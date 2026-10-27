@@ -91,6 +91,85 @@ internal sealed class CommandRegistry
     /// <summary>Looks up a command by name, ignoring case. Returns <c>false</c> if it is not registered.</summary>
     public bool TryGet(string name, out Command command) => commands.TryGetValue(name, out command!);
 
+    /// <summary>
+    /// The commands that match the command token of <paramref name="line"/> (the text up to the
+    /// first whitespace), best first. An empty token (just <c>/</c>) returns every command in name
+    /// order. Otherwise each name scores the smaller Levenshtein distance to the whole name or to
+    /// its prefix of the token's length, so a prefix scores 0 and typos still match. A command is
+    /// kept if its score is 0 for a 1-letter token, at most 1 for 2–3 letters and at most 2 for
+    /// longer tokens. Results are sorted by score, then by name.
+    /// </summary>
+    public IReadOnlyList<Command> Match(string line)
+    {
+        int end = 0;
+        while (end < line.Length && !char.IsWhiteSpace(line[end]))
+        {
+            end++;
+        }
+
+        string token = line[..end];
+        if (token.StartsWith('/'))
+        {
+            token = token[1..];
+        }
+
+        token = token.ToLowerInvariant();
+        if (token.Length == 0)
+        {
+            return Commands.ToList();
+        }
+
+        int limit = token.Length switch
+        {
+            1 => 0,
+            <= 3 => 1,
+            _ => 2,
+        };
+
+        List<(Command Command, int Score)> scored = [];
+        foreach (Command command in commands.Values)
+        {
+            string name = command.Name[1..].ToLowerInvariant();
+            string prefix = name[..Math.Min(token.Length, name.Length)];
+            int score = Math.Min(Levenshtein(token, name), Levenshtein(token, prefix));
+            if (score <= limit)
+            {
+                scored.Add((command, score));
+            }
+        }
+
+        return scored
+            .OrderBy(s => s.Score)
+            .ThenBy(s => s.Command.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(s => s.Command)
+            .ToList();
+    }
+
+    /// <summary>The Levenshtein (edit) distance between two strings: inserts, deletes and substitutions.</summary>
+    internal static int Levenshtein(string a, string b)
+    {
+        int[] previous = new int[b.Length + 1];
+        int[] current = new int[b.Length + 1];
+        for (int j = 0; j <= b.Length; j++)
+        {
+            previous[j] = j;
+        }
+
+        for (int i = 1; i <= a.Length; i++)
+        {
+            current[0] = i;
+            for (int j = 1; j <= b.Length; j++)
+            {
+                int cost = a[i - 1] == b[j - 1] ? 0 : 1;
+                current[j] = Math.Min(Math.Min(current[j - 1] + 1, previous[j] + 1), previous[j - 1] + cost);
+            }
+
+            (previous, current) = (current, previous);
+        }
+
+        return previous[b.Length];
+    }
+
     /// <summary>A table of every registered command and its description.</summary>
     public IRenderable RenderHelp()
     {

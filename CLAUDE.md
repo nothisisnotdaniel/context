@@ -21,6 +21,15 @@ Every factory agent reads this file before working on Context. Keep it short and
   (`console.Input.ReadKey(intercept: true)` + `Cursor.SetPosition`); no `Live` display.
   - Commands start with `/`. Each feature registers its commands (name, description, handler) in the
     single `CommandRegistry` (lookup ignores case), and `/help` lists whatever is registered.
+  - **Command popup:** typing `/` into an empty input opens a popup that lists
+    `CommandRegistry.Match(line)` (Levenshtein-ranked, so typos still match): name in `steelblue1`,
+    description in `grey`, one row each, escaped. It sits just above the input panel, ends on the hint
+    row and grows upwards, full terminal width, at most 8 rows (`… N more` on the last one) and never
+    over row 1. `LineEditor` redraws it in place after every key (`Cursor.SetPosition`, no clear and no
+    layout redraw); rows it stops covering are restored from the last frame, which `App.Draw` keeps
+    as `Segment.SplitLines` (`App.RestoreRow`). Enter, Esc, or a line that no longer starts with `/`
+    closes it. Esc means two things: with the popup open it closes it and keeps the text (it stays
+    closed until the line stops starting with `/`); with no popup it clears the line.
   - Unknown commands and other errors show a short `[red]` hint on the row just above the input
     panel, never a stack trace, and never end the loop. The next command clears the hint.
   - Tests drive the loop by queuing input on `TestConsole.Input` (`PushTextWithEnter`, `PushKey`)
@@ -34,8 +43,9 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `Context.slnx`: the solution. `Directory.Build.props` turns on `EnforceCodeStyleInBuild`.
   - `src/Context/`: the app. `Program.cs` only wires things up (`AnsiConsole.Console`, returns
     `App.Run()`); the loop, layout and dispatch live in `App.cs`, commands in `CommandRegistry.cs`,
-    input in `LineEditor.cs`.
-  - `tests/Context.Tests/`: one test class per production class (`AppTests.cs` tests `App.cs`).
+    input in `LineEditor.cs`, the command popup's rows and `PopupArea` in `CommandPopup.cs`.
+  - `tests/Context.Tests/`: one test class per production class (`AppTests.cs` tests `App.cs`), plus
+    shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves).
 - **Style:**
   - Write all output through an injected `IAnsiConsole`, never `Console.*` or the static
     `AnsiConsole.*` methods (except in `Program.cs`). Tests use `TestConsole` and assert on `.Output`.
