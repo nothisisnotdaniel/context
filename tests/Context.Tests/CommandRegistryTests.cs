@@ -88,4 +88,63 @@ public class CommandRegistryTests
         Assert.Contains("/quit", console.Output);
         Assert.Contains("Exit Context", console.Output);
     }
+
+    // Command popup (job 010) --------------------------------------------------------------
+
+    private static CommandRegistry WithDummies()
+    {
+        CommandRegistry registry = CommandRegistry.CreateDefault();
+        registry.Register("/next", "Next", Nothing);
+        registry.Register("/prev", "Previous", Nothing);
+        registry.Register("/today", "Today", Nothing);
+        return registry;
+    }
+
+    // AC-1
+    [Theory]
+    [InlineData("", "abc", 3)]
+    [InlineData("abc", "", 3)]
+    [InlineData("", "", 0)]
+    [InlineData("help", "help", 0)]
+    [InlineData("hepl", "help", 2)]
+    [InlineData("kitten", "sitting", 3)]
+    public void Levenshtein_CountsEdits(string a, string b, int expected)
+    {
+        Assert.Equal(expected, CommandRegistry.Levenshtein(a, b));
+    }
+
+    // AC-2
+    [Theory]
+    [InlineData("/", "/help,/next,/prev,/quit,/today")]
+    [InlineData("", "/help,/next,/prev,/quit,/today")]
+    [InlineData("/t", "/today")]
+    [InlineData("/T", "/today")]
+    [InlineData("/zzzzz", "")]
+    [InlineData("/he", "/help,/next")]
+    public void Match_ReturnsExpectedCommands(string line, string expected)
+    {
+        string[] names = expected.Length == 0 ? [] : expected.Split(',');
+
+        Assert.Equal(names, WithDummies().Match(line).Select(c => c.Name));
+    }
+
+    // AC-2
+    [Theory]
+    [InlineData("/hepl", "/help")]
+    [InlineData("/HEPL", "/help")]
+    [InlineData("/next foo", "/next")]
+    [InlineData("/tdoay", "/today")]
+    [InlineData("/qiut", "/quit")]
+    public void Match_FirstIsBest(string line, string expected)
+    {
+        Assert.Equal(expected, WithDummies().Match(line)[0].Name);
+    }
+
+    // AC-2
+    [Fact]
+    public void Match_SortsByScoreBeforeName()
+    {
+        // "ne" is a prefix of /next (0) and one edit from "he" (/help scores 1).
+        Assert.Equal(["/next", "/help"], WithDummies().Match("/ne").Select(c => c.Name));
+    }
 }
