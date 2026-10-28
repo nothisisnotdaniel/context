@@ -1,0 +1,215 @@
+namespace Context.Tests;
+
+public sealed class NoteStoreTests : IDisposable
+{
+    private readonly string parent;
+    private readonly string root;
+
+    public NoteStoreTests()
+    {
+        parent = Path.Combine(Path.GetTempPath(), "context-notes-" + Guid.NewGuid().ToString("N"));
+        root = Path.Combine(parent, "Context");
+        Directory.CreateDirectory(parent);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(parent))
+        {
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DefaultFolder_IsContextInAppData()
+    {
+        string expected = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Context");
+
+        Assert.Equal(expected, NoteStore.DefaultFolder());
+    }
+
+    // AC-1
+    [Fact]
+    public void Create_WritesTitleHeading_Utf8NoBom_AndCreatesRoot()
+    {
+        NoteStore store = new NoteStore(root);
+        Assert.False(Directory.Exists(root));
+
+        NoteInfo note = store.Create("Shopping list");
+
+        string path = Path.Combine(root, "Shopping list.md");
+        Assert.True(File.Exists(path));
+        Assert.Equal("Shopping list", note.Name);
+        Assert.Equal("# Shopping list\n"u8.ToArray(), File.ReadAllBytes(path));
+    }
+
+    // AC-1
+    [Fact]
+    public void Create_KeepsNonAsciiTitle_WithoutBom()
+    {
+        NoteStore store = new NoteStore(root);
+
+        store.Create("Grüße");
+
+        byte[] bytes = File.ReadAllBytes(Path.Combine(root, "Grüße.md"));
+        Assert.NotEqual(0xEF, bytes[0]);
+        Assert.Equal("# Grüße\n", System.Text.Encoding.UTF8.GetString(bytes));
+    }
+
+    // AC-2
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("a/b")]
+    [InlineData("a\\b")]
+    [InlineData("a:b")]
+    [InlineData("a\0b")]
+    [InlineData("a\tb")]
+    [InlineData(".hidden")]
+    [InlineData("..")]
+    [InlineData("../secret")]
+    public void Create_RejectsInvalidTitle_WritesNothing(string title)
+    {
+        NoteStore store = new NoteStore(root);
+
+        Assert.NotNull(NoteStore.ValidateTitle(title));
+        Assert.Throws<ArgumentException>(() => store.Create(title));
+        Assert.False(Directory.Exists(root));
+        Assert.Empty(Directory.GetFileSystemEntries(parent));
+    }
+
+    // AC-2
+    [Fact]
+    public void Create_RejectsEveryInvalidFileNameChar()
+    {
+        NoteStore store = new NoteStore(root);
+
+        foreach (char c in Path.GetInvalidFileNameChars())
+        {
+            Assert.Throws<ArgumentException>(() => store.Create($"a{c}b"));
+        }
+
+        Assert.False(Directory.Exists(root));
+    }
+
+    // AC-2
+    [Fact]
+    public void Create_TitleLength_100Ok_101Rejected()
+    {
+        NoteStore store = new NoteStore(root);
+
+        Assert.Throws<ArgumentException>(() => store.Create(new string('a', 101)));
+        Assert.False(Directory.Exists(root));
+
+        store.Create(new string('a', 100));
+        Assert.True(File.Exists(Path.Combine(root, new string('a', 100) + ".md")));
+    }
+
+    // AC-3
+    [Theory]
+    [InlineData("Shopping list")]
+    [InlineData("SHOPPING LIST")]
+    public void Create_Existing_ThrowsAndLeavesFileUnchanged(string title)
+    {
+        Directory.CreateDirectory(root);
+        string path = Path.Combine(root, "Shopping list.md");
+        byte[] original = "﻿my own text [x]\r\n"u8.ToArray();
+        File.WriteAllBytes(path, original);
+        NoteStore store = new NoteStore(root);
+
+        Assert.Throws<NoteExistsException>(() => store.Create(title));
+
+        Assert.Equal(original, File.ReadAllBytes(path));
+        Assert.Single(Directory.GetFiles(root));
+    }
+
+    // AC-4
+    [Fact]
+    public void List_OnlyTopLevelMdFiles_SortedByNameIgnoringCase()
+    {
+        Directory.CreateDirectory(Path.Combine(root, "sub"));
+        File.WriteAllText(Path.Combine(root, "sub", "y.md"), "y");
+        File.WriteAllText(Path.Combine(root, "x.txt"), "x");
+        File.WriteAllText(Path.Combine(root, "x.mdx"), "x");
+        File.WriteAllText(Path.Combine(root, "beta.md"), "b");
+        File.WriteAllText(Path.Combine(root, "Alpha.md"), "a");
+        File.WriteAllText(Path.Combine(root, "gamma.md"), "g");
+        DateTime modified = new DateTime(2026, 3, 4, 5, 6, 0, DateTimeKind.Local);
+        File.SetLastWriteTime(Path.Combine(root, "beta.md"), modified);
+
+        IReadOnlyList<NoteInfo> notes = new NoteStore(root).List();
+
+        Assert.Equal(["Alpha", "beta", "gamma"], notes.Select(n => n.Name));
+        Assert.Equal(modified, notes[1].Modified);
+    }
+
+    // AC-5
+    [Fact]
+    public void List_MissingRoot_IsEmpty_AndDoesNotCreateIt()
+    {
+        IReadOnlyList<NoteInfo> notes = new NoteStore(root).List();
+
+        Assert.Empty(notes);
+        Assert.False(Directory.Exists(root));
+    }
+
+    // AC-7
+    [Theory]
+    [InlineData("Shopping list")]
+    [InlineData("shopping LIST")]
+    [InlineData("Shopping list.md")]
+    [InlineData("SHOPPING LIST.MD")]
+    public void TryOpen_MatchesIgnoringCase_AndWithExtension(string name)
+    {
+        NoteStore store = new NoteStore(root);
+        store.Create("Shopping list");
+        File.AppendAllText(Path.Combine(root, "Shopping list.md"), "- milk [x]\n");
+
+        Assert.True(store.TryOpen(name, out Note? note));
+        Assert.NotNull(note);
+        Assert.Equal("Shopping list", note.Name);
+        Assert.Equal("# Shopping list\n- milk [x]\n", note.Text);
+    }
+
+    // AC-7
+    [Fact]
+    public void TryOpen_CannotEscapeRoot()
+    {
+        File.WriteAllText(Path.Combine(parent, "secret.md"), "secret");
+        NoteStore store = new NoteStore(root);
+        store.Create("note");
+
+        Assert.False(store.TryOpen("../secret", out Note? relative));
+        Assert.Null(relative);
+        Assert.False(store.TryOpen("../secret.md", out _));
+        Assert.False(store.TryOpen(Path.Combine(parent, "secret.md"), out _));
+        Assert.False(store.TryOpen(Path.Combine(parent, "secret"), out _));
+    }
+
+    // AC-7
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(".md")]
+    [InlineData("missing")]
+    [InlineData("sub/y")]
+    public void TryOpen_UnknownName_ReturnsFalse(string name)
+    {
+        Directory.CreateDirectory(Path.Combine(root, "sub"));
+        File.WriteAllText(Path.Combine(root, "sub", "y.md"), "y");
+        NoteStore store = new NoteStore(root);
+        store.Create("note");
+
+        Assert.False(store.TryOpen(name, out Note? note));
+        Assert.Null(note);
+    }
+
+    // AC-7
+    [Fact]
+    public void TryOpen_MissingRoot_ReturnsFalse()
+    {
+        Assert.False(new NoteStore(root).TryOpen("x", out _));
+        Assert.False(Directory.Exists(root));
+    }
+}
