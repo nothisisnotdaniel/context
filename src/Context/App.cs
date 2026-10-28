@@ -20,14 +20,19 @@ internal sealed class App
 
     private readonly IAnsiConsole console;
     private readonly CommandRegistry registry;
+    private readonly TodoSidebar? todos;
 
     // The last drawn frame, one entry per screen row, so rows the command popup covered can be restored.
     private List<SegmentLine> frame = [];
 
-    public App(IAnsiConsole console, CommandRegistry? registry = null)
+    /// <param name="console">Where everything is drawn and read from.</param>
+    /// <param name="registry">The commands; <see cref="CommandRegistry.CreateDefault"/> if null.</param>
+    /// <param name="todos">Fills the <c>Todos</c> sidebar; without one it shows <c>No todos yet</c>.</param>
+    public App(IAnsiConsole console, CommandRegistry? registry = null, TodoSidebar? todos = null)
     {
         this.console = console;
         this.registry = registry ?? CommandRegistry.CreateDefault();
+        this.todos = todos;
     }
 
     /// <summary>Runs the loop until <c>/quit</c> or the input ends. Returns the process exit code.</summary>
@@ -114,7 +119,11 @@ internal sealed class App
             mainRows.Add(message);
         }
 
-        Panel sidebar = new Panel(new Markup("[grey]No todos yet[/]"))
+        // The sidebar panel spans every row above the hint row; its border takes 2 rows and border
+        // plus padding take 4 columns.
+        int sidebarRows = console.Profile.Height - HintHeight - InputHeight - 2;
+        IRenderable todoList = todos?.Render(sidebarRows, SidebarWidth - 4) ?? new Markup("[grey]No todos yet[/]");
+        Panel sidebar = new Panel(todoList)
             .Header("[steelblue1]Todos[/]")
             .Border(BoxBorder.Rounded)
             .BorderColor(Color.Grey)

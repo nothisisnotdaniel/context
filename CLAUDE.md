@@ -39,6 +39,17 @@ Every factory agent reads this file before working on Context. Keep it short and
     no leading `.`, at most 100 chars, no Windows reserved name (CON, PRN, AUX, NUL, COM1-9, LPT1-9, also before a dot), no trailing `.` or space) after `NoteStore.NormalizeTitle` trims them and strips any trailing
     `.md` (ignoring case), so `/new x.md` creates `x.md`; names in `/open` are only matched against `List()` (as typed first, then with
     one `.md` stripped), never turned into a path. Note text is shown as plain `Text`, never parsed as markup.
+  - **Todos:** `TodoStore` keeps the list in `<root>/todos.json` (same root as notes; System.Text.Json,
+    camelCase, UTF-8 no BOM). `List()` sorts by `Due`, then `Created` (UTC), then file order. Writes go to
+    a temp file in the root, then `File.Move(..., overwrite: true)`; a file that can't be read or parsed
+    throws `TodoStoreException` and is never overwritten. `/todo <yyyy-MM-dd|today|tomorrow> <text>` adds
+    (text at most 200 chars, past dates allowed); `/done <n>` removes the n-th todo as numbered in the
+    sidebar. `TodoSidebar.Render(rows, width)` draws `<n> <MM-dd> <text>` lines (date `red` overdue,
+    `steelblue1` today, `grey` later; text cleaned, escaped and cut to one line with `…`), `… N more` in
+    grey on the last row when they don't fit, `No todos yet` when empty and a red `Can't read todos.json`
+    line when the file is bad. `App` takes an optional `TodoSidebar`; without one it shows `No todos yet`.
+    `today` is injected as `Func<DateOnly>` (and `TodoStore` takes an optional UTC clock), so tests never
+    use the real clock.
   - Tests drive the loop by queuing input on `TestConsole.Input` (`PushTextWithEnter`, `PushKey`)
     and always end with `/quit`, so they can't hang.
 - **Stack:** .NET 10 (`net10.0`), C# with nullable reference types and implicit usings on.
@@ -49,12 +60,13 @@ Every factory agent reads this file before working on Context. Keep it short and
 - **Layout:**
   - `Context.slnx`: the solution. `Directory.Build.props` turns on `EnforceCodeStyleInBuild`.
   - `src/Context/`: the app. `Program.cs` only wires things up (builds the registry with
-    `CreateDefault()` + `NoteCommands.Register`, passes it and `AnsiConsole.Console` to `App`, returns
-    `App.Run()`); the loop, layout and dispatch live in `App.cs`, commands in `CommandRegistry.cs`,
+    `CreateDefault()` + `NoteCommands.Register` + `TodoCommands.Register`, passes it, a `TodoSidebar` and
+    `AnsiConsole.Console` to `App`, returns `App.Run()`); the loop, layout and dispatch live in `App.cs`, commands in `CommandRegistry.cs`,
     input in `LineEditor.cs`, the command popup's rows and `PopupArea` in `CommandPopup.cs`, the note
-    files in `NoteStore.cs`, the display sanitizer in `SafeText.cs`, and `/new`, `/notes`, `/open` in `NoteCommands.cs`.
+    files in `NoteStore.cs`, the display sanitizer in `SafeText.cs`, `/new`, `/notes`, `/open` in `NoteCommands.cs`, the todo list in `TodoStore.cs`,
+    `/todo` and `/done` in `TodoCommands.cs`, and the sidebar body in `TodoSidebar.cs`.
   - `tests/Context.Tests/`: one test class per production class (`AppTests.cs` tests `App.cs`), plus
-    shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves). Note tests use their
+    shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves). Note and todo tests use their
     own temp folder (deleted in `Dispose`), never the real app data folder.
 - **Style:**
   - Write all output through an injected `IAnsiConsole`, never `Console.*` or the static
