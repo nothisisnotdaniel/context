@@ -8,7 +8,7 @@ Write one feature per line, in plain language.
 - [x] Notes: create, list and open Markdown files in the Context app data folder → 012-notes
 - [x] Note titles ending in .md: `/new x.md` currently saves `x.md.md`, which `/open` can't find. Strip a trailing `.md` from the title (or reject it) so every created note can be opened. → 013-md-note-titles
 - [x] Safe note text: replace terminal control characters in note text and in note names read from disk with a visible placeholder before rendering, so escape sequences never reach the terminal. Needed before email and calendar import. → 015-safe-note-text
-- [ ] Windows-safe note titles: reject Windows reserved names (CON, PRN, AUX, NUL, COM1-9, LPT1-9) and titles ending in `.` or a space.
+- [x] Windows-safe note titles: reject Windows reserved names (CON, PRN, AUX, NUL, COM1-9, LPT1-9) and titles ending in `.` or a space. → 018-windows-safe-titles
 - [ ] Todos: add todos with due dates, shown in a sidebar sorted by due date
 - [ ] Tags: parse tags in Markdown files and store the links between files in the database
 - [ ] /current view: show today's due todos and linked notes
