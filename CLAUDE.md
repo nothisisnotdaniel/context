@@ -36,8 +36,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     (`NoteStore.DefaultFolder()` = `<ApplicationData>/Context`; the folder is created on the first
     `/new`). A new note's content is `# <Title>\n` (UTF-8, no BOM), written with `FileMode.CreateNew`.
     Titles are validated (`NoteStore.ValidateTitle`: no `/ \ :`, invalid file-name or control chars,
-    no leading `.`, at most 100 chars); names in `/open` are only matched against `List()`, never
-    turned into a path. Note text is shown as plain `Text`, never parsed as markup.
+    no leading `.`, at most 100 chars) after `NoteStore.NormalizeTitle` trims them and strips any trailing
+    `.md` (ignoring case), so `/new x.md` creates `x.md`; names in `/open` are only matched against `List()` (as typed first, then with
+    one `.md` stripped), never turned into a path. Note text is shown as plain `Text`, never parsed as markup.
   - Tests drive the loop by queuing input on `TestConsole.Input` (`PushTextWithEnter`, `PushKey`)
     and always end with `/quit`, so they can't hang.
 - **Stack:** .NET 10 (`net10.0`), C# with nullable reference types and implicit usings on.

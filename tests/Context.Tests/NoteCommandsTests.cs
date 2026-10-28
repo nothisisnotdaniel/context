@@ -335,4 +335,98 @@ public sealed class NoteCommandsTests : IDisposable
         Assert.Contains(rows, w => w.Text.StartsWith("/notes", StringComparison.Ordinal) && w.Text.Contains("List notes"));
         Assert.Contains(rows, w => w.Text.StartsWith("/open", StringComparison.Ordinal) && w.Text.Contains("Open a note"));
     }
+
+    // 013 AC-3
+    [Fact]
+    public void New_TitleEndingInMd_CreatesSingleExtension_OpensWithAndWithoutMd()
+    {
+        string[] created = MainView(LastFrame("/new x.md"));
+
+        Assert.Contains(created, l => l.Contains("Created x", StringComparison.Ordinal)
+            && !l.Contains("Created x.md", StringComparison.Ordinal));
+        Assert.Equal("# x\n"u8.ToArray(), File.ReadAllBytes(Path.Combine(root, "x.md")));
+        Assert.False(File.Exists(Path.Combine(root, "x.md.md")));
+
+        foreach (string command in new[] { "/open x", "/open x.md" })
+        {
+            string[] opened = MainView(LastFrame(command));
+            Assert.Contains(opened, l => l.Contains("╭─x─", StringComparison.Ordinal));
+            Assert.Contains(opened, l => l.Contains("│ # x", StringComparison.Ordinal));
+        }
+    }
+
+    // 013 AC-4
+    [Theory]
+    [InlineData("/new x.md")]
+    [InlineData("/new X.MD")]
+    public void New_ExistingAfterStripping_ShowsRedHint_FileUnchanged(string command)
+    {
+        Directory.CreateDirectory(root);
+        string path = Path.Combine(root, "x.md");
+        byte[] original = "# mine\n"u8.ToArray();
+        File.WriteAllBytes(path, original);
+        string name = command == "/new x.md" ? "x" : "X";
+
+        AssertOnHintRow(LastFrame(command), $"Note {name} already exists. Type /open {name} to see it.");
+        AssertRedHint(command, $"Note {name} already exists");
+        Assert.Equal(original, File.ReadAllBytes(path));
+        Assert.Single(Directory.GetFiles(root));
+    }
+
+    // 013 AC-5
+    [Theory]
+    [InlineData("/new .md")]
+    [InlineData("/new .md.md")]
+    [InlineData("/new  .MD ")]
+    public void New_OnlyMd_ShowsNeedsTitle_CreatesNothing(string command)
+    {
+        AssertOnHintRow(LastFrame(command), "A note needs a title.");
+        AssertRedHint(command, "A note needs a title.");
+        Assert.Empty(Directory.GetFileSystemEntries(parent));
+    }
+
+    // 013 AC-6
+    [Fact]
+    public void New_100CharTitlePlusMd_IsAccepted()
+    {
+        string title = new string('a', 100);
+
+        (int exitCode, _) = Run(false, "/new " + title + ".md");
+
+        Assert.Equal(0, exitCode);
+        Assert.True(File.Exists(Path.Combine(root, title + ".md")));
+        Assert.Single(Directory.GetFiles(root));
+    }
+
+    // 013 AC-6
+    [Theory]
+    [InlineData("/new a/b.md", "can't contain")]
+    [InlineData("/new .x.md", "can't start with a dot")]
+    [InlineData("/new ..md", "can't start with a dot")]
+    public void New_InvalidAfterStripping_ShowsSameHint(string command, string hint)
+    {
+        AssertOnHintRow(LastFrame(command), hint);
+        AssertRedHint(command, "A note");
+        Assert.Empty(Directory.GetFileSystemEntries(parent));
+    }
+
+    // 013 AC-7
+    [Fact]
+    public void Open_LegacyDoubleExtension_ListedAndOpenedByListedName()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "x.md.md"), "legacy text");
+        File.WriteAllText(Path.Combine(root, "y.md"), "plain text");
+
+        string[] listed = MainView(LastFrame("/notes"));
+        Assert.Contains(listed, l => l.Contains("│ x.md ", StringComparison.Ordinal));
+
+        string[] legacy = MainView(LastFrame("/open x.md"));
+        Assert.Contains(legacy, l => l.Contains("╭─x.md─", StringComparison.Ordinal));
+        Assert.Contains(legacy, l => l.Contains("legacy text", StringComparison.Ordinal));
+
+        string[] plain = MainView(LastFrame("/open y.md"));
+        Assert.Contains(plain, l => l.Contains("╭─y─", StringComparison.Ordinal));
+        Assert.Contains(plain, l => l.Contains("plain text", StringComparison.Ordinal));
+    }
 }

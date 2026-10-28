@@ -16,8 +16,9 @@ internal static class NoteCommands
         registry.Register("/open", "Open a note", name => Open(store, name));
     }
 
-    private static CommandResult New(NoteStore store, string title)
+    private static CommandResult New(NoteStore store, string input)
     {
+        string title = NoteStore.NormalizeTitle(input);
         if (string.IsNullOrWhiteSpace(title))
         {
             return CommandResult.Error("A note needs a title. Type [bold]/new <title>[/] to create one.");

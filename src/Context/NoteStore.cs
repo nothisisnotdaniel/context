@@ -76,6 +76,22 @@ internal sealed class NoteStore
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Context");
 
     /// <summary>
+    /// Trims <paramref name="title"/>, then keeps removing a trailing <c>.md</c> (ignoring case) and
+    /// trimming again until it no longer ends in <c>.md</c>. Only ever removes characters, so the
+    /// result must still go through <see cref="ValidateTitle"/>.
+    /// </summary>
+    public static string NormalizeTitle(string title)
+    {
+        string normalized = title.Trim();
+        while (normalized.EndsWith(Extension, StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized[..^Extension.Length].Trim();
+        }
+
+        return normalized;
+    }
+
+    /// <summary>
     /// Checks a note title. Returns <c>null</c> if it is valid, otherwise a short plain-text reason
     /// (not markup). A valid title is non-blank, at most <see cref="MaxTitleLength"/> characters,
     /// does not start with <c>.</c>, and has no <c>/</c>, <c>\</c>, <c>:</c>, control character
@@ -115,9 +131,11 @@ internal sealed class NoteStore
     /// Creates <c>&lt;root&gt;/&lt;title&gt;.md</c> containing <c># &lt;title&gt;\n</c> (UTF-8, no BOM),
     /// creating the root folder if needed. Never overwrites: throws <see cref="ArgumentException"/>
     /// for an invalid title and <see cref="NoteExistsException"/> if the note exists (ignoring case).
+    /// The title is normalized first (<see cref="NormalizeTitle"/>), so <c>x.md</c> creates <c>x.md</c>.
     /// </summary>
     public NoteInfo Create(string title)
     {
+        title = NormalizeTitle(title);
         string? error = ValidateTitle(title);
         if (error is not null)
         {
@@ -166,27 +184,31 @@ internal sealed class NoteStore
     }
 
     /// <summary>
-    /// Opens the note called <paramref name="name"/> (ignoring case, with or without <c>.md</c>).
-    /// The name is only matched against <see cref="List"/>, so it can never reach a file outside the
-    /// root. An exact-case match wins over a case-insensitive one.
+    /// Opens the note called <paramref name="name"/>. The trimmed name is first matched as typed, then
+    /// with one trailing <c>.md</c> removed, so a legacy <c>x.md.md</c> file opens as <c>x.md</c>.
+    /// Each step prefers an exact-case match over a case-insensitive one. The name is only matched
+    /// against <see cref="List"/>, so it can never reach a file outside the root.
     /// </summary>
     public bool TryOpen(string name, out Note? note)
     {
         note = null;
         string wanted = name.Trim();
-        if (wanted.EndsWith(Extension, StringComparison.OrdinalIgnoreCase))
-        {
-            wanted = wanted[..^Extension.Length];
-        }
-
         if (wanted.Length == 0)
         {
             return false;
         }
 
         IReadOnlyList<NoteInfo> notes = List();
-        NoteInfo? match = notes.FirstOrDefault(n => string.Equals(n.Name, wanted, StringComparison.Ordinal))
-            ?? notes.FirstOrDefault(n => string.Equals(n.Name, wanted, StringComparison.OrdinalIgnoreCase));
+        NoteInfo? match = Find(notes, wanted);
+        if (match is null && wanted.EndsWith(Extension, StringComparison.OrdinalIgnoreCase))
+        {
+            string stripped = wanted[..^Extension.Length];
+            if (stripped.Length > 0)
+            {
+                match = Find(notes, stripped);
+            }
+        }
+
         if (match is null)
         {
             return false;
@@ -195,4 +217,8 @@ internal sealed class NoteStore
         note = new Note(match.Name, File.ReadAllText(match.Path));
         return true;
     }
+
+    private static NoteInfo? Find(IReadOnlyList<NoteInfo> notes, string name) =>
+        notes.FirstOrDefault(n => string.Equals(n.Name, name, StringComparison.Ordinal))
+            ?? notes.FirstOrDefault(n => string.Equals(n.Name, name, StringComparison.OrdinalIgnoreCase));
 }
