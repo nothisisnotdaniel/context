@@ -549,4 +549,51 @@ public sealed class NoteCommandsTests : IDisposable
 
         Assert.Contains(main, l => l.Contains("see [red]x[/] here\uFFFD", StringComparison.Ordinal));
     }
+
+    // 018 AC-7
+    [Theory]
+    [InlineData("/new CON", "Windows reserves")]
+    [InlineData("/new com1", "Windows reserves")]
+    [InlineData("/new nul.txt", "Windows reserves")]
+    [InlineData("/new CON.md", "Windows reserves")]
+    [InlineData("/new x.", "can't end with a dot or a space")]
+    [InlineData("/new x..md", "can't end with a dot or a space")]
+    public void New_WindowsUnsafeTitle_ShowsRedHint_CreatesNothing(string command, string hint)
+    {
+        AssertOnHintRow(LastFrame(command), hint);
+        AssertRedHint(command, "A note title can't");
+        Assert.Empty(Directory.GetFileSystemEntries(parent));
+    }
+
+    // 018 AC-8
+    [Theory]
+    [InlineData("CONSOLE")]
+    [InlineData("x.CON")]
+    public void New_ResemblesReservedName_CreatesNote(string title)
+    {
+        string[] frame = LastFrame("/new " + title);
+
+        Assert.Contains(MainView(frame), l => l.Contains("Created " + title, StringComparison.Ordinal));
+        Assert.True(File.Exists(Path.Combine(root, title + ".md")));
+    }
+
+    // 018 AC-9
+    [Fact]
+    public void Open_ExistingNoteWithNowRejectedName_StillListedAndOpens()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "x..md"), "old note");
+
+        string[] listed = MainView(LastFrame("/notes"));
+        Assert.Contains(listed, l => l.Contains("│ x. ", StringComparison.Ordinal));
+
+        string[] opened = MainView(LastFrame("/open x."));
+        Assert.Contains(opened, l => l.Contains("╭─x.─", StringComparison.Ordinal));
+        Assert.Contains(opened, l => l.Contains("old note", StringComparison.Ordinal));
+    }
 }
