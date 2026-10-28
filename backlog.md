@@ -14,3 +14,5 @@ Write one feature per line, in plain language.
 - [ ] /current view: show today's due todos and linked notes
 - [ ] Calendar: pull in today's appointments and show them in /current
 - [ ] Email: pull in information from emails
+- [ ] Todo dates with years: the sidebar shows due dates as `MM-dd` with no year. Show the year when a todo is due in a year other than the current one (e.g. `2027-01-15`), so todos far ahead or long overdue can't be mistaken for this year's.
+- [ ] Helpful empty todo sidebar: "No todos yet" doesn't say how to add one. Mention `/todo` in the empty sidebar, e.g. "No todos yet — add one with /todo".
