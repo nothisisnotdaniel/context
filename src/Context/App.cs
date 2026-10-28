@@ -97,7 +97,7 @@ internal sealed class App
         }
         catch (Exception ex)
         {
-            return CommandResult.Error($"{Markup.Escape(command.Name)} failed: {Markup.Escape(ex.Message)}");
+            return CommandResult.Error($"{Markup.Escape(command.Name)} failed: {Markup.Escape(SafeText.Clean(ex.Message))}");
         }
     }
 

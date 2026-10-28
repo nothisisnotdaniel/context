@@ -52,13 +52,17 @@ Every factory agent reads this file before working on Context. Keep it short and
     `CreateDefault()` + `NoteCommands.Register`, passes it and `AnsiConsole.Console` to `App`, returns
     `App.Run()`); the loop, layout and dispatch live in `App.cs`, commands in `CommandRegistry.cs`,
     input in `LineEditor.cs`, the command popup's rows and `PopupArea` in `CommandPopup.cs`, the note
-    files in `NoteStore.cs`, and `/new`, `/notes`, `/open` in `NoteCommands.cs`.
+    files in `NoteStore.cs`, the display sanitizer in `SafeText.cs`, and `/new`, `/notes`, `/open` in `NoteCommands.cs`.
   - `tests/Context.Tests/`: one test class per production class (`AppTests.cs` tests `App.cs`), plus
     shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves). Note tests use their
     own temp folder (deleted in `Dispose`), never the real app data folder.
 - **Style:**
   - Write all output through an injected `IAnsiConsole`, never `Console.*` or the static
     `AnsiConsole.*` methods (except in `Program.cs`). Tests use `TestConsole` and assert on `.Output`.
+  - Text from disk or other outside sources (note text and names, OS exception messages, later email
+    and calendar data) goes through `SafeText.Clean` before rendering: it keeps `\n`, turns `\r\n`
+    into `\n` and `\t` into 4 spaces, and replaces every other C0/DEL/C1 control with `�` (U+FFFD).
+    Then wrap it in `Markup.Escape` if it goes into markup. Never pass such text to the terminal raw.
   - Wrap any user or external text in `Markup.Escape` before it goes into markup.
   - Use Spectre widgets (`Table`, `Panel`, `Rule`, `Layout`) instead of hand-drawn ASCII.
     Colours: `SteelBlue1` accents, `grey` secondary text, `red` errors.

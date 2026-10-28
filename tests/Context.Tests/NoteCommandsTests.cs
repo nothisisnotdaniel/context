@@ -429,4 +429,124 @@ public sealed class NoteCommandsTests : IDisposable
         Assert.Contains(plain, l => l.Contains("╭─y─", StringComparison.Ordinal));
         Assert.Contains(plain, l => l.Contains("plain text", StringComparison.Ordinal));
     }
+
+    /// <summary>The output with the app's own cursor and clear sequences removed, so only rendered text is left.</summary>
+    private static string RenderedText(string output) => Ansi.Replace(output, string.Empty);
+
+    // 015 AC-4
+    [Fact]
+    public void Open_NoteWithControlCharacters_ShowsPlaceholders()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(
+            Path.Combine(root, "evil.md"),
+            "start\u001b[2Jclear\nti\u001b]0;pwned\u0007tle\nbell\u0007 back\bspace csi\u009b31mred end");
+
+        string[] main = MainView(LastFrame("/open evil"));
+        (int exitCode, string output) = Run(false, "/open evil");
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains(main, l => l.Contains("start\uFFFD[2Jclear", StringComparison.Ordinal));
+        Assert.Contains(main, l => l.Contains("ti\uFFFD]0;pwned\uFFFDtle", StringComparison.Ordinal));
+        Assert.Contains(main, l => l.Contains("bell\uFFFD back\uFFFDspace csi\uFFFD31mred end", StringComparison.Ordinal));
+        string text = RenderedText(output);
+        Assert.DoesNotContain('\u001b', text);
+        Assert.DoesNotContain('\u0007', text);
+        Assert.DoesNotContain('\b', text);
+        Assert.DoesNotContain('\u009b', text);
+    }
+
+    // 015 AC-5
+    [Fact]
+    public void Notes_NameWithControlCharacter_ShowsPlaceholder_TableAligned()
+    {
+        Directory.CreateDirectory(root);
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "bad\u001bname.md"), "x");
+        }
+        catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)
+        {
+            // Windows does not allow control characters in file names.
+            return;
+        }
+
+        File.WriteAllText(Path.Combine(root, "Alpha.md"), "a");
+
+        string[] main = MainView(LastFrame("/notes"));
+        (_, string output) = Run(false, "/notes");
+
+        int bad = Array.FindIndex(main, l => l.Contains("│ bad\uFFFDname ", StringComparison.Ordinal));
+        int alpha = Array.FindIndex(main, l => l.Contains("│ Alpha ", StringComparison.Ordinal));
+        Assert.True(bad >= 0 && alpha >= 0);
+        Assert.Equal(main[alpha].TrimEnd().Length, main[bad].TrimEnd().Length);
+        Assert.Equal(main[alpha].LastIndexOf('│'), main[bad].LastIndexOf('│'));
+        Assert.Equal(
+            main[alpha].IndexOf('│', main[alpha].IndexOf('│') + 1),
+            main[bad].IndexOf('│', main[bad].IndexOf('│') + 1));
+        Assert.DoesNotContain('\u001b', RenderedText(output));
+        Assert.DoesNotContain("bad\u001b", output, StringComparison.Ordinal);
+    }
+
+    // 015 AC-6
+    [Fact]
+    public void Open_NameWithControlCharacter_HeaderShowsPlaceholder()
+    {
+        Directory.CreateDirectory(root);
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "x\u0007y.md"), "body");
+        }
+        catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)
+        {
+            return;
+        }
+
+        // LineEditor cannot type control characters, so call the /open handler directly.
+        CommandRegistry registry = new CommandRegistry();
+        NoteCommands.Register(registry, new NoteStore(root));
+        Assert.True(registry.TryGet("/open", out Command? open));
+        CommandResult result = open!.Handler("x\u0007y");
+        Assert.NotNull(result.Message);
+        TestConsole console = new TestConsole();
+        console.Profile.Width = 40;
+        console.Write(result.Message);
+
+        string[] lines = console.Output.Split('\n');
+        Assert.StartsWith("╭─x\uFFFDy─", lines[0]);
+        Assert.Contains(lines, l => l.Contains("│ body", StringComparison.Ordinal));
+        Assert.DoesNotContain('\u0007', console.Output);
+    }
+
+    // 015 AC-7
+    [Fact]
+    public void Open_CrlfAndTabs_RenderLineByLine()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllBytes(
+            Path.Combine(root, "multi.md"),
+            System.Text.Encoding.UTF8.GetBytes("# Title\r\n\tindented\r\nlast\tline\r\n"));
+
+        string[] main = MainView(LastFrame("/open multi"));
+        (_, string output) = Run(false, "/open multi");
+
+        int title = Array.FindIndex(main, l => l.Contains("│ # Title", StringComparison.Ordinal));
+        Assert.True(title >= 0);
+        Assert.Contains("│     indented", main[title + 1]);
+        Assert.Contains("│ last    line", main[title + 2]);
+        Assert.DoesNotContain('\r', output);
+        Assert.DoesNotContain('\t', output);
+    }
+
+    // 015 AC-9
+    [Fact]
+    public void Open_MarkupInNoteText_StillLiteral()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "m.md"), "see [red]x[/] here\u001b");
+
+        string[] main = MainView(LastFrame("/open m"));
+
+        Assert.Contains(main, l => l.Contains("see [red]x[/] here\uFFFD", StringComparison.Ordinal));
+    }
 }

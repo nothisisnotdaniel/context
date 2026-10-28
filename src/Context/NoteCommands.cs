@@ -33,12 +33,12 @@ internal static class NoteCommands
         try
         {
             NoteInfo note = store.Create(title);
-            return new CommandResult(new Markup($"Created [steelblue1]{Markup.Escape(note.Name)}[/]"));
+            return new CommandResult(new Markup($"Created [steelblue1]{Markup.Escape(SafeText.Clean(note.Name))}[/]"));
         }
         catch (NoteExistsException)
         {
-            return CommandResult.Error(
-                $"Note {Markup.Escape(title)} already exists. Type [bold]/open {Markup.Escape(title)}[/] to see it.");
+            string shown = Markup.Escape(SafeText.Clean(title));
+            return CommandResult.Error($"Note {shown} already exists. Type [bold]/open {shown}[/] to see it.");
         }
     }
 
@@ -59,7 +59,7 @@ internal static class NoteCommands
         foreach (NoteInfo note in notes)
         {
             table.AddRow(
-                new Markup($"[steelblue1]{Markup.Escape(note.Name)}[/]"),
+                new Markup($"[steelblue1]{Markup.Escape(SafeText.Clean(note.Name))}[/]"),
                 new Markup($"[grey]{note.Modified.ToString(DateFormat, CultureInfo.InvariantCulture)}[/]"));
         }
 
@@ -80,8 +80,8 @@ internal static class NoteCommands
                 $"No note named {Markup.Escape(name)}. Type [bold]/notes[/] to see all notes.");
         }
 
-        Panel panel = new Panel(new Text(note.Text))
-            .Header($"[steelblue1]{Markup.Escape(note.Name)}[/]")
+        Panel panel = new Panel(new Text(SafeText.Clean(note.Text)))
+            .Header($"[steelblue1]{Markup.Escape(SafeText.Clean(note.Name))}[/]")
             .Border(BoxBorder.Rounded)
             .BorderColor(Color.Grey)
             .Expand();
