@@ -32,6 +32,12 @@ Every factory agent reads this file before working on Context. Keep it short and
     closed until the line stops starting with `/`); with no popup it clears the line.
   - Unknown commands and other errors show a short `[red]` hint on the row just above the input
     panel, never a stack trace, and never end the loop. The next command clears the hint.
+  - **Notes:** `NoteStore` keeps each note as a top-level `<Title>.md` file in its root folder
+    (`NoteStore.DefaultFolder()` = `<ApplicationData>/Context`; the folder is created on the first
+    `/new`). A new note's content is `# <Title>\n` (UTF-8, no BOM), written with `FileMode.CreateNew`.
+    Titles are validated (`NoteStore.ValidateTitle`: no `/ \ :`, invalid file-name or control chars,
+    no leading `.`, at most 100 chars); names in `/open` are only matched against `List()`, never
+    turned into a path. Note text is shown as plain `Text`, never parsed as markup.
   - Tests drive the loop by queuing input on `TestConsole.Input` (`PushTextWithEnter`, `PushKey`)
     and always end with `/quit`, so they can't hang.
 - **Stack:** .NET 10 (`net10.0`), C# with nullable reference types and implicit usings on.
@@ -41,11 +47,14 @@ Every factory agent reads this file before working on Context. Keep it short and
 - **Run:** `dotnet run --project src/Context`
 - **Layout:**
   - `Context.slnx`: the solution. `Directory.Build.props` turns on `EnforceCodeStyleInBuild`.
-  - `src/Context/`: the app. `Program.cs` only wires things up (`AnsiConsole.Console`, returns
+  - `src/Context/`: the app. `Program.cs` only wires things up (builds the registry with
+    `CreateDefault()` + `NoteCommands.Register`, passes it and `AnsiConsole.Console` to `App`, returns
     `App.Run()`); the loop, layout and dispatch live in `App.cs`, commands in `CommandRegistry.cs`,
-    input in `LineEditor.cs`, the command popup's rows and `PopupArea` in `CommandPopup.cs`.
+    input in `LineEditor.cs`, the command popup's rows and `PopupArea` in `CommandPopup.cs`, the note
+    files in `NoteStore.cs`, and `/new`, `/notes`, `/open` in `NoteCommands.cs`.
   - `tests/Context.Tests/`: one test class per production class (`AppTests.cs` tests `App.cs`), plus
-    shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves).
+    shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves). Note tests use their
+    own temp folder (deleted in `Dispose`), never the real app data folder.
 - **Style:**
   - Write all output through an injected `IAnsiConsole`, never `Console.*` or the static
     `AnsiConsole.*` methods (except in `Program.cs`). Tests use `TestConsole` and assert on `.Output`.

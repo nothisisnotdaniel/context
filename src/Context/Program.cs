@@ -1,4 +1,6 @@
 using Context;
 using Spectre.Console;
 
-return new App(AnsiConsole.Console).Run();
+CommandRegistry registry = CommandRegistry.CreateDefault();
+NoteCommands.Register(registry, new NoteStore(NoteStore.DefaultFolder()));
+return new App(AnsiConsole.Console, registry).Run();
