@@ -212,4 +212,120 @@ public sealed class NoteStoreTests : IDisposable
         Assert.False(new NoteStore(root).TryOpen("x", out _));
         Assert.False(Directory.Exists(root));
     }
+
+    // 013 AC-1
+    [Theory]
+    [InlineData("x.md", "x")]
+    [InlineData("x.MD", "x")]
+    [InlineData("x.md.md", "x")]
+    [InlineData(" x .md ", "x")]
+    [InlineData("x.mdx", "x.mdx")]
+    [InlineData("notes.md draft", "notes.md draft")]
+    [InlineData(".md", "")]
+    [InlineData(".md.md", "")]
+    public void NormalizeTitle_StripsTrailingMd(string title, string expected)
+    {
+        Assert.Equal(expected, NoteStore.NormalizeTitle(title));
+    }
+
+    // 013 AC-2
+    [Fact]
+    public void Create_TitleEndingInMd_WritesSingleExtension()
+    {
+        NoteStore store = new NoteStore(root);
+
+        NoteInfo note = store.Create("x.md");
+
+        Assert.Equal("x", note.Name);
+        Assert.Equal("# x\n"u8.ToArray(), File.ReadAllBytes(Path.Combine(root, "x.md")));
+        Assert.False(File.Exists(Path.Combine(root, "x.md.md")));
+        Assert.Single(Directory.GetFiles(root));
+    }
+
+    // 013 AC-6
+    [Fact]
+    public void Create_100CharTitlePlusMd_IsAccepted()
+    {
+        NoteStore store = new NoteStore(root);
+        string title = new string('a', 100);
+
+        NoteInfo note = store.Create(title + ".md");
+
+        Assert.Equal(title, note.Name);
+        Assert.True(File.Exists(Path.Combine(root, title + ".md")));
+    }
+
+    // 013 AC-5, AC-6
+    [Theory]
+    [InlineData(".md")]
+    [InlineData(".md.md")]
+    [InlineData("a/b.md")]
+    [InlineData(".x.md")]
+    [InlineData("..md")]
+    public void Create_InvalidAfterStripping_IsRejected(string title)
+    {
+        NoteStore store = new NoteStore(root);
+
+        Assert.Throws<ArgumentException>(() => store.Create(title));
+        Assert.False(Directory.Exists(root));
+    }
+
+    // 013 AC-4
+    [Theory]
+    [InlineData("x.md")]
+    [InlineData("X.MD")]
+    public void Create_ExistingAfterStripping_Throws(string title)
+    {
+        NoteStore store = new NoteStore(root);
+        store.Create("x");
+
+        NoteExistsException error = Assert.Throws<NoteExistsException>(() => store.Create(title));
+
+        Assert.Equal("x", error.Name, ignoreCase: true);
+        Assert.Single(Directory.GetFiles(root));
+    }
+
+    // 013 AC-7
+    [Fact]
+    public void TryOpen_LegacyDoubleExtension_OpensByListedName()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "x.md.md"), "legacy");
+        NoteStore store = new NoteStore(root);
+
+        Assert.Equal(["x.md"], store.List().Select(n => n.Name));
+        Assert.True(store.TryOpen("x.md", out Note? note));
+        Assert.NotNull(note);
+        Assert.Equal("x.md", note.Name);
+        Assert.Equal("legacy", note.Text);
+    }
+
+    // 013 AC-7
+    [Fact]
+    public void TryOpen_WithMd_StillOpensPlainNote()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "y.md"), "plain");
+        NoteStore store = new NoteStore(root);
+
+        Assert.True(store.TryOpen("y.md", out Note? note));
+        Assert.NotNull(note);
+        Assert.Equal("y", note.Name);
+        Assert.Equal("plain", note.Text);
+    }
+
+    // 013 AC-7
+    [Fact]
+    public void TryOpen_BothFilesExist_TypedNameWinsThenStripped()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "x.md.md"), "legacy");
+        File.WriteAllText(Path.Combine(root, "x.md"), "plain");
+        NoteStore store = new NoteStore(root);
+
+        Assert.True(store.TryOpen("x.md", out Note? legacy));
+        Assert.Equal("legacy", legacy!.Text);
+        Assert.True(store.TryOpen("x", out Note? plain));
+        Assert.Equal("plain", plain!.Text);
+    }
 }
