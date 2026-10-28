@@ -61,6 +61,19 @@ internal sealed class NoteStore
 
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
+    /// <summary>
+    /// Device names Windows reserves, with or without an extension: <c>CON</c>, <c>PRN</c>, <c>AUX</c>,
+    /// <c>NUL</c>, <c>COM1</c>-<c>COM9</c>, <c>LPT1</c>-<c>LPT9</c> and the superscript digit forms.
+    /// </summary>
+    private static readonly HashSet<string> WindowsReservedNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "COM\u00B9", "COM\u00B2", "COM\u00B3",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        "LPT\u00B9", "LPT\u00B2", "LPT\u00B3",
+    };
+
     private readonly string root;
 
     public NoteStore(string root)
@@ -96,7 +109,11 @@ internal sealed class NoteStore
     /// (not markup). A valid title is non-blank, at most <see cref="MaxTitleLength"/> characters,
     /// does not start with <c>.</c>, and has no <c>/</c>, <c>\</c>, <c>:</c>, control character
     /// or <see cref="Path.GetInvalidFileNameChars"/> character, so it is always a single file name
-    /// inside the root.
+    /// inside the root. On every OS, so notes stay usable on Windows too, it also must not end with
+    /// <c>.</c> or a space, and the part before its first <c>.</c> (trailing spaces removed) must not
+    /// be a name Windows reserves (<c>CON</c>, <c>PRN</c>, <c>AUX</c>, <c>NUL</c>, <c>COM1</c>-<c>COM9</c>,
+    /// <c>LPT1</c>-<c>LPT9</c>, also with superscript digits), ignoring case. The checks run in that
+    /// order and the first failing one gives the message.
     /// </summary>
     public static string? ValidateTitle(string title)
     {
@@ -122,6 +139,18 @@ internal sealed class NoteStore
             {
                 return "A note title can't contain / \\ : or control characters.";
             }
+        }
+
+        if (title.EndsWith('.') || title.EndsWith(' '))
+        {
+            return "A note title can't end with a dot or a space.";
+        }
+
+        int dot = title.IndexOf('.');
+        string stem = (dot < 0 ? title : title[..dot]).TrimEnd(' ');
+        if (WindowsReservedNames.Contains(stem))
+        {
+            return "A note title can't be a name Windows reserves (CON, PRN, AUX, NUL, COM1-9, LPT1-9).";
         }
 
         return null;

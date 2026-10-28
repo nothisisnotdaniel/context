@@ -328,4 +328,105 @@ public sealed class NoteStoreTests : IDisposable
         Assert.True(store.TryOpen("x", out Note? plain));
         Assert.Equal("plain", plain!.Text);
     }
+
+    private const string ReservedMessage =
+        "A note title can't be a name Windows reserves (CON, PRN, AUX, NUL, COM1-9, LPT1-9).";
+
+    private const string TrailingMessage = "A note title can't end with a dot or a space.";
+
+    // 018 AC-1
+    [Theory]
+    [InlineData("CON")]
+    [InlineData("con")]
+    [InlineData("Prn")]
+    [InlineData("AUX")]
+    [InlineData("nul")]
+    [InlineData("COM1")]
+    [InlineData("com9")]
+    [InlineData("LPT1")]
+    [InlineData("lpt9")]
+    [InlineData("COM\u00B9")]
+    [InlineData("LPT\u00B3")]
+    [InlineData("CON.txt")]
+    [InlineData("nul.tar.gz")]
+    [InlineData("Aux.notes")]
+    [InlineData("CON .txt")]
+    public void ValidateTitle_WindowsReservedName_IsRejected(string title)
+    {
+        Assert.Equal(ReservedMessage, NoteStore.ValidateTitle(title));
+    }
+
+    // 018 AC-2
+    [Theory]
+    [InlineData("CONSOLE")]
+    [InlineData("Contact")]
+    [InlineData("ICON")]
+    [InlineData("NULL")]
+    [InlineData("COM")]
+    [InlineData("COM0")]
+    [InlineData("COM10")]
+    [InlineData("LPT")]
+    [InlineData("LPT0")]
+    [InlineData("my CON")]
+    [InlineData("CON x")]
+    [InlineData("AUX-notes")]
+    [InlineData("x.CON")]
+    public void ValidateTitle_ResemblesReservedName_IsValid(string title)
+    {
+        Assert.Null(NoteStore.ValidateTitle(title));
+    }
+
+    // 018 AC-3
+    [Theory]
+    [InlineData("x.")]
+    [InlineData("x..")]
+    [InlineData("Notes...")]
+    [InlineData("x ")]
+    public void ValidateTitle_TrailingDotOrSpace_IsRejected(string title)
+    {
+        Assert.Equal(TrailingMessage, NoteStore.ValidateTitle(title));
+    }
+
+    // 018 AC-4
+    [Theory]
+    [InlineData("v1.2 notes")]
+    [InlineData("a. b")]
+    [InlineData("Shopping list")]
+    public void ValidateTitle_InnerDotsAndSpaces_AreValid(string title)
+    {
+        Assert.Null(NoteStore.ValidateTitle(title));
+    }
+
+    // 018 AC-5
+    [Theory]
+    [InlineData(".", "A note title can't start with a dot.")]
+    [InlineData("..", "A note title can't start with a dot.")]
+    [InlineData("a/b.", "A note title can't contain / \\ : or control characters.")]
+    public void ValidateTitle_ExistingRules_KeepPriority(string title, string message)
+    {
+        Assert.Equal(message, NoteStore.ValidateTitle(title));
+    }
+
+    // 018 AC-5
+    [Fact]
+    public void ValidateTitle_TooLongEndingInDot_GetsLengthMessage()
+    {
+        string title = new string('a', 100) + ".";
+
+        Assert.Equal("A note title can be at most 100 characters.", NoteStore.ValidateTitle(title));
+    }
+
+    // 018 AC-6
+    [Theory]
+    [InlineData("CON")]
+    [InlineData("nul.txt")]
+    [InlineData("x.")]
+    [InlineData("x..md")]
+    public void Create_WindowsUnsafeTitle_IsRejected(string title)
+    {
+        NoteStore store = new NoteStore(root);
+
+        Assert.Throws<ArgumentException>(() => store.Create(title));
+        Assert.False(Directory.Exists(root));
+    }
 }
