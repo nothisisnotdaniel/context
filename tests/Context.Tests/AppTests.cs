@@ -259,6 +259,30 @@ public class AppTests
         AssertOnHintRow(Frames(console.Output)[1], "/boom failed: broken [x]");
     }
 
+    // 015 AC-8
+    [Fact]
+    public void FailingHandler_ControlCharacterInMessage_ShowsPlaceholder()
+    {
+        CommandRegistry registry = CommandRegistry.CreateDefault();
+        registry.Register("/boom", "Fails", _ => throw new IOException("x\u001b[31my"));
+        TestConsole console = new TestConsole().Interactive();
+        console.Profile.Width = Width;
+        console.Profile.Height = Height;
+        console.Input.PushTextWithEnter("/boom");
+        console.Input.PushTextWithEnter("/help");
+        console.Input.PushTextWithEnter("/quit");
+
+        int exitCode = new App(console, registry).Run();
+
+        Assert.Equal(0, exitCode);
+        List<string[]> frames = Frames(console.Output);
+        Assert.Equal(3, frames.Count);
+        AssertOnHintRow(frames[1], "/boom failed: x\uFFFD[31my");
+        Assert.DoesNotContain("x\u001b", console.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain('\u001b', Ansi.Replace(console.Output, string.Empty));
+        Assert.True(string.IsNullOrWhiteSpace(frames[2][^4]));
+    }
+
     // AC-10
     [Fact]
     public void SourceFiles_OutsideProgram_DoNotUseStaticConsoleApis()
