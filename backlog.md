@@ -10,7 +10,7 @@ Write one feature per line, in plain language.
 - [x] Safe note text: replace terminal control characters in note text and in note names read from disk with a visible placeholder before rendering, so escape sequences never reach the terminal. Needed before email and calendar import. → 015-safe-note-text
 - [x] Windows-safe note titles: reject Windows reserved names (CON, PRN, AUX, NUL, COM1-9, LPT1-9) and titles ending in `.` or a space. → 018-windows-safe-titles
 - [x] Todos: add todos with due dates, shown in a sidebar sorted by due date → 020-todos
-- [ ] Tags: parse tags in Markdown files and store the links between files in the database
+- [x] Tags: parse tags in Markdown files and store the links between files in the database → 022-tags
 - [ ] /current view: show today's due todos and linked notes
 - [ ] Calendar: pull in today's appointments and show them in /current
 - [ ] Email: pull in information from emails
