@@ -24,3 +24,6 @@ Write one feature per line, in plain language.
 - [ ] Mention `#[...]` in tag help: the `/tags` help text and the empty-tags message only mention `#tag`. Also show the `#[tag with spaces]` form.
 - [ ] Merge duplicate whitespace code: the whitespace-collapsing loop exists twice, in `NormalizeBracket` and `CollapseWhitespace`. Keep one.
 - [ ] Check `/tags` input: `/tags <tag>` doesn't check what was typed against the tag rules, so bad input just shows "No notes tagged". Show a hint that says what a valid tag looks like instead.
+- [ ] Spacing in /current: add a blank line between the "Today, <date>" title, the Due table, and the Linked notes table (or its "No linked notes" / "Can't read context.db" line).
+- [ ] Limit /current rows: `/current` shows every due todo and runs one database query per distinct tag, with no limit. Cap the Due table (last row `… N more`, like the sidebar) and the number of tags looked up.
+- [ ] Simplify /current code: `CurrentCommands` builds the due list and the tag collection in two passes; do it in one loop.
