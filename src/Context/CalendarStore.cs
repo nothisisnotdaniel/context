@@ -48,21 +48,30 @@ internal sealed class CalendarStore
     /// <summary>The full path of the <c>calendar</c> folder.</summary>
     public string Folder { get; }
 
+    /// <summary>The zone events are converted to and days are counted in.</summary>
+    public TimeZoneInfo Zone => local;
+
     /// <summary>
     /// Returns the events whose local span overlaps <paramref name="day"/> (<c>[day 00:00, day+1 00:00)</c>),
     /// plus zero-length events that start on it, and the names of the files that couldn't be read
     /// (I/O or access errors, not iCalendar, or over <see cref="MaxFileBytes"/>).
     /// </summary>
-    public CalendarDay Day(DateOnly day)
+    public CalendarDay Day(DateOnly day) => Day(day, []);
+
+    /// <summary>
+    /// Like <see cref="Day(DateOnly)"/>, but <paramref name="extra"/> events (for example from the published
+    /// calendar link) are filtered and sorted together with the events from the files.
+    /// </summary>
+    public CalendarDay Day(DateOnly day, IReadOnlyList<Appointment> extra)
     {
         DateTime from = day.ToDateTime(TimeOnly.MinValue);
         DateTime to = from.AddDays(1);
-        List<Appointment> appointments = [];
+        List<Appointment> appointments = extra.Where(a => Overlaps(a, from, to)).ToList();
         List<string> unreadable = [];
         foreach (string path in Files(unreadable))
         {
             string name = Path.GetFileName(path);
-            string? text = Read(path);
+            string? text = ReadText(path);
             if (text is null)
             {
                 unreadable.Add(name);
@@ -138,7 +147,7 @@ internal sealed class CalendarStore
     }
 
     /// <summary>The file's text (UTF-8, BOM dropped), or <c>null</c> if it can't be read or is too large.</summary>
-    private static string? Read(string path)
+    internal static string? ReadText(string path)
     {
         try
         {

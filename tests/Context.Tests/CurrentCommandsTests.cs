@@ -21,6 +21,7 @@ public sealed class CurrentCommandsTests : IDisposable
     private readonly string parent;
     private readonly string root;
     private DateTime clock = new(2026, 10, 29, 9, 0, 0, DateTimeKind.Utc);
+    private CalendarFeed? feed;
 
     public CurrentCommandsTests()
     {
@@ -79,7 +80,7 @@ public sealed class CurrentCommandsTests : IDisposable
         TodoStore todos = Store();
         TodoCommands.Register(registry, todos, () => Today);
         CurrentCommands.Register(
-            registry, todos, new TagIndex(root), notes, new CalendarStore(root, Zone), () => Today);
+            registry, todos, new TagIndex(root), notes, new CalendarStore(root, Zone), () => Today, feed);
         TestConsole console = new TestConsole().Interactive();
         console.Profile.Width = Width;
         console.Profile.Height = Height;
@@ -584,5 +585,183 @@ public sealed class CurrentCommandsTests : IDisposable
 
         Assert.True(RowIndex(main, "14:00-14:00", "E14", "") >= 0);
         Assert.False(HasLine(main, "more"));
+    }
+
+    // ---- 031: Exchange calendar via published link ----
+
+    private static readonly DateTime FeedNow = new(2026, 10, 29, 9, 0, 0, DateTimeKind.Utc);
+
+    private string CachePath => Path.Combine(root, CalendarFeed.CacheFileName);
+
+    private static string Calendar(params string[] events) =>
+        "BEGIN:VCALENDAR\r\n" + string.Concat(events) + "END:VCALENDAR\r\n";
+
+    private FakeHttpHandler UseFeed(FakeHttpHandler handler)
+    {
+        CalendarLink link = new CalendarLink(root);
+        link.Set(FakeHttpHandler.Link);
+        feed = new CalendarFeed(root, link, handler, () => FeedNow, TimeSpan.FromMilliseconds(100));
+        return handler;
+    }
+
+    private void WriteCache(string text, DateTime atUtc)
+    {
+        File.WriteAllText(CachePath, text);
+        File.SetLastWriteTimeUtc(CachePath, atUtc);
+    }
+
+    private static void AssertNoSecret(string text)
+    {
+        Assert.DoesNotContain(FakeHttpHandler.PathToken, text, StringComparison.Ordinal);
+        Assert.DoesNotContain(FakeHttpHandler.QueryToken, text, StringComparison.Ordinal);
+    }
+
+    private void AssertNoSecretInFiles()
+    {
+        foreach (string path in Directory.GetFiles(parent, "*", SearchOption.AllDirectories))
+        {
+            if (Path.GetFileName(path) != CalendarLink.FileName)
+            {
+                AssertNoSecret(File.ReadAllText(path));
+            }
+        }
+    }
+
+    // AC-4: feed events and file events in one table, sorted together.
+    [Fact]
+    public void Current_Feed_MergedWithFiles_Sorted()
+    {
+        WriteCalendar("a.ics", Event("File lunch", ":20261029T120000", ":20261029T130000"));
+        UseFeed(FakeHttpHandler.Ok(Calendar(
+            Event("Feed standup", ":20261029T080000Z", ":20261029T081500Z", "LOCATION:Room 1\r\n"),
+            Event("Feed holiday", ";VALUE=DATE:20261029"),
+            Event("Feed tomorrow", ":20261030T080000Z"))));
+
+        string[] main = Main("/current");
+
+        int holiday = RowIndex(main, "all day", "Feed holiday", "");
+        int standup = RowIndex(main, "09:00-09:15", "Feed standup", "Room 1");
+        int lunch = RowIndex(main, "12:00-13:00", "File lunch", "");
+        Assert.True(holiday >= 0 && standup > holiday && lunch > standup);
+        Assert.Single(main, l => l.Contains("Appointments", StringComparison.Ordinal));
+        Assert.False(HasLine(main, "Feed tomorrow"));
+        Assert.False(HasLine(main, "Exchange calendar"));
+        Assert.False(HasLine(main, "No appointments today"));
+    }
+
+    // AC-4: feed text is cleaned and escaped like file text.
+    [Fact]
+    public void Current_Feed_TextCleanedAndEscaped()
+    {
+        UseFeed(FakeHttpHandler.Ok(Calendar(
+            Event("[red]x[/]\u0007 feed", ":20261029T080000Z", extra: "LOCATION:[b]there\u001b\r\n"))));
+
+        string[] main = Main("/current");
+
+        Assert.True(RowIndex(main, "09:00-09:00", "[red]x[/]\uFFFD feed", "[b]there\uFFFD") >= 0);
+    }
+
+    // AC-4: the 15-row limit counts feed and file events together.
+    [Fact]
+    public void Current_Feed_RowLimit_CountsBoth()
+    {
+        WriteCalendar("a.ics", Enumerable.Range(0, 10)
+            .Select(i => Event($"F{i:00}", $":20261029T{i:00}0000")).ToArray());
+        UseFeed(FakeHttpHandler.Ok(Calendar(Enumerable.Range(10, 10)
+            .Select(i => Event($"X{i:00}", $":20261029T{i:00}3000")).ToArray())));
+
+        string[] main = Main("/current");
+
+        Assert.True(RowIndex(main, "13:30-13:30", "X13", "") >= 0);
+        Assert.Equal(-1, RowIndex(main, "14:30-14:30", "X14", ""));
+        Assert.True(RowIndex(main, "", "… 6 more", "") >= 0);
+    }
+
+    // AC-4: with a link set and no events today, the empty line still shows.
+    [Fact]
+    public void Current_Feed_NoEventsToday_EmptyLine()
+    {
+        UseFeed(FakeHttpHandler.Ok(Calendar(Event("Tomorrow", ":20261030T080000Z"))));
+
+        string[] main = Main("/current");
+
+        Assert.Contains(NoSpace(EmptyCalendar), NoSpace(string.Concat(main)));
+        Assert.False(HasLine(main, "Exchange calendar"));
+    }
+
+    // AC-5: offline with a cache: its events, then a grey line with the cache time in local time.
+    [Fact]
+    public void Current_Feed_Stale_GreyLine_AndCachedEvents()
+    {
+        UseFeed(FakeHttpHandler.Status(System.Net.HttpStatusCode.ServiceUnavailable));
+        WriteCache(Calendar(Event("Cached meeting", ":20261029T140000Z")), new DateTime(2026, 10, 28, 17, 5, 0, DateTimeKind.Utc));
+        const string Line = "Exchange calendar offline, showing the copy from 2026-10-28 18:05.";
+
+        string[] main = Main("/current");
+
+        int row = RowIndex(main, "15:00-15:00", "Cached meeting", "");
+        Assert.True(row >= 0);
+        Assert.True(LineIndex(main, Line) > row);
+        Assert.True(LineIndex(main, Line) < LineIndex(main, NothingDue));
+        (_, string output) = Run(true, "/current");
+        Assert.Contains(Style("[grey]X[/]") + Line, output);
+    }
+
+    // AC-5, AC-6: every failure reason gives a red line and no secret anywhere.
+    [Theory]
+    [MemberData(nameof(CalendarFeedTests.Failures), MemberType = typeof(CalendarFeedTests))]
+    public void Current_Feed_Failed_RedLine_NoSecret(string failure)
+    {
+        UseFeed(CalendarFeedTests.FailingHandler(failure));
+        string line = $"Can't download the Exchange calendar ({CalendarFeedTests.Reason(failure)}).";
+
+        (int exitCode, string output) = Run(true, "/current");
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains(Style("[red]X[/]") + line, output);
+        Assert.Contains("No appointments today", output);
+        Assert.Contains(NothingDue, output);
+        AssertNoSecret(output);
+        AssertNoSecretInFiles();
+    }
+
+    // AC-5, AC-6: a fresh download adds no status line and shows no secret.
+    [Fact]
+    public void Current_Feed_Fresh_NoStatusLine_NoSecret()
+    {
+        UseFeed(FakeHttpHandler.Ok(Calendar(Event("Standup", ":20261029T080000Z"))));
+
+        (int exitCode, string output) = Run(false, "/current", "/current");
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("Standup", output);
+        Assert.DoesNotContain("Exchange calendar", output);
+        AssertNoSecret(output);
+        AssertNoSecretInFiles();
+    }
+
+    // AC-2, AC-5: no link means no request and no line.
+    [Fact]
+    public void Current_Feed_NotConfigured_NoRequest_NoLine()
+    {
+        FakeHttpHandler handler = FakeHttpHandler.Ok(Calendar(Event("Standup", ":20261029T080000Z")));
+        feed = new CalendarFeed(root, new CalendarLink(root), handler, () => FeedNow);
+
+        string[] main = Main("/current");
+
+        Assert.Equal(0, handler.Requests);
+        Assert.False(HasLine(main, "Standup"));
+        Assert.False(HasLine(main, "Exchange calendar"));
+    }
+
+    // AC-5: /current keeps working and the loop goes on after a failure.
+    [Fact]
+    public void Current_Feed_Failure_LoopGoesOn()
+    {
+        UseFeed(FakeHttpHandler.Throw());
+
+        string[] main = Main("/current", "/current");
+
+        Assert.True(HasLine(main, "Can't download the Exchange calendar (network error)."));
     }
 }
