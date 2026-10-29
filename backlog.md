@@ -16,3 +16,7 @@ Write one feature per line, in plain language.
 - [ ] Email: pull in information from emails
 - [ ] Todo dates with years: the sidebar shows due dates as `MM-dd` with no year. Show the year when a todo is due in a year other than the current one (e.g. `2027-01-15`), so todos far ahead or long overdue can't be mistaken for this year's.
 - [ ] Helpful empty todo sidebar: "No todos yet" doesn't say how to add one. Mention `/todo` in the empty sidebar, e.g. "No todos yet — add one with /todo".
+- [ ] Faster tag parser: `TagParser.SkipCodeSpan` rescans the rest of the line for every unmatched backtick run, so a line with many unmatched backticks takes O(n²) time. Make the scan linear before email or calendar text gets indexed.
+- [ ] Note size limit for tag sync: `TagIndex.Sync` reads each changed note whole with no size limit. Skip (or only partly read) notes above a sensible size and say so in `/tags`.
+- [ ] Shorter tag help: shorten the `/tags` help description (e.g. "List tags: /tags [tag]") and give the `/links` usage hint an example (`/links Meeting`).
+- [ ] Tags with spaces: support tags that contain spaces. Suggested notation: `[[tag with spaces]]`, but the spec writer may propose other options (and should weigh them against `[[...]]` being read as a wiki link elsewhere). Single-word `#tags` keep working, and both forms of the same tag should count as one tag.
