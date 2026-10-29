@@ -51,6 +51,23 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Appointment`: one-line summary or `(no title)`; `Where`: grey one-line location), at most 15 rows (last
     `… N more`), or a grey `No appointments today. Put .ics files in <root>/calendar …` line, then a red
     `Can't read calendar/<file>` line per unreadable file (`calendar/` alone if the folder can't be listed).
+  - **Exchange link:** `/calendar-link <url>` (`CalendarLinkCommands`) saves a published Outlook/Exchange ICS
+    link; `/calendar-link` shows it masked with the last download time; `/calendar-link off` deletes the link
+    and the cache. The link is a **bearer secret**: `CalendarLink(root)` keeps it in `<root>/calendar-link.txt`
+    (one line, temp file + move, mode `0600` off Windows) and it is only ever shown as `CalendarLink.Mask`
+    (`https://<host>/…`); never echo it, put it in another file or render an exception message that could hold
+    it. `CalendarLink.Validate`: absolute `https` or `webcal` (stored as `https`), a host, no user-info (not even
+    `@`), no whitespace. `CalendarFeed(root, link, HttpMessageHandler, utcNow, timeout?)` `Fetch()` never throws:
+    `NotConfigured` (no request), the cache `<root>/calendar-link.ics` when younger than 5 min (no request), else
+    one GET (10 s timeout, final URI must be `https`, 2xx, at most `CalendarStore.MaxFileBytes` by
+    `Content-Length` and streamed bytes, must parse with `IcsParser`) that replaces the cache atomically and
+    stamps its last-write time with `utcNow` (`Fresh`). Failures keep the cache untouched: `Stale` with it, or
+    `Failed`; the reason is a fixed text (`timed out`, `network error`, `HTTP <code>`, `not HTTPS`, `over 5 MB`,
+    `not a calendar`, `can't read calendar-link.txt`). `/current` merges the feed's events through
+    `CalendarStore.Day(d, extra)` and adds, under the table, a grey `Exchange calendar offline, showing the copy
+    from …` line (Stale) or a red `Can't download the Exchange calendar (<reason>).` line (Failed). Exchange
+    feeds use `RRULE` a lot, so recurring meetings only show on their first occurrence. Tests use
+    `FakeHttpHandler` and never touch the network.
 - **How it runs:** an interactive session that stays open until `/quit` (exit code 0). A Spectre
   `Layout` fills the terminal: the main view on the left, the `Todos` sidebar on the right (fixed
   32 columns), one hint row, then a 3-line bordered input panel at the bottom. After each command
@@ -97,15 +114,16 @@ Every factory agent reads this file before working on Context. Keep it short and
 - **Layout:**
   - `Context.slnx`: the solution. `Directory.Build.props` turns on `EnforceCodeStyleInBuild`.
   - `src/Context/`: the app. `Program.cs` only wires things up (builds the registry with
-    `CreateDefault()` + `NoteCommands.Register` + `TagCommands.Register` + `TodoCommands.Register` + `CurrentCommands.Register` (with a `CalendarStore(folder, TimeZoneInfo.Local)`), passes it, a `TodoSidebar` and
+    `CreateDefault()` + `NoteCommands.Register` + `TagCommands.Register` + `TodoCommands.Register` + `CalendarLinkCommands.Register` + `CurrentCommands.Register` (with a `CalendarStore(folder, TimeZoneInfo.Local)` and a `CalendarFeed` over a `SocketsHttpHandler` with `MaxAutomaticRedirections = 5`), passes it, a `TodoSidebar` and
     `AnsiConsole.Console` to `App`, returns `App.Run()`); the loop, layout and dispatch live in `App.cs`, commands in `CommandRegistry.cs`,
     input in `LineEditor.cs`, the command popup's rows and `PopupArea` in `CommandPopup.cs`, the note
     files in `NoteStore.cs`, the display sanitizer in `SafeText.cs`, `/new`, `/notes`, `/open` in `NoteCommands.cs`, the todo list in `TodoStore.cs`,
     `/todo` and `/done` in `TodoCommands.cs`, the sidebar body in `TodoSidebar.cs`, tag parsing in
     `TagParser.cs`, the SQLite tag index in `TagIndex.cs`, `/tags`, `/links` in `TagCommands.cs`, `/current` in `CurrentCommands.cs`, the `.ics`
-    parser and `Appointment` in `IcsParser.cs`, and the calendar folder reader and `CalendarDay` in `CalendarStore.cs`.
+    parser and `Appointment` in `IcsParser.cs`, the calendar folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`,
+    the download and cache in `CalendarFeed.cs`, and `/calendar-link` in `CalendarLinkCommands.cs`.
   - `tests/Context.Tests/`: one test class per production class (`AppTests.cs` tests `App.cs`), plus
-    shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves). Note, todo, tag and calendar tests use their
+    shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves) and `FakeHttpHandler.cs` (canned HTTP responses). Note, todo, tag and calendar tests use their
     own temp folder (deleted in `Dispose`), never the real app data folder.
 - **Style:**
   - Write all output through an injected `IAnsiConsole`, never `Console.*` or the static

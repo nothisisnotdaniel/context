@@ -32,22 +32,23 @@ internal static class CurrentCommands
         TagIndex index,
         NoteStore notes,
         CalendarStore calendar,
-        Func<DateOnly> today)
+        Func<DateOnly> today,
+        CalendarFeed? feed = null)
     {
         registry.Register(
             "/current",
             "Today's appointments, due todos and linked notes",
-            _ => Current(todos, index, notes, calendar, today()));
+            _ => Current(todos, index, notes, calendar, feed, today()));
     }
 
     private static CommandResult Current(
-        TodoStore store, TagIndex index, NoteStore notes, CalendarStore calendar, DateOnly today)
+        TodoStore store, TagIndex index, NoteStore notes, CalendarStore calendar, CalendarFeed? feed, DateOnly today)
     {
         List<IRenderable> parts =
         [
             new Markup($"[steelblue1]Today, {today.ToString(DateFormat, CultureInfo.InvariantCulture)}[/]"),
         ];
-        parts.AddRange(Appointments(calendar, today));
+        parts.AddRange(Appointments(calendar, feed, today));
 
         IReadOnlyList<TodoItem> todos;
         try
@@ -146,10 +147,27 @@ internal static class CurrentCommands
         return table;
     }
 
-    /// <summary>The <c>Appointments</c> table (or the empty line), then a red line per unreadable file.</summary>
-    private static List<IRenderable> Appointments(CalendarStore calendar, DateOnly today)
+    /// <summary>
+    /// The <c>Appointments</c> table (or the empty line) with the files' and the feed's events, then a red line
+    /// per unreadable file, then the feed's status line (if any).
+    /// </summary>
+    private static List<IRenderable> Appointments(CalendarStore calendar, CalendarFeed? feed, DateOnly today)
     {
-        CalendarDay day = calendar.Day(today);
+        CalendarFeedResult result = feed?.Fetch() ?? new CalendarFeedResult(CalendarFeedStatus.NotConfigured);
+        IReadOnlyList<Appointment> extra = [];
+        if (result.Text is not null)
+        {
+            try
+            {
+                extra = IcsParser.Parse(result.Text, calendar.Zone);
+            }
+            catch (FormatException)
+            {
+                // The feed only caches text that parsed, so this only happens if the cache was changed by hand.
+            }
+        }
+
+        CalendarDay day = calendar.Day(today, extra);
         List<IRenderable> parts = [];
         IReadOnlyList<Appointment> appointments = day.Appointments;
         if (appointments.Count == 0)
@@ -201,7 +219,33 @@ internal static class CurrentCommands
             parts.Add(new Markup($"[red]Can't read {CalendarStore.FolderName}/{file}[/]"));
         }
 
+        IRenderable? status = FeedStatus(result, calendar.Zone);
+        if (status is not null)
+        {
+            parts.Add(status);
+        }
+
         return parts;
+    }
+
+    /// <summary>A grey offline line for <c>Stale</c>, a red line for <c>Failed</c>, otherwise nothing.</summary>
+    private static IRenderable? FeedStatus(CalendarFeedResult result, TimeZoneInfo zone)
+    {
+        if (result.Status == CalendarFeedStatus.Stale && result.CachedAtUtc is not null)
+        {
+            DateTime local = TimeZoneInfo.ConvertTimeFromUtc(
+                DateTime.SpecifyKind(result.CachedAtUtc.Value, DateTimeKind.Utc), zone);
+            string at = local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+            return new Markup($"[grey]Exchange calendar offline, showing the copy from {at}.[/]");
+        }
+
+        if (result.Status == CalendarFeedStatus.Failed)
+        {
+            string reason = Shown(result.Reason ?? string.Empty);
+            return new Markup($"[red]Can't download the Exchange calendar ({reason}).[/]");
+        }
+
+        return null;
     }
 
     /// <summary><c>all day</c>, or <c>HH:mm-HH:mm</c> with <c>…</c> for a side outside <c>[from, to]</c>.</summary>
