@@ -29,3 +29,7 @@ Write one feature per line, in plain language.
 - [ ] Spacing in /current: add a blank line between the "Today, <date>" title, the Due table, and the Linked notes table (or its "No linked notes" / "Can't read context.db" line).
 - [ ] Limit /current rows: `/current` shows every due todo and runs one database query per distinct tag, with no limit. Cap the Due table (last row `… N more`, like the sidebar) and the number of tags looked up.
 - [ ] Simplify /current code: `CurrentCommands` builds the due list and the tag collection in two passes; do it in one loop.
+- [ ] Calendar reads only regular files: a pipe (FIFO) or other special file named `*.ics` in `calendar/` makes `/current` hang. `CalendarStore` should skip anything that isn't a regular file.
+- [ ] Cache calendar time zones: every unknown `TZID` throws and catches an exception, so a crafted file can slow `/current` by seconds. Cache zone lookups (found or not) for each parse.
+- [ ] Midnight end as `…`: an event that ends exactly at the next midnight shows `23:00-00:00`. Show `23:00-…` like other events that run past today.
+- [ ] Clearer calendar errors: `Can't read calendar/<file>` should say why (too big, can't be opened, not a calendar). Also review the `… N more` row wording in the Appointments table, and make a duplicate `STATUS` line first-wins like the other properties.
