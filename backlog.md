@@ -20,3 +20,7 @@ Write one feature per line, in plain language.
 - [ ] Faster tag parser: `TagParser.SkipCodeSpan` rescans the rest of the line for every unmatched backtick run, so a line with many unmatched backticks takes O(n²) time. Make the scan linear before email or calendar text gets indexed.
 - [ ] Note size limit for tag sync: `TagIndex.Sync` reads each changed note whole with no size limit. Skip (or only partly read) notes above a sensible size and say so in `/tags`.
 - [ ] Shorter tag help: shorten the `/tags` help description (e.g. "List tags: /tags [tag]") and give the `/links` usage hint an example (`/links Meeting`).
+- [ ] Note links: `[[Note name]]` in a note links to the note with that name (matched like `/open`: ignoring case, optional `.md`). Store these links in the database next to the tag links, and show them in `/links <note>` (both notes it links to and notes that link to it). A link to a note that doesn't exist yet is kept and shown as missing. Keep `#[tag]` for tags with spaces (job 024).
+- [ ] Mention `#[...]` in tag help: the `/tags` help text and the empty-tags message only mention `#tag`. Also show the `#[tag with spaces]` form.
+- [ ] Merge duplicate whitespace code: the whitespace-collapsing loop exists twice, in `NormalizeBracket` and `CollapseWhitespace`. Keep one.
+- [ ] Check `/tags` input: `/tags <tag>` doesn't check what was typed against the tag rules, so bad input just shows "No notes tagged". Show a hint that says what a valid tag looks like instead.
