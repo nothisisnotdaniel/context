@@ -9,6 +9,15 @@ Every factory agent reads this file before working on Context. Keep it short and
 - **Tags:** the user places tags in the Markdown files, and the tags link related files together.
   The links between files are stored in a database that lives in the same `Context` app data
   folder. The Markdown files stay the source of the content.
+  - `TagParser.Parse` finds `#tag` (at line start or after whitespace, a letter first, then letters,
+    digits, `-`, `_`; at most 50 chars; lower-cased, distinct) outside fenced code blocks and inline
+    backtick spans. `TagIndex` keeps the index in SQLite at `<root>/context.db` (`Microsoft.Data.Sqlite`,
+    `Pooling=False`, parameterized SQL only): `notes(name, modified)` (last-write UTC ticks, NULL for a
+    note that couldn't be read so it is retried) and `note_tags(note, tag)`. `Sync(NoteStore)` updates it
+    in one transaction and only re-parses files whose time changed. Queries: `Tags()`, `NotesWithTag`,
+    `FindNote`, `Links`. A database that can't be opened or isn't valid throws `TagIndexException` (an
+    `IOException`) and is never deleted or overwritten. `/tags`, `/tags <tag>` and `/links <note>`
+    (`TagCommands`) call `Sync` first and show a red `Can't read context.db` hint on that error.
 - **UI:**
   - An input box at the bottom of the screen is used for navigation.
   - A todo list is always shown in a sidebar, sorted by due date. The user sets each todo's due date.
@@ -53,20 +62,21 @@ Every factory agent reads this file before working on Context. Keep it short and
   - Tests drive the loop by queuing input on `TestConsole.Input` (`PushTextWithEnter`, `PushKey`)
     and always end with `/quit`, so they can't hang.
 - **Stack:** .NET 10 (`net10.0`), C# with nullable reference types and implicit usings on.
-  `Spectre.Console` 0.57.2 handles all terminal output. Tests: xUnit + `Spectre.Console.Testing` 0.57.2.
+  `Spectre.Console` 0.57.2 handles all terminal output. `Microsoft.Data.Sqlite` 10.0.14 for `context.db`. Tests: xUnit + `Spectre.Console.Testing` 0.57.2.
 - **Build:** `dotnet build` (must stay at 0 warnings)
 - **Test command:** `dotnet test`
 - **Run:** `dotnet run --project src/Context`
 - **Layout:**
   - `Context.slnx`: the solution. `Directory.Build.props` turns on `EnforceCodeStyleInBuild`.
   - `src/Context/`: the app. `Program.cs` only wires things up (builds the registry with
-    `CreateDefault()` + `NoteCommands.Register` + `TodoCommands.Register`, passes it, a `TodoSidebar` and
+    `CreateDefault()` + `NoteCommands.Register` + `TagCommands.Register` + `TodoCommands.Register`, passes it, a `TodoSidebar` and
     `AnsiConsole.Console` to `App`, returns `App.Run()`); the loop, layout and dispatch live in `App.cs`, commands in `CommandRegistry.cs`,
     input in `LineEditor.cs`, the command popup's rows and `PopupArea` in `CommandPopup.cs`, the note
     files in `NoteStore.cs`, the display sanitizer in `SafeText.cs`, `/new`, `/notes`, `/open` in `NoteCommands.cs`, the todo list in `TodoStore.cs`,
-    `/todo` and `/done` in `TodoCommands.cs`, and the sidebar body in `TodoSidebar.cs`.
+    `/todo` and `/done` in `TodoCommands.cs`, the sidebar body in `TodoSidebar.cs`, tag parsing in
+    `TagParser.cs`, the SQLite tag index in `TagIndex.cs`, and `/tags`, `/links` in `TagCommands.cs`.
   - `tests/Context.Tests/`: one test class per production class (`AppTests.cs` tests `App.cs`), plus
-    shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves). Note and todo tests use their
+    shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves). Note, todo and tag tests use their
     own temp folder (deleted in `Dispose`), never the real app data folder.
 - **Style:**
   - Write all output through an injected `IAnsiConsole`, never `Console.*` or the static
