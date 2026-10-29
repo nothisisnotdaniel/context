@@ -4,8 +4,8 @@ Every factory agent reads this file before working on Context. Keep it short and
 
 - **What it is:** a personal console app for keeping information in one place. The user stores
   notes as Markdown files in a `Context` folder inside their app data folder
-  (`Environment.SpecialFolder.ApplicationData`). Later it will pull in information from email,
-  the day's appointments from the user's calendar, and other sources.
+  (`Environment.SpecialFolder.ApplicationData`). It shows the day's appointments from `.ics`
+  files in `<root>/calendar/`; later it will pull in information from email and other sources.
 - **Tags:** the user places tags in the Markdown files, and the tags link related files together.
   The links between files are stored in a database that lives in the same `Context` app data
   folder. The Markdown files stay the source of the content.
@@ -32,8 +32,25 @@ Every factory agent reads this file before working on Context. Keep it short and
     red overdue / steelblue1 today, one-line text) and a `Linked notes` table. A todo links to notes
     through tags: `TagParser.Parse` on the text of each due todo (at run time, not stored), then
     `TagIndex.NotesWithTag` after `Sync`; each note once, sorted by name ignoring case, with its matching
-    tags. Grey empty-state lines when nothing is due or nothing links; a red hint for a bad `todos.json`,
-    and a red line in place of the linked notes for a bad `context.db`.
+    tags. Grey empty-state lines when nothing is due or nothing links; a red hint for a bad `todos.json`
+    (the title and appointments still show), and a red line in place of the linked notes for a bad `context.db`.
+    Order: title, `Appointments`, `Due` (or its empty line), `Linked notes`.
+  - **Calendar:** the user puts iCalendar files in `<root>/calendar/`. `CalendarStore(root, TimeZoneInfo)`
+    reads only the top-level `*.ics` files (case-insensitive, no subfolders, never writes anything); a file over
+    5 MB (`MaxFileBytes`) is not read. `Day(d)` returns a `CalendarDay`: the events whose local span overlaps
+    `[d 00:00, d+1 00:00)` plus zero-length events starting on `d`, sorted all-day first, then start, then title
+    (ordinal ignoring case), and the names of unreadable files (IO/access error, `FormatException`, too large).
+    `IcsParser.Parse(text, zone)` scans linearly (no regexes): unfolds lines starting with space/tab, matches
+    names ignoring case, unescapes `\n \N \, \; \\`, reads `SUMMARY`, `LOCATION`, `DTSTART`, `DTEND`, `STATUS` of
+    each `VEVENT` (nested components like `VALARM` ignored). Times: `…Z` (UTC), `;TZID=` (unknown id = local),
+    floating (local), `;VALUE=DATE` (all-day, `DTEND` exclusive). No `DTEND`: ends at start (all-day: one day).
+    Skips `STATUS:CANCELLED`, missing/invalid `DTSTART`, end before start. No `BEGIN:VCALENDAR` throws
+    `FormatException`. **Recurring events are not supported:** `RRULE`, `RDATE`, `EXDATE` are ignored, so a
+    recurring event only shows on its first occurrence. `/current` shows an `Appointments` table (`Time`:
+    `all day` or `HH:mm-HH:mm` in steelblue1, `…` for a side outside today, a midnight end shows as `00:00`;
+    `Appointment`: one-line summary or `(no title)`; `Where`: grey one-line location), at most 15 rows (last
+    `… N more`), or a grey `No appointments today. Put .ics files in <root>/calendar …` line, then a red
+    `Can't read calendar/<file>` line per unreadable file (`calendar/` alone if the folder can't be listed).
 - **How it runs:** an interactive session that stays open until `/quit` (exit code 0). A Spectre
   `Layout` fills the terminal: the main view on the left, the `Todos` sidebar on the right (fixed
   32 columns), one hint row, then a 3-line bordered input panel at the bottom. After each command
@@ -80,14 +97,15 @@ Every factory agent reads this file before working on Context. Keep it short and
 - **Layout:**
   - `Context.slnx`: the solution. `Directory.Build.props` turns on `EnforceCodeStyleInBuild`.
   - `src/Context/`: the app. `Program.cs` only wires things up (builds the registry with
-    `CreateDefault()` + `NoteCommands.Register` + `TagCommands.Register` + `TodoCommands.Register` + `CurrentCommands.Register`, passes it, a `TodoSidebar` and
+    `CreateDefault()` + `NoteCommands.Register` + `TagCommands.Register` + `TodoCommands.Register` + `CurrentCommands.Register` (with a `CalendarStore(folder, TimeZoneInfo.Local)`), passes it, a `TodoSidebar` and
     `AnsiConsole.Console` to `App`, returns `App.Run()`); the loop, layout and dispatch live in `App.cs`, commands in `CommandRegistry.cs`,
     input in `LineEditor.cs`, the command popup's rows and `PopupArea` in `CommandPopup.cs`, the note
     files in `NoteStore.cs`, the display sanitizer in `SafeText.cs`, `/new`, `/notes`, `/open` in `NoteCommands.cs`, the todo list in `TodoStore.cs`,
     `/todo` and `/done` in `TodoCommands.cs`, the sidebar body in `TodoSidebar.cs`, tag parsing in
-    `TagParser.cs`, the SQLite tag index in `TagIndex.cs`, `/tags`, `/links` in `TagCommands.cs`, and `/current` in `CurrentCommands.cs`.
+    `TagParser.cs`, the SQLite tag index in `TagIndex.cs`, `/tags`, `/links` in `TagCommands.cs`, `/current` in `CurrentCommands.cs`, the `.ics`
+    parser and `Appointment` in `IcsParser.cs`, and the calendar folder reader and `CalendarDay` in `CalendarStore.cs`.
   - `tests/Context.Tests/`: one test class per production class (`AppTests.cs` tests `App.cs`), plus
-    shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves). Note, todo and tag tests use their
+    shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves). Note, todo, tag and calendar tests use their
     own temp folder (deleted in `Dispose`), never the real app data folder.
 - **Style:**
   - Write all output through an injected `IAnsiConsole`, never `Console.*` or the static

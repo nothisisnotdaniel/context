@@ -15,6 +15,7 @@ public sealed class CurrentCommandsTests : IDisposable
         "Can't read context.db. Move it out of the Context folder and it is rebuilt from your notes.";
 
     private static readonly DateOnly Today = new(2026, 10, 29);
+    private static readonly TimeZoneInfo Zone = IcsParserTests.Zone;
     private static readonly Regex Ansi = new(@"\u001b\[[0-9;?]*[A-Za-z]");
 
     private readonly string parent;
@@ -46,13 +47,39 @@ public sealed class CurrentCommandsTests : IDisposable
         File.WriteAllText(Path.Combine(root, name + ".md"), text);
     }
 
+    private string CalendarFolder => Path.Combine(root, CalendarStore.FolderName);
+
+    private string WriteCalendar(string name, params string[] events)
+    {
+        Directory.CreateDirectory(CalendarFolder);
+        string path = Path.Combine(CalendarFolder, name);
+        File.WriteAllText(path, "BEGIN:VCALENDAR\r\n" + string.Concat(events) + "END:VCALENDAR\r\n");
+        return path;
+    }
+
+    private static string Event(string? title, string start, string? end = null, string extra = "")
+    {
+        string titleLine = title is null ? string.Empty : $"SUMMARY:{title}\r\n";
+        string endLine = end is null ? string.Empty : $"DTEND{end}\r\n";
+        return $"BEGIN:VEVENT\r\n{titleLine}DTSTART{start}\r\n{endLine}{extra}END:VEVENT\r\n";
+    }
+
+    private string EmptyCalendar =>
+        $"No appointments today. Put .ics files in {Path.Combine(root, "calendar")} to see them here.";
+
+    private static string NoSpace(string text) => Regex.Replace(text, "\\s+", string.Empty);
+
+    private static int LineIndex(string[] main, string text) =>
+        Array.FindIndex(main, l => l.Contains(text, StringComparison.Ordinal));
+
     private (int ExitCode, string Output) Run(bool ansi, params string[] commands)
     {
         CommandRegistry registry = CommandRegistry.CreateDefault();
         NoteStore notes = new NoteStore(root);
         TodoStore todos = Store();
         TodoCommands.Register(registry, todos, () => Today);
-        CurrentCommands.Register(registry, todos, new TagIndex(root), notes, () => Today);
+        CurrentCommands.Register(
+            registry, todos, new TagIndex(root), notes, new CalendarStore(root, Zone), () => Today);
         TestConsole console = new TestConsole().Interactive();
         console.Profile.Width = Width;
         console.Profile.Height = Height;
@@ -159,7 +186,7 @@ public sealed class CurrentCommandsTests : IDisposable
         string[] main = Main("/help");
 
         Assert.Contains(main, l => l.Contains("/current", StringComparison.Ordinal)
-            && l.Contains("Today's due todos and linked notes", StringComparison.Ordinal));
+            && l.Contains("Today's appointments, due todos and linked notes", StringComparison.Ordinal));
     }
 
     // AC-2
@@ -287,7 +314,7 @@ public sealed class CurrentCommandsTests : IDisposable
         (int exitCode, string output) = Run(true, "/current", "/help");
         Assert.Equal(0, exitCode);
         Assert.Contains(Style("[red]X[/]") + Text, output);
-        Assert.Contains("Today's due todos and linked notes", output);
+        Assert.Contains("Today's appointments, due todos and linked notes", output);
     }
 
     // AC-7
@@ -335,5 +362,227 @@ public sealed class CurrentCommandsTests : IDisposable
 
         Assert.True(HasLine(main, "Today, 2026-10-29"));
         Assert.True(RowIndex(main, "1", "2026-10-29", "a") >= 0);
+    }
+
+    // 028 AC-3: title, then appointments, then Due, then linked notes.
+    [Fact]
+    public void Current_Appointments_TableBeforeDueAndLinks()
+    {
+        AddTodo("call #work", Today);
+        WriteNote("Plan", "#work");
+        WriteCalendar(
+            "work.ics",
+            Event("Standup", ":20261029T080000Z", ":20261029T083000Z", "LOCATION:Room 1\r\n"),
+            Event("Holiday", ";VALUE=DATE:20261029"),
+            Event("Late", ":20261029T220000", ":20261030T010000"),
+            Event("Early", ":20261028T230000", ":20261029T010000"),
+            Event(null, ":20261029T120000", ":20261029T130000"),
+            Event("Midnight", ":20261029T230000", ":20261030T000000"));
+
+        string[] main = Main("/current");
+
+        int title = LineIndex(main, "Today, 2026-10-29");
+        int appointments = LineIndex(main, "Appointments");
+        int holiday = RowIndex(main, "all day", "Holiday", "");
+        int early = RowIndex(main, "…-01:00", "Early", "");
+        int standup = RowIndex(main, "09:00-09:30", "Standup", "Room 1");
+        int noTitle = RowIndex(main, "12:00-13:00", "(no title)", "");
+        int late = RowIndex(main, "22:00-…", "Late", "");
+        int midnight = RowIndex(main, "23:00-00:00", "Midnight", "");
+        int due = RowIndex(main, "1", "2026-10-29", "call #work");
+        int linked = RowIndex(main, "Plan", "#work");
+        Assert.True(title >= 0 && appointments > title && holiday > appointments);
+        Assert.True(early > holiday && standup > early && noTitle > standup && late > noTitle && midnight > late);
+        Assert.True(due > midnight && linked > due);
+        Assert.Contains(main, l => l.Contains('╭') && l.Contains('╮'));
+    }
+
+    // 028 AC-3: colours.
+    [Fact]
+    public void Current_Appointments_Colours()
+    {
+        WriteCalendar(
+            "a.ics",
+            Event("Standup", ":20261029T090000", ":20261029T093000", "LOCATION:Room 1\r\n"),
+            Event("Holiday", ";VALUE=DATE:20261029"));
+
+        (int exitCode, string output) = Run(true, "/current");
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains(Style("[steelblue1]X[/]") + "09:00-09:30", output);
+        Assert.Contains(Style("[steelblue1]X[/]") + "all day", output);
+        Assert.Contains(Style("[grey]X[/]") + "Room 1", output);
+        Assert.Contains(Style("[grey]X[/]") + "Appointments", output);
+    }
+
+    // 028 AC-3: appointments show even when nothing is due; Due behaviour unchanged.
+    [Fact]
+    public void Current_Appointments_ShownWhenNothingDue()
+    {
+        WriteCalendar("a.ics", Event("Standup", ":20261029T090000"));
+
+        string[] main = Main("/current");
+
+        int standup = RowIndex(main, "09:00-09:00", "Standup", "");
+        Assert.True(standup >= 0);
+        Assert.True(LineIndex(main, NothingDue) > standup);
+        Assert.False(HasLine(main, "Linked notes"));
+    }
+
+    // 028 AC-3: a bad todos.json still shows the red hint, and the appointments in the main view.
+    [Fact]
+    public void Current_BadTodos_StillShowsAppointments()
+    {
+        WriteCalendar("a.ics", Event("Standup", ":20261029T090000"));
+        File.WriteAllBytes(Path.Combine(root, TodoStore.FileName), [0x7b, 0x00]);
+
+        string[] frame = Frame("/current");
+
+        Assert.Contains("Can't read todos.json", frame[^4]);
+        string[] main = frame[..^4].Select(l => l[..Math.Min(l.Length, MainWidth)]).ToArray();
+        Assert.True(RowIndex(main, "09:00-09:00", "Standup", "") >= 0);
+    }
+
+    // 028 AC-4
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void Current_NoAppointments_ShowsGreyLineWithFolder(bool folder, bool otherDay)
+    {
+        if (folder)
+        {
+            Directory.CreateDirectory(CalendarFolder);
+        }
+
+        if (otherDay)
+        {
+            WriteCalendar("a.ics", Event("Tomorrow", ":20261030T090000"));
+        }
+
+        string[] main = Main("/current");
+
+        Assert.Contains(NoSpace(EmptyCalendar), NoSpace(string.Concat(main)));
+        Assert.False(HasLine(main, "Appointments"));
+        Assert.False(HasLine(main, "Can't read"));
+        (_, string output) = Run(true, "/current");
+        Assert.Contains(Style("[grey]X[/]") + "No appointments today.", output);
+    }
+
+    // 028 AC-4: the folder path is escaped.
+    [Fact]
+    public void Current_NoAppointments_PathIsEscaped()
+    {
+        string odd = Path.Combine(parent, "[red]odd");
+        CommandRegistry registry = CommandRegistry.CreateDefault();
+        TodoStore todos = new TodoStore(odd);
+        CurrentCommands.Register(
+            registry, todos, new TagIndex(odd), new NoteStore(odd), new CalendarStore(odd, Zone), () => Today);
+        TestConsole console = new TestConsole().Interactive();
+        console.Profile.Width = Width;
+        console.Profile.Height = Height;
+        console.Input.PushTextWithEnter("/current");
+        console.Input.PushTextWithEnter("/quit");
+
+        int exitCode = new App(console, registry).Run();
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains(NoSpace("[red]odd"), NoSpace(Ansi.Replace(console.Output, string.Empty)));
+    }
+
+    // 028 AC-5
+    [Fact]
+    public void Current_BadFiles_RedLines_OthersShown_FilesUnchanged()
+    {
+        WriteCalendar("good.ics", Event("Standup", ":20261029T090000"));
+        string bad = Path.Combine(CalendarFolder, "notes.ics");
+        File.WriteAllText(bad, "not a calendar [red]");
+        string big = Path.Combine(CalendarFolder, "big.ics");
+        using (FileStream stream = new FileStream(big, FileMode.CreateNew))
+        {
+            stream.SetLength(6L * 1024 * 1024);
+        }
+
+        byte[] badBytes = File.ReadAllBytes(bad);
+
+        string[] main = Main("/current", "/current");
+
+        int table = RowIndex(main, "09:00-09:00", "Standup", "");
+        int bigLine = LineIndex(main, "Can't read calendar/big.ics");
+        int notesLine = LineIndex(main, "Can't read calendar/notes.ics");
+        Assert.True(table >= 0 && bigLine > table && notesLine > bigLine);
+        (int exitCode, string output) = Run(true, "/current", "/help");
+        Assert.Equal(0, exitCode);
+        Assert.Contains(Style("[red]X[/]") + "Can't read calendar/notes.ics", output);
+        Assert.Contains("Today's appointments, due todos and linked notes", output);
+        Assert.Equal(badBytes, File.ReadAllBytes(bad));
+        Assert.Equal(6L * 1024 * 1024, new FileInfo(big).Length);
+        string[] entries = Directory.GetFileSystemEntries(CalendarFolder)
+            .Select(p => Path.GetRelativePath(CalendarFolder, p))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(["big.ics", "good.ics", "notes.ics"], entries);
+    }
+
+    // 028 AC-5: only bad files, so the red lines go under the empty line.
+    [Fact]
+    public void Current_OnlyBadFile_RedLineUnderEmptyLine()
+    {
+        Directory.CreateDirectory(CalendarFolder);
+        File.WriteAllText(Path.Combine(CalendarFolder, "x.ics"), "nope");
+
+        string[] main = Main("/current");
+
+        int empty = LineIndex(main, "No appointments today.");
+        int red = LineIndex(main, "Can't read calendar/x.ics");
+        Assert.True(empty >= 0 && red > empty);
+    }
+
+    // 028 AC-6
+    [Fact]
+    public void Current_Appointments_MarkupAndControls_ShownLiterally()
+    {
+        WriteCalendar(
+            "a.ics",
+            Event("[red]x[/]\u001b\\nsecond", ":20261029T090000", null, "LOCATION:[b]here\\n\u0007\r\n"));
+        File.WriteAllText(Path.Combine(CalendarFolder, "[b].ics"), "bad");
+
+        string[] main = Main("/current");
+
+        Assert.True(RowIndex(main, "09:00-09:00", "[red]x[/]� second", "[b]here �") >= 0);
+        Assert.True(HasLine(main, "Can't read calendar/[b].ics"));
+    }
+
+    // 028 AC-7
+    [Fact]
+    public void Current_Appointments_AtMost15Rows()
+    {
+        string[] events = Enumerable.Range(0, 20)
+            .Select(i => Event($"E{i:00}", $":20261029T{i:00}0000"))
+            .ToArray();
+        WriteCalendar("a.ics", events);
+
+        string[] main = Main("/current");
+
+        Assert.True(RowIndex(main, "13:00-13:00", "E13", "") >= 0);
+        Assert.Equal(-1, RowIndex(main, "14:00-14:00", "E14", ""));
+        Assert.True(RowIndex(main, "", "… 6 more", "") > RowIndex(main, "13:00-13:00", "E13", ""));
+        (_, string output) = Run(true, "/current");
+        Assert.Contains(Style("[grey]X[/]") + "… 6 more", output);
+    }
+
+    // 028 AC-7: exactly 15 fit without a "more" row.
+    [Fact]
+    public void Current_Appointments_Exactly15_AllShown()
+    {
+        string[] events = Enumerable.Range(0, 15)
+            .Select(i => Event($"E{i:00}", $":20261029T{i:00}0000"))
+            .ToArray();
+        WriteCalendar("a.ics", events);
+
+        string[] main = Main("/current");
+
+        Assert.True(RowIndex(main, "14:00-14:00", "E14", "") >= 0);
+        Assert.False(HasLine(main, "more"));
     }
 }
