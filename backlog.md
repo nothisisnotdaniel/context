@@ -11,6 +11,7 @@ Write one feature per line, in plain language.
 - [x] Windows-safe note titles: reject Windows reserved names (CON, PRN, AUX, NUL, COM1-9, LPT1-9) and titles ending in `.` or a space. → 018-windows-safe-titles
 - [x] Todos: add todos with due dates, shown in a sidebar sorted by due date → 020-todos
 - [x] Tags: parse tags in Markdown files and store the links between files in the database → 022-tags
+- [ ] Tags with spaces: support tags that contain spaces. Suggested notation: `[[tag with spaces]]`, but the spec writer may propose other options (and should weigh them against `[[...]]` being read as a wiki link elsewhere). Single-word `#tags` keep working, and both forms of the same tag should count as one tag.
 - [ ] /current view: show today's due todos and linked notes
 - [ ] Calendar: pull in today's appointments and show them in /current
 - [ ] Email: pull in information from emails
@@ -19,4 +20,3 @@ Write one feature per line, in plain language.
 - [ ] Faster tag parser: `TagParser.SkipCodeSpan` rescans the rest of the line for every unmatched backtick run, so a line with many unmatched backticks takes O(n²) time. Make the scan linear before email or calendar text gets indexed.
 - [ ] Note size limit for tag sync: `TagIndex.Sync` reads each changed note whole with no size limit. Skip (or only partly read) notes above a sensible size and say so in `/tags`.
 - [ ] Shorter tag help: shorten the `/tags` help description (e.g. "List tags: /tags [tag]") and give the `/links` usage hint an example (`/links Meeting`).
-- [ ] Tags with spaces: support tags that contain spaces. Suggested notation: `[[tag with spaces]]`, but the spec writer may propose other options (and should weigh them against `[[...]]` being read as a wiki link elsewhere). Single-word `#tags` keep working, and both forms of the same tag should count as one tag.
