@@ -186,8 +186,8 @@ public sealed class TagCommandsTests : IDisposable
     {
         WriteNote("A", "#home");
 
-        AssertOnHintRow(LastFrame(command), "No notes tagged work.");
-        AssertRedHint(command, "No notes tagged work.");
+        AssertOnHintRow(LastFrame(command), "No notes tagged #work.");
+        AssertRedHint(command, "No notes tagged #work.");
     }
 
     // AC-8
@@ -315,5 +315,92 @@ public sealed class TagCommandsTests : IDisposable
 
         Assert.Contains(main, l => l.Contains("/tags", StringComparison.Ordinal));
         Assert.Contains(main, l => l.Contains("/links", StringComparison.Ordinal));
+    }
+
+    // 024 AC-7
+    [Fact]
+    public void Tags_ShowsBracketForm_ForSpacedTags()
+    {
+        WriteNote("A", "#[Project Alpha] #work");
+        WriteNote("B", "#[project  alpha]");
+
+        string[] main = MainView(LastFrame("/tags"));
+
+        int project = Array.FindIndex(main, l => l.Contains("│ #[project alpha] ", StringComparison.Ordinal));
+        int work = Array.FindIndex(main, l => l.Contains("│ #work ", StringComparison.Ordinal));
+        Assert.True(project >= 0 && work > project);
+        Assert.Contains("│ 2 ", main[project]);
+        Assert.Contains("│ 1 ", main[work]);
+
+        (_, string output) = Run(true, "/tags");
+        Assert.Contains(Style("[steelblue1]X[/]") + "#[project alpha]", output);
+    }
+
+    // 024 AC-7
+    [Theory]
+    [InlineData("/tags project alpha")]
+    [InlineData("/tags #[Project Alpha]")]
+    [InlineData("/tags [project alpha]")]
+    [InlineData("/tags   Project   Alpha  ")]
+    public void TagsWithSpacedTag_ListsNotes(string command)
+    {
+        WriteNote("beta", "#[project alpha]");
+        WriteNote("Alpha", "#[Project Alpha]");
+        WriteNote("gamma", "#project");
+
+        string[] main = MainView(LastFrame(command));
+
+        Assert.Contains(main, l => l.Contains("Notes tagged #[project alpha]", StringComparison.Ordinal));
+        int alpha = Array.FindIndex(main, l => l.Contains("│ Alpha ", StringComparison.Ordinal));
+        int beta = Array.FindIndex(main, l => l.Contains("│ beta ", StringComparison.Ordinal));
+        Assert.True(alpha >= 0 && beta > alpha);
+        Assert.DoesNotContain(main, l => l.Contains("gamma", StringComparison.Ordinal));
+    }
+
+    // 024 AC-7
+    [Fact]
+    public void Links_ShowsSharedSpacedTags_InBracketForm()
+    {
+        WriteNote("A", "#work #[Project Alpha]");
+        WriteNote("B", "#[work] #[project alpha]");
+
+        string[] main = MainView(LastFrame("/links A"));
+
+        int b = Array.FindIndex(main, l => l.Contains("│ B ", StringComparison.Ordinal));
+        Assert.True(b >= 0);
+        Assert.Contains("#[project alpha], #work", main[b]);
+    }
+
+    // 024 AC-8
+    [Theory]
+    [InlineData("/tags no such tag")]
+    [InlineData("/tags #[No  Such Tag]")]
+    public void TagsWithSpacedTag_Unknown_ShowsRedHint(string command)
+    {
+        WriteNote("A", "#home");
+
+        string text = "No notes tagged #[no such tag]. Type /tags to see all tags.";
+        AssertOnHintRow(LastFrame(command), text);
+        AssertRedHint(command, "No notes tagged #[no such tag].");
+    }
+
+    // 024 AC-8: a bracket tag is shown literally, never read as markup.
+    [Fact]
+    public void SpacedTag_LooksLikeMarkup_ShownLiterally()
+    {
+        WriteNote("A", "#[red x] #[a b]");
+        WriteNote("B", "#[red x] #[a b]");
+
+        string[] tags = MainView(LastFrame("/tags"));
+        Assert.Contains(tags, l => l.Contains("│ #[a b] ", StringComparison.Ordinal));
+        Assert.Contains(tags, l => l.Contains("│ #[red x] ", StringComparison.Ordinal));
+
+        string[] tagged = MainView(LastFrame("/tags #[red x]"));
+        Assert.Contains(tagged, l => l.Contains("Notes tagged #[red x]", StringComparison.Ordinal));
+
+        string[] links = MainView(LastFrame("/links A"));
+        Assert.Contains(links, l => l.Contains("#[a b], #[red x]", StringComparison.Ordinal));
+
+        AssertOnHintRow(LastFrame("/tags [bold x]"), "No notes tagged #[bold x].");
     }
 }

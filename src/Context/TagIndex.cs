@@ -61,6 +61,12 @@ internal sealed class TagIndex
         CREATE INDEX IF NOT EXISTS note_tags_tag ON note_tags(tag);
         """;
 
+    /// <summary>
+    /// The parser version the stored tags were made with, kept in <c>PRAGMA user_version</c>. When the
+    /// database has an older one, <see cref="Sync"/> re-parses every note once. 1: <c>#[bracket tags]</c>.
+    /// </summary>
+    public const int ParserVersion = 1;
+
     private readonly string root;
 
     public TagIndex(string root)
@@ -85,6 +91,19 @@ internal sealed class TagIndex
         Run(connection =>
         {
             using SqliteTransaction transaction = connection.BeginTransaction();
+            long version;
+            using (SqliteCommand pragma = Command(connection, transaction, "PRAGMA user_version"))
+            {
+                version = Convert.ToInt64(pragma.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            bool upgrade = version < ParserVersion;
+            if (upgrade)
+            {
+                // Tags were parsed by an older parser: forget the stored times so every note is re-parsed.
+                Execute(connection, transaction, "UPDATE notes SET modified = NULL");
+            }
+
             Dictionary<string, long?> stored = new(StringComparer.Ordinal);
             using (SqliteCommand select = Command(connection, transaction, "SELECT name, modified FROM notes"))
             using (SqliteDataReader reader = select.ExecuteReader())
@@ -145,6 +164,12 @@ internal sealed class TagIndex
 
             // Tag rows whose note row is missing (e.g. edited by hand) would otherwise never go away.
             Execute(connection, transaction, "DELETE FROM note_tags WHERE note NOT IN (SELECT name FROM notes)");
+            if (upgrade)
+            {
+                // A constant, not user input: PRAGMA takes no parameters.
+                Execute(connection, transaction, $"PRAGMA user_version = {ParserVersion}");
+            }
+
             transaction.Commit();
             return 0;
         });
@@ -252,7 +277,11 @@ internal sealed class TagIndex
         });
     }
 
-    /// <summary>Trims <paramref name="tag"/>, removes one leading <c>#</c> and lower-cases it (invariant).</summary>
+    /// <summary>
+    /// Trims <paramref name="tag"/>, removes one leading <c>#</c> and one surrounding <c>[</c>...<c>]</c>
+    /// pair, turns each whitespace run into one space and lower-cases it (invariant), so
+    /// <c>#[Project  Alpha]</c> gives <c>project alpha</c>.
+    /// </summary>
     public static string NormalizeTag(string tag)
     {
         string trimmed = tag.Trim();
@@ -261,7 +290,12 @@ internal sealed class TagIndex
             trimmed = trimmed[1..];
         }
 
-        return trimmed.ToLowerInvariant();
+        if (trimmed.Length >= 2 && trimmed.StartsWith('[') && trimmed.EndsWith(']'))
+        {
+            trimmed = trimmed[1..^1];
+        }
+
+        return TagParser.CollapseWhitespace(trimmed).ToLowerInvariant();
     }
 
     private static List<string> SortNames(IEnumerable<string> names) =>

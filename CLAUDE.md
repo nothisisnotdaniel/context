@@ -10,11 +10,16 @@ Every factory agent reads this file before working on Context. Keep it short and
   The links between files are stored in a database that lives in the same `Context` app data
   folder. The Markdown files stay the source of the content.
   - `TagParser.Parse` finds `#tag` (at line start or after whitespace, a letter first, then letters,
-    digits, `-`, `_`; at most 50 chars; lower-cased, distinct) outside fenced code blocks and inline
-    backtick spans. `TagIndex` keeps the index in SQLite at `<root>/context.db` (`Microsoft.Data.Sqlite`,
+    digits, `-`, `_`; at most 50 chars; lower-cased, distinct) and `#[tag with spaces]` (`#[` at line start or
+    after whitespace, up to the first `]` on the line, not followed by `(`; trimmed, whitespace runs become one
+    space, then the same rules plus spaces) outside fenced code blocks and inline backtick spans. `#work` and
+    `#[Work]` are one tag. `TagParser.Format` shows a tag as `#tag`, or `#[tag]` when it has a space; all tag
+    output uses it. `TagIndex.NormalizeTag` (for `/tags <tag>`) accepts `work`, `#work`, `[a b]`, `#[a b]`. `TagIndex` keeps the index in SQLite at `<root>/context.db` (`Microsoft.Data.Sqlite`,
     `Pooling=False`, parameterized SQL only): `notes(name, modified)` (last-write UTC ticks, NULL for a
     note that couldn't be read so it is retried) and `note_tags(note, tag)`. `Sync(NoteStore)` updates it
-    in one transaction and only re-parses files whose time changed. Queries: `Tags()`, `NotesWithTag`,
+    in one transaction and only re-parses files whose time changed. `PRAGMA user_version` holds the parser
+    version (`TagIndex.ParserVersion`, now 1); when it is lower, `Sync` clears every stored time in the same
+    transaction (so all notes are re-parsed once) and then sets it. Bump it whenever parsing changes. Queries: `Tags()`, `NotesWithTag`,
     `FindNote`, `Links`. A database that can't be opened or isn't valid throws `TagIndexException` (an
     `IOException`) and is never deleted or overwritten. `/tags`, `/tags <tag>` and `/links <note>`
     (`TagCommands`) call `Sync` first and show a red `Can't read context.db` hint on that error.
