@@ -15,6 +15,7 @@ Write one feature per line, in plain language.
 - [x] /current view: show today's due todos and linked notes → 026-current-view
 - [x] Calendar: pull in today's appointments and show them in /current → 028-calendar
 - [ ] Email: pull in information from emails
+- [ ] Recurring appointments: `.ics` events with `RRULE` (plus `RDATE`/`EXDATE`) only show on their first occurrence in `/current`. Expand recurrences (at least daily/weekly/monthly/yearly with `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY`) so they show on every day they occur.
 - [ ] Todo dates with years: the sidebar shows due dates as `MM-dd` with no year. Show the year when a todo is due in a year other than the current one (e.g. `2027-01-15`), so todos far ahead or long overdue can't be mistaken for this year's.
 - [ ] Helpful empty todo sidebar: "No todos yet" doesn't say how to add one. Mention `/todo` in the empty sidebar, e.g. "No todos yet — add one with /todo".
 - [ ] Faster tag parser: `TagParser.SkipCodeSpan` rescans the rest of the line for every unmatched backtick run, so a line with many unmatched backticks takes O(n²) time. Make the scan linear before email or calendar text gets indexed.
