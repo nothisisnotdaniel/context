@@ -33,3 +33,7 @@ Write one feature per line, in plain language.
 - [ ] Cache calendar time zones: every unknown `TZID` throws and catches an exception, so a crafted file can slow `/current` by seconds. Cache zone lookups (found or not) for each parse.
 - [ ] Midnight end as `…`: an event that ends exactly at the next midnight shows `23:00-00:00`. Show `23:00-…` like other events that run past today.
 - [ ] Clearer calendar errors: `Can't read calendar/<file>` should say why (too big, can't be opened, not a calendar). Also review the `… N more` row wording in the Appointments table, and make a duplicate `STATUS` line first-wins like the other properties.
+- [ ] Harden the calendar feed: `CalendarFeed.Fetch` and `/current` only catch `FormatException` from `IcsParser`; catch any parser error so `Fetch` really never throws. Also delete leftover temp files of `calendar-link.txt` (from a crash between write and move) on start-up or the next save.
+- [ ] Better calendar-link failure line: add "see /calendar-link" to the red "Can't download the Exchange calendar" line, and show a "Downloading Exchange calendar…" hint while `/current` waits (up to 10 s).
+- [ ] Shorter /calendar-link popup text: shorten the command description so it fits in a narrow terminal's popup.
+- [ ] Masked link input: hide the link while it is typed after `/calendar-link` (e.g. show `•` per character), so it never lands on screen or in scrollback. Until then, mention the echo in `CLAUDE.md`.
