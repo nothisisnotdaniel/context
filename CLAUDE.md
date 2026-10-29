@@ -27,7 +27,13 @@ Every factory agent reads this file before working on Context. Keep it short and
   - An input box at the bottom of the screen is used for navigation.
   - A todo list is always shown in a sidebar, sorted by due date. The user sets each todo's due date.
   - The `/current` view shows all relevant information for now, such as today's appointments, due
-    todos and linked notes.
+    todos and linked notes. `/current` (`CurrentCommands`, argument ignored) shows a steelblue1
+    `Today, yyyy-MM-dd` title, a `Due` table of every todo with `Due <= today` (sidebar number, `yyyy-MM-dd`
+    red overdue / steelblue1 today, one-line text) and a `Linked notes` table. A todo links to notes
+    through tags: `TagParser.Parse` on the text of each due todo (at run time, not stored), then
+    `TagIndex.NotesWithTag` after `Sync`; each note once, sorted by name ignoring case, with its matching
+    tags. Grey empty-state lines when nothing is due or nothing links; a red hint for a bad `todos.json`,
+    and a red line in place of the linked notes for a bad `context.db`.
 - **How it runs:** an interactive session that stays open until `/quit` (exit code 0). A Spectre
   `Layout` fills the terminal: the main view on the left, the `Todos` sidebar on the right (fixed
   32 columns), one hint row, then a 3-line bordered input panel at the bottom. After each command
@@ -74,12 +80,12 @@ Every factory agent reads this file before working on Context. Keep it short and
 - **Layout:**
   - `Context.slnx`: the solution. `Directory.Build.props` turns on `EnforceCodeStyleInBuild`.
   - `src/Context/`: the app. `Program.cs` only wires things up (builds the registry with
-    `CreateDefault()` + `NoteCommands.Register` + `TagCommands.Register` + `TodoCommands.Register`, passes it, a `TodoSidebar` and
+    `CreateDefault()` + `NoteCommands.Register` + `TagCommands.Register` + `TodoCommands.Register` + `CurrentCommands.Register`, passes it, a `TodoSidebar` and
     `AnsiConsole.Console` to `App`, returns `App.Run()`); the loop, layout and dispatch live in `App.cs`, commands in `CommandRegistry.cs`,
     input in `LineEditor.cs`, the command popup's rows and `PopupArea` in `CommandPopup.cs`, the note
     files in `NoteStore.cs`, the display sanitizer in `SafeText.cs`, `/new`, `/notes`, `/open` in `NoteCommands.cs`, the todo list in `TodoStore.cs`,
     `/todo` and `/done` in `TodoCommands.cs`, the sidebar body in `TodoSidebar.cs`, tag parsing in
-    `TagParser.cs`, the SQLite tag index in `TagIndex.cs`, and `/tags`, `/links` in `TagCommands.cs`.
+    `TagParser.cs`, the SQLite tag index in `TagIndex.cs`, `/tags`, `/links` in `TagCommands.cs`, and `/current` in `CurrentCommands.cs`.
   - `tests/Context.Tests/`: one test class per production class (`AppTests.cs` tests `App.cs`), plus
     shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves). Note, todo and tag tests use their
     own temp folder (deleted in `Dispose`), never the real app data folder.
