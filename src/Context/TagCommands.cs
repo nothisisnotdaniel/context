@@ -32,13 +32,13 @@ internal static class TagCommands
             if (notes.Count == 0)
             {
                 return CommandResult.Error(
-                    $"No notes tagged {Shown(tag)}. Type [bold]/tags[/] to see all tags.");
+                    $"No notes tagged {Shown(TagParser.Format(tag))}. Type [bold]/tags[/] to see all tags.");
             }
 
             Table table = new Table()
                 .Border(TableBorder.Rounded)
                 .BorderColor(Color.Grey)
-                .AddColumn($"[grey]Notes tagged #{Shown(tag)}[/]");
+                .AddColumn($"[grey]Notes tagged {Shown(TagParser.Format(tag))}[/]");
             foreach (string note in notes)
             {
                 table.AddRow(new Markup($"[steelblue1]{Shown(note)}[/]"));
@@ -68,7 +68,7 @@ internal static class TagCommands
         foreach (TagCount tag in tags)
         {
             table.AddRow(
-                new Markup($"[steelblue1]#{Shown(tag.Tag)}[/]"),
+                new Markup($"[steelblue1]{Shown(TagParser.Format(tag.Tag))}[/]"),
                 new Markup($"[grey]{tag.Count}[/]"));
         }
 
@@ -115,7 +115,7 @@ internal static class TagCommands
             {
                 table.AddRow(
                     new Markup($"[steelblue1]{Shown(link.Note)}[/]"),
-                    new Markup($"[grey]{Shown(string.Join(", ", link.SharedTags.Select(t => "#" + t)))}[/]"));
+                    new Markup($"[grey]{Shown(string.Join(", ", link.SharedTags.Select(TagParser.Format)))}[/]"));
             }
 
             return new CommandResult(table);

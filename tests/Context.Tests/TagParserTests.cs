@@ -80,4 +80,110 @@ public sealed class TagParserTests
         Assert.Empty(TagParser.Parse("#" + fiftyOne));
         Assert.Equal(["ok"], TagParser.Parse("#" + fiftyOne + " #ok"));
     }
+
+    // 024 AC-1
+    [Fact]
+    public void Parse_BracketTag_TrimmedCollapsedLowerCase()
+    {
+        Assert.Equal(["project alpha"], TagParser.Parse("#[Project  Alpha] x"));
+    }
+
+    // 024 AC-1
+    [Theory]
+    [InlineData("#[work]", "work")]
+    [InlineData("  #[ a b ]", "a b")]
+    [InlineData("x\t#[a\t\tb].", "a b")]
+    [InlineData("#[a_b-1 x2]", "a_b-1 x2")]
+    [InlineData("#[Über Straße]", "über straße")]
+    [InlineData("line one\r\n#[two words]\r\n", "two words")]
+    [InlineData("#[a b] and ] later", "a b")]
+    [InlineData("#[a b]c", "a b")]
+    [InlineData("#[1st] #[ok go]", "ok go")]
+    [InlineData("#[a, b] #[ok go]", "ok go")]
+    public void Parse_FindsBracketTag(string markdown, string tag)
+    {
+        Assert.Equal([tag], TagParser.Parse(markdown));
+    }
+
+    // 024 AC-2
+    [Theory]
+    [InlineData("#[]")]
+    [InlineData("#[   ]")]
+    [InlineData("#[1st]")]
+    [InlineData("#[a, b]")]
+    [InlineData("#[a")]
+    [InlineData("#[a\nb]")]
+    [InlineData("a#[b c]")]
+    [InlineData("#[label](http://x)")]
+    [InlineData("#[-x]")]
+    [InlineData("#[_x]")]
+    [InlineData("#[a.b]")]
+    [InlineData("##[a b]")]
+    [InlineData("#[a #[b")]
+    public void Parse_NoBracketTag(string markdown)
+    {
+        Assert.Empty(TagParser.Parse(markdown));
+    }
+
+    // 024 AC-2
+    [Fact]
+    public void Parse_BracketTagOfFiftyCharacters_IsKept_LongerIsNot()
+    {
+        string fifty = "ab " + new string('c', 47);
+        string fiftyOne = "ab " + new string('c', 48);
+
+        Assert.Equal(50, fifty.Length);
+        Assert.Equal([fifty], TagParser.Parse("#[" + fifty + "]"));
+        Assert.Equal([fifty], TagParser.Parse("#[  AB   " + new string('C', 47) + "  ]"));
+        Assert.Empty(TagParser.Parse("#[" + fiftyOne + "]"));
+        Assert.Equal(["ok"], TagParser.Parse("#[" + fiftyOne + "] #ok"));
+    }
+
+    // 024 AC-2
+    [Fact]
+    public void Parse_IgnoresBracketTagsInFencedCodeBlocks()
+    {
+        string markdown = "#[before x]\n```\n#[inside x]\n```\n#[after x]";
+
+        Assert.Equal(["before x", "after x"], TagParser.Parse(markdown));
+    }
+
+    // 024 AC-2
+    [Theory]
+    [InlineData("see `#[code x]` and #[real x]", "real x")]
+    [InlineData("see `` a #[code x] ` b `` and #[real x]", "real x")]
+    [InlineData("#[a `b] c` #[real x]", "real x")]
+    [InlineData("an unclosed ` #[real x]", "real x")]
+    public void Parse_IgnoresBracketTagsInInlineCodeSpans(string markdown, string tag)
+    {
+        Assert.Equal([tag], TagParser.Parse(markdown));
+    }
+
+    // 024 AC-3
+    [Fact]
+    public void Parse_BothForms_AreOneTag_InOrderOfFirstAppearance()
+    {
+        Assert.Equal(["work"], TagParser.Parse("#Work #[work] #[ WORK ]"));
+        Assert.Equal(["a b", "c"], TagParser.Parse("#[a b] #c"));
+        Assert.Equal(["c", "a b"], TagParser.Parse("#c #[A  b] #[a b]"));
+    }
+
+    // 024 Security: many "#[" with no "]" on a long line stays fast (one scan for "]").
+    [Fact]
+    public void Parse_ManyOpenBrackets_NoClose_FindsNothing()
+    {
+        string line = string.Concat(Enumerable.Repeat("#[a ", 50_000));
+
+        Assert.Empty(TagParser.Parse(line));
+        Assert.Equal(["x y"], TagParser.Parse(line + "#[x y]"));
+    }
+
+    // 024 AC-7
+    [Theory]
+    [InlineData("work", "#work")]
+    [InlineData("project alpha", "#[project alpha]")]
+    public void Format_UsesBracketsOnlyForSpaces(string tag, string shown)
+    {
+        Assert.Equal(shown, TagParser.Format(tag));
+    }
 }
