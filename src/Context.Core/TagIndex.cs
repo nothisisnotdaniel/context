@@ -46,8 +46,13 @@ internal sealed class TagIndexException : IOException
 /// The index of which note has which tag, kept in SQLite at <c>&lt;root&gt;/context.db</c>. The Markdown
 /// files are the source of truth: <see cref="Sync"/> rebuilds the index from them, never the other way
 /// round. Every value reaches SQL as a parameter.
+/// <para>
+/// While encryption is on (the shared <see cref="Encryption"/> has a vault), the index lives in an in-memory
+/// database instead (<c>PRAGMA temp_store=MEMORY</c>), rebuilt from the notes each session, and
+/// <c>context.db</c> is never opened or created. Turning encryption off drops it and goes back to the file.
+/// </para>
 /// </summary>
-internal sealed class TagIndex
+internal sealed class TagIndex : IDisposable
 {
     /// <summary>The file name of the database inside the root.</summary>
     public const string FileName = "context.db";
@@ -68,11 +73,21 @@ internal sealed class TagIndex
     public const int ParserVersion = 1;
 
     private readonly string root;
+    private readonly Encryption? encryption;
 
-    public TagIndex(string root)
+    // The in-memory database used while encryption is on; null otherwise.
+    private SqliteConnection? memory;
+
+    /// <param name="root">The folder <c>context.db</c> lives in.</param>
+    /// <param name="encryption">The session's encryption state; while it has a vault the index stays in memory.</param>
+    public TagIndex(string root, Encryption? encryption = null)
     {
         this.root = Path.GetFullPath(root);
+        this.encryption = encryption;
     }
+
+    /// <summary>True while the index is kept in memory rather than in <c>context.db</c>.</summary>
+    public bool InMemory => encryption?.IsOn == true;
 
     /// <summary>The full path of <c>context.db</c>.</summary>
     public string FilePath => Path.Combine(root, FileName);
@@ -128,7 +143,7 @@ internal sealed class TagIndex
                 long? newModified = modified;
                 try
                 {
-                    tags = TagParser.Parse(File.ReadAllText(note.Path));
+                    tags = TagParser.Parse(store.Read(note));
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
@@ -308,6 +323,19 @@ internal sealed class TagIndex
     // TagIndexException. The file is never deleted or replaced.
     private T Run<T>(Func<SqliteConnection, T> work)
     {
+        if (InMemory)
+        {
+            try
+            {
+                return work(Memory());
+            }
+            catch (SqliteException ex)
+            {
+                throw new TagIndexException($"Can't read {FileName}.", ex);
+            }
+        }
+
+        DropMemory();
         string connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = FilePath,
@@ -326,6 +354,43 @@ internal sealed class TagIndex
         {
             throw new TagIndexException($"Can't read {FileName}.", ex);
         }
+    }
+
+    /// <summary>Closes the in-memory database, if one is open.</summary>
+    public void Dispose() => DropMemory();
+
+    // The open in-memory database, created (with the schema) on first use.
+    private SqliteConnection Memory()
+    {
+        if (memory is null)
+        {
+            SqliteConnection connection = new SqliteConnection(new SqliteConnectionStringBuilder
+            {
+                DataSource = ":memory:",
+                Pooling = false,
+            }.ToString());
+            try
+            {
+                connection.Open();
+                Execute(connection, null, "PRAGMA temp_store=MEMORY");
+                Execute(connection, null, Schema);
+            }
+            catch
+            {
+                connection.Dispose();
+                throw;
+            }
+
+            memory = connection;
+        }
+
+        return memory;
+    }
+
+    private void DropMemory()
+    {
+        memory?.Dispose();
+        memory = null;
     }
 
     private static SqliteCommand Command(SqliteConnection connection, SqliteTransaction? transaction, string sql)

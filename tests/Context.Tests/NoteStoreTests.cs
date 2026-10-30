@@ -429,4 +429,135 @@ public sealed class NoteStoreTests : IDisposable
         Assert.Throws<ArgumentException>(() => store.Create(title));
         Assert.False(Directory.Exists(root));
     }
+
+    // AC-4
+    [Fact]
+    public void Encrypted_CreateWritesCiphertext_TryOpenReadsIt()
+    {
+        Encryption encryption = SampleData.On(root);
+        NoteStore store = new NoteStore(root, encryption);
+
+        NoteInfo note = store.Create("Secret plan");
+
+        byte[] bytes = File.ReadAllBytes(note.Path);
+        Assert.True(Vault.IsEncrypted(bytes));
+        Assert.DoesNotContain("Secret plan", System.Text.Encoding.Latin1.GetString(bytes), StringComparison.Ordinal);
+        Assert.True(store.TryOpen("Secret plan", out Note? opened));
+        Assert.Equal("# Secret plan\n", opened!.Text);
+        Assert.Empty(Directory.GetFiles(root, "*.tmp"));
+    }
+
+    // AC-1
+    [Fact]
+    public void WithEncryptionOff_CreateWritesTheSameBytesAsBefore()
+    {
+        NoteStore store = new NoteStore(root, new Encryption(root));
+
+        NoteInfo note = store.Create("Plain");
+
+        Assert.Equal("# Plain\n"u8.ToArray(), File.ReadAllBytes(note.Path));
+    }
+
+    // AC-4: a folder left half-migrated stays readable.
+    [Fact]
+    public void Encrypted_PlainNoteIsStillRead()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "Old.md"), "# Old\nplain");
+        NoteStore store = new NoteStore(root, SampleData.On(root));
+
+        Assert.True(store.TryOpen("Old", out Note? note));
+        Assert.Equal("# Old\nplain", note!.Text);
+    }
+
+    // AC-7
+    [Fact]
+    public void Encrypted_TamperedNote_ThrowsIOException()
+    {
+        Encryption encryption = SampleData.On(root);
+        NoteStore store = new NoteStore(root, encryption);
+        NoteInfo note = store.Create("Plan");
+        byte[] tampered = SampleData.Tamper(note.Path);
+
+        Assert.Throws<VaultException>(() => store.TryOpen("Plan", out _));
+        Assert.IsAssignableFrom<IOException>(new VaultException("x"));
+        Assert.Equal(tampered, File.ReadAllBytes(note.Path));
+    }
+
+    // AC-7
+    [Fact]
+    public void EncryptedNote_WithoutVault_ThrowsVaultException()
+    {
+        NoteStore encrypted = new NoteStore(root, SampleData.On(root));
+        encrypted.Create("Plan");
+
+        Assert.Throws<VaultException>(() => new NoteStore(root).TryOpen("Plan", out _));
+    }
+
+    // AC-10
+    [Fact]
+    public void Save_CreatesOrReplacesEncrypted_KeepingTheExistingName()
+    {
+        Encryption encryption = SampleData.On(root);
+        NoteStore store = new NoteStore(root, encryption);
+        store.Create("Plan");
+
+        (NoteInfo replaced, bool wasReplaced) = store.Save("plan.md", "# New\n"u8.ToArray());
+        (NoteInfo created, bool createdReplaced) = store.Save("Fresh", "# Fresh\n"u8.ToArray());
+
+        Assert.True(wasReplaced);
+        Assert.Equal("Plan", replaced.Name);
+        Assert.False(createdReplaced);
+        Assert.Equal(["Fresh", "Plan"], store.List().Select(n => n.Name));
+        Assert.True(store.TryOpen("Plan", out Note? note));
+        Assert.Equal("# New\n", note!.Text);
+        Assert.True(Vault.IsEncrypted(File.ReadAllBytes(created.Path)));
+        Assert.Empty(Directory.GetFiles(root, "*.tmp"));
+    }
+
+    // AC-10
+    [Fact]
+    public void Save_InvalidTitle_Throws()
+    {
+        NoteStore store = new NoteStore(root);
+
+        Assert.Throws<ArgumentException>(() => store.Save("CON", [1]));
+        Assert.False(Directory.Exists(root));
+    }
+
+    // AC-9
+    [Fact]
+    public void Contains_IsTrueForRootAndInside_FalseOutside_AndFollowsLinks()
+    {
+        Directory.CreateDirectory(root);
+        NoteStore store = new NoteStore(root);
+        string link = Path.Combine(parent, "link");
+        Directory.CreateSymbolicLink(link, root);
+
+        Assert.True(store.Contains(root));
+        Assert.True(store.Contains(Path.Combine(root, "x.md")));
+        Assert.True(store.Contains(Path.Combine(root, "sub", "..", "x.md")));
+        Assert.True(store.Contains(Path.Combine(link, "x.md")));
+        Assert.True(store.Contains(Path.Combine(root.ToUpperInvariant(), "x.md")));
+        Assert.False(store.Contains(Path.Combine(parent, "x.md")));
+        Assert.False(store.Contains(root + "-other"));
+    }
+
+    // AC-10
+    [Fact]
+    public void ReadImport_RejectsMissingTooLargeAndEncrypted()
+    {
+        Directory.CreateDirectory(parent);
+        string big = Path.Combine(parent, "big.md");
+        File.WriteAllBytes(big, new byte[NoteStore.MaxImportBytes + 1]);
+        string encrypted = Path.Combine(parent, "enc.md");
+        using (Vault vault = Vault.Create(Path.Combine(parent, "v"), VaultTests.Passphrase, VaultTests.TestIterations))
+        {
+            File.WriteAllBytes(encrypted, vault.Encrypt(Vault.KindNote, [1, 2]));
+        }
+
+        Assert.Throws<FileNotFoundException>(() => NoteStore.ReadImport(Path.Combine(parent, "none.md")));
+        Assert.Throws<InvalidDataException>(() => NoteStore.ReadImport(big));
+        Assert.Throws<InvalidDataException>(() => NoteStore.ReadImport(encrypted));
+    }
 }

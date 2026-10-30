@@ -75,10 +75,14 @@ internal sealed class NoteStore
     };
 
     private readonly string root;
+    private readonly Encryption? encryption;
 
-    public NoteStore(string root)
+    /// <param name="root">The folder notes live in.</param>
+    /// <param name="encryption">The session's encryption state; <c>null</c> (or no vault) keeps files plain.</param>
+    public NoteStore(string root, Encryption? encryption = null)
     {
         this.root = Path.GetFullPath(root);
+        this.encryption = encryption;
     }
 
     /// <summary>The folder notes live in.</summary>
@@ -178,7 +182,7 @@ internal sealed class NoteStore
 
         Directory.CreateDirectory(root);
         string path = Path.Combine(root, title + Extension);
-        byte[] content = Utf8NoBom.GetBytes($"# {title}\n");
+        byte[] content = Encryption.Protect(encryption, Vault.KindNote, Utf8NoBom.GetBytes($"# {title}\n"));
         try
         {
             using FileStream stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
@@ -221,6 +225,19 @@ internal sealed class NoteStore
     public bool TryOpen(string name, out Note? note)
     {
         note = null;
+        if (!TryFind(name, out NoteInfo? match) || match is null)
+        {
+            return false;
+        }
+
+        note = new Note(match.Name, Read(match));
+        return true;
+    }
+
+    /// <summary>Finds the note called <paramref name="name"/> like <see cref="TryOpen"/>, without reading it.</summary>
+    public bool TryFind(string name, out NoteInfo? match)
+    {
+        match = null;
         string wanted = name.Trim();
         if (wanted.Length == 0)
         {
@@ -228,7 +245,7 @@ internal sealed class NoteStore
         }
 
         IReadOnlyList<NoteInfo> notes = List();
-        NoteInfo? match = Find(notes, wanted);
+        match = Find(notes, wanted);
         if (match is null && wanted.EndsWith(Extension, StringComparison.OrdinalIgnoreCase))
         {
             string stripped = wanted[..^Extension.Length];
@@ -238,13 +255,175 @@ internal sealed class NoteStore
             }
         }
 
-        if (match is null)
+        return match is not null;
+    }
+
+    /// <summary>
+    /// The text of <paramref name="note"/> (decoded like <see cref="File.ReadAllText(string)"/>), decrypted when
+    /// the file is encrypted. Throws <see cref="IOException"/> (also <see cref="VaultException"/>) or
+    /// <see cref="UnauthorizedAccessException"/> when it can't be read.
+    /// </summary>
+    public string Read(NoteInfo note) => Encryption.ReadText(encryption, note.Path, Vault.KindNote);
+
+    /// <summary>
+    /// Stores <paramref name="content"/> as the note <paramref name="title"/> (normalized and validated like
+    /// <see cref="Create"/>), encrypted while encryption is on. An existing note with that name (ignoring case)
+    /// is replaced through a temp file and a move, keeping its file name; otherwise a new file is created.
+    /// Returns the note and whether it replaced one. Throws <see cref="ArgumentException"/> for an invalid title.
+    /// </summary>
+    public (NoteInfo Note, bool Replaced) Save(string title, byte[] content)
+    {
+        title = NormalizeTitle(title);
+        string? error = ValidateTitle(title);
+        if (error is not null)
         {
-            return false;
+            throw new ArgumentException(error, nameof(title));
         }
 
-        note = new Note(match.Name, File.ReadAllText(match.Path));
-        return true;
+        NoteInfo? existing = Find(List(), title);
+        Directory.CreateDirectory(root);
+        string name = existing?.Name ?? title;
+        string path = existing?.Path ?? Path.Combine(root, title + Extension);
+        string temp = Path.Combine(root, $".{name}{Extension}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            using (FileStream stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(Encryption.Protect(encryption, Vault.KindNote, content));
+            }
+
+            File.Move(temp, path, overwrite: existing is not null);
+        }
+        finally
+        {
+            if (File.Exists(temp))
+            {
+                File.Delete(temp);
+            }
+        }
+
+        return (new NoteInfo(name, File.GetLastWriteTime(path), path), existing is not null);
+    }
+
+    /// <summary>The largest file <see cref="ReadImport"/> accepts (5 MB).</summary>
+    public const long MaxImportBytes = 5L * 1024 * 1024;
+
+    /// <summary>
+    /// True when <paramref name="path"/> is the root itself or anywhere inside it, after resolving symbolic links
+    /// in the existing part of both paths and ignoring case, so a plain copy can't land in the data folder
+    /// through a link or another spelling.
+    /// </summary>
+    public bool Contains(string path)
+    {
+        string wanted = RealPath(Path.GetFullPath(path));
+        string folder = RealPath(root);
+        string withSeparator = Path.EndsInDirectorySeparator(folder) ? folder : folder + Path.DirectorySeparatorChar;
+        return string.Equals(wanted, folder, StringComparison.OrdinalIgnoreCase)
+            || wanted.StartsWith(withSeparator, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Writes <paramref name="text"/> (UTF-8, no BOM, never encrypted) to a new file at <paramref name="path"/>.
+    /// Never overwrites (<see cref="FileMode.CreateNew"/>): throws <see cref="IOException"/> if it exists. The
+    /// caller checks <see cref="Contains"/> first.
+    /// </summary>
+    public static void WritePlainCopy(string path, string text)
+    {
+        using FileStream stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        stream.Write(Utf8NoBom.GetBytes(text));
+    }
+
+    /// <summary>
+    /// Reads the file to import, at most <see cref="MaxImportBytes"/>, without changing it. Throws
+    /// <see cref="FileNotFoundException"/> when it is missing, <see cref="InvalidDataException"/> when it is too
+    /// large or encrypted, and <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> when it
+    /// can't be read.
+    /// </summary>
+    public static byte[] ReadImport(string path)
+    {
+        if (!File.Exists(path))
+        {
+            throw new FileNotFoundException("No such file.");
+        }
+
+        using FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        if (stream.Length > MaxImportBytes)
+        {
+            throw new InvalidDataException("Too large.");
+        }
+
+        using MemoryStream copy = new MemoryStream();
+        byte[] buffer = new byte[81920];
+        while (true)
+        {
+            int read = stream.Read(buffer, 0, buffer.Length);
+            if (read == 0)
+            {
+                break;
+            }
+
+            if (copy.Length + read > MaxImportBytes)
+            {
+                throw new InvalidDataException("Too large.");
+            }
+
+            copy.Write(buffer, 0, read);
+        }
+
+        byte[] bytes = copy.ToArray();
+        if (Vault.IsEncrypted(bytes))
+        {
+            throw new InvalidDataException("Encrypted.");
+        }
+
+        return bytes;
+    }
+
+    // Resolves symbolic links in the part of the path that exists, from the top down; the rest is kept as is.
+    private static string RealPath(string fullPath, int depth = 0)
+    {
+        string? rootPart = Path.GetPathRoot(fullPath);
+        if (string.IsNullOrEmpty(rootPart))
+        {
+            return fullPath;
+        }
+
+        string current = rootPart;
+        string[] parts = fullPath[rootPart.Length..]
+            .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+        bool resolving = true;
+        foreach (string part in parts)
+        {
+            current = Path.Combine(current, part);
+            if (!resolving)
+            {
+                continue;
+            }
+
+            try
+            {
+                FileSystemInfo info = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
+                if (!info.Exists)
+                {
+                    resolving = false;
+                    continue;
+                }
+
+                FileSystemInfo? target = info.LinkTarget is null ? null : info.ResolveLinkTarget(returnFinalTarget: true);
+                if (target is not null)
+                {
+                    string resolved = Path.GetFullPath(target.FullName);
+                    // The target's own folders may be links too (for example /var on macOS).
+                    current = depth < 8 ? RealPath(resolved, depth + 1) : resolved;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                resolving = false;
+            }
+        }
+
+        return Path.TrimEndingDirectorySeparator(current);
     }
 
     private static NoteInfo? Find(IReadOnlyList<NoteInfo> notes, string name) =>

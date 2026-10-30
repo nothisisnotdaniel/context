@@ -44,4 +44,7 @@ internal static class AnsiWrites
     /// <summary>The text of every write that starts at column 1 of <paramref name="row"/>, in order.</summary>
     public static List<string> AtRow(string output, int row) =>
         Parse(output).Where(w => w.Row == row && w.Column == 1).Select(w => w.Text).ToList();
+
+    /// <summary><paramref name="output"/> with every ANSI sequence removed.</summary>
+    public static string Strip(string output) => Other.Replace(output, string.Empty);
 }

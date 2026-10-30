@@ -49,13 +49,16 @@ internal sealed class TodoStore
 
     private readonly string root;
     private readonly Func<DateTime> utcNow;
+    private readonly Encryption? encryption;
 
     /// <param name="root">The folder <c>todos.json</c> lives in.</param>
     /// <param name="utcNow">The clock for <see cref="TodoItem.Created"/>; <see cref="DateTime.UtcNow"/> if null.</param>
-    public TodoStore(string root, Func<DateTime>? utcNow = null)
+    /// <param name="encryption">The session's encryption state; <c>null</c> (or no vault) keeps the file plain.</param>
+    public TodoStore(string root, Func<DateTime>? utcNow = null, Encryption? encryption = null)
     {
         this.root = Path.GetFullPath(root);
         this.utcNow = utcNow ?? (() => DateTime.UtcNow);
+        this.encryption = encryption;
     }
 
     /// <summary>The full path of <c>todos.json</c>.</summary>
@@ -113,7 +116,7 @@ internal sealed class TodoStore
         List<TodoJson?>? items;
         try
         {
-            byte[] bytes = File.ReadAllBytes(path);
+            byte[] bytes = Encryption.ReadBytes(encryption, path, Vault.KindTodos);
             items = JsonSerializer.Deserialize<List<TodoJson?>>(bytes, JsonOptions);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException
@@ -150,7 +153,11 @@ internal sealed class TodoStore
         string temp = Path.Combine(root, $".{FileName}.{Guid.NewGuid():N}.tmp");
         try
         {
-            File.WriteAllText(temp, json, Utf8NoBom);
+            using (FileStream stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(Encryption.Protect(encryption, Vault.KindTodos, Utf8NoBom.GetBytes(json)));
+            }
+
             File.Move(temp, FilePath, overwrite: true);
         }
         finally
