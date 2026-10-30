@@ -17,7 +17,6 @@ internal static class CalendarLinkCommands
     public const string NotSaved = "Can't save the calendar link. Check that the Context folder is writable.";
     public const string NotRemoved = "Can't remove the calendar link. Check that the Context folder is writable.";
 
-    private const string Off = "off";
     private const string TimeFormat = "yyyy-MM-dd HH:mm";
 
     /// <summary>Adds <c>/calendar-link</c> to <paramref name="registry"/>.</summary>
@@ -27,85 +26,42 @@ internal static class CalendarLinkCommands
         registry.Register(
             "/calendar-link",
             "Exchange calendar: /calendar-link <https or webcal url>, or off",
-            argument => Run(link, feed, zone, argument));
+            argument => Render(CalendarLinkView.Run(link, feed, argument), zone));
     }
 
-    private static CommandResult Run(CalendarLink link, CalendarFeed feed, TimeZoneInfo zone, string argument)
+    /// <summary>
+    /// Draws a <c>/calendar-link</c> view as a hint, with the download time in <paramref name="zone"/>. Only the
+    /// masked link is ever shown, cleaned and escaped.
+    /// </summary>
+    internal static CommandResult Render(CalendarLinkView view, TimeZoneInfo zone)
     {
-        string value = argument.Trim();
-        if (value.Length == 0)
+        switch (view.Kind)
         {
-            return Show(link, feed, zone);
+            case CalendarLinkViewKind.Invalid:
+                return CommandResult.Error(Invalid);
+            case CalendarLinkViewKind.Unreadable:
+                return CommandResult.Error(Unreadable);
+            case CalendarLinkViewKind.NotSaved:
+                return CommandResult.Error(NotSaved);
+            case CalendarLinkViewKind.NotRemoved:
+                return CommandResult.Error(NotRemoved);
+            case CalendarLinkViewKind.NotSet:
+                return Hint($"[grey]{NotSet}[/]");
+            case CalendarLinkViewKind.Removed:
+                return Hint(Removed);
+            case CalendarLinkViewKind.Saved:
+                return Hint($"Calendar link saved ([steelblue1]{Masked(view)}[/]).");
+            default:
+                string downloaded = view.CachedAtUtc is null
+                    ? "not downloaded yet"
+                    : "last download " + TimeZoneInfo.ConvertTimeFromUtc(
+                        DateTime.SpecifyKind(view.CachedAtUtc.Value, DateTimeKind.Utc), zone)
+                        .ToString(TimeFormat, CultureInfo.InvariantCulture);
+                return Hint($"Calendar link: [steelblue1]{Masked(view)}[/] [grey]({downloaded})[/]");
         }
-
-        if (value.Equals(Off, StringComparison.OrdinalIgnoreCase))
-        {
-            return Clear(link, feed);
-        }
-
-        if (CalendarLink.Validate(value) is null)
-        {
-            return CommandResult.Error(Invalid);
-        }
-
-        Uri saved;
-        try
-        {
-            saved = link.Set(value);
-            // The cache belongs to the old link.
-            feed.ClearCache();
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            return CommandResult.Error(NotSaved);
-        }
-
-        return Hint($"Calendar link saved ([steelblue1]{Masked(saved)}[/]).");
-    }
-
-    private static CommandResult Show(CalendarLink link, CalendarFeed feed, TimeZoneInfo zone)
-    {
-        Uri? uri;
-        try
-        {
-            uri = link.Get();
-        }
-        catch (CalendarLinkException)
-        {
-            return CommandResult.Error(Unreadable);
-        }
-
-        if (uri is null)
-        {
-            return Hint($"[grey]{NotSet}[/]");
-        }
-
-        DateTime? cachedAt = feed.CachedAtUtc();
-        string downloaded = cachedAt is null
-            ? "not downloaded yet"
-            : "last download " + TimeZoneInfo.ConvertTimeFromUtc(
-                DateTime.SpecifyKind(cachedAt.Value, DateTimeKind.Utc), zone)
-                .ToString(TimeFormat, CultureInfo.InvariantCulture);
-        return Hint($"Calendar link: [steelblue1]{Masked(uri)}[/] [grey]({downloaded})[/]");
-    }
-
-    private static CommandResult Clear(CalendarLink link, CalendarFeed feed)
-    {
-        bool had;
-        try
-        {
-            had = link.Clear();
-            feed.ClearCache();
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            return CommandResult.Error(NotRemoved);
-        }
-
-        return Hint(had ? Removed : $"[grey]{NotSet}[/]");
     }
 
     private static CommandResult Hint(string markup) => new(hint: new Markup(markup));
 
-    private static string Masked(Uri uri) => Markup.Escape(SafeText.Clean(CalendarLink.Mask(uri)));
+    private static string Masked(CalendarLinkView view) => Markup.Escape(SafeText.Clean(view.Masked ?? string.Empty));
 }

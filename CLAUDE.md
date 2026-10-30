@@ -27,7 +27,8 @@ Every factory agent reads this file before working on Context. Keep it short and
   - An input box at the bottom of the screen is used for navigation.
   - A todo list is always shown in a sidebar, sorted by due date. The user sets each todo's due date.
   - The `/current` view shows all relevant information for now, such as today's appointments, due
-    todos and linked notes. `/current` (`CurrentCommands`, argument ignored) shows a steelblue1
+    todos and linked notes. `/current` (`CurrentView.Build` in Core reads the data, including the untruncated
+    appointments and the time text; `CurrentCommands.Render` draws it; argument ignored) shows a steelblue1
     `Today, yyyy-MM-dd` title, a `Due` table of every todo with `Due <= today` (sidebar number, `yyyy-MM-dd`
     red overdue / steelblue1 today, one-line text) and a `Linked notes` table. A todo links to notes
     through tags: `TagParser.Parse` on the text of each due todo (at run time, not stored), then
@@ -51,7 +52,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Appointment`: one-line summary or `(no title)`; `Where`: grey one-line location), at most 15 rows (last
     `… N more`), or a grey `No appointments today. Put .ics files in <root>/calendar …` line, then a red
     `Can't read calendar/<file>` line per unreadable file (`calendar/` alone if the folder can't be listed).
-  - **Exchange link:** `/calendar-link <url>` (`CalendarLinkCommands`) saves a published Outlook/Exchange ICS
+  - **Exchange link:** `/calendar-link <url>` (`CalendarLinkView.Run` in Core acts and returns a kind plus the
+    masked link only; `CalendarLinkCommands.Render` draws it) saves a published Outlook/Exchange ICS
     link; `/calendar-link` shows it masked with the last download time; `/calendar-link off` deletes the link
     and the cache. The link is a **bearer secret**: `CalendarLink(root)` keeps it in `<root>/calendar-link.txt`
     (one line, temp file + move, mode `0600` off Windows) and it is only ever shown as `CalendarLink.Mask`
@@ -120,7 +122,14 @@ Every factory agent reads this file before working on Context. Keep it short and
     It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, tag parsing in `TagParser.cs`,
     the SQLite tag index in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
-    download and cache in `CalendarFeed.cs`, and the display sanitizer in `SafeText.cs`.
+    download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, and the view data steps
+    `CurrentView.cs` (`/current`), `TagsView.cs` (`/tags`), `LinksView.cs` (`/links`) and `CalendarLinkView.cs`
+    (`/calendar-link`); `/notes` uses `NoteStore.List()` directly.
+  - **Data step in Core, Spectre renderer in the app:** a view command's handler calls a Core data step that
+    returns plain types (a kind plus raw text, never markup, never cleaned or escaped, no exception messages), then
+    an `internal static Render(...)` in its `*Commands` class that only maps that view to a `CommandResult` (no
+    store, index, feed or file access). Markup, colours, `SafeText.Clean` + `Markup.Escape`, fixed message texts
+    and row caps live in the renderer, so any other front end can draw the same data its own way.
   - `src/Context/`: the console app (references `Context.Core` by `ProjectReference`, plus `Spectre.Console`).
     `Program.cs` only wires things up (builds the registry with
     `CreateDefault()` + `NoteCommands.Register` + `TagCommands.Register` + `TodoCommands.Register` + `CalendarLinkCommands.Register` + `CurrentCommands.Register` (with a `CalendarStore(folder, TimeZoneInfo.Local)` and a `CalendarFeed` over a `SocketsHttpHandler` with `MaxAutomaticRedirections = 5`), passes it, a `TodoSidebar` and
@@ -129,8 +138,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     `/new`, `/notes`, `/open` in `NoteCommands.cs`, `/todo` and `/done` in `TodoCommands.cs`, the sidebar body
     in `TodoSidebar.cs`, `/tags`, `/links` in `TagCommands.cs`, `/current` in `CurrentCommands.cs`, and
     `/calendar-link` in `CalendarLinkCommands.cs`. Code that needs Spectre stays here; data and storage go to Core.
-  - `tests/Context.Tests/`: references both projects; one test class per production class (Core and app alike) (`AppTests.cs` tests `App.cs`), plus
-    shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves) and `FakeHttpHandler.cs` (canned HTTP responses). Note, todo, tag and calendar tests use their
+  - `tests/Context.Tests/`: references both projects; one test class per production class (Core and app alike) (`AppTests.cs` tests `App.cs`),
+    `ViewParityTests.cs` (golden ANSI output of `/current`, `/notes`, `/tags`, `/links`, `/calendar-link`; change
+    its expected strings only when a spec changes that output), plus shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves) and `FakeHttpHandler.cs` (canned HTTP responses). Note, todo, tag and calendar tests use their
     own temp folder (deleted in `Dispose`), never the real app data folder.
 - **Style:**
   - Write all output through an injected `IAnsiConsole`, never `Console.*` or the static
