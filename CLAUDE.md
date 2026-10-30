@@ -107,22 +107,29 @@ Every factory agent reads this file before working on Context. Keep it short and
   - Tests drive the loop by queuing input on `TestConsole.Input` (`PushTextWithEnter`, `PushKey`)
     and always end with `/quit`, so they can't hang.
 - **Stack:** .NET 10 (`net10.0`), C# with nullable reference types and implicit usings on.
-  `Spectre.Console` 0.57.2 handles all terminal output. `Microsoft.Data.Sqlite` 10.0.14 for `context.db`. Tests: xUnit + `Spectre.Console.Testing` 0.57.2.
+  `Spectre.Console` 0.57.2 handles all terminal output (app only). `Microsoft.Data.Sqlite` 10.0.14 for `context.db`
+  (referenced by `Context.Core` only; it reaches the app through the project reference). Tests: xUnit + `Spectre.Console.Testing` 0.57.2.
 - **Build:** `dotnet build` (must stay at 0 warnings)
 - **Test command:** `dotnet test`
 - **Run:** `dotnet run --project src/Context`
 - **Layout:**
   - `Context.slnx`: the solution. `Directory.Build.props` turns on `EnforceCodeStyleInBuild`.
-  - `src/Context/`: the app. `Program.cs` only wires things up (builds the registry with
+  - `src/Context.Core/`: class library with the data and storage code, no terminal UI. **It must never
+    reference `Spectre.Console`** (no file there mentions `Spectre`); its only package is `Microsoft.Data.Sqlite`.
+    Types stay `internal` in `namespace Context;`; `InternalsVisibleTo` grants `Context` and `Context.Tests`.
+    It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, tag parsing in `TagParser.cs`,
+    the SQLite tag index in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, the calendar
+    folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
+    download and cache in `CalendarFeed.cs`, and the display sanitizer in `SafeText.cs`.
+  - `src/Context/`: the console app (references `Context.Core` by `ProjectReference`, plus `Spectre.Console`).
+    `Program.cs` only wires things up (builds the registry with
     `CreateDefault()` + `NoteCommands.Register` + `TagCommands.Register` + `TodoCommands.Register` + `CalendarLinkCommands.Register` + `CurrentCommands.Register` (with a `CalendarStore(folder, TimeZoneInfo.Local)` and a `CalendarFeed` over a `SocketsHttpHandler` with `MaxAutomaticRedirections = 5`), passes it, a `TodoSidebar` and
     `AnsiConsole.Console` to `App`, returns `App.Run()`); the loop, layout and dispatch live in `App.cs`, commands in `CommandRegistry.cs`,
-    input in `LineEditor.cs`, the command popup's rows and `PopupArea` in `CommandPopup.cs`, the note
-    files in `NoteStore.cs`, the display sanitizer in `SafeText.cs`, `/new`, `/notes`, `/open` in `NoteCommands.cs`, the todo list in `TodoStore.cs`,
-    `/todo` and `/done` in `TodoCommands.cs`, the sidebar body in `TodoSidebar.cs`, tag parsing in
-    `TagParser.cs`, the SQLite tag index in `TagIndex.cs`, `/tags`, `/links` in `TagCommands.cs`, `/current` in `CurrentCommands.cs`, the `.ics`
-    parser and `Appointment` in `IcsParser.cs`, the calendar folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`,
-    the download and cache in `CalendarFeed.cs`, and `/calendar-link` in `CalendarLinkCommands.cs`.
-  - `tests/Context.Tests/`: one test class per production class (`AppTests.cs` tests `App.cs`), plus
+    input in `LineEditor.cs`, the command popup's rows and `PopupArea` in `CommandPopup.cs`,
+    `/new`, `/notes`, `/open` in `NoteCommands.cs`, `/todo` and `/done` in `TodoCommands.cs`, the sidebar body
+    in `TodoSidebar.cs`, `/tags`, `/links` in `TagCommands.cs`, `/current` in `CurrentCommands.cs`, and
+    `/calendar-link` in `CalendarLinkCommands.cs`. Code that needs Spectre stays here; data and storage go to Core.
+  - `tests/Context.Tests/`: references both projects; one test class per production class (Core and app alike) (`AppTests.cs` tests `App.cs`), plus
     shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves) and `FakeHttpHandler.cs` (canned HTTP responses). Note, todo, tag and calendar tests use their
     own temp folder (deleted in `Dispose`), never the real app data folder.
 - **Style:**
