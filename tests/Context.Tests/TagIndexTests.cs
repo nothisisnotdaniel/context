@@ -363,4 +363,68 @@ public sealed class TagIndexTests : IDisposable
 
         Assert.Equal(7, UserVersion());
     }
+
+    // AC-4
+    [Fact]
+    public void Encrypted_IndexStaysInMemory_AndContextDbIsNeverCreated()
+    {
+        Encryption encryption = SampleData.On(root);
+        NoteStore encrypted = new NoteStore(root, encryption);
+        using TagIndex memory = new TagIndex(root, encryption);
+        encrypted.Save("Plan", "# Plan\n#work #[big plan]\n"u8.ToArray());
+        encrypted.Save("Other", "# Other\n#work\n"u8.ToArray());
+
+        memory.Sync(encrypted);
+
+        Assert.True(memory.InMemory);
+        Assert.Equal(["big plan", "work"], memory.Tags().Select(t => t.Tag));
+        Assert.Equal(["Other", "Plan"], memory.NotesWithTag("#work"));
+        Assert.Equal("Other", Assert.Single(memory.Links("Plan")).Note);
+        Assert.False(File.Exists(DbPath));
+        Assert.Empty(Directory.GetFiles(root, "context.db*"));
+    }
+
+    // AC-7
+    [Fact]
+    public void Encrypted_TamperedNote_HasNoTags_AndIsRetriedOnceFixed()
+    {
+        Encryption encryption = SampleData.On(root);
+        NoteStore encrypted = new NoteStore(root, encryption);
+        using TagIndex memory = new TagIndex(root, encryption);
+        NoteInfo note = encrypted.Save("Plan", "# Plan\n#work\n"u8.ToArray()).Note;
+        DateTime time = File.GetLastWriteTimeUtc(note.Path);
+        byte[] good = File.ReadAllBytes(note.Path);
+        byte[] tampered = SampleData.Tamper(note.Path);
+        File.SetLastWriteTimeUtc(note.Path, time);
+
+        memory.Sync(encrypted);
+
+        Assert.Empty(memory.Tags());
+        Assert.Equal(tampered, File.ReadAllBytes(note.Path));
+
+        // Same time stamp, but the note had no stored time, so it is read again.
+        File.WriteAllBytes(note.Path, good);
+        File.SetLastWriteTimeUtc(note.Path, time);
+        memory.Sync(encrypted);
+
+        Assert.Equal(["work"], memory.Tags().Select(t => t.Tag));
+    }
+
+    // AC-8: turning encryption off goes back to context.db.
+    [Fact]
+    public void AfterEncryptionIsTurnedOff_IndexUsesTheFileAgain()
+    {
+        Encryption encryption = SampleData.On(root);
+        using TagIndex switching = new TagIndex(root, encryption);
+        WriteNote("Plan", "#work");
+        switching.Sync(store);
+        Assert.False(File.Exists(DbPath));
+
+        encryption.Use(null);
+        switching.Sync(store);
+
+        Assert.False(switching.InMemory);
+        Assert.True(File.Exists(DbPath));
+        Assert.Equal(["work"], switching.Tags().Select(t => t.Tag));
+    }
 }

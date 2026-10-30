@@ -384,4 +384,54 @@ public class LineEditorTests
 
         Assert.DoesNotContain("\u001b[2J", run.Console.Output);
     }
+
+    // AC-11
+    [Fact]
+    public void ReadSecret_ReturnsTheText_ShowsOnlyBullets()
+    {
+        (TestConsole console, LineEditor editor) = Create();
+        console.Input.PushTextWithEnter("ÆØÅæøå/zq");
+
+        string? secret = editor.ReadSecret(5, 23, 70, out bool cancelled);
+
+        Assert.Equal("ÆØÅæøå/zq", secret);
+        Assert.False(cancelled);
+        Assert.Contains("•••••••••", console.Output);
+        Assert.DoesNotContain(console.Output, c => "ÆØÅæøåzq".Contains(c));
+    }
+
+    // AC-11
+    [Fact]
+    public void ReadSecret_SlashOpensNoPopup()
+    {
+        TestConsole console = new TestConsole().Interactive();
+        LineEditor editor = new LineEditor(console, CommandRegistry.CreateDefault());
+        console.Input.PushTextWithEnter("/");
+
+        editor.ReadSecret(5, 23, 70, out _);
+
+        Assert.DoesNotContain("List all commands", console.Output);
+    }
+
+    [Fact]
+    public void ReadSecret_Backspace_RemovesLastCharacter()
+    {
+        (TestConsole console, LineEditor editor) = Create();
+        console.Input.PushText("abc");
+        console.Input.PushKey(ConsoleKey.Backspace);
+        console.Input.PushTextWithEnter("d");
+
+        Assert.Equal("abd", editor.ReadSecret(5, 23, 70, out _));
+    }
+
+    [Fact]
+    public void ReadSecret_Escape_Cancels()
+    {
+        (TestConsole console, LineEditor editor) = Create();
+        console.Input.PushText("abc");
+        console.Input.PushKey(ConsoleKey.Escape);
+
+        Assert.Null(editor.ReadSecret(5, 23, 70, out bool cancelled));
+        Assert.True(cancelled);
+    }
 }

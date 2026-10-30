@@ -313,4 +313,43 @@ public sealed class CalendarFeedTests : IDisposable
         Assert.False(File.Exists(CachePath));
         Assert.Null(feed.CachedAtUtc());
     }
+
+    // AC-4
+    [Fact]
+    public void Encrypted_CacheIsWrittenEncrypted_AndReadBack()
+    {
+        Encryption encryption = SampleData.On(root);
+        CalendarLink link = new CalendarLink(root, encryption);
+        link.Set(FakeHttpHandler.Link);
+        FakeHttpHandler handler = FakeHttpHandler.Ok(Ics);
+        CalendarFeed feed = new CalendarFeed(root, link, handler, () => Now, TimeSpan.FromSeconds(5), encryption);
+
+        CalendarFeedResult first = feed.Fetch();
+        CalendarFeedResult second = feed.Fetch();
+
+        Assert.Equal(CalendarFeedStatus.Fresh, first.Status);
+        Assert.Equal(Ics, second.Text);
+        Assert.Equal(1, handler.Requests);
+        byte[] cache = File.ReadAllBytes(CachePath);
+        Assert.True(Vault.IsEncrypted(cache));
+        Assert.DoesNotContain("Standup", Encoding.Latin1.GetString(cache), StringComparison.Ordinal);
+    }
+
+    // AC-7
+    [Fact]
+    public void Encrypted_TamperedCache_IsNotUsed_AndDownloadReplacesIt()
+    {
+        Encryption encryption = SampleData.On(root);
+        CalendarLink link = new CalendarLink(root, encryption);
+        link.Set(FakeHttpHandler.Link);
+        File.WriteAllBytes(CachePath, encryption.Vault!.Encrypt(Vault.KindCalendarCache, Encoding.UTF8.GetBytes(OldIcs)));
+        File.SetLastWriteTimeUtc(CachePath, Now.AddMinutes(-1));
+        SampleData.Tamper(CachePath);
+        File.SetLastWriteTimeUtc(CachePath, Now.AddMinutes(-1));
+
+        CalendarFeedResult failed = new CalendarFeed(
+            root, link, FakeHttpHandler.Status(System.Net.HttpStatusCode.NotFound), () => Now, null, encryption).Fetch();
+
+        Assert.Equal(CalendarFeedStatus.Failed, failed.Status);
+    }
 }

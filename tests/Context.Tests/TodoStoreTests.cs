@@ -175,4 +175,49 @@ public sealed class TodoStoreTests : IDisposable
         Assert.Equal(original, File.ReadAllBytes(FilePath));
         Assert.Single(Directory.GetFiles(root));
     }
+
+    // AC-4
+    [Fact]
+    public void Encrypted_AddAndCompleteWriteCiphertext_ListReadsIt()
+    {
+        Encryption encryption = SampleData.On(root);
+        TodoStore store = new TodoStore(root, () => Start, encryption);
+
+        store.Add("Secret errand", new DateOnly(2026, 11, 3));
+        store.Add("Second", new DateOnly(2026, 11, 4));
+        store.Complete(2);
+
+        byte[] bytes = File.ReadAllBytes(FilePath);
+        Assert.True(Vault.IsEncrypted(bytes));
+        Assert.DoesNotContain("Secret errand", System.Text.Encoding.Latin1.GetString(bytes), StringComparison.Ordinal);
+        Assert.Equal(["Secret errand"], store.List().Select(t => t.Text));
+        Assert.Empty(Directory.GetFiles(root, "*.tmp"));
+    }
+
+    // AC-1
+    [Fact]
+    public void WithEncryptionOff_WritesTheSameBytesAsWithoutIt()
+    {
+        new TodoStore(root, () => Start).Add("Buy milk", new DateOnly(2026, 11, 3));
+        byte[] expected = File.ReadAllBytes(FilePath);
+        File.Delete(FilePath);
+
+        new TodoStore(root, () => Start, new Encryption(root)).Add("Buy milk", new DateOnly(2026, 11, 3));
+
+        Assert.Equal(expected, File.ReadAllBytes(FilePath));
+    }
+
+    // AC-7
+    [Fact]
+    public void Encrypted_TamperedFile_ThrowsTodoStoreException_AndIsNeverOverwritten()
+    {
+        Encryption encryption = SampleData.On(root);
+        TodoStore store = new TodoStore(root, () => Start, encryption);
+        store.Add("Secret", new DateOnly(2026, 11, 3));
+        byte[] tampered = SampleData.Tamper(FilePath);
+
+        Assert.Throws<TodoStoreException>(() => store.List());
+        Assert.Throws<TodoStoreException>(() => store.Add("More", new DateOnly(2026, 11, 3)));
+        Assert.Equal(tampered, File.ReadAllBytes(FilePath));
+    }
 }
