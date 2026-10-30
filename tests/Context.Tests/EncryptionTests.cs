@@ -30,7 +30,7 @@ internal static class SampleData
     /// <summary>A session for <paramref name="root"/> with a new vault (low iterations, for speed).</summary>
     public static Encryption On(string root)
     {
-        Encryption encryption = new Encryption(root);
+        Encryption encryption = new Encryption(root, VaultTests.TestIterations);
         encryption.Use(Vault.Create(root, VaultTests.Passphrase, VaultTests.TestIterations));
         return encryption;
     }
@@ -123,7 +123,7 @@ public sealed class EncryptionTests : IDisposable
 
     private Encryption On()
     {
-        Encryption encryption = new Encryption(root);
+        Encryption encryption = new Encryption(root, VaultTests.TestIterations);
         encryption.Use(Vault.Create(root, VaultTests.Passphrase, VaultTests.TestIterations));
         return encryption;
     }
@@ -315,7 +315,7 @@ public sealed class EncryptionTests : IDisposable
     public void Unlock_WrongPassphrase_LeavesSessionOff()
     {
         On().Migrate();
-        Encryption session = new Encryption(root);
+        Encryption session = new Encryption(root, VaultTests.TestIterations);
 
         Assert.True(session.IsConfigured);
         Assert.Throws<WrongPassphraseException>(() => session.Unlock("not the passphrase"));
@@ -354,5 +354,27 @@ public sealed class EncryptionTests : IDisposable
         File.WriteAllBytes(path, bytes);
 
         Assert.Equal(File.ReadAllText(path), Encryption.DecodeText(bytes));
+    }
+
+    // Feedback 3
+    [Fact]
+    public void EncryptedFilesWithoutKey_CountsEncryptedDataFiles_OnlyWithoutKeyFile()
+    {
+        Encryption encryption = On();
+        Assert.Equal(0, encryption.EncryptedFilesWithoutKey());
+        encryption.Migrate();
+        Assert.Equal(0, encryption.EncryptedFilesWithoutKey());
+
+        File.Delete(Vault.KeyFilePath(root));
+
+        Assert.Equal(SampleData.DataFiles.Length, new Encryption(root).EncryptedFilesWithoutKey());
+    }
+
+    // Feedback 3
+    [Fact]
+    public void EncryptedFilesWithoutKey_PlainFolder_IsZero()
+    {
+        Assert.Equal(0, new Encryption(root).EncryptedFilesWithoutKey());
+        Assert.Equal(0, new Encryption(Path.Combine(root, "missing")).EncryptedFilesWithoutKey());
     }
 }

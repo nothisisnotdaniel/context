@@ -39,6 +39,13 @@ internal static class EncryptionCommands
             return CommandResult.Error($"{Vault.FileName} already exists. Restart Context to unlock it.");
         }
 
+        if (encryption.EncryptedFilesWithoutKey() > 0)
+        {
+            // A new key would sit where the old encryption.json belongs, and the old files could never be read.
+            return CommandResult.Error(
+                $"Some files are encrypted but {Vault.FileName} is missing. Restore it from a backup first.");
+        }
+
         string? passphrase = prompt.Ask(
             NewLabel,
             new Markup(
@@ -49,6 +56,7 @@ internal static class EncryptionCommands
             return Cancelled("Encryption");
         }
 
+        passphrase = Vault.NormalizePassphrase(passphrase);
         if (passphrase.Length < MinPassphraseLength)
         {
             return CommandResult.Error(
@@ -61,7 +69,7 @@ internal static class EncryptionCommands
             return Cancelled("Encryption");
         }
 
-        if (!string.Equals(passphrase, repeat, StringComparison.Ordinal))
+        if (!string.Equals(passphrase, Vault.NormalizePassphrase(repeat), StringComparison.Ordinal))
         {
             return CommandResult.Error("The passphrases don't match. Nothing changed.");
         }
@@ -98,15 +106,16 @@ internal static class EncryptionCommands
         try
         {
             // Only a check: the session's vault does the work.
-            using Vault check = Vault.Unlock(encryption.Root, passphrase);
+            encryption.CheckPassphrase(passphrase);
         }
         catch (WrongPassphraseException)
         {
             return CommandResult.Error("Wrong passphrase. Nothing changed.");
         }
-        catch (VaultException)
+        catch (VaultException ex)
         {
-            return CommandResult.Error($"Can't read {Vault.FileName}. Nothing changed.");
+            // A fixed text from Vault, never file content or the passphrase.
+            return CommandResult.Error($"{Markup.Escape(SafeText.Clean(ex.Message))} Nothing changed.");
         }
 
         MigrationResult result = encryption.DecryptAll();

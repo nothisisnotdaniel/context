@@ -47,6 +47,12 @@ internal sealed class Vault : IDisposable
     /// <summary>The PBKDF2 iteration count new vaults use.</summary>
     public const int DefaultIterations = 600_000;
 
+    /// <summary>
+    /// The lowest iteration count <see cref="Unlock(string, string)"/> accepts from a key file, so a changed
+    /// <c>encryption.json</c> can't make the passphrase cheap to guess.
+    /// </summary>
+    public const int MinUnlockIterations = 100_000;
+
     public const string KindNote = "note";
     public const string KindTodos = "todos";
     public const string KindCalendarLink = "calendar-link";
@@ -170,9 +176,13 @@ internal sealed class Vault : IDisposable
     /// <summary>
     /// Reads <c>encryption.json</c> and unwraps the data key with <paramref name="passphrase"/>. Throws
     /// <see cref="WrongPassphraseException"/> when it doesn't fit, and <see cref="VaultException"/> when the file
-    /// is missing or not valid. Never writes anything.
+    /// is missing, not valid or asks for fewer than <see cref="MinUnlockIterations"/> iterations. Never writes
+    /// anything.
     /// </summary>
-    public static Vault Unlock(string root, string passphrase)
+    public static Vault Unlock(string root, string passphrase) => Unlock(root, passphrase, MinUnlockIterations);
+
+    /// <summary>Like <see cref="Unlock(string, string)"/> with a given minimum iteration count (tests use a low one).</summary>
+    internal static Vault Unlock(string root, string passphrase, int minIterations)
     {
         string path = KeyFilePath(root);
         KeyFile? file;
@@ -192,10 +202,15 @@ internal sealed class Vault : IDisposable
         try
         {
             if (file is null || file.Version != KeyFileVersion || file.Kdf != KdfName
-                || file.Iterations is null || file.Iterations < MinIterations || file.Iterations > MaxIterations
+                || file.Iterations is null || file.Iterations > MaxIterations
                 || file.Salt is null || file.Nonce is null || file.WrappedKey is null)
             {
                 throw new VaultException($"Can't read {FileName}.");
+            }
+
+            if (file.Iterations < Math.Max(MinIterations, minIterations))
+            {
+                throw new VaultException($"{FileName} asks for too few key iterations; it may have been changed.");
             }
 
             salt = Convert.FromBase64String(file.Salt);
@@ -313,8 +328,16 @@ internal sealed class Vault : IDisposable
         return Encoding.UTF8.GetBytes(kind);
     }
 
+    /// <summary>
+    /// The passphrase in Unicode normalization form C, so the same text typed on another OS or keyboard (composed
+    /// or decomposed accents) derives the same key. <see cref="Create(string, string)"/> and
+    /// <see cref="Unlock(string, string)"/> both apply it.
+    /// </summary>
+    public static string NormalizePassphrase(string passphrase) => passphrase.Normalize(NormalizationForm.FormC);
+
     private static byte[] DeriveKey(string passphrase, byte[] salt, int iterations) =>
-        Rfc2898DeriveBytes.Pbkdf2(passphrase, salt, iterations, HashAlgorithmName.SHA256, KeyLength);
+        Rfc2898DeriveBytes.Pbkdf2(
+            NormalizePassphrase(passphrase), salt, iterations, HashAlgorithmName.SHA256, KeyLength);
 
     /// <summary>The JSON shape of <c>encryption.json</c>. Every field is nullable so a missing one is caught.</summary>
     private sealed class KeyFile

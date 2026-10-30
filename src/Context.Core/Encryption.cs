@@ -36,10 +36,17 @@ internal sealed class Encryption
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
     private readonly string root;
+    private readonly int minIterations;
 
-    public Encryption(string root)
+    /// <param name="root">The folder the data lives in.</param>
+    /// <param name="minIterations">
+    /// The lowest key-file iteration count <see cref="Unlock"/> and <see cref="CheckPassphrase"/> accept; tests pass
+    /// a low one.
+    /// </param>
+    public Encryption(string root, int minIterations = Vault.MinUnlockIterations)
     {
         this.root = Path.GetFullPath(root);
+        this.minIterations = minIterations;
     }
 
     /// <summary>The folder the data lives in.</summary>
@@ -66,8 +73,62 @@ internal sealed class Encryption
     /// </summary>
     public void Unlock(string passphrase)
     {
-        Vault vault = Vault.Unlock(root, passphrase);
+        Vault vault = Vault.Unlock(root, passphrase, minIterations);
         Use(vault);
+    }
+
+    /// <summary>
+    /// Checks <paramref name="passphrase"/> against <c>encryption.json</c> without changing the session. Throws like
+    /// <see cref="Unlock"/>.
+    /// </summary>
+    public void CheckPassphrase(string passphrase)
+    {
+        using Vault check = Vault.Unlock(root, passphrase, minIterations);
+    }
+
+    /// <summary>
+    /// How many files of the data set (see <see cref="Migrate"/>) are encrypted while the root has no
+    /// <c>encryption.json</c>: they can't be read, and anything new would be written in plain text. Only the first
+    /// bytes of each file are read; files that can't be read are skipped. 0 when <c>encryption.json</c> exists.
+    /// </summary>
+    public int EncryptedFilesWithoutKey()
+    {
+        if (IsConfigured)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        List<string> ignored = [];
+        List<(string Path, string Kind)> files;
+        try
+        {
+            files = DataFiles(ignored);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return 0;
+        }
+
+        byte[] header = new byte[8];
+        foreach ((string path, _) in files)
+        {
+            try
+            {
+                using FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                int read = stream.ReadAtLeast(header, header.Length, throwOnEndOfStream: false);
+                if (Vault.IsEncrypted(header.AsSpan(0, read)))
+                {
+                    count++;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Unreadable: not counted.
+            }
+        }
+
+        return count;
     }
 
     /// <summary>Sets the session's vault (disposing the previous one), or turns encryption off with <c>null</c>.</summary>

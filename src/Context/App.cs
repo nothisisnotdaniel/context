@@ -49,10 +49,12 @@ internal sealed class App
 
     /// <summary>
     /// Runs the loop until <c>/quit</c> or the input ends. Returns the process exit code. With encryption on, it
-    /// first asks for the passphrase and returns 1 after <see cref="MaxUnlockTries"/> wrong ones.
+    /// first asks for the passphrase: Esc quits (0), <see cref="MaxUnlockTries"/> wrong ones return 1. Without
+    /// <c>encryption.json</c> but with encrypted files, the first frame shows a red warning.
     /// </summary>
     public int Run()
     {
+        IRenderable? hint = null;
         if (encryption is not null && !encryption.IsOn && encryption.IsConfigured)
         {
             int? exitCode = Unlock(encryption);
@@ -61,10 +63,19 @@ internal sealed class App
                 return exitCode.Value;
             }
         }
+        else if (encryption is not null && !encryption.IsOn)
+        {
+            int orphaned = encryption.EncryptedFilesWithoutKey();
+            if (orphaned > 0)
+            {
+                string files = orphaned == 1 ? "1 encrypted file" : $"{orphaned} encrypted files";
+                hint = new Markup(
+                    $"[red]{files} but no {Vault.FileName}: new data is NOT encrypted. Restore it from a backup.[/]");
+            }
+        }
 
         LineEditor editor = new LineEditor(console, registry);
         IRenderable? message = null;
-        IRenderable? hint = null;
 
         while (true)
         {
@@ -97,12 +108,12 @@ internal sealed class App
         }
     }
 
-    // Asks for the passphrase until it unlocks (null), the tries run out or the input ends (an exit code). Wrong
-    // tries never write anything; Esc just asks again.
+    // Asks for the passphrase until it unlocks (null), or returns an exit code: 0 after Esc (the user quits), 1 when
+    // the tries run out, the key file is bad or the input ends. Wrong tries never write anything.
     private int? Unlock(Encryption session)
     {
         PassphrasePrompt prompt = new PassphrasePrompt(console);
-        IRenderable hint = new Markup("[grey]Context is encrypted. Type your passphrase.[/]");
+        IRenderable hint = new Markup("[grey]Context is encrypted. Type your passphrase, or press Esc to quit.[/]");
         int wrong = 0;
         while (true)
         {
@@ -110,13 +121,8 @@ internal sealed class App
             string? passphrase = prompt.Ask(PassphrasePrompt.Label, null, out bool cancelled);
             if (passphrase is null)
             {
-                if (cancelled)
-                {
-                    continue;
-                }
-
                 console.Clear(home: true);
-                return 1;
+                return cancelled ? 0 : 1;
             }
 
             try
@@ -134,12 +140,13 @@ internal sealed class App
                     return 1;
                 }
 
-                hint = new Markup("[red]Wrong passphrase[/]");
+                hint = new Markup("[red]Wrong passphrase.[/] [grey]Try again, or press Esc to quit.[/]");
             }
-            catch (VaultException)
+            catch (VaultException ex)
             {
+                // A fixed text from Vault, never file content or the passphrase.
                 console.Clear(home: true);
-                console.MarkupLine($"[red]Can't read {Vault.FileName}.[/]");
+                console.MarkupLine($"[red]{Markup.Escape(SafeText.Clean(ex.Message))}[/]");
                 return 1;
             }
         }

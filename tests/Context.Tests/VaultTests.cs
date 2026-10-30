@@ -155,7 +155,7 @@ public sealed class VaultTests : IDisposable
             encrypted = vault.Encrypt(Vault.KindNote, Encoding.UTF8.GetBytes("hello"));
         }
 
-        using Vault unlocked = Vault.Unlock(root, Passphrase);
+        using Vault unlocked = Vault.Unlock(root, Passphrase, TestIterations);
         Assert.Equal("hello", Encoding.UTF8.GetString(unlocked.Decrypt(Vault.KindNote, encrypted)));
     }
 
@@ -167,7 +167,7 @@ public sealed class VaultTests : IDisposable
         byte[] before = File.ReadAllBytes(Vault.KeyFilePath(root));
 
         WrongPassphraseException ex = Assert.Throws<WrongPassphraseException>(
-            () => Vault.Unlock(root, "wrong passphrase 123"));
+            () => Vault.Unlock(root, "wrong passphrase 123", TestIterations));
 
         Assert.DoesNotContain("wrong passphrase 123", ex.ToString(), StringComparison.Ordinal);
         Assert.Equal(before, File.ReadAllBytes(Vault.KeyFilePath(root)));
@@ -177,14 +177,14 @@ public sealed class VaultTests : IDisposable
     [Fact]
     public void Unlock_MissingOrBrokenKeyFile_ThrowsVaultException()
     {
-        Assert.Throws<VaultException>(() => Vault.Unlock(root, Passphrase));
+        Assert.Throws<VaultException>(() => Vault.Unlock(root, Passphrase, TestIterations));
 
         Directory.CreateDirectory(root);
         File.WriteAllText(Vault.KeyFilePath(root), "{ not json");
-        Assert.Throws<VaultException>(() => Vault.Unlock(root, Passphrase));
+        Assert.Throws<VaultException>(() => Vault.Unlock(root, Passphrase, TestIterations));
 
         File.WriteAllText(Vault.KeyFilePath(root), "{\"version\":1}");
-        Assert.Throws<VaultException>(() => Vault.Unlock(root, Passphrase));
+        Assert.Throws<VaultException>(() => Vault.Unlock(root, Passphrase, TestIterations));
     }
 
     [Fact]
@@ -240,5 +240,51 @@ public sealed class VaultTests : IDisposable
         using Vault vault = NewVault();
 
         Assert.Throws<ArgumentException>(() => vault.Encrypt("other", [1]));
+    }
+
+    // Feedback 1: the same passphrase in another Unicode form (composed vs decomposed accents) unlocks.
+    [Fact]
+    public void Unlock_PassphraseInOtherNormalizationForm_Unlocks()
+    {
+        string composed = "Ångström café passphrase".Normalize(NormalizationForm.FormC);
+        string decomposed = composed.Normalize(NormalizationForm.FormD);
+        Assert.NotEqual(composed, decomposed);
+        byte[] encrypted;
+        using (Vault vault = Vault.Create(root, composed, TestIterations))
+        {
+            encrypted = vault.Encrypt(Vault.KindNote, [1, 2, 3]);
+        }
+
+        using Vault unlocked = Vault.Unlock(root, decomposed, TestIterations);
+
+        Assert.Equal(new byte[] { 1, 2, 3 }, unlocked.Decrypt(Vault.KindNote, encrypted));
+        Assert.Equal(composed, Vault.NormalizePassphrase(decomposed));
+    }
+
+    // Feedback 2: a key file with too few iterations is refused before any key is derived.
+    [Fact]
+    public void Unlock_KeyFileBelowMinimumIterations_ThrowsVaultException()
+    {
+        NewVault().Dispose();
+
+        VaultException ex = Assert.Throws<VaultException>(() => Vault.Unlock(root, Passphrase));
+
+        Assert.Contains("too few key iterations", ex.Message, StringComparison.Ordinal);
+        Assert.True(Vault.MinUnlockIterations >= 100_000);
+        Assert.True(Vault.DefaultIterations >= Vault.MinUnlockIterations);
+    }
+
+    // Feedback 2: a key file edited down to 1 iteration is refused even with the right passphrase.
+    [Fact]
+    public void Unlock_KeyFileEditedToOneIteration_IsRefused()
+    {
+        Vault.Create(root, Passphrase, Vault.MinUnlockIterations).Dispose();
+        string path = Vault.KeyFilePath(root);
+        File.WriteAllText(
+            path,
+            File.ReadAllText(path).Replace(
+                $"\"iterations\": {Vault.MinUnlockIterations}", "\"iterations\": 1", StringComparison.Ordinal));
+
+        Assert.Throws<VaultException>(() => Vault.Unlock(root, Passphrase));
     }
 }

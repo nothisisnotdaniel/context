@@ -15,9 +15,10 @@ internal sealed class Session : IDisposable
     private readonly CommandRegistry registry;
     private readonly TodoSidebar sidebar;
 
-    public Session(string root)
+    /// <param name="minIterations">The lowest key-file iteration count unlocking accepts; tests use low ones.</param>
+    public Session(string root, int minIterations = VaultTests.TestIterations)
     {
-        Encryption = new Encryption(root);
+        Encryption = new Encryption(root, minIterations);
         Notes = new NoteStore(root, Encryption);
         index = new TagIndex(root, Encryption);
         TodoStore todos = new TodoStore(root, () => Now, Encryption);
@@ -385,5 +386,74 @@ public sealed class EncryptionCommandsTests : IDisposable
         {
             Assert.Contains(name, output);
         }
+    }
+
+    // Feedback 3: /encrypt refuses to make a new key while encrypted files have lost theirs.
+    [Fact]
+    public void Encrypt_WithEncryptedFilesButNoKeyFile_IsRefused()
+    {
+        SampleData.Write(root);
+        using (Session first = new Session(root))
+        {
+            first.Run("/encrypt", Pass, Pass);
+        }
+
+        File.Delete(Vault.KeyFilePath(root));
+        File.WriteAllText(Path.Combine(root, "New.md"), "# New\n");
+        Dictionary<string, string> before = SampleData.Hashes(root);
+        using Session session = new Session(root);
+
+        session.Run("/encrypt", Pass, Pass);
+
+        Assert.Contains("Some files are encrypted but encryption.json is missing.", Plain(session.Console.Output));
+        Assert.Equal(before, SampleData.Hashes(root));
+        Assert.False(Vault.Exists(root));
+    }
+
+    // Feedback 1: the repeat may be typed in another Unicode form.
+    [Fact]
+    public void Encrypt_RepeatInOtherNormalizationForm_Matches_AndUnlocksLater()
+    {
+        string composed = "Ångström café passphrase".Normalize(System.Text.NormalizationForm.FormC);
+        string decomposed = composed.Normalize(System.Text.NormalizationForm.FormD);
+        using Session session = new Session(root);
+        session.Console.Input.PushTextWithEnter("/encrypt");
+        foreach (string typed in new[] { composed, decomposed })
+        {
+            // TestConsole's PushText only takes key codes up to 255; combining marks need their own key info.
+            foreach (char c in typed)
+            {
+                session.Console.Input.PushKey(new ConsoleKeyInfo(c, ConsoleKey.A, false, false, false));
+            }
+
+            session.Console.Input.PushKey(ConsoleKey.Enter);
+        }
+
+        session.Run();
+
+        Assert.True(session.Encryption.IsOn);
+        new Encryption(root, VaultTests.TestIterations).CheckPassphrase(decomposed);
+    }
+
+    // Feedback 2: /decrypt with a weakened key file changes nothing.
+    [Fact]
+    public void Decrypt_KeyFileBelowMinimumIterations_ChangesNothing()
+    {
+        SampleData.Write(root);
+        using (Session first = new Session(root))
+        {
+            first.Run("/encrypt", Pass, Pass);
+        }
+
+        Dictionary<string, string> before = SampleData.Hashes(root);
+        using Session session = new Session(root, Vault.MinUnlockIterations);
+        // The session is on (as if unlocked earlier); only the /decrypt check sees the weak key file.
+        session.Encryption.Use(Vault.Unlock(root, Pass, VaultTests.TestIterations));
+
+        session.Run("/decrypt", Pass);
+
+        Assert.Contains("too few key iterations", Plain(session.Console.Output));
+        Assert.Contains("Nothing changed.", Plain(session.Console.Output));
+        Assert.Equal(before, SampleData.Hashes(root));
     }
 }

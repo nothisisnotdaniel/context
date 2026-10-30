@@ -607,7 +607,7 @@ public class AppTests
             List<AnsiWrite> writes = AnsiWrites.Parse(session.Console.Output);
             Assert.Contains(writes, w => w.Row == Height - 1 && w.Column == 3 && w.Text.StartsWith("Passphrase: ", StringComparison.Ordinal));
             string output = AnsiWrites.Strip(session.Console.Output);
-            Assert.Contains("Context is encrypted. Type your passphrase.", output);
+            Assert.Contains("Context is encrypted. Type your passphrase, or press Esc to quit.", output);
             Assert.Contains(SampleData.NoteMarker, output);
         }
         finally
@@ -649,7 +649,6 @@ public class AppTests
             Dictionary<string, string> before = SampleData.Hashes(root);
             using Session session = new Session(root);
             session.Console.Input.PushTextWithEnter("wrong passphrase 1");
-            session.Console.Input.PushKey(ConsoleKey.Escape);
             session.Console.Input.PushTextWithEnter("wrong passphrase 2");
             session.Console.Input.PushTextWithEnter("wrong passphrase 3");
             session.Console.Input.PushTextWithEnter("/quit");
@@ -713,6 +712,98 @@ public class AppTests
             {
                 Directory.Delete(root, recursive: true);
             }
+        }
+    }
+
+    // Feedback 4: Esc at the start-up prompt quits (exit code 0) and changes nothing.
+    [Fact]
+    public void Start_EscapeAtPassphrasePrompt_Quits_AndChangesNoFile()
+    {
+        string root = EncryptedFolder();
+        try
+        {
+            Dictionary<string, string> before = SampleData.Hashes(root);
+            using Session session = new Session(root);
+            session.Console.Input.PushTextWithEnter("wrong passphrase 1");
+            session.Console.Input.PushText("abc");
+            session.Console.Input.PushKey(ConsoleKey.Escape);
+
+            int exitCode = session.RunQueued();
+
+            Assert.Equal(0, exitCode);
+            Assert.False(session.Encryption.IsOn);
+            Assert.Equal(before, SampleData.Hashes(root));
+            Assert.Contains("Try again, or press Esc to quit.", AnsiWrites.Strip(session.Console.Output));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    // Feedback 2: a key file below the minimum iterations ends start-up with its message, never asking twice.
+    [Fact]
+    public void Start_KeyFileBelowMinimumIterations_ReturnsOneWithMessage()
+    {
+        string root = EncryptedFolder();
+        try
+        {
+            using Session session = new Session(root, Vault.MinUnlockIterations);
+            session.Console.Input.PushTextWithEnter(VaultTests.Passphrase);
+
+            int exitCode = session.RunQueued();
+
+            Assert.Equal(1, exitCode);
+            Assert.False(session.Encryption.IsOn);
+            Assert.Contains("too few key iterations", AnsiWrites.Strip(session.Console.Output));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    // Feedback 3: encrypted files without encryption.json give a red warning at start-up.
+    [Fact]
+    public void Start_EncryptedFilesWithoutKeyFile_WarnsInRed()
+    {
+        string root = EncryptedFolder();
+        try
+        {
+            File.Delete(Vault.KeyFilePath(root));
+            using Session session = new Session(root);
+
+            Assert.Equal(0, session.Run());
+
+            string output = session.Console.Output;
+            Assert.Contains(
+                RedStart() + $"{SampleData.DataFiles.Length} encrypted files but no encryption.json: new data is NOT encrypted.",
+                output);
+            Assert.DoesNotContain("Passphrase:", AnsiWrites.Strip(output));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    // Feedback 3: a plain folder starts without the warning.
+    [Fact]
+    public void Start_PlainFolder_NoWarning()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "context-app-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            SampleData.Write(root);
+            using Session session = new Session(root);
+
+            Assert.Equal(0, session.Run());
+            Assert.DoesNotContain("encrypted files", session.Console.Output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
         }
     }
 }

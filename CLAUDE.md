@@ -72,7 +72,10 @@ Every factory agent reads this file before working on Context. Keep it short and
     `FakeHttpHandler` and never touch the network.
 - **Encryption at rest (optional, off by default):** `<root>/encryption.json` (`Vault.FileName`) means "on". It holds
   the version, KDF (`PBKDF2-HMAC-SHA256`, `Vault.DefaultIterations` = 600,000, 16-byte salt) and a random 32-byte data
-  key wrapped with AES-256-GCM; nothing secret in plain form. `Vault` (`Create`, `Unlock` (throws
+  key wrapped with AES-256-GCM; nothing secret in plain form. Passphrases are normalized to Unicode form C
+  (`Vault.NormalizePassphrase`) before PBKDF2, so the same text from another OS unlocks. `Unlock` refuses a key file
+  with fewer than `Vault.MinUnlockIterations` (100,000) iterations with a `VaultException` (tests pass a lower minimum to
+  `new Encryption(root, minIterations)` / the internal `Vault.Unlock(root, pass, min)`). `Vault` (`Create`, `Unlock` (throws
   `WrongPassphraseException`), `Encrypt`/`Decrypt(kind, bytes)`, `IsEncrypted`, `Dispose` zeroes the key; tests use the
   internal `Create(root, pass, iterations)` with 1,000). Encrypted file: `00 43 54 58 45` + version `01` + 12-byte random
   nonce + ciphertext + 16-byte tag; AAD = kind (`note`, `todos`, `calendar-link`, `calendar-cache`, `calendar`). A
@@ -87,10 +90,14 @@ Every factory agent reads this file before working on Context. Keep it short and
   then move; failures stay as they were and are returned by name (`BeforeReplace` is the test fault hook). `Migrate`
   then deletes `context.db*`; `DecryptAll` deletes `encryption.json` last and turns the session off only when every
   file worked. `/encrypt` (`EncryptionCommands`): off → new passphrase twice (masked, at least 12 chars, says a lost
-  passphrase loses the data), `Vault.Create`, `Migrate`; on → `Migrate` only, no passphrase. `/decrypt` asks the
-  passphrase again (checked with a fresh `Vault.Unlock`), then `DecryptAll`. Esc cancels both with no change. At
-  start-up `App` (given the `Encryption`) asks `Passphrase:` in the input panel (sidebar empty while locked); a wrong
-  one shows red `Wrong passphrase`, 3 wrong ones (or a bad `encryption.json`, or the input ending) return 1.
+  passphrase loses the data), `Vault.Create`, `Migrate`; on → `Migrate` only, no passphrase; refused while
+  `Encryption.EncryptedFilesWithoutKey()` > 0 (encrypted files but no `encryption.json`). `/decrypt` asks the
+  passphrase again (`Encryption.CheckPassphrase`), then `DecryptAll`. Esc cancels both with no change. At
+  start-up `App` (given the `Encryption`) asks `Passphrase:` in the input panel (sidebar empty while locked; the hint
+  says Esc quits); Esc returns 0, a wrong one shows red `Wrong passphrase.`, 3 wrong ones (or a bad or weak
+  `encryption.json`, shown by its fixed message, or the input ending) return 1. Without `encryption.json` but with
+  encrypted data files, the first frame shows a red `N encrypted files but no encryption.json: new data is NOT
+  encrypted.` hint.
   Passphrases are read by `PassphrasePrompt` (label in the input panel, hint on the hint row) over
   `LineEditor.ReadSecret` (shows `•` per character, no popup); they are never shown, stored or put in any text.
   The OS key store, changing the passphrase and an encrypted on-disk tag index are not supported.
