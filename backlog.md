@@ -48,3 +48,6 @@ Write one feature per line, in plain language.
 - [ ] Core has no Spectre test: add a test that fails if `Context.Core` references Spectre.Console (assembly references or package references).
 - [ ] Strong-name Core: `InternalsVisibleTo` in `Context.Core` matches by assembly name only; strong-name the assemblies or give Core a deliberate public API before it ships on its own.
 - [ ] Tidy CLAUDE.md tests line: merge the two adjacent parentheticals in the tests bullet of `Context/CLAUDE.md`.
+- [ ] No raw ToString on views: `CurrentView`, `TagsView` and `LinksView` are records whose built-in `ToString()` prints raw, uncleaned text; override it (e.g. to the type name) or otherwise make sure no front end logs or shows it.
+- [ ] Document view fields: doc comments on `CurrentView.Status` (the Stale line needs a non-null `CachedAtUtc`) and on the `TagsView`/`LinksView` fields that only some kinds use, so other front ends render them right.
+- [ ] Settle `CurrentView.Zone`: the property was added beyond the 034 spec so the renderer can show the stale cache time; keep and document it, or let the renderer get the time zone another way.
