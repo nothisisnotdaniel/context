@@ -12,7 +12,7 @@ internal static class NoteCommands
     public static void Register(CommandRegistry registry, NoteStore store)
     {
         registry.Register("/new", "Create a note", title => New(store, title));
-        registry.Register("/notes", "List notes", _ => List(store));
+        registry.Register("/notes", "List notes", _ => Render(store.List()));
         registry.Register("/open", "Open a note", name => Open(store, name));
     }
 
@@ -42,9 +42,12 @@ internal static class NoteCommands
         }
     }
 
-    private static CommandResult List(NoteStore store)
+    /// <summary>
+    /// Draws the <c>/notes</c> list (<see cref="NoteStore.List"/> is its data step). Note names are cleaned and
+    /// escaped here.
+    /// </summary>
+    internal static CommandResult Render(IReadOnlyList<NoteInfo> notes)
     {
-        IReadOnlyList<NoteInfo> notes = store.List();
         if (notes.Count == 0)
         {
             return new CommandResult(new Markup("[grey]No notes yet. Type /new <title> to create one.[/]"));

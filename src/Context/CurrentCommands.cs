@@ -5,17 +5,12 @@ using Spectre.Console.Rendering;
 namespace Context;
 
 /// <summary>
-/// The <c>/current</c> view: today's appointments (from <see cref="CalendarStore"/>), every todo due today or
-/// earlier, and the notes linked to them. A todo links to every note that has one of the tags in its text
-/// (parsed with <see cref="TagParser.Parse"/>).
+/// The <c>/current</c> command: <see cref="CurrentView.Build"/> reads today's appointments, every todo due today
+/// or earlier and the notes linked to them; <see cref="Render"/> draws that view with Spectre.
 /// </summary>
 internal static class CurrentCommands
 {
     private const string DateFormat = "yyyy-MM-dd";
-
-    private const string TimeFormat = "HH:mm";
-
-    private const string Outside = "…";
 
     /// <summary>At most this many appointment rows; the last reads <c>… N more</c> when there are more.</summary>
     internal const int MaxAppointmentRows = 15;
@@ -38,29 +33,32 @@ internal static class CurrentCommands
         registry.Register(
             "/current",
             "Today's appointments, due todos and linked notes",
-            _ => Current(todos, index, notes, calendar, feed, today()));
+            _ => Render(CurrentView.Build(todos, index, notes, calendar, feed, today())));
     }
 
-    private static CommandResult Current(
-        TodoStore store, TagIndex index, NoteStore notes, CalendarStore calendar, CalendarFeed? feed, DateOnly today)
+    /// <summary>
+    /// Draws <paramref name="view"/>: the title, the appointments (at most <see cref="MaxAppointmentRows"/> rows),
+    /// the due todos and the linked notes. Every text from the view is cleaned and escaped here.
+    /// </summary>
+    internal static CommandResult Render(CurrentView view)
     {
         List<IRenderable> parts =
         [
-            new Markup($"[steelblue1]Today, {today.ToString(DateFormat, CultureInfo.InvariantCulture)}[/]"),
+            new Markup($"[steelblue1]Today, {view.Today.ToString(DateFormat, CultureInfo.InvariantCulture)}[/]"),
         ];
-        parts.AddRange(Appointments(calendar, feed, today));
+        parts.AddRange(Appointments(view));
 
-        IReadOnlyList<TodoItem> todos;
-        try
-        {
-            todos = store.List();
-        }
-        catch (TodoStoreException)
+        if (view.TodosUnreadable)
         {
             return new CommandResult(new Rows(parts), hint: new Markup($"[red]{TodosUnreadable}[/]"));
         }
 
-        List<TodoItem> due = [];
+        if (view.Due.Count == 0)
+        {
+            parts.Add(new Markup("[grey]Nothing due today. Add one with /todo today <text>.[/]"));
+            return new CommandResult(new Rows(parts));
+        }
+
         Table dueTable = new Table()
             .Border(TableBorder.Rounded)
             .BorderColor(Color.Grey)
@@ -68,62 +66,28 @@ internal static class CurrentCommands
             .AddColumn("[grey]#[/]")
             .AddColumn("[grey]Date[/]")
             .AddColumn("[grey]Todo[/]");
-        for (int i = 0; i < todos.Count; i++)
+        foreach (DueTodo todo in view.Due)
         {
-            TodoItem todo = todos[i];
-            if (todo.Due > today)
-            {
-                continue;
-            }
-
-            due.Add(todo);
-            string colour = todo.Due < today ? "red" : "steelblue1";
+            string colour = todo.Overdue ? "red" : "steelblue1";
             dueTable.AddRow(
-                new Markup((i + 1).ToString(CultureInfo.InvariantCulture)),
+                new Markup(todo.Number.ToString(CultureInfo.InvariantCulture)),
                 new Markup($"[{colour}]{todo.Due.ToString(DateFormat, CultureInfo.InvariantCulture)}[/]"),
                 new Markup(Markup.Escape(TodoSidebar.OneLine(todo.Text))));
         }
 
-        if (due.Count == 0)
-        {
-            parts.Add(new Markup("[grey]Nothing due today. Add one with /todo today <text>.[/]"));
-            return new CommandResult(new Rows(parts));
-        }
-
         parts.Add(dueTable);
-        parts.Add(LinkedNotes(index, notes, due));
+        parts.Add(LinkedNotes(view));
         return new CommandResult(new Rows(parts));
     }
 
-    private static IRenderable LinkedNotes(TagIndex index, NoteStore notes, IReadOnlyList<TodoItem> due)
+    private static IRenderable LinkedNotes(CurrentView view)
     {
-        Dictionary<string, SortedSet<string>> linked = new(StringComparer.Ordinal);
-        try
-        {
-            index.Sync(notes);
-            IEnumerable<string> tags = due
-                .SelectMany(t => TagParser.Parse(t.Text))
-                .Distinct(StringComparer.Ordinal);
-            foreach (string tag in tags)
-            {
-                foreach (string note in index.NotesWithTag(tag))
-                {
-                    if (!linked.TryGetValue(note, out SortedSet<string>? noteTags))
-                    {
-                        noteTags = new SortedSet<string>(StringComparer.Ordinal);
-                        linked[note] = noteTags;
-                    }
-
-                    noteTags.Add(tag);
-                }
-            }
-        }
-        catch (TagIndexException)
+        if (view.IndexUnreadable)
         {
             return new Markup($"[red]{IndexUnreadable}[/]");
         }
 
-        if (linked.Count == 0)
+        if (view.LinkedNotes.Count == 0)
         {
             return new Markup("[grey]No linked notes. Add the same #tag to a todo and a note to link them.[/]");
         }
@@ -134,46 +98,28 @@ internal static class CurrentCommands
             .Title("[grey]Linked notes[/]")
             .AddColumn("[grey]Note[/]")
             .AddColumn("[grey]Tags[/]");
-        IEnumerable<string> names = linked.Keys
-            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(n => n, StringComparer.Ordinal);
-        foreach (string name in names)
+        foreach (LinkedNote note in view.LinkedNotes)
         {
             table.AddRow(
-                new Markup($"[steelblue1]{Shown(name)}[/]"),
-                new Markup($"[grey]{Shown(string.Join(", ", linked[name].Select(TagParser.Format)))}[/]"));
+                new Markup($"[steelblue1]{Shown(note.Name)}[/]"),
+                new Markup($"[grey]{Shown(string.Join(", ", note.Tags.Select(TagParser.Format)))}[/]"));
         }
 
         return table;
     }
 
     /// <summary>
-    /// The <c>Appointments</c> table (or the empty line) with the files' and the feed's events, then a red line
-    /// per unreadable file, then the feed's status line (if any).
+    /// The <c>Appointments</c> table (or the empty line), then a red line per unreadable file, then the feed's
+    /// status line (if any).
     /// </summary>
-    private static List<IRenderable> Appointments(CalendarStore calendar, CalendarFeed? feed, DateOnly today)
+    private static List<IRenderable> Appointments(CurrentView view)
     {
-        CalendarFeedResult result = feed?.Fetch() ?? new CalendarFeedResult(CalendarFeedStatus.NotConfigured);
-        IReadOnlyList<Appointment> extra = [];
-        if (result.Text is not null)
-        {
-            try
-            {
-                extra = IcsParser.Parse(result.Text, calendar.Zone);
-            }
-            catch (FormatException)
-            {
-                // The feed only caches text that parsed, so this only happens if the cache was changed by hand.
-            }
-        }
-
-        CalendarDay day = calendar.Day(today, extra);
         List<IRenderable> parts = [];
-        IReadOnlyList<Appointment> appointments = day.Appointments;
+        IReadOnlyList<Appointment> appointments = view.Appointments;
         if (appointments.Count == 0)
         {
             parts.Add(new Markup(
-                $"[grey]No appointments today. Put .ics files in {Shown(calendar.Folder)} to see them here.[/]"));
+                $"[grey]No appointments today. Put .ics files in {Shown(view.Folder)} to see them here.[/]"));
         }
         else
         {
@@ -186,8 +132,6 @@ internal static class CurrentCommands
                 .AddColumn("[grey]Where[/]");
             bool more = appointments.Count > MaxAppointmentRows;
             int shown = more ? MaxAppointmentRows - 1 : appointments.Count;
-            DateTime from = today.ToDateTime(TimeOnly.MinValue);
-            DateTime to = from.AddDays(1);
             for (int i = 0; i < shown; i++)
             {
                 Appointment appointment = appointments[i];
@@ -196,7 +140,7 @@ internal static class CurrentCommands
                     ? string.Empty
                     : $"[grey]{Markup.Escape(TodoSidebar.OneLine(appointment.Location))}[/]";
                 table.AddRow(
-                    new Markup($"[steelblue1]{Time(appointment, from, to)}[/]"),
+                    new Markup($"[steelblue1]{view.TimeText(appointment)}[/]"),
                     new Markup(Markup.Escape(TodoSidebar.OneLine(title))),
                     new Markup(where));
             }
@@ -206,20 +150,20 @@ internal static class CurrentCommands
                 string count = (appointments.Count - shown).ToString(CultureInfo.InvariantCulture);
                 table.AddRow(
                     new Markup(string.Empty),
-                    new Markup($"[grey]{Outside} {count} more[/]"),
+                    new Markup($"[grey]{CurrentView.Outside} {count} more[/]"),
                     new Markup(string.Empty));
             }
 
             parts.Add(table);
         }
 
-        foreach (string name in day.Unreadable)
+        foreach (string name in view.UnreadableCalendarFiles)
         {
             string file = Markup.Escape(TodoSidebar.OneLine(name));
             parts.Add(new Markup($"[red]Can't read {CalendarStore.FolderName}/{file}[/]"));
         }
 
-        IRenderable? status = FeedStatus(result, calendar.Zone);
+        IRenderable? status = FeedStatus(view);
         if (status is not null)
         {
             parts.Add(status);
@@ -229,40 +173,23 @@ internal static class CurrentCommands
     }
 
     /// <summary>A grey offline line for <c>Stale</c>, a red line for <c>Failed</c>, otherwise nothing.</summary>
-    private static IRenderable? FeedStatus(CalendarFeedResult result, TimeZoneInfo zone)
+    private static IRenderable? FeedStatus(CurrentView view)
     {
-        if (result.Status == CalendarFeedStatus.Stale && result.CachedAtUtc is not null)
+        if (view.Status == CalendarFeedStatus.Stale && view.CachedAtUtc is not null)
         {
             DateTime local = TimeZoneInfo.ConvertTimeFromUtc(
-                DateTime.SpecifyKind(result.CachedAtUtc.Value, DateTimeKind.Utc), zone);
+                DateTime.SpecifyKind(view.CachedAtUtc.Value, DateTimeKind.Utc), view.Zone);
             string at = local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
             return new Markup($"[grey]Exchange calendar offline, showing the copy from {at}.[/]");
         }
 
-        if (result.Status == CalendarFeedStatus.Failed)
+        if (view.Status == CalendarFeedStatus.Failed)
         {
-            string reason = Shown(result.Reason ?? string.Empty);
+            string reason = Shown(view.Reason ?? string.Empty);
             return new Markup($"[red]Can't download the Exchange calendar ({reason}).[/]");
         }
 
         return null;
-    }
-
-    /// <summary><c>all day</c>, or <c>HH:mm-HH:mm</c> with <c>…</c> for a side outside <c>[from, to]</c>.</summary>
-    internal static string Time(Appointment appointment, DateTime from, DateTime to)
-    {
-        if (appointment.AllDay)
-        {
-            return "all day";
-        }
-
-        string start = appointment.Start < from
-            ? Outside
-            : appointment.Start.ToString(TimeFormat, CultureInfo.InvariantCulture);
-        string end = appointment.End > to
-            ? Outside
-            : appointment.End.ToString(TimeFormat, CultureInfo.InvariantCulture);
-        return $"{start}-{end}";
     }
 
     // Text from disk or the user, safe for markup.
