@@ -36,18 +36,31 @@ internal sealed record TagsView
     /// </summary>
     public override string ToString() => nameof(TagsView);
 
+    /// <summary>
+    /// What was found; read it first to pick the fields to use: <c>AllTags</c> → <see cref="Tags"/>;
+    /// <c>NotesWithTag</c> → <see cref="Tag"/> and <see cref="Notes"/>; <c>NoSuchTag</c> → <see cref="Tag"/>;
+    /// <c>IndexUnreadable</c> → no field (draw an error). The fields a kind doesn't use are empty, never null.
+    /// </summary>
     public TagsViewKind Kind { get; }
 
     /// <summary>
-    /// The asked-for tag, normalised with <see cref="TagIndex.NormalizeTag"/> (may be empty); empty for
-    /// <c>AllTags</c>.
+    /// The asked-for tag, normalised with <see cref="TagIndex.NormalizeTag"/> (raw: clean and escape it before
+    /// showing it). Filled for <c>NotesWithTag</c> and <c>NoSuchTag</c> (for <c>NoSuchTag</c> it may be empty when
+    /// the argument held no valid tag); every other kind (<c>AllTags</c>, <c>IndexUnreadable</c>) gives empty
+    /// (<c>""</c>), never null.
     /// </summary>
     public string Tag { get; }
 
-    /// <summary>Every tag with its note count (<c>AllTags</c> only).</summary>
+    /// <summary>
+    /// Every tag with its note count, for <c>AllTags</c> (it may be empty when no note has a tag). Every other
+    /// kind gives empty (<c>[]</c>), never null. The tags are raw text: clean and escape them before showing them.
+    /// </summary>
     public IReadOnlyList<TagCount> Tags { get; }
 
-    /// <summary>The notes with <see cref="Tag"/> (<c>NotesWithTag</c> only).</summary>
+    /// <summary>
+    /// The names of the notes with <see cref="Tag"/>, for <c>NotesWithTag</c> (never empty then). Every other kind
+    /// gives empty (<c>[]</c>), never null. The names are raw text: clean and escape them before showing them.
+    /// </summary>
     public IReadOnlyList<string> Notes { get; }
 
     /// <summary>Syncs the index, then lists every tag (blank <paramref name="argument"/>) or a tag's notes.</summary>

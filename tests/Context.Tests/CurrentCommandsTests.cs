@@ -764,4 +764,32 @@ public sealed class CurrentCommandsTests : IDisposable
 
         Assert.True(HasLine(main, "Can't download the Exchange calendar (network error)."));
     }
+
+    // 044 AC-5: a hand-built Stale view without a cache time draws no offline line and doesn't throw.
+    [Fact]
+    public void Render_StaleWithoutCacheTime_NoOfflineLine()
+    {
+        CurrentView view = new CurrentView(
+            Today,
+            Zone,
+            [],
+            "/nowhere/calendar",
+            [],
+            CalendarFeedStatus.Stale,
+            null,
+            "timed out",
+            false,
+            [],
+            [],
+            false);
+
+        CommandResult result = CurrentCommands.Render(view);
+        TestConsole console = new TestConsole();
+        console.Profile.Width = Width;
+        console.Write(Assert.IsAssignableFrom<Spectre.Console.Rendering.IRenderable>(result.Message));
+
+        Assert.DoesNotContain("offline", console.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Exchange calendar", console.Output, StringComparison.Ordinal);
+        Assert.Contains("No appointments today", console.Output, StringComparison.Ordinal);
+    }
 }

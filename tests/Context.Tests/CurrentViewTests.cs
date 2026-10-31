@@ -205,7 +205,7 @@ public sealed class CurrentViewTests : IDisposable
         Assert.False(File.Exists(DbPath));
     }
 
-    // AC-4: a stale feed's events are merged, with its status, time and reason.
+    // AC-4 (also 044 AC-4): a stale feed's events are merged, with its status, a non-null time and a reason.
     [Fact]
     public void Build_StaleFeed_MergesCache()
     {
@@ -221,13 +221,15 @@ public sealed class CurrentViewTests : IDisposable
         CurrentView view = Build(feed);
 
         Assert.Equal(CalendarFeedStatus.Stale, view.Status);
+        Assert.NotNull(view.CachedAtUtc);
         Assert.Equal(cachedAt, view.CachedAtUtc);
+        Assert.NotNull(view.Reason);
         Assert.Equal("HTTP 500", view.Reason);
         Assert.Equal("Cached", Assert.Single(view.Appointments).Title);
         Assert.Same(Zone, view.Zone);
     }
 
-    // AC-4
+    // AC-4 (also 044 AC-4): a failed feed has no time but a reason.
     [Fact]
     public void Build_FailedFeed_ReasonOnly()
     {
@@ -239,6 +241,7 @@ public sealed class CurrentViewTests : IDisposable
 
         Assert.Equal(CalendarFeedStatus.Failed, view.Status);
         Assert.Null(view.CachedAtUtc);
+        Assert.NotNull(view.Reason);
         Assert.Equal("HTTP 404", view.Reason);
         Assert.Empty(view.Appointments);
     }
