@@ -18,7 +18,7 @@ public sealed class ViewDocsTests
         { CurrentViewFile, "Status", ["NotConfigured", "Fresh", "Stale", "Failed", "CachedAtUtc", "Reason"] },
 
         // AC-2
-        { CurrentViewFile, "CachedAtUtc", ["Stale", "UTC", "null"] },
+        { CurrentViewFile, "CachedAtUtc", ["Stale", "UTC", "null", "Zone"] },
         { CurrentViewFile, "Reason", ["Stale", "Failed", "fixed", "never an exception message"] },
 
         // AC-3
@@ -30,6 +30,9 @@ public sealed class ViewDocsTests
         { LinksViewFile, "Typed", ["MissingArgument", "NoSuchNote", "empty"] },
         { LinksViewFile, "Note", ["NoLinks", "Links", "null"] },
         { LinksViewFile, "Links", ["Links", "empty"] },
+
+        // 046 AC-2
+        { CurrentViewFile, "Zone", ["CalendarStore", "Appointments", "CachedAtUtc", "TimeZoneInfo.Local"] },
     };
 
     public static TheoryData<string, string> AllProperties()

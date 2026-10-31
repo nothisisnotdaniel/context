@@ -28,7 +28,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   - A todo list is always shown in a sidebar, sorted by due date. The user sets each todo's due date.
   - The `/current` view shows all relevant information for now, such as today's appointments, due
     todos and linked notes. `/current` (`CurrentView.Build` in Core reads the data, including the untruncated
-    appointments and the time text; `CurrentCommands.Render` draws it; argument ignored) shows a steelblue1
+    appointments, the time text and the calendar's `Zone`, in which the renderer shows the cache time; `CurrentCommands.Render` draws it; argument ignored) shows a steelblue1
     `Today, yyyy-MM-dd` title, a `Due` table of every todo with `Due <= today` (sidebar number, `yyyy-MM-dd`
     red overdue / steelblue1 today, one-line text) and a `Linked notes` table. A todo links to notes
     through tags: `TagParser.Parse` on the text of each due todo (at run time, not stored), then

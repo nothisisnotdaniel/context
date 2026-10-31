@@ -205,6 +205,16 @@ public sealed class CurrentViewTests : IDisposable
         Assert.False(File.Exists(DbPath));
     }
 
+    // 046 AC-4: without a feed the view still carries the calendar store's zone instance.
+    [Fact]
+    public void Build_NoFeed_KeepsCalendarZone()
+    {
+        CurrentView view = Build();
+
+        Assert.Equal(CalendarFeedStatus.NotConfigured, view.Status);
+        Assert.Same(Zone, view.Zone);
+    }
+
     // AC-4 (also 044 AC-4): a stale feed's events are merged, with its status, a non-null time and a reason.
     [Fact]
     public void Build_StaleFeed_MergesCache()

@@ -103,7 +103,12 @@ internal sealed record CurrentView
     /// <summary>The day the view is for (the title date); due todos are those due on or before it.</summary>
     public DateOnly Today { get; }
 
-    /// <summary>The calendar's zone: appointment times are in it, and the feed's cache time is shown in it.</summary>
+    /// <summary>
+    /// The calendar's zone: <see cref="Build"/> sets it to the <see cref="CalendarStore"/>'s zone, and it is never
+    /// <c>null</c>. The <c>Start</c>/<c>End</c> of <see cref="Appointments"/> are already local times in it, so don't
+    /// convert them again; convert <see cref="CachedAtUtc"/> with it before showing it. Renderers use it instead of
+    /// <c>TimeZoneInfo.Local</c>, so the view alone decides which zone times are shown in.
+    /// </summary>
     public TimeZoneInfo Zone { get; }
 
     /// <summary>Every appointment of the day (files and feed merged), sorted, not truncated.</summary>
