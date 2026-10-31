@@ -13,6 +13,12 @@ internal sealed record DueTodo
         Overdue = overdue;
     }
 
+    /// <summary>
+    /// Returns only the type name: the contents are raw outside text, so formatting this record must never
+    /// print them. Front ends draw it through their <c>Render</c> step.
+    /// </summary>
+    public override string ToString() => nameof(DueTodo);
+
     /// <summary>The todo's number as shown in the sidebar (1-based, in <see cref="TodoStore.List"/> order).</summary>
     public int Number { get; }
 
@@ -33,6 +39,12 @@ internal sealed record LinkedNote
         Name = name;
         Tags = tags;
     }
+
+    /// <summary>
+    /// Returns only the type name: the contents are raw outside text, so formatting this record must never
+    /// print them. Front ends draw it through their <c>Render</c> step.
+    /// </summary>
+    public override string ToString() => nameof(LinkedNote);
 
     /// <summary>The note name (raw: clean it before showing it).</summary>
     public string Name { get; }
@@ -81,6 +93,12 @@ internal sealed record CurrentView
         LinkedNotes = linkedNotes;
         IndexUnreadable = indexUnreadable;
     }
+
+    /// <summary>
+    /// Returns only the type name: the contents are raw outside text, so formatting this record must never
+    /// print them. Front ends draw it through their <c>Render</c> step.
+    /// </summary>
+    public override string ToString() => nameof(CurrentView);
 
     public DateOnly Today { get; }
 

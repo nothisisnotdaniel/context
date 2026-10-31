@@ -134,4 +134,19 @@ public sealed class LinksViewTests : IDisposable
             Assert.Equal(ViewParityTests.Goldens[golden], ViewParityTests.Render(TagCommands.Render(view), "/r"));
         }
     }
+
+    // AC-4 (042)
+    [Fact]
+    public void ToString_HidesRawText()
+    {
+        const string Marker = "SECRET-042\u001b[31m";
+        LinksView view = new LinksView(LinksViewKind.Links, Marker, Marker, [new NoteLink(Marker, [Marker])]);
+
+        string text = view.ToString();
+
+        Assert.Equal("LinksView", text);
+        Assert.Equal(text, $"{view}");
+        Assert.DoesNotContain("SECRET-042", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("\u001b", text, StringComparison.Ordinal);
+    }
 }

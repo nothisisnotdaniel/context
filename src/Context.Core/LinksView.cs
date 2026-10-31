@@ -33,6 +33,12 @@ internal sealed record LinksView
         Links = links;
     }
 
+    /// <summary>
+    /// Returns only the type name: the contents are raw outside text, so formatting this record must never
+    /// print them. Front ends draw it through their <c>Render</c> step.
+    /// </summary>
+    public override string ToString() => nameof(LinksView);
+
     public LinksViewKind Kind { get; }
 
     /// <summary>The name as typed, trimmed.</summary>

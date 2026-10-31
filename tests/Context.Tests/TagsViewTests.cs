@@ -142,4 +142,46 @@ public sealed class TagsViewTests : IDisposable
         Assert.Equal(ViewParityTests.Goldens["Notes_List"], ViewParityTests.Render(NoteCommands.Render(notes), "/r"));
         Assert.Equal(ViewParityTests.Goldens["Notes_Empty"], ViewParityTests.Render(NoteCommands.Render([]), "/r"));
     }
+
+    // AC-3 (042)
+    [Fact]
+    public void ToString_EveryKind_HidesRawText()
+    {
+        const string Marker = "SECRET-042\u001b[31m";
+        TagsViewKind[] kinds =
+        [
+            TagsViewKind.AllTags,
+            TagsViewKind.NotesWithTag,
+            TagsViewKind.NoSuchTag,
+            TagsViewKind.IndexUnreadable,
+        ];
+
+        foreach (TagsViewKind kind in kinds)
+        {
+            TagsView view = new TagsView(kind, Marker, [new TagCount(Marker, 2)], [Marker]);
+
+            string text = view.ToString();
+
+            Assert.Equal("TagsView", text);
+            Assert.Equal(text, $"{view}");
+            Assert.DoesNotContain("SECRET-042", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("\u001b", text, StringComparison.Ordinal);
+        }
+    }
+
+    // AC-6 (042)
+    [Fact]
+    public void Equals_EqualArguments_StillEqual()
+    {
+        IReadOnlyList<TagCount> tags = [new TagCount("work", 2)];
+        IReadOnlyList<string> notes = ["A"];
+
+        TagsView first = new TagsView(TagsViewKind.AllTags, string.Empty, tags, notes);
+        TagsView second = new TagsView(TagsViewKind.AllTags, string.Empty, tags, notes);
+
+        Assert.Equal(first, second);
+        Assert.True(first.Equals(second));
+        Assert.Equal(first.GetHashCode(), second.GetHashCode());
+        Assert.NotEqual(first, new TagsView(TagsViewKind.NoSuchTag, string.Empty, tags, notes));
+    }
 }

@@ -30,6 +30,12 @@ internal sealed record TagsView
         Notes = notes;
     }
 
+    /// <summary>
+    /// Returns only the type name: the contents are raw outside text, so formatting this record must never
+    /// print them. Front ends draw it through their <c>Render</c> step.
+    /// </summary>
+    public override string ToString() => nameof(TagsView);
+
     public TagsViewKind Kind { get; }
 
     /// <summary>

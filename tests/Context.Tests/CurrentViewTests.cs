@@ -328,4 +328,57 @@ public sealed class CurrentViewTests : IDisposable
         Assert.Equal(
             ViewParityTests.Goldens["Current_BadDb"], ViewParityTests.Render(CurrentCommands.Render(badDb), "/n"));
     }
+
+    // AC-1 (042)
+    [Fact]
+    public void ToString_HidesRawText()
+    {
+        const string Marker = "SECRET-042\u001b[31m";
+        DateTime start = Today.ToDateTime(new TimeOnly(9, 0));
+        Appointment appointment = new Appointment(Marker, Marker, start, start.AddHours(1), false);
+        DueTodo todo = new DueTodo(1, Today, Marker + " #" + Marker, false);
+        LinkedNote note = new LinkedNote(Marker, [Marker]);
+        CurrentView view = new CurrentView(
+            Today,
+            Zone,
+            [appointment],
+            Marker,
+            [Marker],
+            CalendarFeedStatus.Failed,
+            null,
+            Marker,
+            false,
+            [todo],
+            [note],
+            false);
+
+        string text = view.ToString();
+
+        Assert.Equal("CurrentView", text);
+        Assert.Equal(text, $"{view}");
+        Assert.DoesNotContain("SECRET-042", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("\u001b", text, StringComparison.Ordinal);
+    }
+
+    // AC-2 (042)
+    [Fact]
+    public void ToString_DueTodoAndLinkedNote_HideRawText()
+    {
+        const string Marker = "SECRET-042\u001b[31m";
+        DueTodo todo = new DueTodo(3, Today, Marker, true);
+        LinkedNote note = new LinkedNote(Marker, [Marker, "work"]);
+
+        string todoText = todo.ToString();
+        string noteText = note.ToString();
+
+        Assert.Equal("DueTodo", todoText);
+        Assert.Equal("LinkedNote", noteText);
+        Assert.Equal(todoText, $"{todo}");
+        Assert.Equal(noteText, $"{note}");
+        foreach (string text in new[] { todoText, noteText })
+        {
+            Assert.DoesNotContain("SECRET-042", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("\u001b", text, StringComparison.Ordinal);
+        }
+    }
 }
