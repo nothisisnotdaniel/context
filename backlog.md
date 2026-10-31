@@ -62,7 +62,8 @@ Write one feature per line, in plain language.
 - [ ] Skip nested bin/obj: the source scan in `CoreDependencyTests` skips `bin/` and `obj/` only at the top of the project folder; skip them at any depth.
 - [ ] State the test namespace: say in `CLAUDE.md` that test files use `namespace Context.Tests;` (file-scoped), so specs and new tests get it right.
 - [ ] Safe ToString on all records: give the records inside the views (`Appointment`, `NoteLink`, `TagCount`) and the other Core records holding raw text (`TodoItem`, `NoteInfo`, `Note`, `CalendarDay`, `CalendarFeedResult`, `MigrationResult`) the same `ToString() => nameof(<Type>)` override as the views (job 042), with tests.
-- [ ] Wrap CLAUDE.md sentence: rewrap the sentence added under "Data step in Core" in `CLAUDE.md` (job 042) to the surrounding line width.
+- [ ] Wrap CLAUDE.md lines: rewrap the sentence added under "Data step in Core" (job 042) and the `/current` bullet (job 046, about 150 characters) in `CLAUDE.md` to the surrounding line width.
 - [ ] Fix flaky 5 MB feed test: `CalendarFeedTests.Fetch_ExactlyFiveMb_Accepted` streams 5 MB under a 100 ms test timeout and failed once on a cold run; make it reliable (e.g. a longer timeout for that test only) without weakening the 5 MB cap check.
 - [ ] Precise Reason doc: the `CurrentView.Reason` doc says it is always one of the fixed texts, but `HTTP <code>` is built from the status code; say "a fixed text or `HTTP <code>`" so front ends don't assume a closed list.
 - [ ] Easier-to-scan view docs: split the `CurrentView.Status` summary into a `<list>` with one entry per value, and add a test that pins what `CalendarFeedResult` holds for NotConfigured (no text, no time, no reason).
+- [ ] Zone in CalendarLinkView: `CalendarLinkCommands.Render(CalendarLinkView, TimeZoneInfo zone)` takes the time zone as a separate parameter; put it on `CalendarLinkView` (documented like `CurrentView.Zone`, job 046) so the renderer draws only from its view.
