@@ -58,3 +58,6 @@ Write one feature per line, in plain language.
 - [ ] Measure encrypted start-up: time the in-memory tag index rebuild with encryption on for 100, 1,000 and 5,000 notes; only if it is slow, keep an encrypted copy of the index between sessions without ever writing plain data to disk.
 - [ ] Encryption UX polish: `/encrypt` re-asks after a passphrase shorter than 12 characters, the `/decrypt` success message mentions that the tag index is rebuilt, and the encryption warnings and hints fit narrow terminals.
 - [ ] Encryption cleanup: document `MinIterations` vs `MinUnlockIterations`, fix the `TempSuffix` comment ("prefix" → "suffix"), cap temp file names for very long note titles in `NoteStore.Save`, and compare paths case-sensitively in `NoteStore.Contains` on case-sensitive file systems.
+- [ ] Say why in Core dependency failures: `CoreDependencyTests` failure messages also state the rule, that Core must stay free of Spectre so other front ends (the desktop app) can use it.
+- [ ] Skip nested bin/obj: the source scan in `CoreDependencyTests` skips `bin/` and `obj/` only at the top of the project folder; skip them at any depth.
+- [ ] State the test namespace: say in `CLAUDE.md` that test files use `namespace Context.Tests;` (file-scoped), so specs and new tests get it right.
