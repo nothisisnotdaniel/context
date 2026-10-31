@@ -30,6 +30,11 @@ internal sealed record CalendarFeedResult
         Reason = reason;
     }
 
+    /// <summary>
+    /// Where the text came from: <c>NotConfigured</c> (no text, no time, no reason), <c>Fresh</c> (text and time),
+    /// <c>Stale</c> (the older cached text and its time, plus a <see cref="Reason"/>) or <c>Failed</c> (only a
+    /// <see cref="Reason"/>).
+    /// </summary>
     public CalendarFeedStatus Status { get; }
 
     /// <summary>The iCalendar text (fresh or cached); <c>null</c> for <c>NotConfigured</c> and <c>Failed</c>.</summary>

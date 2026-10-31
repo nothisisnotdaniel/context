@@ -39,15 +39,29 @@ internal sealed record LinksView
     /// </summary>
     public override string ToString() => nameof(LinksView);
 
+    /// <summary>
+    /// What was found; read it first to pick the fields to use: <c>MissingArgument</c> → no field (draw a usage
+    /// hint); <c>NoSuchNote</c> → <see cref="Typed"/>; <c>NoLinks</c> → <see cref="Note"/>; <c>Links</c> →
+    /// <see cref="Note"/> and <see cref="Links"/>; <c>IndexUnreadable</c> → no field (draw an error).
+    /// </summary>
     public LinksViewKind Kind { get; }
 
-    /// <summary>The name as typed, trimmed.</summary>
+    /// <summary>
+    /// The name as typed, trimmed (raw: clean and escape it before showing it). Set for every kind; empty
+    /// (<c>""</c>) for <c>MissingArgument</c>. Shown for <c>NoSuchNote</c>.
+    /// </summary>
     public string Typed { get; }
 
-    /// <summary>The indexed note that matched (<c>NoLinks</c>, <c>Links</c>), else <c>null</c>.</summary>
+    /// <summary>
+    /// The name of the indexed note that matched (raw: clean and escape it before showing it). Non-null exactly for
+    /// <c>NoLinks</c> and <c>Links</c>; every other kind gives <c>null</c>.
+    /// </summary>
     public string? Note { get; }
 
-    /// <summary>The linked notes and their shared tags (<c>Links</c> only).</summary>
+    /// <summary>
+    /// The linked notes and their shared tags (raw: clean and escape them before showing them). Non-empty only for
+    /// <c>Links</c>; every other kind gives empty (<c>[]</c>), never null.
+    /// </summary>
     public IReadOnlyList<NoteLink> Links { get; }
 
     /// <summary>

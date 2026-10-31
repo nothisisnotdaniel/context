@@ -100,6 +100,7 @@ internal sealed record CurrentView
     /// </summary>
     public override string ToString() => nameof(CurrentView);
 
+    /// <summary>The day the view is for (the title date); due todos are those due on or before it.</summary>
     public DateOnly Today { get; }
 
     /// <summary>The calendar's zone: appointment times are in it, and the feed's cache time is shown in it.</summary>
@@ -114,14 +115,29 @@ internal sealed record CurrentView
     /// <summary>The names of the calendar files that couldn't be read (raw).</summary>
     public IReadOnlyList<string> UnreadableCalendarFiles { get; }
 
-    /// <summary>The Exchange feed's status; <c>NotConfigured</c> without a feed.</summary>
+    /// <summary>
+    /// The Exchange feed's status, and the feed line a renderer draws for it (the feed's events are already merged
+    /// into <see cref="Appointments"/>):
+    /// <c>NotConfigured</c> (no link set, or no feed given) and <c>Fresh</c>: no feed line.
+    /// <c>Stale</c>: the download failed and the events are the older cached copy; draw an offline line with the
+    /// cache time from <see cref="CachedAtUtc"/>, and only when it is non-null (<see cref="Build"/> always sets it
+    /// for <c>Stale</c>, but a hand-built view may not). <see cref="Reason"/> is set too, but showing it is optional.
+    /// <c>Failed</c>: the download failed and there is no cached copy; draw an error line with <see cref="Reason"/>.
+    /// Never show the calendar link itself in any of these lines.
+    /// </summary>
     public CalendarFeedStatus Status { get; }
 
-    /// <summary>When the feed's text was downloaded (UTC), if there is any.</summary>
+    /// <summary>
+    /// When the feed's text was downloaded (UTC; convert it with <see cref="Zone"/> before showing it). Non-null for
+    /// <c>Stale</c> (the time of the cached copy), also set for <c>Fresh</c>; <c>null</c> for <c>NotConfigured</c>
+    /// and <c>Failed</c>. Check it for <c>null</c> before using it.
+    /// </summary>
     public DateTime? CachedAtUtc { get; }
 
     /// <summary>
-    /// Why the feed failed (<c>Stale</c>, <c>Failed</c>): one of the fixed texts in <see cref="CalendarFeed"/>.
+    /// Why the feed failed: non-null for <c>Stale</c> and <c>Failed</c>, <c>null</c> otherwise. It is always one of
+    /// the fixed texts in <see cref="CalendarFeed"/>, never an exception message; still clean and escape it like
+    /// any other text before showing it.
     /// </summary>
     public string? Reason { get; }
 
