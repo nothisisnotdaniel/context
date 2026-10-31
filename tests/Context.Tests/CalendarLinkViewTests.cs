@@ -258,4 +258,30 @@ public sealed class CalendarLinkViewTests : IDisposable
                 ViewParityTests.Render(CalendarLinkCommands.Render(view, zone), "/r"));
         }
     }
+
+    // AC-5 (042)
+    [Fact]
+    public void ToString_HidesMaskedLink()
+    {
+        CalendarLinkView view = new CalendarLinkView(CalendarLinkViewKind.Shown, "https://SECRET-042/…", Now);
+
+        string text = view.ToString();
+
+        Assert.Equal("CalendarLinkView", text);
+        Assert.Equal(text, $"{view}");
+        Assert.DoesNotContain("SECRET-042", text, StringComparison.Ordinal);
+    }
+
+    // AC-6 (042)
+    [Fact]
+    public void Equals_EqualArguments_StillEqual()
+    {
+        CalendarLinkView first = new CalendarLinkView(CalendarLinkViewKind.Shown, "https://host/…", Now);
+        CalendarLinkView second = new CalendarLinkView(CalendarLinkViewKind.Shown, "https://host/…", Now);
+
+        Assert.Equal(first, second);
+        Assert.True(first.Equals(second));
+        Assert.Equal(first.GetHashCode(), second.GetHashCode());
+        Assert.NotEqual(first, new CalendarLinkView(CalendarLinkViewKind.Saved, "https://host/…"));
+    }
 }

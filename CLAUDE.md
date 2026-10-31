@@ -169,6 +169,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     an `internal static Render(...)` in its `*Commands` class that only maps that view to a `CommandResult` (no
     store, index, feed or file access). Markup, colours, `SafeText.Clean` + `Markup.Escape`, fixed message texts
     and row caps live in the renderer, so any other front end can draw the same data its own way.
+    View records (and `DueTodo`, `LinkedNote`) override `ToString()` to return only their type name, so their raw text never
+    leaks through formatting; nobody formats a view directly.
   - `src/Context/`: the console app (references `Context.Core` by `ProjectReference`, plus `Spectre.Console`).
     `Program.cs` only wires things up (builds the registry with
     `CreateDefault()` + `NoteCommands.Register` + `TagCommands.Register` + `TodoCommands.Register` + `CalendarLinkCommands.Register` + `CurrentCommands.Register` (with a `CalendarStore(folder, TimeZoneInfo.Local)` and a `CalendarFeed` over a `SocketsHttpHandler` with `MaxAutomaticRedirections = 5`) + `EncryptionCommands.Register`, all stores sharing one `Encryption(folder)`; passes the registry, a `TodoSidebar`,
