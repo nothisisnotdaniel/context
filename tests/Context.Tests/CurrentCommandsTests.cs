@@ -792,4 +792,44 @@ public sealed class CurrentCommandsTests : IDisposable
         Assert.DoesNotContain("Exchange calendar", console.Output, StringComparison.Ordinal);
         Assert.Contains("No appointments today", console.Output, StringComparison.Ordinal);
     }
+
+    // 046 AC-3: the cache time is shown in view.Zone, not the machine's zone.
+    [Fact]
+    public void Render_StaleCacheTime_UsesViewZone()
+    {
+        DateTime cachedAt = new(2026, 10, 29, 10, 0, 0, DateTimeKind.Utc);
+        TimeZoneInfo plusOne = TimeZoneInfo.CreateCustomTimeZone(
+            "Test+01:00", TimeSpan.FromHours(1), "Test+01:00", "Test+01:00");
+        TimeZoneInfo plusFiveFortyFive = TimeZoneInfo.CreateCustomTimeZone(
+            "Test+05:45", new TimeSpan(5, 45, 0), "Test+05:45", "Test+05:45");
+
+        string one = RenderStale(plusOne, cachedAt);
+        string other = RenderStale(plusFiveFortyFive, cachedAt);
+
+        Assert.Contains("showing the copy from 2026-10-29 11:00.", one, StringComparison.Ordinal);
+        Assert.Contains("showing the copy from 2026-10-29 15:45.", other, StringComparison.Ordinal);
+    }
+
+    private static string RenderStale(TimeZoneInfo zone, DateTime cachedAtUtc)
+    {
+        CurrentView view = new CurrentView(
+            Today,
+            zone,
+            [],
+            "/nowhere/calendar",
+            [],
+            CalendarFeedStatus.Stale,
+            cachedAtUtc,
+            "timed out",
+            false,
+            [],
+            [],
+            false);
+
+        CommandResult result = CurrentCommands.Render(view);
+        TestConsole console = new TestConsole();
+        console.Profile.Width = Width;
+        console.Write(Assert.IsAssignableFrom<Spectre.Console.Rendering.IRenderable>(result.Message));
+        return console.Output;
+    }
 }
