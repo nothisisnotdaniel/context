@@ -61,3 +61,5 @@ Write one feature per line, in plain language.
 - [ ] Say why in Core dependency failures: `CoreDependencyTests` failure messages also state the rule, that Core must stay free of Spectre so other front ends (the desktop app) can use it.
 - [ ] Skip nested bin/obj: the source scan in `CoreDependencyTests` skips `bin/` and `obj/` only at the top of the project folder; skip them at any depth.
 - [ ] State the test namespace: say in `CLAUDE.md` that test files use `namespace Context.Tests;` (file-scoped), so specs and new tests get it right.
+- [ ] Safe ToString on all records: give the records inside the views (`Appointment`, `NoteLink`, `TagCount`) and the other Core records holding raw text (`TodoItem`, `NoteInfo`, `Note`, `CalendarDay`, `CalendarFeedResult`, `MigrationResult`) the same `ToString() => nameof(<Type>)` override as the views (job 042), with tests.
+- [ ] Wrap CLAUDE.md sentence: rewrap the sentence added under "Data step in Core" in `CLAUDE.md` (job 042) to the surrounding line width.
