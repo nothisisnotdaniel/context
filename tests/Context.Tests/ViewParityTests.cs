@@ -290,6 +290,19 @@ public sealed class ViewParityTests : IDisposable
         AssertGolden(name, Run("/links", argument));
     }
 
+    // 048 AC-8: To, From, Both (with a shared tag), a tag-only row and a missing note.
+    [Fact]
+    public void Links_NoteLinks()
+    {
+        WriteNote("A", "#work [[Beta]] [[Gamma]] [[delta.md]]");
+        WriteNote("Beta", "#work [[A]]");
+        WriteNote("c", "#work");
+        WriteNote("Delta", "plain");
+        WriteNote("Epsilon", "see [[a]]");
+
+        AssertGolden(nameof(Links_NoteLinks), Run("/links", "A"));
+    }
+
     [Fact]
     public void Links_BadDb()
     {
@@ -624,12 +637,30 @@ public sealed class ViewParityTests : IDisposable
         (none)
         """,
 
+        ["Links_NoteLinks"] =
+        """
+        message:
+                         ␛[38;5;75mLinked to A␛[0m
+        ␛[38;5;8m╭─────────┬────────────────────┬─────────────╮␛[0m
+        ␛[38;5;8m│␛[0m ␛[38;5;8mNote␛[0m    ␛[38;5;8m│␛[0m ␛[38;5;8mLink␛[0m               ␛[38;5;8m│␛[0m ␛[38;5;8mShared tags␛[0m ␛[38;5;8m│␛[0m
+        ␛[38;5;8m├─────────┼────────────────────┼─────────────┤␛[0m
+        ␛[38;5;8m│␛[0m ␛[38;5;75mBeta␛[0m    ␛[38;5;8m│␛[0m ␛[38;5;8mboth ways␛[0m          ␛[38;5;8m│␛[0m ␛[38;5;8m#work␛[0m       ␛[38;5;8m│␛[0m
+        ␛[38;5;8m│␛[0m ␛[38;5;75mc␛[0m       ␛[38;5;8m│␛[0m                    ␛[38;5;8m│␛[0m ␛[38;5;8m#work␛[0m       ␛[38;5;8m│␛[0m
+        ␛[38;5;8m│␛[0m ␛[38;5;75mDelta␛[0m   ␛[38;5;8m│␛[0m ␛[38;5;8mlinks to␛[0m           ␛[38;5;8m│␛[0m             ␛[38;5;8m│␛[0m
+        ␛[38;5;8m│␛[0m ␛[38;5;75mEpsilon␛[0m ␛[38;5;8m│␛[0m ␛[38;5;8mlinked from␛[0m        ␛[38;5;8m│␛[0m             ␛[38;5;8m│␛[0m
+        ␛[38;5;8m│␛[0m ␛[38;5;8mGamma␛[0m   ␛[38;5;8m│␛[0m ␛[38;5;8mlinks to (missing)␛[0m ␛[38;5;8m│␛[0m             ␛[38;5;8m│␛[0m
+        ␛[38;5;8m╰─────────┴────────────────────┴─────────────╯␛[0m
+
+        hint:
+        (none)
+        """,
+
         ["Links_NoArgument"] =
         """
         message:
         (none)
         hint:
-        ␛[38;5;9mType ␛[0m␛[1;38;5;9m/links <note>␛[0m␛[38;5;9m to see the notes that share a tag with it. Type ␛[0m␛[1;38;5;9m/notes␛[0m␛[38;5;9m to see all notes.␛[0m
+        ␛[38;5;9mType ␛[0m␛[1;38;5;9m/links <note>␛[0m␛[38;5;9m to see the notes linked to it by tags or [[links]]. Type ␛[0m␛[1;38;5;9m/notes␛[0m␛[38;5;9m to see all notes.␛[0m
         """,
 
         ["Links_NoLinks"] =

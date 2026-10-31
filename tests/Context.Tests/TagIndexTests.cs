@@ -42,6 +42,34 @@ public sealed class TagIndexTests : IDisposable
         File.WriteAllText(Path.Combine(root, name + ".md"), text);
     }
 
+    /// <summary>Every (note, target) row of <c>note_links</c>, read directly.</summary>
+    private List<(string Note, string Target)> LinkRows()
+    {
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT note, target FROM note_links ORDER BY note, target";
+        using SqliteDataReader reader = command.ExecuteReader();
+        List<(string, string)> rows = [];
+        while (reader.Read())
+        {
+            rows.Add((reader.GetString(0), reader.GetString(1)));
+        }
+
+        return rows;
+    }
+
+    /// <summary>Rewrites a note and moves its last-write time forward, so the next sync re-parses it.</summary>
+    private void EditNote(string name, string text)
+    {
+        string path = Path.Combine(root, name + ".md");
+        DateTime before = File.GetLastWriteTimeUtc(path);
+        File.WriteAllText(path, text);
+        File.SetLastWriteTimeUtc(path, before.AddSeconds(5));
+    }
+
+    private static string Describe(NoteLink link) =>
+        $"{link.Note}|{link.Direction}|{link.Missing}|{string.Join(",", link.SharedTags)}";
+
     /// <summary>Every (note, tag) row in the database, read directly.</summary>
     private List<(string Note, string Tag)> Rows()
     {
@@ -306,7 +334,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(1, TagIndex.ParserVersion);
+        Assert.Equal(2, TagIndex.ParserVersion);
     }
 
     // 024 AC-6
@@ -336,7 +364,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal([("A", "a b"), ("B", "keep")], Rows());
-        Assert.Equal(1, UserVersion());
+        Assert.Equal(TagIndex.ParserVersion, UserVersion());
 
         // Upgraded once: unchanged times are not re-parsed again.
         File.WriteAllText(a, "#[c d]");
@@ -344,7 +372,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal([("A", "a b"), ("B", "keep")], Rows());
-        Assert.Equal(1, UserVersion());
+        Assert.Equal(TagIndex.ParserVersion, UserVersion());
     }
 
     // 024 AC-6: a newer version is left alone, not lowered.
@@ -426,5 +454,251 @@ public sealed class TagIndexTests : IDisposable
         Assert.False(switching.InMemory);
         Assert.True(File.Exists(DbPath));
         Assert.Equal(["work"], switching.Tags().Select(t => t.Tag));
+    }
+
+    // 048 AC-4: the old constructor means a tag link only.
+    [Fact]
+    public void NoteLink_OldConstructor_IsTagOnly()
+    {
+        NoteLink link = new NoteLink("A", ["work"]);
+
+        Assert.Equal(NoteLinkDirection.None, link.Direction);
+        Assert.False(link.Missing);
+    }
+
+    // 048 AC-3
+    [Theory]
+    [InlineData("Beta")]
+    [InlineData("beta")]
+    [InlineData("beta.MD")]
+    [InlineData("BETA.md")]
+    public void Links_TargetResolvesLikeOpen(string target)
+    {
+        WriteNote("A", $"[[{target}]]");
+        WriteNote("Beta", "plain");
+        index.Sync(store);
+
+        Assert.Equal(["Beta|To|False|"], index.Links("A").Select(Describe));
+        Assert.Equal(["A|From|False|"], index.Links("Beta").Select(Describe));
+    }
+
+    // 048 AC-3: exact before ignoring case, and the name as written before stripping .md.
+    [Fact]
+    public void Links_Resolve_ExactFirst_ThenWithoutMd()
+    {
+        WriteNote("A", "[[x.md]] [[Y]]");
+        WriteNote("x.md", "plain");
+        WriteNote("x", "plain");
+        WriteNote("y", "plain");
+        index.Sync(store);
+
+        Assert.Equal(["x.md|To|False|", "y|To|False|"], index.Links("A").Select(Describe));
+
+        NameLookup names = new NameLookup(["Beta", "beta", "c"]);
+        Assert.Equal("beta", names.Resolve("beta"));
+        Assert.Equal("Beta", names.Resolve("Beta.md"));
+        Assert.Equal("c", names.Resolve("C.MD"));
+        Assert.Null(names.Resolve(".md"));
+        Assert.Null(names.Resolve("d"));
+    }
+
+    // 048 AC-4
+    [Fact]
+    public void Links_Directions_SharedTags_OnceEach_NeverSelf_Sorted()
+    {
+        WriteNote("A", "#work [[Beta]] [[A]] [[a.md]] [[charlie]] [[Beta.md]]");
+        WriteNote("Beta", "#work #home [[A]]");
+        WriteNote("charlie", "#home");
+        WriteNote("Delta", "[[a]]");
+        WriteNote("echo", "#work");
+        index.Sync(store);
+
+        Assert.Equal(
+            ["Beta|Both|False|work", "charlie|To|False|", "Delta|From|False|", "echo|None|False|work"],
+            index.Links("A").Select(Describe));
+        Assert.Equal(
+            ["A|Both|False|work", "charlie|None|False|home", "echo|None|False|work"],
+            index.Links("Beta").Select(Describe));
+        Assert.Equal(["A|To|False|"], index.Links("Delta").Select(Describe));
+    }
+
+    // 048 AC-4: a note that only links to itself has no links.
+    [Fact]
+    public void Links_SelfLinkOnly_IsNoLink()
+    {
+        WriteNote("A", "[[A]] [[a.md]]");
+        index.Sync(store);
+
+        Assert.Empty(index.Links("A"));
+    }
+
+    // 048 AC-5
+    [Fact]
+    public void Links_MissingTarget_ResolvesOnceTheNoteExists_WithoutReparsing()
+    {
+        WriteNote("A", "[[Gamma]] [[gamma.md]]");
+        string a = Path.Combine(root, "A.md");
+        DateTime time = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(a, time);
+        index.Sync(store);
+
+        NoteLink missing = Assert.Single(index.Links("A"));
+        Assert.Equal("Gamma", missing.Note);
+        Assert.Equal(NoteLinkDirection.To, missing.Direction);
+        Assert.True(missing.Missing);
+        Assert.Empty(missing.SharedTags);
+
+        // A changes on disk but keeps its time, so it must not be read again: the old link stays.
+        File.WriteAllText(a, "[[Other]]");
+        File.SetLastWriteTimeUtc(a, time);
+        WriteNote("Gamma", "plain");
+        index.Sync(store);
+
+        Assert.Equal(["Gamma|To|False|"], index.Links("A").Select(Describe));
+        Assert.Equal(["A|From|False|"], index.Links("Gamma").Select(Describe));
+        Assert.Equal([("A", "Gamma"), ("A", "gamma.md")], LinkRows());
+    }
+
+    // 048 AC-6
+    [Fact]
+    public void Sync_KeepsNoteLinksUpToDate()
+    {
+        WriteNote("A", "[[Beta]] [[Gamma]]");
+        WriteNote("Beta", "[[A]]");
+        index.Sync(store);
+        Assert.Equal([("A", "Beta"), ("A", "Gamma"), ("Beta", "A")], LinkRows());
+
+        EditNote("A", "[[Gamma]]");
+        index.Sync(store);
+        Assert.Equal([("A", "Gamma"), ("Beta", "A")], LinkRows());
+        Assert.Equal(["Beta|From|False|", "Gamma|To|True|"], index.Links("A").Select(Describe));
+
+        File.Delete(Path.Combine(root, "A.md"));
+        index.Sync(store);
+        Assert.Equal([("Beta", "A")], LinkRows());
+        Assert.Equal(["A|To|True|"], index.Links("Beta").Select(Describe));
+    }
+
+    // 048 AC-6: orphaned link rows (no note row) are removed.
+    [Fact]
+    public void Sync_RemovesOrphanedLinkRows()
+    {
+        WriteNote("A", "plain");
+        index.Sync(store);
+        using (SqliteConnection connection = Open())
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "INSERT INTO note_links(note, target) VALUES('Ghost', 'A')";
+            command.ExecuteNonQuery();
+        }
+
+        index.Sync(store);
+
+        Assert.Empty(LinkRows());
+        Assert.Empty(index.Links("A"));
+    }
+
+    // 048 AC-6: an unreadable note has no link rows and is retried.
+    [Fact]
+    public void Sync_UnreadableNote_HasNoLinks_AndIsRetried()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        WriteNote("A", "plain");
+        WriteNote("B", "[[A]]");
+        index.Sync(store);
+        string b = Path.Combine(root, "B.md");
+        File.WriteAllText(b, "[[A]] [[C]]");
+        File.SetLastWriteTimeUtc(b, DateTime.UtcNow.AddMinutes(1));
+        File.SetUnixFileMode(b, UnixFileMode.None);
+        if (CanRead(b))
+        {
+            return;
+        }
+
+        index.Sync(store);
+        Assert.Empty(LinkRows());
+        Assert.Empty(index.Links("A"));
+
+        File.SetUnixFileMode(b, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        index.Sync(store);
+        Assert.Equal([("B", "A"), ("B", "C")], LinkRows());
+    }
+
+    // 048 AC-6: a version 1 database gets the links of unchanged notes after one sync.
+    [Fact]
+    public void Sync_VersionOneDatabase_ParsesLinksOnce()
+    {
+        WriteNote("A", "#work [[Beta]]");
+        WriteNote("Beta", "plain");
+        string a = Path.Combine(root, "A.md");
+        DateTime time = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(a, time);
+        index.Sync(store);
+
+        // Make it look like an index from before note links: version 1 and no link rows.
+        using (SqliteConnection connection = Open())
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "PRAGMA user_version = 1; DELETE FROM note_links WHERE note = 'A';";
+            command.ExecuteNonQuery();
+        }
+
+        Assert.Empty(LinkRows());
+        Assert.Equal(1, UserVersion());
+
+        index.Sync(store);
+
+        Assert.Equal([("A", "Beta")], LinkRows());
+        Assert.Equal([("A", "work")], Rows());
+        Assert.Equal(2, UserVersion());
+        Assert.Equal(["Beta|To|False|"], index.Links("A").Select(Describe));
+    }
+
+    // 048 AC-7
+    [Fact]
+    public void Encrypted_NoteLinks_WorkInMemory()
+    {
+        Encryption encryption = SampleData.On(root);
+        NoteStore encrypted = new NoteStore(root, encryption);
+        using TagIndex memory = new TagIndex(root, encryption);
+        encrypted.Save("Plan", "# Plan\n[[Other]] [[Missing]]\n"u8.ToArray());
+        encrypted.Save("Other", "# Other\n[[plan.md]]\n"u8.ToArray());
+
+        memory.Sync(encrypted);
+
+        Assert.True(memory.InMemory);
+        Assert.Equal(["Missing|To|True|", "Other|Both|False|"], memory.Links("Plan").Select(Describe));
+        Assert.Equal(["Plan|Both|False|"], memory.Links("Other").Select(Describe));
+        Assert.False(File.Exists(DbPath));
+        Assert.Empty(Directory.GetFiles(root, "context.db*"));
+    }
+
+    // 048 AC-6: a database that isn't valid still throws and is left as it was.
+    [Fact]
+    public void Garbage_Database_LinksThrow_BytesUnchanged()
+    {
+        WriteNote("A", "[[B]]");
+        byte[] garbage = new byte[4096];
+        new Random(48).NextBytes(garbage);
+        File.WriteAllBytes(DbPath, garbage);
+
+        Assert.Throws<TagIndexException>(() => index.Sync(store));
+        Assert.Throws<TagIndexException>(() => index.Links("A"));
+        Assert.Equal(garbage, File.ReadAllBytes(DbPath));
+    }
+
+    // Security: link targets go in as parameters and are stored literally.
+    [Fact]
+    public void Sync_TargetWithQuotes_StoredLiterally()
+    {
+        WriteNote("A", "[[x'); DROP TABLE notes; --]]");
+        index.Sync(store);
+
+        Assert.Equal([("A", "x'); DROP TABLE notes; --")], LinkRows());
+        Assert.Equal(["x'); DROP TABLE notes; --|To|True|"], index.Links("A").Select(Describe));
     }
 }

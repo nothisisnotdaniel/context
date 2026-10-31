@@ -16,18 +16,101 @@ internal sealed record TagCount
     public int Count { get; }
 }
 
-/// <summary>A note linked to another note, and the tags the two share (sorted).</summary>
+/// <summary>Which way the <c>[[note links]]</c> between two notes go, seen from the note asked about.</summary>
+internal enum NoteLinkDirection
+{
+    /// <summary>No <c>[[link]]</c> either way: the notes only share tags.</summary>
+    None,
+
+    /// <summary>The note asked about links to <see cref="NoteLink.Note"/>.</summary>
+    To,
+
+    /// <summary><see cref="NoteLink.Note"/> links to the note asked about.</summary>
+    From,
+
+    /// <summary>Both notes link to each other.</summary>
+    Both,
+}
+
+/// <summary>
+/// A note linked to another note: by the tags the two share (sorted), by <c>[[note links]]</c>
+/// (<see cref="Direction"/>), or both.
+/// </summary>
 internal sealed record NoteLink
 {
+    /// <summary>A link by shared tags only: <see cref="Direction"/> is <c>None</c>, <see cref="Missing"/> false.</summary>
     public NoteLink(string note, IReadOnlyList<string> sharedTags)
+        : this(note, sharedTags, NoteLinkDirection.None, missing: false)
+    {
+    }
+
+    public NoteLink(string note, IReadOnlyList<string> sharedTags, NoteLinkDirection direction, bool missing)
     {
         Note = note;
         SharedTags = sharedTags;
+        Direction = direction;
+        Missing = missing;
     }
 
+    /// <summary>
+    /// The other note's name (raw), or for a <see cref="Missing"/> note the link target as written.
+    /// </summary>
     public string Note { get; }
 
+    /// <summary>The tags the two notes share, sorted (ordinal); empty when they share none.</summary>
     public IReadOnlyList<string> SharedTags { get; }
+
+    /// <summary>Which way the <c>[[note links]]</c> go; <c>None</c> when the notes only share tags.</summary>
+    public NoteLinkDirection Direction { get; }
+
+    /// <summary>
+    /// True when the note asked about links to <see cref="Note"/> but no note has that name yet. Then
+    /// <see cref="Direction"/> is <c>To</c> and <see cref="SharedTags"/> is empty. Once the note exists, the
+    /// link resolves without the linking note being edited.
+    /// </summary>
+    public bool Missing { get; }
+}
+
+/// <summary>The indexed note names, for matching typed names and <c>[[link]]</c> targets in constant time.</summary>
+internal sealed class NameLookup
+{
+    private readonly HashSet<string> exact = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> folded = new(StringComparer.OrdinalIgnoreCase);
+
+    public NameLookup(IEnumerable<string> names)
+    {
+        foreach (string name in names)
+        {
+            exact.Add(name);
+            folded.TryAdd(name, name);
+        }
+    }
+
+    /// <summary>The note called <paramref name="wanted"/>: an exact match first, then one ignoring case.</summary>
+    public string? Match(string wanted)
+    {
+        if (exact.Contains(wanted))
+        {
+            return wanted;
+        }
+
+        return folded.TryGetValue(wanted, out string? name) ? name : null;
+    }
+
+    /// <summary>
+    /// The note a <c>[[link]]</c> target names, like <c>/open</c>: the target as written, then with one trailing
+    /// <c>.md</c> removed (ignoring case); each step is <see cref="Match"/>. <c>null</c> if no note matches.
+    /// </summary>
+    public string? Resolve(string target)
+    {
+        string? found = Match(target);
+        if (found is null && target.EndsWith(".md", StringComparison.OrdinalIgnoreCase) && target.Length > 3)
+        {
+            found = Match(target[..^3]);
+        }
+
+        return found;
+    }
 }
 
 /// <summary>
@@ -64,13 +147,18 @@ internal sealed class TagIndex : IDisposable
             tag TEXT NOT NULL,
             PRIMARY KEY(note, tag));
         CREATE INDEX IF NOT EXISTS note_tags_tag ON note_tags(tag);
+        CREATE TABLE IF NOT EXISTS note_links(
+            note TEXT NOT NULL,
+            target TEXT NOT NULL,
+            PRIMARY KEY(note, target));
         """;
 
     /// <summary>
     /// The parser version the stored tags were made with, kept in <c>PRAGMA user_version</c>. When the
     /// database has an older one, <see cref="Sync"/> re-parses every note once. 1: <c>#[bracket tags]</c>.
+    /// 2: <c>[[note links]]</c>.
     /// </summary>
-    public const int ParserVersion = 1;
+    public const int ParserVersion = 2;
 
     private readonly string root;
     private readonly Encryption? encryption;
@@ -94,9 +182,10 @@ internal sealed class TagIndex : IDisposable
 
     /// <summary>
     /// Brings the index up to date with the notes in <paramref name="store"/>, in one transaction. Creates
-    /// the root folder and the database if missing. A note is re-parsed only when its last-write time
-    /// (UTC ticks) differs from the stored one. Notes that are gone lose their rows. A note that can't be
-    /// read is kept with no tags and no stored time, so it is retried on the next sync.
+    /// the root folder and the database if missing. A note is re-parsed (tags and <c>[[note links]]</c>) only
+    /// when its last-write time (UTC ticks) differs from the stored one. Notes that are gone lose their rows.
+    /// A note that can't be read is kept with no tags, no links and no stored time, so it is retried on the
+    /// next sync. Link targets are stored as written and resolved against note names only when queried.
     /// Throws <see cref="TagIndexException"/> if the database can't be opened or isn't valid.
     /// </summary>
     public void Sync(NoteStore store)
@@ -140,14 +229,18 @@ internal sealed class TagIndex : IDisposable
                 }
 
                 IReadOnlyList<string> tags;
+                IReadOnlyList<string> targets;
                 long? newModified = modified;
                 try
                 {
-                    tags = TagParser.Parse(store.Read(note));
+                    string text = store.Read(note);
+                    tags = TagParser.Parse(text);
+                    targets = NoteLinkParser.Parse(text);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     tags = [];
+                    targets = [];
                     newModified = null;
                 }
 
@@ -162,6 +255,17 @@ internal sealed class TagIndex : IDisposable
                         ("$tag", tag));
                 }
 
+                Execute(connection, transaction, "DELETE FROM note_links WHERE note = $note", ("$note", note.Name));
+                foreach (string target in targets)
+                {
+                    Execute(
+                        connection,
+                        transaction,
+                        "INSERT INTO note_links(note, target) VALUES($note, $target)",
+                        ("$note", note.Name),
+                        ("$target", target));
+                }
+
                 Execute(
                     connection,
                     transaction,
@@ -174,11 +278,13 @@ internal sealed class TagIndex : IDisposable
             foreach (string gone in stored.Keys.Where(n => !current.Contains(n)))
             {
                 Execute(connection, transaction, "DELETE FROM note_tags WHERE note = $note", ("$note", gone));
+                Execute(connection, transaction, "DELETE FROM note_links WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM notes WHERE name = $note", ("$note", gone));
             }
 
-            // Tag rows whose note row is missing (e.g. edited by hand) would otherwise never go away.
+            // Tag and link rows whose note row is missing (e.g. edited by hand) would otherwise never go away.
             Execute(connection, transaction, "DELETE FROM note_tags WHERE note NOT IN (SELECT name FROM notes)");
+            Execute(connection, transaction, "DELETE FROM note_links WHERE note NOT IN (SELECT name FROM notes)");
             if (upgrade)
             {
                 // A constant, not user input: PRAGMA takes no parameters.
@@ -232,46 +338,34 @@ internal sealed class TagIndex : IDisposable
     /// </summary>
     public string? FindNote(string name)
     {
-        string wanted = name.Trim();
-        List<string> names = Run(connection =>
-        {
-            List<string> all = [];
-            using SqliteCommand command = Command(connection, null, "SELECT name FROM notes");
-            using SqliteDataReader reader = command.ExecuteReader();
-            while (reader.Read())
-            {
-                all.Add(reader.GetString(0));
-            }
-
-            return all;
-        });
-
-        return names.FirstOrDefault(n => string.Equals(n, wanted, StringComparison.Ordinal))
-            ?? names.FirstOrDefault(n => string.Equals(n, wanted, StringComparison.OrdinalIgnoreCase));
+        return Run(connection => new NameLookup(NoteNames(connection)).Match(name.Trim()));
     }
 
     /// <summary>
-    /// Every other note that shares at least one tag with <paramref name="noteName"/> (matched like
-    /// <see cref="FindNote"/>), once each, sorted by name ignoring case, with the shared tags sorted.
-    /// A note never links to itself. An unknown note has no links.
+    /// Every other note linked to <paramref name="noteName"/> (matched like <see cref="FindNote"/>): notes
+    /// that share at least one tag with it (shared tags sorted), notes it links to with <c>[[...]]</c>, and
+    /// notes that link to it. Each note appears once, sorted by name ignoring case, then ordinal. A link
+    /// target resolves like <c>/open</c> (<see cref="NameLookup.Resolve"/>); one that names no note gives a
+    /// <see cref="NoteLink.Missing"/> row with the target as written. A note never links to itself. An
+    /// unknown note has no links.
     /// </summary>
-    public IReadOnlyList<NoteLink> Links(string noteName)
+    public IReadOnlyList<NoteLink> Links(string noteName) => Run(connection =>
     {
-        string? note = FindNote(noteName);
+        NameLookup names = new NameLookup(NoteNames(connection));
+        string? note = names.Match(noteName.Trim());
         if (note is null)
         {
-            return [];
+            return (IReadOnlyList<NoteLink>)[];
         }
 
-        return Run(connection =>
+        Dictionary<string, List<string>> shared = new(StringComparer.Ordinal);
+        using (SqliteCommand command = Command(
+            connection,
+            null,
+            "SELECT other.note, other.tag FROM note_tags AS mine "
+                + "JOIN note_tags AS other ON other.tag = mine.tag AND other.note <> mine.note "
+                + "WHERE mine.note = $note"))
         {
-            Dictionary<string, List<string>> shared = new(StringComparer.Ordinal);
-            using SqliteCommand command = Command(
-                connection,
-                null,
-                "SELECT other.note, other.tag FROM note_tags AS mine "
-                    + "JOIN note_tags AS other ON other.tag = mine.tag AND other.note <> mine.note "
-                    + "WHERE mine.note = $note");
             command.Parameters.AddWithValue("$note", note);
             using SqliteDataReader reader = command.ExecuteReader();
             while (reader.Read())
@@ -285,11 +379,80 @@ internal sealed class TagIndex : IDisposable
 
                 tags.Add(reader.GetString(1));
             }
+        }
 
-            return SortNames(shared.Keys)
-                .Select(n => new NoteLink(n, shared[n].Distinct().OrderBy(t => t, StringComparer.Ordinal).ToList()))
-                .ToList();
-        });
+        Dictionary<string, NoteLinkDirection> directions = new(StringComparer.Ordinal);
+        Dictionary<string, string> missing = new(StringComparer.OrdinalIgnoreCase);
+        using (SqliteCommand command = Command(connection, null, "SELECT note, target FROM note_links"))
+        using (SqliteDataReader reader = command.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                string from = reader.GetString(0);
+                string target = reader.GetString(1);
+                string? to = names.Resolve(target);
+                if (string.Equals(from, note, StringComparison.Ordinal))
+                {
+                    if (to is null)
+                    {
+                        // One row per missing note: "Gamma" and "gamma.md" would both become the same note.
+                        missing.TryAdd(StripMd(target), target);
+                    }
+                    else if (!string.Equals(to, note, StringComparison.Ordinal))
+                    {
+                        AddDirection(directions, to, NoteLinkDirection.To);
+                    }
+                }
+                else if (string.Equals(to, note, StringComparison.Ordinal))
+                {
+                    AddDirection(directions, from, NoteLinkDirection.From);
+                }
+            }
+        }
+
+        Dictionary<string, NoteLink> rows = new(StringComparer.Ordinal);
+        foreach (string other in shared.Keys.Concat(directions.Keys))
+        {
+            if (rows.ContainsKey(other))
+            {
+                continue;
+            }
+
+            IReadOnlyList<string> tags = shared.TryGetValue(other, out List<string>? found)
+                ? found.Distinct().OrderBy(t => t, StringComparer.Ordinal).ToList()
+                : [];
+            NoteLinkDirection direction = directions.GetValueOrDefault(other, NoteLinkDirection.None);
+            rows[other] = new NoteLink(other, tags, direction, missing: false);
+        }
+
+        foreach (string target in missing.Values)
+        {
+            rows.TryAdd(target, new NoteLink(target, [], NoteLinkDirection.To, missing: true));
+        }
+
+        return SortNames(rows.Keys).Select(n => rows[n]).ToList();
+    });
+
+    private static string StripMd(string target) =>
+        target.EndsWith(".md", StringComparison.OrdinalIgnoreCase) && target.Length > 3 ? target[..^3] : target;
+
+    private static void AddDirection(Dictionary<string, NoteLinkDirection> directions, string other, NoteLinkDirection add)
+    {
+        NoteLinkDirection now = directions.GetValueOrDefault(other, NoteLinkDirection.None);
+        directions[other] = now == NoteLinkDirection.None || now == add ? add : NoteLinkDirection.Both;
+    }
+
+    private static List<string> NoteNames(SqliteConnection connection)
+    {
+        List<string> all = [];
+        using SqliteCommand command = Command(connection, null, "SELECT name FROM notes");
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            all.Add(reader.GetString(0));
+        }
+
+        return all;
     }
 
     /// <summary>

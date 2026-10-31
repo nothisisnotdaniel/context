@@ -9,10 +9,16 @@ internal enum LinksViewKind
     /// <summary>No indexed note is called <see cref="LinksView.Typed"/>.</summary>
     NoSuchNote,
 
-    /// <summary><see cref="LinksView.Note"/> shares no tag with another note.</summary>
+    /// <summary>
+    /// <see cref="LinksView.Note"/> shares no tag with another note, links to no note with <c>[[...]]</c> (not
+    /// even a missing one) and no note links to it.
+    /// </summary>
     NoLinks,
 
-    /// <summary><see cref="LinksView.Links"/> holds the notes that share a tag with the note.</summary>
+    /// <summary>
+    /// <see cref="LinksView.Links"/> holds the notes that share a tag with the note, that it links to with
+    /// <c>[[...]]</c> (including missing ones) or that link to it.
+    /// </summary>
     Links,
 
     /// <summary><c>context.db</c> can't be read.</summary>
@@ -59,14 +65,15 @@ internal sealed record LinksView
     public string? Note { get; }
 
     /// <summary>
-    /// The linked notes and their shared tags (raw: clean and escape them before showing them). Non-empty only for
-    /// <c>Links</c>; every other kind gives empty (<c>[]</c>), never null.
+    /// The linked notes with their shared tags, <see cref="NoteLink.Direction"/> and <see cref="NoteLink.Missing"/>
+    /// (raw: clean and escape names and tags before showing them; a missing note's name is the link target as
+    /// written). Non-empty only for <c>Links</c>; every other kind gives empty (<c>[]</c>), never null.
     /// </summary>
     public IReadOnlyList<NoteLink> Links { get; }
 
     /// <summary>
     /// Syncs the index and finds the note called <paramref name="argument"/> (as typed, then without one trailing
-    /// <c>.md</c>) and the notes that share a tag with it.
+    /// <c>.md</c>) and the notes linked to it by shared tags or <c>[[note links]]</c> (<see cref="TagIndex.Links"/>).
     /// </summary>
     public static LinksView Build(TagIndex index, NoteStore store, string argument)
     {
