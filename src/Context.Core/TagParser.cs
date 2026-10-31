@@ -22,8 +22,22 @@ internal static class TagParser
     {
         List<string> tags = [];
         HashSet<string> seen = new(StringComparer.Ordinal);
-        bool inFence = false;
+        foreach (string line in LinesOutsideFences(markdown))
+        {
+            ParseLine(line, tags, seen);
+        }
 
+        return tags;
+    }
+
+    /// <summary>
+    /// The lines of <paramref name="markdown"/> (split on <c>\n</c>, trailing <c>\r</c> removed) that are not
+    /// inside a fenced code block. The <c>```</c> fence lines themselves are left out too. Shared with
+    /// <see cref="NoteLinkParser"/>.
+    /// </summary>
+    internal static IEnumerable<string> LinesOutsideFences(string markdown)
+    {
+        bool inFence = false;
         foreach (string rawLine in markdown.Split('\n'))
         {
             string line = rawLine.TrimEnd('\r');
@@ -38,10 +52,8 @@ internal static class TagParser
                 continue;
             }
 
-            ParseLine(line, tags, seen);
+            yield return line;
         }
-
-        return tags;
     }
 
     private static void ParseLine(string line, List<string> tags, HashSet<string> seen)
@@ -108,9 +120,12 @@ internal static class TagParser
         }
     }
 
-    // At a run of backticks: returns the index just after the matching closing run of the same length,
-    // or just after the opening run when there is none (then the backticks are plain text).
-    private static int SkipCodeSpan(string line, int start)
+    /// <summary>
+    /// At a run of backticks starting at <paramref name="start"/>: returns the index just after the matching
+    /// closing run of the same length, or just after the opening run when there is none (then the backticks
+    /// are plain text). Shared with <see cref="NoteLinkParser"/>.
+    /// </summary>
+    internal static int SkipCodeSpan(string line, int start)
     {
         int open = start;
         while (open < line.Length && line[open] == '`')

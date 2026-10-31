@@ -95,6 +95,37 @@ public sealed class LinksViewTests : IDisposable
         Assert.Equal(["work"], view.Links[1].SharedTags);
     }
 
+    // 048 AC-4/5: note links count as links; a link to a missing note alone gives Links, not NoLinks.
+    [Fact]
+    public void Build_NoteLinks_Kinds()
+    {
+        WriteNote("Only missing", "[[Nowhere]]");
+        WriteNote("Linker", "[[Lonely]]");
+
+        LinksView missing = Build("only missing");
+        LinksView lonely = Build("Lonely");
+        LinksView self = Build("Linker");
+
+        Assert.Equal(LinksViewKind.Links, missing.Kind);
+        NoteLink row = Assert.Single(missing.Links);
+        Assert.Equal("Nowhere", row.Note);
+        Assert.True(row.Missing);
+        Assert.Equal(NoteLinkDirection.To, row.Direction);
+
+        Assert.Equal(LinksViewKind.Links, lonely.Kind);
+        Assert.Equal(NoteLinkDirection.From, Assert.Single(lonely.Links).Direction);
+        Assert.Equal(NoteLinkDirection.To, Assert.Single(self.Links).Direction);
+    }
+
+    // 048 AC-4: a note that only links to itself still has no links.
+    [Fact]
+    public void Build_SelfLinkOnly_NoLinks()
+    {
+        WriteNote("Self", "[[Self]]");
+
+        Assert.Equal(LinksViewKind.NoLinks, Build("Self").Kind);
+    }
+
     // AC-5
     [Fact]
     public void Build_BadDb_IndexUnreadable()
@@ -126,6 +157,20 @@ public sealed class LinksViewTests : IDisposable
                     "A",
                     "A",
                     [new NoteLink("B [b]", ["big plan", "work"]), new NoteLink("c", ["work"])])
+            ),
+            (
+                "Links_NoteLinks",
+                new LinksView(
+                    LinksViewKind.Links,
+                    "A",
+                    "A",
+                    [
+                        new NoteLink("Beta", ["work"], NoteLinkDirection.Both, missing: false),
+                        new NoteLink("c", ["work"]),
+                        new NoteLink("Delta", [], NoteLinkDirection.To, missing: false),
+                        new NoteLink("Epsilon", [], NoteLinkDirection.From, missing: false),
+                        new NoteLink("Gamma", [], NoteLinkDirection.To, missing: true),
+                    ])
             ),
         ];
 

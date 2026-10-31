@@ -403,4 +403,108 @@ public sealed class TagCommandsTests : IDisposable
 
         AssertOnHintRow(LastFrame("/tags [bold x]"), "No notes tagged #[bold x].");
     }
+
+    // 048 AC-8: with a note link the table gets a Link column; tag-only rows have an empty Link cell.
+    [Fact]
+    public void Links_NoteLinks_ShowLinkColumn()
+    {
+        WriteNote("A", "#work [[Beta]] [[Gamma]] [[delta.md]]");
+        WriteNote("Beta", "#work [[A]]");
+        WriteNote("c", "#work");
+        WriteNote("Delta", "plain");
+        WriteNote("Epsilon", "see [[a]]");
+
+        string[] main = MainView(LastFrame("/links A"));
+
+        string header = Assert.Single(main, l => l.Contains("│ Note ", StringComparison.Ordinal));
+        int note = header.IndexOf("Note", StringComparison.Ordinal);
+        int link = header.IndexOf("Link", StringComparison.Ordinal);
+        int tags = header.IndexOf("Shared tags", StringComparison.Ordinal);
+        Assert.True(note < link && link < tags);
+        Assert.Matches(@"│ Beta +│ both ways +│ #work +│", Assert.Single(main, l => l.Contains("│ Beta ", StringComparison.Ordinal)));
+        Assert.Matches(@"│ c +│ +│ #work +│", Assert.Single(main, l => l.Contains("│ c ", StringComparison.Ordinal)));
+        Assert.Matches(@"│ Delta +│ links to +│ +│", Assert.Single(main, l => l.Contains("│ Delta ", StringComparison.Ordinal)));
+        Assert.Matches(@"│ Epsilon +│ linked from +│ +│", Assert.Single(main, l => l.Contains("│ Epsilon ", StringComparison.Ordinal)));
+        Assert.Matches(@"│ Gamma +│ links to \(missing\) +│ +│", Assert.Single(main, l => l.Contains("│ Gamma ", StringComparison.Ordinal)));
+
+        (_, string output) = Run(true, "/links A");
+        Assert.Contains(Style("[grey]X[/]") + "Gamma", output);
+        Assert.Contains(Style("[steelblue1]X[/]") + "Delta", output);
+        Assert.Contains(Style("[grey]X[/]") + "links to (missing)", output);
+        Assert.Contains(Style("[grey]X[/]") + "linked from", output);
+    }
+
+    // 048 AC-8: tag links only keep the old two columns.
+    [Fact]
+    public void Links_TagLinksOnly_NoLinkColumn()
+    {
+        WriteNote("A", "#work");
+        WriteNote("B", "#work");
+
+        string[] main = MainView(LastFrame("/links A"));
+
+        Assert.Contains(main, l => l.Contains("│ Note ", StringComparison.Ordinal));
+        Assert.DoesNotContain(main, l => l.Contains("Link ", StringComparison.Ordinal));
+    }
+
+    // 048 AC-8: a link to a missing note alone still shows the table.
+    [Fact]
+    public void Links_OnlyMissingLink_ShowsTable()
+    {
+        WriteNote("A", "[[Nowhere]]");
+
+        string[] main = MainView(LastFrame("/links A"));
+
+        Assert.Contains(main, l => l.Contains("Linked to A", StringComparison.Ordinal));
+        Assert.Contains(main, l => l.Contains("links to (missing)", StringComparison.Ordinal));
+        Assert.DoesNotContain(main, l => l.Contains("has no linked notes", StringComparison.Ordinal));
+    }
+
+    // 048 AC-9
+    [Fact]
+    public void Links_DescriptionAndUsage_ShowLinksLiterally()
+    {
+        CommandRegistry registry = CommandRegistry.CreateDefault();
+        NoteStore store = new NoteStore(root);
+        TagCommands.Register(registry, new TagIndex(root), store);
+        Assert.True(registry.TryGet("/links", out Command command));
+        Assert.Equal("Linked notes (tags, [[links]]): /links <note>", command.Description);
+
+        CommandResult usage = TagCommands.Render(new LinksView(LinksViewKind.MissingArgument, string.Empty, null, []));
+        TestConsole plain = new TestConsole();
+        plain.Profile.Width = 200;
+        plain.Write(usage.Hint!);
+        Assert.Equal(
+            "Type /links <note> to see the notes linked to it by tags or [[links]]. Type /notes to see all notes.",
+            plain.Output.TrimEnd());
+
+        string[] help = MainView(LastFrame("/help"));
+        Assert.Contains(help, l => l.Contains("Linked notes (tags, [[links]]): /links <note>", StringComparison.Ordinal));
+        AssertOnHintRow(LastFrame("/links"), "by tags or [[links]].");
+    }
+
+    // 048 AC-9: link targets are cleaned and escaped. The parser never yields a '[' in a target, so the
+    // markup case is a hand-built view; the control character comes from a real note.
+    [Fact]
+    public void Links_MarkupAndControlsInTarget_ShownSafely()
+    {
+        LinksView view = new LinksView(
+            LinksViewKind.Links,
+            "A",
+            "A [b]",
+            [new NoteLink("[red]x[/red]", [], NoteLinkDirection.To, missing: true)]);
+        TestConsole console = new TestConsole();
+        console.Profile.Width = 200;
+        console.Write(TagCommands.Render(view).Message!);
+        Assert.Contains("[red]x[/red]", console.Output);
+        Assert.Contains("Linked to A [b]", console.Output);
+
+        WriteNote("A", "[[bad\u001bname]] [[Nope [x]]");
+        (int exitCode, string output) = Run(false, "/links A");
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("bad\uFFFDname", output);
+        Assert.DoesNotContain("Nope", output);
+        Assert.DoesNotContain('\u001b', Ansi.Replace(output, string.Empty));
+    }
 }

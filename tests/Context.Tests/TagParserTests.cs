@@ -42,6 +42,16 @@ public sealed class TagParserTests
         Assert.Empty(TagParser.Parse(markdown));
     }
 
+    // 048 AC-2: a [[note link]] is never a tag.
+    [Theory]
+    [InlineData("[[a b]]")]
+    [InlineData("[[work]]")]
+    [InlineData("x [[a]]")]
+    public void Parse_NoteLink_IsNoTag(string markdown)
+    {
+        Assert.Empty(TagParser.Parse(markdown));
+    }
+
     // AC-2
     [Fact]
     public void Parse_IgnoresFencedCodeBlocks()

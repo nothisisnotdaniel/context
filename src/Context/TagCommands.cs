@@ -14,7 +14,8 @@ internal static class TagCommands
     private const string LinksForm = "[bold]/links <note>[/]";
 
     private const string LinksUsage =
-        $"Type {LinksForm} to see the notes that share a tag with it. Type [bold]/notes[/] to see all notes.";
+        // "[[[[links]]]]" is markup for the literal "[[links]]".
+        $"Type {LinksForm} to see the notes linked to it by tags or [[[[links]]]]. Type [bold]/notes[/] to see all notes.";
 
     /// <summary>Adds <c>/tags</c> and <c>/links</c> to <paramref name="registry"/>.</summary>
     public static void Register(CommandRegistry registry, TagIndex index, NoteStore store)
@@ -23,7 +24,7 @@ internal static class TagCommands
             "/tags", "List tags, or notes with a tag: /tags [tag]", tag => Render(TagsView.Build(index, store, tag)));
         registry.Register(
             "/links",
-            "Notes sharing a tag with a note: /links <note>",
+            "Linked notes (tags, [[links]]): /links <note>",
             name => Render(LinksView.Build(index, store, name)));
     }
 
@@ -91,21 +92,59 @@ internal static class TagCommands
             case LinksViewKind.NoLinks:
                 return new CommandResult(new Markup($"[grey]{Shown(note)} has no linked notes.[/]"));
             default:
-                Table table = new Table()
-                    .Border(TableBorder.Rounded)
-                    .BorderColor(Color.Grey)
-                    .Title($"[steelblue1]Linked to {Shown(note)}[/]")
-                    .AddColumn("[grey]Note[/]")
-                    .AddColumn("[grey]Shared tags[/]");
-                foreach (NoteLink link in view.Links)
-                {
-                    table.AddRow(
-                        new Markup($"[steelblue1]{Shown(link.Note)}[/]"),
-                        new Markup($"[grey]{Shown(string.Join(", ", link.SharedTags.Select(TagParser.Format)))}[/]"));
-                }
-
-                return new CommandResult(table);
+                return new CommandResult(LinksTable(note, view.Links));
         }
+    }
+
+    // The "Linked to" table. Only with at least one [[note link]] does it get the Link column, so a view with
+    // tag links alone looks exactly as before note links existed.
+    private static Table LinksTable(string note, IReadOnlyList<NoteLink> links)
+    {
+        bool noteLinks = links.Any(l => l.Direction != NoteLinkDirection.None);
+        Table table = new Table()
+            .Border(TableBorder.Rounded)
+            .BorderColor(Color.Grey)
+            .Title($"[steelblue1]Linked to {Shown(note)}[/]")
+            .AddColumn("[grey]Note[/]");
+        if (noteLinks)
+        {
+            table.AddColumn("[grey]Link[/]");
+        }
+
+        table.AddColumn("[grey]Shared tags[/]");
+        foreach (NoteLink link in links)
+        {
+            string colour = link.Missing ? "grey" : "steelblue1";
+            Markup name = new Markup($"[{colour}]{Shown(link.Note)}[/]");
+            Markup tags = new Markup($"[grey]{Shown(string.Join(", ", link.SharedTags.Select(TagParser.Format)))}[/]");
+            if (noteLinks)
+            {
+                table.AddRow(name, new Markup($"[grey]{LinkText(link)}[/]"), tags);
+            }
+            else
+            {
+                table.AddRow(name, tags);
+            }
+        }
+
+        return table;
+    }
+
+    // Fixed texts only, so no escaping is needed.
+    private static string LinkText(NoteLink link)
+    {
+        if (link.Missing)
+        {
+            return "links to (missing)";
+        }
+
+        return link.Direction switch
+        {
+            NoteLinkDirection.To => "links to",
+            NoteLinkDirection.From => "linked from",
+            NoteLinkDirection.Both => "both ways",
+            _ => string.Empty,
+        };
     }
 
     // Text from disk or the user, safe for markup.

@@ -16,13 +16,24 @@ Every factory agent reads this file before working on Context. Keep it short and
     `#[Work]` are one tag. `TagParser.Format` shows a tag as `#tag`, or `#[tag]` when it has a space; all tag
     output uses it. `TagIndex.NormalizeTag` (for `/tags <tag>`) accepts `work`, `#work`, `[a b]`, `#[a b]`. `TagIndex` keeps the index in SQLite at `<root>/context.db` (`Microsoft.Data.Sqlite`,
     `Pooling=False`, parameterized SQL only): `notes(name, modified)` (last-write UTC ticks, NULL for a
-    note that couldn't be read so it is retried) and `note_tags(note, tag)`. `Sync(NoteStore)` updates it
+    note that couldn't be read so it is retried), `note_tags(note, tag)` and `note_links(note, target)`. `Sync(NoteStore)` updates it
     in one transaction and only re-parses files whose time changed. `PRAGMA user_version` holds the parser
-    version (`TagIndex.ParserVersion`, now 1); when it is lower, `Sync` clears every stored time in the same
+    version (`TagIndex.ParserVersion`, now 2: note links); when it is lower, `Sync` clears every stored time in the same
     transaction (so all notes are re-parsed once) and then sets it. Bump it whenever parsing changes. Queries: `Tags()`, `NotesWithTag`,
     `FindNote`, `Links`. A database that can't be opened or isn't valid throws `TagIndexException` (an
     `IOException`) and is never deleted or overwritten. `/tags`, `/tags <tag>` and `/links <note>`
     (`TagCommands`) call `Sync` first and show a red `Can't read context.db` hint on that error.
+  - **Note links:** `NoteLinkParser.Parse` finds `[[Note name]]` anywhere in a line (`[[`, text with no `[` up to the
+    first `]` on the line, then `]]`; trimmed; empty or over 103 chars (`MaxTargetLength`) is no link; distinct ignoring
+    case, first spelling kept), skipping fences and code spans through `TagParser.LinesOutsideFences` and
+    `TagParser.SkipCodeSpan` (shared, not copied). It scans each line once (cached next `]` and `[`). `[[...]]` is never
+    a tag and `#[...]` never a link; `|alias` and `#heading` are part of the target. Targets are stored as written and
+    resolved only at query time by `NameLookup.Resolve` (like `/open`: as written, then without one `.md`; exact, then
+    ignoring case), never turned into a path, so a link to a missing note starts working once the note exists. `Links`
+    merges tag links and note links into one `NoteLink` per other note (`Direction` `None`/`To`/`From`/`Both`,
+    `Missing` = a `To` target that names no note, shown as written); never the note itself. `/links` adds a `Link`
+    column (`links to`, `linked from`, `both ways`, `links to (missing)`, grey; missing names grey) only when some row
+    has a note link, so tag-only output is unchanged.
 - **UI:**
   - An input box at the bottom of the screen is used for navigation.
   - A todo list is always shown in a sidebar, sorted by due date. The user sets each todo's due date.
@@ -158,7 +169,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     reference `Spectre.Console`** (no file there mentions `Spectre`); its only package is `Microsoft.Data.Sqlite`.
     Types stay `internal` in `namespace Context;`; `InternalsVisibleTo` grants `Context` and `Context.Tests`.
     It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, tag parsing in `TagParser.cs`,
-    the SQLite tag index in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, the calendar
+    `[[note link]]` parsing in `NoteLinkParser.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the key file and file format in `Vault.cs`, the session holder and
     migration in `Encryption.cs`, the display sanitizer in `SafeText.cs`, and the view data steps
