@@ -180,7 +180,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     `/calendar-link` in `CalendarLinkCommands.cs`. Code that needs Spectre stays here; data and storage go to Core.
   - `tests/Context.Tests/`: references both projects; one test class per production class (Core and app alike) (`AppTests.cs` tests `App.cs`),
     `ViewParityTests.cs` (golden ANSI output of `/current`, `/notes`, `/tags`, `/links`, `/calendar-link`; change
-    its expected strings only when a spec changes that output), plus shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves),
+    its expected strings only when a spec changes that output), `CoreDependencyTests.cs` (architecture test: fails on any
+    Spectre assembly, package, project reference or source mention in `Context.Core`), plus shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves),
     `SampleData` in `EncryptionTests.cs` (one file of every kind with plaintext markers), `Session` in
     `EncryptionCommandsTests.cs` (everything wired like `Program.cs`) and `FakeHttpHandler.cs` (canned HTTP responses). Note, todo, tag and calendar tests use their
     own temp folder (deleted in `Dispose`), never the real app data folder.
