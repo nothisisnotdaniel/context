@@ -1,0 +1,33 @@
+@inherits StateComponent
+
+<section class="todos">
+    <h2>Todos</h2>
+    @if (Snapshot is { } snapshot)
+    {
+        @if (snapshot.TodosUnreadable)
+        {
+            <p class="red">Can't read todos.json</p>
+        }
+        else if (snapshot.Todos.Count == 0)
+        {
+            <p class="grey">No todos yet</p>
+        }
+        else
+        {
+            <ol class="todo-list">
+                @for (int i = 0; i < snapshot.Todos.Count; i++)
+                {
+                    TodoItem todo = snapshot.Todos[i];
+                    string number = (i + 1).ToString(CultureInfo.InvariantCulture);
+                    string text = DesktopText.OneLine(todo.Text);
+                    string when = todo.Due < snapshot.Today ? "overdue" : todo.Due == snapshot.Today ? "today" : "later";
+                    <li class="todo">
+                        <span class="number">@number</span>
+                        <span class="date @when">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                        <span class="text cut" title="@text">@text</span>
+                    </li>
+                }
+            </ol>
+        }
+    }
+</section>

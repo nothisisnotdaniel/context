@@ -1,0 +1,136 @@
+@inherits StateComponent
+
+@if (Snapshot?.Current is { } view)
+{
+    <section class="current">
+        <h1 class="title">Today, @view.Today.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</h1>
+
+        @if (view.Appointments.Count == 0)
+        {
+            <p class="grey">No appointments today. Put .ics files in @DesktopText.OneLine(view.Folder) to see them here.</p>
+        }
+        else
+        {
+            <h2>Appointments</h2>
+            <table class="appointments">
+                <thead>
+                    <tr><th>Time</th><th>Appointment</th><th>Where</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (Appointment appointment in ShownAppointments(view))
+                    {
+                        string title = DesktopText.OneLine(appointment.Title.Length == 0 ? "(no title)" : appointment.Title);
+                        string where = appointment.Location is null ? string.Empty : DesktopText.OneLine(appointment.Location);
+                        <tr class="appointment">
+                            <td class="time accent">@view.TimeText(appointment)</td>
+                            <td class="cut" title="@title">@title</td>
+                            <td class="where grey cut" title="@where">@where</td>
+                        </tr>
+                    }
+                    @if (MoreAppointments(view) is { } more)
+                    {
+                        <tr class="more">
+                            <td></td>
+                            <td class="grey">@more</td>
+                            <td></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+
+        @foreach (string name in view.UnreadableCalendarFiles)
+        {
+            <p class="red">Can't read @CalendarStore.FolderName/@DesktopText.OneLine(name)</p>
+        }
+
+        @if (view.Status == CalendarFeedStatus.Stale && view.CachedAtUtc is { } cachedAt)
+        {
+            <p class="grey feed">Exchange calendar offline, showing the copy from @CacheTime(view, cachedAt).</p>
+        }
+        else if (view.Status == CalendarFeedStatus.Failed)
+        {
+            <p class="red feed">Can't download the Exchange calendar (@DesktopText.OneLine(view.Reason ?? string.Empty)).</p>
+        }
+
+        @if (view.TodosUnreadable)
+        {
+            <p class="red">Can't read todos.json. Fix or move the file and try again.</p>
+        }
+        else if (view.Due.Count == 0)
+        {
+            <p class="grey">Nothing due today. Add one with /todo today &lt;text&gt;.</p>
+        }
+        else
+        {
+            <h2>Due</h2>
+            <table class="due">
+                <thead>
+                    <tr><th>#</th><th>Date</th><th>Todo</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (DueTodo todo in view.Due)
+                    {
+                        string text = DesktopText.OneLine(todo.Text);
+                        <tr class="due-todo">
+                            <td class="number">@todo.Number.ToString(CultureInfo.InvariantCulture)</td>
+                            <td class="date @(todo.Overdue ? "overdue" : "today")">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</td>
+                            <td class="cut" title="@text">@text</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            @if (view.IndexUnreadable)
+            {
+                <p class="red">Can't read context.db. Move it out of the Context folder and it is rebuilt from your notes.</p>
+            }
+            else if (view.LinkedNotes.Count == 0)
+            {
+                <p class="grey">No linked notes. Add the same #tag to a todo and a note to link them.</p>
+            }
+            else
+            {
+                <h2>Linked notes</h2>
+                <ul class="linked">
+                    @foreach (LinkedNote note in view.LinkedNotes)
+                    {
+                        string name = DesktopText.OneLine(note.Name);
+                        string tags = DesktopText.OneLine(string.Join(", ", note.Tags.Select(TagParser.Format)));
+                        <li class="linked-note">
+                            <span class="name accent cut" title="@name">@name</span>
+                            <span class="tags grey cut" title="@tags">@tags</span>
+                        </li>
+                    }
+                </ul>
+            }
+        }
+    </section>
+}
+
+@code {
+    /// <summary>At most this many appointment rows; the last reads <c>… N more</c> when there are more.</summary>
+    internal const int MaxAppointmentRows = 15;
+
+    private static IEnumerable<Appointment> ShownAppointments(CurrentView view) =>
+        view.Appointments.Take(view.Appointments.Count > MaxAppointmentRows
+            ? MaxAppointmentRows - 1
+            : view.Appointments.Count);
+
+    private static string? MoreAppointments(CurrentView view)
+    {
+        if (view.Appointments.Count <= MaxAppointmentRows)
+        {
+            return null;
+        }
+
+        int hidden = view.Appointments.Count - (MaxAppointmentRows - 1);
+        return $"{CurrentView.Outside} {hidden.ToString(CultureInfo.InvariantCulture)} more";
+    }
+
+    private static string CacheTime(CurrentView view, DateTime cachedAtUtc)
+    {
+        DateTime local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(cachedAtUtc, DateTimeKind.Utc), view.Zone);
+        return local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+    }
+}

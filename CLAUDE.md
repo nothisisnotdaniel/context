@@ -160,14 +160,17 @@ Every factory agent reads this file before working on Context. Keep it short and
 - **Stack:** .NET 10 (`net10.0`), C# with nullable reference types and implicit usings on.
   `Spectre.Console` 0.57.2 handles all terminal output (app only). `Microsoft.Data.Sqlite` 10.0.14 for `context.db`
   (referenced by `Context.Core` only; it reaches the app through the project reference). Tests: xUnit + `Spectre.Console.Testing` 0.57.2.
+  Desktop: `Photino.Blazor` 4.0.13 (Blazor in the OS web view: WebView2 / WKWebView), `Context.Desktop` only; its tests
+  use `bunit` 2.13.3.
 - **Build:** `dotnet build` (must stay at 0 warnings)
 - **Test command:** `dotnet test`
-- **Run:** `dotnet run --project src/Context`
+- **Run:** `dotnet run --project src/Context` (console), `dotnet run --project src/Context.Desktop` (desktop window)
 - **Layout:**
   - `Context.slnx`: the solution. `Directory.Build.props` turns on `EnforceCodeStyleInBuild`.
   - `src/Context.Core/`: class library with the data and storage code, no terminal UI. **It must never
     reference `Spectre.Console`** (no file there mentions `Spectre`); its only package is `Microsoft.Data.Sqlite`.
-    Types stay `internal` in `namespace Context;`; `InternalsVisibleTo` grants `Context` and `Context.Tests`.
+    Types stay `internal` in `namespace Context;`; `InternalsVisibleTo` grants `Context`, `Context.Tests`,
+    `Context.Desktop` and `Context.Desktop.Tests`.
     It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, tag parsing in `TagParser.cs`,
     `[[note link]]` parsing in `NoteLinkParser.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
@@ -191,6 +194,24 @@ Every factory agent reads this file before working on Context. Keep it short and
     `EncryptionCommands.cs`, the masked prompt in `PassphrasePrompt.cs`, `/todo` and `/done` in `TodoCommands.cs`, the sidebar body
     in `TodoSidebar.cs`, `/tags`, `/links` in `TagCommands.cs`, `/current` in `CurrentCommands.cs`, and
     `/calendar-link` in `CalendarLinkCommands.cs`. Code that needs Spectre stays here; data and storage go to Core.
+  - `src/Context.Desktop/`: the read-only desktop app (`Microsoft.NET.Sdk.Razor`, `WinExe`, references `Context.Core`
+    only, never Spectre or the console app; components and classes in `namespace Context`). `Program.cs` only wires
+    things up (stores built like the console's, one `Encryption(folder)`, Photino window `Context` 1100x750, dev tools
+    only in Debug). `DesktopState` builds a `DesktopSnapshot` (`Locked`, `Failed`, `Today`, `CurrentView? Current`,
+    `Todos`, `Notes`, unreadable flags, `Folder`) off the UI thread with `Refresh()` (one at a time; requests during a run
+    coalesce into one more run) and raises `Changed`; `Tick()` refreshes when the day changed or 5 min passed.
+    `DataWatcher` (one `FileSystemWatcher` with subfolders, `IsRelevant` filter, 300 ms debounce, 30 s tick timer;
+    never creates the folder) calls them. Components (`App`, `Main`, `CurrentPanel`, `TodoPanel`, `NotesPanel`,
+    `LockedPanel`) inherit `StateComponent`, which injects the state (internal types can't be public parameters).
+    `wwwroot/index.html` (CSP meta tag, only `_framework/blazor.webview.js`) and `wwwroot/app.css`.
+  - **Desktop rules:** read-only: never call `NoteStore.Create/Save`, `TodoStore.Add/Complete`, `CalendarLink.Set/Clear`,
+    `CalendarFeed.ClearCache`, `Encryption.Migrate/DecryptAll` or `Vault.Create` (the only writes are `TagIndex.Sync`
+    and `CalendarFeed.Fetch`, as in the console). With `encryption.json` it shows only `LockedPanel` and reads nothing.
+    Outside text goes through `DesktopText.OneLine` and Blazor's default encoding: never `MarkupString`,
+    `AddMarkupContent` or `@((` raw markup; no `style=`, `<a `, `<form`, `<input`, `<button`, `<textarea` or
+    `<script` in `.razor` files; no CDN or external fonts; error lines are fixed texts, never exception messages; the
+    calendar link stays inside `CalendarFeed`. Texts match the console renderer's. Colours by CSS class (`accent`,
+    `grey`, `red`, dates `overdue`/`today`/`later`); long lines cut by CSS with the full text in `title`.
   - `tests/Context.Tests/`: references both projects; one test class per production class (Core and app alike) (`AppTests.cs` tests `App.cs`),
     `ViewParityTests.cs` (golden ANSI output of `/current`, `/notes`, `/tags`, `/links`, `/calendar-link`; change
     its expected strings only when a spec changes that output), `CoreDependencyTests.cs` (architecture test: fails on any
@@ -198,6 +219,10 @@ Every factory agent reads this file before working on Context. Keep it short and
     `SampleData` in `EncryptionTests.cs` (one file of every kind with plaintext markers), `Session` in
     `EncryptionCommandsTests.cs` (everything wired like `Program.cs`) and `FakeHttpHandler.cs` (canned HTTP responses). Note, todo, tag and calendar tests use their
     own temp folder (deleted in `Dispose`), never the real app data folder.
+  - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
+    component or class, plus `DesktopDependencyTests` (no Spectre), `DesktopSourceTests` (raw markup, risky elements,
+    CSP, read-only calls), `DesktopFixture` (temp folder, injected day/clocks, `FakeHttpHandler` linked from
+    `Context.Tests`, a `BunitContext` serving the state) and `RepoFiles`.
 - **Style:**
   - Write all output through an injected `IAnsiConsole`, never `Console.*` or the static
     `AnsiConsole.*` methods (except in `Program.cs`). Tests use `TestConsole` and assert on `.Output`.

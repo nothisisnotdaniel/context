@@ -1,0 +1,29 @@
+@inherits StateComponent
+
+<section class="notes">
+    <h2>Notes</h2>
+    @if (Snapshot is { } snapshot)
+    {
+        @if (snapshot.NotesUnreadable)
+        {
+            <p class="red">Can't read the notes folder.</p>
+        }
+        else if (snapshot.Notes.Count == 0)
+        {
+            <p class="grey">No notes yet</p>
+        }
+        else
+        {
+            <ul class="note-list">
+                @foreach (NoteInfo note in snapshot.Notes)
+                {
+                    string name = DesktopText.OneLine(note.Name);
+                    <li class="note">
+                        <span class="name cut" title="@name">@name</span>
+                        <span class="time grey">@note.Modified.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)</span>
+                    </li>
+                }
+            </ul>
+        }
+    }
+</section>

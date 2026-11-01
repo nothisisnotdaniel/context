@@ -1,0 +1,210 @@
+/* Context desktop: steelblue1 accents, grey secondary text, red errors; light or dark from the system. */
+:root {
+    color-scheme: light dark;
+    --accent: #63b8ff;
+    --accent-strong: #1e78c8;
+    --text: #1d1d1f;
+    --grey: #6e6e73;
+    --red: #d70015;
+    --background: #ffffff;
+    --panel: #f5f5f7;
+    --line: #d2d2d7;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --accent-strong: #63b8ff;
+        --text: #f5f5f7;
+        --grey: #98989d;
+        --red: #ff453a;
+        --background: #1c1c1e;
+        --panel: #242426;
+        --line: #3a3a3c;
+    }
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    height: 100%;
+    margin: 0;
+}
+
+body {
+    background: var(--background);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px;
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+app {
+    display: block;
+    height: 100%;
+}
+
+h1,
+h2 {
+    font-weight: 600;
+    margin: 0 0 8px;
+}
+
+h1 {
+    color: var(--accent-strong);
+    font-size: 20px;
+}
+
+h2 {
+    color: var(--grey);
+    font-size: 13px;
+    margin-top: 18px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+p {
+    margin: 6px 0;
+}
+
+ul,
+ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.layout {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr) 280px;
+    height: 100%;
+}
+
+.notes-region,
+.todos-region {
+    background: var(--panel);
+    overflow-y: auto;
+    padding: 16px;
+}
+
+.notes-region {
+    border-right: 1px solid var(--line);
+}
+
+.todos-region {
+    border-left: 1px solid var(--line);
+}
+
+.notes-region h2,
+.todos-region h2 {
+    margin-top: 0;
+}
+
+.current-region {
+    overflow-y: auto;
+    padding: 20px 24px;
+}
+
+.grey,
+.later {
+    color: var(--grey);
+}
+
+.red,
+.overdue {
+    color: var(--red);
+}
+
+.accent,
+.today {
+    color: var(--accent-strong);
+}
+
+.cut {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.note,
+.todo,
+.linked-note {
+    display: flex;
+    gap: 8px;
+    padding: 3px 0;
+}
+
+.note .name,
+.todo .text,
+.linked-note .name {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.note .time {
+    flex: none;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.linked-note .tags {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.number,
+.date,
+.time {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+}
+
+.todo .number {
+    color: var(--grey);
+    min-width: 1.5em;
+    text-align: right;
+}
+
+table {
+    border-collapse: collapse;
+    table-layout: fixed;
+    width: 100%;
+}
+
+th,
+td {
+    border-bottom: 1px solid var(--line);
+    padding: 4px 8px;
+    text-align: left;
+    vertical-align: top;
+}
+
+th {
+    color: var(--grey);
+    font-weight: 500;
+}
+
+.appointments th:first-child,
+.appointments td:first-child {
+    width: 110px;
+}
+
+.due th:first-child,
+.due td:first-child {
+    width: 40px;
+}
+
+.due th:nth-child(2),
+.due td:nth-child(2) {
+    width: 110px;
+}
+
+.locked,
+.failed,
+.loading {
+    margin: 0;
+    padding: 40px;
+}
