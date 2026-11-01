@@ -67,3 +67,6 @@ Write one feature per line, in plain language.
 - [ ] Precise Reason doc: the `CurrentView.Reason` doc says it is always one of the fixed texts, but `HTTP <code>` is built from the status code; say "a fixed text or `HTTP <code>`" so front ends don't assume a closed list.
 - [ ] Easier-to-scan view docs: split the `CurrentView.Status` summary into a `<list>` with one entry per value, and add a test that pins what `CalendarFeedResult` holds for NotConfigured (no text, no time, no reason).
 - [ ] Zone in CalendarLinkView: `CalendarLinkCommands.Render(CalendarLinkView, TimeZoneInfo zone)` takes the time zone as a separate parameter; put it on `CalendarLinkView` (documented like `CurrentView.Zone`, job 046) so the renderer draws only from its view.
+- [ ] Code spans in link targets: `NoteLinkParser.ParseLine` caches the next `]` and `[` positions, which can point into a later backtick span, so a link target can run into code; respect code spans inside `[[...]]` while keeping the scan linear.
+- [ ] Query links per note: `TagIndex.Links` reads the whole `note_links` table on every `/links` call; query only the rows for that note and the rows whose target matches it.
+- [ ] Label shared-tag rows: when the `/links` table shows the Link column, rows linked only by shared tags have a blank cell; show e.g. `shared tag` instead.
