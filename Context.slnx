@@ -2,8 +2,10 @@
   <Folder Name="/src/">
     <Project Path="src/Context/Context.csproj" />
     <Project Path="src/Context.Core/Context.Core.csproj" />
+    <Project Path="src/Context.Desktop/Context.Desktop.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Context.Desktop.Tests/Context.Desktop.Tests.csproj" />
     <Project Path="tests/Context.Tests/Context.Tests.csproj" />
   </Folder>
 </Solution>

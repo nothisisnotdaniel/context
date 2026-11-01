@@ -13,6 +13,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Context" />
     <InternalsVisibleTo Include="Context.Tests" />
+    <InternalsVisibleTo Include="Context.Desktop" />
+    <InternalsVisibleTo Include="Context.Desktop.Tests" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,31 @@
+@inherits StateComponent
+
+@if (Snapshot is { } snapshot)
+{
+    @if (snapshot.Locked)
+    {
+        <LockedPanel />
+    }
+    else if (snapshot.Failed)
+    {
+        <p class="red failed" role="alert">Can't read the data folder.</p>
+    }
+    else
+    {
+        <div class="layout">
+            <aside class="notes-region">
+                <NotesPanel />
+            </aside>
+            <main class="current-region">
+                <CurrentPanel />
+            </main>
+            <aside class="todos-region">
+                <TodoPanel />
+            </aside>
+        </div>
+    }
+}
+else
+{
+    <p class="grey loading" role="status">Loading…</p>
+}
