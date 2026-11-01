@@ -244,5 +244,5 @@ Every factory agent reads this file before working on Context. Keep it short and
     style break is a build warning, and builds must stay at 0 warnings.
   - `Run` returns a process exit code: 0 for success, non-zero for errors.
   - No new NuGet packages without a reason in the spec. The approver escalates any new dependency.
-- **Git:** the main branch is `main`. Factory work happens on `factory/<job-id>` branches and is merged with `--no-ff`.
+- **Git:** `develop` is the working branch: factory work branches off it as `factory/<job-id>` and is merged back with `--no-ff`. `main` holds releases only and is pushed to only for a new release.
   `.gitignore` is the standard `dotnet new gitignore`.
