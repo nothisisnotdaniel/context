@@ -8,7 +8,7 @@
     }
     else if (snapshot.Failed)
     {
-        <p class="red failed">Can't read the data folder.</p>
+        <p class="red failed" role="alert">Can't read the data folder.</p>
     }
     else
     {
@@ -27,5 +27,5 @@
 }
 else
 {
-    <p class="grey loading">Loading…</p>
+    <p class="grey loading" role="status">Loading…</p>
 }

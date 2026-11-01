@@ -160,7 +160,7 @@ Every factory agent reads this file before working on Context. Keep it short and
 - **Stack:** .NET 10 (`net10.0`), C# with nullable reference types and implicit usings on.
   `Spectre.Console` 0.57.2 handles all terminal output (app only). `Microsoft.Data.Sqlite` 10.0.14 for `context.db`
   (referenced by `Context.Core` only; it reaches the app through the project reference). Tests: xUnit + `Spectre.Console.Testing` 0.57.2.
-  Desktop: `Photino.Blazor` 4.0.13 (Blazor in the OS web view: WebView2 / WKWebView), `Context.Desktop` only; its tests
+  Desktop: `Photino.Blazor` 4.0.13 (Apache-2.0; Blazor in the OS web view: WebView2 / WKWebView), `Context.Desktop` only; its tests
   use `bunit` 2.13.3.
 - **Build:** `dotnet build` (must stay at 0 warnings)
 - **Test command:** `dotnet test`

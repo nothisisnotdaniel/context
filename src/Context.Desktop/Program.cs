@@ -40,6 +40,7 @@ internal static class Program
         app.MainWindow
             .SetTitle("Context")
             .SetSize(1100, 750)
+            .SetGrantBrowserPermissions(false)
             .SetDevToolsEnabled(DevTools);
 
         using DataWatcher watcher = new DataWatcher(folder, state);
