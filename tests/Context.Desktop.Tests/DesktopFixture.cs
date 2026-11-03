@@ -46,6 +46,11 @@ internal sealed class DesktopFixture : IDisposable
 
     public DesktopState? State { get; private set; }
 
+    public DesktopActions? Actions { get; private set; }
+
+    /// <summary>The todo store the state and the actions share (set by <see cref="CreateState"/>).</summary>
+    public TodoStore? Todos { get; private set; }
+
     public void Dispose()
     {
         Bunit.Dispose();
@@ -55,7 +60,7 @@ internal sealed class DesktopFixture : IDisposable
         }
     }
 
-    /// <summary>Builds the state (once) and registers it with <see cref="Bunit"/>.</summary>
+    /// <summary>Builds the state and the actions (once) and registers both with <see cref="Bunit"/>.</summary>
     public DesktopState CreateState()
     {
         if (State is not null)
@@ -66,16 +71,19 @@ internal sealed class DesktopFixture : IDisposable
         Encryption encryption = new Encryption(Root, minIterations: 1000);
         CalendarLink link = new CalendarLink(Root, encryption);
         CalendarFeed feed = new CalendarFeed(Root, link, Http, FeedClock, encryption: encryption);
+        Todos = new TodoStore(Root, encryption: encryption);
         State = new DesktopState(
             encryption,
             new NoteStore(Root, encryption),
-            new TodoStore(Root, encryption: encryption),
+            Todos,
             new TagIndex(Root, encryption),
             new CalendarStore(Root, Zone, encryption),
             feed,
             () => Day,
             () => UtcNow);
+        Actions = new DesktopActions(encryption, Todos, State);
         Bunit.Services.AddSingleton(State);
+        Bunit.Services.AddSingleton(Actions);
         return State;
     }
 

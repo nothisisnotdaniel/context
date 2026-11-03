@@ -208,3 +208,74 @@ th {
     margin: 0;
     padding: 40px;
 }
+
+button {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+    padding: 3px 10px;
+}
+
+button:hover:not(:disabled) {
+    border-color: var(--accent-strong);
+}
+
+button:disabled {
+    cursor: default;
+    opacity: 0.5;
+}
+
+button:focus-visible,
+.dialog:focus-visible {
+    outline: 2px solid var(--accent-strong);
+    outline-offset: 2px;
+}
+
+.todo .done {
+    flex: none;
+    font-size: 12px;
+    padding: 1px 8px;
+}
+
+.result {
+    min-height: 1.2em;
+}
+
+.dialog-backdrop {
+    align-items: center;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex;
+    inset: 0;
+    justify-content: center;
+    position: fixed;
+    z-index: 10;
+}
+
+.dialog {
+    background: var(--background);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+    max-width: min(480px, 90vw);
+    padding: 20px;
+}
+
+.dialog .question {
+    margin: 0 0 16px;
+    overflow-wrap: anywhere;
+}
+
+.dialog-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.dialog .confirm {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: #ffffff;
+}

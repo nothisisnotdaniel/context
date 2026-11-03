@@ -18,16 +18,96 @@
                 @for (int i = 0; i < snapshot.Todos.Count; i++)
                 {
                     TodoItem todo = snapshot.Todos[i];
-                    string number = (i + 1).ToString(CultureInfo.InvariantCulture);
+                    int position = i + 1;
+                    string number = position.ToString(CultureInfo.InvariantCulture);
                     string text = DesktopText.OneLine(todo.Text);
                     string when = todo.Due < snapshot.Today ? "overdue" : todo.Due == snapshot.Today ? "today" : "later";
                     <li class="todo">
                         <span class="number">@number</span>
                         <span class="date @when">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
                         <span class="text cut" title="@text">@text</span>
+                        @if (!snapshot.Locked)
+                        {
+                            <button type="button" class="done" aria-label="@($"Mark todo {number} done")"
+                                    disabled="@(asking is not null || running)" @onclick="() => Ask(position, todo)">Done</button>
+                        }
                     </li>
                 }
             </ol>
         }
     }
+    @if (result is { } shown)
+    {
+        @if (shown.Kind == ActionKind.Done)
+        {
+            <p class="result accent" role="status">Done: @DesktopText.OneLine(shown.Text)</p>
+        }
+        else
+        {
+            <p class="result red" role="status">@shown.Text</p>
+        }
+    }
+    else
+    {
+        <p class="result" role="status"></p>
+    }
+    @if (asking is { } todoAsked)
+    {
+        <ConfirmDialog Question="@($"Mark this todo done? {todoAsked.Item.Text}")" ConfirmLabel="Mark done"
+                       Busy="running" OnConfirm="CompleteAsked" OnCancel="CloseDialog" />
+    }
 </section>
+
+@code {
+    private Asked? asking;
+    private bool running;
+    private ActionResult? result;
+
+    private void Ask(int number, TodoItem todo)
+    {
+        if (!running)
+        {
+            asking = new Asked(number, todo);
+        }
+    }
+
+    private void CloseDialog()
+    {
+        if (!running)
+        {
+            asking = null;
+        }
+    }
+
+    private async Task CompleteAsked(Confirmation confirmed)
+    {
+        if (asking is not { } todoAsked || running)
+        {
+            return;
+        }
+
+        running = true;
+        try
+        {
+            result = await Actions.CompleteTodo(todoAsked.Number, todoAsked.Item, confirmed);
+        }
+        finally
+        {
+            running = false;
+            asking = null;
+        }
+    }
+
+    private sealed class Asked
+    {
+        public Asked(int number, TodoItem item)
+        {
+            Number = number;
+            Item = item;
+        }
+
+        public int Number { get; }
+
+        public TodoItem Item { get; }
+    }
+}
