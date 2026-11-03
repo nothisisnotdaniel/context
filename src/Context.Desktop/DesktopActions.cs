@@ -81,12 +81,12 @@ internal sealed class DesktopActions
     internal Action? BeforeWrite { get; set; }
 
     /// <summary>
-    /// Marks todo <paramref name="number"/> (1-based, as listed) done, which removes it through
-    /// <see cref="TodoStore.Complete"/>, but only when the stored todo at that number still equals
-    /// <paramref name="expected"/> and the user <paramref name="confirmed"/> it.
+    /// Marks <paramref name="todo"/> done, which removes the stored todo with the same id through
+    /// <see cref="TodoStore.Complete"/> in one read and write, but only when the user <paramref name="confirmed"/> it.
+    /// A todo that is no longer stored is refused as <see cref="ActionReason.Changed"/>.
     /// </summary>
-    public Task<ActionResult> CompleteTodo(int number, TodoItem expected, Confirmation? confirmed) =>
-        Run(() => CompleteTodoNow(number, expected, confirmed));
+    public Task<ActionResult> CompleteTodo(TodoItem todo, Confirmation? confirmed) =>
+        Run(() => CompleteTodoNow(todo, confirmed));
 
     private static ActionResult Refused(ActionReason reason, string text) => new(ActionKind.Refused, reason, text);
 
@@ -153,36 +153,28 @@ internal sealed class DesktopActions
         }
     }
 
-    private ActionResult CompleteTodoNow(int number, TodoItem? expected, Confirmation? confirmed)
+    private ActionResult CompleteTodoNow(TodoItem? todo, Confirmation? confirmed)
     {
         if (confirmed is null)
         {
             return Refused(ActionReason.NotConfirmed, NotConfirmedText);
         }
 
-        if (expected is null)
+        if (todo is null)
         {
             return Refused(ActionReason.Changed, TodosChangedText);
         }
 
         try
         {
-            IReadOnlyList<TodoItem> list = todos.List();
-            if (number < 1 || number > list.Count || list[number - 1] != expected)
-            {
-                return Refused(ActionReason.Changed, TodosChangedText);
-            }
-
-            TodoItem done = todos.Complete(number);
-            return new ActionResult(ActionKind.Done, ActionReason.None, done.Text);
+            TodoItem? done = todos.Complete(todo.Id);
+            return done is null
+                ? Refused(ActionReason.Changed, TodosChangedText)
+                : new ActionResult(ActionKind.Done, ActionReason.None, done.Text);
         }
         catch (TodoStoreException)
         {
             return Failed(ActionReason.Unreadable, TodosUnreadableText);
-        }
-        catch (ArgumentOutOfRangeException)
-        {
-            return Refused(ActionReason.Changed, TodosChangedText);
         }
         catch (Exception)
         {

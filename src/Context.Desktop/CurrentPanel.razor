@@ -66,14 +66,13 @@
             <h2>Due</h2>
             <table class="due">
                 <thead>
-                    <tr><th>#</th><th>Date</th><th>Todo</th></tr>
+                    <tr><th>Date</th><th>Todo</th></tr>
                 </thead>
                 <tbody>
                     @foreach (DueTodo todo in view.Due)
                     {
                         string text = DesktopText.OneLine(todo.Text);
                         <tr class="due-todo">
-                            <td class="number">@todo.Number.ToString(CultureInfo.InvariantCulture)</td>
                             <td class="date @(todo.Overdue ? "overdue" : "today")">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</td>
                             <td class="cut" title="@text">@text</td>
                         </tr>

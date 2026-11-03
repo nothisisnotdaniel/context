@@ -41,10 +41,10 @@ public sealed class CurrentPanelTests : IDisposable
 
         IReadOnlyList<IElement> due = cut.FindAll("table.due tbody tr");
         Assert.Equal(2, due.Count);
-        Assert.Equal(["1", "2026-10-28", "Report for #work"], Cells(due[0]));
-        Assert.Equal(["2", "2026-10-29", "Plan #[big project]"], Cells(due[1]));
-        Assert.True(due[0].Children[1].ClassList.Contains("overdue"));
-        Assert.True(due[1].Children[1].ClassList.Contains("today"));
+        Assert.Equal(["2026-10-28", "Report for #work"], Cells(due[0]));
+        Assert.Equal(["2026-10-29", "Plan #[big project]"], Cells(due[1]));
+        Assert.True(due[0].Children[0].ClassList.Contains("overdue"));
+        Assert.True(due[1].Children[0].ClassList.Contains("today"));
 
         IElement linked = Assert.Single(cut.FindAll("ul.linked li"));
         Assert.Equal("Alpha", linked.QuerySelector(".name")!.TextContent);
@@ -200,7 +200,7 @@ public sealed class CurrentPanelTests : IDisposable
         Assert.Equal(shown, cells[1].TextContent);
         Assert.Equal(shown, cells[2].TextContent);
         Assert.Equal(shown, cells[2].GetAttribute("title"));
-        Assert.Equal(shown + " #work", cut.FindAll("table.due td")[2].TextContent);
+        Assert.Equal(shown + " #work", cut.FindAll("table.due td")[1].TextContent);
         Assert.Contains("&lt;script&gt;", cut.Markup);
         Assert.DoesNotContain("\u0007", cut.Markup, StringComparison.Ordinal);
         if (!OperatingSystem.IsWindows())

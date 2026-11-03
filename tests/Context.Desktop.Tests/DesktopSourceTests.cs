@@ -257,7 +257,7 @@ public sealed class DesktopSourceTests
             found.AddRange(UntypedButtons(text).Select(b => $"{file}: {b}"));
         }
 
-        Assert.True(buttons >= 3, "Expected the Done, confirm and Cancel buttons, found " + buttons);
+        Assert.True(buttons >= 2, "Expected the confirm and Cancel buttons, found " + buttons);
         Assert.True(found.Count == 0, "Buttons without type=\"button\": " + string.Join(", ", found));
     }
 
@@ -272,6 +272,41 @@ public sealed class DesktopSourceTests
     public void ButtonType_Pattern(string razor, int untyped)
     {
         Assert.Equal(untyped, UntypedButtons(razor).Count);
+    }
+
+    // 080 round 2: the first <input> use. Every <input> is a checkbox (no text entry yet) and nothing binds a value
+    // with @bind; the first job with text inputs adds its own rules and tests.
+    [Fact]
+    public void Razor_InputsAreCheckboxesOnly()
+    {
+        string root = RepoFiles.Root();
+        List<string> found = [];
+        int inputs = 0;
+        foreach (string file in RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".razor"))
+        {
+            string text = File.ReadAllText(Path.Combine(root, file));
+            inputs += Regex.Matches(text, "<input", RegexOptions.IgnoreCase).Count;
+            found.AddRange(BadInputs(text).Select(i => $"{file}: {i}"));
+        }
+
+        Assert.True(inputs >= 1, "Expected the todo checkboxes, found " + inputs);
+        Assert.True(found.Count == 0, "Inputs other than plain checkboxes: " + string.Join(", ", found));
+    }
+
+    // 080 round 2 (control): the input check.
+    [Theory]
+    [InlineData("<input type=\"checkbox\" checked=\"@x\" @onchange=\"() => Ask(t)\" />", 0)]
+    [InlineData("<input class=\"done\" type=\"checkbox\">", 0)]
+    [InlineData("<input>", 1)]
+    [InlineData("<input type=\"text\" />", 1)]
+    [InlineData("<INPUT type=\"file\">", 1)]
+    [InlineData("<input data-type=\"checkbox\">", 1)]
+    [InlineData("<input type=\"checkbox\" @bind=\"done\" />", 1)]
+    [InlineData("<input type=\"checkbox\" @bind-value=\"done\" />", 1)]
+    [InlineData("<textarea>x</textarea>", 1)]
+    public void Input_Pattern(string razor, int bad)
+    {
+        Assert.Equal(bad, BadInputs(razor).Count);
     }
 
     // AC-10: no plain HTML event attributes (on<event>= without '@') on elements.
@@ -334,6 +369,7 @@ public sealed class DesktopSourceTests
     [InlineData("notes.Save(title, bytes)")]
     [InlineData("todos.Add(text, due)")]
     [InlineData("todos.Complete(1)")]
+    [InlineData("todos.Complete(todo.Id)")]
     [InlineData("link.Set(value)")]
     [InlineData("link.Clear()")]
     [InlineData("link.Save(value)")]
@@ -378,6 +414,16 @@ public sealed class DesktopSourceTests
         RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".razor")
             .Select(f => Path.GetFileNameWithoutExtension(f))
             .ToHashSet(StringComparer.Ordinal);
+
+    // Every <input> that is not type="checkbox" or that uses @bind, and every <textarea>.
+    private static List<string> BadInputs(string razor) =>
+        Tag.Matches(MarkupOf(razor))
+            .Where(m => m.Groups[1].Value.Equals("input", StringComparison.OrdinalIgnoreCase)
+                ? !Regex.IsMatch(m.Groups[2].Value, @"(?<![\w-])type\s*=\s*""checkbox""")
+                    || m.Groups[2].Value.Contains("@bind", StringComparison.Ordinal)
+                : m.Groups[1].Value.Equals("textarea", StringComparison.OrdinalIgnoreCase))
+            .Select(m => m.Value)
+            .ToList();
 
     // Every <button ...> tag (any case) without type="button".
     private static List<string> UntypedButtons(string razor) =>

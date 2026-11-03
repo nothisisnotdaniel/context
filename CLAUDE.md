@@ -147,9 +147,14 @@ Every factory agent reads this file before working on Context. Keep it short and
   - **Todos:** `TodoStore` keeps the list in `<root>/todos.json` (same root as notes; System.Text.Json,
     camelCase, UTF-8 no BOM). `List()` sorts by `Due`, then `Created` (UTC), then file order. Writes go to
     a temp file in the root, then `File.Move(..., overwrite: true)`; a file that can't be read or parsed
-    throws `TodoStoreException` and is never overwritten. `/todo <yyyy-MM-dd|today|tomorrow> <text>` adds
-    (text at most 200 chars, past dates allowed); `/done <n>` removes the n-th todo as numbered in the
-    sidebar. `TodoSidebar.Render(rows, width)` draws `<n> <MM-dd> <text>` lines (date `red` overdue,
+    throws `TodoStoreException` and is never overwritten. Each `TodoItem` has a `Guid Id` (stored as `id`, never
+    shown to the user; new ones from `Guid.NewGuid` or the injected `newId`). A todo stored without an id (files from
+    before ids), or with an empty or repeated one, gets `TodoStore.DerivedId` (SHA-256 of created, due, text and its
+    rank among identical todos), so reads never write and the id stays the same until the next write stores it; an
+    `id` that is not a GUID makes the file unreadable. `Complete(Guid id)` removes that todo in one read and write
+    and returns it, or returns `null` and writes nothing. `/todo <yyyy-MM-dd|today|tomorrow> <text>` adds
+    (text at most 200 chars, past dates allowed); `/done <n>` picks the n-th todo as numbered in the console
+    sidebar and removes it by its id. `TodoSidebar.Render(rows, width)` draws `<n> <MM-dd> <text>` lines (date `red` overdue,
     `steelblue1` today, `grey` later; text cleaned, escaped and cut to one line with `…`), `… N more` in
     grey on the last row when they don't fit, `No todos yet` when empty and a red `Can't read todos.json`
     line when the file is bad. `App` takes an optional `TodoSidebar`; without one it shows `No todos yet`.
@@ -206,11 +211,13 @@ Every factory agent reads this file before working on Context. Keep it short and
     public parameters). `DesktopActions` (with `ActionResult`: `ActionKind` `Done`/`Refused`/`Failed`, `ActionReason`,
     raw text) is the only write path: it never throws, runs one action at a time (`Busy`), refuses every action while
     `encryption.json` exists (`Locked`) without touching a file, refreshes the state after a change and has the test
-    hook `BeforeWrite`. `CompleteTodo(number, expected, confirmation)` removes the todo only when the stored one at
-    that number still equals `expected` (else `The todo list changed. Nothing was done.`). `ConfirmDialog` (in-window
+    hook `BeforeWrite`. `CompleteTodo(todo, confirmation)` removes the todo with `todo.Id` through
+    `TodoStore.Complete(id)` (a todo no longer stored: `The todo list changed. Nothing was done.`). `ConfirmDialog` (in-window
     `role="dialog"` overlay, focus on `Cancel`, Esc cancels, `Busy` disables it) is the only creator of a
-    `Confirmation` (public sealed, internal constructor), which destructive actions require. `TodoPanel` has a `Done`
-    button per todo and a `role="status"` result line (`Done: <text>` accent, or the fixed red text).
+    `Confirmation` (public sealed, internal constructor), which destructive actions require. The desktop shows no todo
+    numbers (not in `TodoPanel`, not in the `Due` table): `TodoPanel` shows each todo as a `<label>` line with a
+    checkbox, date and text; ticking it opens the dialog (the box stays ticked while it is open), and a
+    `role="status"` result line shows `Done: <text>` (accent) or the fixed red text.
     `wwwroot/index.html` (CSP meta tag, only `_framework/blazor.webview.js`) and `wwwroot/app.css`.
   - **Desktop rules:** the Core writing calls (`Create`, `Save`, `Add`, `Complete`, `Set`, `Clear`, `Delete`,
     `ClearCache`, `Migrate`, `DecryptAll`, `Vault.Create`) appear only in `DesktopActions.cs` (the reads still write
@@ -225,8 +232,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     Outside text goes through `DesktopText.OneLine` and Blazor's default encoding: never `MarkupString`,
     `AddMarkupContent` or `@((` raw markup; no `style=`, `<a `, `<form` or `<script` in `.razor` files; every
     `<button` has `type="button"`; no plain HTML event attributes (`on<event>=` without `@`); no source mentions
-    `IJSRuntime`/`JSRuntime` (no JavaScript of our own; `ElementReference.FocusAsync` is Blazor's). `<input>` and
-    `<textarea>` are allowed, but the first job that uses them adds tests for them. No CDN or external fonts; error
+    `IJSRuntime`/`JSRuntime` (no JavaScript of our own; `ElementReference.FocusAsync` is Blazor's). Every `<input>`
+    is `type="checkbox"` without `@bind`, and there is no `<textarea>`; the first job with text entry changes this
+    rule and adds tests for it. No CDN or external fonts; error
     lines are fixed texts, never exception messages; the calendar link stays inside `CalendarFeed`. Texts match the
     console renderer's. Colours by CSS class (`accent`, `grey`, `red`, dates `overdue`/`today`/`later`); long lines
     cut by CSS with the full text in `title`.
@@ -239,7 +247,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     own temp folder (deleted in `Dispose`), never the real app data folder.
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `DesktopDependencyTests` (no Spectre), `DesktopSourceTests` (raw markup, risky elements,
-    CSP, write sites, event-handler-only actions, button types, JS interop), `DesktopFixture` (temp folder, injected
+    CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop), `DesktopFixture` (temp folder, injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),
     `FileSnapshot` (bytes and last-write times of a folder, to prove nothing changed) and `RepoFiles`.
 - **Style:**

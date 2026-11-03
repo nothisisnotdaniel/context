@@ -22,13 +22,13 @@ public sealed class AppTests : IDisposable
         await data.State.Refresh();
         cut.WaitForAssertion(() => Assert.Contains("Sample todo", cut.Find(".todos").TextContent));
 
-        Assert.NotEmpty(cut.FindAll("button.done"));
+        Assert.NotEmpty(cut.FindAll("input.done[type=checkbox]"));
         Assert.Equal(before, Files());
     }
 
-    // AC-7: the locked state renders no Done button and changes no data file.
+    // AC-7: the locked state renders no checkbox and changes no data file.
     [Fact]
-    public async Task Render_Locked_NoDoneButtonChangesNoFile()
+    public async Task Render_Locked_NoCheckboxChangesNoFile()
     {
         WriteSample();
         Vault.Create(data.Root, "a long enough passphrase", 1000).Dispose();
@@ -38,7 +38,7 @@ public sealed class AppTests : IDisposable
         await data.State!.Refresh();
 
         Assert.Single(cut.FindAll(".locked"));
-        Assert.Empty(cut.FindAll("button"));
+        Assert.Empty(cut.FindAll("button, input"));
         Assert.DoesNotContain("Sample todo", cut.Markup);
         Assert.Equal(before, Files());
     }

@@ -6,7 +6,7 @@ public sealed class DesktopActionsTests : IDisposable
 
     public void Dispose() => data.Dispose();
 
-    // AC-1: a matching todo and a confirmation remove exactly that todo, return Done with its text, refresh once.
+    // AC-1: a stored todo and a confirmation remove exactly that todo (by id), return Done with its text, refresh once.
     [Fact]
     public async Task CompleteTodo_Matching_RemovesItAndRefreshesOnce()
     {
@@ -16,7 +16,7 @@ public sealed class DesktopActionsTests : IDisposable
         DesktopSnapshot before = await data.RefreshAsync();
         int builds = data.State!.Builds;
 
-        ActionResult result = await data.Actions!.CompleteTodo(2, before.Todos[1], new Confirmation());
+        ActionResult result = await data.Actions!.CompleteTodo(before.Todos[1], new Confirmation());
 
         Assert.Equal(ActionKind.Done, result.Kind);
         Assert.Equal(ActionReason.None, result.Reason);
@@ -33,66 +33,43 @@ public sealed class DesktopActionsTests : IDisposable
         Assert.Equal("ActionResult", new ActionResult(ActionKind.Done, ActionReason.None, "secret").ToString());
     }
 
-    // AC-2: a changed todo at that number (other text, due or created) leaves the file byte-for-byte unchanged.
-    [Theory]
-    [InlineData("text")]
-    [InlineData("due")]
-    [InlineData("created")]
-    public async Task CompleteTodo_ExpectedDiffers_RefusedUnchanged(string field)
+    // AC-2: a todo that is no longer stored (done elsewhere, or an id the file never had) leaves the file
+    // byte-for-byte unchanged and is refused.
+    [Fact]
+    public async Task CompleteTodo_TodoGone_RefusedUnchanged()
     {
         data.AddTodo("First", DesktopFixture.Today);
         data.AddTodo("Second", DesktopFixture.Today.AddDays(1));
         DesktopSnapshot before = await data.RefreshAsync();
-        TodoItem stored = before.Todos[1];
-        TodoItem expected = field switch
-        {
-            "text" => new TodoItem("Other", stored.Due, stored.Created),
-            "due" => new TodoItem(stored.Text, stored.Due.AddDays(1), stored.Created),
-            _ => new TodoItem(stored.Text, stored.Due, stored.Created.AddTicks(1)),
-        };
+        data.Todos!.Complete(before.Todos[1].Id);
         SortedDictionary<string, string> files = Files();
         int builds = data.State!.Builds;
 
-        ActionResult result = await data.Actions!.CompleteTodo(2, expected, new Confirmation());
+        ActionResult gone = await data.Actions!.CompleteTodo(before.Todos[1], new Confirmation());
+        ActionResult unknown = await data.Actions.CompleteTodo(
+            new TodoItem(Guid.NewGuid(), "First", before.Todos[0].Due, before.Todos[0].Created), new Confirmation());
 
-        AssertRefused(result, ActionReason.Changed, "The todo list changed. Nothing was done.");
+        AssertRefused(gone, ActionReason.Changed, "The todo list changed. Nothing was done.");
+        AssertRefused(unknown, ActionReason.Changed, DesktopActions.TodosChangedText);
         Assert.Equal(files, Files());
         Assert.Equal(builds, data.State.Builds);
+        Assert.Equal(["First"], data.Todos.List().Select(t => t.Text).ToArray());
     }
 
-    // AC-2: the list changed since render (a todo was added before it), so number 1 is another todo now.
+    // AC-2: the list changed since render (a sooner todo now sits where the shown one was); the shown todo, found
+    // by its id, is the one removed.
     [Fact]
-    public async Task CompleteTodo_ListChangedSinceRender_RefusedUnchanged()
+    public async Task CompleteTodo_ListChangedSinceRender_RemovesTheShownTodo()
     {
         data.AddTodo("Later", DesktopFixture.Today.AddDays(3));
         DesktopSnapshot before = await data.RefreshAsync();
         data.AddTodo("Sooner", DesktopFixture.Today);
-        SortedDictionary<string, string> files = Files();
 
-        ActionResult result = await data.Actions!.CompleteTodo(1, before.Todos[0], new Confirmation());
+        ActionResult result = await data.Actions!.CompleteTodo(before.Todos[0], new Confirmation());
 
-        AssertRefused(result, ActionReason.Changed, DesktopActions.TodosChangedText);
-        Assert.Equal(files, Files());
-        Assert.Equal(["Sooner", "Later"], data.Todos!.List().Select(t => t.Text).ToArray());
-    }
-
-    // AC-2: numbers out of range (and an empty or missing list) change nothing.
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    [InlineData(3)]
-    [InlineData(int.MaxValue)]
-    public async Task CompleteTodo_OutOfRange_RefusedUnchanged(int number)
-    {
-        data.AddTodo("First", DesktopFixture.Today);
-        data.AddTodo("Second", DesktopFixture.Today);
-        DesktopSnapshot before = await data.RefreshAsync();
-        SortedDictionary<string, string> files = Files();
-
-        ActionResult result = await data.Actions!.CompleteTodo(number, before.Todos[0], new Confirmation());
-
-        AssertRefused(result, ActionReason.Changed, DesktopActions.TodosChangedText);
-        Assert.Equal(files, Files());
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Equal("Later", result.Text);
+        Assert.Equal(["Sooner"], data.Todos!.List().Select(t => t.Text).ToArray());
     }
 
     // AC-2: no todos.json at all: refused, and nothing is created.
@@ -103,7 +80,7 @@ public sealed class DesktopActionsTests : IDisposable
         SortedDictionary<string, string> files = Files();
 
         ActionResult result = await data.Actions!.CompleteTodo(
-            1, new TodoItem("Gone", DesktopFixture.Today, DateTime.UnixEpoch), new Confirmation());
+            new TodoItem(Guid.NewGuid(), "Gone", DesktopFixture.Today, DateTime.UnixEpoch), new Confirmation());
 
         AssertRefused(result, ActionReason.Changed, DesktopActions.TodosChangedText);
         Assert.Equal(files, Files());
@@ -122,7 +99,7 @@ public sealed class DesktopActionsTests : IDisposable
         SortedDictionary<string, string> files = Files();
 
         ActionResult result = await data.Actions!.CompleteTodo(
-            1, new TodoItem("x", DesktopFixture.Today, DateTime.UnixEpoch), new Confirmation());
+            new TodoItem(Guid.NewGuid(), "x", DesktopFixture.Today, DateTime.UnixEpoch), new Confirmation());
 
         Assert.Equal(ActionKind.Failed, result.Kind);
         Assert.Equal(ActionReason.Unreadable, result.Reason);
@@ -146,7 +123,7 @@ public sealed class DesktopActionsTests : IDisposable
         SortedDictionary<string, string> files = Files();
 
         ActionResult result = await data.Actions!.CompleteTodo(
-            1, new TodoItem("Secret", DesktopFixture.Today, DateTime.UnixEpoch), new Confirmation());
+            new TodoItem(Guid.NewGuid(), "Secret", DesktopFixture.Today, DateTime.UnixEpoch), new Confirmation());
 
         Assert.Equal(ActionKind.Failed, result.Kind);
         Assert.Equal(DesktopActions.TodosUnreadableText, result.Text);
@@ -164,8 +141,8 @@ public sealed class DesktopActionsTests : IDisposable
         SortedDictionary<string, string> files = Files();
         int builds = data.State!.Builds;
 
-        ActionResult confirmed = await data.Actions!.CompleteTodo(1, list[0], new Confirmation());
-        ActionResult unconfirmed = await data.Actions.CompleteTodo(1, list[0], null);
+        ActionResult confirmed = await data.Actions!.CompleteTodo(list[0], new Confirmation());
+        ActionResult unconfirmed = await data.Actions.CompleteTodo(list[0], null);
 
         AssertRefused(confirmed, ActionReason.Locked, DesktopActions.LockedText);
         AssertRefused(unconfirmed, ActionReason.Locked, DesktopActions.LockedText);
@@ -188,9 +165,9 @@ public sealed class DesktopActionsTests : IDisposable
             release.Wait(TimeSpan.FromSeconds(10));
         };
 
-        Task<ActionResult> first = data.Actions.CompleteTodo(1, before.Todos[0], new Confirmation());
+        Task<ActionResult> first = data.Actions.CompleteTodo(before.Todos[0], new Confirmation());
         Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
-        ActionResult second = await data.Actions.CompleteTodo(2, before.Todos[1], new Confirmation());
+        ActionResult second = await data.Actions.CompleteTodo(before.Todos[1], new Confirmation());
         release.Set();
         ActionResult firstResult = await first;
 
@@ -199,7 +176,7 @@ public sealed class DesktopActionsTests : IDisposable
         Assert.Equal(["Second"], data.Todos!.List().Select(t => t.Text).ToArray());
 
         data.Actions.BeforeWrite = null;
-        ActionResult third = await data.Actions.CompleteTodo(1, data.Todos.List()[0], new Confirmation());
+        ActionResult third = await data.Actions.CompleteTodo(data.Todos.List()[0], new Confirmation());
         Assert.Equal(ActionKind.Done, third.Kind);
     }
 
@@ -211,7 +188,7 @@ public sealed class DesktopActionsTests : IDisposable
         DesktopSnapshot before = await data.RefreshAsync();
         SortedDictionary<string, string> files = Files();
 
-        ActionResult result = await data.Actions!.CompleteTodo(1, before.Todos[0], null);
+        ActionResult result = await data.Actions!.CompleteTodo(before.Todos[0], null);
 
         AssertRefused(result, ActionReason.NotConfirmed, DesktopActions.NotConfirmedText);
         Assert.Equal(files, Files());
@@ -225,9 +202,9 @@ public sealed class DesktopActionsTests : IDisposable
         await data.RefreshAsync();
         SortedDictionary<string, string> files = Files();
 
-        ActionResult nullExpected = await data.Actions!.CompleteTodo(1, null!, new Confirmation());
+        ActionResult nullExpected = await data.Actions!.CompleteTodo(null!, new Confirmation());
         data.Actions.BeforeWrite = () => throw new InvalidOperationException("secret detail");
-        ActionResult thrown = await data.Actions.CompleteTodo(1, data.Todos!.List()[0], new Confirmation());
+        ActionResult thrown = await data.Actions.CompleteTodo(data.Todos!.List()[0], new Confirmation());
 
         AssertRefused(nullExpected, ActionReason.Changed, DesktopActions.TodosChangedText);
         Assert.Equal(ActionKind.Failed, thrown.Kind);
