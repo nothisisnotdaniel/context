@@ -1,0 +1,51 @@
+@* An in-window confirmation: the question, a confirm button and Cancel. Focus starts on Cancel and Esc cancels.
+   It is the only place a Confirmation is created; the parent gets it through OnConfirm. *@
+
+<div class="dialog-backdrop">
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-question" tabindex="-1"
+         @onkeydown="Key">
+        <p id="confirm-question" class="question">@DesktopText.OneLine(Question)</p>
+        <div class="dialog-buttons">
+            <button type="button" class="confirm" disabled="@Busy" @onclick="Confirm">@ConfirmLabel</button>
+            <button type="button" class="cancel" disabled="@Busy" @onclick="Cancel" @ref="cancelButton">Cancel</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    private ElementReference cancelButton;
+
+    /// <summary>The question; outside text in it is shown on one line, encoded.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Question { get; set; } = string.Empty;
+
+    /// <summary>The confirm button's text.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string ConfirmLabel { get; set; } = string.Empty;
+
+    /// <summary>While true both buttons are disabled and Esc does nothing.</summary>
+    [Parameter]
+    public bool Busy { get; set; }
+
+    [Parameter]
+    public EventCallback<Confirmation> OnConfirm { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await cancelButton.FocusAsync();
+        }
+    }
+
+    private Task Confirm() => Busy ? Task.CompletedTask : OnConfirm.InvokeAsync(new Confirmation());
+
+    private Task Cancel() => Busy ? Task.CompletedTask : OnCancel.InvokeAsync();
+
+    private Task Key(KeyboardEventArgs e) => e.Key == "Escape" ? Cancel() : Task.CompletedTask;
+}

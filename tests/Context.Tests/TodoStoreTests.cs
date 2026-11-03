@@ -58,7 +58,7 @@ public sealed class TodoStoreTests : IDisposable
         TodoStore store = Store();
         store.Add("a", new DateOnly(2026, 11, 3));
         store.Add("b", new DateOnly(2026, 11, 4));
-        store.Complete(1);
+        store.Complete(store.List()[0].Id);
 
         Assert.Equal([FilePath], Directory.GetFiles(root));
     }
@@ -112,43 +112,160 @@ public sealed class TodoStoreTests : IDisposable
         Assert.Equal([b, a], read);
     }
 
-    // AC-6
+    // AC-6 / 080: Complete removes the todo with that id and returns it.
     [Fact]
-    public void Complete_RemovesThatPosition_ReturnsIt()
+    public void Complete_RemovesThatId_ReturnsIt()
     {
         TodoStore store = Store();
         store.Add("c", new DateOnly(2026, 11, 5));
         store.Add("a", new DateOnly(2026, 11, 3));
-        store.Add("b", new DateOnly(2026, 11, 4));
+        TodoItem b = store.Add("b", new DateOnly(2026, 11, 4));
 
-        TodoItem done = store.Complete(2);
+        TodoItem? done = store.Complete(b.Id);
 
-        Assert.Equal("b", done.Text);
+        Assert.Equal(b, done);
         Assert.Equal(["a", "c"], new TodoStore(root).List().Select(t => t.Text));
     }
 
-    // AC-6
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    [InlineData(3)]
-    public void Complete_OutOfRange_Throws_ChangesNothing(int number)
+    // 080: an id no todo has returns null and changes nothing.
+    [Fact]
+    public void Complete_UnknownId_ReturnsNull_ChangesNothing()
     {
         TodoStore store = Store();
         store.Add("a", new DateOnly(2026, 11, 3));
-        store.Add("b", new DateOnly(2026, 11, 4));
+        TodoItem b = store.Add("b", new DateOnly(2026, 11, 4));
+        store.Complete(b.Id);
         byte[] before = File.ReadAllBytes(FilePath);
+        DateTime written = File.GetLastWriteTimeUtc(FilePath);
 
-        Assert.Throws<ArgumentOutOfRangeException>(() => store.Complete(number));
+        Assert.Null(store.Complete(b.Id));
+        Assert.Null(store.Complete(Guid.NewGuid()));
+        Assert.Null(store.Complete(Guid.Empty));
         Assert.Equal(before, File.ReadAllBytes(FilePath));
+        Assert.Equal(written, File.GetLastWriteTimeUtc(FilePath));
     }
 
-    // AC-6
+    // 080: no file: null, and nothing is created.
     [Fact]
-    public void Complete_NoFile_Throws_CreatesNothing()
+    public void Complete_NoFile_ReturnsNull_CreatesNothing()
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => Store().Complete(1));
+        Assert.Null(Store().Complete(Guid.NewGuid()));
         Assert.False(Directory.Exists(root));
+    }
+
+    // 080: the list changed after it was read (a sooner todo was added), so the old position now holds another
+    // todo; completing by id still removes the one that was meant.
+    [Fact]
+    public void Complete_ListChangedSinceRead_RemovesTheMeantTodo()
+    {
+        TodoStore store = Store();
+        TodoItem later = store.Add("later", new DateOnly(2026, 11, 5));
+        TodoItem shown = store.List()[0];
+        new TodoStore(root, () => Start).Add("sooner", new DateOnly(2026, 11, 1));
+
+        TodoItem? done = store.Complete(shown.Id);
+
+        Assert.Equal(later, done);
+        Assert.Equal(["sooner"], store.List().Select(t => t.Text));
+    }
+
+    // 080: each new todo gets a new, non-empty id that is written to the file and read back.
+    [Fact]
+    public void Add_StoresUniqueIds()
+    {
+        TodoStore store = FrozenStore();
+        TodoItem a = store.Add("same", new DateOnly(2026, 11, 3));
+        TodoItem b = store.Add("same", new DateOnly(2026, 11, 3));
+
+        Assert.NotEqual(Guid.Empty, a.Id);
+        Assert.NotEqual(a.Id, b.Id);
+        Assert.Contains($"\"id\": \"{a.Id}\"", File.ReadAllText(FilePath));
+        Assert.Equal([a.Id, b.Id], new TodoStore(root).List().Select(t => t.Id));
+    }
+
+    // 080: an injected id is used unless it is empty or already taken.
+    [Fact]
+    public void Add_InjectedId_UsedUnlessEmptyOrTaken()
+    {
+        Guid fixedId = new Guid("11111111-2222-3333-4444-555555555555");
+        TodoStore store = new TodoStore(root, () => Start, newId: () => fixedId);
+
+        TodoItem first = store.Add("a", new DateOnly(2026, 11, 3));
+        TodoItem second = store.Add("b", new DateOnly(2026, 11, 3));
+        TodoItem third = new TodoStore(root, () => Start, newId: () => Guid.Empty).Add("c", new DateOnly(2026, 11, 3));
+
+        Assert.Equal(fixedId, first.Id);
+        Assert.NotEqual(fixedId, second.Id);
+        Assert.NotEqual(Guid.Empty, third.Id);
+    }
+
+    // 080 migration: a file from before ids still reads; every todo gets an id that is the same on every read, and
+    // reading writes nothing.
+    [Fact]
+    public void LegacyFile_NoIds_StableDerivedIds_ReadWritesNothing()
+    {
+        Directory.CreateDirectory(root);
+        string legacy = "[\n  {\"text\": \"twin\", \"due\": \"2026-11-03\", \"created\": \"2026-10-01T09:00:00Z\"},\n"
+            + "  {\"text\": \"twin\", \"due\": \"2026-11-03\", \"created\": \"2026-10-01T09:00:00Z\"},\n"
+            + "  {\"text\": \"other\", \"due\": \"2026-11-04\"}\n]\n";
+        File.WriteAllText(FilePath, legacy);
+        DateTime written = File.GetLastWriteTimeUtc(FilePath);
+
+        IReadOnlyList<TodoItem> first = new TodoStore(root).List();
+        IReadOnlyList<TodoItem> second = new TodoStore(root).List();
+
+        Assert.Equal(first, second);
+        Assert.Equal(3, first.Select(t => t.Id).Distinct().Count());
+        Assert.DoesNotContain(Guid.Empty, first.Select(t => t.Id));
+        Assert.Equal(legacy, File.ReadAllText(FilePath));
+        Assert.Equal(written, File.GetLastWriteTimeUtc(FilePath));
+    }
+
+    // 080 migration: completing one legacy twin removes exactly that one and stores the ids, which stay the same.
+    [Fact]
+    public void LegacyFile_CompleteOneTwin_KeepsTheOtherWithTheSameId()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath,
+            "[{\"text\":\"twin\",\"due\":\"2026-11-03\"},{\"text\":\"twin\",\"due\":\"2026-11-03\"},"
+            + "{\"text\":\"other\",\"due\":\"2026-11-04\"}]");
+        TodoStore store = new TodoStore(root);
+        IReadOnlyList<TodoItem> before = store.List();
+
+        Assert.Equal(before[1], store.Complete(before[1].Id));
+
+        Assert.Equal([before[0], before[2]], store.List());
+        Assert.Contains($"\"id\": \"{before[0].Id}\"", File.ReadAllText(FilePath));
+        Assert.Contains($"\"id\": \"{before[2].Id}\"", File.ReadAllText(FilePath));
+    }
+
+    // 080: an empty or repeated stored id gets a derived one; a stored id is never taken by a derived one.
+    [Fact]
+    public void StoredIds_EmptyOrRepeated_GetDerivedUniqueIds()
+    {
+        Directory.CreateDirectory(root);
+        Guid kept = new Guid("aaaaaaaa-0000-0000-0000-000000000001");
+        File.WriteAllText(FilePath,
+            $"[{{\"id\":\"{kept}\",\"text\":\"a\",\"due\":\"2026-11-03\"}},"
+            + $"{{\"id\":\"{kept}\",\"text\":\"b\",\"due\":\"2026-11-03\"}},"
+            + $"{{\"id\":\"{Guid.Empty}\",\"text\":\"c\",\"due\":\"2026-11-03\"}}]");
+
+        IReadOnlyList<TodoItem> todos = new TodoStore(root).List();
+
+        Assert.Equal(kept, todos[0].Id);
+        Assert.Equal(3, todos.Select(t => t.Id).Distinct().Count());
+        Assert.DoesNotContain(Guid.Empty, todos.Select(t => t.Id));
+        Assert.Equal(todos, new TodoStore(root).List());
+    }
+
+    // 080: an id that is not a GUID makes the file unreadable, like any other bad field.
+    [Fact]
+    public void StoredId_NotAGuid_Unreadable()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, "[{\"id\":\"nope\",\"text\":\"a\",\"due\":\"2026-11-03\"}]");
+
+        Assert.Throws<TodoStoreException>(() => new TodoStore(root).List());
     }
 
     // AC-8
@@ -171,7 +288,7 @@ public sealed class TodoStoreTests : IDisposable
 
         Assert.Throws<TodoStoreException>(() => store.List());
         Assert.Throws<TodoStoreException>(() => store.Add("x", new DateOnly(2026, 11, 3)));
-        Assert.Throws<TodoStoreException>(() => store.Complete(1));
+        Assert.Throws<TodoStoreException>(() => store.Complete(Guid.NewGuid()));
         Assert.Equal(original, File.ReadAllBytes(FilePath));
         Assert.Single(Directory.GetFiles(root));
     }
@@ -184,8 +301,8 @@ public sealed class TodoStoreTests : IDisposable
         TodoStore store = new TodoStore(root, () => Start, encryption);
 
         store.Add("Secret errand", new DateOnly(2026, 11, 3));
-        store.Add("Second", new DateOnly(2026, 11, 4));
-        store.Complete(2);
+        TodoItem second = store.Add("Second", new DateOnly(2026, 11, 4));
+        store.Complete(second.Id);
 
         byte[] bytes = File.ReadAllBytes(FilePath);
         Assert.True(Vault.IsEncrypted(bytes));
@@ -198,11 +315,12 @@ public sealed class TodoStoreTests : IDisposable
     [Fact]
     public void WithEncryptionOff_WritesTheSameBytesAsWithoutIt()
     {
-        new TodoStore(root, () => Start).Add("Buy milk", new DateOnly(2026, 11, 3));
+        Guid id = Guid.NewGuid();
+        new TodoStore(root, () => Start, newId: () => id).Add("Buy milk", new DateOnly(2026, 11, 3));
         byte[] expected = File.ReadAllBytes(FilePath);
         File.Delete(FilePath);
 
-        new TodoStore(root, () => Start, new Encryption(root)).Add("Buy milk", new DateOnly(2026, 11, 3));
+        new TodoStore(root, () => Start, new Encryption(root), () => id).Add("Buy milk", new DateOnly(2026, 11, 3));
 
         Assert.Equal(expected, File.ReadAllBytes(FilePath));
     }

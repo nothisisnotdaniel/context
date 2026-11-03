@@ -14,20 +14,85 @@
         }
         else
         {
-            <ol class="todo-list">
-                @for (int i = 0; i < snapshot.Todos.Count; i++)
+            <ul class="todo-list">
+                @foreach (TodoItem todo in snapshot.Todos)
                 {
-                    TodoItem todo = snapshot.Todos[i];
-                    string number = (i + 1).ToString(CultureInfo.InvariantCulture);
                     string text = DesktopText.OneLine(todo.Text);
                     string when = todo.Due < snapshot.Today ? "overdue" : todo.Due == snapshot.Today ? "today" : "later";
                     <li class="todo">
-                        <span class="number">@number</span>
-                        <span class="date @when">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
-                        <span class="text cut" title="@text">@text</span>
+                        <label class="todo-line">
+                            @if (!snapshot.Locked)
+                            {
+                                <input type="checkbox" class="done" checked="@(asking?.Id == todo.Id)"
+                                       disabled="@(asking is not null || running)" @onchange="() => Ask(todo)" />
+                            }
+                            <span class="date @when">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                            <span class="text cut" title="@text">@text</span>
+                        </label>
                     </li>
                 }
-            </ol>
+            </ul>
         }
     }
+    @if (result is { } shown)
+    {
+        @if (shown.Kind == ActionKind.Done)
+        {
+            <p class="result accent" role="status">Done: @DesktopText.OneLine(shown.Text)</p>
+        }
+        else
+        {
+            <p class="result red" role="status">@shown.Text</p>
+        }
+    }
+    else
+    {
+        <p class="result" role="status"></p>
+    }
+    @if (asking is { } todoAsked)
+    {
+        <ConfirmDialog Question="@($"Mark this todo done? {todoAsked.Text}")" ConfirmLabel="Mark done"
+                       Busy="running" OnConfirm="CompleteAsked" OnCancel="CloseDialog" />
+    }
 </section>
+
+@code {
+    private TodoItem? asking;
+    private bool running;
+    private ActionResult? result;
+
+    private void Ask(TodoItem todo)
+    {
+        if (!running)
+        {
+            asking = todo;
+        }
+    }
+
+    private void CloseDialog()
+    {
+        if (!running)
+        {
+            asking = null;
+        }
+    }
+
+    private async Task CompleteAsked(Confirmation confirmed)
+    {
+        if (asking is not { } todoAsked || running)
+        {
+            return;
+        }
+
+        running = true;
+        try
+        {
+            result = await Actions.CompleteTodo(todoAsked, confirmed);
+        }
+        finally
+        {
+            running = false;
+            asking = null;
+        }
+    }
+}

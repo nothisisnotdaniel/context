@@ -110,14 +110,21 @@ internal static class TodoCommands
             return CommandResult.Error($"There is no todo {number}. Type {DoneForm} with a number from 1 to {todos.Count}.");
         }
 
-        TodoItem done;
+        // The sidebar number only picks the todo; it is removed by its id, so a list that changed in between can't
+        // make another todo go away.
+        TodoItem? done;
         try
         {
-            done = store.Complete(number);
+            done = store.Complete(todos[number - 1].Id);
         }
         catch (TodoStoreException)
         {
             return CommandResult.Error(Unreadable);
+        }
+
+        if (done is null)
+        {
+            return CommandResult.Error($"There is no todo {number}. Type {DoneForm} with a number from the sidebar.");
         }
 
         return new CommandResult(new Markup($"Done: [steelblue1]{Shown(done.Text)}[/]"));
