@@ -271,12 +271,18 @@ internal sealed class NoteStore
     /// Reads <paramref name="note"/> for editing: the text (decrypted when the file is encrypted) with <c>\r\n</c>
     /// turned into <c>\n</c> and the BOM dropped, plus the SHA-256 of the file's bytes and whether it had CRLF
     /// line endings or a BOM, so <see cref="SaveIfUnchanged"/> can write it back the same way. Throws like
-    /// <see cref="Read"/> when the file can't be read.
+    /// <see cref="Read"/> when the file can't be read, and with an <see cref="IOException"/> when it is not a regular
+    /// file or is larger than <see cref="MaxEditBytes"/> (plus the encryption overhead).
     /// </summary>
     public EditableNote ReadForEdit(NoteInfo note)
     {
-        byte[] raw = File.ReadAllBytes(note.Path);
+        byte[] raw = BoundedFile.Read(note.Path, MaxEditFileBytes);
         byte[] plain = Encryption.Unprotect(encryption, Vault.KindNote, raw);
+        if (plain.Length > MaxEditBytes)
+        {
+            throw new IOException("Too large.");
+        }
+
         bool hadBom = plain.AsSpan().StartsWith(Utf8Bom);
         string text = Encryption.DecodeText(plain);
         bool hadCrlf = text.Contains("\r\n", StringComparison.Ordinal);
@@ -310,12 +316,17 @@ internal sealed class NoteStore
         string onDisk = opened.HadCrlf ? plainText.Replace("\n", "\r\n", StringComparison.Ordinal) : plainText;
         byte[] body = Utf8NoBom.GetBytes(onDisk);
         byte[] plain = opened.HadBom ? [.. Utf8Bom, .. body] : body;
+        if (plain.Length > MaxEditBytes)
+        {
+            return NoteSaveResult.TooLarge;
+        }
+
         byte[] content = Encryption.Protect(encryption, Vault.KindNote, plain);
         string folder = Path.GetDirectoryName(opened.Path) ?? root;
         string temp = Path.Combine(folder, $".{opened.Name}{Extension}.{Guid.NewGuid():N}.tmp");
         try
         {
-            using (FileStream stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using (FileStream stream = new FileStream(temp, PrivateTempOptions()))
             {
                 stream.Write(content);
             }
@@ -340,17 +351,22 @@ internal sealed class NoteStore
         return NoteSaveResult.Saved;
     }
 
-    // Saved when the file still hashes to the version it was opened with.
+    // Saved when the file still hashes to the version it was opened with. A file that is now too large or not a
+    // regular file can't have that version, so it counts as changed (read with the same bound as ReadForEdit).
     private static NoteSaveResult CheckVersion(EditableNote opened)
     {
         byte[] current;
         try
         {
-            current = File.ReadAllBytes(opened.Path);
+            current = BoundedFile.Read(opened.Path, MaxEditFileBytes);
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
             return NoteSaveResult.Missing;
+        }
+        catch (IOException)
+        {
+            return NoteSaveResult.ChangedOnDisk;
         }
 
         return string.Equals(EditableNote.Hash(current), opened.Version, StringComparison.Ordinal)
@@ -400,6 +416,32 @@ internal sealed class NoteStore
 
     /// <summary>The largest file <see cref="ReadImport"/> accepts (5 MB).</summary>
     public const long MaxImportBytes = 5L * 1024 * 1024;
+
+    /// <summary>
+    /// The largest note <see cref="ReadForEdit"/> opens and <see cref="SaveIfUnchanged"/> writes, counted in the file's
+    /// plain bytes (BOM and line endings included): 5 MB, as for imports.
+    /// </summary>
+    public const long MaxEditBytes = MaxImportBytes;
+
+    // The same limit on the file as stored, which is larger by the fixed overhead when it is encrypted.
+    private const long MaxEditFileBytes = MaxEditBytes + Vault.Overhead;
+
+    // A new temp file only the owner can read and write (mode 0600 off Windows), as in Encryption.Migrate.
+    private static FileStreamOptions PrivateTempOptions()
+    {
+        FileStreamOptions options = new FileStreamOptions
+        {
+            Mode = FileMode.CreateNew,
+            Access = FileAccess.Write,
+            Share = FileShare.None,
+        };
+        if (!OperatingSystem.IsWindows())
+        {
+            options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        }
+
+        return options;
+    }
 
     /// <summary>
     /// True when <paramref name="path"/> is the root itself or anywhere inside it, after resolving symbolic links

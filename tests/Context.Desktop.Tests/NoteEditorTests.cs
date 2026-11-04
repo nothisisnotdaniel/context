@@ -61,6 +61,21 @@ public sealed class NoteEditorTests : IDisposable
         Assert.True(cut.Find("button.save").HasAttribute("disabled"));
     }
 
+    // A note over 5 MB is not sent to the page editor: the red line, nothing mounted.
+    [Fact]
+    public async Task Open_OverLimit_RedLineNoMount()
+    {
+        data.WriteNote("Big", new string('a', (int)NoteStore.MaxEditBytes + 1));
+        EditorJs js = new EditorJs(data.Bunit);
+
+        await data.RefreshAsync();
+        IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p.Add(e => e.Name, "Big"));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".unreadable")));
+
+        Assert.Equal("Can't read Big.", cut.Find(".unreadable").TextContent);
+        Assert.Empty(js.Calls("ContextEditor.mount"));
+    }
+
     // AC-8: the Save button saves the editor's Markdown and says so.
     [Fact]
     public async Task SaveButton_SavesMarkdown()

@@ -24,7 +24,7 @@
                             @if (!snapshot.Locked)
                             {
                                 <input type="checkbox" class="done" checked="@(asking?.Id == todo.Id)"
-                                       disabled="@(asking is not null || running)" @onchange="() => Ask(todo)" />
+                                       disabled="@(asking is not null || running || adding)" @onchange="() => Ask(todo)" />
                             }
                             <span class="date @when">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
                             <span class="text cut" title="@text">@text</span>
@@ -52,14 +52,15 @@
     @if (Snapshot is { Locked: false } open)
     {
         DateOnly shownDue = due ?? open.Today;
+        bool entryOff = adding || running;
         <div class="todo-entry">
             <input type="text" class="todo-text" value="@newText" maxlength="@DesktopActions.MaxTodoLength"
-                   aria-label="New todo" placeholder="New todo" @oninput="TextTyped" @onkeydown="e => Add(e)" />
+                   disabled="@entryOff" aria-label="New todo" placeholder="New todo" @oninput="TextTyped" @onkeydown="e => Add(e)" />
             <input type="date" class="todo-due" value="@shownDue.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)"
-                   aria-label="Due date" @onchange="DueChosen" />
-            <button type="button" class="due-today" @onclick="() => due = open.Today">Today</button>
-            <button type="button" class="due-tomorrow" @onclick="() => due = open.Today.AddDays(1)">Tomorrow</button>
-            <button type="button" class="add" disabled="@adding" @onclick="() => Add(null)">Add</button>
+                   disabled="@entryOff" aria-label="Due date" @onchange="DueChosen" />
+            <button type="button" class="due-today" disabled="@entryOff" @onclick="() => due = open.Today">Today</button>
+            <button type="button" class="due-tomorrow" disabled="@entryOff" @onclick="() => due = open.Today.AddDays(1)">Tomorrow</button>
+            <button type="button" class="add" disabled="@entryOff" @onclick="() => Add(null)">Add</button>
         </div>
         @if (added is { } addShown)
         {
@@ -102,7 +103,7 @@
 
     private async Task Add(KeyboardEventArgs? key)
     {
-        if ((key is not null && key.Key != "Enter") || adding || Snapshot is not { } snapshot)
+        if ((key is not null && key.Key != "Enter") || adding || running || Snapshot is not { } snapshot)
         {
             return;
         }

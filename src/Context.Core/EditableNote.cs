@@ -57,4 +57,7 @@ internal enum NoteSaveResult
 
     /// <summary>The file no longer exists; nothing was written.</summary>
     Missing,
+
+    /// <summary>The note as it would be written is larger than <see cref="NoteStore.MaxEditBytes"/>; nothing was written.</summary>
+    TooLarge,
 }

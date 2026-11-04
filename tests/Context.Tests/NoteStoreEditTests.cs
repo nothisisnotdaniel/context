@@ -155,6 +155,89 @@ public sealed class NoteStoreEditTests : IDisposable
         Assert.Equal("Hidden too\n", Encryption.DecodeText(Encryption.Unprotect(encryption, Vault.KindNote, bytes)));
     }
 
+    // A note over the limit is not opened; one exactly at the limit is.
+    [Fact]
+    public void ReadForEdit_OverLimit_Refused()
+    {
+        NoteInfo big = Write("Big", Encoding.ASCII.GetBytes(new string('a', (int)NoteStore.MaxEditBytes + 1)));
+        NoteInfo edge = Write("Edge", Encoding.ASCII.GetBytes(new string('a', (int)NoteStore.MaxEditBytes)));
+
+        Assert.ThrowsAny<IOException>(() => store.ReadForEdit(big));
+        Assert.Equal((int)NoteStore.MaxEditBytes, store.ReadForEdit(edge).Text.Length);
+    }
+
+    // Text that would be over the limit on disk (here through CRLF) writes nothing.
+    [Fact]
+    public void SaveIfUnchanged_OverLimitOnDisk_WritesNothing()
+    {
+        NoteInfo note = Write("Win", Encoding.ASCII.GetBytes("a\r\n"));
+        EditableNote opened = store.ReadForEdit(note);
+        SortedDictionary<string, string> before = FileSnapshot.Take(root);
+        string text = new string('\n', (int)(NoteStore.MaxEditBytes / 2) + 1);
+
+        NoteSaveResult result = store.SaveIfUnchanged(opened, text, out EditableNote? saved);
+
+        Assert.Equal(NoteSaveResult.TooLarge, result);
+        Assert.Null(saved);
+        Assert.Equal(before, FileSnapshot.Take(root));
+    }
+
+    // A file that grew over the limit since it was opened counts as changed and is not overwritten.
+    [Fact]
+    public void SaveIfUnchanged_GrewOverLimit_ChangedOnDisk()
+    {
+        NoteInfo note = Write("Plan", Encoding.UTF8.GetBytes("# Plan\n"));
+        EditableNote opened = store.ReadForEdit(note);
+        File.WriteAllBytes(note.Path, Encoding.ASCII.GetBytes(new string('b', (int)NoteStore.MaxEditBytes + 10)));
+        SortedDictionary<string, string> before = FileSnapshot.Take(root);
+
+        Assert.Equal(NoteSaveResult.ChangedOnDisk, store.SaveIfUnchanged(opened, "# Plan\n\nMore\n", out _));
+        Assert.Equal(before, FileSnapshot.Take(root));
+    }
+
+    // A FIFO named like a note is refused at once instead of blocking the reader, and a save over it writes nothing.
+    [Fact]
+    public async Task Fifo_RefusedWithoutBlocking()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        NoteInfo plan = Write("Plan", Encoding.UTF8.GetBytes("# Plan\n"));
+        EditableNote opened = store.ReadForEdit(plan);
+        File.Delete(plan.Path);
+        using (System.Diagnostics.Process mkfifo = System.Diagnostics.Process.Start("mkfifo", plan.Path))
+        {
+            await mkfifo.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(0, mkfifo.ExitCode);
+        }
+
+        await Assert.ThrowsAnyAsync<IOException>(() => Task.Run(() => store.ReadForEdit(plan)).WaitAsync(TimeSpan.FromSeconds(10)));
+        NoteSaveResult result = await Task.Run(() => store.SaveIfUnchanged(opened, "# Plan\n\nMore\n", out _)).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(NoteSaveResult.ChangedOnDisk, result);
+        Assert.Equal(["Plan.md"], Directory.GetFiles(root).Select(f => Path.GetFileName(f)).ToArray());
+    }
+
+    // The temp file of a save is private to the owner (it may hold decrypted-then-encrypted note text).
+    [Fact]
+    public void SaveIfUnchanged_TempFileIsPrivate()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        NoteInfo note = Write("Plan", Encoding.UTF8.GetBytes("# Plan\n"));
+        EditableNote opened = store.ReadForEdit(note);
+        File.SetUnixFileMode(note.Path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+
+        Assert.Equal(NoteSaveResult.Saved, store.SaveIfUnchanged(opened, "# Plan\n\nMore\n", out _));
+
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(note.Path));
+    }
+
     private NoteInfo Write(string name, byte[] bytes)
     {
         string path = Path.Combine(root, name + ".md");

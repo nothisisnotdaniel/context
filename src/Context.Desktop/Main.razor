@@ -37,7 +37,7 @@
         </div>
         @if (discarding)
         {
-            <ConfirmDialog Question="@($"Discard changes to {openName}?")" ConfirmLabel="Discard"
+            <ConfirmDialog Question="@($"Discard changes to {DesktopText.OneLine(openName ?? string.Empty)}?")" ConfirmLabel="Discard"
                            OnConfirm="Discard" OnCancel="KeepEditing" />
         }
         @if (paletteOpen)

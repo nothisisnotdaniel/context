@@ -145,6 +145,42 @@ public sealed class DesktopSourceTests
         Assert.DoesNotContain("@font-face", css, StringComparison.OrdinalIgnoreCase);
     }
 
+    // 094 review: the editing components are styled in app.css (layout, the palette's selected row, the entry row,
+    // themed text and date fields, note names as plain text); editor.css styles only the editor body (and ProseMirror's own
+    // classes, from prosemirror-view's stylesheet).
+    [Theory]
+    [InlineData(".palette-row.selected")]
+    [InlineData(".palette-row {")]
+    [InlineData(".todo-entry {")]
+    [InlineData("input[type=\"text\"],")]
+    [InlineData("input[type=\"date\"],")]
+    [InlineData(".note .name,")]
+    [InlineData(".tag-notes .note-button")]
+    [InlineData(".editor-bar,")]
+    [InlineData(".editor-host:focus-within")]
+    public void AppCss_StylesEditingComponents(string selector)
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+
+        Assert.Contains(selector, css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EditorCss_StylesOnlyTheEditorBody()
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "editor", "editor.css"));
+        string[] selectors = System.Text.RegularExpressions.Regex.Matches(css, @"(?m)^([^\s{}/*][^{]*)\{")
+            .SelectMany(m => m.Groups[1].Value.Split(','))
+            .Select(sel => sel.Trim())
+            .ToArray();
+
+        Assert.NotEmpty(selectors);
+        Assert.Contains(selectors, sel => sel.StartsWith(".note-editor-body", StringComparison.Ordinal));
+        Assert.All(selectors, sel => Assert.True(
+            sel.StartsWith(".note-editor-body", StringComparison.Ordinal) || sel.Contains("ProseMirror", StringComparison.Ordinal),
+            sel));
+    }
+
     // AC-8: no Desktop file except DesktopActions.cs calls a Core method that changes data.
     [Fact]
     public void Sources_CallWritingMethodsOnlyInDesktopActions()

@@ -87,7 +87,7 @@ internal sealed class DesktopActions
     public const int MaxTodoLength = 200;
 
     /// <summary>The largest note text <see cref="SaveNote"/> writes (5 MB, as for imports).</summary>
-    public const long MaxNoteBytes = NoteStore.MaxImportBytes;
+    public const long MaxNoteBytes = NoteStore.MaxEditBytes;
 
     private readonly Encryption encryption;
     private readonly NoteStore notes;
@@ -253,6 +253,7 @@ internal sealed class DesktopActions
                 NoteSaveResult.Saved => new ActionResult(ActionKind.Done, ActionReason.None, opened.Name, savedNote),
                 NoteSaveResult.Unchanged => new ActionResult(ActionKind.Done, ActionReason.Unchanged, opened.Name, opened),
                 NoteSaveResult.ChangedOnDisk => Refused(ActionReason.ChangedOnDisk, ChangedOnDiskText(opened.Name)),
+                NoteSaveResult.TooLarge => Refused(ActionReason.Invalid, TooLargeText(opened.Name)),
                 _ => Refused(ActionReason.Missing, MissingText(opened.Name)),
             };
         }

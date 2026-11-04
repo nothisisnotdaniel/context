@@ -69,6 +69,29 @@ public sealed class TodoEntryTests : IDisposable
         Assert.Equal(new DateOnly(2026, 12, 24), added.Due);
     }
 
+    // While a todo is being added the whole row and the todo checkboxes are disabled.
+    [Fact]
+    public async Task Add_Running_RowAndBoxesDisabled()
+    {
+        data.AddTodo("Existing", new DateOnly(2026, 10, 29));
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+        using ManualResetEventSlim release = new ManualResetEventSlim();
+        data.Actions!.BeforeWrite = () => release.Wait(TimeSpan.FromSeconds(10));
+        await cut.Find("input.todo-text").InputAsync(new ChangeEventArgs { Value = "Buy milk" });
+
+        Task add = cut.Find(".todo-entry button.add").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.All(
+            cut.FindAll(".todo-entry input, .todo-entry button, .todo-list input"),
+            e => Assert.True(e.HasAttribute("disabled"), e.OuterHtml)));
+        Assert.Equal(6, cut.FindAll(".todo-entry input, .todo-entry button, .todo-list input").Count);
+        release.Set();
+        await add;
+        cut.WaitForAssertion(() => Assert.All(
+            cut.FindAll(".todo-entry input, .todo-entry button, .todo-list input"),
+            e => Assert.False(e.HasAttribute("disabled"), e.OuterHtml)));
+    }
+
     // Empty text writes nothing and asks for the todo.
     [Fact]
     public async Task Add_Empty_WritesNothing()

@@ -148,6 +148,8 @@ public sealed class TodoPanelTests : IDisposable
         {
             Assert.Equal(5, cut.FindAll(".todo-list input, [role=dialog] button").Count);
             Assert.All(cut.FindAll(".todo-list input, [role=dialog] button"), b => Assert.True(b.HasAttribute("disabled"), b.OuterHtml));
+            Assert.Equal(5, cut.FindAll(".todo-entry input, .todo-entry button").Count);
+            Assert.All(cut.FindAll(".todo-entry input, .todo-entry button"), b => Assert.True(b.HasAttribute("disabled"), b.OuterHtml));
         });
         release.Set();
         await confirm;
@@ -160,7 +162,7 @@ public sealed class TodoPanelTests : IDisposable
             Assert.True(result.ClassList.Contains("accent"));
             Assert.Equal("status", result.GetAttribute("role"));
             Assert.Equal(["First todo", "Third todo"], cut.FindAll("li.todo .text").Select(t => t.TextContent).ToArray());
-            Assert.All(cut.FindAll(".todo-list input"), b => Assert.False(b.HasAttribute("disabled")));
+            Assert.All(cut.FindAll(".todo-list input, .todo-entry input, .todo-entry button"), b => Assert.False(b.HasAttribute("disabled")));
             Assert.All(cut.FindAll(".todo-list input"), b => Assert.False(b.HasAttribute("checked")));
         });
         Assert.Equal(["First todo", "Third todo"], data.Todos!.List().Select(t => t.Text).ToArray());
