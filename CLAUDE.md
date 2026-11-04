@@ -166,7 +166,12 @@ Every factory agent reads this file before working on Context. Keep it short and
   `Spectre.Console` 0.57.2 handles all terminal output (app only). `Microsoft.Data.Sqlite` 10.0.14 for `context.db`
   (referenced by `Context.Core` only; it reaches the app through the project reference). Tests: xUnit + `Spectre.Console.Testing` 0.57.2.
   Desktop: `Photino.Blazor` 4.0.13 (Apache-2.0; Blazor in the OS web view: WebView2 / WKWebView), `Context.Desktop` only; its tests
-  use `bunit` 2.13.3.
+  use `bunit` 2.13.3 and `Jint` 4.17.0 (BSD-2, test project only; runs the editor bundle).
+  Editor bundle: `src/Context.Desktop/editor/` is an npm project (exact versions in `package.json`, `package-lock.json`;
+  ProseMirror + prosemirror-markdown/markdown-it, esbuild; licenses in `THIRD-PARTY-LICENSES.txt`, update it when a
+  package changes). After changing `editor/src/*`, run `cd src/Context.Desktop/editor && npm install && npm run build`
+  (Node from `brew install node`) and commit the rebuilt `wwwroot/editor/editor.js` and `editor.css`; `dotnet build`
+  and `dotnet test` never need Node. `node_modules` is ignored and `editor/**` is excluded from the C# project.
 - **Build:** `dotnet build` (must stay at 0 warnings)
 - **Test command:** `dotnet test`
 - **Run:** `dotnet run --project src/Context` (console), `dotnet run --project src/Context.Desktop` (desktop window)
@@ -218,9 +223,21 @@ Every factory agent reads this file before working on Context. Keep it short and
     numbers (not in `TodoPanel`, not in the `Due` table): `TodoPanel` shows each todo as a `<label>` line with a
     checkbox, date and text; ticking it opens the dialog (the box stays ticked while it is open), and a
     `role="status"` result line shows `Done: <text>` (accent) or the fixed red text.
-    `wwwroot/index.html` (CSP meta tag, only `_framework/blazor.webview.js`) and `wwwroot/app.css`.
-  - **Desktop rules:** the Core writing calls (`Create`, `Save`, `Add`, `Complete`, `Set`, `Clear`, `Delete`,
-    `ClearCache`, `Migrate`, `DecryptAll`, `Vault.Create`) appear only in `DesktopActions.cs` (the reads still write
+    **Editing:** clicking a note name (`NotesPanel` button), a link or `/open` in the palette shows `NoteEditor` in the
+    main region (`Main` keeps the open name; a dirty editor asks `Discard changes to <name>?` first). `NoteEditor`
+    reads through `DesktopState.ReadForEdit` (`NoteStore.ReadForEdit` -> `EditableNote`: text with `\n`, raw-byte
+    SHA-256 `Version`, CRLF and BOM flags), mounts the page editor through `EditorInterop` (the only class that touches
+    `IJSRuntime`; `[JSInvokable]` `OnTag`/`OnLink` only navigate) and saves on the Save button or Ctrl/Cmd+S through
+    `DesktopActions.SaveNote` -> `NoteStore.SaveIfUnchanged` (unchanged text writes nothing; version re-checked before
+    the move; CRLF and BOM kept). `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
+    `/current`, `/open`, `/save`, `/tags`, `/todo` with `CommandMatcher` (shared with `CommandRegistry.Match`).
+    `TodoPanel` has an entry row (`DesktopActions.AddTodo`). The page editor is `wwwroot/editor/editor.js`
+    (`globalThis.ContextEditor`), built from `editor/src/` (`schema.js`, `markdown.js` with markdown-it `html: false`,
+    `view.js`, `index.js`); `isLossless` false shows the grey `Saving will reformat parts of this note.`
+    `wwwroot/index.html` (CSP meta tag, only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
+    and `wwwroot/editor/editor.css`.
+  - **Desktop rules:** the Core writing calls (`Create`, `Save`, `SaveIfUnchanged`, `Add`, `Complete`, `Set`, `Clear`, `Delete`,
+    `ClearCache`, `Migrate`, `DecryptAll`, `Vault.Create`) appear only in `DesktopActions.cs` (`DotNetObjectReference.Create(` once in `EditorInterop.cs` is the one exemption; the reads still write
     only through `TagIndex.Sync` and `CalendarFeed.Fetch`, as in the console). `DesktopActions` is named only by
     `.razor` files, `Program.cs` and `StateComponent`, never by `DesktopState`, `DataWatcher` or `DesktopSnapshot`, so
     nothing writes on render, refresh, the watcher or the tick. In `.razor` files every `@code` method that calls
@@ -231,10 +248,11 @@ Every factory agent reads this file before working on Context. Keep it short and
     `ConfirmDialog.razor`. With `encryption.json` it shows only `LockedPanel` and reads nothing.
     Outside text goes through `DesktopText.OneLine` and Blazor's default encoding: never `MarkupString`,
     `AddMarkupContent` or `@((` raw markup; no `style=`, `<a `, `<form` or `<script` in `.razor` files; every
-    `<button` has `type="button"`; no plain HTML event attributes (`on<event>=` without `@`); no source mentions
-    `IJSRuntime`/`JSRuntime` (no JavaScript of our own; `ElementReference.FocusAsync` is Blazor's). Every `<input>`
-    is `type="checkbox"` without `@bind`, and there is no `<textarea>`; the first job with text entry changes this
-    rule and adds tests for it. No CDN or external fonts; error
+    `<button` has `type="button"`; no plain HTML event attributes (`on<event>=` without `@`); only `EditorInterop.cs`
+    mentions `IJSRuntime`/`JSRuntime`/`JSInvokable`, and its `[JSInvokable]` methods only raise events (never `Actions.`).
+    The editor sources (`editor/src/*.js`) use no `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`,
+    `eval` or `new Function`. Every `<input>` is `type="checkbox"`, `"text"`, `"date"` or `"search"`, without `@bind`,
+    and there is no `<textarea>`. No CDN or external fonts; error
     lines are fixed texts, never exception messages; the calendar link stays inside `CalendarFeed`. Texts match the
     console renderer's. Colours by CSS class (`accent`, `grey`, `red`, dates `overdue`/`today`/`later`); long lines
     cut by CSS with the full text in `title`.
@@ -246,7 +264,10 @@ Every factory agent reads this file before working on Context. Keep it short and
     `EncryptionCommandsTests.cs` (everything wired like `Program.cs`) and `FakeHttpHandler.cs` (canned HTTP responses). Note, todo, tag and calendar tests use their
     own temp folder (deleted in `Dispose`), never the real app data folder.
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
-    component or class, plus `DesktopDependencyTests` (no Spectre), `DesktopSourceTests` (raw markup, risky elements,
+    component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
+    `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `DesktopDependencyTests` (no Spectre, no Jint
+    outside tests, exact npm versions), `DesktopSourceTests` (raw markup, risky elements,
     CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop), `DesktopFixture` (temp folder, injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),
     `FileSnapshot` (bytes and last-write times of a folder, to prove nothing changed) and `RepoFiles`.

@@ -61,6 +61,8 @@ internal sealed class NoteStore
 
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
+    private static readonly byte[] Utf8Bom = [0xEF, 0xBB, 0xBF];
+
     /// <summary>
     /// Device names Windows reserves, with or without an extension: <c>CON</c>, <c>PRN</c>, <c>AUX</c>,
     /// <c>NUL</c>, <c>COM1</c>-<c>COM9</c>, <c>LPT1</c>-<c>LPT9</c> and the superscript digit forms.
@@ -264,6 +266,97 @@ internal sealed class NoteStore
     /// <see cref="UnauthorizedAccessException"/> when it can't be read.
     /// </summary>
     public string Read(NoteInfo note) => Encryption.ReadText(encryption, note.Path, Vault.KindNote);
+
+    /// <summary>
+    /// Reads <paramref name="note"/> for editing: the text (decrypted when the file is encrypted) with <c>\r\n</c>
+    /// turned into <c>\n</c> and the BOM dropped, plus the SHA-256 of the file's bytes and whether it had CRLF
+    /// line endings or a BOM, so <see cref="SaveIfUnchanged"/> can write it back the same way. Throws like
+    /// <see cref="Read"/> when the file can't be read.
+    /// </summary>
+    public EditableNote ReadForEdit(NoteInfo note)
+    {
+        byte[] raw = File.ReadAllBytes(note.Path);
+        byte[] plain = Encryption.Unprotect(encryption, Vault.KindNote, raw);
+        bool hadBom = plain.AsSpan().StartsWith(Utf8Bom);
+        string text = Encryption.DecodeText(plain);
+        bool hadCrlf = text.Contains("\r\n", StringComparison.Ordinal);
+        return new EditableNote(note.Name, note.Path, text.Replace("\r\n", "\n", StringComparison.Ordinal), EditableNote.Hash(raw), hadCrlf, hadBom);
+    }
+
+    /// <summary>
+    /// Saves <paramref name="text"/> over the note <paramref name="opened"/> came from, only when the file has not
+    /// changed since. Writes nothing and returns <see cref="NoteSaveResult.Unchanged"/> when the text equals the text
+    /// as opened, <see cref="NoteSaveResult.Missing"/> when the file is gone and <see cref="NoteSaveResult.ChangedOnDisk"/>
+    /// when its bytes no longer hash to <see cref="EditableNote.Version"/>. Otherwise writes the text through a temp
+    /// file and a move, with CRLF line endings and a BOM when the file had them, encrypted while encryption is on, and
+    /// returns the note as saved in <paramref name="saved"/>. The file is hashed again just before the move. Throws
+    /// <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> when it can't write.
+    /// </summary>
+    public NoteSaveResult SaveIfUnchanged(EditableNote opened, string text, out EditableNote? saved)
+    {
+        saved = null;
+        string plainText = text.Replace("\r\n", "\n", StringComparison.Ordinal);
+        if (string.Equals(plainText, opened.Text, StringComparison.Ordinal))
+        {
+            return NoteSaveResult.Unchanged;
+        }
+
+        NoteSaveResult check = CheckVersion(opened);
+        if (check != NoteSaveResult.Saved)
+        {
+            return check;
+        }
+
+        string onDisk = opened.HadCrlf ? plainText.Replace("\n", "\r\n", StringComparison.Ordinal) : plainText;
+        byte[] body = Utf8NoBom.GetBytes(onDisk);
+        byte[] plain = opened.HadBom ? [.. Utf8Bom, .. body] : body;
+        byte[] content = Encryption.Protect(encryption, Vault.KindNote, plain);
+        string folder = Path.GetDirectoryName(opened.Path) ?? root;
+        string temp = Path.Combine(folder, $".{opened.Name}{Extension}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            using (FileStream stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(content);
+            }
+
+            check = CheckVersion(opened);
+            if (check != NoteSaveResult.Saved)
+            {
+                return check;
+            }
+
+            File.Move(temp, opened.Path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temp))
+            {
+                File.Delete(temp);
+            }
+        }
+
+        saved = new EditableNote(opened.Name, opened.Path, plainText, EditableNote.Hash(content), opened.HadCrlf, opened.HadBom);
+        return NoteSaveResult.Saved;
+    }
+
+    // Saved when the file still hashes to the version it was opened with.
+    private static NoteSaveResult CheckVersion(EditableNote opened)
+    {
+        byte[] current;
+        try
+        {
+            current = File.ReadAllBytes(opened.Path);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return NoteSaveResult.Missing;
+        }
+
+        return string.Equals(EditableNote.Hash(current), opened.Version, StringComparison.Ordinal)
+            ? NoteSaveResult.Saved
+            : NoteSaveResult.ChangedOnDisk;
+    }
 
     /// <summary>
     /// Stores <paramref name="content"/> as the note <paramref name="title"/> (normalized and validated like

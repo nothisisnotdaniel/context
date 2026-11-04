@@ -1,0 +1,64 @@
+@inherits StateComponent
+@* The notes with one tag (DesktopState.NotesWithTag), sorted ignoring case; clicking one opens it. *@
+
+<section class="tag-panel" aria-label="Notes with this tag">
+    <div class="panel-bar">
+        <h2>Notes with <span class="accent">@DesktopText.OneLine(TagParser.Format(Tag))</span></h2>
+        <button type="button" class="close" @onclick="() => OnClose.InvokeAsync()">Close</button>
+    </div>
+    @if (loading)
+    {
+        <p class="grey" role="status">Loading…</p>
+    }
+    else if (names is null)
+    {
+        <p class="red" role="status">Can't read the tags.</p>
+    }
+    else if (names.Count == 0)
+    {
+        <p class="grey" role="status">No notes with this tag.</p>
+    }
+    else
+    {
+        <ul class="tag-notes">
+            @foreach (string name in names)
+            {
+                string shown = DesktopText.OneLine(name);
+                <li>
+                    <button type="button" class="note-button cut" title="@shown" @onclick="() => OnOpen.InvokeAsync(name)">@shown</button>
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+@code {
+    private IReadOnlyList<string>? names;
+    private bool loading = true;
+    private string? loaded;
+
+    /// <summary>The tag, as TagParser finds it (no <c>#</c>).</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Tag { get; set; } = string.Empty;
+
+    /// <summary>Called with a note's name when it is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.Equals(loaded, Tag, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        loaded = Tag;
+        loading = true;
+        names = await State.NotesWithTag(Tag);
+        loading = false;
+    }
+}

@@ -11,6 +11,9 @@ internal sealed class DesktopState
     public static readonly TimeSpan MaxAge = TimeSpan.FromMinutes(5);
 
     private readonly object gate = new();
+
+    // One user of the tag index at a time: the snapshot build and NotesWithTag.
+    private readonly object indexGate = new();
     private readonly Encryption encryption;
     private readonly NoteStore notes;
     private readonly TodoStore todos;
@@ -107,6 +110,70 @@ internal sealed class DesktopState
         return due;
     }
 
+    /// <summary>
+    /// Reads the note called <paramref name="name"/> for editing (<see cref="NoteStore.ReadForEdit"/>) off the
+    /// calling thread. <c>null</c> when there is no such note, it can't be read or the data is encrypted.
+    /// </summary>
+    public Task<EditableNote?> ReadForEdit(string name) => Task.Run(() =>
+    {
+        try
+        {
+            if (encryption.IsConfigured || !notes.TryFind(name, out NoteInfo? found) || found is null)
+            {
+                return null;
+            }
+
+            return notes.ReadForEdit(found);
+        }
+        catch (Exception)
+        {
+            return (EditableNote?)null;
+        }
+    });
+
+    /// <summary>
+    /// The notes tagged <paramref name="tag"/> (normalized like <see cref="TagIndex.NormalizeTag"/>) after syncing the
+    /// index, sorted by name ignoring case, off the calling thread. <c>null</c> when the index can't be read.
+    /// </summary>
+    public Task<IReadOnlyList<string>?> NotesWithTag(string tag) => Task.Run(() =>
+    {
+        try
+        {
+            if (encryption.IsConfigured)
+            {
+                return null;
+            }
+
+            lock (indexGate)
+            {
+                index.Sync(notes);
+                return (IReadOnlyList<string>?)index.NotesWithTag(tag)
+                    .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(n => n, StringComparer.Ordinal)
+                    .ToList();
+            }
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    });
+
+    /// <summary>
+    /// The note a <c>[[link]]</c> target or a typed name names, resolved like <c>/open</c>
+    /// (<see cref="NameLookup.Resolve"/>, trimmed) against the notes in the latest snapshot. <c>null</c> if none.
+    /// </summary>
+    public string? ResolveNote(string target)
+    {
+        DesktopSnapshot? current = snapshot;
+        if (current is null)
+        {
+            return null;
+        }
+
+        return new NameLookup(current.Notes.Select(n => n.Name)).Resolve(target.Trim());
+    }
+
     private DesktopSnapshot Loop()
     {
         while (true)
@@ -193,7 +260,12 @@ internal sealed class DesktopState
                 todosUnreadable = true;
             }
 
-            CurrentView current = CurrentView.Build(todos, index, notes, calendar, feed, day);
+            CurrentView current;
+            lock (indexGate)
+            {
+                current = CurrentView.Build(todos, index, notes, calendar, feed, day);
+            }
+
             return new DesktopSnapshot(
                 false, false, day, current, todoList, todosUnreadable, noteList, notesUnreadable, folder);
         }

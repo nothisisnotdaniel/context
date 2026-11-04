@@ -23,4 +23,8 @@
     <ProjectReference Include="..\..\src\Context.Core\Context.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\Context.Desktop.Tests\FileSnapshot.cs" Link="FileSnapshot.cs" />
+  </ItemGroup>
+
 </Project>

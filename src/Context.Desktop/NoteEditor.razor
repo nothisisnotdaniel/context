@@ -1,0 +1,192 @@
+@inherits StateComponent
+@implements IAsyncDisposable
+@* The note editor: the bundled ProseMirror editor (EditorInterop) in a host element, a Save button and a status
+   line. Saving goes through DesktopActions.SaveNote only from the Save button and Ctrl/Cmd+S. Tag and link clicks
+   come back from the page as events and only open things. *@
+
+<section class="note-editor" @onkeydown="e => Save(e)">
+    <div class="editor-bar">
+        <h2 class="note-title cut" title="@DisplayName">@DisplayName</h2>
+        <button type="button" class="save" disabled="@(opened is null || saving)" @onclick="() => Save(null)">Save</button>
+    </div>
+    @if (unreadable)
+    {
+        <p class="red unreadable" role="alert">Can't read @DisplayName.</p>
+    }
+    @if (lossy)
+    {
+        <p class="grey lossy">Saving will reformat parts of this note.</p>
+    }
+    <p class="status @statusClass" role="status">@statusText</p>
+    <div class="editor-host" @ref="host"></div>
+</section>
+
+@code {
+    private ElementReference host;
+    private EditableNote? opened;
+    private bool mounted;
+    private bool unreadable;
+    private bool lossy;
+    private bool saving;
+    private string statusText = string.Empty;
+    private string statusClass = string.Empty;
+
+    /// <summary>The bridge to the page's editor; one per editor.</summary>
+    [Inject]
+    internal EditorInterop Interop { get; set; } = null!;
+
+    /// <summary>The note to open (its name).</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Called with the tag (as found by TagParser) when a tag in the text is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnTag { get; set; }
+
+    /// <summary>Called with the note's name when a link to an existing note is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpenNote { get; set; }
+
+    private string DisplayName => DesktopText.OneLine(Name);
+
+    /// <summary>True when the text changed since it was opened or last saved.</summary>
+    public async Task<bool> IsDirtyAsync() => mounted && await Interop.IsDirtyAsync(host);
+
+    /// <summary>
+    /// What a save writes: the note as opened and the editor's Markdown, or the text as opened when nothing was
+    /// edited, so an unedited note is never reformatted. <c>null</c> while no note is open or a save runs.
+    /// </summary>
+    internal async Task<SaveRequest?> PrepareSaveAsync()
+    {
+        if (opened is not { } note || !mounted || saving)
+        {
+            return null;
+        }
+
+        bool dirty = await Interop.IsDirtyAsync(host);
+        string text = dirty ? await Interop.GetMarkdownAsync(host) : note.Text;
+        return new SaveRequest(note, text);
+    }
+
+    /// <summary>Shows how a save ended; after a save the saved text becomes the text as opened.</summary>
+    internal async Task ApplySaveAsync(ActionResult result)
+    {
+        if (result.Kind == ActionKind.Done)
+        {
+            if (result.Note is { } saved)
+            {
+                opened = saved;
+                lossy = !await Interop.IsLosslessAsync(saved.Text);
+            }
+
+            await Interop.MarkCleanAsync(host);
+            ShowStatus($"Saved {DesktopText.OneLine(result.Text)}.", "accent");
+        }
+        else
+        {
+            ShowStatus(DesktopText.OneLine(result.Text), "red");
+        }
+
+        StateHasChanged();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Dispose();
+        Interop.TagClicked -= TagClicked;
+        Interop.LinkClicked -= LinkClicked;
+        await Interop.DestroyAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        EditableNote? note = await State.ReadForEdit(Name);
+        if (note is null)
+        {
+            unreadable = true;
+            StateHasChanged();
+            return;
+        }
+
+        try
+        {
+            lossy = !await Interop.IsLosslessAsync(note.Text);
+            Interop.TagClicked += TagClicked;
+            Interop.LinkClicked += LinkClicked;
+            await Interop.MountAsync(host, note.Text);
+            opened = note;
+            mounted = true;
+            await Interop.FocusAsync(host);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            unreadable = true;
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task Save(KeyboardEventArgs? key)
+    {
+        if (key is not null && !((key.CtrlKey || key.MetaKey) && string.Equals(key.Key, "s", StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        if (await PrepareSaveAsync() is not { } request)
+        {
+            return;
+        }
+
+        saving = true;
+        try
+        {
+            ActionResult result = await Actions.SaveNote(request.Note, request.Text);
+            await ApplySaveAsync(result);
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private Task TagClicked(string raw) => InvokeAsync(async () =>
+    {
+        IReadOnlyList<string> tags = TagParser.Parse(raw);
+        if (tags.Count > 0)
+        {
+            await OnTag.InvokeAsync(tags[0]);
+        }
+    });
+
+    private Task LinkClicked(string raw) => InvokeAsync(async () =>
+    {
+        IReadOnlyList<string> targets = NoteLinkParser.Parse(raw);
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        string? name = State.ResolveNote(targets[0]);
+        if (name is null)
+        {
+            ShowStatus($"No note named {DesktopText.OneLine(targets[0])}.", "grey");
+            StateHasChanged();
+            return;
+        }
+
+        await OnOpenNote.InvokeAsync(name);
+    });
+
+    private void ShowStatus(string text, string cssClass)
+    {
+        statusText = text;
+        statusClass = cssClass;
+    }
+}

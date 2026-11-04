@@ -23,19 +23,33 @@ internal enum ActionReason
     Changed,
     Unreadable,
     WriteFailed,
+
+    /// <summary>The note's text is the same as when it was opened; nothing was written.</summary>
+    Unchanged,
+
+    /// <summary>The note's file changed on disk since it was opened.</summary>
+    ChangedOnDisk,
+
+    /// <summary>The note's file no longer exists.</summary>
+    Missing,
+
+    /// <summary>The input is empty or too long.</summary>
+    Invalid,
 }
 
 /// <summary>
-/// The result of a desktop action: a kind, a reason and raw text (the todo's text for <see cref="ActionKind.Done"/>,
-/// else a fixed message; never an exception message, never cleaned or encoded).
+/// The result of a desktop action: a kind, a reason and raw text (the todo's text or the note's name for
+/// <see cref="ActionKind.Done"/>, else a fixed message, which may name the note; never an exception message, never
+/// cleaned or encoded). A saved note comes back in <see cref="Note"/>.
 /// </summary>
 internal sealed record ActionResult
 {
-    public ActionResult(ActionKind kind, ActionReason reason, string text)
+    public ActionResult(ActionKind kind, ActionReason reason, string text, EditableNote? note = null)
     {
         Kind = kind;
         Reason = reason;
         Text = text;
+        Note = note;
     }
 
     public ActionKind Kind { get; }
@@ -43,6 +57,9 @@ internal sealed record ActionResult
     public ActionReason Reason { get; }
 
     public string Text { get; }
+
+    /// <summary>The note as saved (or as opened, when nothing changed); <c>null</c> for other actions.</summary>
+    public EditableNote? Note { get; }
 
     /// <summary>Only the type name, so the raw text never leaks through formatting.</summary>
     public override string ToString() => nameof(ActionResult);
@@ -64,18 +81,42 @@ internal sealed class DesktopActions
         "Can't read todos.json, so nothing was changed. Fix or move the file and try again.";
     public const string TodosWriteFailedText = "Can't write todos.json. Nothing was done.";
     public const string FailedText = "Can't make that change.";
+    public const string EmptyTodoText = "Write the todo first.";
+
+    /// <summary>The longest todo text <see cref="AddTodo"/> accepts, as in the console.</summary>
+    public const int MaxTodoLength = 200;
+
+    /// <summary>The largest note text <see cref="SaveNote"/> writes (5 MB, as for imports).</summary>
+    public const long MaxNoteBytes = NoteStore.MaxImportBytes;
 
     private readonly Encryption encryption;
+    private readonly NoteStore notes;
     private readonly TodoStore todos;
     private readonly DesktopState state;
     private int running;
 
-    public DesktopActions(Encryption encryption, TodoStore todos, DesktopState state)
+    public DesktopActions(Encryption encryption, NoteStore notes, TodoStore todos, DesktopState state)
     {
         this.encryption = encryption;
+        this.notes = notes;
         this.todos = todos;
         this.state = state;
     }
+
+    /// <summary>The red line when a note changed on disk since it was opened.</summary>
+    public static string ChangedOnDiskText(string name) => $"{name} changed on disk since you opened it. Nothing was saved.";
+
+    /// <summary>The red line when a note's file is gone.</summary>
+    public static string MissingText(string name) => $"{name} no longer exists. Nothing was saved.";
+
+    /// <summary>The red line when a note can't be written.</summary>
+    public static string NoteWriteFailedText(string name) => $"Can't write {name}. Nothing was saved.";
+
+    /// <summary>The red line when a note's text is over <see cref="MaxNoteBytes"/>.</summary>
+    public static string TooLargeText(string name) => $"{name} is larger than 5 MB. Nothing was saved.";
+
+    /// <summary>The red line when a todo's text is too long.</summary>
+    public static string TodoTooLongText => $"A todo can be at most {MaxTodoLength} characters. Nothing was done.";
 
     /// <summary>Test hook: runs on the worker thread right before an action's checks and write.</summary>
     internal Action? BeforeWrite { get; set; }
@@ -87,6 +128,21 @@ internal sealed class DesktopActions
     /// </summary>
     public Task<ActionResult> CompleteTodo(TodoItem todo, Confirmation? confirmed) =>
         Run(() => CompleteTodoNow(todo, confirmed));
+
+    /// <summary>
+    /// Saves <paramref name="text"/> over the note <paramref name="opened"/> came from through
+    /// <see cref="NoteStore.SaveIfUnchanged"/>, keeping its line endings and BOM. Writes nothing when the text is
+    /// unchanged (<see cref="ActionReason.Unchanged"/>, done, no refresh), when the file changed on disk or is gone,
+    /// or when the text is over <see cref="MaxNoteBytes"/>. The result's text is the note's name when done.
+    /// </summary>
+    public Task<ActionResult> SaveNote(EditableNote opened, string text) => Run(() => SaveNoteNow(opened, text));
+
+    /// <summary>
+    /// Adds a todo due <paramref name="due"/> through <see cref="TodoStore.Add"/>. Blank text is refused with
+    /// <see cref="EmptyTodoText"/> and text over <see cref="MaxTodoLength"/> characters is refused; both
+    /// write nothing. The result's text is the todo's text when done.
+    /// </summary>
+    public Task<ActionResult> AddTodo(string text, DateOnly due) => Run(() => AddTodoNow(text, due));
 
     private static ActionResult Refused(ActionReason reason, string text) => new(ActionKind.Refused, reason, text);
 
@@ -120,7 +176,7 @@ internal sealed class DesktopActions
                 result = Failed(ActionReason.WriteFailed, FailedText);
             }
 
-            if (result.Kind == ActionKind.Done)
+            if (result.Kind == ActionKind.Done && result.Reason != ActionReason.Unchanged)
             {
                 try
                 {
@@ -171,6 +227,58 @@ internal sealed class DesktopActions
             return done is null
                 ? Refused(ActionReason.Changed, TodosChangedText)
                 : new ActionResult(ActionKind.Done, ActionReason.None, done.Text);
+        }
+        catch (TodoStoreException)
+        {
+            return Failed(ActionReason.Unreadable, TodosUnreadableText);
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, TodosWriteFailedText);
+        }
+    }
+
+    private ActionResult SaveNoteNow(EditableNote opened, string text)
+    {
+        if (System.Text.Encoding.UTF8.GetByteCount(text) > MaxNoteBytes)
+        {
+            return Refused(ActionReason.Invalid, TooLargeText(opened.Name));
+        }
+
+        try
+        {
+            NoteSaveResult saved = notes.SaveIfUnchanged(opened, text, out EditableNote? savedNote);
+            return saved switch
+            {
+                NoteSaveResult.Saved => new ActionResult(ActionKind.Done, ActionReason.None, opened.Name, savedNote),
+                NoteSaveResult.Unchanged => new ActionResult(ActionKind.Done, ActionReason.Unchanged, opened.Name, opened),
+                NoteSaveResult.ChangedOnDisk => Refused(ActionReason.ChangedOnDisk, ChangedOnDiskText(opened.Name)),
+                _ => Refused(ActionReason.Missing, MissingText(opened.Name)),
+            };
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, NoteWriteFailedText(opened.Name));
+        }
+    }
+
+    private ActionResult AddTodoNow(string text, DateOnly due)
+    {
+        string trimmed = text.Trim();
+        if (trimmed.Length == 0)
+        {
+            return Refused(ActionReason.Invalid, EmptyTodoText);
+        }
+
+        if (trimmed.Length > MaxTodoLength)
+        {
+            return Refused(ActionReason.Invalid, TodoTooLongText);
+        }
+
+        try
+        {
+            TodoItem added = todos.Add(trimmed, due);
+            return new ActionResult(ActionKind.Done, ActionReason.None, added.Text);
         }
         catch (TodoStoreException)
         {

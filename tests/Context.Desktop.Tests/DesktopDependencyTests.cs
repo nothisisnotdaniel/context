@@ -101,5 +101,36 @@ public sealed class DesktopDependencyTests
         Assert.True(found.Length == 0, "Files in Context.Desktop mention Spectre: " + string.Join(", ", found));
     }
 
+    // 094 AC-12: Jint runs the editor bundle in tests only; it never reaches a shipped project.
+    [Theory]
+    [InlineData("src/Context.Desktop/Context.Desktop.csproj")]
+    [InlineData("src/Context.Core/Context.Core.csproj")]
+    [InlineData("src/Context/Context.csproj")]
+    public void ShippedProjects_HaveNoJint(string project)
+    {
+        string path = Path.Combine(RepoFiles.Root(), project);
+        Assert.True(File.Exists(path), "Project file not found: " + path);
+
+        Assert.DoesNotContain("Jint", File.ReadAllText(path), StringComparison.OrdinalIgnoreCase);
+    }
+
+    // 094 AC-12: the editor's npm packages are pinned to exact versions.
+    [Fact]
+    public void EditorPackages_AreExactVersions()
+    {
+        string path = Path.Combine(RepoFiles.Root(), "src/Context.Desktop/editor/package.json");
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+        Assert.False(document.RootElement.TryGetProperty("dependencies", out _), "The editor bundles everything; use devDependencies.");
+        JsonElement packages = document.RootElement.GetProperty("devDependencies");
+
+        string[] loose = packages.EnumerateObject()
+            .Where(p => !System.Text.RegularExpressions.Regex.IsMatch(p.Value.GetString() ?? string.Empty, @"^\d+\.\d+\.\d+$"))
+            .Select(p => p.Name + "@" + p.Value.GetString())
+            .ToArray();
+
+        Assert.Contains(packages.EnumerateObject(), p => p.Name == "prosemirror-markdown");
+        Assert.True(loose.Length == 0, "Editor packages without an exact version: " + string.Join(", ", loose));
+    }
+
     private static bool IsSpectre(string name) => name.StartsWith("Spectre", StringComparison.OrdinalIgnoreCase);
 }

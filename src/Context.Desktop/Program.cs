@@ -3,7 +3,10 @@ using Photino.Blazor;
 
 namespace Context;
 
-/// <summary>Wires up the desktop window; reads live in <see cref="DesktopState"/>, changes in <see cref="DesktopActions"/>.</summary>
+/// <summary>
+/// Wires up the desktop window; reads live in <see cref="DesktopState"/>, changes in <see cref="DesktopActions"/>, the
+/// page's editor is reached only through <see cref="EditorInterop"/>.
+/// </summary>
 internal static class Program
 {
     [STAThread]
@@ -26,11 +29,12 @@ internal static class Program
         CalendarFeed feed = new CalendarFeed(folder, calendarLink, http, () => DateTime.UtcNow, encryption: encryption);
         DesktopState state = new DesktopState(
             encryption, notes, todos, index, calendar, feed, Today, () => DateTime.UtcNow);
-        DesktopActions actions = new DesktopActions(encryption, todos, state);
+        DesktopActions actions = new DesktopActions(encryption, notes, todos, state);
 
         PhotinoBlazorAppBuilder builder = PhotinoBlazorAppBuilder.CreateDefault(args);
         builder.Services.AddSingleton(state);
         builder.Services.AddSingleton(actions);
+        builder.Services.AddTransient<EditorInterop>();
         builder.RootComponents.Add<App>("app");
         PhotinoBlazorApp app = builder.Build();
 

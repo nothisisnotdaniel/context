@@ -11,7 +11,7 @@ public sealed class DesktopSourceTests
 
     // The Core calls that change data (AC-8). CalendarLink's real names are Set/Clear; Save/Delete are listed too.
     private static readonly Regex Writes = new(
-        @"\.\s*(Create|Save|Add|Complete|Set|Clear|Delete|ClearCache|Migrate|DecryptAll)\s*\(",
+        @"\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|ClearCache|Migrate|DecryptAll)\s*\(",
         RegexOptions.CultureInvariant);
 
     private static readonly string[] RawMarkup = ["MarkupString", "AddMarkupContent", "@(("];
@@ -20,6 +20,16 @@ public sealed class DesktopSourceTests
 
     // The only Desktop file allowed to call the writing methods.
     private const string ActionsFile = "src/Context.Desktop/DesktopActions.cs";
+
+    // 094: the only Desktop file that may use JavaScript interop (IJSRuntime, [JSInvokable]).
+    private const string InteropFile = "src/Context.Desktop/EditorInterop.cs";
+
+    // 094: DotNetObjectReference.Create only wraps EditorInterop for the page's callbacks; it writes no data.
+    private const string InteropReference = "DotNetObjectReference.Create(";
+
+    // 094: DOM and code-eval APIs the editor's own sources must not use.
+    private static readonly string[] EditorForbidden =
+        ["innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function"];
 
     // The .cs files that may name DesktopActions (besides DesktopActions.cs itself).
     private static readonly string[] ActionsUsers = ["src/Context.Desktop/Program.cs", "src/Context.Desktop/StateComponent.cs"];
@@ -89,7 +99,8 @@ public sealed class DesktopSourceTests
         Assert.True(found.Count == 0, "Forbidden markup in .razor files: " + string.Join(", ", found));
     }
 
-    // AC-6: exactly the CSP meta tag, one external script (blazor.webview.js), no inline script or style.
+    // AC-6 / 094 AC-12: exactly the CSP meta tag, two external scripts (the editor bundle and blazor.webview.js), no
+    // inline script or style.
     [Fact]
     public void IndexHtml_HasCspAndNoInlineCode()
     {
@@ -104,10 +115,15 @@ public sealed class DesktopSourceTests
 
         MatchCollection scripts = Regex.Matches(html, "<script\\b([^>]*)>(.*?)</script>", RegexOptions.IgnoreCase
             | RegexOptions.Singleline);
-        Match script = Assert.Single(scripts);
-        Assert.Equal(" src=\"_framework/blazor.webview.js\"", script.Groups[1].Value);
-        Assert.Equal(string.Empty, script.Groups[2].Value);
-        Assert.Single(Regex.Matches(html, "<script", RegexOptions.IgnoreCase));
+        Assert.Equal(
+            [" src=\"editor/editor.js\"", " src=\"_framework/blazor.webview.js\""],
+            scripts.Select(m => m.Groups[1].Value).ToArray());
+        Assert.All(scripts, m => Assert.Equal(string.Empty, m.Groups[2].Value));
+        Assert.Equal(2, Regex.Matches(html, "<script", RegexOptions.IgnoreCase).Count);
+        Assert.Equal(
+            ["app.css", "editor/editor.css"],
+            Regex.Matches(html, "<link\\s+href=\"([^\"]*)\"\\s+rel=\"stylesheet\"").Select(m => m.Groups[1].Value).ToArray());
+        Assert.Equal(2, Regex.Matches(html, "<link", RegexOptions.IgnoreCase).Count);
 
         Assert.DoesNotContain("<style", html, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("style=", html, StringComparison.OrdinalIgnoreCase);
@@ -116,11 +132,13 @@ public sealed class DesktopSourceTests
         Assert.DoesNotContain("https:", html, StringComparison.OrdinalIgnoreCase);
     }
 
-    // AC-6: the stylesheet loads nothing from outside (no CDN, no external fonts).
-    [Fact]
-    public void AppCss_LoadsNothingExternal()
+    // AC-6 / 094 AC-12: the stylesheets load nothing from outside (no CDN, no external fonts).
+    [Theory]
+    [InlineData("app.css")]
+    [InlineData("editor/editor.css")]
+    public void Css_LoadsNothingExternal(string file)
     {
-        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", file));
 
         Assert.DoesNotContain("@import", css, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("url(", css, StringComparison.OrdinalIgnoreCase);
@@ -140,6 +158,12 @@ public sealed class DesktopSourceTests
         foreach (string file in files.Where(f => f != ActionsFile))
         {
             string text = File.ReadAllText(Path.Combine(root, file));
+            if (file == InteropFile)
+            {
+                Assert.Single(Regex.Matches(text, Regex.Escape(InteropReference)));
+                text = text.Replace(InteropReference, string.Empty, StringComparison.Ordinal);
+            }
+
             found.AddRange(Writes.Matches(text).Select(m => $"{file}: {m.Value}"));
         }
 
@@ -274,10 +298,10 @@ public sealed class DesktopSourceTests
         Assert.Equal(untyped, UntypedButtons(razor).Count);
     }
 
-    // 080 round 2: the first <input> use. Every <input> is a checkbox (no text entry yet) and nothing binds a value
-    // with @bind; the first job with text inputs adds its own rules and tests.
+    // 080 round 2 / 094 AC-12: every <input> is a checkbox, text, date or search field, nothing binds a value with
+    // @bind and there is no <textarea> (the note editor is the bundled editor, not a form field).
     [Fact]
-    public void Razor_InputsAreCheckboxesOnly()
+    public void Razor_InputsAreAllowedTypesOnly()
     {
         string root = RepoFiles.Root();
         List<string> found = [];
@@ -290,15 +314,20 @@ public sealed class DesktopSourceTests
         }
 
         Assert.True(inputs >= 1, "Expected the todo checkboxes, found " + inputs);
-        Assert.True(found.Count == 0, "Inputs other than plain checkboxes: " + string.Join(", ", found));
+        Assert.True(found.Count == 0, "Inputs other than checkbox, text, date or search: " + string.Join(", ", found));
     }
 
-    // 080 round 2 (control): the input check.
+    // 080 round 2 / 094 (control): the input check.
     [Theory]
     [InlineData("<input type=\"checkbox\" checked=\"@x\" @onchange=\"() => Ask(t)\" />", 0)]
     [InlineData("<input class=\"done\" type=\"checkbox\">", 0)]
+    [InlineData("<input type=\"text\" value=\"@x\" @oninput=\"Typed\" />", 0)]
+    [InlineData("<input type=\"date\" @onchange=\"Chosen\" />", 0)]
+    [InlineData("<input type=\"search\" />", 0)]
     [InlineData("<input>", 1)]
-    [InlineData("<input type=\"text\" />", 1)]
+    [InlineData("<input type=\"password\" />", 1)]
+    [InlineData("<input type=\"text\" @bind=\"x\" />", 1)]
+    [InlineData("<input type=\"hidden\" />", 1)]
     [InlineData("<INPUT type=\"file\">", 1)]
     [InlineData("<input data-type=\"checkbox\">", 1)]
     [InlineData("<input type=\"checkbox\" @bind=\"done\" />", 1)]
@@ -340,16 +369,61 @@ public sealed class DesktopSourceTests
         Assert.Equal(count, PlainEvents(razor, ["ConfirmDialog"]).Count);
     }
 
-    // AC-10: no Desktop source uses JavaScript interop directly.
+    // AC-10 / 094 AC-12: only EditorInterop.cs uses JavaScript interop (IJSRuntime, [JSInvokable]).
     [Fact]
-    public void Sources_MentionNoJSRuntime()
+    public void Sources_MentionJSRuntimeOnlyInEditorInterop()
     {
         string root = RepoFiles.Root();
-        List<string> found = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
-            .Where(f => MentionsJSRuntime(File.ReadAllText(Path.Combine(root, f))))
+        List<string> files = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor");
+        Assert.Contains(InteropFile, files);
+        Assert.True(MentionsJSRuntime(File.ReadAllText(Path.Combine(root, InteropFile))));
+
+        List<string> found = files
+            .Where(f => f != InteropFile)
+            .Where(f =>
+            {
+                string text = File.ReadAllText(Path.Combine(root, f));
+                return MentionsJSRuntime(text) || text.Contains("JSInvokable", StringComparison.Ordinal);
+            })
             .ToList();
 
-        Assert.True(found.Count == 0, "JSRuntime mentioned in: " + string.Join(", ", found));
+        Assert.True(found.Count == 0, "JavaScript interop in: " + string.Join(", ", found));
+    }
+
+    // 094 AC-9: the [JSInvokable] methods only raise EditorInterop's events; none calls Actions or DesktopActions.
+    [Fact]
+    public void JSInvokable_MethodsChangeNothing()
+    {
+        string text = File.ReadAllText(Path.Combine(RepoFiles.Root(), InteropFile));
+        MatchCollection invokable = Regex.Matches(text, @"\[JSInvokable\]\s*public\s+Task\s+(\w+)\(string raw\)\s*=>\s*([^;]*);");
+
+        Assert.Equal(["OnTag", "OnLink"], invokable.Select(m => m.Groups[1].Value).ToArray());
+        Assert.Equal(2, Regex.Matches(text, @"\[JSInvokable").Count);
+        Assert.All(invokable, m => Assert.Matches(@"^(TagClicked|LinkClicked)\?\.Invoke\(raw\) \?\? Task\.CompletedTask$", m.Groups[2].Value));
+        Assert.DoesNotMatch(ActionsCall, text);
+        Assert.DoesNotMatch(ActionsName, text);
+    }
+
+    // 094 AC-3: the editor's own sources build no HTML from strings and evaluate no code.
+    [Fact]
+    public void EditorSources_UseNoHtmlStringsOrEval()
+    {
+        string root = RepoFiles.Root();
+        string folder = Path.Combine(root, RepoFiles.DesktopFolder, "editor");
+        List<string> files = Directory.EnumerateFiles(Path.Combine(folder, "src"), "*.js").ToList();
+        files.Add(Path.Combine(folder, "build.mjs"));
+        Assert.True(files.Count >= 4, "Expected the editor sources, found " + files.Count);
+
+        List<string> found = [];
+        foreach (string file in files)
+        {
+            string text = File.ReadAllText(file);
+            found.AddRange(EditorForbidden
+                .Where(m => text.Contains(m, StringComparison.Ordinal))
+                .Select(m => $"{RepoFiles.Relative(root, file)}: {m}"));
+        }
+
+        Assert.True(found.Count == 0, "Forbidden APIs in the editor sources: " + string.Join(", ", found));
     }
 
     // AC-10 (control): the JSRuntime check.
@@ -378,6 +452,7 @@ public sealed class DesktopSourceTests
     [InlineData("encryption.Migrate()")]
     [InlineData("encryption.DecryptAll()")]
     [InlineData("Vault.Create(root, pass)")]
+    [InlineData("notes.SaveIfUnchanged(opened, text, out saved)")]
     public void Writes_Pattern_CatchesCalls(string call)
     {
         Assert.Matches(Writes, call);
@@ -391,6 +466,9 @@ public sealed class DesktopSourceTests
     [InlineData("Directory.CreateDirectory(root)")]
     [InlineData("builder.Services.AddSingleton(actions)")]
     [InlineData("Actions.CompleteTodo(n, todo, confirmed)")]
+    [InlineData("Actions.SaveNote(request.Note, request.Text)")]
+    [InlineData("Actions.AddTodo(newText, due)")]
+    [InlineData("notes.ReadForEdit(found)")]
     public void Writes_Pattern_AllowsReads(string call)
     {
         Assert.DoesNotMatch(Writes, call);
@@ -415,11 +493,11 @@ public sealed class DesktopSourceTests
             .Select(f => Path.GetFileNameWithoutExtension(f))
             .ToHashSet(StringComparer.Ordinal);
 
-    // Every <input> that is not type="checkbox" or that uses @bind, and every <textarea>.
+    // Every <input> that is not type="checkbox", "text", "date" or "search" or that uses @bind, and every <textarea>.
     private static List<string> BadInputs(string razor) =>
         Tag.Matches(MarkupOf(razor))
             .Where(m => m.Groups[1].Value.Equals("input", StringComparison.OrdinalIgnoreCase)
-                ? !Regex.IsMatch(m.Groups[2].Value, @"(?<![\w-])type\s*=\s*""checkbox""")
+                ? !Regex.IsMatch(m.Groups[2].Value, @"(?<![\w-])type\s*=\s*""(checkbox|text|date|search)""")
                     || m.Groups[2].Value.Contains("@bind", StringComparison.Ordinal)
                 : m.Groups[1].Value.Equals("textarea", StringComparison.OrdinalIgnoreCase))
             .Select(m => m.Value)

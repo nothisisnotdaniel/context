@@ -49,6 +49,30 @@
     {
         <p class="result" role="status"></p>
     }
+    @if (Snapshot is { Locked: false } open)
+    {
+        DateOnly shownDue = due ?? open.Today;
+        <div class="todo-entry">
+            <input type="text" class="todo-text" value="@newText" maxlength="@DesktopActions.MaxTodoLength"
+                   aria-label="New todo" placeholder="New todo" @oninput="TextTyped" @onkeydown="e => Add(e)" />
+            <input type="date" class="todo-due" value="@shownDue.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)"
+                   aria-label="Due date" @onchange="DueChosen" />
+            <button type="button" class="due-today" @onclick="() => due = open.Today">Today</button>
+            <button type="button" class="due-tomorrow" @onclick="() => due = open.Today.AddDays(1)">Tomorrow</button>
+            <button type="button" class="add" disabled="@adding" @onclick="() => Add(null)">Add</button>
+        </div>
+        @if (added is { } addShown)
+        {
+            @if (addShown.Kind == ActionKind.Done)
+            {
+                <p class="add-result accent" role="status">Added: @DesktopText.OneLine(addShown.Text)</p>
+            }
+            else
+            {
+                <p class="add-result red" role="status">@addShown.Text</p>
+            }
+        }
+    }
     @if (asking is { } todoAsked)
     {
         <ConfirmDialog Question="@($"Mark this todo done? {todoAsked.Text}")" ConfirmLabel="Mark done"
@@ -60,6 +84,44 @@
     private TodoItem? asking;
     private bool running;
     private ActionResult? result;
+    private string newText = string.Empty;
+    private DateOnly? due;
+    private bool adding;
+    private ActionResult? added;
+
+    private void TextTyped(ChangeEventArgs e) => newText = e.Value?.ToString() ?? string.Empty;
+
+    private void DueChosen(ChangeEventArgs e)
+    {
+        if (DateOnly.TryParseExact(
+            e.Value?.ToString(), DesktopText.DateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly chosen))
+        {
+            due = chosen;
+        }
+    }
+
+    private async Task Add(KeyboardEventArgs? key)
+    {
+        if ((key is not null && key.Key != "Enter") || adding || Snapshot is not { } snapshot)
+        {
+            return;
+        }
+
+        adding = true;
+        try
+        {
+            added = await Actions.AddTodo(newText, due ?? snapshot.Today);
+            if (added.Kind == ActionKind.Done)
+            {
+                newText = string.Empty;
+                due = null;
+            }
+        }
+        finally
+        {
+            adding = false;
+        }
+    }
 
     private void Ask(TodoItem todo)
     {
