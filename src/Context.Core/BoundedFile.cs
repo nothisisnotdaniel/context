@@ -68,6 +68,8 @@ internal static class BoundedFile
             return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         }
 
+        // O_NONBLOCK and O_CLOEXEC differ per system: these are the macOS values and the Linux (x64, arm64) values. Other
+        // Unix-like systems (BSDs) would get the Linux values; the app targets macOS, Windows and Linux only.
         int flags = OperatingSystem.IsMacOS() || OperatingSystem.IsIOS()
             ? MacNonBlock | MacCloseOnExec
             : LinuxNonBlock | LinuxCloseOnExec;

@@ -58,6 +58,8 @@ public sealed class TodoEntryTests : IDisposable
     public async Task Enter_WithPickedDate_Adds()
     {
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+        string? textId = cut.Find("input.todo-text").GetAttribute("blazor:elementReference");
+        Assert.False(string.IsNullOrEmpty(textId));
         await cut.Find("input.todo-due").ChangeAsync(new ChangeEventArgs { Value = "2026-12-24" });
         await cut.Find("input.todo-text").InputAsync(new ChangeEventArgs { Value = "Presents" });
 
@@ -67,6 +69,21 @@ public sealed class TodoEntryTests : IDisposable
 
         TodoItem added = Assert.Single(data.Todos!.List());
         Assert.Equal(new DateOnly(2026, 12, 24), added.Due);
+        JSRuntimeInvocation focus = data.Bunit.JSInterop.VerifyFocusAsyncInvoke();
+        Assert.Equal(textId, ((ElementReference)focus.Arguments[0]!).Id);
+    }
+
+    // The Add button keeps the focus where it is (only Enter in the field gives the focus back to it).
+    [Fact]
+    public async Task AddButton_DoesNotMoveFocus()
+    {
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+        await cut.Find("input.todo-text").InputAsync(new ChangeEventArgs { Value = "Buy milk" });
+
+        await cut.Find(".todo-entry button.add").ClickAsync(new MouseEventArgs());
+
+        Assert.Single(data.Todos!.List());
+        Assert.DoesNotContain(data.Bunit.JSInterop.Invocations, i => i.Identifier.Contains("focus", StringComparison.OrdinalIgnoreCase));
     }
 
     // While a todo is being added the whole row and the todo checkboxes are disabled.

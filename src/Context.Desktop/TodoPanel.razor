@@ -55,7 +55,7 @@
         bool entryOff = adding || running;
         <div class="todo-entry">
             <input type="text" class="todo-text" value="@newText" maxlength="@DesktopActions.MaxTodoLength"
-                   disabled="@entryOff" aria-label="New todo" placeholder="New todo" @oninput="TextTyped" @onkeydown="e => Add(e)" />
+                   disabled="@entryOff" aria-label="New todo" placeholder="New todo" @ref="textField" @oninput="TextTyped" @onkeydown="e => Add(e)" />
             <input type="date" class="todo-due" value="@shownDue.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)"
                    disabled="@entryOff" aria-label="Due date" @onchange="DueChosen" />
             <button type="button" class="due-today" disabled="@entryOff" @onclick="() => due = open.Today">Today</button>
@@ -89,6 +89,18 @@
     private DateOnly? due;
     private bool adding;
     private ActionResult? added;
+    private ElementReference textField;
+    private bool refocus;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // An add started with Enter disables the field while it runs; give the focus back once it is enabled again.
+        if (refocus && !adding && !running)
+        {
+            refocus = false;
+            await textField.FocusAsync();
+        }
+    }
 
     private void TextTyped(ChangeEventArgs e) => newText = e.Value?.ToString() ?? string.Empty;
 
@@ -121,6 +133,7 @@
         finally
         {
             adding = false;
+            refocus = key is not null;
         }
     }
 
