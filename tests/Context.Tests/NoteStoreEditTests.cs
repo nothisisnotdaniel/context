@@ -155,6 +155,20 @@ public sealed class NoteStoreEditTests : IDisposable
         Assert.Equal("Hidden too\n", Encryption.DecodeText(Encryption.Unprotect(encryption, Vault.KindNote, bytes)));
     }
 
+    // An empty note reads as empty text with the hash of no bytes.
+    [Fact]
+    public void ReadForEdit_Empty_EmptyText()
+    {
+        NoteInfo note = Write("Empty", []);
+
+        EditableNote opened = store.ReadForEdit(note);
+
+        Assert.Equal(string.Empty, opened.Text);
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(Array.Empty<byte>())), opened.Version);
+        Assert.Equal(NoteSaveResult.Saved, store.SaveIfUnchanged(opened, "Now text\n", out _));
+        Assert.Equal("Now text\n", File.ReadAllText(note.Path));
+    }
+
     // A note over the limit is not opened; one exactly at the limit is.
     [Fact]
     public void ReadForEdit_OverLimit_Refused()
@@ -195,9 +209,10 @@ public sealed class NoteStoreEditTests : IDisposable
         Assert.Equal(before, FileSnapshot.Take(root));
     }
 
-    // A FIFO named like a note is refused at once instead of blocking the reader, and a save over it writes nothing.
+    // A FIFO named like a note is never opened (it reports length 0), so reading it returns at once as an empty note
+    // instead of blocking the reader, and a save over it (opened with other text) writes nothing.
     [Fact]
-    public async Task Fifo_RefusedWithoutBlocking()
+    public async Task Fifo_ReadWithoutBlocking_SaveWritesNothing()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -213,7 +228,8 @@ public sealed class NoteStoreEditTests : IDisposable
             Assert.Equal(0, mkfifo.ExitCode);
         }
 
-        await Assert.ThrowsAnyAsync<IOException>(() => Task.Run(() => store.ReadForEdit(plan)).WaitAsync(TimeSpan.FromSeconds(10)));
+        EditableNote fifo = await Task.Run(() => store.ReadForEdit(plan)).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(string.Empty, fifo.Text);
         NoteSaveResult result = await Task.Run(() => store.SaveIfUnchanged(opened, "# Plan\n\nMore\n", out _)).WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Equal(NoteSaveResult.ChangedOnDisk, result);

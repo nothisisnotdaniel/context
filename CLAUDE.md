@@ -185,7 +185,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `[[note link]]` parsing in `NoteLinkParser.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the key file and file format in `Vault.cs`, the session holder and
-    migration in `Encryption.cs`, the display sanitizer in `SafeText.cs`, bounded regular-file reads (`BoundedFile.cs`: on Unix a non-blocking `open`, so a FIFO named `x.md` is refused instead of hanging) and the view data steps
+    migration in `Encryption.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
     `CurrentView.cs` (`/current`), `TagsView.cs` (`/tags`), `LinksView.cs` (`/links`) and `CalendarLinkView.cs`
     (`/calendar-link`); `/notes` uses `NoteStore.List()` directly.
   - **Data step in Core, Spectre renderer in the app:** a view command's handler calls a Core data step that
@@ -230,7 +230,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `IJSRuntime`; `[JSInvokable]` `OnTag`/`OnLink` only navigate) and saves on the Save button or Ctrl/Cmd+S through
     `DesktopActions.SaveNote` -> `NoteStore.SaveIfUnchanged` (unchanged text writes nothing; version re-checked before
     the move; CRLF and BOM kept; temp file mode `0600`). Open and save both stop at `NoteStore.MaxEditBytes` (5 MB of plain
-    file bytes, read through `BoundedFile`): a bigger or non-regular note can't be opened (`Can't read <name>.`), a save
+    file bytes, read through `BoundedFile`): a bigger or non-seekable note can't be opened (`Can't read <name>.`), a save
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
     `/current`, `/open`, `/save`, `/tags`, `/todo` with `CommandMatcher` (shared with `CommandRegistry.Match`).

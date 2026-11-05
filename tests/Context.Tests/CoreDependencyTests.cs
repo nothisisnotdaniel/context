@@ -57,6 +57,35 @@ public sealed class CoreDependencyTests
         Assert.True(found.Count == 0, "Files in Context.Core mention Spectre: " + string.Join(", ", found));
     }
 
+    // 094 feedback: Context.Core is managed code only, with no P/Invoke into native libraries.
+    [Fact]
+    public void CoreSources_HaveNoPInvoke()
+    {
+        string root = RepoRoot();
+        string core = Path.Combine(root, "src/Context.Core");
+        string[] found = Directory.EnumerateFiles(core, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !Path.GetRelativePath(core, f).StartsWith("bin", StringComparison.Ordinal)
+                && !Path.GetRelativePath(core, f).StartsWith("obj", StringComparison.Ordinal))
+            .Where(f =>
+            {
+                string text = File.ReadAllText(f);
+                return text.Contains("DllImport", StringComparison.Ordinal)
+                    || text.Contains("LibraryImport", StringComparison.Ordinal)
+                    || text.Contains("extern ", StringComparison.Ordinal)
+                    || text.Contains("\"libc\"", StringComparison.Ordinal);
+            })
+            .Select(f => Relative(root, f))
+            .ToArray();
+
+        Assert.True(File.Exists(Path.Combine(core, "BoundedFile.cs")), "BoundedFile.cs not found");
+        Assert.True(found.Length == 0, "Context.Core has P/Invoke: " + string.Join(", ", found));
+        Assert.DoesNotContain(
+            typeof(NoteStore).Assembly.GetTypes().SelectMany(t => t.GetMethods(
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public
+                | System.Reflection.BindingFlags.DeclaredOnly)),
+            m => (m.Attributes & System.Reflection.MethodAttributes.PinvokeImpl) != 0);
+    }
+
     // AC-6 (control for AC-1)
     [Fact]
     public void AppAssembly_ReferencesSpectreAssembly()
