@@ -12,20 +12,210 @@
     }
     else
     {
-        <div class="layout">
+        <div class="layout" @onkeydown="OpenPalette">
             <aside class="notes-region">
-                <NotesPanel />
+                <NotesPanel OnOpen="RequestOpen" />
             </aside>
             <main class="current-region">
-                <CurrentPanel />
+                @if (tagShown is { } tag)
+                {
+                    <TagPanel Tag="@tag" OnOpen="RequestOpen" OnClose="CloseTag" />
+                }
+                <p class="main-status @statusClass" role="status">@statusText</p>
+                @if (openName is { } name)
+                {
+                    <NoteEditor @key="name" @ref="editor" Name="@name" OnTag="ShowTag" OnOpenNote="RequestOpen" />
+                }
+                else
+                {
+                    <CurrentPanel />
+                }
             </main>
             <aside class="todos-region">
                 <TodoPanel />
             </aside>
         </div>
+        @if (discarding)
+        {
+            <ConfirmDialog Question="@($"Discard changes to {DesktopText.OneLine(openName ?? string.Empty)}?")" ConfirmLabel="Discard"
+                           OnConfirm="Discard" OnCancel="KeepEditing" />
+        }
+        @if (paletteOpen)
+        {
+            <CommandPalette OnRun="RunCommand" OnClose="ClosePalette" />
+        }
     }
 }
 else
 {
     <p class="grey loading" role="status">Loading…</p>
+}
+
+@code {
+    private string? openName;
+    private NoteEditor? editor;
+    private string? tagShown;
+    private bool discarding;
+    private string? pendingName;
+    private bool paletteOpen;
+    private bool running;
+    private string statusText = string.Empty;
+    private string statusClass = string.Empty;
+
+    private void OpenPalette(KeyboardEventArgs e)
+    {
+        if ((e.CtrlKey || e.MetaKey) && string.Equals(e.Key, "k", StringComparison.OrdinalIgnoreCase) && !discarding)
+        {
+            paletteOpen = true;
+        }
+    }
+
+    private void ClosePalette() => paletteOpen = false;
+
+    private void ShowTag(string tag)
+    {
+        tagShown = TagIndex.NormalizeTag(tag);
+    }
+
+    private void CloseTag() => tagShown = null;
+
+    // Opens the note called name (null: the current view), asking first when the open note has unsaved changes.
+    private async Task RequestOpen(string? name)
+    {
+        if (name is not null && string.Equals(name, openName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (editor is not null && openName is not null && await editor.IsDirtyAsync())
+        {
+            pendingName = name;
+            discarding = true;
+            return;
+        }
+
+        ShowNote(name);
+    }
+
+    private void Discard(Confirmation confirmed)
+    {
+        discarding = false;
+        ShowNote(pendingName);
+    }
+
+    private void KeepEditing()
+    {
+        discarding = false;
+        pendingName = null;
+    }
+
+    private void ShowNote(string? name)
+    {
+        openName = name;
+        pendingName = null;
+        tagShown = null;
+        if (name is null)
+        {
+            editor = null;
+        }
+
+        ShowStatus(string.Empty, string.Empty);
+    }
+
+    // Runs a palette command; the palette closes first.
+    private async Task RunCommand(string line)
+    {
+        paletteOpen = false;
+        string trimmed = line.Trim();
+        int space = trimmed.IndexOfAny([' ', '\t']);
+        string command = (space < 0 ? trimmed : trimmed[..space]).ToLowerInvariant();
+        string rest = space < 0 ? string.Empty : trimmed[(space + 1)..].Trim();
+        switch (command)
+        {
+            case "/current":
+                await RequestOpen(null);
+                break;
+            case "/open":
+                string? found = rest.Length == 0 ? null : State.ResolveNote(rest);
+                if (rest.Length == 0)
+                {
+                    ShowStatus("Type /open <note>.", "red");
+                }
+                else if (found is null)
+                {
+                    ShowStatus($"No note named {DesktopText.OneLine(rest)}.", "grey");
+                }
+                else
+                {
+                    await RequestOpen(found);
+                }
+
+                break;
+            case "/save":
+                if (editor is null || openName is null)
+                {
+                    ShowStatus("No note is open.", "grey");
+                }
+                else if (await editor.PrepareSaveAsync() is { } request && !running)
+                {
+                    running = true;
+                    try
+                    {
+                        ActionResult saved = await Actions.SaveNote(request.Note, request.Text);
+                        await editor.ApplySaveAsync(saved);
+                    }
+                    finally
+                    {
+                        running = false;
+                    }
+                }
+
+                break;
+            case "/tags":
+                if (rest.Length == 0)
+                {
+                    ShowStatus("Type /tags <tag>.", "red");
+                }
+                else
+                {
+                    ShowTag(rest);
+                }
+
+                break;
+            case "/todo":
+                int split = rest.IndexOfAny([' ', '\t']);
+                if (split < 0 || !DesktopText.TryParseDue(rest[..split], Snapshot?.Today ?? default, out DateOnly due))
+                {
+                    ShowStatus("Type /todo <yyyy-MM-dd|today|tomorrow> <text>.", "red");
+                    break;
+                }
+
+                if (!running)
+                {
+                    running = true;
+                    try
+                    {
+                        ActionResult added = await Actions.AddTodo(rest[(split + 1)..], due);
+                        ShowStatus(
+                            added.Kind == ActionKind.Done ? $"Added: {DesktopText.OneLine(added.Text)}" : DesktopText.OneLine(added.Text),
+                            added.Kind == ActionKind.Done ? "accent" : "red");
+                    }
+                    finally
+                    {
+                        running = false;
+                    }
+                }
+
+                break;
+            default:
+                ShowStatus("Unknown command.", "red");
+                break;
+        }
+    }
+
+    private void ShowStatus(string text, string cssClass)
+    {
+        statusText = text;
+        statusClass = cssClass;
+    }
 }

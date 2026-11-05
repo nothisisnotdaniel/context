@@ -1,0 +1,111 @@
+/* The note editor. Colours come from app.css (--accent-strong, --grey, --line, --panel). */
+.note-editor-body {
+  min-height: 300px;
+  outline: none;
+  line-height: 1.5;
+}
+
+.note-editor-body p {
+  margin: 0 0 10px;
+}
+
+.note-editor-body h1,
+.note-editor-body h2,
+.note-editor-body h3,
+.note-editor-body h4,
+.note-editor-body h5,
+.note-editor-body h6 {
+  color: var(--accent-strong);
+  margin: 14px 0 8px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.note-editor-body ul {
+  list-style: disc;
+  margin: 0 0 10px;
+  padding-left: 24px;
+}
+
+.note-editor-body ol {
+  list-style: decimal;
+  margin: 0 0 10px;
+  padding-left: 28px;
+}
+
+.note-editor-body li > p,
+.note-editor-body li > div > p {
+  margin: 0;
+}
+
+.note-editor-body li.task {
+  list-style: none;
+  display: flex;
+  gap: 6px;
+  margin-left: -20px;
+}
+
+.note-editor-body .task-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.note-editor-body .task-box {
+  cursor: pointer;
+  flex: none;
+  user-select: none;
+}
+
+.note-editor-body .task-box::before {
+  content: "\2610";
+}
+
+.note-editor-body li.task.done > .task-box::before {
+  content: "\2611";
+}
+
+.note-editor-body li.task.done > .task-body {
+  color: var(--grey);
+  text-decoration: line-through;
+}
+
+.note-editor-body blockquote {
+  border-left: 3px solid var(--line);
+  color: var(--grey);
+  margin: 0 0 10px;
+  padding-left: 12px;
+}
+
+.note-editor-body pre {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+}
+
+.note-editor-body code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+.note-editor-body .chip {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+  padding: 0 6px;
+}
+
+.note-editor-body .link {
+  text-decoration: underline;
+}
+
+.note-editor-body .image-placeholder {
+  color: var(--grey);
+  font-style: italic;
+}
+
+.note-editor-body hr {
+  border: none;
+  border-top: 1px solid var(--line);
+}

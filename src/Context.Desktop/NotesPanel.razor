@@ -19,7 +19,7 @@
                 {
                     string name = DesktopText.OneLine(note.Name);
                     <li class="note">
-                        <span class="name cut" title="@name">@name</span>
+                        <button type="button" class="name cut" title="@name" @onclick="() => OnOpen.InvokeAsync(note.Name)">@name</button>
                         <span class="time grey">@note.Modified.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)</span>
                     </li>
                 }
@@ -27,3 +27,9 @@
         }
     }
 </section>
+
+@code {
+    /// <summary>Called with a note's name when it is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+}

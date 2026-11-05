@@ -87,7 +87,7 @@ public sealed class TodoPanelTests : IDisposable
         Assert.Equal(
             ["2026-10-29 First", "2026-10-30 Second"],
             cut.FindAll("li.todo label").Select(l => System.Text.RegularExpressions.Regex.Replace(l.TextContent, "\\s+", " ").Trim()).ToArray());
-        Assert.Empty(cut.FindAll("button"));
+        Assert.Empty(cut.FindAll(".todo-list button"));
         Assert.Empty(cut.FindAll("[role=dialog]"));
         foreach (TodoItem todo in data.Todos!.List())
         {
@@ -146,8 +146,10 @@ public sealed class TodoPanelTests : IDisposable
 
         cut.WaitForAssertion(() =>
         {
-            Assert.Equal(5, cut.FindAll("button, input").Count);
-            Assert.All(cut.FindAll("button, input"), b => Assert.True(b.HasAttribute("disabled"), b.OuterHtml));
+            Assert.Equal(5, cut.FindAll(".todo-list input, [role=dialog] button").Count);
+            Assert.All(cut.FindAll(".todo-list input, [role=dialog] button"), b => Assert.True(b.HasAttribute("disabled"), b.OuterHtml));
+            Assert.Equal(5, cut.FindAll(".todo-entry input, .todo-entry button").Count);
+            Assert.All(cut.FindAll(".todo-entry input, .todo-entry button"), b => Assert.True(b.HasAttribute("disabled"), b.OuterHtml));
         });
         release.Set();
         await confirm;
@@ -160,8 +162,8 @@ public sealed class TodoPanelTests : IDisposable
             Assert.True(result.ClassList.Contains("accent"));
             Assert.Equal("status", result.GetAttribute("role"));
             Assert.Equal(["First todo", "Third todo"], cut.FindAll("li.todo .text").Select(t => t.TextContent).ToArray());
-            Assert.All(cut.FindAll("input"), b => Assert.False(b.HasAttribute("disabled")));
-            Assert.All(cut.FindAll("input"), b => Assert.False(b.HasAttribute("checked")));
+            Assert.All(cut.FindAll(".todo-list input, .todo-entry input, .todo-entry button"), b => Assert.False(b.HasAttribute("disabled")));
+            Assert.All(cut.FindAll(".todo-list input"), b => Assert.False(b.HasAttribute("checked")));
         });
         Assert.Equal(["First todo", "Third todo"], data.Todos!.List().Select(t => t.Text).ToArray());
     }

@@ -1,0 +1,22 @@
+{
+  "name": "context-editor",
+  "private": true,
+  "version": "1.0.0",
+  "description": "The note editor of Context.Desktop: ProseMirror with prosemirror-markdown, bundled to wwwroot/editor/editor.js.",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "prosemirror-commands": "1.7.2",
+    "prosemirror-history": "1.5.1",
+    "prosemirror-inputrules": "1.5.1",
+    "prosemirror-keymap": "1.2.3",
+    "prosemirror-markdown": "1.13.9",
+    "prosemirror-model": "1.25.12",
+    "prosemirror-schema-list": "1.6.0",
+    "prosemirror-state": "1.4.4",
+    "prosemirror-view": "1.42.9"
+  }
+}

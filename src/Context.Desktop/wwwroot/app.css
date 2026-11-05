@@ -9,6 +9,7 @@
     --background: #ffffff;
     --panel: #f5f5f7;
     --line: #d2d2d7;
+    --on-accent: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -20,6 +21,7 @@
         --background: #1c1c1e;
         --panel: #242426;
         --line: #3a3a3c;
+        --on-accent: #1c1c1e;
     }
 }
 
@@ -284,4 +286,202 @@ input[type="checkbox"]:disabled {
     background: var(--accent-strong);
     border-color: var(--accent-strong);
     color: #ffffff;
+}
+
+/* Text and date fields (todo entry, command palette), themed for light and dark. */
+input[type="text"],
+input[type="date"],
+input[type="search"] {
+    background: var(--background);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--text);
+    color-scheme: light dark;
+    font: inherit;
+    min-width: 0;
+    padding: 4px 8px;
+}
+
+input[type="text"]:focus-visible,
+input[type="date"]:focus-visible,
+input[type="search"]:focus-visible {
+    border-color: var(--accent-strong);
+    outline: 2px solid var(--accent-strong);
+    outline-offset: 0;
+}
+
+input[type="text"]:disabled,
+input[type="date"]:disabled,
+input[type="search"]:disabled {
+    opacity: 0.5;
+}
+
+/* Note names in the notes list and the tag panel: plain link-like text, not bordered buttons. */
+.note .name,
+.tag-notes .note-button {
+    background: none;
+    border: none;
+    border-radius: 3px;
+    color: var(--accent-strong);
+    display: block;
+    padding: 0;
+    text-align: left;
+}
+
+.tag-notes .note-button {
+    max-width: 100%;
+}
+
+.note .name:hover:not(:disabled),
+.tag-notes .note-button:hover:not(:disabled) {
+    text-decoration: underline;
+}
+
+.tag-notes li {
+    padding: 3px 0;
+}
+
+/* The main region's status line and the bars above the editor and the tag panel. */
+.main-status:empty,
+.note-editor .status:empty {
+    display: none;
+}
+
+.editor-bar,
+.panel-bar {
+    align-items: center;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+}
+
+.editor-bar .note-title,
+.panel-bar h2 {
+    color: var(--accent-strong);
+    font-size: 18px;
+    letter-spacing: normal;
+    margin: 0;
+    min-width: 0;
+    text-transform: none;
+}
+
+.editor-bar .save,
+.panel-bar .close {
+    flex: none;
+}
+
+.tag-panel {
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+}
+
+.note-editor .lossy,
+.note-editor .unreadable,
+.note-editor .status {
+    margin: 8px 0 0;
+}
+
+.editor-host {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    margin-top: 12px;
+    padding: 4px 16px;
+}
+
+.editor-host:empty {
+    display: none;
+}
+
+.editor-host:focus-within {
+    border-color: var(--accent-strong);
+    box-shadow: 0 0 0 1px var(--accent-strong);
+}
+
+/* The todo entry row under the list. */
+.todo-entry {
+    border-top: 1px solid var(--line);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 12px;
+    padding-top: 12px;
+}
+
+.todo-entry .todo-text {
+    flex: 1 1 100%;
+}
+
+.todo-entry .todo-due {
+    flex: 1 1 auto;
+}
+
+.todo-entry .add {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: var(--on-accent);
+}
+
+.add-result {
+    min-height: 1.2em;
+}
+
+/* The command palette: near the top, with a visible selected row. */
+.dialog-backdrop:has(.palette) {
+    align-items: flex-start;
+    padding-top: 12vh;
+}
+
+.palette {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    width: min(560px, 90vw);
+}
+
+.palette .palette-input {
+    font-size: 15px;
+    padding: 8px 10px;
+    width: 100%;
+}
+
+.palette-list {
+    max-height: 50vh;
+    overflow-y: auto;
+}
+
+.palette-row {
+    border-left: 3px solid transparent;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    gap: 12px;
+    padding: 6px 10px;
+}
+
+.palette-row:hover {
+    background: var(--panel);
+}
+
+.palette-row.selected {
+    background: var(--panel);
+    border-left-color: var(--accent-strong);
+}
+
+.palette-row .usage {
+    flex: none;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.palette-row .description {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.palette .none {
+    margin: 4px 10px;
 }

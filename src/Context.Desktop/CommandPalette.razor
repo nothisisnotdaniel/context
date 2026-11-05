@@ -1,0 +1,95 @@
+@* The command palette (Ctrl/Cmd+K): a text field and the matching commands, ranked like the console's popup
+   (CommandMatcher). Up/Down pick a row, Enter runs it through OnRun, Esc closes. It changes nothing itself. *@
+
+<div class="dialog-backdrop">
+    <div class="dialog palette" role="dialog" aria-modal="true" aria-label="Commands">
+        <input type="text" class="palette-input" value="@typed" maxlength="300" spellcheck="false"
+               aria-label="Command" placeholder="Type a command" @ref="input" @oninput="Typed" @onkeydown="Key" />
+        @if (rows.Count == 0)
+        {
+            <p class="grey none">No matching command.</p>
+        }
+        else
+        {
+            <ul class="palette-list" role="listbox" aria-label="Commands">
+                @for (int i = 0; i < rows.Count; i++)
+                {
+                    PaletteCommand row = rows[i];
+                    bool picked = i == selected;
+                    <li class="palette-row @(picked ? "selected" : string.Empty)" role="option" aria-selected="@(picked ? "true" : "false")"
+                        @onclick="() => Pick(row)">
+                        <span class="usage accent">@row.Usage</span>
+                        <span class="description grey">@row.Description</span>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>The commands the palette offers.</summary>
+    internal static readonly IReadOnlyList<PaletteCommand> Commands =
+    [
+        new PaletteCommand("/current", "/current", "Show the current view"),
+        new PaletteCommand("/open", "/open <note>", "Open a note"),
+        new PaletteCommand("/save", "/save", "Save the open note"),
+        new PaletteCommand("/tags", "/tags <tag>", "List the notes with a tag"),
+        new PaletteCommand("/todo", "/todo <yyyy-MM-dd|today|tomorrow> <text>", "Add a todo"),
+    ];
+
+    private ElementReference input;
+    private string typed = string.Empty;
+    private int selected;
+    private IReadOnlyList<PaletteCommand> rows = Commands;
+
+    /// <summary>Called with the command line to run: the picked command's name and what was typed after it.</summary>
+    [Parameter]
+    public EventCallback<string> OnRun { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await input.FocusAsync();
+        }
+    }
+
+    private void Typed(ChangeEventArgs e)
+    {
+        typed = e.Value?.ToString() ?? string.Empty;
+        rows = CommandMatcher.Match(Commands, c => c.Name, typed.TrimStart().Length == 0 ? "/" : typed.TrimStart());
+        selected = 0;
+    }
+
+    private Task Key(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "ArrowDown":
+                selected = rows.Count == 0 ? 0 : (selected + 1) % rows.Count;
+                return Task.CompletedTask;
+            case "ArrowUp":
+                selected = rows.Count == 0 ? 0 : (selected + rows.Count - 1) % rows.Count;
+                return Task.CompletedTask;
+            case "Enter":
+                return rows.Count == 0 ? Task.CompletedTask : Pick(rows[Math.Min(selected, rows.Count - 1)]);
+            case "Escape":
+                return OnClose.InvokeAsync();
+            default:
+                return Task.CompletedTask;
+        }
+    }
+
+    // The picked command's name replaces the typed command word; the rest of the line is kept.
+    private Task Pick(PaletteCommand row)
+    {
+        string line = typed.Trim();
+        int space = line.IndexOfAny([' ', '\t']);
+        string rest = space < 0 ? string.Empty : line[(space + 1)..].Trim();
+        return OnRun.InvokeAsync(rest.Length == 0 ? row.Name : row.Name + " " + rest);
+    }
+}

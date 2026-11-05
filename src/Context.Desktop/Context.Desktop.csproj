@@ -5,6 +5,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- The editor's npm project: its built bundle lands in wwwroot/editor; the sources and node_modules are not content. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);editor/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
