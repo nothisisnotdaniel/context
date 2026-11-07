@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 
 namespace Context;
 
@@ -25,6 +26,9 @@ internal sealed class Cli
 
     /// <summary>Exit code for a usage error (unknown command, missing or bad arguments).</summary>
     public const int ExitUsage = 2;
+
+    /// <summary>The longest passphrase read from stdin; a longer first line is refused.</summary>
+    public const int MaxPassphraseLength = 1024;
 
     private const string DateFormat = "yyyy-MM-dd";
     private const string HelpHint = "Run 'context help'.";
@@ -115,7 +119,15 @@ internal sealed class Cli
         catch (Exception)
         {
             // Never a stack trace or an exception message: they could hold note text or paths.
-            return Error("Something went wrong. Nothing more was done.");
+            try
+            {
+                return Error("Something went wrong. Nothing more was done.");
+            }
+            catch (Exception)
+            {
+                // stderr itself is gone: only the exit code is left.
+                return ExitError;
+            }
         }
     }
 
@@ -125,7 +137,8 @@ internal sealed class Cli
         // anything is read, and never repeat it.
         foreach (string arg in args)
         {
-            if (arg == "--passphrase" || arg.StartsWith("--passphrase=", StringComparison.Ordinal))
+            if (string.Equals(arg, "--passphrase", StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith("--passphrase=", StringComparison.OrdinalIgnoreCase))
             {
                 return Usage(
                     $"A passphrase can't be given as an argument. Set {PassphraseVariable} or use {PassphraseStdin}.");
@@ -163,7 +176,9 @@ internal sealed class Cli
         Func<Session, int>? action = Parse(name, rest, out string? usage);
         if (action is null)
         {
-            return Usage(usage ?? $"Unknown command: {OneLine(args[start])}.");
+            // An unknown option is not repeated: it could be a mistyped secret.
+            string shown = args[start].StartsWith('-') ? "that option" : OneLine(args[start]);
+            return Usage(usage ?? $"Unknown command: {shown}.");
         }
 
         Encryption encryption = new Encryption(folder, minIterations);
@@ -199,7 +214,20 @@ internal sealed class Cli
     // Returns null once unlocked, or the exit code after writing the error line. Nothing is written to disk.
     private int? Unlock(Encryption encryption, bool fromStdin)
     {
-        string? passphrase = fromStdin ? stdin.ReadLine() : env(PassphraseVariable);
+        string? passphrase;
+        if (fromStdin)
+        {
+            passphrase = ReadPassphraseLine(out bool tooLong);
+            if (tooLong)
+            {
+                return Error($"The passphrase on stdin is longer than {MaxPassphraseLength} characters.");
+            }
+        }
+        else
+        {
+            passphrase = env(PassphraseVariable);
+        }
+
         if (string.IsNullOrEmpty(passphrase))
         {
             return Error($"Encryption is on: set {PassphraseVariable} or use {PassphraseStdin}.");
@@ -219,6 +247,48 @@ internal sealed class Cli
             // A fixed text from Vault (bad or weak key file), never file content or the passphrase.
             return Error(OneLine(ex.Message));
         }
+    }
+
+    // The first line of stdin without its line break, read one character at a time so a huge input without a line
+    // break is never buffered: more than MaxPassphraseLength characters stops reading and sets tooLong.
+    private string? ReadPassphraseLine(out bool tooLong)
+    {
+        tooLong = false;
+        StringBuilder line = new StringBuilder();
+        while (true)
+        {
+            int c = stdin.Read();
+            if (c == -1)
+            {
+                return line.Length == 0 ? null : line.ToString();
+            }
+
+            if (c == '\n')
+            {
+                break;
+            }
+
+            if (line.Length > MaxPassphraseLength)
+            {
+                tooLong = true;
+                return null;
+            }
+
+            line.Append((char)c);
+        }
+
+        if (line.Length > 0 && line[^1] == '\r')
+        {
+            line.Length--;
+        }
+
+        if (line.Length > MaxPassphraseLength)
+        {
+            tooLong = true;
+            return null;
+        }
+
+        return line.ToString();
     }
 
     // Checks the arguments of a data command and returns what to run, or null with a usage message (null when the

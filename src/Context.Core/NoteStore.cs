@@ -520,43 +520,26 @@ internal sealed class NoteStore
     }
 
     /// <summary>
-    /// Reads the file to import, at most <see cref="MaxImportBytes"/>, without changing it. Throws
-    /// <see cref="FileNotFoundException"/> when it is missing, <see cref="InvalidDataException"/> when it is too
-    /// large or encrypted, and <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> when it
-    /// can't be read.
+    /// Reads the file to import, at most <see cref="MaxImportBytes"/>, without changing it, through
+    /// <see cref="BoundedFile"/>: a file that reports length 0 is returned empty without being opened (so a FIFO
+    /// never blocks) and a stream that can't seek is refused. Throws <see cref="FileNotFoundException"/> when it is
+    /// missing, <see cref="InvalidDataException"/> when it is too large or encrypted, and <see cref="IOException"/>
+    /// (also when it is not a regular file) or <see cref="UnauthorizedAccessException"/> when it can't be read.
     /// </summary>
     public static byte[] ReadImport(string path)
     {
-        if (!File.Exists(path))
+        FileInfo info = new FileInfo(path);
+        if (!info.Exists)
         {
             throw new FileNotFoundException("No such file.");
         }
 
-        using FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        if (stream.Length > MaxImportBytes)
+        if (info.Length > MaxImportBytes)
         {
             throw new InvalidDataException("Too large.");
         }
 
-        using MemoryStream copy = new MemoryStream();
-        byte[] buffer = new byte[81920];
-        while (true)
-        {
-            int read = stream.Read(buffer, 0, buffer.Length);
-            if (read == 0)
-            {
-                break;
-            }
-
-            if (copy.Length + read > MaxImportBytes)
-            {
-                throw new InvalidDataException("Too large.");
-            }
-
-            copy.Write(buffer, 0, read);
-        }
-
-        byte[] bytes = copy.ToArray();
+        byte[] bytes = BoundedFile.Read(path, MaxImportBytes);
         if (Vault.IsEncrypted(bytes))
         {
             throw new InvalidDataException("Encrypted.");

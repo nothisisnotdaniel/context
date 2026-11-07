@@ -799,4 +799,67 @@ public sealed class CliTests : IDisposable
         Assert.DoesNotContain("Spectre", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Console.", source, StringComparison.Ordinal);
     }
+
+    // Round 2 ------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Import_Fifo_ReturnsWithoutBlocking()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string fifo = Path.Combine(outside, "pipe.md");
+        using (System.Diagnostics.Process mkfifo = System.Diagnostics.Process.Start("mkfifo", fifo))
+        {
+            mkfifo.WaitForExit();
+        }
+
+        Task<Result> run = Task.Run(() => Run("import", fifo));
+        Assert.True(run.Wait(TimeSpan.FromSeconds(5)), "context import blocked on a FIFO.");
+        // A FIFO reports length 0, so it is never opened: it imports as an empty note and never hangs.
+        Assert.Equal(0, run.Result.Code);
+    }
+
+    [Fact]
+    public void PassphraseStdin_TooLong_IsRefusedWithoutUnlocking()
+    {
+        EncryptedRoot();
+        Dictionary<string, string> before = Snapshot();
+
+        Result result = RunWithStdin(new string('p', 100_000), Cli.PassphraseStdin, "notes");
+
+        AssertError(result, 1, $"The passphrase on stdin is longer than {Cli.MaxPassphraseLength} characters.");
+        Assert.Equal(before, Snapshot());
+    }
+
+    [Fact]
+    public void PassphraseStdin_UpToTheLimit_IsRead()
+    {
+        EncryptedRoot();
+        string longOne = new string('p', Cli.MaxPassphraseLength);
+
+        AssertError(RunWithStdin(longOne + "\r\n", Cli.PassphraseStdin, "notes"), 1, "Wrong passphrase.");
+    }
+
+    [Theory]
+    [InlineData("--Passphrase=topSecret55aa", "notes")]
+    [InlineData("--PASSPHRASE", "topSecret55aa")]
+    public void PassphraseArgument_AnyCase_IsRefused(params string[] args)
+    {
+        Result result = Run(args);
+
+        AssertUsage(result);
+        Assert.DoesNotContain("topSecret55aa", result.Err, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UnknownOption_IsNotEchoed()
+    {
+        Result result = Run("--pasphrase=topSecret55aa", "notes");
+
+        AssertUsage(result);
+        Assert.DoesNotContain("topSecret55aa", result.Err, StringComparison.Ordinal);
+    }
 }
