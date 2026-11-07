@@ -133,13 +133,13 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#99](backlog/099-refuse-odd-files-on-import.md) Refuse odd files on import
 - [?] [#100](backlog/100-revisit-ac-8-texts-with-json.md) Revisit AC-8 texts with --json
 - [ ] [#101](backlog/101-work-item-references.md) Work item references
-- [ ] [#102](backlog/102-work-item-dossier.md) Work item dossier (after: #101; #17; Times#37)
-- [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4)
+- [ ] [#102](backlog/102-work-item-dossier.md) Work item dossier (after: #101; #17; Times#37; #108)
+- [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4; #108)
 - [ ] [#104](backlog/104-decision-log.md) Decision log (after: #101)
-- [ ] [#105](backlog/105-handover-pack.md) Handover pack (after: #102; #104)
-- [ ] [#106](backlog/106-claude-code-mcp-server.md) Claude Code MCP server (after: #101; #17; Times#37)
+- [ ] [#105](backlog/105-handover-pack.md) Handover pack (after: #102; #104; #108)
+- [ ] [#106](backlog/106-claude-code-mcp-server.md) Claude Code MCP server (after: #101; #17; Times#37; #108)
 - [ ] [#107](backlog/107-own-cloud-sync-spike.md) Own-cloud sync spike
-- [ ] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context
+- [ ] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39)
 - [ ] [#109](backlog/109-install-guide-for-the-unsigned-desktop.md) Install guide for the unsigned desktop app
 
 ## Dropped with the terminal UI
