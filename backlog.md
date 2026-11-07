@@ -129,6 +129,9 @@ Write one feature per line, in plain language.
 - [?] Unlock with a password manager: read the encryption passphrase from 1Password (its `op` CLI) or KeePassXC (`keepassxc-cli`) instead of typing it, chosen in the settings (the item's name is stored, never the passphrase); the CLI already takes `--passphrase-stdin`, so document piping `op read` into it. The setup and docs recommend keeping the passphrase in the password manager as recovery, since a lost passphrase loses the data. Decide next to OS key store unlock.
 - [?] Azure DevOps status: `#1234` shows the work item's title, state and assignee from Azure DevOps on hover and on the project page. Read-only, with a personal access token kept in the OS key store (never in a file or shown), a short timeout and a cache; off by default. Builds on project pages and OS key store unlock.
 - [?] Sharing notes with key exchange: plan in detail before approving. A lightweight server (its own project) that stores only encrypted notes; each user has a public/private key pair, people exchange public keys once (verified, for example by comparing a short fingerprint), and a shared note is encrypted for exactly the people it is shared with, so the server never sees note text. To plan: key storage and recovery, revoking access, editing conflicts, what the server knows (metadata), hosting, and how shared notes look next to private ones.
+- [?] refusing zero-length or non-regular files on import changes /import behaviour (from 123-scriptable-cli) (from 123-scriptable-cli)
+- [?] no echo for --passphrase-stdin on a terminal (from 123-scriptable-cli) (from 123-scriptable-cli)
+- [?] AC-8 current texts and sections: revisit with --json (from 123-scriptable-cli) (from 123-scriptable-cli)
 
 ## Dropped with the terminal UI
 
