@@ -414,6 +414,57 @@ internal sealed class NoteStore
         return (new NoteInfo(name, File.GetLastWriteTime(path), path), existing is not null);
     }
 
+    /// <summary>
+    /// Creates the note <paramref name="title"/> (normalized and validated like <see cref="Create"/>) with
+    /// <paramref name="text"/> (UTF-8, no BOM, encrypted while encryption is on) through a private temp file in the
+    /// root and a move that never overwrites, so the note appears whole or not at all. Throws
+    /// <see cref="NoteExistsException"/> when a note with that name exists (ignoring case), also when it appeared
+    /// between the check and the move, and <see cref="ArgumentException"/> for an invalid title.
+    /// </summary>
+    public NoteInfo CreateWithText(string title, string text)
+    {
+        title = NormalizeTitle(title);
+        string? error = ValidateTitle(title);
+        if (error is not null)
+        {
+            throw new ArgumentException(error, nameof(title));
+        }
+
+        if (Find(List(), title) is not null)
+        {
+            throw new NoteExistsException(title);
+        }
+
+        Directory.CreateDirectory(root);
+        string path = Path.Combine(root, title + Extension);
+        string temp = Path.Combine(root, $".{title}{Extension}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            using (FileStream stream = new FileStream(temp, PrivateTempOptions()))
+            {
+                stream.Write(Encryption.Protect(encryption, Vault.KindNote, Utf8NoBom.GetBytes(text)));
+            }
+
+            try
+            {
+                File.Move(temp, path, overwrite: false);
+            }
+            catch (IOException) when (File.Exists(path))
+            {
+                throw new NoteExistsException(title);
+            }
+        }
+        finally
+        {
+            if (File.Exists(temp))
+            {
+                File.Delete(temp);
+            }
+        }
+
+        return new NoteInfo(title, File.GetLastWriteTime(path), path);
+    }
+
     /// <summary>The largest file <see cref="ReadImport"/> accepts (5 MB).</summary>
     public const long MaxImportBytes = 5L * 1024 * 1024;
 
@@ -469,43 +520,26 @@ internal sealed class NoteStore
     }
 
     /// <summary>
-    /// Reads the file to import, at most <see cref="MaxImportBytes"/>, without changing it. Throws
-    /// <see cref="FileNotFoundException"/> when it is missing, <see cref="InvalidDataException"/> when it is too
-    /// large or encrypted, and <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> when it
-    /// can't be read.
+    /// Reads the file to import, at most <see cref="MaxImportBytes"/>, without changing it, through
+    /// <see cref="BoundedFile"/>: a file that reports length 0 is returned empty without being opened (so a FIFO
+    /// never blocks) and a stream that can't seek is refused. Throws <see cref="FileNotFoundException"/> when it is
+    /// missing, <see cref="InvalidDataException"/> when it is too large or encrypted, and <see cref="IOException"/>
+    /// (also when it is not a regular file) or <see cref="UnauthorizedAccessException"/> when it can't be read.
     /// </summary>
     public static byte[] ReadImport(string path)
     {
-        if (!File.Exists(path))
+        FileInfo info = new FileInfo(path);
+        if (!info.Exists)
         {
             throw new FileNotFoundException("No such file.");
         }
 
-        using FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        if (stream.Length > MaxImportBytes)
+        if (info.Length > MaxImportBytes)
         {
             throw new InvalidDataException("Too large.");
         }
 
-        using MemoryStream copy = new MemoryStream();
-        byte[] buffer = new byte[81920];
-        while (true)
-        {
-            int read = stream.Read(buffer, 0, buffer.Length);
-            if (read == 0)
-            {
-                break;
-            }
-
-            if (copy.Length + read > MaxImportBytes)
-            {
-                throw new InvalidDataException("Too large.");
-            }
-
-            copy.Write(buffer, 0, read);
-        }
-
-        byte[] bytes = copy.ToArray();
+        byte[] bytes = BoundedFile.Read(path, MaxImportBytes);
         if (Vault.IsEncrypted(bytes))
         {
             throw new InvalidDataException("Encrypted.");

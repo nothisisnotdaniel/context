@@ -3,6 +3,22 @@ using Spectre.Console;
 
 static DateOnly Today() => DateOnly.FromDateTime(DateTime.Now);
 
+if (args.Length > 0)
+{
+    // One command, plain text, then exit: the scriptable command line.
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    using SocketsHttpHandler cliHttp = new SocketsHttpHandler { AllowAutoRedirect = true, MaxAutomaticRedirections = 5 };
+    return new Cli(
+        Console.Out,
+        Console.Error,
+        Console.In,
+        Environment.GetEnvironmentVariable,
+        NoteStore.DefaultFolder(),
+        Today,
+        () => DateTime.Now,
+        cliHttp).Run(args);
+}
+
 CommandRegistry registry = CommandRegistry.CreateDefault();
 string folder = NoteStore.DefaultFolder();
 Encryption encryption = new Encryption(folder);

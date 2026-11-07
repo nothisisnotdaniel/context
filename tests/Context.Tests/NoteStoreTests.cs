@@ -560,4 +560,29 @@ public sealed class NoteStoreTests : IDisposable
         Assert.Throws<InvalidDataException>(() => NoteStore.ReadImport(big));
         Assert.Throws<InvalidDataException>(() => NoteStore.ReadImport(encrypted));
     }
+
+    // 123 round 2: a FIFO named like a Markdown file is never opened, so the import can't hang.
+    [Fact]
+    public async Task ReadImport_FifoOrEmptyFile_ReturnsWithoutBlocking()
+    {
+        Directory.CreateDirectory(parent);
+        string empty = Path.Combine(parent, "empty.md");
+        File.WriteAllBytes(empty, []);
+        Assert.Empty(NoteStore.ReadImport(empty));
+
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string fifo = Path.Combine(parent, "pipe.md");
+        using (System.Diagnostics.Process mkfifo = System.Diagnostics.Process.Start("mkfifo", fifo))
+        {
+            mkfifo.WaitForExit();
+        }
+
+        Task<byte[]> read = Task.Run(() => NoteStore.ReadImport(fifo));
+        Assert.Same(read, await Task.WhenAny(read, Task.Delay(TimeSpan.FromSeconds(5))));
+        Assert.Empty(await read);
+    }
 }

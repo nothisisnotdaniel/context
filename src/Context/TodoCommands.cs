@@ -6,9 +6,6 @@ namespace Context;
 /// <summary>The <c>/todo</c> and <c>/done</c> commands over a <see cref="TodoStore"/>.</summary>
 internal static class TodoCommands
 {
-    /// <summary>The longest todo text <c>/todo</c> accepts.</summary>
-    public const int MaxTextLength = 200;
-
     private const string DateFormat = "yyyy-MM-dd";
     private const string TodoForm = "[bold]/todo <yyyy-MM-dd|today|tomorrow> <text>[/]";
     private const string DoneForm = "[bold]/done <number>[/]";
@@ -20,27 +17,6 @@ internal static class TodoCommands
     {
         registry.Register("/todo", "Add a todo: /todo <date> <text>", argument => Add(store, today, argument));
         registry.Register("/done", "Mark a todo done: /done <number>", argument => Done(store, argument));
-    }
-
-    /// <summary>
-    /// Parses <c>yyyy-MM-dd</c> (invariant culture, exact), <c>today</c> or <c>tomorrow</c> (any case).
-    /// Returns false for anything else.
-    /// </summary>
-    public static bool TryParseDate(string token, DateOnly today, out DateOnly date)
-    {
-        if (string.Equals(token, "today", StringComparison.OrdinalIgnoreCase))
-        {
-            date = today;
-            return true;
-        }
-
-        if (string.Equals(token, "tomorrow", StringComparison.OrdinalIgnoreCase))
-        {
-            date = today.AddDays(1);
-            return true;
-        }
-
-        return DateOnly.TryParseExact(token, DateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
     }
 
     private static CommandResult Add(TodoStore store, Func<DateOnly> today, string argument)
@@ -59,14 +35,14 @@ internal static class TodoCommands
             return CommandResult.Error($"A todo needs a date and text. Type {TodoForm}.");
         }
 
-        if (!TryParseDate(token, today(), out DateOnly due))
+        if (!TodoInput.TryParseDate(token, today(), out DateOnly due))
         {
             return CommandResult.Error($"That date isn't valid. Type {TodoForm}.");
         }
 
-        if (text.Length > MaxTextLength)
+        if (text.Length > TodoInput.MaxTextLength)
         {
-            return CommandResult.Error($"A todo can be at most {MaxTextLength} characters. Type {TodoForm}.");
+            return CommandResult.Error($"A todo can be at most {TodoInput.MaxTextLength} characters. Type {TodoForm}.");
         }
 
         TodoItem todo;

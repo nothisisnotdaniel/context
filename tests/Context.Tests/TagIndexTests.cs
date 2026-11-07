@@ -701,4 +701,74 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal([("A", "x'); DROP TABLE notes; --")], LinkRows());
         Assert.Equal(["x'); DROP TABLE notes; --|To|True|"], index.Links("A").Select(Describe));
     }
+
+    // Job 123, AC-14 ----------------------------------------------------------------------------
+
+    [Fact]
+    public void BusyTimeout_IsFiveSeconds()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(5), TagIndex.BusyTimeout);
+    }
+
+    // AC-14: another connection holds a write lock for 1 s; Sync waits for it and succeeds.
+    [Fact]
+    public async Task Sync_WhileLockedForOneSecond_WaitsAndSucceeds()
+    {
+        WriteNote("A", "#work");
+        index.Sync(store);
+        WriteNote("B", "#work");
+
+        using SqliteConnection other = OpenWithoutTimeout();
+        Execute(other, "BEGIN EXCLUSIVE");
+        Task release = Task.Run(() =>
+        {
+            Thread.Sleep(1000);
+            Execute(other, "COMMIT");
+        });
+
+        index.Sync(store);
+        await release;
+
+        Assert.Equal(["A", "B"], index.NotesWithTag("work"));
+    }
+
+    // AC-14: a lock held past the timeout makes Sync throw, and the database is unchanged.
+    [Fact]
+    public void Sync_LockedPastTimeout_ThrowsAndLeavesDatabaseUnchanged()
+    {
+        WriteNote("A", "#work");
+        index.Sync(store);
+        WriteNote("B", "#work");
+        TagIndex shortWait = new TagIndex(root, null, TimeSpan.FromMilliseconds(200));
+        byte[] before = File.ReadAllBytes(DbPath);
+
+        using (SqliteConnection other = OpenWithoutTimeout())
+        {
+            // The other connection only locks; it changes nothing and rolls back.
+            Execute(other, "BEGIN EXCLUSIVE");
+            Assert.Throws<TagIndexException>(() => shortWait.Sync(store));
+            Execute(other, "ROLLBACK");
+        }
+
+        Assert.Equal(before, File.ReadAllBytes(DbPath));
+        Assert.Equal(["A"], index.NotesWithTag("work"));
+    }
+
+    private SqliteConnection OpenWithoutTimeout()
+    {
+        SqliteConnection connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = DbPath,
+            Pooling = false,
+        }.ToString());
+        connection.Open();
+        return connection;
+    }
+
+    private static void Execute(SqliteConnection connection, string sql)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.ExecuteNonQuery();
+    }
 }
