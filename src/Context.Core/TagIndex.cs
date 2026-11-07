@@ -160,8 +160,16 @@ internal sealed class TagIndex : IDisposable
     /// </summary>
     public const int ParserVersion = 2;
 
+    /// <summary>
+    /// How long opening <c>context.db</c> and starting <see cref="Sync"/>'s write transaction wait while another
+    /// process (the desktop app, another command line run) holds a lock on it, before giving up with a
+    /// <see cref="TagIndexException"/>.
+    /// </summary>
+    public static readonly TimeSpan BusyTimeout = TimeSpan.FromSeconds(5);
+
     private readonly string root;
     private readonly Encryption? encryption;
+    private readonly TimeSpan busyTimeout;
 
     // The in-memory database used while encryption is on; null otherwise.
     private SqliteConnection? memory;
@@ -169,9 +177,16 @@ internal sealed class TagIndex : IDisposable
     /// <param name="root">The folder <c>context.db</c> lives in.</param>
     /// <param name="encryption">The session's encryption state; while it has a vault the index stays in memory.</param>
     public TagIndex(string root, Encryption? encryption = null)
+        : this(root, encryption, BusyTimeout)
+    {
+    }
+
+    /// <summary>Like the public constructor with another busy timeout (tests use a short one).</summary>
+    internal TagIndex(string root, Encryption? encryption, TimeSpan busyTimeout)
     {
         this.root = Path.GetFullPath(root);
         this.encryption = encryption;
+        this.busyTimeout = busyTimeout;
     }
 
     /// <summary>True while the index is kept in memory rather than in <c>context.db</c>.</summary>
@@ -194,7 +209,9 @@ internal sealed class TagIndex : IDisposable
         IReadOnlyList<NoteInfo> notes = store.List();
         Run(connection =>
         {
-            using SqliteTransaction transaction = connection.BeginTransaction();
+            // BEGIN IMMEDIATE: take the write lock up front (waiting up to the busy timeout), so a sync never fails
+            // half way when another process writes at the same time.
+            using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
             long version;
             using (SqliteCommand pragma = Command(connection, transaction, "PRAGMA user_version"))
             {
@@ -504,12 +521,20 @@ internal sealed class TagIndex : IDisposable
             DataSource = FilePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
             Pooling = false,
+            // Microsoft.Data.Sqlite retries a busy statement until this many seconds have passed.
+            DefaultTimeout = (int)Math.Max(1, Math.Ceiling(busyTimeout.TotalSeconds)),
         }.ToString();
 
         try
         {
             using SqliteConnection connection = new SqliteConnection(connectionString);
             connection.Open();
+            // A constant number, not user input: PRAGMA takes no parameters.
+            Execute(
+                connection,
+                null,
+                "PRAGMA busy_timeout = "
+                    + ((long)busyTimeout.TotalMilliseconds).ToString(System.Globalization.CultureInfo.InvariantCulture));
             Execute(connection, null, Schema);
             return work(connection);
         }

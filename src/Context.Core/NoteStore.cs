@@ -414,6 +414,57 @@ internal sealed class NoteStore
         return (new NoteInfo(name, File.GetLastWriteTime(path), path), existing is not null);
     }
 
+    /// <summary>
+    /// Creates the note <paramref name="title"/> (normalized and validated like <see cref="Create"/>) with
+    /// <paramref name="text"/> (UTF-8, no BOM, encrypted while encryption is on) through a private temp file in the
+    /// root and a move that never overwrites, so the note appears whole or not at all. Throws
+    /// <see cref="NoteExistsException"/> when a note with that name exists (ignoring case), also when it appeared
+    /// between the check and the move, and <see cref="ArgumentException"/> for an invalid title.
+    /// </summary>
+    public NoteInfo CreateWithText(string title, string text)
+    {
+        title = NormalizeTitle(title);
+        string? error = ValidateTitle(title);
+        if (error is not null)
+        {
+            throw new ArgumentException(error, nameof(title));
+        }
+
+        if (Find(List(), title) is not null)
+        {
+            throw new NoteExistsException(title);
+        }
+
+        Directory.CreateDirectory(root);
+        string path = Path.Combine(root, title + Extension);
+        string temp = Path.Combine(root, $".{title}{Extension}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            using (FileStream stream = new FileStream(temp, PrivateTempOptions()))
+            {
+                stream.Write(Encryption.Protect(encryption, Vault.KindNote, Utf8NoBom.GetBytes(text)));
+            }
+
+            try
+            {
+                File.Move(temp, path, overwrite: false);
+            }
+            catch (IOException) when (File.Exists(path))
+            {
+                throw new NoteExistsException(title);
+            }
+        }
+        finally
+        {
+            if (File.Exists(temp))
+            {
+                File.Delete(temp);
+            }
+        }
+
+        return new NoteInfo(title, File.GetLastWriteTime(path), path);
+    }
+
     /// <summary>The largest file <see cref="ReadImport"/> accepts (5 MB).</summary>
     public const long MaxImportBytes = 5L * 1024 * 1024;
 
