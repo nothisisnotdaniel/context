@@ -712,7 +712,7 @@ public sealed class TagIndexTests : IDisposable
 
     // AC-14: another connection holds a write lock for 1 s; Sync waits for it and succeeds.
     [Fact]
-    public void Sync_WhileLockedForOneSecond_WaitsAndSucceeds()
+    public async Task Sync_WhileLockedForOneSecond_WaitsAndSucceeds()
     {
         WriteNote("A", "#work");
         index.Sync(store);
@@ -727,7 +727,7 @@ public sealed class TagIndexTests : IDisposable
         });
 
         index.Sync(store);
-        release.Wait();
+        await release;
 
         Assert.Equal(["A", "B"], index.NotesWithTag("work"));
     }

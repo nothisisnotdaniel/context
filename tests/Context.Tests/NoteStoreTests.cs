@@ -563,7 +563,7 @@ public sealed class NoteStoreTests : IDisposable
 
     // 123 round 2: a FIFO named like a Markdown file is never opened, so the import can't hang.
     [Fact]
-    public void ReadImport_FifoOrEmptyFile_ReturnsWithoutBlocking()
+    public async Task ReadImport_FifoOrEmptyFile_ReturnsWithoutBlocking()
     {
         Directory.CreateDirectory(parent);
         string empty = Path.Combine(parent, "empty.md");
@@ -582,7 +582,7 @@ public sealed class NoteStoreTests : IDisposable
         }
 
         Task<byte[]> read = Task.Run(() => NoteStore.ReadImport(fifo));
-        Assert.True(read.Wait(TimeSpan.FromSeconds(5)), "ReadImport blocked on a FIFO.");
-        Assert.Empty(read.Result);
+        Assert.Same(read, await Task.WhenAny(read, Task.Delay(TimeSpan.FromSeconds(5))));
+        Assert.Empty(await read);
     }
 }

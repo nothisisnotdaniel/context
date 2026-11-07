@@ -803,7 +803,7 @@ public sealed class CliTests : IDisposable
     // Round 2 ------------------------------------------------------------------------------------
 
     [Fact]
-    public void Import_Fifo_ReturnsWithoutBlocking()
+    public async Task Import_Fifo_ReturnsWithoutBlocking()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -817,9 +817,9 @@ public sealed class CliTests : IDisposable
         }
 
         Task<Result> run = Task.Run(() => Run("import", fifo));
-        Assert.True(run.Wait(TimeSpan.FromSeconds(5)), "context import blocked on a FIFO.");
+        Assert.Same(run, await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(5))));
         // A FIFO reports length 0, so it is never opened: it imports as an empty note and never hangs.
-        Assert.Equal(0, run.Result.Code);
+        Assert.Equal(0, (await run).Code);
     }
 
     [Fact]
