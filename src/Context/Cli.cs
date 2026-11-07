@@ -260,7 +260,12 @@ internal sealed class Cli
             int c = stdin.Read();
             if (c == -1)
             {
-                return line.Length == 0 ? null : line.ToString();
+                if (line.Length == 0)
+                {
+                    return null;
+                }
+
+                break;
             }
 
             if (c == '\n')

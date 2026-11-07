@@ -862,4 +862,14 @@ public sealed class CliTests : IDisposable
         AssertUsage(result);
         Assert.DoesNotContain("topSecret55aa", result.Err, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void PassphraseStdin_TrailingCarriageReturnWithoutNewline_IsRemoved()
+    {
+        EncryptedRoot();
+
+        Result result = RunWithStdin(VaultTests.Passphrase + "\r", Cli.PassphraseStdin, "notes");
+
+        Assert.Equal((0, string.Empty), (result.Code, result.Err));
+    }
 }
