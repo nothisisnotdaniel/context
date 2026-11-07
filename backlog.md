@@ -139,6 +139,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#105](backlog/105-handover-pack.md) Handover pack (after: #102; #104)
 - [ ] [#106](backlog/106-claude-code-mcp-server.md) Claude Code MCP server (after: #101; #17; Times#37)
 - [ ] [#107](backlog/107-own-cloud-sync-spike.md) Own-cloud sync spike
+- [ ] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context
+- [ ] [#109](backlog/109-install-guide-for-the-unsigned-desktop.md) Install guide for the unsigned desktop app
 
 ## Dropped with the terminal UI
 
