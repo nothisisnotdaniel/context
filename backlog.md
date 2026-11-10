@@ -33,7 +33,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] Scriptable CLI: turn the console app into a non-interactive tool for automation from PowerShell or any shell. `context <command> [args]` runs one command and exits (0 on success; non-zero with a message on stderr on an error), with no layout, popup, line editor or prompts. Start with `capture`, `todo add`, `todo done`, `todos`, `notes`, `note show`, `tags`, `links`, `current`, `import`, `export` and `help`. Plain text output by default. With encryption on, the passphrase comes from the `CONTEXT_PASSPHRASE` environment variable or from stdin with `--passphrase-stdin`, never from an argument. Safe to run while the desktop app is open (SQLite busy timeout, atomic file writes). Full path, high risk. → 123-scriptable-cli
 - [x] Desktop todos: add a todo with a due date (date picker plus today and tomorrow shortcuts) and mark todos done in the desktop app. Builds on desktop writes. → done in 094-desktop-editing (entry row with date picker, Today/Tomorrow, checkbox done)
 - [x] [#1](backlog/001-github-actions-ci.md) GitHub Actions CI → 129-github-actions-ci
-- [ ] [#16](backlog/016-release-workflow.md) Release workflow
+- [x] [#16](backlog/016-release-workflow.md) Release workflow → 131-release-workflow
 - [x] [#2](backlog/002-flaky-feed-tests.md) Flaky feed tests → 130-flaky-feed-tests
 - [ ] [#3](backlog/003-remove-folder-encryption.md) Remove folder encryption
 - [ ] [#4](backlog/004-desktop-notes.md) Desktop notes
