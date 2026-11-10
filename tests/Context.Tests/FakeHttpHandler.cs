@@ -28,6 +28,16 @@ internal sealed class FakeHttpHandler : HttpMessageHandler
         this.respond = respond;
     }
 
+    private FakeHttpHandler(
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond, bool isHang)
+    {
+        this.respond = respond;
+        IsHang = isHang;
+    }
+
+    /// <summary>True only for <see cref="Hang"/>: the handler never answers, so a test wants a short timeout.</summary>
+    public bool IsHang { get; }
+
     public int Requests { get; private set; }
 
     public List<Uri?> Uris { get; } = [];
@@ -48,21 +58,32 @@ internal sealed class FakeHttpHandler : HttpMessageHandler
 
     /// <summary>Waits until the request is cancelled (the feed's timeout).</summary>
     public static FakeHttpHandler Hang() =>
-        new(async (request, token) =>
-        {
-            await Task.Delay(Timeout.Infinite, token);
-            return Response(request, HttpStatusCode.OK, new StringContent(string.Empty));
-        });
+        new(
+            async (request, token) =>
+            {
+                await Task.Delay(Timeout.Infinite, token);
+                return Response(request, HttpStatusCode.OK, new StringContent(string.Empty));
+            },
+            isHang: true);
 
     /// <summary>Throws the way <c>SocketsHttpHandler</c> does, with the link in the message.</summary>
     public static FakeHttpHandler Throw() =>
         new((request, _) => throw new HttpRequestException(
             $"No such host is known ({request.RequestUri}) " + Link, new IOException(Link)));
 
-    /// <summary>A 200 of <paramref name="bytes"/> bytes, with or without a <c>Content-Length</c>.</summary>
-    public static FakeHttpHandler Large(long bytes, bool withLength) =>
-        new((request, _) =>
+    /// <summary>
+    /// A 200 of <paramref name="bytes"/> bytes, with or without a <c>Content-Length</c>. With a
+    /// <paramref name="delay"/> the handler first waits that long (or until the request is cancelled), like a
+    /// slow machine, before it builds the body.
+    /// </summary>
+    public static FakeHttpHandler Large(long bytes, bool withLength, TimeSpan? delay = null) =>
+        new(async (request, token) =>
         {
+            if (delay is TimeSpan wait)
+            {
+                await Task.Delay(wait, token);
+            }
+
             byte[] body = new byte[bytes];
             Encoding.ASCII.GetBytes("BEGIN:VCALENDAR\r\n").CopyTo(body, 0);
             HttpContent content = withLength
@@ -77,7 +98,7 @@ internal sealed class FakeHttpHandler : HttpMessageHandler
                 Assert.Null(content.Headers.ContentLength);
             }
 
-            return Task.FromResult(Response(request, HttpStatusCode.OK, content));
+            return Response(request, HttpStatusCode.OK, content);
         });
 
     /// <summary>A 200 with a calendar, but the final request (after a redirect) went to an http address.</summary>

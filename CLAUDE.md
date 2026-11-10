@@ -82,7 +82,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     `CalendarStore.Day(d, extra)` and adds, under the table, a grey `Exchange calendar offline, showing the copy
     from …` line (Stale) or a red `Can't download the Exchange calendar (<reason>).` line (Failed). Exchange
     feeds use `RRULE` a lot, so recurring meetings only show on their first occurrence. Tests use
-    `FakeHttpHandler` and never touch the network.
+    `FakeHttpHandler` and never touch the network; feed tests take their timeout from
+    `CalendarFeedTests.TimeoutFor` (100 ms only with `FakeHttpHandler.Hang()`, 30 s for every handler that answers).
 - **Encryption at rest (optional, off by default):** `<root>/encryption.json` (`Vault.FileName`) means "on". It holds
   the version, KDF (`PBKDF2-HMAC-SHA256`, `Vault.DefaultIterations` = 600,000, 16-byte salt) and a random 32-byte data
   key wrapped with AES-256-GCM; nothing secret in plain form. Passphrases are normalized to Unicode form C

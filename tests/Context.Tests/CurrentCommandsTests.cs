@@ -600,7 +600,7 @@ public sealed class CurrentCommandsTests : IDisposable
     {
         CalendarLink link = new CalendarLink(root);
         link.Set(FakeHttpHandler.Link);
-        feed = new CalendarFeed(root, link, handler, () => FeedNow, TimeSpan.FromMilliseconds(100));
+        feed = new CalendarFeed(root, link, handler, () => FeedNow, CalendarFeedTests.TimeoutFor(handler));
         return handler;
     }
 
@@ -721,6 +721,22 @@ public sealed class CurrentCommandsTests : IDisposable
         Assert.Contains(Style("[red]X[/]") + line, output);
         Assert.Contains("No appointments today", output);
         Assert.Contains(NothingDue, output);
+        AssertNoSecret(output);
+        AssertNoSecretInFiles();
+    }
+
+    // 130 AC-3: a slow answer over the cap still shows "over 5 MB", never "timed out".
+    [Fact]
+    public void Current_Feed_SlowOverCap_RedLine_OverFiveMb()
+    {
+        FakeHttpHandler handler = UseFeed(CalendarFeedTests.SlowOverCap());
+
+        (int exitCode, string output) = Run(true, "/current");
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains(Style("[red]X[/]") + "Can't download the Exchange calendar (over 5 MB).", output);
+        Assert.DoesNotContain("timed out", output);
+        Assert.Equal(1, handler.Requests);
         AssertNoSecret(output);
         AssertNoSecretInFiles();
     }
