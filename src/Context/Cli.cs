@@ -39,6 +39,7 @@ internal sealed class Cli
     private static readonly (string Usage, string Description)[] Commands =
     [
         ("help", "Show this list."),
+        ("version", "Show the version."),
         ("capture <text...>", "Append a dated line to the inbox note."),
         ("todos", "List todos: number, date, text."),
         ("todo add <yyyy-MM-dd|today|tomorrow> <text...>", "Add a todo."),
@@ -171,6 +172,13 @@ internal sealed class Cli
         if (name is "help" or "--help" or "-h")
         {
             return Help();
+        }
+
+        if (name is "version" or "--version")
+        {
+            // Like help: answered before the data folder or a passphrase is looked at.
+            Out($"Context {AppVersion.Current}");
+            return ExitOk;
         }
 
         Func<Session, int>? action = Parse(name, rest, out string? usage);

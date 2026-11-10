@@ -169,7 +169,9 @@ Every factory agent reads this file before working on Context. Keep it short and
   (`src/Context/Cli.cs`) and exits; no arguments starts the interactive console as before. `Cli(stdout, stderr, stdin,
   env, folder, today, now, HttpMessageHandler)` writes plain text only (results on stdout with `\n` line ends, tab-separated
   columns; errors on stderr), no markup, no layout, popup, line editor or prompt; `int Run(args)` never throws.
-  Commands (matched ignoring case): `help`/`--help`/`-h` (never reads the folder), `capture <text...>`
+  Commands (matched ignoring case): `help`/`--help`/`-h` (never reads the folder), `version`/`--version` (prints
+  `Context <version>` from `AppVersion.Current`: the assembly's informational version without `+...`; never reads the
+  folder, no passphrase), `capture <text...>`
   (`Inbox.Capture`: controls to spaces, trimmed, 1-1000 chars, appends `- yyyy-MM-dd HH:mm <text>` to `inbox.md` via
   `ReadForEdit` + `SaveIfUnchanged`, retries 3 times on a change on disk; a missing inbox is created as `# inbox\n` +
   the line through `NoteStore.CreateWithText`, temp file + no-overwrite move), `todos` (`<n>\t<date>\t<text>`),
@@ -196,9 +198,36 @@ Every factory agent reads this file before working on Context. Keep it short and
   and `dotnet test` never need Node. `node_modules` is ignored and `editor/**` is excluded from the C# project.
 - **Build:** `dotnet build` (must stay at 0 warnings)
 - **Test command:** `dotnet test`
-- **CI:** `.github/workflows/ci.yml` (the only workflow; GitHub Actions, `ubuntu-latest`) runs on every push to `develop` and `main`
+- **CI:** `.github/workflows/ci.yml` (GitHub Actions, `ubuntu-latest`) runs on every push to `develop` and `main`
   and on every pull request: `dotnet restore`, `dotnet build --no-restore -warnaserror`, `dotnet test --no-build`, at the repo root.
   Read-only token, no secrets, actions pinned to commit SHAs; `CiWorkflowTests.cs` checks the file as text.
+- **Release:** `.github/workflows/release.yml` (the only other workflow; `ubuntu-latest`, `contents: write`, no secrets)
+  has three triggers: a push to `develop`, a merged `develop` -> `main` pull request titled exactly `release vX.Y.Z`,
+  and a pushed `vX.Y.Z` tag. Steps: check out, set up .NET, Version, `dotnet test -c Release`,
+  `dotnet pack src/Context -c Release -p:Version="$VERSION"`, smoke check, create the GitHub release, prune.
+  - **Versions:** a `develop` push makes a prerelease `X.Y.(Z+1)-develop.<run number>`, one patch above the highest
+    release tag (`.github/scripts/develop-version.sh`; `0.0.1-develop.<n>` while there is no tag). A push that changes
+    only the root `backlog.md` is skipped (`paths-ignore`) and makes no prerelease. A release PR takes its version from
+    the title (`.github/scripts/release-pr-version.sh`: a plain `X.Y.Z`, no prerelease label, tag not there yet); the release and its tag are
+    made on the merge commit, and closed-unmerged PRs, PRs from other branches and fork PRs never reach a step. A pushed
+    tag gives its own version, must be on `main`, and a `-develop` tag is refused. The version is checked against SemVer
+    in the Version step and again by the `ValidateVersion` target in `Context.csproj` (`<Version>0.1.0</Version>` there
+    is only the local default).
+  - **What ships:** the console app only, as the .NET tool package `Context.<version>.nupkg` (`PackAsTool`, command
+    `context`, written to the ignored `nupkg/` folder) attached to the GitHub release. The package is not signed
+    (Context has no updater that checks a signature), nothing goes to nuget.org, and there is no desktop build. The
+    smoke check installs the package from a throwaway nuget.config that knows only the local folder, requires
+    `context --version` to print `Context <version>`, and runs `context tags` on a fresh data folder so a missing
+    SQLite native library fails the release.
+  - **Pruning:** after a proper release `vX.Y.Z` the `Prune old prereleases` step (`continue-on-error`) deletes the
+    `-develop` prereleases with core <= X.Y.Z and their tags (`.github/scripts/old-prereleases.sh`); proper releases
+    and higher prereleases stay.
+  - **Rules:** actions pinned to commit SHAs (the same two as `ci.yml`, tag in the trailing comment); no `${{ }}`
+    inside a `run:` script: PR fields, refs and the token reach the shell only through `env:` and the runner's own
+    variables. The three scripts are Times' (`release-pr-version.sh` differs in one pattern: it refuses every prerelease label, Times' only `-develop`). `ReleaseWorkflowTests.cs` reads `release.yml`
+    only through the small YAML reader `tests/Context.Tests/WorkflowYaml.cs` (block mappings and sequences, plain and
+    quoted scalars, `|` and `>` blocks, comments; anything else throws), so reformatting the YAML does not break the
+    tests, and it runs the scripts with `bash`. `/factory release --project Context` opens the release PR.
 - **Run:** `dotnet run --project src/Context` (console), `dotnet run --project src/Context.Desktop` (desktop window)
 - **Layout:**
   - `Context.slnx`: the solution. `Directory.Build.props` turns on `EnforceCodeStyleInBuild`.
@@ -230,7 +259,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `/new`, `/notes`, `/open`, `/export`, `/import` in `NoteCommands.cs`, `/encrypt`, `/decrypt` in
     `EncryptionCommands.cs`, the masked prompt in `PassphrasePrompt.cs`, `/todo` and `/done` in `TodoCommands.cs`, the sidebar body
     in `TodoSidebar.cs`, `/tags`, `/links` in `TagCommands.cs`, `/current` in `CurrentCommands.cs`, and
-    `/calendar-link` in `CalendarLinkCommands.cs`, and the scriptable command line in `Cli.cs`. Code that needs Spectre stays here; data and storage go to Core.
+    `/calendar-link` in `CalendarLinkCommands.cs`, the scriptable command line in `Cli.cs`, and the version text in `AppVersion.cs`. Code that needs Spectre stays here; data and storage go to Core.
   - `src/Context.Desktop/`: the desktop app (`Microsoft.NET.Sdk.Razor`, `WinExe`, references `Context.Core`
     only, never Spectre or the console app; components and classes in `namespace Context`). `Program.cs` only wires
     things up (stores built like the console's, one `Encryption(folder)`, Photino window `Context` 1100x750, dev tools
@@ -287,7 +316,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     console renderer's. Colours by CSS class (`accent`, `grey`, `red`, dates `overdue`/`today`/`later`); long lines
     cut by CSS with the full text in `title`.
   - `tests/Context.Tests/`: references both projects; one test class per production class (Core and app alike) (`AppTests.cs` tests `App.cs`),
-    `ViewParityTests.cs` (golden ANSI output of `/current`, `/notes`, `/tags`, `/links`, `/calendar-link`; change
+    `CiWorkflowTests.cs` and `ReleaseWorkflowTests.cs` (the workflows, the release scripts and the tool packaging; with `WorkflowYaml.cs` and its `WorkflowYamlTests.cs`), `ViewParityTests.cs` (golden ANSI output of `/current`, `/notes`, `/tags`, `/links`, `/calendar-link`; change
     its expected strings only when a spec changes that output), `CoreDependencyTests.cs` (architecture test: fails on any
     Spectre assembly, package, project reference or source mention in `Context.Core`), plus shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves),
     `SampleData` in `EncryptionTests.cs` (one file of every kind with plaintext markers), `Session` in
