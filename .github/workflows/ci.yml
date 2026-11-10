@@ -1,0 +1,45 @@
+# Builds Context with 0 warnings and runs the tests on a clean Linux machine.
+# - Runs on every push to develop and main, and on every pull request. There is no file filter:
+#   the factory's CI wait looks up runs by commit, so every pushed commit must get a run.
+# - The three commands are the local ones, at the repo root against Context.slnx.
+# - The token is read-only, and the commands are fixed text: no repository credentials and no
+#   event fields reach the shell.
+# - Actions are pinned to full commit SHAs (the tag each one had is in the trailing comment), so a
+#   moved tag cannot run new code.
+name: CI
+
+on:
+  push:
+    branches:
+      - "develop"
+      - "main"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # The factory waits 8 minutes for a run.
+    timeout-minutes: 8
+    steps:
+      - name: Check out
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # No later step needs git credentials, so the token is not left in .git/config.
+          persist-credentials: false
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore -warnaserror
+
+      - name: Test
+        run: dotnet test --no-build
