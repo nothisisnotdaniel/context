@@ -44,8 +44,22 @@ public sealed class CalendarFeedTests : IDisposable
             link.Set(FakeHttpHandler.Link);
         }
 
-        return new CalendarFeed(root, link, handler, () => Now, TimeSpan.FromMilliseconds(100));
+        return new CalendarFeed(root, link, handler, () => Now, TimeoutFor(handler));
     }
+
+    /// <summary>
+    /// The download timeout for a test feed: short only for a handler that hangs (the "timed out" case), long
+    /// for every handler that answers, so a slow machine never turns another result into "timed out".
+    /// </summary>
+    internal static TimeSpan TimeoutFor(FakeHttpHandler handler) =>
+        handler.IsHang ? TimeSpan.FromMilliseconds(100) : TimeSpan.FromSeconds(30);
+
+    /// <summary>Longer than the 100 ms every test feed once had as its timeout, far below the 30 s of now.</summary>
+    internal static readonly TimeSpan SlowAnswer = TimeSpan.FromSeconds(0.3);
+
+    /// <summary>A 6 MB answer without a <c>Content-Length</c> that takes <see cref="SlowAnswer"/> to start.</summary>
+    internal static FakeHttpHandler SlowOverCap() =>
+        FakeHttpHandler.Large(6L * 1024 * 1024, withLength: false, SlowAnswer);
 
     private void WriteCache(string text, DateTime atUtc)
     {
@@ -272,6 +286,77 @@ public sealed class CalendarFeedTests : IDisposable
         Assert.Equal(2, Directory.GetFiles(root).Length);
         AssertNoSecret(result);
         AssertNoSecretInFiles();
+    }
+
+    // 130 AC-1: a slow answer over the cap is still "over 5 MB", never "timed out".
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Fetch_SlowOverCap_OverFiveMb_NotTimedOut(bool withCache)
+    {
+        FakeHttpHandler handler = SlowOverCap();
+        if (withCache)
+        {
+            WriteCache(OldIcs, OldCacheTime);
+        }
+
+        CalendarFeedResult result = Feed(handler).Fetch();
+
+        Assert.Equal(withCache ? CalendarFeedStatus.Stale : CalendarFeedStatus.Failed, result.Status);
+        Assert.Equal("over 5 MB", result.Reason);
+        Assert.Equal(1, handler.Requests);
+        AssertNoSecret(result);
+        AssertNoSecretInFiles();
+    }
+
+    // 130 AC-2: a slow answer of exactly the cap is accepted.
+    [Fact]
+    public void Fetch_SlowExactlyFiveMb_Fresh()
+    {
+        FakeHttpHandler handler = FakeHttpHandler.Large(CalendarStore.MaxFileBytes, withLength: false, SlowAnswer);
+
+        CalendarFeedResult result = Feed(handler).Fetch();
+
+        Assert.Equal(CalendarFeedStatus.Fresh, result.Status);
+        Assert.Equal(1, handler.Requests);
+    }
+
+    /// <summary><see cref="Failures"/> plus the handlers that answer well.</summary>
+    public static TheoryData<string> Handlers()
+    {
+        TheoryData<string> data = ["ok", "large", "large (slow)"];
+        foreach (string failure in Failures())
+        {
+            data.Add(failure);
+        }
+
+        return data;
+    }
+
+    // 130 AC-4: only the handler that hangs gets the short timeout.
+    [Theory]
+    [MemberData(nameof(Handlers))]
+    public void TimeoutFor_ShortOnlyForHang(string kind)
+    {
+        FakeHttpHandler handler = kind switch
+        {
+            "ok" => FakeHttpHandler.Ok(Ics),
+            "large" => FakeHttpHandler.Large(CalendarStore.MaxFileBytes, withLength: false),
+            "large (slow)" => SlowOverCap(),
+            _ => FailingHandler(kind),
+        };
+
+        TimeSpan timeout = TimeoutFor(handler);
+
+        Assert.Equal(kind == "timed out", handler.IsHang);
+        if (kind == "timed out")
+        {
+            Assert.InRange(timeout, TimeSpan.FromTicks(1), TimeSpan.FromSeconds(0.1));
+        }
+        else
+        {
+            Assert.True(timeout >= TimeSpan.FromSeconds(10), kind);
+        }
     }
 
     // AC-3
