@@ -33,6 +33,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] Scriptable CLI: turn the console app into a non-interactive tool for automation from PowerShell or any shell. `context <command> [args]` runs one command and exits (0 on success; non-zero with a message on stderr on an error), with no layout, popup, line editor or prompts. Start with `capture`, `todo add`, `todo done`, `todos`, `notes`, `note show`, `tags`, `links`, `current`, `import`, `export` and `help`. Plain text output by default. With encryption on, the passphrase comes from the `CONTEXT_PASSPHRASE` environment variable or from stdin with `--passphrase-stdin`, never from an argument. Safe to run while the desktop app is open (SQLite busy timeout, atomic file writes). Full path, high risk. → 123-scriptable-cli
 - [x] Desktop todos: add a todo with a due date (date picker plus today and tomorrow shortcuts) and mark todos done in the desktop app. Builds on desktop writes. → done in 094-desktop-editing (entry row with date picker, Today/Tomorrow, checkbox done)
 - [ ] [#1](backlog/001-github-actions-ci.md) GitHub Actions CI
+- [ ] [#16](backlog/016-release-workflow.md) Release workflow
 - [ ] [#2](backlog/002-flaky-feed-tests.md) Flaky feed tests
 - [ ] [#3](backlog/003-remove-folder-encryption.md) Remove folder encryption
 - [ ] [#4](backlog/004-desktop-notes.md) Desktop notes
@@ -47,7 +48,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#13](backlog/013-console-todos-without-numbers.md) Console todos without numbers
 - [ ] [#14](backlog/014-remove-the-interactive-console.md) Remove the interactive console (after: #4; #7; #8; #6)
 - [ ] [#15](backlog/015-signed-desktop-builds.md) Signed desktop builds
-- [ ] [#16](backlog/016-release-workflow.md) Release workflow
 - [ ] [#17](backlog/017-json-output-for-the-cli.md) JSON output for the CLI
 - [ ] [#18](backlog/018-write-todo-ids-once.md) Write todo ids once
 - [ ] [#19](backlog/019-survive-a-bad-todo-id.md) Survive a bad todo id
