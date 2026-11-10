@@ -77,7 +77,8 @@ public sealed class CiWorkflowTests
         // Top level, one entry, and the next line is not indented (so nothing else is granted).
         Assert.Matches(new Regex(@"^permissions:\n  contents: read\n(?![ \t]+\S)", RegexOptions.Multiline), text);
         Assert.Single(Regex.Matches(text, @"permissions:"));
-        Assert.DoesNotContain("write", text);
+        // No permission value grants write access (a comment may still use the word).
+        Assert.DoesNotMatch(new Regex(@"^[^#\n]*:\s*write\b", RegexOptions.Multiline), text);
 
         int checkout = text.IndexOf("uses: actions/checkout@", StringComparison.Ordinal);
         int setup = text.IndexOf("uses: actions/setup-dotnet@", StringComparison.Ordinal);
