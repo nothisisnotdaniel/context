@@ -195,6 +195,9 @@ Every factory agent reads this file before working on Context. Keep it short and
   and `dotnet test` never need Node. `node_modules` is ignored and `editor/**` is excluded from the C# project.
 - **Build:** `dotnet build` (must stay at 0 warnings)
 - **Test command:** `dotnet test`
+- **CI:** `.github/workflows/ci.yml` (the only workflow; GitHub Actions, `ubuntu-latest`) runs on every push to `develop` and `main`
+  and on every pull request: `dotnet restore`, `dotnet build --no-restore -warnaserror`, `dotnet test --no-build`, at the repo root.
+  Read-only token, no secrets, actions pinned to commit SHAs; `CiWorkflowTests.cs` checks the file as text.
 - **Run:** `dotnet run --project src/Context` (console), `dotnet run --project src/Context.Desktop` (desktop window)
 - **Layout:**
   - `Context.slnx`: the solution. `Directory.Build.props` turns on `EnforceCodeStyleInBuild`.
