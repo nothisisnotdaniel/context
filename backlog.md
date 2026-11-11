@@ -35,7 +35,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#1](backlog/001-github-actions-ci.md) GitHub Actions CI → 129-github-actions-ci
 - [x] [#16](backlog/016-release-workflow.md) Release workflow → 131-release-workflow
 - [x] [#2](backlog/002-flaky-feed-tests.md) Flaky feed tests → 130-flaky-feed-tests
-- [ ] [#3](backlog/003-remove-folder-encryption.md) Remove folder encryption
+- [x] [#3](backlog/003-remove-folder-encryption.md) Remove folder encryption → 132-remove-folder-encryption
 - [ ] [#4](backlog/004-desktop-notes.md) Desktop notes
 - [ ] [#5](backlog/005-sensitive-notes-with-certificate-unlock.md) Sensitive notes with certificate unlock (after: #3; #4)
 - [ ] [#6](backlog/006-desktop-tags-and-links.md) Desktop tags and links
