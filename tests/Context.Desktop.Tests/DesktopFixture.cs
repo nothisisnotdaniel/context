@@ -71,21 +71,19 @@ internal sealed class DesktopFixture : IDisposable
             return State;
         }
 
-        Encryption encryption = new Encryption(Root, minIterations: 1000);
-        CalendarLink link = new CalendarLink(Root, encryption);
-        CalendarFeed feed = new CalendarFeed(Root, link, Http, FeedClock, encryption: encryption);
-        Todos = new TodoStore(Root, encryption: encryption);
-        Notes = new NoteStore(Root, encryption);
+        CalendarLink link = new CalendarLink(Root);
+        CalendarFeed feed = new CalendarFeed(Root, link, Http, FeedClock);
+        Todos = new TodoStore(Root);
+        Notes = new NoteStore(Root);
         State = new DesktopState(
-            encryption,
             Notes,
             Todos,
-            new TagIndex(Root, encryption),
-            new CalendarStore(Root, Zone, encryption),
+            new TagIndex(Root),
+            new CalendarStore(Root, Zone),
             feed,
             () => Day,
             () => UtcNow);
-        Actions = new DesktopActions(encryption, Notes, Todos, State);
+        Actions = new DesktopActions(Notes, Todos, State);
         Bunit.Services.AddSingleton(State);
         Bunit.Services.AddSingleton(Actions);
         Bunit.Services.AddTransient<EditorInterop>();

@@ -11,7 +11,7 @@ public sealed class DesktopSourceTests
 
     // The Core calls that change data (AC-8). CalendarLink's real names are Set/Clear; Save/Delete are listed too.
     private static readonly Regex Writes = new(
-        @"\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|ClearCache|Migrate|DecryptAll)\s*\(",
+        @"\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|ClearCache)\s*\(",
         RegexOptions.CultureInvariant);
 
     private static readonly string[] RawMarkup = ["MarkupString", "AddMarkupContent", "@(("];
@@ -485,9 +485,6 @@ public sealed class DesktopSourceTests
     [InlineData("link.Save(value)")]
     [InlineData("link.Delete()")]
     [InlineData("feed.ClearCache()")]
-    [InlineData("encryption.Migrate()")]
-    [InlineData("encryption.DecryptAll()")]
-    [InlineData("Vault.Create(root, pass)")]
     [InlineData("notes.SaveIfUnchanged(opened, text, out saved)")]
     public void Writes_Pattern_CatchesCalls(string call)
     {
@@ -513,7 +510,7 @@ public sealed class DesktopSourceTests
     // AC-8 (control): the DesktopActions name check.
     [Theory]
     [InlineData("private readonly DesktopActions actions;", true)]
-    [InlineData("new DesktopActions(encryption, todos, this)", true)]
+    [InlineData("new DesktopActions(notes, todos, this)", true)]
     [InlineData("<see cref=\"DesktopActions\"/>", true)]
     [InlineData("DesktopActionsTests", false)]
     [InlineData("internal DesktopState State", false)]

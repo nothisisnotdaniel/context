@@ -38,16 +38,13 @@ internal sealed class CalendarStore
     private static readonly Encoding Utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
     private readonly TimeZoneInfo local;
-    private readonly Encryption? encryption;
 
     /// <param name="root">The folder that holds <c>calendar/</c>.</param>
     /// <param name="local">The zone events are converted to.</param>
-    /// <param name="encryption">The session's encryption state, to read encrypted <c>.ics</c> files.</param>
-    public CalendarStore(string root, TimeZoneInfo local, Encryption? encryption = null)
+    public CalendarStore(string root, TimeZoneInfo local)
     {
         Folder = Path.Combine(root, FolderName);
         this.local = local;
-        this.encryption = encryption;
     }
 
     /// <summary>The full path of the <c>calendar</c> folder.</summary>
@@ -76,7 +73,7 @@ internal sealed class CalendarStore
         foreach (string path in Files(unreadable))
         {
             string name = Path.GetFileName(path);
-            string? text = ReadText(path, encryption, Vault.KindCalendar);
+            string? text = ReadText(path);
             if (text is null)
             {
                 unreadable.Add(name);
@@ -152,13 +149,12 @@ internal sealed class CalendarStore
     }
 
     /// <summary>
-    /// The file's text (UTF-8, BOM dropped), or <c>null</c> if it can't be read, can't be decrypted or is too large.
-    /// An encrypted file is decrypted as <paramref name="kind"/>; it may be <see cref="Vault.Overhead"/> bytes
-    /// larger than <see cref="MaxFileBytes"/>, but its plain text may not.
+    /// The file's text (UTF-8, BOM dropped), or <c>null</c> if it can't be read or is larger than
+    /// <see cref="MaxFileBytes"/>.
     /// </summary>
-    internal static string? ReadText(string path, Encryption? encryption = null, string kind = Vault.KindCalendar)
+    internal static string? ReadText(string path)
     {
-        const long Limit = MaxFileBytes + Vault.Overhead;
+        const long Limit = MaxFileBytes;
         try
         {
             using FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -190,13 +186,7 @@ internal sealed class CalendarStore
                 return null;
             }
 
-            byte[] bytes = Encryption.Unprotect(encryption, kind, buffer[..total]);
-            if (bytes.Length > MaxFileBytes)
-            {
-                return null;
-            }
-
-            string text = Utf8.GetString(bytes);
+            string text = Utf8.GetString(buffer, 0, total);
             return text.Length > 0 && text[0] == '﻿' ? text[1..] : text;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)

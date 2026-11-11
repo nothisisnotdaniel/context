@@ -11,8 +11,6 @@ if (args.Length > 0)
     return new Cli(
         Console.Out,
         Console.Error,
-        Console.In,
-        Environment.GetEnvironmentVariable,
         NoteStore.DefaultFolder(),
         Today,
         () => DateTime.Now,
@@ -21,20 +19,16 @@ if (args.Length > 0)
 
 CommandRegistry registry = CommandRegistry.CreateDefault();
 string folder = NoteStore.DefaultFolder();
-Encryption encryption = new Encryption(folder);
-NoteStore notes = new NoteStore(folder, encryption);
-NoteCommands.Register(registry, notes, encryption);
-using TagIndex index = new TagIndex(folder, encryption);
+NoteStore notes = new NoteStore(folder);
+NoteCommands.Register(registry, notes);
+TagIndex index = new TagIndex(folder);
 TagCommands.Register(registry, index, notes);
-TodoStore todos = new TodoStore(folder, encryption: encryption);
+TodoStore todos = new TodoStore(folder);
 TodoCommands.Register(registry, todos, Today);
-CalendarStore calendar = new CalendarStore(folder, TimeZoneInfo.Local, encryption);
-CalendarLink calendarLink = new CalendarLink(folder, encryption);
+CalendarStore calendar = new CalendarStore(folder, TimeZoneInfo.Local);
+CalendarLink calendarLink = new CalendarLink(folder);
 using SocketsHttpHandler http = new SocketsHttpHandler { AllowAutoRedirect = true, MaxAutomaticRedirections = 5 };
-CalendarFeed feed = new CalendarFeed(folder, calendarLink, http, () => DateTime.UtcNow, encryption: encryption);
+CalendarFeed feed = new CalendarFeed(folder, calendarLink, http, () => DateTime.UtcNow);
 CalendarLinkCommands.Register(registry, calendarLink, feed, TimeZoneInfo.Local);
 CurrentCommands.Register(registry, todos, index, notes, calendar, Today, feed);
-EncryptionCommands.Register(registry, encryption, new PassphrasePrompt(AnsiConsole.Console));
-int exitCode = new App(AnsiConsole.Console, registry, new TodoSidebar(todos, Today), encryption).Run();
-encryption.Use(null);
-return exitCode;
+return new App(AnsiConsole.Console, registry, new TodoSidebar(todos, Today)).Run();

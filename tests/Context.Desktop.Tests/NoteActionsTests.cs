@@ -80,21 +80,6 @@ public sealed class NoteActionsTests : IDisposable
         Assert.Equal(before, Files());
     }
 
-    // AC-6: with encryption.json the save is refused as locked and nothing changes.
-    [Fact]
-    public async Task SaveNote_Locked_RefusedNothingWritten()
-    {
-        EditableNote opened = await Open("Plan", Encoding.UTF8.GetBytes("Mine\n"));
-        Vault.Create(data.Root, "a long enough passphrase", 1000).Dispose();
-        SortedDictionary<string, string> before = Files();
-
-        ActionResult result = await data.Actions!.SaveNote(opened, "Mine, edited\n");
-
-        Assert.Equal(ActionReason.Locked, result.Reason);
-        Assert.Equal(DesktopActions.LockedText, result.Text);
-        Assert.Equal(before, Files());
-    }
-
     // AC-6: a write that fails leaves the file alone and says so.
     [Fact]
     public async Task SaveNote_WriteFails_FailedNothingWritten()
@@ -182,21 +167,6 @@ public sealed class NoteActionsTests : IDisposable
         Assert.Equal(ActionKind.Refused, result.Kind);
         Assert.Equal(DesktopActions.TodoTooLongText, result.Text);
         Assert.False(File.Exists(Path.Combine(data.Root, TodoStore.FileName)));
-    }
-
-    // AC-10: with encryption.json nothing is written.
-    [Fact]
-    public async Task AddTodo_Locked_RefusedNothingWritten()
-    {
-        data.AddTodo("Existing", DesktopFixture.Today);
-        Vault.Create(data.Root, "a long enough passphrase", 1000).Dispose();
-        await data.RefreshAsync();
-        SortedDictionary<string, string> before = Files();
-
-        ActionResult result = await data.Actions!.AddTodo("New", DesktopFixture.Today);
-
-        Assert.Equal(ActionReason.Locked, result.Reason);
-        Assert.Equal(before, Files());
     }
 
     // AC-10: an unreadable todos.json is not overwritten.

@@ -6,8 +6,7 @@ namespace Context;
 /// A small line editor for the input box. It reads keys with <c>ReadKey(intercept: true)</c> and,
 /// after each key, redraws only the command popup's rows and the input line via
 /// <c>Cursor.SetPosition</c>, never the whole screen. Supports printable characters, Backspace,
-/// Enter and Esc (close the popup if it is open, otherwise clear the line). <see cref="ReadSecret"/> reads a
-/// masked line (passphrases) instead.
+/// Enter and Esc (close the popup if it is open, otherwise clear the line).
 /// <para>
 /// When a <see cref="PopupArea"/> is given, the popup opens while the line starts with <c>/</c>
 /// and lists <see cref="CommandRegistry.Match"/> for it. Esc closes it and keeps it closed until
@@ -17,9 +16,6 @@ namespace Context;
 /// </summary>
 internal sealed class LineEditor
 {
-    /// <summary>What <see cref="ReadSecret"/> shows for each typed character.</summary>
-    public const char Mask = '•';
-
     private readonly IAnsiConsole console;
     private readonly CommandRegistry registry;
 
@@ -100,57 +96,6 @@ internal sealed class LineEditor
             bool showPopup = popup is not null && buffer.StartsWith('/') && !popupDismissed;
             popupRows = showPopup ? DrawPopup(popup!, buffer, popupRows) : ClosePopup(popup, popupRows);
             drawn = Redraw(buffer, column, line, width, drawn);
-        }
-    }
-
-    /// <summary>
-    /// Reads one line in masked mode: every character shows as <c>•</c>, the typed text is never written to the
-    /// console, and there is no popup. Backspace and Enter work as usual; Esc cancels. Returns the text, or
-    /// <c>null</c> with <paramref name="cancelled"/> true after Esc, or <c>null</c> with it false when the input
-    /// has no more keys.
-    /// </summary>
-    public string? ReadSecret(int column, int line, int width, out bool cancelled)
-    {
-        cancelled = false;
-        string buffer = string.Empty;
-        int drawn = 0;
-        console.Cursor.SetPosition(column, line);
-        while (true)
-        {
-            ConsoleKeyInfo? key = console.Input.ReadKey(intercept: true);
-            if (key is null)
-            {
-                return null;
-            }
-
-            ConsoleKeyInfo info = key.Value;
-            switch (info.Key)
-            {
-                case ConsoleKey.Enter:
-                    return buffer;
-
-                case ConsoleKey.Escape:
-                    cancelled = true;
-                    return null;
-
-                case ConsoleKey.Backspace:
-                    if (buffer.Length > 0)
-                    {
-                        buffer = buffer[..^1];
-                    }
-
-                    break;
-
-                default:
-                    if (info.KeyChar != '\0' && !char.IsControl(info.KeyChar))
-                    {
-                        buffer += info.KeyChar;
-                    }
-
-                    break;
-            }
-
-            drawn = Redraw(new string(Mask, buffer.Length), column, line, width, drawn);
         }
     }
 

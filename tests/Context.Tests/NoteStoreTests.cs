@@ -430,91 +430,6 @@ public sealed class NoteStoreTests : IDisposable
         Assert.False(Directory.Exists(root));
     }
 
-    // AC-4
-    [Fact]
-    public void Encrypted_CreateWritesCiphertext_TryOpenReadsIt()
-    {
-        Encryption encryption = SampleData.On(root);
-        NoteStore store = new NoteStore(root, encryption);
-
-        NoteInfo note = store.Create("Secret plan");
-
-        byte[] bytes = File.ReadAllBytes(note.Path);
-        Assert.True(Vault.IsEncrypted(bytes));
-        Assert.DoesNotContain("Secret plan", System.Text.Encoding.Latin1.GetString(bytes), StringComparison.Ordinal);
-        Assert.True(store.TryOpen("Secret plan", out Note? opened));
-        Assert.Equal("# Secret plan\n", opened!.Text);
-        Assert.Empty(Directory.GetFiles(root, "*.tmp"));
-    }
-
-    // AC-1
-    [Fact]
-    public void WithEncryptionOff_CreateWritesTheSameBytesAsBefore()
-    {
-        NoteStore store = new NoteStore(root, new Encryption(root));
-
-        NoteInfo note = store.Create("Plain");
-
-        Assert.Equal("# Plain\n"u8.ToArray(), File.ReadAllBytes(note.Path));
-    }
-
-    // AC-4: a folder left half-migrated stays readable.
-    [Fact]
-    public void Encrypted_PlainNoteIsStillRead()
-    {
-        Directory.CreateDirectory(root);
-        File.WriteAllText(Path.Combine(root, "Old.md"), "# Old\nplain");
-        NoteStore store = new NoteStore(root, SampleData.On(root));
-
-        Assert.True(store.TryOpen("Old", out Note? note));
-        Assert.Equal("# Old\nplain", note!.Text);
-    }
-
-    // AC-7
-    [Fact]
-    public void Encrypted_TamperedNote_ThrowsIOException()
-    {
-        Encryption encryption = SampleData.On(root);
-        NoteStore store = new NoteStore(root, encryption);
-        NoteInfo note = store.Create("Plan");
-        byte[] tampered = SampleData.Tamper(note.Path);
-
-        Assert.Throws<VaultException>(() => store.TryOpen("Plan", out _));
-        Assert.IsAssignableFrom<IOException>(new VaultException("x"));
-        Assert.Equal(tampered, File.ReadAllBytes(note.Path));
-    }
-
-    // AC-7
-    [Fact]
-    public void EncryptedNote_WithoutVault_ThrowsVaultException()
-    {
-        NoteStore encrypted = new NoteStore(root, SampleData.On(root));
-        encrypted.Create("Plan");
-
-        Assert.Throws<VaultException>(() => new NoteStore(root).TryOpen("Plan", out _));
-    }
-
-    // AC-10
-    [Fact]
-    public void Save_CreatesOrReplacesEncrypted_KeepingTheExistingName()
-    {
-        Encryption encryption = SampleData.On(root);
-        NoteStore store = new NoteStore(root, encryption);
-        store.Create("Plan");
-
-        (NoteInfo replaced, bool wasReplaced) = store.Save("plan.md", "# New\n"u8.ToArray());
-        (NoteInfo created, bool createdReplaced) = store.Save("Fresh", "# Fresh\n"u8.ToArray());
-
-        Assert.True(wasReplaced);
-        Assert.Equal("Plan", replaced.Name);
-        Assert.False(createdReplaced);
-        Assert.Equal(["Fresh", "Plan"], store.List().Select(n => n.Name));
-        Assert.True(store.TryOpen("Plan", out Note? note));
-        Assert.Equal("# New\n", note!.Text);
-        Assert.True(Vault.IsEncrypted(File.ReadAllBytes(created.Path)));
-        Assert.Empty(Directory.GetFiles(root, "*.tmp"));
-    }
-
     // AC-10
     [Fact]
     public void Save_InvalidTitle_Throws()
@@ -543,22 +458,56 @@ public sealed class NoteStoreTests : IDisposable
         Assert.False(store.Contains(root + "-other"));
     }
 
-    // AC-10
     [Fact]
-    public void ReadImport_RejectsMissingTooLargeAndEncrypted()
+    public void ReadImport_RejectsMissingAndTooLarge()
     {
         Directory.CreateDirectory(parent);
         string big = Path.Combine(parent, "big.md");
         File.WriteAllBytes(big, new byte[NoteStore.MaxImportBytes + 1]);
-        string encrypted = Path.Combine(parent, "enc.md");
-        using (Vault vault = Vault.Create(Path.Combine(parent, "v"), VaultTests.Passphrase, VaultTests.TestIterations))
-        {
-            File.WriteAllBytes(encrypted, vault.Encrypt(Vault.KindNote, [1, 2]));
-        }
 
         Assert.Throws<FileNotFoundException>(() => NoteStore.ReadImport(Path.Combine(parent, "none.md")));
         Assert.Throws<InvalidDataException>(() => NoteStore.ReadImport(big));
-        Assert.Throws<InvalidDataException>(() => NoteStore.ReadImport(encrypted));
+    }
+
+    // 132 AC-7: the old magic bytes (00 43 54 58 45) get no special handling anywhere in the store.
+    [Fact]
+    public void FileStartingWithTheOldMagicBytes_IsReadLikeAnyOtherFile()
+    {
+        Directory.CreateDirectory(root);
+        byte[] bytes = [0x00, 0x43, 0x54, 0x58, 0x45, 0x01, .. "rest\n"u8];
+        File.WriteAllBytes(Path.Combine(root, "Old.md"), bytes);
+        string outside = Path.Combine(parent, "old-import.md");
+        File.WriteAllBytes(outside, bytes);
+        NoteStore store = new NoteStore(root);
+        NoteInfo info = Assert.Single(store.List());
+
+        Assert.Equal("\0CTXE\u0001rest\n", store.Read(info));
+        Assert.True(store.TryOpen("Old", out Note? note));
+        Assert.Equal("\0CTXE\u0001rest\n", note!.Text);
+        EditableNote editable = store.ReadForEdit(info);
+        Assert.Equal("\0CTXE\u0001rest\n", editable.Text);
+        Assert.Equal(NoteSaveResult.Saved, store.SaveIfUnchanged(editable, editable.Text + "more\n", out _));
+        Assert.Equal((byte[])[.. bytes, .. "more\n"u8], File.ReadAllBytes(info.Path));
+        Assert.Equal(bytes, NoteStore.ReadImport(outside));
+    }
+
+    // 132 AC-9: Save writes exactly the given bytes, for a new note and over an existing one.
+    [Fact]
+    public void Save_CreatesOrReplaces_KeepingTheExistingName_AndWritesTheBytesAsGiven()
+    {
+        NoteStore store = new NoteStore(root);
+        store.Create("Plan");
+
+        (NoteInfo replaced, bool wasReplaced) = store.Save("plan.md", "# New\n"u8.ToArray());
+        (NoteInfo created, bool createdReplaced) = store.Save("Fresh", "# Fresh\n"u8.ToArray());
+
+        Assert.True(wasReplaced);
+        Assert.Equal("Plan", replaced.Name);
+        Assert.False(createdReplaced);
+        Assert.Equal(["Fresh", "Plan"], store.List().Select(n => n.Name));
+        Assert.Equal("# New\n"u8.ToArray(), File.ReadAllBytes(replaced.Path));
+        Assert.Equal("# Fresh\n"u8.ToArray(), File.ReadAllBytes(created.Path));
+        Assert.Empty(Directory.GetFiles(root, "*.tmp"));
     }
 
     // 123 round 2: a FIFO named like a Markdown file is never opened, so the import can't hang.

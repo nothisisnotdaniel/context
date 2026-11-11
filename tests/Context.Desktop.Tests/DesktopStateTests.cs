@@ -12,30 +12,7 @@ public sealed class DesktopStateTests : IDisposable
 
     public void Dispose() => data.Dispose();
 
-    // AC-8: with encryption.json, Refresh returns Locked without reading anything or making a request.
-    [Fact]
-    public async Task Refresh_Encrypted_LockedWithoutReading()
-    {
-        Vault.Create(data.Root, "a long enough passphrase", 1000).Dispose();
-        data.WriteNote("Alpha", "#work");
-        data.AddTodo("Due #work", DesktopFixture.Today);
-        data.WriteCalendar("a.ics", DesktopFixture.Calendar(
-            DesktopFixture.Event("Standup", "20261029T090000", "20261029T093000")));
-        data.SaveLink(FakeHttpHandler.Link);
-
-        DesktopSnapshot snapshot = await data.RefreshAsync();
-
-        Assert.True(snapshot.Locked);
-        Assert.False(snapshot.Failed);
-        Assert.Null(snapshot.Current);
-        Assert.Empty(snapshot.Notes);
-        Assert.Empty(snapshot.Todos);
-        Assert.Equal(0, data.Http.Requests);
-        Assert.False(File.Exists(Path.Combine(data.Root, TagIndex.FileName)));
-        Assert.False(File.Exists(Path.Combine(data.Root, CalendarFeed.CacheFileName)));
-    }
-
-    // AC-8 control: the same data without encryption.json is read (the feed is asked, the index is built).
+    // The data is read (the feed is asked, the index is built).
     [Fact]
     public async Task Refresh_Plain_ReadsEverything()
     {
@@ -45,7 +22,6 @@ public sealed class DesktopStateTests : IDisposable
 
         DesktopSnapshot snapshot = await data.RefreshAsync();
 
-        Assert.False(snapshot.Locked);
         Assert.NotNull(snapshot.Current);
         Assert.Single(snapshot.Notes);
         Assert.Single(snapshot.Todos);
@@ -200,5 +176,27 @@ public sealed class DesktopStateTests : IDisposable
         }
 
         Assert.Equal(count, state.Builds);
+    }
+
+    // 132 AC-5: a leftover key file of the removed feature changes nothing: notes, todos and appointments are read.
+    [Fact]
+    public async Task Refresh_WithALeftoverKeyFile_ReadsNotesTodosAndAppointments()
+    {
+        string key = Path.Combine(data.Root, RemovedFeature.KeyFileName);
+        data.WriteFile(RemovedFeature.KeyFileName, "{\"left\":\"over\"}");
+        data.WriteNote("Alpha", "#work");
+        data.AddTodo("Due #work", DesktopFixture.Today);
+        data.WriteCalendar("a.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("Standup", "20261029T090000", "20261029T093000")));
+
+        DesktopSnapshot snapshot = await data.RefreshAsync();
+
+        Assert.False(snapshot.Failed);
+        Assert.NotNull(snapshot.Current);
+        Assert.Equal(["Standup"], snapshot.Current.Appointments.Select(a => a.Title).ToArray());
+        Assert.Single(snapshot.Notes);
+        Assert.Equal(["Due #work"], snapshot.Todos.Select(t => t.Text).ToArray());
+        Assert.True(File.Exists(Path.Combine(data.Root, TagIndex.FileName)));
+        Assert.Equal("{\"left\":\"over\"}", File.ReadAllText(key));
     }
 }

@@ -39,7 +39,7 @@ internal sealed class DataWatcher : IDisposable
 
     /// <summary>
     /// True for a path whose change the window shows: a top-level <c>*.md</c> note (any case),
-    /// <c>todos.json</c>, <c>calendar-link.ics</c>, <c>encryption.json</c> or a top-level <c>calendar/*.ics</c>
+    /// <c>todos.json</c>, <c>calendar-link.ics</c> or a top-level <c>calendar/*.ics</c>
     /// file. False for the index (<c>context.db*</c>), temp files, <c>calendar-link.txt</c>, notes in subfolders
     /// and anything outside <paramref name="root"/>. A successful <see cref="CalendarFeed.Fetch"/> rewrites
     /// <c>calendar-link.ics</c>, so it causes one extra refresh; that one is served from the fresh cache (no request).
@@ -73,8 +73,7 @@ internal sealed class DataWatcher : IDisposable
             string name = parts[0];
             return HasExtension(name, ".md")
                 || Same(name, TodoStore.FileName)
-                || Same(name, CalendarFeed.CacheFileName)
-                || Same(name, Vault.FileName);
+                || Same(name, CalendarFeed.CacheFileName);
         }
 
         return parts.Length == 2 && Same(parts[0], CalendarStore.FolderName) && HasExtension(parts[1], ".ics");

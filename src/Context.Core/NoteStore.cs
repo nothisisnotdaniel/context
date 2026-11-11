@@ -77,14 +77,11 @@ internal sealed class NoteStore
     };
 
     private readonly string root;
-    private readonly Encryption? encryption;
 
     /// <param name="root">The folder notes live in.</param>
-    /// <param name="encryption">The session's encryption state; <c>null</c> (or no vault) keeps files plain.</param>
-    public NoteStore(string root, Encryption? encryption = null)
+    public NoteStore(string root)
     {
         this.root = Path.GetFullPath(root);
-        this.encryption = encryption;
     }
 
     /// <summary>The folder notes live in.</summary>
@@ -184,7 +181,7 @@ internal sealed class NoteStore
 
         Directory.CreateDirectory(root);
         string path = Path.Combine(root, title + Extension);
-        byte[] content = Encryption.Protect(encryption, Vault.KindNote, Utf8NoBom.GetBytes($"# {title}\n"));
+        byte[] content = Utf8NoBom.GetBytes($"# {title}\n");
         try
         {
             using FileStream stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
@@ -261,30 +258,23 @@ internal sealed class NoteStore
     }
 
     /// <summary>
-    /// The text of <paramref name="note"/> (decoded like <see cref="File.ReadAllText(string)"/>), decrypted when
-    /// the file is encrypted. Throws <see cref="IOException"/> (also <see cref="VaultException"/>) or
-    /// <see cref="UnauthorizedAccessException"/> when it can't be read.
+    /// The text of <paramref name="note"/> (decoded like <see cref="File.ReadAllText(string)"/>). Throws
+    /// <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> when it can't be read.
     /// </summary>
-    public string Read(NoteInfo note) => Encryption.ReadText(encryption, note.Path, Vault.KindNote);
+    public string Read(NoteInfo note) => File.ReadAllText(note.Path);
 
     /// <summary>
-    /// Reads <paramref name="note"/> for editing: the text (decrypted when the file is encrypted) with <c>\r\n</c>
+    /// Reads <paramref name="note"/> for editing: the text with <c>\r\n</c>
     /// turned into <c>\n</c> and the BOM dropped, plus the SHA-256 of the file's bytes and whether it had CRLF
     /// line endings or a BOM, so <see cref="SaveIfUnchanged"/> can write it back the same way. Throws like
     /// <see cref="Read"/> when the file can't be read, and with an <see cref="IOException"/> when it is not a regular
-    /// file or is larger than <see cref="MaxEditBytes"/> (plus the encryption overhead).
+    /// file or is larger than <see cref="MaxEditBytes"/>.
     /// </summary>
     public EditableNote ReadForEdit(NoteInfo note)
     {
-        byte[] raw = BoundedFile.Read(note.Path, MaxEditFileBytes);
-        byte[] plain = Encryption.Unprotect(encryption, Vault.KindNote, raw);
-        if (plain.Length > MaxEditBytes)
-        {
-            throw new IOException("Too large.");
-        }
-
-        bool hadBom = plain.AsSpan().StartsWith(Utf8Bom);
-        string text = Encryption.DecodeText(plain);
+        byte[] raw = BoundedFile.Read(note.Path, MaxEditBytes);
+        bool hadBom = raw.AsSpan().StartsWith(Utf8Bom);
+        string text = DecodeText(raw);
         bool hadCrlf = text.Contains("\r\n", StringComparison.Ordinal);
         return new EditableNote(note.Name, note.Path, text.Replace("\r\n", "\n", StringComparison.Ordinal), EditableNote.Hash(raw), hadCrlf, hadBom);
     }
@@ -294,7 +284,7 @@ internal sealed class NoteStore
     /// changed since. Writes nothing and returns <see cref="NoteSaveResult.Unchanged"/> when the text equals the text
     /// as opened, <see cref="NoteSaveResult.Missing"/> when the file is gone and <see cref="NoteSaveResult.ChangedOnDisk"/>
     /// when its bytes no longer hash to <see cref="EditableNote.Version"/>. Otherwise writes the text through a temp
-    /// file and a move, with CRLF line endings and a BOM when the file had them, encrypted while encryption is on, and
+    /// file and a move, with CRLF line endings and a BOM when the file had them, and
     /// returns the note as saved in <paramref name="saved"/>. The file is hashed again just before the move. Throws
     /// <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> when it can't write.
     /// </summary>
@@ -321,14 +311,13 @@ internal sealed class NoteStore
             return NoteSaveResult.TooLarge;
         }
 
-        byte[] content = Encryption.Protect(encryption, Vault.KindNote, plain);
         string folder = Path.GetDirectoryName(opened.Path) ?? root;
         string temp = Path.Combine(folder, $".{opened.Name}{Extension}.{Guid.NewGuid():N}.tmp");
         try
         {
             using (FileStream stream = new FileStream(temp, PrivateTempOptions()))
             {
-                stream.Write(content);
+                stream.Write(plain);
             }
 
             check = CheckVersion(opened);
@@ -347,7 +336,7 @@ internal sealed class NoteStore
             }
         }
 
-        saved = new EditableNote(opened.Name, opened.Path, plainText, EditableNote.Hash(content), opened.HadCrlf, opened.HadBom);
+        saved = new EditableNote(opened.Name, opened.Path, plainText, EditableNote.Hash(plain), opened.HadCrlf, opened.HadBom);
         return NoteSaveResult.Saved;
     }
 
@@ -358,7 +347,7 @@ internal sealed class NoteStore
         byte[] current;
         try
         {
-            current = BoundedFile.Read(opened.Path, MaxEditFileBytes);
+            current = BoundedFile.Read(opened.Path, MaxEditBytes);
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
@@ -376,7 +365,7 @@ internal sealed class NoteStore
 
     /// <summary>
     /// Stores <paramref name="content"/> as the note <paramref name="title"/> (normalized and validated like
-    /// <see cref="Create"/>), encrypted while encryption is on. An existing note with that name (ignoring case)
+    /// <see cref="Create"/>). An existing note with that name (ignoring case)
     /// is replaced through a temp file and a move, keeping its file name; otherwise a new file is created.
     /// Returns the note and whether it replaced one. Throws <see cref="ArgumentException"/> for an invalid title.
     /// </summary>
@@ -398,7 +387,7 @@ internal sealed class NoteStore
         {
             using (FileStream stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
-                stream.Write(Encryption.Protect(encryption, Vault.KindNote, content));
+                stream.Write(content);
             }
 
             File.Move(temp, path, overwrite: existing is not null);
@@ -416,7 +405,7 @@ internal sealed class NoteStore
 
     /// <summary>
     /// Creates the note <paramref name="title"/> (normalized and validated like <see cref="Create"/>) with
-    /// <paramref name="text"/> (UTF-8, no BOM, encrypted while encryption is on) through a private temp file in the
+    /// <paramref name="text"/> (UTF-8, no BOM) through a private temp file in the
     /// root and a move that never overwrites, so the note appears whole or not at all. Throws
     /// <see cref="NoteExistsException"/> when a note with that name exists (ignoring case), also when it appeared
     /// between the check and the move, and <see cref="ArgumentException"/> for an invalid title.
@@ -442,7 +431,7 @@ internal sealed class NoteStore
         {
             using (FileStream stream = new FileStream(temp, PrivateTempOptions()))
             {
-                stream.Write(Encryption.Protect(encryption, Vault.KindNote, Utf8NoBom.GetBytes(text)));
+                stream.Write(Utf8NoBom.GetBytes(text));
             }
 
             try
@@ -474,10 +463,15 @@ internal sealed class NoteStore
     /// </summary>
     public const long MaxEditBytes = MaxImportBytes;
 
-    // The same limit on the file as stored, which is larger by the fixed overhead when it is encrypted.
-    private const long MaxEditFileBytes = MaxEditBytes + Vault.Overhead;
+    // Decodes text the way File.ReadAllText does: UTF-8 unless a byte order mark says otherwise; the mark is dropped.
+    private static string DecodeText(byte[] bytes)
+    {
+        using MemoryStream stream = new MemoryStream(bytes, writable: false);
+        using StreamReader reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        return reader.ReadToEnd();
+    }
 
-    // A new temp file only the owner can read and write (mode 0600 off Windows), as in Encryption.Migrate.
+    // A new temp file only the owner can read and write (mode 0600 off Windows).
     private static FileStreamOptions PrivateTempOptions()
     {
         FileStreamOptions options = new FileStreamOptions
@@ -509,7 +503,7 @@ internal sealed class NoteStore
     }
 
     /// <summary>
-    /// Writes <paramref name="text"/> (UTF-8, no BOM, never encrypted) to a new file at <paramref name="path"/>.
+    /// Writes <paramref name="text"/> (UTF-8, no BOM) to a new file at <paramref name="path"/>.
     /// Never overwrites (<see cref="FileMode.CreateNew"/>): throws <see cref="IOException"/> if it exists. The
     /// caller checks <see cref="Contains"/> first.
     /// </summary>
@@ -523,7 +517,7 @@ internal sealed class NoteStore
     /// Reads the file to import, at most <see cref="MaxImportBytes"/>, without changing it, through
     /// <see cref="BoundedFile"/>: a file that reports length 0 is returned empty without being opened (so a FIFO
     /// never blocks) and a stream that can't seek is refused. Throws <see cref="FileNotFoundException"/> when it is
-    /// missing, <see cref="InvalidDataException"/> when it is too large or encrypted, and <see cref="IOException"/>
+    /// missing, <see cref="InvalidDataException"/> when it is too large, and <see cref="IOException"/>
     /// (also when it is not a regular file) or <see cref="UnauthorizedAccessException"/> when it can't be read.
     /// </summary>
     public static byte[] ReadImport(string path)
@@ -539,13 +533,7 @@ internal sealed class NoteStore
             throw new InvalidDataException("Too large.");
         }
 
-        byte[] bytes = BoundedFile.Read(path, MaxImportBytes);
-        if (Vault.IsEncrypted(bytes))
-        {
-            throw new InvalidDataException("Encrypted.");
-        }
-
-        return bytes;
+        return BoundedFile.Read(path, MaxImportBytes);
     }
 
     // Resolves symbolic links in the part of the path that exists, from the top down; the rest is kept as is.

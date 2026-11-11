@@ -84,37 +84,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     feeds use `RRULE` a lot, so recurring meetings only show on their first occurrence. Tests use
     `FakeHttpHandler` and never touch the network; feed tests take their timeout from
     `CalendarFeedTests.TimeoutFor` (100 ms only with `FakeHttpHandler.Hang()`, 30 s for every handler that answers).
-- **Encryption at rest (optional, off by default):** `<root>/encryption.json` (`Vault.FileName`) means "on". It holds
-  the version, KDF (`PBKDF2-HMAC-SHA256`, `Vault.DefaultIterations` = 600,000, 16-byte salt) and a random 32-byte data
-  key wrapped with AES-256-GCM; nothing secret in plain form. Passphrases are normalized to Unicode form C
-  (`Vault.NormalizePassphrase`) before PBKDF2, so the same text from another OS unlocks. `Unlock` refuses a key file
-  with fewer than `Vault.MinUnlockIterations` (100,000) iterations with a `VaultException` (tests pass a lower minimum to
-  `new Encryption(root, minIterations)` / the internal `Vault.Unlock(root, pass, min)`). `Vault` (`Create`, `Unlock` (throws
-  `WrongPassphraseException`), `Encrypt`/`Decrypt(kind, bytes)`, `IsEncrypted`, `Dispose` zeroes the key; tests use the
-  internal `Create(root, pass, iterations)` with 1,000). Encrypted file: `00 43 54 58 45` + version `01` + 12-byte random
-  nonce + ciphertext + 16-byte tag; AAD = kind (`note`, `todos`, `calendar-link`, `calendar-cache`, `calendar`). A
-  failed decrypt throws `VaultException` (an `IOException`, fixed message), so stores treat it like any unreadable file.
-  `Encryption` is the shared session holder (`Vault?`), passed as an optional last constructor argument to `NoteStore`,
-  `TodoStore`, `TagIndex`, `CalendarStore`, `CalendarLink`, `CalendarFeed`; `null` or no vault = plain, byte-for-byte as
-  before. Reads detect the magic (plain files are still read; encrypted ones need the vault); writes (and their temp
-  files) are ciphertext while the vault is set. With the vault set `TagIndex` uses an in-memory SQLite database
-  (`PRAGMA temp_store=MEMORY`, rebuilt each session) and never opens `context.db`. `Encryption.Migrate()` /
-  `DecryptAll()` convert the data set (top-level `*.md`, `todos.json`, `calendar-link.txt`, `calendar-link.ics`,
-  top-level `calendar/*.ics`) file by file: temp file (mode `0600`), read back and verify, keep the last-write time,
-  then move; failures stay as they were and are returned by name (`BeforeReplace` is the test fault hook). `Migrate`
-  then deletes `context.db*`; `DecryptAll` deletes `encryption.json` last and turns the session off only when every
-  file worked. `/encrypt` (`EncryptionCommands`): off → new passphrase twice (masked, at least 12 chars, says a lost
-  passphrase loses the data), `Vault.Create`, `Migrate`; on → `Migrate` only, no passphrase; refused while
-  `Encryption.EncryptedFilesWithoutKey()` > 0 (encrypted files but no `encryption.json`). `/decrypt` asks the
-  passphrase again (`Encryption.CheckPassphrase`), then `DecryptAll`. Esc cancels both with no change. At
-  start-up `App` (given the `Encryption`) asks `Passphrase:` in the input panel (sidebar empty while locked; the hint
-  says Esc quits); Esc returns 0, a wrong one shows red `Wrong passphrase.`, 3 wrong ones (or a bad or weak
-  `encryption.json`, shown by its fixed message, or the input ending) return 1. Without `encryption.json` but with
-  encrypted data files, the first frame shows a red `N encrypted files but no encryption.json: new data is NOT
-  encrypted.` hint.
-  Passphrases are read by `PassphrasePrompt` (label in the input panel, hint on the hint row) over
-  `LineEditor.ReadSecret` (shows `•` per character, no popup); they are never shown, stored or put in any text.
-  The OS key store, changing the passphrase and an encrypted on-disk tag index are not supported.
+- **Data is plain:** every file in the data folder is stored as plain bytes; nothing is encrypted.
 - **How it runs:** an interactive session that stays open until `/quit` (exit code 0). A Spectre
   `Layout` fills the terminal: the main view on the left, the `Todos` sidebar on the right (fixed
   32 columns), one hint row, then a 3-line bordered input panel at the bottom. After each command
@@ -140,13 +110,13 @@ Every factory agent reads this file before working on Context. Keep it short and
     no leading `.`, at most 100 chars, no Windows reserved name (CON, PRN, AUX, NUL, COM1-9, LPT1-9, also before a dot), no trailing `.` or space) after `NoteStore.NormalizeTitle` trims them and strips any trailing
     `.md` (ignoring case), so `/new x.md` creates `x.md`; names in `/open` are only matched against `List()` (as typed first, then with
     one `.md` stripped), never turned into a path. Note text is shown as plain `Text`, never parsed as markup.
-    `/open` on an unreadable or undecryptable note shows a red `Can't read <name>.` hint.
+    `/open` on an unreadable note shows a red `Can't read <name>.` hint.
     `/export <note> <path>` (note = the longest leading part that names a note; `~` = home) writes the note's plain
     text (UTF-8, no BOM, `FileMode.CreateNew`) outside the root (`NoteStore.Contains` resolves links and ignores
-    case); in encrypted mode the hint starts with a red `This copy is not encrypted.` `/import <path>` reads a plain
-    file outside the root (at most 5 MB, not encrypted, never changed) and stores it as the note
-    `NormalizeTitle(file name)` via `NoteStore.Save` (create, or replace an existing note through temp + move;
-    encrypted when on); the hint says to delete the source.
+    case). `/import <path>` reads a
+    file outside the root (at most 5 MB, never changed) and stores it as the note
+    `NormalizeTitle(file name)` via `NoteStore.Save` (create, or replace an existing note through temp + move);
+    the hint says to delete the source.
   - **Todos:** `TodoStore` keeps the list in `<root>/todos.json` (same root as notes; System.Text.Json,
     camelCase, UTF-8 no BOM). `List()` sorts by `Due`, then `Created` (UTC), then file order. Writes go to
     a temp file in the root, then `File.Move(..., overwrite: true)`; a file that can't be read or parsed
@@ -166,12 +136,12 @@ Every factory agent reads this file before working on Context. Keep it short and
   - Tests drive the loop by queuing input on `TestConsole.Input` (`PushTextWithEnter`, `PushKey`)
     and always end with `/quit`, so they can't hang.
 - **Command line (scriptable):** `Context <command> [args]` (any arguments) runs one command through `Cli`
-  (`src/Context/Cli.cs`) and exits; no arguments starts the interactive console as before. `Cli(stdout, stderr, stdin,
-  env, folder, today, now, HttpMessageHandler)` writes plain text only (results on stdout with `\n` line ends, tab-separated
+  (`src/Context/Cli.cs`) and exits; no arguments starts the interactive console as before. `Cli(stdout, stderr,
+  folder, today, now, HttpMessageHandler)` (it takes no stdin and no environment, so no command can read either) writes plain text only (results on stdout with `\n` line ends, tab-separated
   columns; errors on stderr), no markup, no layout, popup, line editor or prompt; `int Run(args)` never throws.
   Commands (matched ignoring case): `help`/`--help`/`-h` (never reads the folder), `version`/`--version` (prints
   `Context <version>` from `AppVersion.Current`: the assembly's informational version without `+...`; never reads the
-  folder, no passphrase), `capture <text...>`
+  folder), `capture <text...>`
   (`Inbox.Capture`: controls to spaces, trimmed, 1-1000 chars, appends `- yyyy-MM-dd HH:mm <text>` to `inbox.md` via
   `ReadForEdit` + `SaveIfUnchanged`, retries 3 times on a change on disk; a missing inbox is created as `# inbox\n` +
   the line through `NoteStore.CreateWithText`, temp file + no-overwrite move), `todos` (`<n>\t<date>\t<text>`),
@@ -181,11 +151,8 @@ Every factory agent reads this file before working on Context. Keep it short and
   `import <path>`, `export <note> <path>` (paths relative to the current directory, no `~`). Exit codes: 0 success,
   1 error (one stderr line, nothing on stdout; `current` may write both), 2 usage error (one stderr line ending in
   `Run 'context help'.`; unknown commands never touch the folder). All text from disk goes through `SafeText.Clean`
-  (one-line fields also `\n` to space). **Passphrase rule:** with `encryption.json` the passphrase comes only from
-  `--passphrase-stdin` (before the command; first stdin line) or `CONTEXT_PASSPHRASE`; never prompted, never echoed,
-  and any `--passphrase`/`--passphrase=...` argument is refused with exit 2 before anything is read. Encrypted files
-  without `encryption.json` add the console's `N encrypted files ...` warning on stderr. Tests (`CliTests`) use the
-  internal constructor with a low `minIterations` and a fixed zone.
+  (one-line fields also `\n` to space). Tests (`CliTests`) use the
+  internal constructor with a fixed zone.
 - **Stack:** .NET 10 (`net10.0`), C# with nullable reference types and implicit usings on.
   `Spectre.Console` 0.57.2 handles all terminal output (app only). `Microsoft.Data.Sqlite` 10.0.14 for `context.db`
   (referenced by `Context.Core` only; it reaches the app through the project reference). Tests: xUnit + `Spectre.Console.Testing` 0.57.2.
@@ -238,8 +205,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, tag parsing in `TagParser.cs`,
     `[[note link]]` parsing in `NoteLinkParser.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
-    download and cache in `CalendarFeed.cs`, the key file and file format in `Vault.cs`, the session holder and
-    migration in `Encryption.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
+    download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
     `CurrentView.cs` (`/current`), the inbox capture in `Inbox.cs`, the todo input rules (`TryParseDate`,
     `MaxTextLength`) in `TodoInput.cs`, `TagsView.cs` (`/tags`), `LinksView.cs` (`/links`) and `CalendarLinkView.cs`
     (`/calendar-link`); `/notes` uses `NoteStore.List()` directly.
@@ -252,26 +218,24 @@ Every factory agent reads this file before working on Context. Keep it short and
     leaks through formatting; nobody formats a view directly.
   - `src/Context/`: the console app (references `Context.Core` by `ProjectReference`, plus `Spectre.Console`).
     `Program.cs` only wires things up (with arguments it sets UTF-8 output and returns `new Cli(...).Run(args)` over
-    `Console.Out`/`Error`/`In`; with none it builds the registry with
-    `CreateDefault()` + `NoteCommands.Register` + `TagCommands.Register` + `TodoCommands.Register` + `CalendarLinkCommands.Register` + `CurrentCommands.Register` (with a `CalendarStore(folder, TimeZoneInfo.Local)` and a `CalendarFeed` over a `SocketsHttpHandler` with `MaxAutomaticRedirections = 5`) + `EncryptionCommands.Register`, all stores sharing one `Encryption(folder)`; passes the registry, a `TodoSidebar`,
-    the `Encryption` and `AnsiConsole.Console` to `App`, returns `App.Run()`); the loop, layout and dispatch live in `App.cs`, commands in `CommandRegistry.cs`,
+    `Console.Out`/`Error`; with none it builds the registry with
+    `CreateDefault()` + `NoteCommands.Register` + `TagCommands.Register` + `TodoCommands.Register` + `CalendarLinkCommands.Register` + `CurrentCommands.Register` (with a `CalendarStore(folder, TimeZoneInfo.Local)` and a `CalendarFeed` over a `SocketsHttpHandler` with `MaxAutomaticRedirections = 5`); passes the registry, a `TodoSidebar`
+    and `AnsiConsole.Console` to `App`, returns `App.Run()`); the loop, layout and dispatch live in `App.cs`, commands in `CommandRegistry.cs`,
     input in `LineEditor.cs`, the command popup's rows and `PopupArea` in `CommandPopup.cs`,
-    `/new`, `/notes`, `/open`, `/export`, `/import` in `NoteCommands.cs`, `/encrypt`, `/decrypt` in
-    `EncryptionCommands.cs`, the masked prompt in `PassphrasePrompt.cs`, `/todo` and `/done` in `TodoCommands.cs`, the sidebar body
+    `/new`, `/notes`, `/open`, `/export`, `/import` in `NoteCommands.cs`, `/todo` and `/done` in `TodoCommands.cs`, the sidebar body
     in `TodoSidebar.cs`, `/tags`, `/links` in `TagCommands.cs`, `/current` in `CurrentCommands.cs`, and
     `/calendar-link` in `CalendarLinkCommands.cs`, the scriptable command line in `Cli.cs`, and the version text in `AppVersion.cs`. Code that needs Spectre stays here; data and storage go to Core.
   - `src/Context.Desktop/`: the desktop app (`Microsoft.NET.Sdk.Razor`, `WinExe`, references `Context.Core`
     only, never Spectre or the console app; components and classes in `namespace Context`). `Program.cs` only wires
-    things up (stores built like the console's, one `Encryption(folder)`, Photino window `Context` 1100x750, dev tools
-    only in Debug). `DesktopState` builds a `DesktopSnapshot` (`Locked`, `Failed`, `Today`, `CurrentView? Current`,
+    things up (stores built like the console's, Photino window `Context` 1100x750, dev tools
+    only in Debug). `DesktopState` builds a `DesktopSnapshot` (`Failed`, `Today`, `CurrentView? Current`,
     `Todos`, `Notes`, unreadable flags, `Folder`) off the UI thread with `Refresh()` (one at a time; requests during a run
     coalesce into one more run) and raises `Changed`; `Tick()` refreshes when the day changed or 5 min passed.
     `DataWatcher` (one `FileSystemWatcher` with subfolders, `IsRelevant` filter, 300 ms debounce, 30 s tick timer;
-    never creates the folder) calls them. Components (`App`, `Main`, `CurrentPanel`, `TodoPanel`, `NotesPanel`,
-    `LockedPanel`) inherit `StateComponent`, which injects the state and `DesktopActions` (internal types can't be
+    never creates the folder) calls them. Components (`App`, `Main`, `CurrentPanel`, `TodoPanel`, `NotesPanel`)
+    inherit `StateComponent`, which injects the state and `DesktopActions` (internal types can't be
     public parameters). `DesktopActions` (with `ActionResult`: `ActionKind` `Done`/`Refused`/`Failed`, `ActionReason`,
-    raw text) is the only write path: it never throws, runs one action at a time (`Busy`), refuses every action while
-    `encryption.json` exists (`Locked`) without touching a file, refreshes the state after a change and has the test
+    raw text) is the only write path: it never throws, runs one action at a time (`Busy`), refreshes the state after a change and has the test
     hook `BeforeWrite`. `CompleteTodo(todo, confirmation)` removes the todo with `todo.Id` through
     `TodoStore.Complete(id)` (a todo no longer stored: `The todo list changed. Nothing was done.`). `ConfirmDialog` (in-window
     `role="dialog"` overlay, focus on `Cancel`, Esc cancels, `Busy` disables it) is the only creator of a
@@ -296,7 +260,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `wwwroot/index.html` (CSP meta tag, only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
     and `wwwroot/editor/editor.css`.
   - **Desktop rules:** the Core writing calls (`Create`, `Save`, `SaveIfUnchanged`, `Add`, `Complete`, `Set`, `Clear`, `Delete`,
-    `ClearCache`, `Migrate`, `DecryptAll`, `Vault.Create`) appear only in `DesktopActions.cs` (`DotNetObjectReference.Create(` once in `EditorInterop.cs` is the one exemption; the reads still write
+    `ClearCache`) appear only in `DesktopActions.cs` (`DotNetObjectReference.Create(` once in `EditorInterop.cs` is the one exemption; the reads still write
     only through `TagIndex.Sync` and `CalendarFeed.Fetch`, as in the console). `DesktopActions` is named only by
     `.razor` files, `Program.cs` and `StateComponent`, never by `DesktopState`, `DataWatcher` or `DesktopSnapshot`, so
     nothing writes on render, refresh, the watcher or the tick. In `.razor` files every `@code` method that calls
@@ -304,7 +268,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     callback parameter on a component), is no lifecycle method (`OnInitialized*`, `OnParametersSet*`,
     `OnAfterRender*`, `SetParametersAsync`, `BuildRenderTree`) and is called by no other method; no `.cs` file calls
     `Actions.`. Destructive actions take a `Confirmation`, and `new Confirmation(` appears only in
-    `ConfirmDialog.razor`. With `encryption.json` it shows only `LockedPanel` and reads nothing.
+    `ConfirmDialog.razor`.
     Outside text goes through `DesktopText.OneLine` and Blazor's default encoding: never `MarkupString`,
     `AddMarkupContent` or `@((` raw markup; no `style=`, `<a `, `<form` or `<script` in `.razor` files; every
     `<button` has `type="button"`; no plain HTML event attributes (`on<event>=` without `@`); only `EditorInterop.cs`
@@ -319,8 +283,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     `CiWorkflowTests.cs` and `ReleaseWorkflowTests.cs` (the workflows, the release scripts and the tool packaging; with `WorkflowYaml.cs` and its `WorkflowYamlTests.cs`), `ViewParityTests.cs` (golden ANSI output of `/current`, `/notes`, `/tags`, `/links`, `/calendar-link`; change
     its expected strings only when a spec changes that output), `CoreDependencyTests.cs` (architecture test: fails on any
     Spectre assembly, package, project reference or source mention in `Context.Core`), plus shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves),
-    `SampleData` in `EncryptionTests.cs` (one file of every kind with plaintext markers), `Session` in
-    `EncryptionCommandsTests.cs` (everything wired like `Program.cs`) and `FakeHttpHandler.cs` (canned HTTP responses). Note, todo, tag and calendar tests use their
+    `ConsoleSession.cs` (everything wired like `Program.cs`), `RemovedFeature.cs` (the names of the removed
+    whole-folder protection, spelled in pieces; `RemovedFeatureSourceTests.cs` fails when `src/`, `tests/` or this file
+    names that feature again) and `FakeHttpHandler.cs` (canned HTTP responses). Note, todo, tag and calendar tests use their
     own temp folder (deleted in `Dispose`), never the real app data folder.
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and

@@ -126,23 +126,4 @@ public sealed class InboxTests : IDisposable
         Assert.Equal(CaptureResult.Captured, result);
         Assert.Equal("# theirs\n- 2026-11-07 14:05 mine\n", File.ReadAllText(InboxPath));
     }
-
-    // AC-3: encrypted when encryption is on.
-    [Fact]
-    public void Capture_WithVault_WritesCiphertext()
-    {
-        Encryption encryption = new Encryption(root, VaultTests.TestIterations);
-        encryption.Use(Vault.Create(root, "correct horse battery", VaultTests.TestIterations));
-        NoteStore encrypted = new NoteStore(root, encryption);
-
-        Inbox.Capture(encrypted, "secret plan", Now);
-        Inbox.Capture(encrypted, "second", Now);
-
-        byte[] raw = File.ReadAllBytes(InboxPath);
-        Assert.True(Vault.IsEncrypted(raw));
-        Assert.DoesNotContain("secret plan", Encoding.UTF8.GetString(raw), StringComparison.Ordinal);
-        Assert.True(encrypted.TryOpen("inbox", out Note? note));
-        Assert.Equal("# inbox\n- 2026-11-07 14:05 secret plan\n- 2026-11-07 14:05 second\n", note!.Text);
-        encryption.Use(null);
-    }
 }

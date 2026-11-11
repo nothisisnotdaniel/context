@@ -578,37 +578,35 @@ public class AppTests
         Assert.Single(AnsiFrames(output));
     }
 
-    /// <summary>A temp Context folder with the sample data, encrypted with <see cref="VaultTests.Passphrase"/>.</summary>
-    private static string EncryptedFolder()
+    private static string TempRoot()
     {
         string root = Path.Combine(Path.GetTempPath(), "context-app-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        SampleData.Write(root);
-        Encryption encryption = SampleData.On(root);
-        encryption.Migrate();
-        encryption.Use(null);
         return root;
     }
 
-    // AC-6
+    // 132 AC-2: with everything registered as in Program.cs, the two removed commands are unknown and /help lists
+    // neither.
     [Fact]
-    public void Start_WithEncryption_AsksPassphraseInInputPanel_ThenRuns()
+    public void RemovedCommands_AreUnknown_AndHelpListsNeither()
     {
-        string root = EncryptedFolder();
+        string root = TempRoot();
         try
         {
-            using Session session = new Session(root);
-            session.Console.Input.PushTextWithEnter(VaultTests.Passphrase);
+            ConsoleSession session = new ConsoleSession(root);
 
-            int exitCode = session.Run("/open Plan");
+            Assert.Equal(0, session.Run("/encrypt", "/decrypt", "/help"));
 
-            Assert.Equal(0, exitCode);
-            Assert.True(session.Encryption.IsOn);
-            List<AnsiWrite> writes = AnsiWrites.Parse(session.Console.Output);
-            Assert.Contains(writes, w => w.Row == Height - 1 && w.Column == 3 && w.Text.StartsWith("Passphrase: ", StringComparison.Ordinal));
-            string output = AnsiWrites.Strip(session.Console.Output);
-            Assert.Contains("Context is encrypted. Type your passphrase, or press Esc to quit.", output);
-            Assert.Contains(SampleData.NoteMarker, output);
+            Assert.False(session.Registry.TryGet("/encrypt", out _));
+            Assert.False(session.Registry.TryGet("/decrypt", out _));
+            Assert.DoesNotContain(session.Registry.Commands, c => c.Name.Contains("crypt", StringComparison.OrdinalIgnoreCase));
+            List<string[]> frames = Frames(session.Console.Output);
+            Assert.Equal(4, frames.Count);
+            Assert.Contains("Unknown command /encrypt. Type /help to see all commands.", frames[1][^4]);
+            Assert.Contains("Unknown command /decrypt. Type /help to see all commands.", frames[2][^4]);
+            Assert.Contains(frames[3], l => l.Contains("/notes", StringComparison.Ordinal));
+            Assert.DoesNotContain(frames[3], l => l.Contains("crypt", StringComparison.OrdinalIgnoreCase));
+            Assert.Empty(Directory.GetFileSystemEntries(root));
         }
         finally
         {
@@ -616,22 +614,37 @@ public class AppTests
         }
     }
 
-    // AC-6
+    // 132 AC-3: a leftover key file changes nothing at start-up: no question is asked (the first line typed is run
+    // as a command), the first frame has an empty hint row and the todo list, and the file stays as it was.
     [Fact]
-    public void Start_WrongPassphrase_ShowsRedHint_AndAsksAgain()
+    public void Start_WithALeftoverKeyFile_GoesStraightToTheCommandLoop()
     {
-        string root = EncryptedFolder();
+        string root = TempRoot();
         try
         {
-            using Session session = new Session(root);
-            session.Console.Input.PushTextWithEnter("wrong passphrase 1");
-            session.Console.Input.PushTextWithEnter(VaultTests.Passphrase);
+            string leftover = Path.Combine(root, RemovedFeature.KeyFileName);
+            byte[] content = "{ \"version\": 1, \"kdf\": \"x\" }"u8.ToArray();
+            File.WriteAllBytes(leftover, content);
+            DateTime modified = new DateTime(2026, 10, 1, 8, 30, 0, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(leftover, modified);
+            File.WriteAllText(Path.Combine(root, "Plan.md"), "# Plan\nplan-marker\n");
+            new TodoStore(root, () => ConsoleSession.Now).Add("todo-marker", ConsoleSession.Today);
+            ConsoleSession session = new ConsoleSession(root);
 
-            int exitCode = session.Run();
+            Assert.Equal(0, session.Run("/open Plan"));
 
-            Assert.Equal(0, exitCode);
-            Assert.True(session.Encryption.IsOn);
-            Assert.Contains(RedStart() + "Wrong passphrase", session.Console.Output);
+            List<string[]> frames = Frames(session.Console.Output);
+            Assert.Equal(2, frames.Count);
+            string[] first = frames[0];
+            Assert.Equal(string.Empty, first[^4].Trim());
+            Assert.Contains(first, l => l.Contains("todo-marker", StringComparison.Ordinal));
+            Assert.Contains(first, l => l.Contains("Type /help for commands", StringComparison.Ordinal));
+            Assert.DoesNotContain(first, l => l.Contains("crypt", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(first, l => l.Contains("pass", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain('•', session.Console.Output);
+            Assert.Contains(frames[1], l => l.Contains("plan-marker", StringComparison.Ordinal));
+            Assert.Equal(content, File.ReadAllBytes(leftover));
+            Assert.Equal(modified, File.GetLastWriteTimeUtc(leftover));
         }
         finally
         {
@@ -639,171 +652,21 @@ public class AppTests
         }
     }
 
-    // AC-6
+    // 132 AC-3: the console app has no way to ask for a secret: App takes only the console, the registry and the
+    // sidebar, and the line editor has only ReadLine.
     [Fact]
-    public void Start_ThreeWrongPassphrases_ReturnsOne_AndChangesNoFile()
+    public void App_TakesOnlyConsoleRegistryAndSidebar_AndLineEditorOnlyReadsLines()
     {
-        string root = EncryptedFolder();
-        try
-        {
-            Dictionary<string, string> before = SampleData.Hashes(root);
-            using Session session = new Session(root);
-            session.Console.Input.PushTextWithEnter("wrong passphrase 1");
-            session.Console.Input.PushTextWithEnter("wrong passphrase 2");
-            session.Console.Input.PushTextWithEnter("wrong passphrase 3");
-            session.Console.Input.PushTextWithEnter("/quit");
+        System.Reflection.ConstructorInfo constructor = Assert.Single(typeof(App).GetConstructors());
 
-            int exitCode = session.RunQueued();
-
-            Assert.Equal(1, exitCode);
-            Assert.False(session.Encryption.IsOn);
-            Assert.Equal(before, SampleData.Hashes(root));
-            Assert.Empty(Directory.GetFiles(root, "context.db*"));
-            string output = AnsiWrites.Strip(session.Console.Output);
-            Assert.DoesNotContain("wrong passphrase", output, StringComparison.Ordinal);
-            Assert.DoesNotContain(SampleData.TodoMarker, output, StringComparison.Ordinal);
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
-    }
-
-    // AC-11
-    [Fact]
-    public void Start_PassphraseIsMasked()
-    {
-        const string Secret = "ÆØÅæøåÆØÅæøå";
-        string root = Path.Combine(Path.GetTempPath(), "context-app-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        try
-        {
-            Vault.Create(root, Secret, VaultTests.TestIterations).Dispose();
-            using Session session = new Session(root);
-            session.Console.Input.PushTextWithEnter(Secret);
-
-            Assert.Equal(0, session.Run());
-
-            Assert.DoesNotContain(session.Console.Output, c => "ÆØÅæøå".Contains(c));
-            Assert.Contains(new string('•', Secret.Length), session.Console.Output);
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
-    }
-
-    // AC-1: without encryption.json the app doesn't ask.
-    [Fact]
-    public void Start_WithoutKeyFile_DoesNotAsk()
-    {
-        string root = Path.Combine(Path.GetTempPath(), "context-app-" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            using Session session = new Session(root);
-
-            Assert.Equal(0, session.Run());
-            Assert.DoesNotContain("Passphrase", session.Console.Output, StringComparison.Ordinal);
-            Assert.False(Directory.Exists(root));
-        }
-        finally
-        {
-            if (Directory.Exists(root))
-            {
-                Directory.Delete(root, recursive: true);
-            }
-        }
-    }
-
-    // Feedback 4: Esc at the start-up prompt quits (exit code 0) and changes nothing.
-    [Fact]
-    public void Start_EscapeAtPassphrasePrompt_Quits_AndChangesNoFile()
-    {
-        string root = EncryptedFolder();
-        try
-        {
-            Dictionary<string, string> before = SampleData.Hashes(root);
-            using Session session = new Session(root);
-            session.Console.Input.PushTextWithEnter("wrong passphrase 1");
-            session.Console.Input.PushText("abc");
-            session.Console.Input.PushKey(ConsoleKey.Escape);
-
-            int exitCode = session.RunQueued();
-
-            Assert.Equal(0, exitCode);
-            Assert.False(session.Encryption.IsOn);
-            Assert.Equal(before, SampleData.Hashes(root));
-            Assert.Contains("Try again, or press Esc to quit.", AnsiWrites.Strip(session.Console.Output));
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
-    }
-
-    // Feedback 2: a key file below the minimum iterations ends start-up with its message, never asking twice.
-    [Fact]
-    public void Start_KeyFileBelowMinimumIterations_ReturnsOneWithMessage()
-    {
-        string root = EncryptedFolder();
-        try
-        {
-            using Session session = new Session(root, Vault.MinUnlockIterations);
-            session.Console.Input.PushTextWithEnter(VaultTests.Passphrase);
-
-            int exitCode = session.RunQueued();
-
-            Assert.Equal(1, exitCode);
-            Assert.False(session.Encryption.IsOn);
-            Assert.Contains("too few key iterations", AnsiWrites.Strip(session.Console.Output));
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
-    }
-
-    // Feedback 3: encrypted files without encryption.json give a red warning at start-up.
-    [Fact]
-    public void Start_EncryptedFilesWithoutKeyFile_WarnsInRed()
-    {
-        string root = EncryptedFolder();
-        try
-        {
-            File.Delete(Vault.KeyFilePath(root));
-            using Session session = new Session(root);
-
-            Assert.Equal(0, session.Run());
-
-            string output = session.Console.Output;
-            Assert.Contains(
-                RedStart() + $"{SampleData.DataFiles.Length} encrypted files but no encryption.json: new data is NOT encrypted.",
-                output);
-            Assert.DoesNotContain("Passphrase:", AnsiWrites.Strip(output));
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
-    }
-
-    // Feedback 3: a plain folder starts without the warning.
-    [Fact]
-    public void Start_PlainFolder_NoWarning()
-    {
-        string root = Path.Combine(Path.GetTempPath(), "context-app-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        try
-        {
-            SampleData.Write(root);
-            using Session session = new Session(root);
-
-            Assert.Equal(0, session.Run());
-            Assert.DoesNotContain("encrypted files", session.Console.Output, StringComparison.Ordinal);
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        Assert.Equal(
+            [typeof(IAnsiConsole), typeof(CommandRegistry), typeof(TodoSidebar)],
+            constructor.GetParameters().Select(p => p.ParameterType));
+        Assert.Equal(
+            ["ReadLine"],
+            typeof(LineEditor)
+                .GetMethods(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public
+                    | System.Reflection.BindingFlags.DeclaredOnly)
+                .Select(m => m.Name));
     }
 }

@@ -10,29 +10,13 @@ public sealed class MainTests : IDisposable
 
     // AC-4 layout: notes on the left, /current in the middle, todos on the right.
     [Fact]
-    public async Task Render_Unlocked_ThreeRegions()
+    public async Task Render_ThreeRegions()
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
         Assert.Equal(
             ["notes-region", "current-region", "todos-region"],
             cut.Find(".layout").Children.Select(c => c.ClassName ?? string.Empty).ToArray());
-    }
-
-    // AC-8: an encryption.json shows only the locked panel.
-    [Fact]
-    public async Task Render_Encrypted_OnlyLockedPanel()
-    {
-        Vault.Create(data.Root, "a long enough passphrase", 1000).Dispose();
-        data.WriteNote("Alpha", "a");
-
-        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-
-        Assert.Equal(
-            "Your data is encrypted. The desktop app can't unlock it yet; use the console app.",
-            cut.Find(".locked p").TextContent);
-        Assert.Empty(cut.FindAll(".layout"));
-        Assert.DoesNotContain("Alpha", cut.Markup);
     }
 
     // AC-10: a refresh that throws shows the fixed red line, never the exception message.
@@ -64,5 +48,24 @@ public sealed class MainTests : IDisposable
         await data.State!.Refresh();
 
         cut.WaitForAssertion(() => Assert.Contains("Fresh todo", cut.Find(".todos").TextContent));
+    }
+
+    // 132 AC-5: a leftover key file of the removed feature still gives the normal three panels with the data.
+    [Fact]
+    public async Task Render_WithALeftoverKeyFile_NormalPanelsWithData()
+    {
+        data.WriteFile(RemovedFeature.KeyFileName, "{}");
+        data.WriteNote("Alpha", "a");
+        data.AddTodo("Buy milk", DesktopFixture.Today);
+
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.State!.Refresh();
+
+        cut.WaitForAssertion(() => Assert.Contains("Buy milk", cut.Find(".todos-region").TextContent));
+        Assert.Equal(
+            ["notes-region", "current-region", "todos-region"],
+            cut.Find(".layout").Children.Select(c => c.ClassName ?? string.Empty).ToArray());
+        Assert.Contains("Alpha", cut.Find(".notes-region").TextContent);
+        Assert.Empty(cut.FindAll(".locked"));
     }
 }

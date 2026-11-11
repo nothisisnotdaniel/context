@@ -21,11 +21,8 @@
                     string when = todo.Due < snapshot.Today ? "overdue" : todo.Due == snapshot.Today ? "today" : "later";
                     <li class="todo">
                         <label class="todo-line">
-                            @if (!snapshot.Locked)
-                            {
-                                <input type="checkbox" class="done" checked="@(asking?.Id == todo.Id)"
-                                       disabled="@(asking is not null || running || adding)" @onchange="() => Ask(todo)" />
-                            }
+                            <input type="checkbox" class="done" checked="@(asking?.Id == todo.Id)"
+                                   disabled="@(asking is not null || running || adding)" @onchange="() => Ask(todo)" />
                             <span class="date @when">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
                             <span class="text cut" title="@text">@text</span>
                         </label>
@@ -49,7 +46,7 @@
     {
         <p class="result" role="status"></p>
     }
-    @if (Snapshot is { Locked: false } open)
+    @if (Snapshot is { } open)
     {
         DateOnly shownDue = due ?? open.Today;
         bool entryOff = adding || running;

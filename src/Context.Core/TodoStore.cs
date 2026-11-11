@@ -61,19 +61,15 @@ internal sealed class TodoStore
 
     private readonly string root;
     private readonly Func<DateTime> utcNow;
-    private readonly Encryption? encryption;
     private readonly Func<Guid> newId;
 
     /// <param name="root">The folder <c>todos.json</c> lives in.</param>
     /// <param name="utcNow">The clock for <see cref="TodoItem.Created"/>; <see cref="DateTime.UtcNow"/> if null.</param>
-    /// <param name="encryption">The session's encryption state; <c>null</c> (or no vault) keeps the file plain.</param>
     /// <param name="newId">The ids of new todos; <see cref="Guid.NewGuid"/> if null (tests pass fixed ones).</param>
-    public TodoStore(
-        string root, Func<DateTime>? utcNow = null, Encryption? encryption = null, Func<Guid>? newId = null)
+    public TodoStore(string root, Func<DateTime>? utcNow = null, Func<Guid>? newId = null)
     {
         this.root = Path.GetFullPath(root);
         this.utcNow = utcNow ?? (() => DateTime.UtcNow);
-        this.encryption = encryption;
         this.newId = newId ?? Guid.NewGuid;
     }
 
@@ -155,7 +151,7 @@ internal sealed class TodoStore
         List<TodoJson?>? items;
         try
         {
-            byte[] bytes = Encryption.ReadBytes(encryption, path, Vault.KindTodos);
+            byte[] bytes = File.ReadAllBytes(path);
             items = JsonSerializer.Deserialize<List<TodoJson?>>(bytes, JsonOptions);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException
@@ -217,7 +213,7 @@ internal sealed class TodoStore
         {
             using (FileStream stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
-                stream.Write(Encryption.Protect(encryption, Vault.KindTodos, Utf8NoBom.GetBytes(json)));
+                stream.Write(Utf8NoBom.GetBytes(json));
             }
 
             File.Move(temp, FilePath, overwrite: true);

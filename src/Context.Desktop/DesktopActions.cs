@@ -17,7 +17,6 @@ internal enum ActionKind
 internal enum ActionReason
 {
     None,
-    Locked,
     Busy,
     NotConfirmed,
     Changed,
@@ -67,13 +66,11 @@ internal sealed record ActionResult
 
 /// <summary>
 /// The only place the desktop app changes data. Every action calls the same Core stores and checks as the console,
-/// never throws, runs one at a time (a call made while another runs is refused as <see cref="ActionReason.Busy"/>),
-/// is refused as <see cref="ActionReason.Locked"/> without touching a file while <c>encryption.json</c> exists, and
+/// never throws, runs one at a time (a call made while another runs is refused as <see cref="ActionReason.Busy"/>) and
 /// refreshes <see cref="DesktopState"/> after a change. Components call it only from event handlers.
 /// </summary>
 internal sealed class DesktopActions
 {
-    public const string LockedText = "Your data is encrypted. Nothing was done.";
     public const string BusyText = "Another change is still running. Nothing was done.";
     public const string NotConfirmedText = "Not confirmed. Nothing was done.";
     public const string TodosChangedText = "The todo list changed. Nothing was done.";
@@ -89,15 +86,13 @@ internal sealed class DesktopActions
     /// <summary>The largest note text <see cref="SaveNote"/> writes (5 MB, as for imports).</summary>
     public const long MaxNoteBytes = NoteStore.MaxEditBytes;
 
-    private readonly Encryption encryption;
     private readonly NoteStore notes;
     private readonly TodoStore todos;
     private readonly DesktopState state;
     private int running;
 
-    public DesktopActions(Encryption encryption, NoteStore notes, TodoStore todos, DesktopState state)
+    public DesktopActions(NoteStore notes, TodoStore todos, DesktopState state)
     {
-        this.encryption = encryption;
         this.notes = notes;
         this.todos = todos;
         this.state = state;
@@ -150,11 +145,6 @@ internal sealed class DesktopActions
 
     private async Task<ActionResult> Run(Func<ActionResult> action)
     {
-        if (IsLocked())
-        {
-            return Refused(ActionReason.Locked, LockedText);
-        }
-
         if (Interlocked.CompareExchange(ref running, 1, 0) != 0)
         {
             return Refused(ActionReason.Busy, BusyText);
@@ -168,7 +158,7 @@ internal sealed class DesktopActions
                 result = await Task.Run(() =>
                 {
                     BeforeWrite?.Invoke();
-                    return IsLocked() ? Refused(ActionReason.Locked, LockedText) : action();
+                    return action();
                 });
             }
             catch (Exception)
@@ -193,19 +183,6 @@ internal sealed class DesktopActions
         finally
         {
             Volatile.Write(ref running, 0);
-        }
-    }
-
-    // Any doubt counts as locked, so nothing is touched.
-    private bool IsLocked()
-    {
-        try
-        {
-            return encryption.IsConfigured;
-        }
-        catch (Exception)
-        {
-            return true;
         }
     }
 

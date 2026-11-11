@@ -35,6 +35,24 @@ public class CommandRegistryTests
         Assert.Throws<ArgumentException>(() => registry.Register("/Help", "Again", Nothing));
     }
 
+    // 132 AC-2: after the console's registrations there is no /encrypt and no /decrypt, in any spelling.
+    [Fact]
+    public void ConsoleRegistrations_HaveNoEncryptAndNoDecrypt()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "context-registry-" + Guid.NewGuid().ToString("N"));
+        CommandRegistry registry = new ConsoleSession(root).Registry;
+
+        Assert.False(registry.TryGet("/encrypt", out _));
+        Assert.False(registry.TryGet("/Decrypt", out _));
+        Assert.Equal(
+            [
+                "/calendar-link", "/current", "/done", "/export", "/help", "/import", "/links", "/new", "/notes",
+                "/open", "/quit", "/tags", "/todo",
+            ],
+            registry.Commands.Select(c => c.Name).OrderBy(n => n, StringComparer.Ordinal));
+        Assert.False(Directory.Exists(root));
+    }
+
     [Theory]
     [InlineData("note")]
     [InlineData("/")]

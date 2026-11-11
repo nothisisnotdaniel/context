@@ -46,11 +46,12 @@ public sealed class NoteEditorTests : IDisposable
     [Fact]
     public async Task Open_Unreadable_RedLineNoMount()
     {
-        Directory.CreateDirectory(data.Root);
-        File.WriteAllBytes(Path.Combine(data.Root, "Bad.md"), [0x00, 0x43, 0x54, 0x58, 0x45, 0x01, 1, 2, 3, 4]);
+        data.WriteNote("Bad", "text");
         EditorJs js = new EditorJs(data.Bunit);
 
         await data.RefreshAsync();
+        using FileStream held = new FileStream(
+            Path.Combine(data.Root, "Bad.md"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
         IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p.Add(e => e.Name, "Bad"));
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".unreadable")));
 
@@ -170,22 +171,6 @@ public sealed class NoteEditorTests : IDisposable
 
         Assert.False(File.Exists(Path.Combine(data.Root, "Plan.md")));
         Assert.Equal("Plan no longer exists. Nothing was saved.", cut.Find(".status").TextContent);
-    }
-
-    // AC-6: with encryption.json the save is refused with the locked text.
-    [Fact]
-    public async Task Save_Locked_RefusedLockedText()
-    {
-        data.WriteNote("Plan", "# Plan\n");
-        EditorJs js = new EditorJs(data.Bunit);
-        IRenderedComponent<NoteEditor> cut = await Render("Plan");
-        js.Edit("# Plan\n\nMine\n");
-        Vault.Create(data.Root, "a long enough passphrase", 1000).Dispose();
-
-        await cut.Find("button.save").ClickAsync(new MouseEventArgs());
-
-        Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
-        Assert.Equal(DesktopActions.LockedText, cut.Find(".status").TextContent);
     }
 
     // AC-9: a link to a missing note shows the grey line.

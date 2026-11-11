@@ -1,4 +1,5 @@
 using System.Net;
+using System.Reflection;
 using System.Text;
 
 namespace Context.Tests;
@@ -11,7 +12,6 @@ public sealed class CliTests : IDisposable
     private readonly string parent;
     private readonly string root;
     private readonly string outside;
-    private readonly Dictionary<string, string> env = new(StringComparer.Ordinal);
     private FakeHttpHandler http = FakeHttpHandler.Ok(CalendarFeedTests.Ics);
 
     public CliTests()
@@ -35,23 +35,11 @@ public sealed class CliTests : IDisposable
         public string[] ErrLines => Err.Split('\n', StringSplitOptions.RemoveEmptyEntries);
     }
 
-    private Result Run(params string[] args) => RunWithStdin(string.Empty, args);
-
-    private Result RunWithStdin(string input, params string[] args)
+    private Result Run(params string[] args)
     {
         StringWriter stdout = new StringWriter();
         StringWriter stderr = new StringWriter();
-        Cli cli = new Cli(
-            stdout,
-            stderr,
-            new StringReader(input),
-            name => env.TryGetValue(name, out string? value) ? value : null,
-            root,
-            () => Today,
-            () => Now,
-            http,
-            VaultTests.TestIterations,
-            TimeZoneInfo.Utc);
+        Cli cli = new Cli(stdout, stderr, root, () => Today, () => Now, http, TimeZoneInfo.Utc);
         int code = cli.Run(args);
         return new Result(code, stdout.ToString(), stderr.ToString());
     }
@@ -91,14 +79,6 @@ public sealed class CliTests : IDisposable
         Assert.EndsWith("Run 'context help'.", result.ErrLines[0], StringComparison.Ordinal);
     }
 
-    private void EncryptedRoot(Action<Encryption>? write = null)
-    {
-        Directory.CreateDirectory(root);
-        Encryption encryption = SampleData.On(root);
-        write?.Invoke(encryption);
-        encryption.Use(null);
-    }
-
     // AC-1, AC-2 ---------------------------------------------------------------------------------
 
     [Theory]
@@ -125,6 +105,102 @@ public sealed class CliTests : IDisposable
         Assert.False(Directory.Exists(root));
     }
 
+    // 132 AC-4: help says nothing about a secret to give, and every line is a command line.
+    [Fact]
+    public void Help_MentionsNoSecretAndOnlyListsCommands()
+    {
+        Result result = Run("help");
+
+        Assert.DoesNotContain("pass", result.Out, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("encrypt", result.Out, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("stdin", result.Out, StringComparison.OrdinalIgnoreCase);
+        Assert.All(
+            result.Out.Split('\n', StringSplitOptions.RemoveEmptyEntries),
+            line => Assert.StartsWith("context ", line, StringComparison.Ordinal));
+    }
+
+    // 132 AC-4: a leftover key file changes nothing: every command runs as on any folder, with nothing on stderr,
+    // and the file stays as it was.
+    [Fact]
+    public void LeftoverKeyFile_IsIgnored_CommandsRunAndStderrStaysEmpty()
+    {
+        WriteNote("Plan", "# Plan\n#work\n");
+        string leftover = Path.Combine(root, RemovedFeature.KeyFileName);
+        File.WriteAllText(leftover, "{ \"version\": 1 }");
+        string target = Path.Combine(outside, "plan.md");
+
+        Result notes = Run("notes");
+        Result[] others =
+        [
+            Run("note", "show", "Plan"), Run("todo", "add", "today", "x"), Run("todos"), Run("tags"),
+            Run("links", "Plan"), Run("capture", "hello"), Run("export", "Plan", target), Run("version"), Run("help"),
+        ];
+
+        Assert.Equal((0, "Plan\n", string.Empty), (notes.Code, notes.Out, notes.Err));
+        Assert.All(others, r => Assert.Equal((0, string.Empty), (r.Code, r.Err)));
+        Assert.Equal("{ \"version\": 1 }", File.ReadAllText(leftover));
+        Assert.True(File.Exists(Path.Combine(root, TagIndex.FileName)));
+        Assert.Equal("# Plan\n#work\n", File.ReadAllText(target));
+    }
+
+    // 132 AC-4: the command line has no way to read stdin or the environment: no constructor takes a reader or an
+    // environment lookup, and the source names neither (Console. is checked by CliSource_MentionsNoSpectreAndNoConsole).
+    [Fact]
+    public void Cli_CannotReadStdinOrTheEnvironment()
+    {
+        ConstructorInfo[] constructors = typeof(Cli).GetConstructors(
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        FieldInfo[] fields = typeof(Cli).GetFields(BindingFlags.Instance | BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
+
+        Assert.NotEmpty(constructors);
+        Assert.DoesNotContain(
+            constructors.SelectMany(c => c.GetParameters()),
+            p => typeof(TextReader).IsAssignableFrom(p.ParameterType) || p.ParameterType == typeof(Func<string, string?>));
+        Assert.DoesNotContain(fields, f => typeof(TextReader).IsAssignableFrom(f.FieldType));
+        string source = CliSource();
+        Assert.DoesNotContain("TextReader", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("stdin.", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Environment.", source, StringComparison.Ordinal);
+        Assert.DoesNotContain(RemovedFeature.Variable, source, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // 132 AC-4: the removed options are unknown options like any other: exit 2, not echoed, folder untouched.
+    [Theory]
+    [InlineData("--frobnicate")]
+    [InlineData(RemovedFeature.Option + "-stdin", "notes")]
+    [InlineData(RemovedFeature.Option, "topSecret55aa", "notes")]
+    [InlineData(RemovedFeature.Option + "=topSecret55aa", "notes")]
+    [InlineData(RemovedFeature.OptionUpper + "=topSecret55aa", "notes")]
+    public void RemovedOptions_AreUsageErrorsLikeAnyUnknownOption(params string[] args)
+    {
+        Result result = Run(args);
+
+        AssertUsage(result);
+        Assert.Equal("Unknown command: that option. Run 'context help'.", result.ErrLines[0]);
+        Assert.DoesNotContain("topSecret55aa", result.Out + result.Err, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(root));
+    }
+
+    // 132 AC-7: a note that starts with the old magic bytes is shown like any other note.
+    [Fact]
+    public void NoteShow_FileStartingWithTheOldMagicBytes_IsShownAsText()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllBytes(Path.Combine(root, "Old.md"), [.. RemovedFeature.Magic, .. "old-marker"u8]);
+        File.WriteAllBytes(Path.Combine(root, TodoStore.FileName), [.. RemovedFeature.Magic, 1, 2]);
+
+        Result shown = Run("note", "show", "Old");
+        Result listed = Run("notes");
+        Result todos = Run("todos");
+
+        Assert.Equal((0, string.Empty), (shown.Code, shown.Err));
+        Assert.Contains("CTXE", shown.Out, StringComparison.Ordinal);
+        Assert.Contains("old-marker", shown.Out, StringComparison.Ordinal);
+        Assert.DoesNotContain('\0', shown.Out);
+        Assert.Equal((0, "Old\n", string.Empty), (listed.Code, listed.Out, listed.Err));
+        AssertError(todos, 1, "Can't read todos.json.");
+    }
+
     // 131 AC-10
     [Theory]
     [InlineData("version")]
@@ -140,23 +216,6 @@ public sealed class CliTests : IDisposable
         Assert.Equal("Context 0.1.0\n", result.Out);
         Assert.Equal("Context " + AppVersion.Current + "\n", result.Out);
         Assert.False(Directory.Exists(root));
-    }
-
-    // 131 AC-10
-    [Theory]
-    [InlineData("version")]
-    [InlineData("--version")]
-    public void Version_WithEncryptionOn_AsksNoPassphraseAndChangesNothing(string arg)
-    {
-        EncryptedRoot();
-        Dictionary<string, string> before = Snapshot();
-
-        Result result = Run(arg);
-
-        Assert.Equal(0, result.Code);
-        Assert.Equal(string.Empty, result.Err);
-        Assert.Equal("Context 0.1.0\n", result.Out);
-        Assert.Equal(before, Snapshot());
     }
 
     // 131 AC-10
@@ -177,17 +236,6 @@ public sealed class CliTests : IDisposable
         Assert.Equal(string.Empty, result.Out);
     }
 
-    [Fact]
-    public void Help_WithEncryptionOn_AsksNoPassphrase()
-    {
-        EncryptedRoot();
-
-        Result result = Run("help");
-
-        Assert.Equal(0, result.Code);
-        Assert.Equal(string.Empty, result.Err);
-    }
-
     [Theory]
     [InlineData("frobnicate")]
     [InlineData("/notes")]
@@ -197,20 +245,6 @@ public sealed class CliTests : IDisposable
 
         AssertUsage(result);
         Assert.False(Directory.Exists(root));
-    }
-
-    [Fact]
-    public void UnknownCommand_WithEncryptionOn_AsksNoPassphrase()
-    {
-        EncryptedRoot();
-
-        AssertUsage(Run("frobnicate"));
-    }
-
-    [Fact]
-    public void NoCommand_AfterPassphraseOption_IsUsageError()
-    {
-        AssertUsage(Run(Cli.PassphraseStdin));
     }
 
     [Fact]
@@ -386,21 +420,6 @@ public sealed class CliTests : IDisposable
     public void MissingOrExtraArguments_AreUsageErrors(params string[] args)
     {
         AssertUsage(Run(args));
-    }
-
-    [Fact]
-    public void NoteShow_Undecryptable_CantRead()
-    {
-        Directory.CreateDirectory(root);
-        File.WriteAllBytes(Path.Combine(root, "Locked.md"), [0x00, 0x43, 0x54, 0x58, 0x45, 0x01, 1, 2, 3]);
-
-        Result result = Run("note", "show", "Locked");
-
-        Assert.Equal(1, result.Code);
-        Assert.Equal(string.Empty, result.Out);
-        // The first line is AC-13's warning, the error is the one line that stops the command.
-        Assert.Equal("Can't read Locked.", result.ErrLines[^1]);
-        Assert.Equal(2, result.ErrLines.Length);
     }
 
     // AC-7 ---------------------------------------------------------------------------------------
@@ -627,6 +646,7 @@ public sealed class CliTests : IDisposable
 
         Result result = Run("export", "plan", target);
 
+        // 132 AC-8: nothing on stderr, so no warning about the copy.
         Assert.Equal((0, "Exported Plan.\n", string.Empty), (result.Code, result.Out, result.Err));
         Assert.Equal("# Plan\nbody", File.ReadAllText(target));
     }
@@ -666,20 +686,6 @@ public sealed class CliTests : IDisposable
         AssertError(Run("export", "Nope", Path.Combine(outside, "x.md")), 1, "No note named Nope.");
     }
 
-    [Fact]
-    public void Export_WithEncryption_WarnsOnStderrAndExitsZero()
-    {
-        EncryptedRoot(e => new NoteStore(root, e).Save("Plan", Encoding.UTF8.GetBytes(SampleData.NoteMarker)));
-        env[Cli.PassphraseVariable] = VaultTests.Passphrase;
-        string target = Path.Combine(outside, "plan.md");
-
-        Result result = Run("export", "Plan", target);
-
-        Assert.Equal((0, "Exported Plan.\n"), (result.Code, result.Out));
-        Assert.Equal(["This copy is not encrypted."], result.ErrLines);
-        Assert.Equal(SampleData.NoteMarker, File.ReadAllText(target));
-    }
-
     // AC-10 --------------------------------------------------------------------------------------
 
     [Fact]
@@ -696,125 +702,6 @@ public sealed class CliTests : IDisposable
         Assert.Contains("line �[31mred��\nnext", all, StringComparison.Ordinal);
         // Tabs are the column separators the CLI writes itself (a tab from disk is cleaned into spaces).
         Assert.DoesNotContain(all, c => char.IsControl(c) && c != '\n' && c != '\t');
-    }
-
-    // AC-11 --------------------------------------------------------------------------------------
-
-    [Fact]
-    public void Encrypted_UnlocksFromEnvironment()
-    {
-        EncryptedRoot(e => new NoteStore(root, e).Save("Plan", Encoding.UTF8.GetBytes("secret text")));
-        env[Cli.PassphraseVariable] = VaultTests.Passphrase;
-
-        Result result = Run("note", "show", "Plan");
-
-        Assert.Equal((0, "secret text\n", string.Empty), (result.Code, result.Out, result.Err));
-    }
-
-    [Fact]
-    public void Encrypted_UnlocksFromStdinFirstLine_BeforeEnvironment()
-    {
-        EncryptedRoot(e => new NoteStore(root, e).Save("Plan", Encoding.UTF8.GetBytes("secret text")));
-        env[Cli.PassphraseVariable] = "wrong one entirely";
-
-        Result result = RunWithStdin(VaultTests.Passphrase + "\r\nsecond line\n", Cli.PassphraseStdin, "capture", "x");
-
-        Assert.Equal((0, "Captured.\n", string.Empty), (result.Code, result.Out, result.Err));
-        Assert.True(Vault.IsEncrypted(File.ReadAllBytes(Path.Combine(root, "inbox.md"))));
-    }
-
-    [Fact]
-    public void Encrypted_NoPassphrase_IsErrorAndWritesNothing()
-    {
-        EncryptedRoot();
-        Dictionary<string, string> before = Snapshot();
-
-        AssertError(Run("capture", "x"), 1, "Encryption is on: set CONTEXT_PASSPHRASE or use --passphrase-stdin.");
-        AssertError(
-            RunWithStdin(string.Empty, Cli.PassphraseStdin, "notes"),
-            1,
-            "Encryption is on: set CONTEXT_PASSPHRASE or use --passphrase-stdin.");
-        Assert.Equal(before, Snapshot());
-    }
-
-    [Fact]
-    public void Encrypted_WrongPassphrase_IsErrorAndNeverShown()
-    {
-        EncryptedRoot();
-        Dictionary<string, string> before = Snapshot();
-        const string Wrong = "wrongSecret91c4";
-        env[Cli.PassphraseVariable] = Wrong;
-
-        Result fromEnv = Run("todo", "add", "today", "x");
-        Result fromStdin = RunWithStdin(Wrong + "\n", Cli.PassphraseStdin, "capture", "x");
-
-        AssertError(fromEnv, 1, "Wrong passphrase.");
-        AssertError(fromStdin, 1, "Wrong passphrase.");
-        Assert.Equal(before, Snapshot());
-        Assert.DoesNotContain(Wrong, fromEnv.Out + fromEnv.Err + fromStdin.Out + fromStdin.Err, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Encrypted_PassphraseNeverInOutput()
-    {
-        EncryptedRoot();
-        env[Cli.PassphraseVariable] = VaultTests.Passphrase;
-
-        Result result = Run("capture", "x");
-
-        Assert.Equal(0, result.Code);
-        Assert.DoesNotContain(VaultTests.Passphrase, result.Out + result.Err, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Encrypted_BadKeyFile_FixedMessage()
-    {
-        Directory.CreateDirectory(root);
-        File.WriteAllText(Vault.KeyFilePath(root), "{ broken");
-        env[Cli.PassphraseVariable] = VaultTests.Passphrase;
-        Dictionary<string, string> before = Snapshot();
-
-        AssertError(Run("notes"), 1, "Can't read encryption.json.");
-        Assert.Equal(before, Snapshot());
-    }
-
-    // AC-12 --------------------------------------------------------------------------------------
-
-    [Theory]
-    [InlineData("--passphrase=topSecret55aa", "notes")]
-    [InlineData("--passphrase", "topSecret55aa", "notes")]
-    [InlineData("capture", "--passphrase=topSecret55aa")]
-    [InlineData("help", "--passphrase", "topSecret55aa")]
-    public void PassphraseArgument_IsRefused_AndNotEchoed(params string[] args)
-    {
-        Result result = RunWithStdin("topSecret55aa\n", args);
-
-        AssertUsage(result);
-        Assert.DoesNotContain("topSecret55aa", result.Out + result.Err, StringComparison.Ordinal);
-        Assert.False(Directory.Exists(root));
-    }
-
-    [Fact]
-    public void PassphraseStdin_AfterTheCommand_IsUsageError()
-    {
-        AssertUsage(Run("notes", Cli.PassphraseStdin));
-        Assert.False(Directory.Exists(root));
-    }
-
-    // AC-13 --------------------------------------------------------------------------------------
-
-    [Fact]
-    public void EncryptedFilesWithoutKeyFile_WarnAndCarryOn()
-    {
-        EncryptedRoot(e => new NoteStore(root, e).Save("Plan", Encoding.UTF8.GetBytes("x")));
-        File.Delete(Vault.KeyFilePath(root));
-
-        Result result = Run("notes");
-
-        Assert.Equal((0, "Plan\n"), (result.Code, result.Out));
-        Assert.Equal(
-            ["1 encrypted file but no encryption.json: new data is NOT encrypted. Restore it from a backup."],
-            result.ErrLines);
     }
 
     // AC-15 --------------------------------------------------------------------------------------
@@ -840,6 +727,13 @@ public sealed class CliTests : IDisposable
     [Fact]
     public void CliSource_MentionsNoSpectreAndNoConsole()
     {
+        string source = CliSource();
+        Assert.DoesNotContain("Spectre", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Console.", source, StringComparison.Ordinal);
+    }
+
+    private static string CliSource()
+    {
         DirectoryInfo? dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Context.slnx")))
         {
@@ -847,9 +741,7 @@ public sealed class CliTests : IDisposable
         }
 
         Assert.NotNull(dir);
-        string source = File.ReadAllText(Path.Combine(dir.FullName, "src", "Context", "Cli.cs"));
-        Assert.DoesNotContain("Spectre", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("Console.", source, StringComparison.Ordinal);
+        return File.ReadAllText(Path.Combine(dir.FullName, "src", "Context", "Cli.cs"));
     }
 
     // Round 2 ------------------------------------------------------------------------------------
@@ -875,53 +767,11 @@ public sealed class CliTests : IDisposable
     }
 
     [Fact]
-    public void PassphraseStdin_TooLong_IsRefusedWithoutUnlocking()
-    {
-        EncryptedRoot();
-        Dictionary<string, string> before = Snapshot();
-
-        Result result = RunWithStdin(new string('p', 100_000), Cli.PassphraseStdin, "notes");
-
-        AssertError(result, 1, $"The passphrase on stdin is longer than {Cli.MaxPassphraseLength} characters.");
-        Assert.Equal(before, Snapshot());
-    }
-
-    [Fact]
-    public void PassphraseStdin_UpToTheLimit_IsRead()
-    {
-        EncryptedRoot();
-        string longOne = new string('p', Cli.MaxPassphraseLength);
-
-        AssertError(RunWithStdin(longOne + "\r\n", Cli.PassphraseStdin, "notes"), 1, "Wrong passphrase.");
-    }
-
-    [Theory]
-    [InlineData("--Passphrase=topSecret55aa", "notes")]
-    [InlineData("--PASSPHRASE", "topSecret55aa")]
-    public void PassphraseArgument_AnyCase_IsRefused(params string[] args)
-    {
-        Result result = Run(args);
-
-        AssertUsage(result);
-        Assert.DoesNotContain("topSecret55aa", result.Err, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void UnknownOption_IsNotEchoed()
     {
         Result result = Run("--pasphrase=topSecret55aa", "notes");
 
         AssertUsage(result);
         Assert.DoesNotContain("topSecret55aa", result.Err, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void PassphraseStdin_TrailingCarriageReturnWithoutNewline_IsRemoved()
-    {
-        EncryptedRoot();
-
-        Result result = RunWithStdin(VaultTests.Passphrase + "\r", Cli.PassphraseStdin, "notes");
-
-        Assert.Equal((0, string.Empty), (result.Code, result.Err));
     }
 }

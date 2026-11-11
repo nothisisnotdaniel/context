@@ -36,6 +36,28 @@ public sealed class TagIndexTests : IDisposable
 
     private string DbPath => Path.Combine(root, TagIndex.FileName);
 
+    // 132 AC-6: the index is always the file <root>/context.db, and there is no in-memory mode to switch to.
+    [Fact]
+    public void Sync_AlwaysCreatesAndUsesContextDb_AndThereIsNoInMemoryMember()
+    {
+        WriteNote("Plan", "#work");
+        Assert.False(File.Exists(DbPath));
+
+        index.Sync(store);
+
+        Assert.True(File.Exists(DbPath));
+        Assert.Equal(DbPath, index.FilePath);
+        // Another instance sees what the first one stored without syncing: the data is in the file.
+        Assert.Equal(["Plan"], new TagIndex(root).NotesWithTag("work"));
+        System.Reflection.BindingFlags all = System.Reflection.BindingFlags.Instance
+            | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public
+            | System.Reflection.BindingFlags.NonPublic;
+        Assert.DoesNotContain(typeof(TagIndex).GetMembers(all), m => m.Name.Contains("Memory", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(
+            typeof(TagIndex).GetFields(all), f => f.FieldType == typeof(Microsoft.Data.Sqlite.SqliteConnection));
+        Assert.False(typeof(IDisposable).IsAssignableFrom(typeof(TagIndex)));
+    }
+
     private void WriteNote(string name, string text)
     {
         Directory.CreateDirectory(root);
@@ -392,70 +414,6 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal(7, UserVersion());
     }
 
-    // AC-4
-    [Fact]
-    public void Encrypted_IndexStaysInMemory_AndContextDbIsNeverCreated()
-    {
-        Encryption encryption = SampleData.On(root);
-        NoteStore encrypted = new NoteStore(root, encryption);
-        using TagIndex memory = new TagIndex(root, encryption);
-        encrypted.Save("Plan", "# Plan\n#work #[big plan]\n"u8.ToArray());
-        encrypted.Save("Other", "# Other\n#work\n"u8.ToArray());
-
-        memory.Sync(encrypted);
-
-        Assert.True(memory.InMemory);
-        Assert.Equal(["big plan", "work"], memory.Tags().Select(t => t.Tag));
-        Assert.Equal(["Other", "Plan"], memory.NotesWithTag("#work"));
-        Assert.Equal("Other", Assert.Single(memory.Links("Plan")).Note);
-        Assert.False(File.Exists(DbPath));
-        Assert.Empty(Directory.GetFiles(root, "context.db*"));
-    }
-
-    // AC-7
-    [Fact]
-    public void Encrypted_TamperedNote_HasNoTags_AndIsRetriedOnceFixed()
-    {
-        Encryption encryption = SampleData.On(root);
-        NoteStore encrypted = new NoteStore(root, encryption);
-        using TagIndex memory = new TagIndex(root, encryption);
-        NoteInfo note = encrypted.Save("Plan", "# Plan\n#work\n"u8.ToArray()).Note;
-        DateTime time = File.GetLastWriteTimeUtc(note.Path);
-        byte[] good = File.ReadAllBytes(note.Path);
-        byte[] tampered = SampleData.Tamper(note.Path);
-        File.SetLastWriteTimeUtc(note.Path, time);
-
-        memory.Sync(encrypted);
-
-        Assert.Empty(memory.Tags());
-        Assert.Equal(tampered, File.ReadAllBytes(note.Path));
-
-        // Same time stamp, but the note had no stored time, so it is read again.
-        File.WriteAllBytes(note.Path, good);
-        File.SetLastWriteTimeUtc(note.Path, time);
-        memory.Sync(encrypted);
-
-        Assert.Equal(["work"], memory.Tags().Select(t => t.Tag));
-    }
-
-    // AC-8: turning encryption off goes back to context.db.
-    [Fact]
-    public void AfterEncryptionIsTurnedOff_IndexUsesTheFileAgain()
-    {
-        Encryption encryption = SampleData.On(root);
-        using TagIndex switching = new TagIndex(root, encryption);
-        WriteNote("Plan", "#work");
-        switching.Sync(store);
-        Assert.False(File.Exists(DbPath));
-
-        encryption.Use(null);
-        switching.Sync(store);
-
-        Assert.False(switching.InMemory);
-        Assert.True(File.Exists(DbPath));
-        Assert.Equal(["work"], switching.Tags().Select(t => t.Tag));
-    }
-
     // 048 AC-4: the old constructor means a tag link only.
     [Fact]
     public void NoteLink_OldConstructor_IsTagOnly()
@@ -658,25 +616,6 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal(["Beta|To|False|"], index.Links("A").Select(Describe));
     }
 
-    // 048 AC-7
-    [Fact]
-    public void Encrypted_NoteLinks_WorkInMemory()
-    {
-        Encryption encryption = SampleData.On(root);
-        NoteStore encrypted = new NoteStore(root, encryption);
-        using TagIndex memory = new TagIndex(root, encryption);
-        encrypted.Save("Plan", "# Plan\n[[Other]] [[Missing]]\n"u8.ToArray());
-        encrypted.Save("Other", "# Other\n[[plan.md]]\n"u8.ToArray());
-
-        memory.Sync(encrypted);
-
-        Assert.True(memory.InMemory);
-        Assert.Equal(["Missing|To|True|", "Other|Both|False|"], memory.Links("Plan").Select(Describe));
-        Assert.Equal(["Plan|Both|False|"], memory.Links("Other").Select(Describe));
-        Assert.False(File.Exists(DbPath));
-        Assert.Empty(Directory.GetFiles(root, "context.db*"));
-    }
-
     // 048 AC-6: a database that isn't valid still throws and is left as it was.
     [Fact]
     public void Garbage_Database_LinksThrow_BytesUnchanged()
@@ -739,7 +678,7 @@ public sealed class TagIndexTests : IDisposable
         WriteNote("A", "#work");
         index.Sync(store);
         WriteNote("B", "#work");
-        TagIndex shortWait = new TagIndex(root, null, TimeSpan.FromMilliseconds(200));
+        TagIndex shortWait = new TagIndex(root, TimeSpan.FromMilliseconds(200));
         byte[] before = File.ReadAllBytes(DbPath);
 
         using (SqliteConnection other = OpenWithoutTimeout())

@@ -48,8 +48,8 @@ internal static class Inbox
     /// <summary>
     /// Appends <c>- yyyy-MM-dd HH:mm &lt;text&gt;\n</c> (<paramref name="now"/> as given, <paramref name="text"/>
     /// cleaned with <see cref="Clean"/>) to the inbox note, adding a missing final newline first, through
-    /// <see cref="NoteStore.ReadForEdit"/> and <see cref="NoteStore.SaveIfUnchanged"/> (temp file and move, encrypted
-    /// while encryption is on). A missing note is created as <c># inbox\n</c> plus the line. When the note changed on
+    /// <see cref="NoteStore.ReadForEdit"/> and <see cref="NoteStore.SaveIfUnchanged"/> (temp file
+    /// and move). A missing note is created as <c># inbox\n</c> plus the line. When the note changed on
     /// disk between reading and saving it is read again, at most <see cref="MaxRetries"/> more times. Throws
     /// <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> when the note can't be read or written.
     /// </summary>

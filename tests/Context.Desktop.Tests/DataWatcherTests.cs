@@ -17,7 +17,6 @@ public sealed class DataWatcherTests : IDisposable
     [InlineData("with space.Md")]
     [InlineData("todos.json")]
     [InlineData("calendar-link.ics")]
-    [InlineData("encryption.json")]
     [InlineData("calendar/work.ics")]
     [InlineData("calendar/WORK.ICS")]
     public void IsRelevant_DataFiles_True(string relative)
@@ -39,6 +38,7 @@ public sealed class DataWatcherTests : IDisposable
     [InlineData("calendar/notes.md")]
     [InlineData("calendar")]
     [InlineData("other.json")]
+    [InlineData(RemovedFeature.KeyFileName)]
     [InlineData(".md")]
     [InlineData("")]
     [InlineData("../Note.md")]

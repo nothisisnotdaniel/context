@@ -188,11 +188,11 @@ public sealed class TodoStoreTests : IDisposable
     public void Add_InjectedId_UsedUnlessEmptyOrTaken()
     {
         Guid fixedId = new Guid("11111111-2222-3333-4444-555555555555");
-        TodoStore store = new TodoStore(root, () => Start, newId: () => fixedId);
+        TodoStore store = new TodoStore(root, () => Start, () => fixedId);
 
         TodoItem first = store.Add("a", new DateOnly(2026, 11, 3));
         TodoItem second = store.Add("b", new DateOnly(2026, 11, 3));
-        TodoItem third = new TodoStore(root, () => Start, newId: () => Guid.Empty).Add("c", new DateOnly(2026, 11, 3));
+        TodoItem third = new TodoStore(root, () => Start, () => Guid.Empty).Add("c", new DateOnly(2026, 11, 3));
 
         Assert.Equal(fixedId, first.Id);
         Assert.NotEqual(fixedId, second.Id);
@@ -293,49 +293,34 @@ public sealed class TodoStoreTests : IDisposable
         Assert.Single(Directory.GetFiles(root));
     }
 
-    // AC-4
+    // 132 AC-7: a todos.json that starts with the old magic bytes is just a file that isn't JSON.
     [Fact]
-    public void Encrypted_AddAndCompleteWriteCiphertext_ListReadsIt()
+    public void FileStartingWithTheOldMagicBytes_IsUnreadableLikeAnyCorruptFile_AndNeverOverwritten()
     {
-        Encryption encryption = SampleData.On(root);
-        TodoStore store = new TodoStore(root, () => Start, encryption);
-
-        store.Add("Secret errand", new DateOnly(2026, 11, 3));
-        TodoItem second = store.Add("Second", new DateOnly(2026, 11, 4));
-        store.Complete(second.Id);
-
-        byte[] bytes = File.ReadAllBytes(FilePath);
-        Assert.True(Vault.IsEncrypted(bytes));
-        Assert.DoesNotContain("Secret errand", System.Text.Encoding.Latin1.GetString(bytes), StringComparison.Ordinal);
-        Assert.Equal(["Secret errand"], store.List().Select(t => t.Text));
-        Assert.Empty(Directory.GetFiles(root, "*.tmp"));
-    }
-
-    // AC-1
-    [Fact]
-    public void WithEncryptionOff_WritesTheSameBytesAsWithoutIt()
-    {
-        Guid id = Guid.NewGuid();
-        new TodoStore(root, () => Start, newId: () => id).Add("Buy milk", new DateOnly(2026, 11, 3));
-        byte[] expected = File.ReadAllBytes(FilePath);
-        File.Delete(FilePath);
-
-        new TodoStore(root, () => Start, new Encryption(root), () => id).Add("Buy milk", new DateOnly(2026, 11, 3));
-
-        Assert.Equal(expected, File.ReadAllBytes(FilePath));
-    }
-
-    // AC-7
-    [Fact]
-    public void Encrypted_TamperedFile_ThrowsTodoStoreException_AndIsNeverOverwritten()
-    {
-        Encryption encryption = SampleData.On(root);
-        TodoStore store = new TodoStore(root, () => Start, encryption);
-        store.Add("Secret", new DateOnly(2026, 11, 3));
-        byte[] tampered = SampleData.Tamper(FilePath);
+        Directory.CreateDirectory(root);
+        byte[] original = [0x00, 0x43, 0x54, 0x58, 0x45, 0x01, 0x02, 0x03];
+        File.WriteAllBytes(FilePath, original);
+        TodoStore store = Store();
 
         Assert.Throws<TodoStoreException>(() => store.List());
-        Assert.Throws<TodoStoreException>(() => store.Add("More", new DateOnly(2026, 11, 3)));
-        Assert.Equal(tampered, File.ReadAllBytes(FilePath));
+        Assert.Throws<TodoStoreException>(() => store.Add("x", new DateOnly(2026, 11, 3)));
+        Assert.Equal(original, File.ReadAllBytes(FilePath));
+        Assert.Single(Directory.GetFiles(root));
+    }
+
+    // 132 AC-9: todos.json is the plain JSON text, byte for byte.
+    [Fact]
+    public void Add_WritesPlainJsonBytes()
+    {
+        Guid id = new Guid("11111111-2222-3333-4444-555555555555");
+        new TodoStore(root, () => Start, () => id).Add("Buy milk", new DateOnly(2026, 11, 3));
+
+        byte[] bytes = File.ReadAllBytes(FilePath);
+
+        Assert.Equal((byte)'[', bytes[0]);
+        Assert.Equal(Encoding.UTF8.GetBytes(File.ReadAllText(FilePath)), bytes);
+        TodoItem todo = Assert.Single(Store().List());
+        Assert.Equal(id, todo.Id);
+        Assert.Equal("Buy milk", todo.Text);
     }
 }

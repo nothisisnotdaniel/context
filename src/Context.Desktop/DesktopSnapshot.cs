@@ -7,7 +7,6 @@ namespace Context;
 internal sealed record DesktopSnapshot
 {
     public DesktopSnapshot(
-        bool locked,
         bool failed,
         DateOnly today,
         CurrentView? current,
@@ -17,7 +16,6 @@ internal sealed record DesktopSnapshot
         bool notesUnreadable,
         string folder)
     {
-        Locked = locked;
         Failed = failed;
         Today = today;
         Current = current;
@@ -31,16 +29,13 @@ internal sealed record DesktopSnapshot
     /// <summary>Returns only the type name, so formatting a snapshot never prints its raw text.</summary>
     public override string ToString() => nameof(DesktopSnapshot);
 
-    /// <summary>True when <c>encryption.json</c> exists: nothing else was read and the window shows only the lock.</summary>
-    public bool Locked { get; }
-
     /// <summary>True when building the snapshot threw; the window shows a fixed error line.</summary>
     public bool Failed { get; }
 
     /// <summary>The day the snapshot is for (todo date classes compare against it).</summary>
     public DateOnly Today { get; }
 
-    /// <summary>The <c>/current</c> view, or <c>null</c> when <see cref="Locked"/> or <see cref="Failed"/>.</summary>
+    /// <summary>The <c>/current</c> view, or <c>null</c> when <see cref="Failed"/>.</summary>
     public CurrentView? Current { get; }
 
     /// <summary>Every todo in <see cref="TodoStore.List"/> order.</summary>
@@ -58,11 +53,7 @@ internal sealed record DesktopSnapshot
     /// <summary>The data folder (raw).</summary>
     public string Folder { get; }
 
-    /// <summary>The snapshot shown while the data is encrypted.</summary>
-    public static DesktopSnapshot ForLocked(string folder, DateOnly today) =>
-        new(true, false, today, null, [], false, [], false, folder);
-
     /// <summary>The snapshot shown when building one threw.</summary>
     public static DesktopSnapshot ForFailure(string folder, DateOnly today) =>
-        new(false, true, today, null, [], false, [], false, folder);
+        new(true, today, null, [], false, [], false, folder);
 }

@@ -122,18 +122,4 @@ public sealed class TodoEntryTests : IDisposable
         Assert.True(cut.Find(".add-result").ClassList.Contains("red"));
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
     }
-
-    // Locked (encryption.json appeared after rendering) writes nothing.
-    [Fact]
-    public async Task Add_Locked_WritesNothing()
-    {
-        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
-        Vault.Create(data.Root, "a long enough passphrase", 1000).Dispose();
-        await cut.Find("input.todo-text").InputAsync(new ChangeEventArgs { Value = "Secret" });
-
-        await cut.Find(".todo-entry button.add").ClickAsync(new MouseEventArgs());
-
-        Assert.False(File.Exists(Path.Combine(data.Root, TodoStore.FileName)));
-        Assert.Equal(DesktopActions.LockedText, cut.Find(".add-result").TextContent);
-    }
 }

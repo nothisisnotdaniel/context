@@ -2,11 +2,7 @@
 
 @if (Snapshot is { } snapshot)
 {
-    @if (snapshot.Locked)
-    {
-        <LockedPanel />
-    }
-    else if (snapshot.Failed)
+    @if (snapshot.Failed)
     {
         <p class="red failed" role="alert">Can't read the data folder.</p>
     }
