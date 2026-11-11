@@ -144,6 +144,9 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#110](backlog/110-narrow-the-node-check-in-the.md) Narrow the node check in the CI workflow test
 - [?] [#111](backlog/111-concurrency-and-timeout-for-the-release.md) Concurrency and timeout for the release workflow
 - [?] [#112](backlog/112-locked-package-restore-for-release-builds.md) Locked package restore for release builds
+- [?] [#113](backlog/113-refuse-removed-secret-options-after-a.md) Refuse removed secret options after a command
+- [?] [#114](backlog/114-owner-only-file-mode-for-all.md) Owner-only file mode for all data files
+- [?] [#115](backlog/115-bounded-reads-for-todos-calendar-link.md) Bounded reads for todos, calendar link and notes
 
 ## Dropped with the terminal UI
 
