@@ -1,34 +1,23 @@
 using System.Globalization;
-using System.Text;
 
 namespace Context;
 
 /// <summary>
 /// The scriptable command line: <c>Context &lt;command&gt; [args]</c> runs one command against the data folder and
 /// returns. Output is plain text: results on stdout, one error line on stderr. Exit codes: 0 success, 1 error,
-/// 2 usage error. With <c>encryption.json</c> the passphrase comes from <c>--passphrase-stdin</c> (the first line of
-/// stdin) or <see cref="PassphraseVariable"/>, never from an argument and never by prompting. This class writes
+/// 2 usage error. It never reads stdin or the environment and never prompts. This class writes
 /// through the given <see cref="TextWriter"/>s only, so it needs no terminal library.
 /// </summary>
 internal sealed class Cli
 {
-    /// <summary>The environment variable that holds the passphrase.</summary>
-    public const string PassphraseVariable = "CONTEXT_PASSPHRASE";
-
-    /// <summary>The option that reads the passphrase from the first line of stdin; only before the command.</summary>
-    public const string PassphraseStdin = "--passphrase-stdin";
-
     /// <summary>Exit code for success.</summary>
     public const int ExitOk = 0;
 
-    /// <summary>Exit code for an error (unreadable data, not found, wrong or missing passphrase).</summary>
+    /// <summary>Exit code for an error (unreadable data, not found).</summary>
     public const int ExitError = 1;
 
     /// <summary>Exit code for a usage error (unknown command, missing or bad arguments).</summary>
     public const int ExitUsage = 2;
-
-    /// <summary>The longest passphrase read from stdin; a longer first line is refused.</summary>
-    public const int MaxPassphraseLength = 1024;
 
     private const string DateFormat = "yyyy-MM-dd";
     private const string HelpHint = "Run 'context help'.";
@@ -55,19 +44,14 @@ internal sealed class Cli
 
     private readonly TextWriter stdout;
     private readonly TextWriter stderr;
-    private readonly TextReader stdin;
-    private readonly Func<string, string?> env;
     private readonly string folder;
     private readonly Func<DateOnly> today;
     private readonly Func<DateTime> now;
     private readonly HttpMessageHandler http;
-    private readonly int minIterations;
     private readonly TimeZoneInfo zone;
 
     /// <param name="stdout">Where results go.</param>
     /// <param name="stderr">Where error and warning lines go.</param>
-    /// <param name="stdin">Read only for <c>--passphrase-stdin</c>.</param>
-    /// <param name="env">Reads an environment variable (null when unset).</param>
     /// <param name="folder">The data folder.</param>
     /// <param name="today">The local date.</param>
     /// <param name="now">The local time, for capture lines and the calendar download.</param>
@@ -75,38 +59,30 @@ internal sealed class Cli
     public Cli(
         TextWriter stdout,
         TextWriter stderr,
-        TextReader stdin,
-        Func<string, string?> env,
         string folder,
         Func<DateOnly> today,
         Func<DateTime> now,
         HttpMessageHandler http)
-        : this(stdout, stderr, stdin, env, folder, today, now, http, Vault.MinUnlockIterations, TimeZoneInfo.Local)
+        : this(stdout, stderr, folder, today, now, http, TimeZoneInfo.Local)
     {
     }
 
-    /// <summary>Like the public constructor with a lower key-file minimum and a fixed zone (tests).</summary>
+    /// <summary>Like the public constructor with a fixed zone (tests).</summary>
     internal Cli(
         TextWriter stdout,
         TextWriter stderr,
-        TextReader stdin,
-        Func<string, string?> env,
         string folder,
         Func<DateOnly> today,
         Func<DateTime> now,
         HttpMessageHandler http,
-        int minIterations,
         TimeZoneInfo zone)
     {
         this.stdout = stdout;
         this.stderr = stderr;
-        this.stdin = stdin;
-        this.env = env;
         this.folder = folder;
         this.today = today;
         this.now = now;
         this.http = http;
-        this.minIterations = minIterations;
         this.zone = zone;
     }
 
@@ -134,41 +110,13 @@ internal sealed class Cli
 
     private int RunCommand(string[] args)
     {
-        // A passphrase in an argument would be visible in process lists and shell history: refuse it before
-        // anything is read, and never repeat it.
-        foreach (string arg in args)
-        {
-            if (string.Equals(arg, "--passphrase", StringComparison.OrdinalIgnoreCase)
-                || arg.StartsWith("--passphrase=", StringComparison.OrdinalIgnoreCase))
-            {
-                return Usage(
-                    $"A passphrase can't be given as an argument. Set {PassphraseVariable} or use {PassphraseStdin}.");
-            }
-        }
-
-        int start = 0;
-        bool passphraseFromStdin = false;
-        if (args.Length > 0 && args[0] == PassphraseStdin)
-        {
-            passphraseFromStdin = true;
-            start = 1;
-        }
-
-        for (int i = start + 1; i < args.Length; i++)
-        {
-            if (args[i] == PassphraseStdin)
-            {
-                return Usage($"{PassphraseStdin} goes before the command.");
-            }
-        }
-
-        if (args.Length <= start)
+        if (args.Length == 0)
         {
             return Usage("No command given.");
         }
 
-        string name = args[start].ToLowerInvariant();
-        string[] rest = args[(start + 1)..];
+        string name = args[0].ToLowerInvariant();
+        string[] rest = args[1..];
         if (name is "help" or "--help" or "-h")
         {
             return Help();
@@ -176,7 +124,7 @@ internal sealed class Cli
 
         if (name is "version" or "--version")
         {
-            // Like help: answered before the data folder or a passphrase is looked at.
+            // Like help: answered before the data folder is looked at.
             Out($"Context {AppVersion.Current}");
             return ExitOk;
         }
@@ -185,123 +133,11 @@ internal sealed class Cli
         if (action is null)
         {
             // An unknown option is not repeated: it could be a mistyped secret.
-            string shown = args[start].StartsWith('-') ? "that option" : OneLine(args[start]);
+            string shown = args[0].StartsWith('-') ? "that option" : OneLine(args[0]);
             return Usage(usage ?? $"Unknown command: {shown}.");
         }
 
-        Encryption encryption = new Encryption(folder, minIterations);
-        try
-        {
-            if (encryption.IsConfigured)
-            {
-                int? failed = Unlock(encryption, passphraseFromStdin);
-                if (failed is not null)
-                {
-                    return failed.Value;
-                }
-            }
-            else
-            {
-                int orphaned = encryption.EncryptedFilesWithoutKey();
-                if (orphaned > 0)
-                {
-                    string files = orphaned == 1 ? "1 encrypted file" : $"{orphaned} encrypted files";
-                    Warn($"{files} but no {Vault.FileName}: new data is NOT encrypted. Restore it from a backup.");
-                }
-            }
-
-            using Session session = new Session(this, encryption);
-            return action(session);
-        }
-        finally
-        {
-            encryption.Use(null);
-        }
-    }
-
-    // Returns null once unlocked, or the exit code after writing the error line. Nothing is written to disk.
-    private int? Unlock(Encryption encryption, bool fromStdin)
-    {
-        string? passphrase;
-        if (fromStdin)
-        {
-            passphrase = ReadPassphraseLine(out bool tooLong);
-            if (tooLong)
-            {
-                return Error($"The passphrase on stdin is longer than {MaxPassphraseLength} characters.");
-            }
-        }
-        else
-        {
-            passphrase = env(PassphraseVariable);
-        }
-
-        if (string.IsNullOrEmpty(passphrase))
-        {
-            return Error($"Encryption is on: set {PassphraseVariable} or use {PassphraseStdin}.");
-        }
-
-        try
-        {
-            encryption.Unlock(passphrase);
-            return null;
-        }
-        catch (WrongPassphraseException)
-        {
-            return Error("Wrong passphrase.");
-        }
-        catch (VaultException ex)
-        {
-            // A fixed text from Vault (bad or weak key file), never file content or the passphrase.
-            return Error(OneLine(ex.Message));
-        }
-    }
-
-    // The first line of stdin without its line break, read one character at a time so a huge input without a line
-    // break is never buffered: more than MaxPassphraseLength characters stops reading and sets tooLong.
-    private string? ReadPassphraseLine(out bool tooLong)
-    {
-        tooLong = false;
-        StringBuilder line = new StringBuilder();
-        while (true)
-        {
-            int c = stdin.Read();
-            if (c == -1)
-            {
-                if (line.Length == 0)
-                {
-                    return null;
-                }
-
-                break;
-            }
-
-            if (c == '\n')
-            {
-                break;
-            }
-
-            if (line.Length > MaxPassphraseLength)
-            {
-                tooLong = true;
-                return null;
-            }
-
-            line.Append((char)c);
-        }
-
-        if (line.Length > 0 && line[^1] == '\r')
-        {
-            line.Length--;
-        }
-
-        if (line.Length > MaxPassphraseLength)
-        {
-            tooLong = true;
-            return null;
-        }
-
-        return line.ToString();
+        return action(new Session(this));
     }
 
     // Checks the arguments of a data command and returns what to run, or null with a usage message (null when the
@@ -449,7 +285,6 @@ internal sealed class Cli
             Out($"context {usage.PadRight(width)}  {description}");
         }
 
-        Out($"With encryption on, set {PassphraseVariable} or put {PassphraseStdin} before the command.");
         return ExitOk;
     }
 
@@ -732,7 +567,7 @@ internal sealed class Cli
         }
         catch (InvalidDataException)
         {
-            return Error($"Can't import a file over 5 MB or an encrypted one: {shownSource}");
+            return Error($"Can't import a file over 5 MB: {shownSource}");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -797,11 +632,6 @@ internal sealed class Cli
                 : Error($"Can't write {shownTarget}.");
         }
 
-        if (session.Encryption.IsOn)
-        {
-            Warn("This copy is not encrypted.");
-        }
-
         Out($"Exported {shownName}.");
         return ExitOk;
     }
@@ -823,8 +653,6 @@ internal sealed class Cli
         stderr.Write('\n');
     }
 
-    private void Warn(string line) => Err(line);
-
     private int Done(string line)
     {
         Out(line);
@@ -843,21 +671,18 @@ internal sealed class Cli
         return ExitUsage;
     }
 
-    // The stores of one run, all sharing the run's Encryption, as in Program.cs.
-    private sealed class Session : IDisposable
+    // The stores of one run, built as in Program.cs.
+    private sealed class Session
     {
-        public Session(Cli cli, Encryption encryption)
+        public Session(Cli cli)
         {
-            Encryption = encryption;
-            Notes = new NoteStore(cli.folder, encryption);
-            Todos = new TodoStore(cli.folder, () => cli.now().ToUniversalTime(), encryption);
-            Index = new TagIndex(cli.folder, encryption);
-            Calendar = new CalendarStore(cli.folder, cli.zone, encryption);
-            CalendarLink link = new CalendarLink(cli.folder, encryption);
-            Feed = new CalendarFeed(cli.folder, link, cli.http, () => cli.now().ToUniversalTime(), encryption: encryption);
+            Notes = new NoteStore(cli.folder);
+            Todos = new TodoStore(cli.folder, () => cli.now().ToUniversalTime());
+            Index = new TagIndex(cli.folder);
+            Calendar = new CalendarStore(cli.folder, cli.zone);
+            CalendarLink link = new CalendarLink(cli.folder);
+            Feed = new CalendarFeed(cli.folder, link, cli.http, () => cli.now().ToUniversalTime());
         }
-
-        public Encryption Encryption { get; }
 
         public NoteStore Notes { get; }
 
@@ -868,7 +693,5 @@ internal sealed class Cli
         public CalendarStore Calendar { get; }
 
         public CalendarFeed Feed { get; }
-
-        public void Dispose() => Index.Dispose();
     }
 }

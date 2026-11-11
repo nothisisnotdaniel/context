@@ -38,6 +38,33 @@ public sealed class CalendarStoreTests : IDisposable
 
     private static string[] Titles(CalendarDay day) => day.Appointments.Select(a => a.Title).ToArray();
 
+    // 132 AC-7: an .ics file that starts with the old magic bytes is just a file that is not a calendar.
+    [Fact]
+    public void Day_FileStartingWithTheOldMagicBytes_IsUnreadableLikeAnyBadFile_OthersStillRead()
+    {
+        Write("good.ics", Event("Standup", ":20261029T090000"));
+        byte[] bytes = [0x00, 0x43, 0x54, 0x58, 0x45, 0x01, 0x02, 0x03];
+        string old = Path.Combine(folder, "old.ics");
+        File.WriteAllBytes(old, bytes);
+
+        CalendarDay day = Day();
+
+        Assert.Equal(["Standup"], Titles(day));
+        Assert.Equal(["old.ics"], day.Unreadable);
+        Assert.Equal(bytes, File.ReadAllBytes(old));
+    }
+
+    // 132 AC-7: with a calendar header after them, the old magic bytes are read as plain text like any others.
+    [Fact]
+    public void ReadText_ReturnsTheBytesAsText_WhateverTheyStartWith()
+    {
+        Directory.CreateDirectory(folder);
+        string path = Path.Combine(folder, "old.ics");
+        File.WriteAllBytes(path, [0x00, 0x43, 0x54, 0x58, 0x45, .. "\nBEGIN:VCALENDAR\n"u8]);
+
+        Assert.Equal("\0CTXE\nBEGIN:VCALENDAR\n", CalendarStore.ReadText(path));
+    }
+
     // AC-4
     [Fact]
     public void Day_NoFolder_IsEmpty()
@@ -148,43 +175,5 @@ public sealed class CalendarStoreTests : IDisposable
         File.WriteAllText(Path.Combine(folder, "bom.ics"), text, new System.Text.UTF8Encoding(true));
 
         Assert.Equal(["Café"], Titles(Day()));
-    }
-
-    // AC-4
-    [Fact]
-    public void Encrypted_IcsFileIsRead_AndPlainOneToo()
-    {
-        Encryption encryption = SampleData.On(root);
-        Directory.CreateDirectory(folder);
-        File.WriteAllBytes(
-            Path.Combine(folder, "enc.ics"),
-            encryption.Vault!.Encrypt(Vault.KindCalendar, System.Text.Encoding.UTF8.GetBytes(SampleData.Ics("Hidden"))));
-        File.WriteAllText(Path.Combine(folder, "plain.ics"), SampleData.Ics("Shown"));
-
-        CalendarDay day = new CalendarStore(root, TimeZoneInfo.Utc, encryption).Day(Today);
-
-        Assert.Equal(["Hidden", "Shown"], Titles(day));
-        Assert.Empty(day.Unreadable);
-    }
-
-    // AC-7
-    [Fact]
-    public void Encrypted_TamperedOrWrongKindOrLocked_IsUnreadable()
-    {
-        Encryption encryption = SampleData.On(root);
-        Directory.CreateDirectory(folder);
-        byte[] plain = System.Text.Encoding.UTF8.GetBytes(SampleData.Ics("Hidden"));
-        string tampered = Path.Combine(folder, "a.ics");
-        File.WriteAllBytes(tampered, encryption.Vault!.Encrypt(Vault.KindCalendar, plain));
-        SampleData.Tamper(tampered);
-        File.WriteAllBytes(Path.Combine(folder, "b.ics"), encryption.Vault.Encrypt(Vault.KindNote, plain));
-        byte[] before = File.ReadAllBytes(tampered);
-
-        CalendarDay day = new CalendarStore(root, TimeZoneInfo.Utc, encryption).Day(Today);
-        CalendarDay locked = new CalendarStore(root, TimeZoneInfo.Utc).Day(Today);
-
-        Assert.Equal(["a.ics", "b.ics"], day.Unreadable);
-        Assert.Equal(["a.ics", "b.ics"], locked.Unreadable);
-        Assert.Equal(before, File.ReadAllBytes(tampered));
     }
 }

@@ -108,48 +108,6 @@ public sealed class DesktopActionsTests : IDisposable
         Assert.Equal(files, Files());
     }
 
-    // AC-3: an encrypted todos.json without the key (no encryption.json, so not locked) can't be decrypted.
-    [Fact]
-    public async Task CompleteTodo_Undecryptable_FailedUnchanged()
-    {
-        data.AddTodo("Secret", DesktopFixture.Today);
-        string elsewhere = Path.Combine(Path.GetDirectoryName(data.Root)!, "keys");
-        Directory.CreateDirectory(elsewhere);
-        Encryption other = new Encryption(elsewhere, minIterations: 1000);
-        other.Use(Vault.Create(elsewhere, "a long enough passphrase", 1000));
-        string path = Path.Combine(data.Root, TodoStore.FileName);
-        File.WriteAllBytes(path, Encryption.Protect(other, Vault.KindTodos, File.ReadAllBytes(path)));
-        await data.RefreshAsync();
-        SortedDictionary<string, string> files = Files();
-
-        ActionResult result = await data.Actions!.CompleteTodo(
-            new TodoItem(Guid.NewGuid(), "Secret", DesktopFixture.Today, DateTime.UnixEpoch), new Confirmation());
-
-        Assert.Equal(ActionKind.Failed, result.Kind);
-        Assert.Equal(DesktopActions.TodosUnreadableText, result.Text);
-        Assert.Equal(files, Files());
-    }
-
-    // AC-4: with encryption.json every action is refused as Locked and no file under the root changes.
-    [Fact]
-    public async Task CompleteTodo_Locked_RefusedNothingTouched()
-    {
-        data.AddTodo("First", DesktopFixture.Today);
-        IReadOnlyList<TodoItem> list = new TodoStore(data.Root).List();
-        Vault.Create(data.Root, "a long enough passphrase", 1000).Dispose();
-        data.CreateState();
-        SortedDictionary<string, string> files = Files();
-        int builds = data.State!.Builds;
-
-        ActionResult confirmed = await data.Actions!.CompleteTodo(list[0], new Confirmation());
-        ActionResult unconfirmed = await data.Actions.CompleteTodo(list[0], null);
-
-        AssertRefused(confirmed, ActionReason.Locked, DesktopActions.LockedText);
-        AssertRefused(unconfirmed, ActionReason.Locked, DesktopActions.LockedText);
-        Assert.Equal(files, Files());
-        Assert.Equal(builds, data.State.Builds);
-    }
-
     // AC-4: a call made while another action runs is refused as Busy; the first one still finishes.
     [Fact]
     public async Task CompleteTodo_WhileRunning_SecondRefusedBusy()
@@ -210,6 +168,26 @@ public sealed class DesktopActionsTests : IDisposable
         Assert.Equal(ActionKind.Failed, thrown.Kind);
         Assert.Equal(DesktopActions.FailedText, thrown.Text);
         Assert.Equal(files, Files());
+    }
+
+    // 132 AC-5: a leftover key file of the removed feature refuses nothing: adding and completing a todo work.
+    [Fact]
+    public async Task WithALeftoverKeyFile_AddAndCompleteTodoSucceed()
+    {
+        string key = Path.Combine(data.Root, RemovedFeature.KeyFileName);
+        data.WriteFile(RemovedFeature.KeyFileName, "{}");
+        await data.RefreshAsync();
+
+        ActionResult added = await data.Actions!.AddTodo("Buy milk", DesktopFixture.Today);
+        string written = File.ReadAllText(Path.Combine(data.Root, TodoStore.FileName));
+        ActionResult completed = await data.Actions.CompleteTodo(data.Todos!.List()[0], new Confirmation());
+
+        Assert.Equal(ActionKind.Done, added.Kind);
+        Assert.StartsWith("[", written.TrimStart());
+        Assert.Contains("Buy milk", written);
+        Assert.Equal(ActionKind.Done, completed.Kind);
+        Assert.Empty(data.Todos.List());
+        Assert.Equal("{}", File.ReadAllText(key));
     }
 
     private static void AssertRefused(ActionResult result, ActionReason reason, string text)

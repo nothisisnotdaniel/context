@@ -26,23 +26,6 @@ public sealed class AppTests : IDisposable
         Assert.Equal(before, Files());
     }
 
-    // AC-7: the locked state renders no checkbox and changes no data file.
-    [Fact]
-    public async Task Render_Locked_NoCheckboxChangesNoFile()
-    {
-        WriteSample();
-        Vault.Create(data.Root, "a long enough passphrase", 1000).Dispose();
-        SortedDictionary<string, string> before = Files();
-
-        IRenderedComponent<App> cut = await data.RenderAsync<App>();
-        await data.State!.Refresh();
-
-        Assert.Single(cut.FindAll(".locked"));
-        Assert.Empty(cut.FindAll("button, input"));
-        Assert.DoesNotContain("Sample todo", cut.Markup);
-        Assert.Equal(before, Files());
-    }
-
     private void WriteSample()
     {
         data.WriteNote("Plan", "# Plan\n#work notes [[Other]]\n");

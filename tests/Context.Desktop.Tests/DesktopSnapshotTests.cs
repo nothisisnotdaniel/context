@@ -7,7 +7,7 @@ public sealed class DesktopSnapshotTests
     public void ToString_OnlyTypeName()
     {
         DesktopSnapshot snapshot = new DesktopSnapshot(
-            false, false, DesktopFixture.Today, null, [new TodoItem(Guid.NewGuid(), "secret", DesktopFixture.Today, DateTime.UtcNow)],
+            false, DesktopFixture.Today, null, [new TodoItem(Guid.NewGuid(), "secret", DesktopFixture.Today, DateTime.UtcNow)],
             false, [], false, "/secret/folder");
 
         Assert.Equal("DesktopSnapshot", snapshot.ToString());

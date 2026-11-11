@@ -15,21 +15,20 @@ internal static class Program
         static DateOnly Today() => DateOnly.FromDateTime(DateTime.Now);
 
         string folder = NoteStore.DefaultFolder();
-        Encryption encryption = new Encryption(folder);
-        NoteStore notes = new NoteStore(folder, encryption);
-        using TagIndex index = new TagIndex(folder, encryption);
-        TodoStore todos = new TodoStore(folder, encryption: encryption);
-        CalendarStore calendar = new CalendarStore(folder, TimeZoneInfo.Local, encryption);
-        CalendarLink calendarLink = new CalendarLink(folder, encryption);
+        NoteStore notes = new NoteStore(folder);
+        TagIndex index = new TagIndex(folder);
+        TodoStore todos = new TodoStore(folder);
+        CalendarStore calendar = new CalendarStore(folder, TimeZoneInfo.Local);
+        CalendarLink calendarLink = new CalendarLink(folder);
         using SocketsHttpHandler http = new SocketsHttpHandler
         {
             AllowAutoRedirect = true,
             MaxAutomaticRedirections = 5,
         };
-        CalendarFeed feed = new CalendarFeed(folder, calendarLink, http, () => DateTime.UtcNow, encryption: encryption);
+        CalendarFeed feed = new CalendarFeed(folder, calendarLink, http, () => DateTime.UtcNow);
         DesktopState state = new DesktopState(
-            encryption, notes, todos, index, calendar, feed, Today, () => DateTime.UtcNow);
-        DesktopActions actions = new DesktopActions(encryption, notes, todos, state);
+            notes, todos, index, calendar, feed, Today, () => DateTime.UtcNow);
+        DesktopActions actions = new DesktopActions(notes, todos, state);
 
         PhotinoBlazorAppBuilder builder = PhotinoBlazorAppBuilder.CreateDefault(args);
         builder.Services.AddSingleton(state);

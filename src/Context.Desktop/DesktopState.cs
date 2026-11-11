@@ -14,7 +14,6 @@ internal sealed class DesktopState
 
     // One user of the tag index at a time: the snapshot build and NotesWithTag.
     private readonly object indexGate = new();
-    private readonly Encryption encryption;
     private readonly NoteStore notes;
     private readonly TodoStore todos;
     private readonly TagIndex index;
@@ -31,7 +30,6 @@ internal sealed class DesktopState
     private volatile DesktopSnapshot? snapshot;
 
     public DesktopState(
-        Encryption encryption,
         NoteStore notes,
         TodoStore todos,
         TagIndex index,
@@ -40,7 +38,6 @@ internal sealed class DesktopState
         Func<DateOnly> today,
         Func<DateTime> utcNow)
     {
-        this.encryption = encryption;
         this.notes = notes;
         this.todos = todos;
         this.index = index;
@@ -112,13 +109,13 @@ internal sealed class DesktopState
 
     /// <summary>
     /// Reads the note called <paramref name="name"/> for editing (<see cref="NoteStore.ReadForEdit"/>) off the
-    /// calling thread. <c>null</c> when there is no such note, it can't be read or the data is encrypted.
+    /// calling thread. <c>null</c> when there is no such note, or it can't be read.
     /// </summary>
     public Task<EditableNote?> ReadForEdit(string name) => Task.Run(() =>
     {
         try
         {
-            if (encryption.IsConfigured || !notes.TryFind(name, out NoteInfo? found) || found is null)
+            if (!notes.TryFind(name, out NoteInfo? found) || found is null)
             {
                 return null;
             }
@@ -139,11 +136,6 @@ internal sealed class DesktopState
     {
         try
         {
-            if (encryption.IsConfigured)
-            {
-                return null;
-            }
-
             lock (indexGate)
             {
                 index.Sync(notes);
@@ -231,11 +223,6 @@ internal sealed class DesktopState
                 lastRefreshUtc = now;
             }
 
-            if (encryption.IsConfigured)
-            {
-                return DesktopSnapshot.ForLocked(folder, day);
-            }
-
             IReadOnlyList<NoteInfo> noteList;
             bool notesUnreadable = false;
             try
@@ -267,7 +254,7 @@ internal sealed class DesktopState
             }
 
             return new DesktopSnapshot(
-                false, false, day, current, todoList, todosUnreadable, noteList, notesUnreadable, folder);
+                false, day, current, todoList, todosUnreadable, noteList, notesUnreadable, folder);
         }
         catch (Exception)
         {

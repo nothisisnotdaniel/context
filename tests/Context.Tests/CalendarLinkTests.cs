@@ -161,34 +161,4 @@ public sealed class CalendarLinkTests : IDisposable
 
         Assert.DoesNotContain(FakeHttpHandler.PathToken, e.ToString(), StringComparison.Ordinal);
     }
-
-    // AC-4
-    [Fact]
-    public void Encrypted_SetWritesCiphertext_GetReadsIt()
-    {
-        Encryption encryption = SampleData.On(root);
-        CalendarLink link = new CalendarLink(root, encryption);
-
-        link.Set(FakeHttpHandler.Link);
-
-        byte[] bytes = File.ReadAllBytes(link.FilePath);
-        Assert.True(Vault.IsEncrypted(bytes));
-        Assert.DoesNotContain(
-            FakeHttpHandler.PathToken, System.Text.Encoding.Latin1.GetString(bytes), StringComparison.Ordinal);
-        Assert.Equal(FakeHttpHandler.Link, link.Get()!.AbsoluteUri);
-    }
-
-    // AC-7
-    [Fact]
-    public void Encrypted_TamperedFile_ThrowsCalendarLinkException_WithoutTheLink()
-    {
-        Encryption encryption = SampleData.On(root);
-        CalendarLink link = new CalendarLink(root, encryption);
-        link.Set(FakeHttpHandler.Link);
-        SampleData.Tamper(link.FilePath);
-
-        CalendarLinkException ex = Assert.Throws<CalendarLinkException>(() => link.Get());
-
-        Assert.DoesNotContain(FakeHttpHandler.PathToken, ex.ToString(), StringComparison.Ordinal);
-    }
 }

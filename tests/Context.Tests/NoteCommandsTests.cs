@@ -616,7 +616,7 @@ public sealed class NoteCommandsTests : IDisposable
         Assert.Equal(0, exitCode);
         Assert.Equal(new System.Text.UTF8Encoding(false).GetBytes("# Big plan\nÜmlaut text\n"), File.ReadAllBytes(target));
         Assert.Contains("Exported Big plan to", output);
-        Assert.DoesNotContain("not encrypted", output);
+        Assert.DoesNotContain("not encrypted", output, StringComparison.OrdinalIgnoreCase);
     }
 
     // AC-9
@@ -661,35 +661,23 @@ public sealed class NoteCommandsTests : IDisposable
         Assert.Contains("/export <note> <path>", output);
     }
 
-    // AC-9: in encrypted mode the copy is plain, and the hint says so.
-    [Fact]
-    public void Export_Encrypted_WritesPlainAndWarns()
-    {
-        using Session session = new Session(root);
-        string target = Path.Combine(parent, "plan.md");
-
-        session.Run("/encrypt", VaultTests.Passphrase, VaultTests.Passphrase, "/new Plan", $"/export Plan {target}");
-
-        Assert.Equal("# Plan\n"u8.ToArray(), File.ReadAllBytes(target));
-        Assert.Contains(RedStart() + "This copy is not encrypted.", session.Console.Output);
-        Assert.True(Vault.IsEncrypted(File.ReadAllBytes(Path.Combine(root, "Plan.md"))));
-    }
-
     // AC-10
     [Fact]
     public void Import_CreatesNoteNamedAfterFile_SourceUntouched()
     {
         string source = Path.Combine(parent, "Meeting notes.md");
         File.WriteAllText(source, "# Meeting\n#work\n");
-        File.SetLastWriteTimeUtc(source, SampleData.Modified);
+        DateTime modified = new DateTime(2026, 10, 1, 8, 30, 0, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(source, modified);
 
         (_, string output) = Run(false, $"/import {source}", "/open Meeting notes");
 
         Assert.Contains("Imported Meeting notes", output);
+        Assert.DoesNotContain("and encrypted", output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("delete it if you don't need the plain copy", output);
         Assert.Equal("# Meeting\n#work\n", File.ReadAllText(Path.Combine(root, "Meeting notes.md")));
         Assert.Equal("# Meeting\n#work\n", File.ReadAllText(source));
-        Assert.Equal(SampleData.Modified, File.GetLastWriteTimeUtc(source));
+        Assert.Equal(modified, File.GetLastWriteTimeUtc(source));
     }
 
     // AC-10
@@ -703,53 +691,32 @@ public sealed class NoteCommandsTests : IDisposable
         (_, string output) = Run(false, $"/import {source}");
 
         Assert.Contains("Replaced Plan", output);
+        Assert.DoesNotContain("and encrypted", output, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("# New\n", File.ReadAllText(Path.Combine(root, "Plan.md")));
         Assert.Single(Directory.GetFiles(root));
     }
 
     // AC-10
     [Fact]
-    public void Import_Encrypted_StoresCiphertext()
-    {
-        string source = Path.Combine(parent, "Secret.md");
-        File.WriteAllText(source, "# Secret\nimportMarker9\n");
-        using Session session = new Session(root);
-
-        session.Run("/encrypt", VaultTests.Passphrase, VaultTests.Passphrase, $"/import {source}", "/open Secret");
-
-        byte[] stored = File.ReadAllBytes(Path.Combine(root, "Secret.md"));
-        Assert.True(Vault.IsEncrypted(stored));
-        Assert.Contains("Imported and encrypted Secret", AnsiWrites.Strip(session.Console.Output));
-        Assert.Contains("importMarker9", AnsiWrites.Strip(session.Console.Output));
-        Assert.Equal("# Secret\nimportMarker9\n", File.ReadAllText(source));
-    }
-
-    // AC-10
-    [Fact]
-    public void Import_InvalidNameMissingOrEncryptedOrInside_ShowsRedHint_ChangesNothing()
+    public void Import_InvalidNameMissingTooLargeOrInside_ShowsRedHint_ChangesNothing()
     {
         Directory.CreateDirectory(root);
         string reserved = Path.Combine(parent, "CON.md");
         File.WriteAllText(reserved, "x");
-        string encrypted = Path.Combine(parent, "enc.md");
-        using (Vault vault = Vault.Create(Path.Combine(parent, "v"), VaultTests.Passphrase, VaultTests.TestIterations))
-        {
-            File.WriteAllBytes(encrypted, vault.Encrypt(Vault.KindNote, [1, 2, 3]));
-        }
-
         string inside = Path.Combine(root, "x.md");
         File.WriteAllText(inside, "inside");
         string big = Path.Combine(parent, "big.md");
         File.WriteAllBytes(big, new byte[NoteStore.MaxImportBytes + 1]);
 
         (_, string output) = Run(
-            true, $"/import {reserved}", $"/import {Path.Combine(parent, "none.md")}", $"/import {encrypted}",
+            true, $"/import {reserved}", $"/import {Path.Combine(parent, "none.md")}",
             $"/import {inside}", $"/import {big}", "/import");
 
         string red = RedStart();
         Assert.Contains(red + "A note title can't be a name Windows reserves", output);
         Assert.Contains(red + "No such file:", output);
-        Assert.Contains(red + "Can't import a file over 5 MB or an encrypted one:", output);
+        Assert.Contains(red + "Can't import a file over 5 MB:", output);
+        Assert.DoesNotContain("encrypted", output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(red + "That file is already in the Context folder.", output);
         Assert.Contains(red + "Type ", output);
         Assert.Contains("/import <path>", output);
@@ -762,11 +729,31 @@ public sealed class NoteCommandsTests : IDisposable
     public void Open_UnreadableNote_ShowsCantRead()
     {
         WriteNote("Plan", "x");
-        using (Vault vault = Vault.Create(Path.Combine(parent, "v"), VaultTests.Passphrase, VaultTests.TestIterations))
-        {
-            File.WriteAllBytes(Path.Combine(root, "Plan.md"), vault.Encrypt(Vault.KindNote, [1]));
-        }
+        using FileStream held = new FileStream(
+            Path.Combine(root, "Plan.md"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
 
         AssertRedHint("/open Plan", "Can't read Plan.");
+    }
+
+    // 132 AC-7: a note that starts with the old magic bytes opens like any other note, and one with those bytes
+    // can be imported.
+    [Fact]
+    public void OldMagicBytes_OpenAndImportWorkLikeAnyOtherFile()
+    {
+        Directory.CreateDirectory(root);
+        byte[] bytes = [0x00, 0x43, 0x54, 0x58, 0x45, 0x01, .. "old-marker\n"u8];
+        File.WriteAllBytes(Path.Combine(root, "Old.md"), bytes);
+        string source = Path.Combine(parent, "Other.md");
+        File.WriteAllBytes(source, bytes);
+
+        (int exitCode, string output) = Run(false, "/open Old", $"/import {source}");
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("CTXE", output);
+        Assert.Contains("old-marker", output);
+        Assert.DoesNotContain("Can't read", output);
+        Assert.DoesNotContain("failed", output);
+        Assert.Contains("Imported Other", output);
+        Assert.Equal(bytes, File.ReadAllBytes(Path.Combine(root, "Other.md")));
     }
 }

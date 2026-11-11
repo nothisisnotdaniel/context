@@ -12,14 +12,13 @@ internal static class NoteCommands
     private const string DateFormat = "yyyy-MM-dd HH:mm";
 
     /// <summary>Adds <c>/new</c>, <c>/notes</c>, <c>/open</c>, <c>/export</c> and <c>/import</c> to <paramref name="registry"/>.</summary>
-    /// <param name="encryption">The session's encryption state, for the warnings of <c>/export</c> and <c>/import</c>.</param>
-    public static void Register(CommandRegistry registry, NoteStore store, Encryption? encryption = null)
+    public static void Register(CommandRegistry registry, NoteStore store)
     {
         registry.Register("/new", "Create a note", title => New(store, title));
         registry.Register("/notes", "List notes", _ => Render(store.List()));
         registry.Register("/open", "Open a note", name => Open(store, name));
-        registry.Register("/export", "Write a note to a plain file", argument => Export(store, encryption, argument));
-        registry.Register("/import", "Store a Markdown file as a note", path => Import(store, encryption, path));
+        registry.Register("/export", "Write a note to a plain file", argument => Export(store, argument));
+        registry.Register("/import", "Store a Markdown file as a note", path => Import(store, path));
     }
 
     private static CommandResult New(NoteStore store, string input)
@@ -107,7 +106,7 @@ internal static class NoteCommands
 
     // /export <note> <path>: the note name is the longest leading part (split at whitespace) that names a note,
     // the rest is the path. Writes a new plain file outside the Context folder, never over an existing one.
-    private static CommandResult Export(NoteStore store, Encryption? encryption, string argument)
+    private static CommandResult Export(NoteStore store, string argument)
     {
         const string Usage = "Type [bold]/export <note> <path>[/] to write a note to a file outside Context.";
         if (string.IsNullOrWhiteSpace(argument))
@@ -166,14 +165,12 @@ internal static class NoteCommands
                 : CommandResult.Error($"Can't write {shownTarget}.");
         }
 
-        // The warning goes first so a long path can't push it off the hint row.
-        string warning = encryption?.IsOn == true ? "[red]This copy is not encrypted.[/] " : string.Empty;
         return new CommandResult(
-            hint: new Markup($"{warning}[grey]Exported [steelblue1]{shownName}[/] to {shownTarget}[/]"));
+            hint: new Markup($"[grey]Exported [steelblue1]{shownName}[/] to {shownTarget}[/]"));
     }
 
     // /import <path>: stores a plain Markdown file as the note named after it. The source is only read.
-    private static CommandResult Import(NoteStore store, Encryption? encryption, string argument)
+    private static CommandResult Import(NoteStore store, string argument)
     {
         if (string.IsNullOrWhiteSpace(argument))
         {
@@ -205,7 +202,7 @@ internal static class NoteCommands
         }
         catch (InvalidDataException)
         {
-            return CommandResult.Error($"Can't import a file over 5 MB or an encrypted one: {shownSource}");
+            return CommandResult.Error($"Can't import a file over 5 MB: {shownSource}");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -223,7 +220,7 @@ internal static class NoteCommands
             return CommandResult.Error($"Can't save {Markup.Escape(SafeText.Clean(title))}. Nothing changed.");
         }
 
-        string how = (replaced ? "Replaced " : "Imported ") + (encryption?.IsOn == true ? "and encrypted " : string.Empty);
+        string how = replaced ? "Replaced " : "Imported ";
         return new CommandResult(hint: new Markup(
             $"[grey]{how}[steelblue1]{Markup.Escape(SafeText.Clean(note.Name))}[/]. "
             + $"The source is unchanged; delete it if you don't need the plain copy: {shownSource}[/]"));

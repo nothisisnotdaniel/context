@@ -137,24 +137,6 @@ public sealed class NoteStoreEditTests : IDisposable
         Assert.Empty(Directory.GetFiles(root));
     }
 
-    // With encryption on, the note is read decrypted and saved encrypted.
-    [Fact]
-    public void SaveIfUnchanged_Encrypted_StaysEncrypted()
-    {
-        Encryption encryption = new Encryption(root, minIterations: 1000);
-        encryption.Use(Vault.Create(Path.Combine(root, "vault"), "a long enough passphrase", 1000));
-        NoteStore encrypted = new NoteStore(root, encryption);
-        NoteInfo note = Write("Secret", Encryption.Protect(encryption, Vault.KindNote, Encoding.UTF8.GetBytes("Hidden\n")));
-
-        EditableNote opened = encrypted.ReadForEdit(note);
-        Assert.Equal("Hidden\n", opened.Text);
-        Assert.Equal(NoteSaveResult.Saved, encrypted.SaveIfUnchanged(opened, "Hidden too\n", out _));
-
-        byte[] bytes = File.ReadAllBytes(note.Path);
-        Assert.True(Vault.IsEncrypted(bytes));
-        Assert.Equal("Hidden too\n", Encryption.DecodeText(Encryption.Unprotect(encryption, Vault.KindNote, bytes)));
-    }
-
     // An empty note reads as empty text with the hash of no bytes.
     [Fact]
     public void ReadForEdit_Empty_EmptyText()
@@ -236,7 +218,7 @@ public sealed class NoteStoreEditTests : IDisposable
         Assert.Equal(["Plan.md"], Directory.GetFiles(root).Select(f => Path.GetFileName(f)).ToArray());
     }
 
-    // The temp file of a save is private to the owner (it may hold decrypted-then-encrypted note text).
+    // The temp file of a save is private to the owner.
     [Fact]
     public void SaveIfUnchanged_TempFileIsPrivate()
     {

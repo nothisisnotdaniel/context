@@ -29,14 +29,11 @@ internal sealed class CalendarLink
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
     private readonly string root;
-    private readonly Encryption? encryption;
 
     /// <param name="root">The folder <c>calendar-link.txt</c> lives in.</param>
-    /// <param name="encryption">The session's encryption state; <c>null</c> (or no vault) keeps the file plain.</param>
-    public CalendarLink(string root, Encryption? encryption = null)
+    public CalendarLink(string root)
     {
         this.root = Path.GetFullPath(root);
-        this.encryption = encryption;
     }
 
     /// <summary>The full path of <c>calendar-link.txt</c>.</summary>
@@ -57,7 +54,7 @@ internal sealed class CalendarLink
         string text;
         try
         {
-            text = Encryption.DecodeText(Encryption.ReadBytes(encryption, path, Vault.KindCalendarLink));
+            text = File.ReadAllText(path);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -85,8 +82,7 @@ internal sealed class CalendarLink
         string temp = Path.Combine(root, $".{FileName}.{Guid.NewGuid():N}.tmp");
         try
         {
-            byte[] plain = Utf8NoBom.GetBytes(uri.AbsoluteUri + "\n");
-            WritePrivate(temp, Encryption.Protect(encryption, Vault.KindCalendarLink, plain));
+            WritePrivate(temp, Utf8NoBom.GetBytes(uri.AbsoluteUri + "\n"));
             File.Move(temp, FilePath, overwrite: true);
         }
         finally

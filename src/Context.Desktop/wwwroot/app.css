@@ -207,7 +207,6 @@ th {
     width: 110px;
 }
 
-.locked,
 .failed,
 .loading {
     margin: 0;

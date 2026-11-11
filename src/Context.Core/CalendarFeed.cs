@@ -81,23 +81,19 @@ internal sealed class CalendarFeed
     private readonly HttpClient client;
     private readonly Func<DateTime> utcNow;
     private readonly TimeSpan timeout;
-    private readonly Encryption? encryption;
 
     /// <param name="root">The folder the cache lives in.</param>
     /// <param name="link">Where the link comes from.</param>
     /// <param name="handler">Sends the request; the caller owns it (it isn't disposed here).</param>
     /// <param name="utcNow">The clock for the cache age and time stamp.</param>
     /// <param name="timeout">How long one download may take; <see cref="DefaultTimeout"/> if null.</param>
-    /// <param name="encryption">The session's encryption state; <c>null</c> (or no vault) keeps the cache plain.</param>
     public CalendarFeed(
         string root,
         CalendarLink link,
         HttpMessageHandler handler,
         Func<DateTime> utcNow,
-        TimeSpan? timeout = null,
-        Encryption? encryption = null)
+        TimeSpan? timeout = null)
     {
-        this.encryption = encryption;
         this.root = Path.GetFullPath(root);
         this.link = link;
         this.utcNow = utcNow;
@@ -160,7 +156,7 @@ internal sealed class CalendarFeed
             TimeSpan age = now - cachedAt.Value;
             if (age >= TimeSpan.Zero && age < CacheLifetime)
             {
-                string? cached = CalendarStore.ReadText(CachePath, encryption, Vault.KindCalendarCache);
+                string? cached = CalendarStore.ReadText(CachePath);
                 if (cached is not null)
                 {
                     return new CalendarFeedResult(CalendarFeedStatus.Fresh, cached, cachedAt);
@@ -193,7 +189,7 @@ internal sealed class CalendarFeed
         DateTime? cachedAt = CachedAtUtc();
         string? cached = cachedAt is null
             ? null
-            : CalendarStore.ReadText(CachePath, encryption, Vault.KindCalendarCache);
+            : CalendarStore.ReadText(CachePath);
         if (cached is null)
         {
             return new CalendarFeedResult(CalendarFeedStatus.Failed, reason: reason);
@@ -275,7 +271,7 @@ internal sealed class CalendarFeed
         try
         {
             Directory.CreateDirectory(root);
-            CalendarLink.WritePrivate(temp, Encryption.Protect(encryption, Vault.KindCalendarCache, Utf8.GetBytes(text)));
+            CalendarLink.WritePrivate(temp, Utf8.GetBytes(text));
             File.SetLastWriteTimeUtc(temp, DateTime.SpecifyKind(now, DateTimeKind.Utc));
             File.Move(temp, CachePath, overwrite: true);
         }
