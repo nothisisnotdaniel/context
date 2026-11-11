@@ -5,15 +5,17 @@ namespace Context.Tests;
 /// <summary>Checks <c>.github/workflows/ci.yml</c> as plain text (no YAML package).</summary>
 public sealed class CiWorkflowTests
 {
-    // AC-1
+    // AC-1 (131: release.yml joined it; these two files are the only workflows)
     [Fact]
     public void CiYml_IsTheOnlyWorkflow()
     {
         string folder = Path.Combine(RepoRoot(), ".github", "workflows");
 
-        string[] files = [.. Directory.GetFileSystemEntries(folder).Select(path => Path.GetFileName(path) ?? "")];
+        string[] files = [.. Directory.GetFileSystemEntries(folder)
+            .Select(path => Path.GetFileName(path) ?? "")
+            .Order(StringComparer.Ordinal)];
 
-        Assert.Equal(["ci.yml"], files);
+        Assert.Equal(["ci.yml", "release.yml"], files);
     }
 
     // AC-2

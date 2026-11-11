@@ -5,7 +5,20 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- The local default; release builds pass -p:Version (see .github/workflows/release.yml). -->
+    <Version>0.1.0</Version>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>context</ToolCommandName>
+    <PackageId>Context</PackageId>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)../../nupkg</PackageOutputPath>
+    <Description>Context: a console app that keeps Markdown notes, todos and the day's appointments in one place.</Description>
+    <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../LICENSE.md" Pack="true" PackagePath="" Visible="false" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Spectre.Console" Version="0.57.2" />
@@ -18,5 +31,12 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Context.Tests" />
   </ItemGroup>
+
+  <!-- Release builds pass -p:Version from the workflow; refuse anything that is not SemVer. -->
+  <Target Name="ValidateVersion" BeforeTargets="BeforeBuild">
+    <Error
+      Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(Version)', '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?\z'))"
+      Text="Version '$(Version)' is not a valid SemVer version (expected MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-prerelease, for example 1.2.3 or 1.2.3-beta.1, without a leading 'v' or '+build' metadata)." />
+  </Target>
 
 </Project>

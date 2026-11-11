@@ -116,13 +116,65 @@ public sealed class CliTests : IDisposable
         {
             "capture <text...>", "todos", "todo add <yyyy-MM-dd|today|tomorrow> <text...>", "todo done <n>", "notes",
             "note show <name...>", "tags [tag...]", "links <note...>", "current", "import <path>",
-            "export <note> <path>",
+            "export <note> <path>", "version",
         })
         {
             Assert.Contains($"context {usage} ", result.Out, StringComparison.Ordinal);
         }
 
         Assert.False(Directory.Exists(root));
+    }
+
+    // 131 AC-10
+    [Theory]
+    [InlineData("version")]
+    [InlineData("--version")]
+    [InlineData("VERSION")]
+    [InlineData("--Version")]
+    public void Version_PrintsOneLine_WithoutTouchingTheFolder(string arg)
+    {
+        Result result = Run(arg);
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(string.Empty, result.Err);
+        Assert.Equal("Context 0.1.0\n", result.Out);
+        Assert.Equal("Context " + AppVersion.Current + "\n", result.Out);
+        Assert.False(Directory.Exists(root));
+    }
+
+    // 131 AC-10
+    [Theory]
+    [InlineData("version")]
+    [InlineData("--version")]
+    public void Version_WithEncryptionOn_AsksNoPassphraseAndChangesNothing(string arg)
+    {
+        EncryptedRoot();
+        Dictionary<string, string> before = Snapshot();
+
+        Result result = Run(arg);
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(string.Empty, result.Err);
+        Assert.Equal("Context 0.1.0\n", result.Out);
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 131 AC-10
+    [Fact]
+    public void Help_ListsVersion()
+    {
+        Assert.Contains("context version ", Run("help").Out, StringComparison.Ordinal);
+    }
+
+    // 131 AC-8: the release smoke check's second command succeeds on a data folder that does not exist yet.
+    [Fact]
+    public void Tags_OnAFreshFolder_ExitsZero()
+    {
+        Result result = Run("tags");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(string.Empty, result.Err);
+        Assert.Equal(string.Empty, result.Out);
     }
 
     [Fact]
