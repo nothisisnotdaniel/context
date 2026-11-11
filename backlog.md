@@ -142,6 +142,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39)
 - [ ] [#109](backlog/109-install-guide-for-the-unsigned-desktop.md) Install guide for the unsigned desktop app
 - [?] [#110](backlog/110-narrow-the-node-check-in-the.md) Narrow the node check in the CI workflow test
+- [?] [#111](backlog/111-concurrency-and-timeout-for-the-release.md) Concurrency and timeout for the release workflow
+- [?] [#112](backlog/112-locked-package-restore-for-release-builds.md) Locked package restore for release builds
 
 ## Dropped with the terminal UI
 
