@@ -32,6 +32,17 @@ public sealed class DesktopSourceTests
         ["innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function"];
 
     // The .cs files that may name DesktopActions (besides DesktopActions.cs itself).
+    private const string ProgramFile = "src/Context.Desktop/Program.cs";
+
+    // Spelled in pieces: no test file may hold the real source's name (see Tests_NeverReferenceTheRealUpdateSource).
+    private const string RealUpdateSource = "Velopack" + "UpdateSource";
+    private const string RealUpdateSourceFile = "src/Context.Desktop/" + RealUpdateSource + ".cs";
+
+    private static readonly string[] UpdateFiles =
+    [
+        "src/Context.Desktop/IUpdateSource.cs", "src/Context.Desktop/StartupUpdate.cs", RealUpdateSourceFile,
+    ];
+
     private static readonly string[] ActionsUsers = ["src/Context.Desktop/Program.cs", "src/Context.Desktop/StateComponent.cs"];
 
     private static readonly string[] Lifecycle =
@@ -517,6 +528,110 @@ public sealed class DesktopSourceTests
     public void ActionsName_Pattern(string source, bool mentions)
     {
         Assert.Equal(mentions, ActionsName.IsMatch(source));
+    }
+
+    // 133 AC-12: only the real update source and Program.cs name Velopack; nothing else in the app can reach it.
+    [Fact]
+    public void Sources_NameVelopackOnlyInTheUpdateSourceAndProgram()
+    {
+        string root = RepoFiles.Root();
+        List<string> found = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
+            .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains("Velopack", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        Assert.Equal([ProgramFile, RealUpdateSourceFile], found);
+    }
+
+    // 133 AC-12: Velopack's hooks run before anything else in Main (an install or update run exits there).
+    [Fact]
+    public void Program_RunsVelopackAppFirst_AndStartsTheUpdateWithTheBuildsChannel()
+    {
+        string program = File.ReadAllText(Path.Combine(RepoFiles.Root(), ProgramFile)).ReplaceLineEndings("\n");
+
+        Assert.Matches(@"private static void Main\(string\[\] args\)\n    \{\n        VelopackApp\.Build\(\)\.Run\(\);\n", program);
+        Assert.Single(Regex.Matches(program, @"VelopackApp"));
+        Assert.Contains(
+            "new " + RealUpdateSource + "(StartupUpdate.IncludePrereleases(StartupUpdate.CurrentVersion))",
+            program,
+            StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(program, @"new StartupUpdate\("));
+        Assert.Contains("_ = update.Start();", program, StringComparison.Ordinal);
+        // Fire and forget: the window never waits for the update.
+        Assert.DoesNotMatch(@"update\.Start\(\)\s*\.\s*(Wait|Result|GetAwaiter)", program);
+        Assert.DoesNotContain("await", program, StringComparison.Ordinal);
+    }
+
+    // 133 AC-12, AC-10: the update classes know nothing about the data folder, the actions, the environment or the
+    // command line, and write no output.
+    [Theory]
+    [InlineData("NoteStore")]
+    [InlineData("DefaultFolder")]
+    [InlineData("DesktopActions")]
+    [InlineData("DesktopState")]
+    [InlineData("Environment.GetEnvironmentVariable")]
+    [InlineData("args")]
+    [InlineData("Console.")]
+    [InlineData("Debug.")]
+    [InlineData("Trace.")]
+    [InlineData("File.")]
+    [InlineData("Directory.")]
+    [InlineData("Process.")]
+    public void UpdateClasses_DoNotMention(string forbidden)
+    {
+        string root = RepoFiles.Root();
+        Assert.All(UpdateFiles, file =>
+        {
+            string path = Path.Combine(root, file);
+            Assert.True(File.Exists(path), path + " is missing");
+            Assert.DoesNotContain(forbidden, File.ReadAllText(path), StringComparison.Ordinal);
+        });
+    }
+
+    // 133 AC-11: GitHub releases of this repository over HTTPS, no token, no explicit channel (the installed one
+    // stays), no downgrade; installed means Windows and not the portable copy; applying asks for no restart.
+    [Fact]
+    public void RealUpdateSource_UsesThisRepositorysReleases_WithoutTokenChannelOrDowngrade()
+    {
+        string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), RealUpdateSourceFile));
+
+        Assert.Contains(
+            "private const string Repository = \"https://github.com/nothisisnotdaniel/context\";",
+            source,
+            StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(source, @"https?://"));
+        Assert.Single(Regex.Matches(source, @"new GithubSource\("));
+        Assert.Contains("new GithubSource(Repository, null, prereleases)", source, StringComparison.Ordinal);
+        Assert.Contains("this.prereleases = prereleases;", source, StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(source, @"new UpdateManager\("));
+        Assert.Contains("new UpdateOptions { AllowVersionDowngrade = false }", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ExplicitChannel", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("AccessToken", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("token", source.Replace("No access token", string.Empty, StringComparison.Ordinal), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("if (!OperatingSystem.IsWindows())", source, StringComparison.Ordinal);
+        Assert.Contains("updates.IsInstalled && !updates.IsPortable", source, StringComparison.Ordinal);
+
+        // After exit, silent, no restart; never one of the calls that restart or close the app.
+        Assert.Contains("WaitExitThenApplyUpdates(found.TargetFullRelease, true, false)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ApplyUpdatesAndRestart", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ApplyUpdatesAndExit", source, StringComparison.Ordinal);
+    }
+
+    // 133 AC-12: no test touches the real source (it would reach the network); tests use FakeUpdateSource.
+    [Fact]
+    public void Tests_NeverReferenceTheRealUpdateSource()
+    {
+        string root = RepoFiles.Root();
+        List<string> found = [];
+        foreach (string folder in new[] { "tests/Context.Tests", "tests/Context.Desktop.Tests" })
+        {
+            found.AddRange(RepoFiles.Sources(root, folder, ".cs", ".csproj")
+                .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains(RealUpdateSource, StringComparison.Ordinal)));
+        }
+
+        Assert.True(found.Count == 0, "Tests name the real update source: " + string.Join(", ", found));
+        Assert.Contains(
+            "tests/Context.Desktop.Tests/FakeUpdateSource.cs",
+            RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs"));
     }
 
     private static bool MentionsJSRuntime(string source) => source.Contains("JSRuntime", StringComparison.Ordinal);

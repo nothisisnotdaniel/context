@@ -132,5 +132,37 @@ public sealed class DesktopDependencyTests
         Assert.True(loose.Length == 0, "Editor packages without an exact version: " + string.Join(", ", loose));
     }
 
+    // 133 AC-4: Velopack (installer and updater) is a package of the desktop app only, at an exact version.
+    [Fact]
+    public void Velopack_IsReferencedOnlyByTheDesktopProject_AtAnExactVersion()
+    {
+        string root = RepoFiles.Root();
+        XDocument desktop = XDocument.Load(Path.Combine(root, DesktopProject));
+        XElement reference = Assert.Single(
+            desktop.Descendants("PackageReference"),
+            e => e.Attribute("Include")?.Value == "Velopack");
+        Assert.Matches(@"^\d+\.\d+\.\d+$", reference.Attribute("Version")?.Value ?? string.Empty);
+
+        foreach (string project in new[]
+        {
+            "src/Context.Core/Context.Core.csproj", "src/Context/Context.csproj",
+            "tests/Context.Tests/Context.Tests.csproj", "tests/Context.Desktop.Tests/Context.Desktop.Tests.csproj",
+        })
+        {
+            Assert.DoesNotContain("Velopack", File.ReadAllText(Path.Combine(root, project)), StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Core and the console app never get it through a reference either.
+        foreach (string assets in new[] { "src/Context.Core/obj/project.assets.json", "src/Context/obj/project.assets.json" })
+        {
+            string path = Path.Combine(root, assets);
+            Assert.True(File.Exists(path), path + " is missing. Run `dotnet restore` first.");
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+            Assert.DoesNotContain(
+                document.RootElement.GetProperty("libraries").EnumerateObject(),
+                p => p.Name.StartsWith("Velopack", StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
     private static bool IsSpectre(string name) => name.StartsWith("Spectre", StringComparison.OrdinalIgnoreCase);
 }

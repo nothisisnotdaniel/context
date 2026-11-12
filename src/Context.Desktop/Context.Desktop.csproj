@@ -11,6 +11,8 @@
 
   <ItemGroup>
     <PackageReference Include="Photino.Blazor" Version="4.0.13" />
+    <!-- Installer and updater for the Windows build; the version equals the vpk tool version in release.yml. -->
+    <PackageReference Include="Velopack" Version="1.2.161" />
   </ItemGroup>
 
   <ItemGroup>

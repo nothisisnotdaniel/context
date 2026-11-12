@@ -1,17 +1,20 @@
 using Microsoft.Extensions.DependencyInjection;
 using Photino.Blazor;
+using Velopack;
 
 namespace Context;
 
 /// <summary>
 /// Wires up the desktop window; reads live in <see cref="DesktopState"/>, changes in <see cref="DesktopActions"/>, the
-/// page's editor is reached only through <see cref="EditorInterop"/>.
+/// page's editor is reached only through <see cref="EditorInterop"/>, a newer build through <see cref="StartupUpdate"/>.
 /// </summary>
 internal static class Program
 {
     [STAThread]
     private static void Main(string[] args)
     {
+        VelopackApp.Build().Run();
+
         static DateOnly Today() => DateOnly.FromDateTime(DateTime.Now);
 
         string folder = NoteStore.DefaultFolder();
@@ -51,6 +54,11 @@ internal static class Program
         using DataWatcher watcher = new DataWatcher(folder, state);
         watcher.Start();
         _ = state.Refresh();
+
+        // Installed Windows copies only: look for a newer build in the background; it is put in place after exit.
+        StartupUpdate update = new StartupUpdate(
+            new VelopackUpdateSource(StartupUpdate.IncludePrereleases(StartupUpdate.CurrentVersion)));
+        _ = update.Start();
         app.Run();
     }
 }
