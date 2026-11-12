@@ -142,18 +142,18 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#107](backlog/107-own-cloud-sync-spike.md) Own-cloud sync spike
 - [ ] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39)
 - [ ] [#109](backlog/109-install-guide-for-the-unsigned-desktop.md) Install guide for the unsigned desktop app
-- [?] [#110](backlog/110-narrow-the-node-check-in-the.md) Narrow the node check in the CI workflow test
-- [?] [#111](backlog/111-concurrency-and-timeout-for-the-release.md) Concurrency and timeout for the release workflow
-- [?] [#112](backlog/112-locked-package-restore-for-release-builds.md) Locked package restore for release builds
-- [?] [#113](backlog/113-refuse-removed-secret-options-after-a.md) Refuse removed secret options after a command
-- [?] [#114](backlog/114-owner-only-file-mode-for-all.md) Owner-only file mode for all data files
-- [?] [#115](backlog/115-bounded-reads-for-todos-calendar-link.md) Bounded reads for todos, calendar link and notes
+- [ ] [#110](backlog/110-narrow-the-node-check-in-the.md) Narrow the node check in the CI workflow test
+- [ ] [#111](backlog/111-concurrency-and-timeout-for-the-release.md) Concurrency and timeout for the release workflow
+- [ ] [#112](backlog/112-locked-package-restore-for-release-builds.md) Locked package restore for release builds
+- [ ] [#113](backlog/113-refuse-removed-secret-options-after-a.md) Refuse removed secret options after a command
+- [ ] [#114](backlog/114-owner-only-file-mode-for-all.md) Owner-only file mode for all data files
+- [ ] [#115](backlog/115-bounded-reads-for-todos-calendar-link.md) Bounded reads for todos, calendar link and notes
 - [h] [#117](backlog/117-make-the-github-repo-public.md) Make the GitHub repo public
 - [ ] [#118](backlog/118-refuse-a-newline-in-version-in.md) Refuse a newline in VERSION in the release scripts
 - [ ] [#119](backlog/119-fetch-the-earlier-desktop-package-with.md) Fetch the earlier desktop package with gh release download
 - [ ] [#120](backlog/120-pin-the-nuget-source-for-the.md) Pin the NuGet source for the desktop packages
-- [?] [#121](backlog/121-open-empty-notes-in-the-default.md) Open empty notes in the default editor on macOS and Linux
-- [?] [#122](backlog/122-update-links-when-a-note-is.md) Update [[links]] when a note is renamed in the desktop app
+- [ ] [#121](backlog/121-open-empty-notes-in-the-default.md) Open empty notes in the default editor on macOS and Linux
+- [ ] [#122](backlog/122-update-links-when-a-note-is.md) Update [[links]] when a note is renamed in the desktop app
 
 ## Dropped with the terminal UI
 
