@@ -6,7 +6,8 @@ namespace Context;
 
 /// <summary>
 /// Wires up the desktop window; reads live in <see cref="DesktopState"/>, changes in <see cref="DesktopActions"/>, the
-/// page's editor is reached only through <see cref="EditorInterop"/>, a newer build through <see cref="StartupUpdate"/>.
+/// page's editor is reached only through <see cref="EditorInterop"/>, a newer build through <see cref="StartupUpdate"/>,
+/// the OS default editor through <see cref="ShellNoteLauncher"/>.
 /// </summary>
 internal static class Program
 {
@@ -31,7 +32,7 @@ internal static class Program
         CalendarFeed feed = new CalendarFeed(folder, calendarLink, http, () => DateTime.UtcNow);
         DesktopState state = new DesktopState(
             notes, todos, index, calendar, feed, Today, () => DateTime.UtcNow);
-        DesktopActions actions = new DesktopActions(notes, todos, state);
+        DesktopActions actions = new DesktopActions(notes, todos, state, new ShellNoteLauncher());
 
         PhotinoBlazorAppBuilder builder = PhotinoBlazorAppBuilder.CreateDefault(args);
         builder.Services.AddSingleton(state);

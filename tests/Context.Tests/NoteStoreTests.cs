@@ -534,4 +534,140 @@ public sealed class NoteStoreTests : IDisposable
         Assert.Same(read, await Task.WhenAny(read, Task.Delay(TimeSpan.FromSeconds(5))));
         Assert.Empty(await read);
     }
+
+    // 134 AC-1: a rename moves the file, keeps its bytes and last-write time, strips .md and returns the new note.
+    [Fact]
+    public void Rename_Valid_MovesFileKeepingBytesAndTime()
+    {
+        NoteStore store = new NoteStore(root);
+        store.Create("Plan");
+        string old = Path.Combine(root, "Plan.md");
+        byte[] bytes = "# Plan\r\nKept\r\n"u8.ToArray();
+        File.WriteAllBytes(old, bytes);
+        DateTime time = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(old, time);
+
+        NoteInfo? renamed = store.Rename("plan", "  Project.md ");
+
+        Assert.NotNull(renamed);
+        Assert.Equal("Project", renamed.Name);
+        Assert.Equal(Path.Combine(root, "Project.md"), renamed.Path);
+        Assert.False(File.Exists(old));
+        Assert.Equal(bytes, File.ReadAllBytes(renamed.Path));
+        Assert.Equal(time, File.GetLastWriteTimeUtc(renamed.Path));
+        Assert.Equal(["Project"], store.List().Select(n => n.Name).ToArray());
+    }
+
+    // 134 AC-1: an invalid title throws with the ValidateTitle text and moves nothing.
+    [Theory]
+    [InlineData("")]
+    [InlineData("a/b")]
+    [InlineData(".hidden")]
+    [InlineData("CON")]
+    [InlineData("a:b.md")]
+    public void Rename_InvalidTitle_ThrowsValidateText(string title)
+    {
+        NoteStore store = new NoteStore(root);
+        store.Create("Plan");
+
+        ArgumentException error = Assert.Throws<ArgumentException>(() => store.Rename("Plan", title));
+
+        Assert.StartsWith(NoteStore.ValidateTitle(NoteStore.NormalizeTitle(title))!, error.Message, StringComparison.Ordinal);
+        Assert.Equal(["Plan"], store.List().Select(n => n.Name).ToArray());
+    }
+
+    // 134 AC-1: another note with that title, ignoring case, is never overwritten.
+    [Fact]
+    public void Rename_OtherNoteExistsIgnoringCase_Throws()
+    {
+        NoteStore store = new NoteStore(root);
+        store.Create("Plan");
+        store.Create("Other");
+
+        NoteExistsException error = Assert.Throws<NoteExistsException>(() => store.Rename("Plan", "OTHER"));
+
+        Assert.Equal("Note OTHER already exists.", error.Message);
+        Assert.Equal("# Other\n", File.ReadAllText(Path.Combine(root, "Other.md")));
+        Assert.Equal(["Other", "Plan"], store.List().Select(n => n.Name).ToArray());
+    }
+
+    // 134 AC-1: a case-only rename of the same note is allowed.
+    [Fact]
+    public void Rename_CaseOnly_Renames()
+    {
+        NoteStore store = new NoteStore(root);
+        store.Create("Plan");
+
+        NoteInfo? renamed = store.Rename("Plan", "plan");
+
+        Assert.Equal("plan", renamed!.Name);
+        Assert.Equal(["plan"], store.List().Select(n => n.Name).ToArray());
+        Assert.Equal("# Plan\n", File.ReadAllText(renamed.Path));
+    }
+
+    // 134 AC-1: a missing note gives null and creates nothing.
+    [Fact]
+    public void Rename_Missing_ReturnsNull()
+    {
+        NoteStore store = new NoteStore(root);
+        store.Create("Plan");
+
+        Assert.Null(store.Rename("Nope", "Other"));
+        Assert.Equal(["Plan"], store.List().Select(n => n.Name).ToArray());
+    }
+
+    // 134 AC-1: the same title as before writes nothing and returns the note.
+    [Fact]
+    public void Rename_SameName_WritesNothing()
+    {
+        NoteStore store = new NoteStore(root);
+        store.Create("Plan");
+        string path = Path.Combine(root, "Plan.md");
+        DateTime time = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(path, time);
+
+        NoteInfo? same = store.Rename("Plan", "Plan.md");
+
+        Assert.Equal("Plan", same!.Name);
+        Assert.Equal(path, same.Path);
+        Assert.Equal(time, File.GetLastWriteTimeUtc(path));
+        Assert.Equal(path, Assert.Single(Directory.GetFiles(root)));
+    }
+
+    // 134 AC-2: a delete removes the matched note only.
+    [Fact]
+    public void Delete_Hit_DeletesThatNote()
+    {
+        NoteStore store = new NoteStore(root);
+        store.Create("Plan");
+        store.Create("Other");
+
+        Assert.True(store.Delete("plan.md"));
+
+        Assert.Equal(["Other"], store.List().Select(n => n.Name).ToArray());
+    }
+
+    // 134 AC-2: a name that matches no note deletes nothing, also files outside the root or not in List().
+    [Theory]
+    [InlineData("Nope")]
+    [InlineData("../outside")]
+    [InlineData("sub/inner")]
+    [InlineData("notes.txt")]
+    [InlineData("notes")]
+    public void Delete_Miss_DeletesNothing(string name)
+    {
+        NoteStore store = new NoteStore(root);
+        store.Create("Plan");
+        File.WriteAllText(Path.Combine(parent, "outside.md"), "x");
+        Directory.CreateDirectory(Path.Combine(root, "sub"));
+        File.WriteAllText(Path.Combine(root, "sub", "inner.md"), "x");
+        File.WriteAllText(Path.Combine(root, "notes.txt"), "x");
+
+        Assert.False(store.Delete(name));
+
+        Assert.True(File.Exists(Path.Combine(parent, "outside.md")));
+        Assert.True(File.Exists(Path.Combine(root, "sub", "inner.md")));
+        Assert.True(File.Exists(Path.Combine(root, "notes.txt")));
+        Assert.Equal(["Plan"], store.List().Select(n => n.Name).ToArray());
+    }
 }

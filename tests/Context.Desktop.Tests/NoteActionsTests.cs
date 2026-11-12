@@ -184,6 +184,262 @@ public sealed class NoteActionsTests : IDisposable
         Assert.Equal(before, Files());
     }
 
+    // 134 AC-3: a new note is created through NoteStore.Create, named in the result, and the state refreshes.
+    [Fact]
+    public async Task CreateNote_Valid_CreatesAndRefreshes()
+    {
+        await data.RefreshAsync();
+        int builds = data.State!.Builds;
+
+        ActionResult result = await data.Actions!.CreateNote("  Plan.md ");
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Equal("Plan", result.Text);
+        Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.Equal(builds + 1, data.State.Builds);
+        Assert.Equal(["Plan"], data.State.Snapshot!.Notes.Select(n => n.Name).ToArray());
+    }
+
+    // 134 AC-3: an invalid title is refused with the ValidateTitle text and writes nothing.
+    [Theory]
+    [InlineData("")]
+    [InlineData("a/b")]
+    [InlineData("NUL.txt")]
+    public async Task CreateNote_Invalid_RefusedWithValidateText(string title)
+    {
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult result = await data.Actions!.CreateNote(title);
+
+        Assert.Equal(ActionKind.Refused, result.Kind);
+        Assert.Equal(ActionReason.Invalid, result.Reason);
+        Assert.Equal(NoteStore.ValidateTitle(NoteStore.NormalizeTitle(title)), result.Text);
+        Assert.Equal(before, Files());
+    }
+
+    // 134 AC-3: an existing note (ignoring case) is refused and left alone.
+    [Fact]
+    public async Task CreateNote_Exists_Refused()
+    {
+        data.WriteNote("Plan", "Mine\n");
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult result = await data.Actions!.CreateNote("plan");
+
+        Assert.Equal(ActionKind.Refused, result.Kind);
+        Assert.Equal(ActionReason.Exists, result.Reason);
+        Assert.Equal("Note plan already exists.", result.Text);
+        Assert.Equal(before, Files());
+    }
+
+    // 134 AC-3: any other error is Failed with the fixed text, never the exception's, and nothing is written.
+    [Fact]
+    public async Task CreateNote_FolderCantBeMade_FailedFixedText()
+    {
+        File.WriteAllText(data.Root, "not a folder");
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.CreateNote("Plan");
+
+        Assert.Equal(ActionKind.Failed, result.Kind);
+        Assert.Equal("Can't create that note. Nothing was done.", result.Text);
+        Assert.Equal("not a folder", File.ReadAllText(data.Root));
+    }
+
+    // 134 AC-4: a rename moves the note, keeps its bytes, refreshes, and the list and the index know only the new name.
+    [Fact]
+    public async Task RenameNote_Valid_RenamesRefreshesAndIndexDropsOldName()
+    {
+        data.WriteNote("Plan", "# Plan\n#work\n");
+        await data.RefreshAsync();
+        Assert.Equal(["Plan"], await data.State!.NotesWithTag("work"));
+        int builds = data.State.Builds;
+
+        ActionResult result = await data.Actions!.RenameNote("Plan", "Project");
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Equal(ActionReason.None, result.Reason);
+        Assert.Equal("Project", result.Text);
+        Assert.Equal("# Plan\n#work\n", File.ReadAllText(Path.Combine(data.Root, "Project.md")));
+        Assert.Equal(builds + 1, data.State.Builds);
+        Assert.Equal(["Project"], data.State.Snapshot!.Notes.Select(n => n.Name).ToArray());
+        Assert.Equal(["Project"], await data.State.NotesWithTag("work"));
+    }
+
+    // 134 AC-4: the same name is Done/Unchanged with no write and no refresh.
+    [Fact]
+    public async Task RenameNote_SameName_UnchangedNoRefresh()
+    {
+        data.WriteNote("Plan", "x");
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+        int builds = data.State!.Builds;
+
+        ActionResult result = await data.Actions!.RenameNote("Plan", " Plan ");
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Equal(ActionReason.Unchanged, result.Reason);
+        Assert.Equal(before, Files());
+        Assert.Equal(builds, data.State.Builds);
+    }
+
+    // 134 AC-4: invalid titles, existing notes and missing sources are refused with their texts; nothing changes.
+    [Theory]
+    [InlineData("Plan", "a:b", nameof(ActionReason.Invalid), "A note title can't contain / \\ : or control characters.")]
+    [InlineData("Plan", "OTHER", nameof(ActionReason.Exists), "Note OTHER already exists.")]
+    [InlineData("Gone", "New", nameof(ActionReason.Missing), "Gone no longer exists. Nothing was done.")]
+    public async Task RenameNote_Refusals_NothingChanged(string name, string title, string reason, string text)
+    {
+        data.WriteNote("Plan", "p");
+        data.WriteNote("Other", "o");
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult result = await data.Actions!.RenameNote(name, title);
+
+        Assert.Equal(ActionKind.Refused, result.Kind);
+        Assert.Equal(reason, result.Reason.ToString());
+        Assert.Equal(text, result.Text);
+        Assert.Equal(before, Files());
+    }
+
+    // 134 AC-5: without a confirmation nothing is deleted.
+    [Fact]
+    public async Task DeleteNote_NotConfirmed_DeletesNothing()
+    {
+        data.WriteNote("Plan", "p");
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult result = await data.Actions!.DeleteNote("Plan", null);
+
+        Assert.Equal(ActionKind.Refused, result.Kind);
+        Assert.Equal(ActionReason.NotConfirmed, result.Reason);
+        Assert.Equal(before, Files());
+    }
+
+    // 134 AC-5: confirmed, the note is deleted and the state refreshes.
+    [Fact]
+    public async Task DeleteNote_Confirmed_DeletesAndRefreshes()
+    {
+        data.WriteNote("Plan", "p");
+        data.WriteNote("Other", "o");
+        await data.RefreshAsync();
+        int builds = data.State!.Builds;
+
+        ActionResult result = await data.Actions!.DeleteNote("Plan", new Confirmation());
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Equal("Plan", result.Text);
+        Assert.False(File.Exists(Path.Combine(data.Root, "Plan.md")));
+        Assert.Equal(builds + 1, data.State.Builds);
+        Assert.Equal(["Other"], data.State.Snapshot!.Notes.Select(n => n.Name).ToArray());
+    }
+
+    // 134 AC-5: a missing note is refused and nothing is deleted.
+    [Fact]
+    public async Task DeleteNote_Missing_Refused()
+    {
+        data.WriteNote("Plan", "p");
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult result = await data.Actions!.DeleteNote("Gone", new Confirmation());
+
+        Assert.Equal(ActionReason.Missing, result.Reason);
+        Assert.Equal("Gone no longer exists. Nothing was done.", result.Text);
+        Assert.Equal(before, Files());
+    }
+
+    // 134 AC-6: the note's own path from List() is launched once; nothing is written and the state is not refreshed.
+    [Fact]
+    public async Task OpenExternally_Note_LaunchesItsPathOnly()
+    {
+        data.WriteNote("Plan", "p");
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+        int builds = data.State!.Builds;
+
+        ActionResult result = await data.Actions!.OpenExternally("plan.md");
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Equal([Path.Combine(data.Root, "Plan.md")], data.Launcher.Launched);
+        Assert.Equal(before, Files());
+        Assert.Equal(builds, data.State.Builds);
+    }
+
+    // 134 AC-6: a launcher that throws gives Failed with the fixed text, not the exception's.
+    [Fact]
+    public async Task OpenExternally_LauncherThrows_FailedFixedText()
+    {
+        data.WriteNote("Plan", "p");
+        await data.RefreshAsync();
+        data.Launcher.Throws = new InvalidOperationException("secret detail");
+
+        ActionResult result = await data.Actions!.OpenExternally("Plan");
+
+        Assert.Equal(ActionKind.Failed, result.Kind);
+        Assert.Equal("Can't open Plan in another app.", result.Text);
+    }
+
+    // 134 AC-6: a missing note is refused and nothing is launched.
+    [Fact]
+    public async Task OpenExternally_Missing_RefusedNotLaunched()
+    {
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.OpenExternally("Gone");
+
+        Assert.Equal(ActionReason.Missing, result.Reason);
+        Assert.Empty(data.Launcher.Launched);
+    }
+
+    // 134 AC-6: a symlinked x.md (to a script outside the root, or to a note inside it) is never launched.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task OpenExternally_Symlink_RefusedNotLaunched(bool outside)
+    {
+        data.WriteNote("Plan", "p");
+        string target = outside ? Path.Combine(Path.GetDirectoryName(data.Root)!, "evil.sh") : Path.Combine(data.Root, "Plan.md");
+        if (outside)
+        {
+            File.WriteAllText(target, "#!/bin/sh\necho hi\n");
+        }
+
+        try
+        {
+            File.CreateSymbolicLink(Path.Combine(data.Root, "x.md"), target);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return; // Symlinks can't be made here (Windows without the privilege).
+        }
+
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.OpenExternally("x");
+
+        Assert.Equal(ActionKind.Refused, result.Kind);
+        Assert.Equal("Can't open x in another app.", result.Text);
+        Assert.Empty(data.Launcher.Launched);
+    }
+
+    // 134 AC-6: off Windows an empty x.md (which could be a FIFO) is never launched.
+    [Fact]
+    public async Task OpenExternally_EmptyFileOffWindows_Refused()
+    {
+        data.WriteNote("Empty", string.Empty);
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.OpenExternally("Empty");
+
+        Assert.Equal(OperatingSystem.IsWindows() ? ActionKind.Done : ActionKind.Refused, result.Kind);
+        Assert.Equal(OperatingSystem.IsWindows() ? 1 : 0, data.Launcher.Launched.Count);
+    }
+
     private async Task<EditableNote> Open(string name, byte[] bytes)
     {
         Directory.CreateDirectory(data.Root);

@@ -425,6 +425,59 @@ input[type="search"]:disabled {
     min-height: 1.2em;
 }
 
+/* New note: the entry row under the notes list. */
+.note-entry {
+    border-top: 1px solid var(--line);
+    display: flex;
+    gap: 6px;
+    margin-top: 12px;
+    padding-top: 12px;
+}
+
+.note-entry .note-new-title {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.note-entry .note-new {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: var(--on-accent);
+    flex: none;
+}
+
+.note-entry-result {
+    margin: 6px 0 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The open note's toolbar (Rename, Delete, Open in default editor) and its inline rename field. */
+.note-toolbar {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-end;
+    margin-bottom: 8px;
+}
+
+.note-toolbar .rename-title {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.note-toolbar .save-name {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: var(--on-accent);
+}
+
+.note-toolbar .delete {
+    color: var(--red);
+}
+
 /* The command palette: near the top, with a visible selected row. */
 .dialog-backdrop:has(.palette) {
     align-items: flex-start;

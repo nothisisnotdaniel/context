@@ -10,8 +10,9 @@ public sealed class DesktopSourceTests
         + "connect-src 'self'; base-uri 'none'; form-action 'none'";
 
     // The Core calls that change data (AC-8). CalendarLink's real names are Set/Clear; Save/Delete are listed too.
+    // 134: NoteStore.Rename and NoteStore.Delete.
     private static readonly Regex Writes = new(
-        @"\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|ClearCache)\s*\(",
+        @"\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache)\s*\(",
         RegexOptions.CultureInvariant);
 
     private static readonly string[] RawMarkup = ["MarkupString", "AddMarkupContent", "@(("];
@@ -37,6 +38,10 @@ public sealed class DesktopSourceTests
     // Spelled in pieces: no test file may hold the real source's name (see Tests_NeverReferenceTheRealUpdateSource).
     private const string RealUpdateSource = "Velopack" + "UpdateSource";
     private const string RealUpdateSourceFile = "src/Context.Desktop/" + RealUpdateSource + ".cs";
+
+    // 134: spelled in pieces too: no test file may hold the real launcher's name.
+    private const string RealLauncher = "Shell" + "NoteLauncher";
+    private const string RealLauncherFile = "src/Context.Desktop/" + RealLauncher + ".cs";
 
     private static readonly string[] UpdateFiles =
     [
@@ -169,6 +174,8 @@ public sealed class DesktopSourceTests
     [InlineData(".tag-notes .note-button")]
     [InlineData(".editor-bar,")]
     [InlineData(".editor-host:focus-within")]
+    [InlineData(".note-entry {")]
+    [InlineData(".note-toolbar {")]
     public void AppCss_StylesEditingComponents(string selector)
     {
         string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
@@ -497,6 +504,9 @@ public sealed class DesktopSourceTests
     [InlineData("link.Delete()")]
     [InlineData("feed.ClearCache()")]
     [InlineData("notes.SaveIfUnchanged(opened, text, out saved)")]
+    [InlineData("notes.Rename(source.Name, title)")]
+    [InlineData("notes.Delete(name)")]
+    [InlineData("notes . Rename (a, b)")]
     public void Writes_Pattern_CatchesCalls(string call)
     {
         Assert.Matches(Writes, call);
@@ -513,6 +523,10 @@ public sealed class DesktopSourceTests
     [InlineData("Actions.SaveNote(request.Note, request.Text)")]
     [InlineData("Actions.AddTodo(newText, due)")]
     [InlineData("notes.ReadForEdit(found)")]
+    [InlineData("Actions.CreateNote(newTitle)")]
+    [InlineData("Actions.RenameNote(name, renameText)")]
+    [InlineData("Actions.DeleteNote(name, confirmed)")]
+    [InlineData("Actions.OpenExternally(name)")]
     public void Writes_Pattern_AllowsReads(string call)
     {
         Assert.DoesNotMatch(Writes, call);
@@ -631,6 +645,66 @@ public sealed class DesktopSourceTests
         Assert.True(found.Count == 0, "Tests name the real update source: " + string.Join(", ", found));
         Assert.Contains(
             "tests/Context.Desktop.Tests/FakeUpdateSource.cs",
+            RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs"));
+    }
+
+    // 134 AC-9: only the real launcher starts a process; Process and System.Diagnostics appear nowhere else in the app.
+    [Fact]
+    public void Sources_UseProcessOnlyInTheLauncher()
+    {
+        string root = RepoFiles.Root();
+        Regex process = new Regex(@"\bProcess\b|System\.Diagnostics", RegexOptions.CultureInvariant);
+        List<string> found = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
+            .Where(f => process.IsMatch(File.ReadAllText(Path.Combine(root, f))))
+            .ToList();
+
+        Assert.Equal([RealLauncherFile], found);
+    }
+
+    // 134 AC-9: the real launcher is named only by itself and Program.cs, which wires it into the actions.
+    [Fact]
+    public void Sources_NameTheLauncherOnlyInItselfAndProgram()
+    {
+        string root = RepoFiles.Root();
+        List<string> found = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
+            .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains(RealLauncher, StringComparison.Ordinal))
+            .ToList();
+
+        Assert.Equal([ProgramFile, RealLauncherFile], found);
+        Assert.Contains(
+            "new DesktopActions(notes, todos, state, new " + RealLauncher + "())",
+            File.ReadAllText(Path.Combine(root, ProgramFile)),
+            StringComparison.Ordinal);
+    }
+
+    // 134 AC-9: the launcher passes the path as FileName through the shell, with no arguments.
+    [Fact]
+    public void Launcher_UsesShellExecuteWithThePathOnly()
+    {
+        string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), RealLauncherFile));
+
+        Assert.Contains("FileName = path,", source, StringComparison.Ordinal);
+        Assert.Contains("UseShellExecute = true,", source, StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(source, @"Process\.Start\("));
+        Assert.DoesNotContain("Arguments", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ArgumentList", source, StringComparison.Ordinal);
+    }
+
+    // 134 AC-9: no test touches the real launcher (it would open apps); tests use FakeNoteLauncher.
+    [Fact]
+    public void Tests_NeverReferenceTheRealLauncher()
+    {
+        string root = RepoFiles.Root();
+        List<string> found = [];
+        foreach (string folder in new[] { "tests/Context.Tests", "tests/Context.Desktop.Tests" })
+        {
+            found.AddRange(RepoFiles.Sources(root, folder, ".cs", ".csproj")
+                .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains(RealLauncher, StringComparison.Ordinal)));
+        }
+
+        Assert.True(found.Count == 0, "Tests name the real launcher: " + string.Join(", ", found));
+        Assert.Contains(
+            "tests/Context.Desktop.Tests/FakeNoteLauncher.cs",
             RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs"));
     }
 

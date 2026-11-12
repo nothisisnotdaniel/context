@@ -44,6 +44,9 @@ internal sealed class DesktopFixture : IDisposable
     /// <summary>When set, the feed's clock throws this instead of returning <see cref="UtcNow"/>.</summary>
     public Exception? FeedClockThrows { get; set; }
 
+    /// <summary>The launcher the actions use for "Open in default editor"; it only records paths.</summary>
+    public FakeNoteLauncher Launcher { get; } = new();
+
     public DesktopState? State { get; private set; }
 
     public DesktopActions? Actions { get; private set; }
@@ -83,7 +86,7 @@ internal sealed class DesktopFixture : IDisposable
             feed,
             () => Day,
             () => UtcNow);
-        Actions = new DesktopActions(Notes, Todos, State);
+        Actions = new DesktopActions(Notes, Todos, State, Launcher);
         Bunit.Services.AddSingleton(State);
         Bunit.Services.AddSingleton(Actions);
         Bunit.Services.AddTransient<EditorInterop>();

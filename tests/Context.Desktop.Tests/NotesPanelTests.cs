@@ -1,6 +1,8 @@
 using System.Globalization;
 using AngleSharp.Dom;
 using Bunit;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
 
 namespace Context.Tests;
 
@@ -99,6 +101,71 @@ public sealed class NotesPanelTests : IDisposable
         Assert.Empty(cut.FindAll("script"));
         Assert.Empty(cut.FindAll("img"));
         Assert.Equal("<script>alert(1)<\\script> <img src=x onerror=alert(1)> �", cut.Find(".name").TextContent);
+    }
+
+    // 134 AC-7: the entry row is a plain text field (no @bind) and a New note button.
+    [Fact]
+    public async Task EntryRow_TextFieldAndButton()
+    {
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        Assert.Equal("text", cut.Find(".note-entry input").GetAttribute("type"));
+        IElement button = cut.Find(".note-entry button.note-new");
+        Assert.Equal("button", button.GetAttribute("type"));
+        Assert.Equal("New note", button.TextContent);
+    }
+
+    // 134 AC-7: Enter or the button creates the note, clears the field, opens the note and shows the accent status.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task EntryRow_Create_ClearsOpensAndShowsCreated(bool enter)
+    {
+        List<string> opened = [];
+        await data.RefreshAsync();
+        IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OnOpen, (string name) => opened.Add(name)));
+
+        await cut.Find(".note-new-title").InputAsync(new ChangeEventArgs { Value = "Plan.md" });
+        if (enter)
+        {
+            await cut.Find(".note-new-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        }
+        else
+        {
+            await cut.Find("button.note-new").ClickAsync(new MouseEventArgs());
+        }
+
+        Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.Equal(["Plan"], opened);
+        cut.WaitForAssertion(() => Assert.Equal(string.Empty, cut.Find(".note-new-title").GetAttribute("value")));
+        IElement status = cut.Find(".note-entry-result");
+        Assert.Equal("Created Plan", status.TextContent);
+        Assert.True(status.ClassList.Contains("accent"));
+        Assert.Equal("status", status.GetAttribute("role"));
+        cut.WaitForAssertion(() => Assert.Contains("Plan", cut.Find(".note-list").TextContent));
+    }
+
+    // 134 AC-7: a refusal shows the fixed red text, keeps the typed title and opens nothing.
+    [Theory]
+    [InlineData("a/b", "A note title can't contain / \\ : or control characters.")]
+    [InlineData("alpha", "Note alpha already exists.")]
+    public async Task EntryRow_Refused_RedLine(string title, string text)
+    {
+        data.WriteNote("Alpha", "a");
+        List<string> opened = [];
+        await data.RefreshAsync();
+        IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OnOpen, (string name) => opened.Add(name)));
+
+        await cut.Find(".note-new-title").InputAsync(new ChangeEventArgs { Value = title });
+        await cut.Find("button.note-new").ClickAsync(new MouseEventArgs());
+
+        IElement status = cut.Find(".note-entry-result");
+        Assert.Equal(text, status.TextContent);
+        Assert.True(status.ClassList.Contains("red"));
+        Assert.Equal("status", status.GetAttribute("role"));
+        Assert.Equal(title, cut.Find(".note-new-title").GetAttribute("value"));
+        Assert.Empty(opened);
+        Assert.Equal("a", File.ReadAllText(Path.Combine(data.Root, "Alpha.md")));
     }
 
     private static string Time(DateTime local) => local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
