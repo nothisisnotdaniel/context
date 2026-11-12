@@ -48,7 +48,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#12](backlog/012-clear-editor-mount-error.md) Clear editor mount error
 - [ ] [#13](backlog/013-console-todos-without-numbers.md) Console todos without numbers
 - [ ] [#14](backlog/014-remove-the-interactive-console.md) Remove the interactive console (after: #4; #7; #8; #6)
-- [ ] [#15](backlog/015-signed-desktop-builds.md) Signed desktop builds
+- [ ] [#15](backlog/015-signed-desktop-builds.md) Signed desktop builds (after: #116)
 - [ ] [#17](backlog/017-json-output-for-the-cli.md) JSON output for the CLI
 - [ ] [#18](backlog/018-write-todo-ids-once.md) Write todo ids once
 - [ ] [#19](backlog/019-survive-a-bad-todo-id.md) Survive a bad todo id
