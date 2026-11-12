@@ -148,7 +148,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#113](backlog/113-refuse-removed-secret-options-after-a.md) Refuse removed secret options after a command
 - [ ] [#114](backlog/114-owner-only-file-mode-for-all.md) Owner-only file mode for all data files
 - [ ] [#115](backlog/115-bounded-reads-for-todos-calendar-link.md) Bounded reads for todos, calendar link and notes
-- [h] [#117](backlog/117-make-the-github-repo-public.md) Make the GitHub repo public
+- [x] [#117](backlog/117-make-the-github-repo-public.md) Make the GitHub repo public
 - [ ] [#118](backlog/118-refuse-a-newline-in-version-in.md) Refuse a newline in VERSION in the release scripts
 - [ ] [#119](backlog/119-fetch-the-earlier-desktop-package-with.md) Fetch the earlier desktop package with gh release download
 - [ ] [#120](backlog/120-pin-the-nuget-source-for-the.md) Pin the NuGet source for the desktop packages
