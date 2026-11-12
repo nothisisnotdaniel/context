@@ -34,6 +34,9 @@ internal enum ActionReason
 
     /// <summary>The input is empty or too long.</summary>
     Invalid,
+
+    /// <summary>Another note already has that name (ignoring case).</summary>
+    Exists,
 }
 
 /// <summary>
@@ -79,6 +82,7 @@ internal sealed class DesktopActions
     public const string TodosWriteFailedText = "Can't write todos.json. Nothing was done.";
     public const string FailedText = "Can't make that change.";
     public const string EmptyTodoText = "Write the todo first.";
+    public const string CreateFailedText = "Can't create that note. Nothing was done.";
 
     /// <summary>The longest todo text <see cref="AddTodo"/> accepts, as in the console.</summary>
     public const int MaxTodoLength = 200;
@@ -89,14 +93,31 @@ internal sealed class DesktopActions
     private readonly NoteStore notes;
     private readonly TodoStore todos;
     private readonly DesktopState state;
+    private readonly INoteLauncher launcher;
     private int running;
 
-    public DesktopActions(NoteStore notes, TodoStore todos, DesktopState state)
+    public DesktopActions(NoteStore notes, TodoStore todos, DesktopState state, INoteLauncher launcher)
     {
         this.notes = notes;
         this.todos = todos;
         this.state = state;
+        this.launcher = launcher;
     }
+
+    /// <summary>The red line when a note with that name exists (ignoring case).</summary>
+    public static string ExistsText(string name) => $"Note {name} already exists.";
+
+    /// <summary>The red line when the note to rename, delete or open is gone.</summary>
+    public static string NoteMissingText(string name) => $"{name} no longer exists. Nothing was done.";
+
+    /// <summary>The red line when a rename fails.</summary>
+    public static string RenameFailedText(string name) => $"Can't rename {name}. Nothing was done.";
+
+    /// <summary>The red line when a delete fails.</summary>
+    public static string DeleteFailedText(string name) => $"Can't delete {name}.";
+
+    /// <summary>The red line when a note can't be (or may not be) opened in another app.</summary>
+    public static string OpenExternallyText(string name) => $"Can't open {name} in another app.";
 
     /// <summary>The red line when a note changed on disk since it was opened.</summary>
     public static string ChangedOnDiskText(string name) => $"{name} changed on disk since you opened it. Nothing was saved.";
@@ -139,11 +160,38 @@ internal sealed class DesktopActions
     /// </summary>
     public Task<ActionResult> AddTodo(string text, DateOnly due) => Run(() => AddTodoNow(text, due));
 
+    /// <summary>
+    /// Creates the note <paramref name="title"/> through <see cref="NoteStore.Create"/>. An invalid title is refused
+    /// with the <see cref="NoteStore.ValidateTitle"/> text, an existing note with <see cref="ExistsText"/>. The result's
+    /// text is the new note's name when done.
+    /// </summary>
+    public Task<ActionResult> CreateNote(string title) => Run(() => CreateNoteNow(title));
+
+    /// <summary>
+    /// Renames the note <paramref name="name"/> to <paramref name="newTitle"/> through <see cref="NoteStore.Rename"/>
+    /// (the file is moved, its bytes are kept). The same name gives <see cref="ActionReason.Unchanged"/> (done, nothing
+    /// written, no refresh). The result's text is the new name when done.
+    /// </summary>
+    public Task<ActionResult> RenameNote(string name, string newTitle) => Run(() => RenameNoteNow(name, newTitle));
+
+    /// <summary>
+    /// Deletes the note <paramref name="name"/> through <see cref="NoteStore.Delete"/>, but only when the user
+    /// <paramref name="confirmed"/> it. There is no undo. The result's text is the name when done.
+    /// </summary>
+    public Task<ActionResult> DeleteNote(string name, Confirmation? confirmed) => Run(() => DeleteNoteNow(name, confirmed));
+
+    /// <summary>
+    /// Opens the note <paramref name="name"/> in the OS default app through the <see cref="INoteLauncher"/>. Only a path
+    /// from the note list is launched, and only when it is inside the data folder, ends in <c>.md</c> and is a regular
+    /// file (no link or reparse point, no folder, seekable). Never writes and never refreshes.
+    /// </summary>
+    public Task<ActionResult> OpenExternally(string name) => Run(() => OpenExternallyNow(name), refresh: false);
+
     private static ActionResult Refused(ActionReason reason, string text) => new(ActionKind.Refused, reason, text);
 
     private static ActionResult Failed(ActionReason reason, string text) => new(ActionKind.Failed, reason, text);
 
-    private async Task<ActionResult> Run(Func<ActionResult> action)
+    private async Task<ActionResult> Run(Func<ActionResult> action, bool refresh = true)
     {
         if (Interlocked.CompareExchange(ref running, 1, 0) != 0)
         {
@@ -166,7 +214,7 @@ internal sealed class DesktopActions
                 result = Failed(ActionReason.WriteFailed, FailedText);
             }
 
-            if (result.Kind == ActionKind.Done && result.Reason != ActionReason.Unchanged)
+            if (refresh && result.Kind == ActionKind.Done && result.Reason != ActionReason.Unchanged)
             {
                 try
                 {
@@ -266,5 +314,142 @@ internal sealed class DesktopActions
         {
             return Failed(ActionReason.WriteFailed, TodosWriteFailedText);
         }
+    }
+
+    private ActionResult CreateNoteNow(string title)
+    {
+        string? invalid = NoteStore.ValidateTitle(NoteStore.NormalizeTitle(title));
+        if (invalid is not null)
+        {
+            return Refused(ActionReason.Invalid, invalid);
+        }
+
+        try
+        {
+            NoteInfo created = notes.Create(title);
+            return new ActionResult(ActionKind.Done, ActionReason.None, created.Name);
+        }
+        catch (NoteExistsException e)
+        {
+            return Refused(ActionReason.Exists, ExistsText(e.Name));
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, CreateFailedText);
+        }
+    }
+
+    private ActionResult RenameNoteNow(string name, string newTitle)
+    {
+        string title = NoteStore.NormalizeTitle(newTitle);
+        string? invalid = NoteStore.ValidateTitle(title);
+        if (invalid is not null)
+        {
+            return Refused(ActionReason.Invalid, invalid);
+        }
+
+        try
+        {
+            if (!notes.TryFind(name, out NoteInfo? source) || source is null)
+            {
+                return Refused(ActionReason.Missing, NoteMissingText(name));
+            }
+
+            if (string.Equals(source.Name, title, StringComparison.Ordinal))
+            {
+                return new ActionResult(ActionKind.Done, ActionReason.Unchanged, source.Name);
+            }
+
+            NoteInfo? renamed = notes.Rename(source.Name, title);
+            return renamed is null
+                ? Refused(ActionReason.Missing, NoteMissingText(name))
+                : new ActionResult(ActionKind.Done, ActionReason.None, renamed.Name);
+        }
+        catch (NoteExistsException e)
+        {
+            return Refused(ActionReason.Exists, ExistsText(e.Name));
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, RenameFailedText(name));
+        }
+    }
+
+    private ActionResult DeleteNoteNow(string name, Confirmation? confirmed)
+    {
+        if (confirmed is null)
+        {
+            return Refused(ActionReason.NotConfirmed, NotConfirmedText);
+        }
+
+        try
+        {
+            return notes.Delete(name)
+                ? new ActionResult(ActionKind.Done, ActionReason.None, name)
+                : Refused(ActionReason.Missing, NoteMissingText(name));
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, DeleteFailedText(name));
+        }
+    }
+
+    private ActionResult OpenExternallyNow(string name)
+    {
+        NoteInfo? note;
+        try
+        {
+            if (!notes.TryFind(name, out note) || note is null)
+            {
+                return Refused(ActionReason.Missing, NoteMissingText(name));
+            }
+
+            if (!IsLaunchable(note.Path))
+            {
+                return Refused(ActionReason.Invalid, OpenExternallyText(name));
+            }
+        }
+        catch (Exception)
+        {
+            return Refused(ActionReason.Invalid, OpenExternallyText(name));
+        }
+
+        try
+        {
+            launcher.Launch(note.Path);
+            return new ActionResult(ActionKind.Done, ActionReason.None, note.Name);
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, OpenExternallyText(name));
+        }
+    }
+
+    // Only a regular .md file directly in the note folder: no link or reparse point, no folder, and seekable. A file
+    // that reports length 0 can't be told apart from a FIFO without opening it (which could block), so off Windows it
+    // is refused. Best effort: the file could still be swapped between this check and the launch, but only by someone who
+    // can already write to the data folder, and the OS picks the handler by the .md extension.
+    private bool IsLaunchable(string path)
+    {
+        if (!string.Equals(Path.GetExtension(path), ".md", StringComparison.OrdinalIgnoreCase) || !notes.Contains(path))
+        {
+            return false;
+        }
+
+        FileInfo info = new FileInfo(path);
+        if (!info.Exists
+            || info.LinkTarget is not null
+            || (info.Attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory | FileAttributes.Device)) != 0)
+        {
+            return false;
+        }
+
+        if (info.Length == 0)
+        {
+            return OperatingSystem.IsWindows();
+        }
+
+        using FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        return stream.CanSeek;
     }
 }

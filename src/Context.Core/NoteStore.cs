@@ -197,6 +197,70 @@ internal sealed class NoteStore
     }
 
     /// <summary>
+    /// Renames the note called <paramref name="name"/> (found like <see cref="TryFind"/>, never used as a path) to
+    /// <paramref name="newTitle"/>, normalized and validated like <see cref="Create"/> (throws
+    /// <see cref="ArgumentException"/> with the <see cref="ValidateTitle"/> text). Throws <see cref="NoteExistsException"/>
+    /// when another note has that title, ignoring case; a case-only rename of the same note is allowed. The file is
+    /// moved with <c>File.Move(..., overwrite: false)</c>, so its bytes (including the <c># Title</c> line) stay as they
+    /// were. Returns the renamed note, the note itself when the title is exactly its name (nothing is written), or
+    /// <c>null</c> when <paramref name="name"/> names no note.
+    /// </summary>
+    public NoteInfo? Rename(string name, string newTitle)
+    {
+        string title = NormalizeTitle(newTitle);
+        string? error = ValidateTitle(title);
+        if (error is not null)
+        {
+            throw new ArgumentException(error, nameof(newTitle));
+        }
+
+        if (!TryFind(name, out NoteInfo? source) || source is null)
+        {
+            return null;
+        }
+
+        if (string.Equals(source.Name, title, StringComparison.Ordinal))
+        {
+            return source;
+        }
+
+        if (List().Any(n => !string.Equals(n.Path, source.Path, StringComparison.Ordinal)
+            && string.Equals(n.Name, title, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new NoteExistsException(title);
+        }
+
+        string target = Path.Combine(root, title + Extension);
+        bool caseOnly = string.Equals(source.Name, title, StringComparison.OrdinalIgnoreCase);
+        try
+        {
+            File.Move(source.Path, target, overwrite: false);
+        }
+        catch (IOException) when (!caseOnly && File.Exists(target))
+        {
+            // Created by someone else between the check and the move.
+            throw new NoteExistsException(title);
+        }
+
+        return new NoteInfo(title, File.GetLastWriteTime(target), target);
+    }
+
+    /// <summary>
+    /// Deletes the note called <paramref name="name"/> (found like <see cref="TryFind"/>, so only a file
+    /// <see cref="List"/> returns) and returns true, or returns false and deletes nothing when no note matches.
+    /// </summary>
+    public bool Delete(string name)
+    {
+        if (!TryFind(name, out NoteInfo? match) || match is null)
+        {
+            return false;
+        }
+
+        File.Delete(match.Path);
+        return true;
+    }
+
+    /// <summary>
     /// Every top-level <c>*.md</c> file in the root, sorted by name ignoring case. Other files and
     /// subfolders are left out. A missing root lists as empty and is not created.
     /// </summary>

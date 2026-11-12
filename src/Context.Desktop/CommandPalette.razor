@@ -32,6 +32,7 @@
     internal static readonly IReadOnlyList<PaletteCommand> Commands =
     [
         new PaletteCommand("/current", "/current", "Show the current view"),
+        new PaletteCommand("/new", "/new <title>", "Create a note and open it"),
         new PaletteCommand("/open", "/open <note>", "Open a note"),
         new PaletteCommand("/save", "/save", "Save the open note"),
         new PaletteCommand("/tags", "/tags <tag>", "List the notes with a tag"),

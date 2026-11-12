@@ -117,6 +117,13 @@ Every factory agent reads this file before working on Context. Keep it short and
     file outside the root (at most 5 MB, never changed) and stores it as the note
     `NormalizeTitle(file name)` via `NoteStore.Save` (create, or replace an existing note through temp + move);
     the hint says to delete the source.
+    `Rename(name, newTitle)` finds `name` through `TryFind` (never a path), normalizes and validates `newTitle` like
+    `Create` (`ArgumentException` with the `ValidateTitle` text), throws `NoteExistsException` when another note has
+    that title ignoring case (a case-only rename of the same note is allowed), moves the file with
+    `File.Move(..., overwrite: false)` (bytes and `# Title` line unchanged; `[[links]]` elsewhere are not rewritten) and
+    returns the new `NoteInfo`, the note itself when the title is exactly its name (nothing written), or `null` when no
+    note matches. `Delete(name)` deletes the file `TryFind(name)` found and returns true, else false (nothing deleted,
+    never anything outside `List()`). There is no trash; only the desktop uses them (no console or CLI command).
   - **Todos:** `TodoStore` keeps the list in `<root>/todos.json` (same root as notes; System.Text.Json,
     camelCase, UTF-8 no BOM). `List()` sorts by `Due`, then `Created` (UTC), then file order. Writes go to
     a temp file in the root, then `File.Move(..., overwrite: true)`; a file that can't be read or parsed
@@ -263,7 +270,17 @@ Every factory agent reads this file before working on Context. Keep it short and
     public parameters). `DesktopActions` (with `ActionResult`: `ActionKind` `Done`/`Refused`/`Failed`, `ActionReason`,
     raw text) is the only write path: it never throws, runs one action at a time (`Busy`), refreshes the state after a change and has the test
     hook `BeforeWrite`. `CompleteTodo(todo, confirmation)` removes the todo with `todo.Id` through
-    `TodoStore.Complete(id)` (a todo no longer stored: `The todo list changed. Nothing was done.`). `ConfirmDialog` (in-window
+    `TodoStore.Complete(id)` (a todo no longer stored: `The todo list changed. Nothing was done.`).
+    Note actions: `CreateNote(title)` (`NoteStore.Create`; invalid: Refused/`Invalid` with the `ValidateTitle` text;
+    existing: Refused/`Exists` `Note <name> already exists.`; else Failed `Can't create that note. Nothing was done.`),
+    `RenameNote(name, newTitle)` (`NoteStore.Rename`; same name: Done/`Unchanged`, no refresh; same invalid/exists texts;
+    gone: Refused/`Missing` `<name> no longer exists. Nothing was done.`), `DeleteNote(name, confirmation)` (no
+    confirmation: `NotConfirmed`; `NoteStore.Delete`) and `OpenExternally(name)`, which never writes or refreshes: it
+    resolves `name` through `TryFind` and calls `INoteLauncher.Launch(path)` once, only when the path is `.md`, inside
+    the root (`NoteStore.Contains`) and a regular file (no symlink/reparse point, seekable; an empty file is refused off
+    Windows because it can't be told from a FIFO), else Refused `Can't open <name> in another app.` (Failed with the
+    same text when the launcher throws). `DesktopActions` takes the launcher in its constructor; `Program.cs` passes
+    `ShellNoteLauncher` (`Process.Start` with `UseShellExecute = true`, the path as `FileName`, no arguments). `ConfirmDialog` (in-window
     `role="dialog"` overlay, focus on `Cancel`, Esc cancels, `Busy` disables it) is the only creator of a
     `Confirmation` (public sealed, internal constructor), which destructive actions require. The desktop shows no todo
     numbers (not in `TodoPanel`, not in the `Due` table): `TodoPanel` shows each todo as a `<label>` line with a
@@ -279,8 +296,16 @@ Every factory agent reads this file before working on Context. Keep it short and
     file bytes, read through `BoundedFile`): a bigger or non-seekable note can't be opened (`Can't read <name>.`), a save
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
-    `/current`, `/open`, `/save`, `/tags`, `/todo` with `CommandMatcher` (shared with `CommandRegistry.Match`).
-    `TodoPanel` has an entry row (`DesktopActions.AddTodo`). The page editor is `wwwroot/editor/editor.js`
+    `/current`, `/new`, `/open`, `/save`, `/tags`, `/todo` with `CommandMatcher` (shared with `CommandRegistry.Match`).
+    `TodoPanel` has an entry row (`DesktopActions.AddTodo`). `NotesPanel` has a new-note entry row (text field + `New
+    note`; Enter or the button calls `CreateNote`; on Done the field clears, the note opens through `Main`'s `RequestOpen`
+    (a dirty editor asks first) and a `role="status"` line shows `Created <name>` (accent), else the red text). While a
+    note is open `Main` shows a toolbar above it (also when the note can't be read): `Rename` swaps in a prefilled name
+    field (Enter or `Save name` renames and reopens the note under the new name; Esc or `Cancel` restores the toolbar;
+    a dirty editor is refused with red `Save <name> first.`), `Delete` asks `Delete <name>? This can't be undone.`
+    (`ConfirmDialog`, confirm label `Delete`; on confirm the main region returns to the current view) and `Open in
+    default editor` calls `OpenExternally` (red text on failure). The palette's `/new <title>` does what the entry row
+    does (`/new` alone: red `Type /new <title>.`). The page editor is `wwwroot/editor/editor.js`
     (`globalThis.ContextEditor`), built from `editor/src/` (`schema.js`, `markdown.js` with markdown-it `html: false`,
     `view.js`, `index.js`); `isLossless` false shows the grey `Saving will reformat parts of this note.`
     **Update:** `Program.Main` starts with `VelopackApp.Build().Run()` (Velopack's install/update hooks), and before
@@ -297,7 +322,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `wwwroot/index.html` (CSP meta tag, only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
     and `wwwroot/editor/editor.css`.
   - **Desktop rules:** the Core writing calls (`Create`, `Save`, `SaveIfUnchanged`, `Add`, `Complete`, `Set`, `Clear`, `Delete`,
-    `ClearCache`) appear only in `DesktopActions.cs` (`DotNetObjectReference.Create(` once in `EditorInterop.cs` is the one exemption; the reads still write
+    `Rename`, `ClearCache`) appear only in `DesktopActions.cs` (`DotNetObjectReference.Create(` once in `EditorInterop.cs` is the one exemption; the reads still write
     only through `TagIndex.Sync` and `CalendarFeed.Fetch`, as in the console). `DesktopActions` is named only by
     `.razor` files, `Program.cs` and `StateComponent`, never by `DesktopState`, `DataWatcher` or `DesktopSnapshot`, so
     nothing writes on render, refresh, the watcher or the tick. In `.razor` files every `@code` method that calls
@@ -310,6 +335,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     `StartupUpdate.cs`, `VelopackUpdateSource.cs`) never mention `NoteStore`, `DefaultFolder`, `DesktopActions`,
     `Environment.GetEnvironmentVariable`, `args` or `Console.`, so an update never touches the data folder; no test
     references `VelopackUpdateSource` (tests use `FakeUpdateSource`, never the network).
+    **Launcher rule:** `Process` / `System.Diagnostics` appear only in `ShellNoteLauncher.cs`, which is named only there and
+    in `Program.cs`; the only path it ever gets is a checked note path from `List()` (no user text becomes a path or an
+    argument); no test references `ShellNoteLauncher` (tests use `FakeNoteLauncher`, which records paths and can throw).
     Outside text goes through `DesktopText.OneLine` and Blazor's default encoding: never `MarkupString`,
     `AddMarkupContent` or `@((` raw markup; no `style=`, `<a `, `<form` or `<script` in `.razor` files; every
     `<button` has `type="button"`; no plain HTML event attributes (`on<event>=` without `@`); only `EditorInterop.cs`
@@ -331,9 +359,9 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `DesktopDependencyTests` (no Spectre, no Jint
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `DesktopDependencyTests` (no Spectre, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
-    CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop), `DesktopFixture` (temp folder, injected
+    CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule), `DesktopFixture` (temp folder, injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),
     `FileSnapshot` (bytes and last-write times of a folder, to prove nothing changed) and `RepoFiles`.
 - **Style:**

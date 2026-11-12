@@ -20,6 +20,21 @@
                 <p class="main-status @statusClass" role="status">@statusText</p>
                 @if (openName is { } name)
                 {
+                    <div class="note-toolbar">
+                        @if (renaming)
+                        {
+                            <input type="text" class="rename-title" value="@renameText" maxlength="200" disabled="@running"
+                                   aria-label="New name" @ref="renameField" @oninput="RenameTyped" @onkeydown="e => SaveName(e)" />
+                            <button type="button" class="save-name" disabled="@running" @onclick="() => SaveName(null)">Save name</button>
+                            <button type="button" class="cancel-rename" disabled="@running" @onclick="CancelRename">Cancel</button>
+                        }
+                        else
+                        {
+                            <button type="button" class="rename" disabled="@running" @onclick="StartRename">Rename</button>
+                            <button type="button" class="delete" disabled="@running" @onclick="AskDelete">Delete</button>
+                            <button type="button" class="open-external" disabled="@running" @onclick="OpenOutside">Open in default editor</button>
+                        }
+                    </div>
                     <NoteEditor @key="name" @ref="editor" Name="@name" OnTag="ShowTag" OnOpenNote="RequestOpen" />
                 }
                 else
@@ -35,6 +50,11 @@
         {
             <ConfirmDialog Question="@($"Discard changes to {DesktopText.OneLine(openName ?? string.Empty)}?")" ConfirmLabel="Discard"
                            OnConfirm="Discard" OnCancel="KeepEditing" />
+        }
+        @if (deleting && openName is { } doomed)
+        {
+            <ConfirmDialog Question="@($"Delete {DesktopText.OneLine(doomed)}? This can't be undone.")" ConfirmLabel="Delete"
+                           Busy="running" OnConfirm="DeleteConfirmed" OnCancel="CancelDelete" />
         }
         @if (paletteOpen)
         {
@@ -57,10 +77,24 @@ else
     private bool running;
     private string statusText = string.Empty;
     private string statusClass = string.Empty;
+    private bool renaming;
+    private string renameText = string.Empty;
+    private ElementReference renameField;
+    private bool focusRename;
+    private bool deleting;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusRename && renaming)
+        {
+            focusRename = false;
+            await renameField.FocusAsync();
+        }
+    }
 
     private void OpenPalette(KeyboardEventArgs e)
     {
-        if ((e.CtrlKey || e.MetaKey) && string.Equals(e.Key, "k", StringComparison.OrdinalIgnoreCase) && !discarding)
+        if ((e.CtrlKey || e.MetaKey) && string.Equals(e.Key, "k", StringComparison.OrdinalIgnoreCase) && !discarding && !deleting)
         {
             paletteOpen = true;
         }
@@ -110,6 +144,8 @@ else
         openName = name;
         pendingName = null;
         tagShown = null;
+        renaming = false;
+        deleting = false;
         if (name is null)
         {
             editor = null;
@@ -144,6 +180,36 @@ else
                 else
                 {
                     await RequestOpen(found);
+                }
+
+                break;
+            case "/new":
+                if (rest.Length == 0)
+                {
+                    ShowStatus("Type /new <title>.", "red");
+                }
+                else if (!running)
+                {
+                    running = true;
+                    ActionResult made;
+                    try
+                    {
+                        made = await Actions.CreateNote(rest);
+                    }
+                    finally
+                    {
+                        running = false;
+                    }
+
+                    if (made.Kind == ActionKind.Done)
+                    {
+                        await RequestOpen(made.Text);
+                        ShowStatus($"Created {DesktopText.OneLine(made.Text)}", "accent");
+                    }
+                    else
+                    {
+                        ShowStatus(DesktopText.OneLine(made.Text), "red");
+                    }
                 }
 
                 break;
@@ -206,6 +272,164 @@ else
             default:
                 ShowStatus("Unknown command.", "red");
                 break;
+        }
+    }
+
+    // Rename: refused while the editor has unsaved changes, otherwise swaps the toolbar for a name field.
+    private async Task StartRename()
+    {
+        if (openName is not { } name || running)
+        {
+            return;
+        }
+
+        if (editor is not null && await editor.IsDirtyAsync())
+        {
+            ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
+            return;
+        }
+
+        renameText = name;
+        renaming = true;
+        focusRename = true;
+        ShowStatus(string.Empty, string.Empty);
+    }
+
+    private void RenameTyped(ChangeEventArgs e) => renameText = e.Value?.ToString() ?? string.Empty;
+
+    private void CancelRename()
+    {
+        if (!running)
+        {
+            renaming = false;
+        }
+    }
+
+    // Enter in the name field or Save name; Esc cancels. After a rename the editor opens the note under its new name.
+    private async Task SaveName(KeyboardEventArgs? key)
+    {
+        if (key is not null && key.Key == "Escape")
+        {
+            if (!running)
+            {
+                renaming = false;
+            }
+
+            return;
+        }
+
+        if ((key is not null && key.Key != "Enter") || running || openName is not { } name)
+        {
+            return;
+        }
+
+        if (editor is not null && await editor.IsDirtyAsync())
+        {
+            ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
+            return;
+        }
+
+        running = true;
+        ActionResult renamed;
+        try
+        {
+            renamed = await Actions.RenameNote(name, renameText);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        if (renamed.Kind != ActionKind.Done)
+        {
+            ShowStatus(DesktopText.OneLine(renamed.Text), "red");
+            return;
+        }
+
+        renaming = false;
+        if (renamed.Reason == ActionReason.Unchanged)
+        {
+            ShowStatus(string.Empty, string.Empty);
+            return;
+        }
+
+        ShowNote(renamed.Text);
+        ShowStatus($"Renamed to {DesktopText.OneLine(renamed.Text)}", "accent");
+    }
+
+    private void AskDelete()
+    {
+        if (openName is not null && !running)
+        {
+            renaming = false;
+            deleting = true;
+        }
+    }
+
+    private void CancelDelete()
+    {
+        if (!running)
+        {
+            deleting = false;
+        }
+    }
+
+    // Confirmed in the dialog: deletes the open note and shows the current view again.
+    private async Task DeleteConfirmed(Confirmation confirmed)
+    {
+        if (openName is not { } name || running)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult deleted;
+        try
+        {
+            deleted = await Actions.DeleteNote(name, confirmed);
+        }
+        finally
+        {
+            running = false;
+            deleting = false;
+        }
+
+        if (deleted.Kind == ActionKind.Done)
+        {
+            ShowNote(null);
+            ShowStatus($"Deleted {DesktopText.OneLine(deleted.Text)}", "accent");
+        }
+        else
+        {
+            ShowStatus(DesktopText.OneLine(deleted.Text), "red");
+        }
+    }
+
+    private async Task OpenOutside()
+    {
+        if (openName is not { } name || running)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult opened;
+        try
+        {
+            opened = await Actions.OpenExternally(name);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        if (opened.Kind == ActionKind.Done)
+        {
+            ShowStatus(string.Empty, string.Empty);
+        }
+        else
+        {
+            ShowStatus(DesktopText.OneLine(opened.Text), "red");
         }
     }
 
