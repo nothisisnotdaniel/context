@@ -158,6 +158,8 @@ Every factory agent reads this file before working on Context. Keep it short and
   (referenced by `Context.Core` only; it reaches the app through the project reference). Tests: xUnit + `Spectre.Console.Testing` 0.57.2.
   Desktop: `Photino.Blazor` 4.0.13 (Apache-2.0; Blazor in the OS web view: WebView2 / WKWebView), `Context.Desktop` only; its tests
   use `bunit` 2.13.3 and `Jint` 4.17.0 (BSD-2, test project only; runs the editor bundle).
+  `Velopack` 1.2.161 (MIT; the Windows installer and updater), `Context.Desktop` only; its version must equal the
+  `vpk` tool version in `release.yml` (`ReleaseWorkflowTests` compares them), so change both together.
   Editor bundle: `src/Context.Desktop/editor/` is an npm project (exact versions in `package.json`, `package-lock.json`;
   ProseMirror + prosemirror-markdown/markdown-it, esbuild; licenses in `THIRD-PARTY-LICENSES.txt`, update it when a
   package changes). After changing `editor/src/*`, run `cd src/Context.Desktop/editor && npm install && npm run build`
@@ -168,10 +170,13 @@ Every factory agent reads this file before working on Context. Keep it short and
 - **CI:** `.github/workflows/ci.yml` (GitHub Actions, `ubuntu-latest`) runs on every push to `develop` and `main`
   and on every pull request: `dotnet restore`, `dotnet build --no-restore -warnaserror`, `dotnet test --no-build`, at the repo root.
   Read-only token, no secrets, actions pinned to commit SHAs; `CiWorkflowTests.cs` checks the file as text.
-- **Release:** `.github/workflows/release.yml` (the only other workflow; `ubuntu-latest`, `contents: write`, no secrets)
+- **Release:** `.github/workflows/release.yml` (next to `ci.yml` there is no third workflow; `contents: write`, no secrets)
   has three triggers: a push to `develop`, a merged `develop` -> `main` pull request titled exactly `release vX.Y.Z`,
-  and a pushed `vX.Y.Z` tag. Steps: check out, set up .NET, Version, `dotnet test -c Release`,
-  `dotnet pack src/Context -c Release -p:Version="$VERSION"`, smoke check, create the GitHub release, prune.
+  and a pushed `vX.Y.Z` tag. Three jobs: `release` (`ubuntu-latest`), then `desktop-macos` (`macos-latest`) and
+  `desktop-windows` (`windows-latest`, `shell: bash`), which both `needs: release`. Steps of `release`: check out,
+  set up .NET, Version, `dotnet test -c Release`,
+  `dotnet pack src/Context -c Release -p:Version="$VERSION"`, smoke check, create the GitHub release (notes start
+  with `.github/release-notes-header.md`: how to open an unsigned build), prune.
   - **Versions:** a `develop` push makes a prerelease `X.Y.(Z+1)-develop.<run number>`, one patch above the highest
     release tag (`.github/scripts/develop-version.sh`; `0.0.1-develop.<n>` while there is no tag). A push that changes
     only the root `backlog.md` is skipped (`paths-ignore`) and makes no prerelease. A release PR takes its version from
@@ -180,21 +185,40 @@ Every factory agent reads this file before working on Context. Keep it short and
     tag gives its own version, must be on `main`, and a `-develop` tag is refused. The version is checked against SemVer
     in the Version step and again by the `ValidateVersion` target in `Context.csproj` (`<Version>0.1.0</Version>` there
     is only the local default).
-  - **What ships:** the console app only, as the .NET tool package `Context.<version>.nupkg` (`PackAsTool`, command
-    `context`, written to the ignored `nupkg/` folder) attached to the GitHub release. The package is not signed
-    (Context has no updater that checks a signature), nothing goes to nuget.org, and there is no desktop build. The
-    smoke check installs the package from a throwaway nuget.config that knows only the local folder, requires
+  - **What ships:** on every release, three things. (1) The console app as the .NET tool package
+    `Context.<version>.nupkg` (`PackAsTool`, command `context`, written to the ignored `nupkg/` folder). The smoke
+    check installs it from a throwaway nuget.config that knows only the local folder, requires
     `context --version` to print `Context <version>`, and runs `context tags` on a fresh data folder so a missing
-    SQLite native library fails the release.
+    SQLite native library fails the release. Nothing goes to nuget.org. (2) The desktop app for macOS:
+    `Context-<version>-osx-arm64.zip` and `Context-<version>-osx-x64.zip`, each a `Context.app` built by
+    `.github/scripts/macos-app.sh <publish-dir> <version> <out-dir>` (Info.plist + all published files in
+    `Contents/MacOS/`; it neither signs nor zips), ad-hoc signed (`codesign -s -`, the only identity) and zipped
+    with `ditto`. (3) The desktop app for Windows, packed by `vpk` (`--packId ContextDesktop`, `--mainExe
+    Context.Desktop.exe`): `Setup.exe`, the portable zip, this version's full `.nupkg`, a delta `.nupkg` when
+    `vpk download github` found an earlier release of the channel (a failed download only warns), and the feed
+    files (`releases.<channel>.json`, `assets.<channel>.json`, `RELEASES*`); never a package of an older version.
+    The desktop jobs get version, tag and commit from the `release` job's outputs (job-level `env:` `VERSION`,
+    `TAG`; checkout `ref`), re-check the version against SemVer before any `dotnet` call, and upload with
+    `gh release upload "$TAG" ... --clobber`, so re-running a failed desktop job works. A failed desktop job leaves
+    a release with fewer assets.
+  - **Channels and updater:** two channels. A prerelease version is packed with `--channel develop`, a proper
+    release with vpk's default channel (`win`). A copy installed by `Setup.exe` updates itself at start-up
+    (`StartupUpdate`, see the desktop layout) from the channel it was installed from; the portable copy and the
+    macOS zips never update. **Trust model:** nothing is signed (no certificate, no notarization, no signature check
+    in the updater; signed builds are backlog #15). An update is trusted only as an HTTPS download from this
+    repository's GitHub releases, which only the release workflow writes, so whoever can write a release here can run
+    code on every installed copy. No token is embedded in the app; while the repository is private the
+    unauthenticated updater finds nothing and stays silent. The installer cannot run in `dotnet test`: after a change
+    to the desktop jobs, the next develop run is the real check.
   - **Pruning:** after a proper release `vX.Y.Z` the `Prune old prereleases` step (`continue-on-error`) deletes the
     `-develop` prereleases with core <= X.Y.Z and their tags (`.github/scripts/old-prereleases.sh`); proper releases
     and higher prereleases stay.
   - **Rules:** actions pinned to commit SHAs (the same two as `ci.yml`, tag in the trailing comment); no `${{ }}`
     inside a `run:` script: PR fields, refs and the token reach the shell only through `env:` and the runner's own
-    variables. The three scripts are Times' (`release-pr-version.sh` differs in one pattern: it refuses every prerelease label, Times' only `-develop`). `ReleaseWorkflowTests.cs` reads `release.yml`
+    variables. `github.token` is the only credential (the two release steps, the Windows `vpk download` and the two uploads). The three version scripts are Times' (`release-pr-version.sh` differs in one pattern: it refuses every prerelease label, Times' only `-develop`). `ReleaseWorkflowTests.cs` reads `release.yml`
     only through the small YAML reader `tests/Context.Tests/WorkflowYaml.cs` (block mappings and sequences, plain and
     quoted scalars, `|` and `>` blocks, comments; anything else throws), so reformatting the YAML does not break the
-    tests, and it runs the scripts with `bash`. `/factory release --project Context` opens the release PR.
+    tests, and it runs the scripts with `bash` (also the Windows `Pack` and `Upload` steps, against stub `vpk` and `gh` commands). `/factory release --project Context` opens the release PR.
 - **Run:** `dotnet run --project src/Context` (console), `dotnet run --project src/Context.Desktop` (desktop window)
 - **Layout:**
   - `Context.slnx`: the solution. `Directory.Build.props` turns on `EnforceCodeStyleInBuild`.
@@ -257,6 +281,15 @@ Every factory agent reads this file before working on Context. Keep it short and
     `TodoPanel` has an entry row (`DesktopActions.AddTodo`). The page editor is `wwwroot/editor/editor.js`
     (`globalThis.ContextEditor`), built from `editor/src/` (`schema.js`, `markdown.js` with markdown-it `html: false`,
     `view.js`, `index.js`); `isLossless` false shows the grey `Saving will reformat parts of this note.`
+    **Update:** `Program.Main` starts with `VelopackApp.Build().Run()` (Velopack's install/update hooks), and before
+    the window opens `StartupUpdate(IUpdateSource).Start()` runs the silent update on a pool thread: it returns at once
+    and never throws. Not `IsInstalled`: nothing is called. Otherwise `CheckAsync`; when a newer version is found,
+    `DownloadAsync` once, then `ApplyOnExit` once (put in place after the app closes, no restart). Any exception or
+    cancellation is swallowed with no output; the next start tries again. `StartupUpdate.IncludePrereleases(version)`
+    is true only for a SemVer version with a prerelease label (`StartupUpdate.CurrentVersion` is the assembly's
+    informational version). `VelopackUpdateSource` is the one real source: Velopack's `UpdateManager` over
+    `GithubSource` with the fixed repository URL, no access token, no explicit channel and no downgrade; installed
+    means Windows, installed by `Setup.exe` and not the portable copy. There is no update UI.
     `wwwroot/index.html` (CSP meta tag, only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
     and `wwwroot/editor/editor.css`.
   - **Desktop rules:** the Core writing calls (`Create`, `Save`, `SaveIfUnchanged`, `Add`, `Complete`, `Set`, `Clear`, `Delete`,
@@ -269,6 +302,10 @@ Every factory agent reads this file before working on Context. Keep it short and
     `OnAfterRender*`, `SetParametersAsync`, `BuildRenderTree`) and is called by no other method; no `.cs` file calls
     `Actions.`. Destructive actions take a `Confirmation`, and `new Confirmation(` appears only in
     `ConfirmDialog.razor`.
+    `Velopack` is named only in `VelopackUpdateSource.cs` and `Program.cs`; the update classes (`IUpdateSource.cs`,
+    `StartupUpdate.cs`, `VelopackUpdateSource.cs`) never mention `NoteStore`, `DefaultFolder`, `DesktopActions`,
+    `Environment.GetEnvironmentVariable`, `args` or `Console.`, so an update never touches the data folder; no test
+    references `VelopackUpdateSource` (tests use `FakeUpdateSource`, never the network).
     Outside text goes through `DesktopText.OneLine` and Blazor's default encoding: never `MarkupString`,
     `AddMarkupContent` or `@((` raw markup; no `style=`, `<a `, `<form` or `<script` in `.razor` files; every
     `<button` has `type="button"`; no plain HTML event attributes (`on<event>=` without `@`); only `EditorInterop.cs`
@@ -280,7 +317,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     console renderer's. Colours by CSS class (`accent`, `grey`, `red`, dates `overdue`/`today`/`later`); long lines
     cut by CSS with the full text in `title`.
   - `tests/Context.Tests/`: references both projects; one test class per production class (Core and app alike) (`AppTests.cs` tests `App.cs`),
-    `CiWorkflowTests.cs` and `ReleaseWorkflowTests.cs` (the workflows, the release scripts and the tool packaging; with `WorkflowYaml.cs` and its `WorkflowYamlTests.cs`), `ViewParityTests.cs` (golden ANSI output of `/current`, `/notes`, `/tags`, `/links`, `/calendar-link`; change
+    `CiWorkflowTests.cs` and `ReleaseWorkflowTests.cs` (the workflows and their three jobs, the release scripts and the tool packaging; with `WorkflowYaml.cs` and its `WorkflowYamlTests.cs`), `ViewParityTests.cs` (golden ANSI output of `/current`, `/notes`, `/tags`, `/links`, `/calendar-link`; change
     its expected strings only when a spec changes that output), `CoreDependencyTests.cs` (architecture test: fails on any
     Spectre assembly, package, project reference or source mention in `Context.Core`), plus shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves),
     `ConsoleSession.cs` (everything wired like `Program.cs`), `RemovedFeature.cs` (the names of the removed
@@ -290,8 +327,8 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `DesktopDependencyTests` (no Spectre, no Jint
-    outside tests, exact npm versions), `DesktopSourceTests` (raw markup, risky elements,
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `DesktopDependencyTests` (no Spectre, no Jint
+    outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
     CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop), `DesktopFixture` (temp folder, injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),
     `FileSnapshot` (bytes and last-write times of a folder, to prove nothing changed) and `RepoFiles`.

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Xml;
 using System.Xml.Linq;
 using Xunit.Sdk;
 
@@ -8,8 +9,9 @@ namespace Context.Tests;
 
 /// <summary>
 /// Checks the release flow: <c>.github/workflows/release.yml</c> (read only through <see cref="WorkflowYaml"/>), the
-/// three scripts in <c>.github/scripts/</c> (run with <c>bash</c>, no network, no <c>gh</c>), the tool packaging in
-/// <c>Context.csproj</c> and the release entry in <c>CLAUDE.md</c>.
+/// scripts in <c>.github/scripts/</c> and the Windows pack and upload steps (run with <c>bash</c>, no network; the
+/// steps against stub <c>vpk</c> and <c>gh</c> commands), the tool packaging in <c>Context.csproj</c>, the Velopack
+/// version in <c>Context.Desktop.csproj</c> and the release entry in <c>CLAUDE.md</c>.
 /// </summary>
 public sealed class ReleaseWorkflowTests
 {
@@ -27,13 +29,32 @@ public sealed class ReleaseWorkflowTests
     private const string PackCommand = "dotnet pack src/Context -c Release -p:Version=\"$VERSION\"";
     private const string ReleaseCommand =
         "gh release create \"$TAG\" \"nupkg/Context.$VERSION.nupkg\" --title \"Context $VERSION\""
-        + " --generate-notes --target \"$TARGET\" $PRERELEASE";
+        + " --notes-file .github/release-notes-header.md --generate-notes --target \"$TARGET\" $PRERELEASE";
+
+    private const string PublishCommand =
+        "dotnet publish src/Context.Desktop -c Release --self-contained -p:Version=\"$VERSION\"";
+
+    private const string VersionOutput = "${{ needs.release.outputs.version }}";
+    private const string TagOutput = "${{ needs.release.outputs.tag }}";
+    private const string TargetOutput = "${{ needs.release.outputs.target }}";
 
     private static readonly string[] StepNames =
     [
         "Check out", "Set up .NET", "Version", "Test", "Pack", "Smoke check the packed tool",
         "Create GitHub release", "Prune old prereleases",
     ];
+
+    private static readonly string[] MacStepNames =
+    [
+        "Check out", "Check version", "Set up .NET", "Publish", "Bundle, ad-hoc sign and zip", "Upload",
+    ];
+
+    private static readonly string[] WindowsStepNames =
+    [
+        "Check out", "Check version", "Set up .NET", "Install vpk", "Publish", "Pack", "Upload",
+    ];
+
+    private static readonly string[] JobNames = ["release", "desktop-macos", "desktop-windows"];
 
     private static readonly string RepoRoot = FindRepoRoot();
 
@@ -49,43 +70,72 @@ public sealed class ReleaseWorkflowTests
     public void Workflow_PinsTheSameActionsAsCi_ToCommitShasWithVersionComments()
     {
         string workflow = ReadWorkflow();
-        List<YamlScalar> uses = [.. Steps(workflow)
+        List<YamlScalar> uses = [.. AllSteps(workflow)
             .Where(step => step.ContainsKey("uses"))
             .Select(step => Assert.IsType<YamlScalar>(step["uses"]))];
         string[] lines = workflow.Split('\n');
         string ci = File.ReadAllText(Path.Combine(RepoRoot, ".github", "workflows", "ci.yml"));
 
-        Assert.Equal([CheckoutAction, SetupDotnetAction], uses.Select(scalar => scalar.Value));
-        Assert.Equal(["v4.4.0", "v4.3.1"], uses.Select(scalar => scalar.Comment));
-        Assert.EndsWith(" # v4.4.0", lines[uses[0].Line - 1], StringComparison.Ordinal);
-        Assert.EndsWith(" # v4.3.1", lines[uses[1].Line - 1], StringComparison.Ordinal);
+        // The same two actions in each of the three jobs, and no other.
+        Assert.Equal(
+            [CheckoutAction, SetupDotnetAction, CheckoutAction, SetupDotnetAction, CheckoutAction, SetupDotnetAction],
+            uses.Select(scalar => scalar.Value));
+        Assert.All(uses, scalar => Assert.EndsWith(
+            scalar.Value == CheckoutAction ? " # v4.4.0" : " # v4.3.1",
+            lines[scalar.Line - 1],
+            StringComparison.Ordinal));
         Assert.All(uses, scalar => Assert.Matches("@[0-9a-f]{40}$", scalar.Value));
         Assert.Contains("uses: " + CheckoutAction + " # v4.4.0", ci, StringComparison.Ordinal);
         Assert.Contains("uses: " + SetupDotnetAction + " # v4.3.1", ci, StringComparison.Ordinal);
     }
 
-    // AC-2: no sign step, no secret, and github.token is the only credential.
+    // AC-2 (133 AC-1, AC-2, AC-6): nothing is signed with a certificate (the macOS apps only ad-hoc, identity "-"),
+    // no secret, and github.token is the only credential.
     [Fact]
-    public void Workflow_HasNoSignStep_NoSecret_AndOnlyTheGitHubToken()
+    public void Workflow_SignsOnlyAdHoc_HasNoSecret_AndOnlyTheGitHubToken()
     {
         string workflow = ReadWorkflow();
-        List<YamlMapping> steps = Steps(workflow);
+        List<YamlMapping> steps = AllSteps(workflow);
 
         Assert.DoesNotContain("secrets.", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("pull_request_target", workflow, StringComparison.Ordinal);
-        Assert.DoesNotContain(steps, step => Scalar(step["name"]).Contains("sign", StringComparison.OrdinalIgnoreCase));
-        Assert.All(RunScripts(workflow), script =>
+        Assert.Equal(
+            ["Bundle, ad-hoc sign and zip"],
+            steps.Select(step => Scalar(step["name"])).Where(name => name.Contains("sign", StringComparison.OrdinalIgnoreCase)));
+        Assert.All(AllRunScripts(workflow), script =>
         {
             Assert.DoesNotContain("openssl", script, StringComparison.Ordinal);
             Assert.DoesNotContain(".sig", script, StringComparison.Ordinal);
+            Assert.DoesNotContain("--sign", script, StringComparison.Ordinal);
+            Assert.DoesNotContain("signtool", script, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("notarytool", script, StringComparison.Ordinal);
+            Assert.DoesNotContain("--azure", script, StringComparison.Ordinal);
         });
+
+        // Every codesign call either makes the ad-hoc signature or verifies it; no script outside the macOS job signs.
+        List<string> codesign = [.. AllRunScripts(workflow)
+            .SelectMany(script => script.Split('\n'))
+            .Select(line => line.Trim())
+            .Where(line => line.Contains("codesign", StringComparison.Ordinal) && !line.StartsWith('#'))];
+        Assert.Equal(
+            [
+                "codesign --force --deep -s - \"app/$RID/Context.app\"",
+                "codesign --verify --deep --strict \"app/$RID/Context.app\"",
+            ],
+            codesign);
+        Assert.All(
+            JobRunScripts(workflow, "release").Concat(JobRunScripts(workflow, "desktop-windows")),
+            script => Assert.DoesNotContain("codesign", script, StringComparison.Ordinal));
 
         List<string> tokens = [.. steps
             .Where(step => step.ContainsKey("env"))
             .SelectMany(step => Map(step["env"]).Entries)
             .Where(entry => !Scalar(entry.Value).StartsWith("${{ github.event.pull_request.", StringComparison.Ordinal))
             .Select(entry => entry.Key + "=" + Scalar(entry.Value))];
-        Assert.Equal(["GH_TOKEN=${{ github.token }}", "GH_TOKEN=${{ github.token }}"], tokens);
+        // Release, prune, the macOS upload, the Windows vpk download (in Pack) and the Windows upload.
+        Assert.Equal(Enumerable.Repeat("GH_TOKEN=${{ github.token }}", 5), tokens);
+        Assert.Equal(5, Regex.Matches(workflow, Regex.Escape("${{ github.token }}")).Count);
+        Assert.DoesNotContain("GITHUB_TOKEN", workflow, StringComparison.Ordinal);
     }
 
     // AC-12: the structure check reads only the parsed model, so reformatting the YAML keeps it passing.
@@ -111,6 +161,13 @@ public sealed class ReleaseWorkflowTests
     [InlineData("extra trigger")]
     [InlineData("expression in run")]
     [InlineData("expression in a run block")]
+    [InlineData("tag-pinned checkout in a desktop job")]
+    [InlineData("third action in a desktop job")]
+    [InlineData("expression in a desktop run")]
+    [InlineData("credentials kept in a desktop job")]
+    [InlineData("desktop job without needs")]
+    [InlineData("desktop job with its own permissions")]
+    [InlineData("secret in a desktop job")]
     public void StructureCheck_FailsOnUnsafeCopy(string change)
     {
         string workflow = ReadWorkflow();
@@ -121,7 +178,28 @@ public sealed class ReleaseWorkflowTests
                 workflow,
                 "permissions:\n  contents: write\n",
                 "permissions:\n  contents: write\n  id-token: write\n"),
-            "tag-pinned checkout" => ReplaceOnce(workflow, CheckoutAction + " # v4.4.0", "actions/checkout@v4"),
+            "tag-pinned checkout" => ReplaceNth(workflow, CheckoutAction + " # v4.4.0", "actions/checkout@v4", 0),
+            "tag-pinned checkout in a desktop job" =>
+                ReplaceNth(workflow, CheckoutAction + " # v4.4.0", "actions/checkout@v4", 2),
+            "third action in a desktop job" => ReplaceOnce(
+                workflow,
+                "      - name: Install vpk\n        run: ",
+                "      - name: Install vpk\n        uses: actions/cache@0000000000000000000000000000000000000000 # v4.0.0\n"
+                    + "      - name: Install vpk again\n        run: "),
+            "expression in a desktop run" => ReplaceOnce(
+                workflow,
+                "gh release upload \"$TAG\" \"$@\" --clobber",
+                "gh release upload \"${{ needs.release.outputs.tag }}\" \"$@\" --clobber"),
+            "credentials kept in a desktop job" => ReplaceNth(
+                workflow, "          persist-credentials: false\n", "          persist-credentials: true\n", 2),
+            "desktop job without needs" => ReplaceNth(workflow, "    needs: release\n", string.Empty, 1),
+            "desktop job with its own permissions" => ReplaceNth(
+                workflow, "    needs: release\n", "    needs: release\n    permissions: write-all\n", 0),
+            "secret in a desktop job" => ReplaceNth(
+                workflow,
+                "      TAG: ${{ needs.release.outputs.tag }}\n",
+                "      TAG: ${{ needs.release.outputs.tag }}\n      KEY: ${{ secrets.SIGNING_KEY }}\n",
+                0),
             "pull_request_target" => ReplaceOnce(workflow, "\n  pull_request:\n", "\n  pull_request_target:\n"),
             "extra trigger" => ReplaceOnce(workflow, "\non:\n", "\non:\n  workflow_dispatch:\n"),
             "expression in run" => ReplaceOnce(
@@ -150,8 +228,32 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("backlog.md", header, StringComparison.Ordinal);
         Assert.Contains("release vX.Y.Z", header, StringComparison.Ordinal);
         Assert.Contains("X.Y.(Z+1)-develop.<run number>", header, StringComparison.Ordinal);
-        Assert.Contains("not signed", header, StringComparison.Ordinal);
         Assert.DoesNotContain("Times", workflow, StringComparison.Ordinal);
+
+        // 133 AC-13: what ships, the two channels, the updater and its trust model.
+        string flat = Regex.Replace(header.Replace("\n#", " ", StringComparison.Ordinal), @"\s+", " ");
+        string[] expected =
+        [
+            "Context.<version>.nupkg",
+            "Context-<version>-osx-arm64.zip",
+            "Context-<version>-osx-x64.zip",
+            "Setup.exe",
+            "portable zip",
+            "full .nupkg",
+            "delta .nupkg",
+            "releases.<channel>.json",
+            "--channel develop",
+            "default channel (win)",
+            "looks at start-up for a newer build",
+            "Nothing is signed",
+            "ad-hoc signature",
+            "checks no signature",
+            "HTTPS from this repository's releases, which only this workflow writes",
+            "github.token is the only credential",
+            "--clobber",
+        ];
+        Assert.All(expected, text => Assert.Contains(text, flat, StringComparison.Ordinal));
+        Assert.DoesNotContain("there is no desktop build", flat, StringComparison.Ordinal);
     }
 
     // AC-2: the version is set first, the tests run on the normal build, then the pack takes the version.
@@ -179,6 +281,12 @@ public sealed class ReleaseWorkflowTests
 
         Assert.Equal(6, scripts.Count);
         Assert.All(scripts, script => Assert.DoesNotContain("${{", script, StringComparison.Ordinal));
+
+        // 133 AC-1: the same for every run: script of the two desktop jobs.
+        List<string> all = AllRunScripts(ReadWorkflow());
+        Assert.Equal(6 + 4 + 5, all.Count);
+        Assert.All(all, script => Assert.DoesNotContain("${{", script, StringComparison.Ordinal));
+        Assert.All(all, script => Assert.DoesNotContain("eval", script, StringComparison.Ordinal));
     }
 
     // AC-4: pull_request first, then the develop push, then the tag push; one SemVer check after all three.
@@ -304,6 +412,12 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("echo \"TAG=$TAG\" >> \"$GITHUB_ENV\"", script[check..], StringComparison.Ordinal);
         Assert.Contains("echo \"TARGET=$TARGET\" >> \"$GITHUB_ENV\"", script[check..], StringComparison.Ordinal);
         Assert.Equal(3, Regex.Matches(script, Regex.Escape(">> \"$GITHUB_ENV\"")).Count);
+
+        // 133: the same three values become the job outputs the desktop jobs read, also only after the check.
+        Assert.Contains("echo \"version=$VERSION\" >> \"$GITHUB_OUTPUT\"", script[check..], StringComparison.Ordinal);
+        Assert.Contains("echo \"tag=$TAG\" >> \"$GITHUB_OUTPUT\"", script[check..], StringComparison.Ordinal);
+        Assert.Contains("echo \"target=$TARGET\" >> \"$GITHUB_OUTPUT\"", script[check..], StringComparison.Ordinal);
+        Assert.Equal(3, Regex.Matches(script, Regex.Escape(">> \"$GITHUB_OUTPUT\"")).Count);
     }
 
     // AC-5
@@ -716,8 +830,26 @@ public sealed class ReleaseWorkflowTests
     [InlineData("`paths-ignore`")]
     [InlineData("`Prune old prereleases`")]
     [InlineData("`Context.<version>.nupkg`")]
-    [InlineData("console app only")]
-    [InlineData("not signed")]
+    [InlineData("nothing is signed")]
+    [InlineData("`desktop-macos` (`macos-latest`)")]
+    [InlineData("`desktop-windows` (`windows-latest`, `shell: bash`)")]
+    [InlineData("`needs: release`")]
+    [InlineData("`Context-<version>-osx-arm64.zip` and `Context-<version>-osx-x64.zip`")]
+    [InlineData(".github/scripts/macos-app.sh <publish-dir> <version> <out-dir>")]
+    [InlineData("`codesign -s -`")]
+    [InlineData("`Setup.exe`, the portable zip, this version's full `.nupkg`, a delta `.nupkg`")]
+    [InlineData("`releases.<channel>.json`")]
+    [InlineData("never a package of an older version")]
+    [InlineData("`--channel develop`")]
+    [InlineData("default channel (`win`)")]
+    [InlineData("updates itself at start-up")]
+    [InlineData("**Trust model:**")]
+    [InlineData("no signature check in the updater")]
+    [InlineData("HTTPS download from this repository's GitHub releases, which only the release workflow writes")]
+    [InlineData("No token is embedded")]
+    [InlineData("`github.token` is the only credential")]
+    [InlineData(".github/release-notes-header.md")]
+    [InlineData("--clobber`, so re-running a failed desktop job works")]
     [InlineData("commit SHAs")]
     [InlineData("tests/Context.Tests/WorkflowYaml.cs")]
     [InlineData("context --version")]
@@ -731,6 +863,448 @@ public sealed class ReleaseWorkflowTests
 
         Assert.Contains(expected, entry, StringComparison.Ordinal);
         Assert.DoesNotContain("the only workflow", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("there is no desktop build", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("console app only", text, StringComparison.Ordinal);
+    }
+
+    // 133 AC-2: both architectures are published self-contained with the version, then bundled, ad-hoc signed,
+    // verified and zipped, and both zips are uploaded to the release's tag.
+    [Fact]
+    public void MacJob_PublishesBundlesSignsAdHocZipsAndUploadsBothArchitectures()
+    {
+        string[] publish = Lines(JobScript("desktop-macos", "Publish"));
+        Assert.Equal(
+            ["for RID in osx-arm64 osx-x64; do", PublishCommand + " -r \"$RID\" -o \"publish/$RID\"", "done"],
+            publish);
+
+        string[] bundle = Lines(JobScript("desktop-macos", "Bundle, ad-hoc sign and zip"));
+        Assert.Equal(
+            [
+                "for RID in osx-arm64 osx-x64; do",
+                "sh .github/scripts/macos-app.sh \"publish/$RID\" \"$VERSION\" \"app/$RID\"",
+                "codesign --force --deep -s - \"app/$RID/Context.app\"",
+                "codesign --verify --deep --strict \"app/$RID/Context.app\"",
+                "ditto -c -k --keepParent \"app/$RID/Context.app\" \"Context-$VERSION-$RID.zip\"",
+                "done",
+            ],
+            bundle);
+
+        Assert.Equal(
+            ["gh release upload \"$TAG\" \"Context-$VERSION-osx-arm64.zip\" \"Context-$VERSION-osx-x64.zip\" --clobber"],
+            Lines(JobScript("desktop-macos", "Upload")));
+    }
+
+    // 133 AC-3: Info.plist with the bundle keys, and every published file under Contents/MacOS.
+    [Theory]
+    [InlineData("1.2.3", "1.2.3")]
+    [InlineData("1.2.4-develop.7", "1.2.4")]
+    [InlineData("0.0.1-develop.12", "0.0.1")]
+    [InlineData("10.20.30-rc-1.x", "10.20.30")]
+    public async Task MacAppScript_BuildsTheBundle(string version, string core)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            WritePublishFolder(folder);
+
+            ScriptResult result = await RunBash(folder, [MacAppScript, "publish", version, "out"]);
+
+            Assert.True(result.Code == 0, "macos-app.sh exit " + result.Code + ": " + result.Err);
+            Assert.Equal(["out", "publish"], result.FilesCreated.Order(StringComparer.Ordinal));
+            string contents = Path.Combine(folder, "out", "Context.app", "Contents");
+            Assert.Equal(["Info.plist", "MacOS"], Entries(contents));
+
+            Dictionary<string, string> plist = ReadPlist(Path.Combine(contents, "Info.plist"));
+            Assert.Equal("Context.Desktop", plist["CFBundleExecutable"]);
+            Assert.Equal("com.nothisisnotdaniel.context", plist["CFBundleIdentifier"]);
+            Assert.Equal(core, plist["CFBundleShortVersionString"]);
+            Assert.Equal(core, plist["CFBundleVersion"]);
+            Assert.Equal("Context", plist["CFBundleName"]);
+            Assert.Equal("APPL", plist["CFBundlePackageType"]);
+
+            Assert.Equal(RelativeFiles(Path.Combine(folder, "publish")), RelativeFiles(Path.Combine(contents, "MacOS")));
+            Assert.Equal(
+                File.ReadAllBytes(Path.Combine(folder, "publish", "wwwroot", "index.html")),
+                File.ReadAllBytes(Path.Combine(contents, "MacOS", "wwwroot", "index.html")));
+            Assert.True(
+                (File.GetUnixFileMode(Path.Combine(contents, "MacOS", "Context.Desktop")) & UnixFileMode.UserExecute) != 0,
+                "the executable must stay executable");
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 133 AC-3: a version that is not SemVer is refused before anything is created, and is never evaluated.
+    [Theory]
+    [InlineData("")]
+    [InlineData("1.2")]
+    [InlineData("v1.2.3")]
+    [InlineData("01.2.3")]
+    [InlineData("1.2.3.4")]
+    [InlineData("1.2.3+abc")]
+    [InlineData("1.2.3-")]
+    [InlineData("1.2.3 ")]
+    [InlineData("1.2.3\n")]
+    [InlineData("1.2.3\n1.2.4")]
+    [InlineData("1.2.3\r")]
+    [InlineData("1.2.3;touch MARKER")]
+    [InlineData("1.2.3; touch MARKER")]
+    [InlineData("$(touch MARKER)")]
+    [InlineData("`touch MARKER`")]
+    [InlineData("1.2.3-$(touch MARKER)")]
+    [InlineData("1.2.3-béta")]
+    [InlineData("1.2.3-béta", "en_US.UTF-8")]
+    [InlineData("</string><string>x")]
+    public async Task MacAppScript_RefusesAVersionThatIsNotSemVer(string version, string locale = "")
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            WritePublishFolder(folder);
+            Dictionary<string, string> environment = [];
+            if (locale.Length > 0)
+            {
+                environment["LC_ALL"] = locale;
+                environment["LANG"] = locale;
+            }
+
+            ScriptResult result = await RunBash(folder, [MacAppScript, "publish", version, "out"], environment);
+
+            Assert.NotEqual(0, result.Code);
+            Assert.NotEqual(string.Empty, result.Err);
+            Assert.Equal(string.Empty, result.Out);
+            // No out folder, and nothing the version could have run left a trace.
+            Assert.Equal(["publish"], result.FilesCreated);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 133 AC-3: a missing or extra argument, an empty one, a publish folder without the executable or an output
+    // folder that already holds Context.app exits non-zero and creates nothing.
+    [Theory]
+    [InlineData("no arguments")]
+    [InlineData("one argument")]
+    [InlineData("two arguments")]
+    [InlineData("four arguments")]
+    [InlineData("empty publish folder")]
+    [InlineData("empty out folder")]
+    [InlineData("no executable")]
+    [InlineData("no publish folder")]
+    [InlineData("app already there")]
+    public async Task MacAppScript_RefusesWrongArguments_AndCreatesNothing(string situation)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            WritePublishFolder(folder);
+            string[] arguments = situation switch
+            {
+                "no arguments" => [],
+                "one argument" => ["publish"],
+                "two arguments" => ["publish", "1.2.3"],
+                "four arguments" => ["publish", "1.2.3", "out", "more"],
+                "empty publish folder" => ["", "1.2.3", "out"],
+                "empty out folder" => ["publish", "1.2.3", ""],
+                "no publish folder" => ["missing", "1.2.3", "out"],
+                _ => ["publish", "1.2.3", "out"],
+            };
+            if (situation == "no executable")
+            {
+                File.Delete(Path.Combine(folder, "publish", "Context.Desktop"));
+            }
+
+            if (situation == "app already there")
+            {
+                Directory.CreateDirectory(Path.Combine(folder, "out", "Context.app"));
+            }
+
+            SortedDictionary<string, DateTime> before = Listing(folder);
+            ScriptResult result = await RunBash(folder, [MacAppScript, .. arguments]);
+
+            Assert.NotEqual(0, result.Code);
+            Assert.NotEqual(string.Empty, result.Err);
+            Assert.Equal(before, Listing(folder));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 133 AC-3: the script only builds the bundle (no signing, no zip), and never evaluates its arguments.
+    [Fact]
+    public void MacAppScript_NeitherSignsNorZips_AndNeverEvaluatesTheVersion()
+    {
+        string source = ScriptSource("macos-app.sh");
+        string code = CodeLines(source);
+
+        Assert.StartsWith("#!/bin/sh\n", source, StringComparison.Ordinal);
+        Assert.Contains("set -eu\n", code, StringComparison.Ordinal);
+        Assert.Contains("LC_ALL=C\nexport LC_ALL\n", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("eval", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("sh -c", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("codesign", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("zip", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("ditto", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("curl", code, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"[^""{]\$version", code);
+        // The SemVer check comes before the first thing the script creates.
+        Assert.True(
+            code.IndexOf("grep -Eq \"$semver\"", StringComparison.Ordinal) < code.IndexOf("mkdir", StringComparison.Ordinal),
+            "the version must be checked before anything is created");
+        Assert.Single(Regex.Matches(code, @"\bmkdir\b"));
+    }
+
+    // 133 AC-4: vpk is installed at an exact version, equal to the Velopack package of Context.Desktop, and no other
+    // project references Velopack.
+    [Fact]
+    public void WindowsJob_InstallsVpkAtTheVelopackPackageVersion()
+    {
+        string install = Assert.Single(Lines(JobScript("desktop-windows", "Install vpk")));
+        Match match = Regex.Match(install, @"\Adotnet tool install --global vpk --version (\d+\.\d+\.\d+)\z");
+        Assert.True(match.Success, "vpk must be installed at an exact version: " + install);
+
+        List<string> references = [];
+        foreach (string folder in new[] { "src", "tests" })
+        {
+            foreach (string project in Directory.EnumerateFiles(
+                Path.Combine(RepoRoot, folder), "*.csproj", SearchOption.AllDirectories))
+            {
+                string relative = Path.GetRelativePath(RepoRoot, project).Replace('\\', '/');
+                if (relative.Contains("/bin/", StringComparison.Ordinal) || relative.Contains("/obj/", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                foreach (XElement reference in XDocument.Load(project).Descendants("PackageReference"))
+                {
+                    string id = (reference.Attribute("Include") ?? reference.Attribute("Update"))?.Value ?? string.Empty;
+                    if (id.Contains("Velopack", StringComparison.OrdinalIgnoreCase)
+                        || id.Equals("vpk", StringComparison.OrdinalIgnoreCase))
+                    {
+                        references.Add(relative + ": " + id + " " + reference.Attribute("Version")?.Value);
+                    }
+                }
+            }
+        }
+
+        Assert.Equal(["src/Context.Desktop/Context.Desktop.csproj: Velopack " + match.Groups[1].Value], references);
+        Assert.Equal(
+            [PublishCommand + " -r win-x64 -o publish/win-x64"],
+            Lines(JobScript("desktop-windows", "Publish")));
+    }
+
+    // 133 AC-4, AC-5: the Pack step, run with bash against a stub vpk: an earlier release of the same channel is
+    // downloaded first (with the token), then the pack runs without the token; --channel develop exactly for a
+    // version with a prerelease label.
+    [Theory]
+    [InlineData("1.2.3", "")]
+    [InlineData("1.2.4-develop.7", " --channel develop")]
+    [InlineData("0.0.1-develop.1", " --channel develop")]
+    [InlineData("2.0.0", "")]
+    public async Task WindowsPackStep_UsesTheDevelopChannelOnlyForPrereleases(string version, string channel)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            ScriptResult result = await RunStep(folder, JobScript("desktop-windows", "Pack"), version, downloadExit: 0);
+
+            Assert.True(result.Code == 0, "Pack exit " + result.Code + ": " + result.Err);
+            string pre = channel.Length > 0 ? " --pre" : string.Empty;
+            Assert.Equal(
+                [
+                    "vpk [token] download github --repoUrl https://github.com/owner/repo --token stub-token"
+                        + " --outputDir Releases" + channel + pre,
+                    "vpk [no token] pack --packId ContextDesktop --packVersion " + version
+                        + " --packDir publish/win-x64 --mainExe Context.Desktop.exe --packTitle Context"
+                        + " --runtime win-x64 --outputDir Releases" + channel,
+                ],
+                StubLog(folder));
+            Assert.DoesNotContain("::warning::", result.Out, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 133 AC-5: no earlier release (the download fails) only warns: the pack still runs and the step passes. A
+    // failed pack fails the step.
+    [Theory]
+    [InlineData("1.2.3")]
+    [InlineData("1.2.4-develop.7")]
+    public async Task WindowsPackStep_AFailedDownloadOnlyWarns_AFailedPackFails(string version)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            string script = JobScript("desktop-windows", "Pack");
+            ScriptResult result = await RunStep(folder, script, version, downloadExit: 1);
+
+            Assert.True(result.Code == 0, "Pack exit " + result.Code + ": " + result.Err);
+            Assert.Contains("::warning::", result.Out, StringComparison.Ordinal);
+            List<string> log = StubLog(folder);
+            Assert.Equal(2, log.Count);
+            Assert.StartsWith("vpk [token] download github ", log[0], StringComparison.Ordinal);
+            Assert.StartsWith("vpk [no token] pack ", log[1], StringComparison.Ordinal);
+
+            File.Delete(Path.Combine(folder, "stub.log"));
+            ScriptResult failed = await RunStep(folder, script, version, downloadExit: 0, packExit: 1);
+            Assert.NotEqual(0, failed.Code);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 133 AC-6: the Upload step, run with bash against a stub gh: Setup.exe, the portable zip, this version's full
+    // package, the feed files and the delta when there is one; never the earlier package that sits next to them.
+    [Theory]
+    [InlineData("1.2.4-develop.7", "develop", "-develop", true)]
+    [InlineData("1.2.4-develop.7", "develop", "-develop", false)]
+    [InlineData("1.2.3", "win", "", true)]
+    [InlineData("1.2.3", "win", "", false)]
+    public async Task WindowsUploadStep_UploadsOnlyThisVersionsFiles(string version, string name, string suffix, bool delta)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            string full = "ContextDesktop-" + version + suffix + "-full.nupkg";
+            string deltaName = "ContextDesktop-" + version + suffix + "-delta.nupkg";
+            List<string> files =
+            [
+                "ContextDesktop-" + name + "-Setup.exe", "ContextDesktop-" + name + "-Portable.zip", full,
+                "releases." + name + ".json", "assets." + name + ".json", "RELEASES" + suffix,
+                // What `vpk download` left there: an earlier version, and the other channel's files.
+                "ContextDesktop-1.2.2" + suffix + "-full.nupkg", "ContextDesktop-1.2.2" + suffix + "-delta.nupkg",
+                "ContextDesktop-1.2.4-develop.6-develop-full.nupkg", "ContextDesktop-1.0.0-full.nupkg",
+            ];
+            if (delta)
+            {
+                files.Add(deltaName);
+            }
+
+            WriteReleases(folder, files);
+
+            ScriptResult result = await RunStep(folder, JobScript("desktop-windows", "Upload"), version);
+
+            Assert.True(result.Code == 0, "Upload exit " + result.Code + ": " + result.Err);
+            string expected = "gh [token] release upload v" + version
+                + " Releases/ContextDesktop-" + name + "-Setup.exe Releases/ContextDesktop-" + name + "-Portable.zip"
+                + " Releases/" + full + " Releases/releases." + name + ".json Releases/assets." + name + ".json"
+                + " Releases/RELEASES" + suffix + (delta ? " Releases/" + deltaName : string.Empty) + " --clobber";
+            Assert.Equal([expected], StubLog(folder));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 133 AC-6: without Setup.exe or this version's full package the step fails before gh is called.
+    [Theory]
+    [InlineData("1.2.4-develop.7", "ContextDesktop-develop-Setup.exe")]
+    [InlineData("1.2.4-develop.7", "ContextDesktop-1.2.4-develop.7-develop-full.nupkg")]
+    [InlineData("1.2.3", "ContextDesktop-win-Setup.exe")]
+    [InlineData("1.2.3", "ContextDesktop-1.2.3-full.nupkg")]
+    public async Task WindowsUploadStep_FailsWhenSetupOrTheFullPackageIsMissing(string version, string missing)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            bool develop = version.Contains('-', StringComparison.Ordinal);
+            string name = develop ? "develop" : "win";
+            string suffix = develop ? "-develop" : string.Empty;
+            List<string> files =
+            [
+                "ContextDesktop-" + name + "-Setup.exe", "ContextDesktop-" + name + "-Portable.zip",
+                "ContextDesktop-" + version + suffix + "-full.nupkg", "releases." + name + ".json",
+                "assets." + name + ".json", "RELEASES" + suffix,
+                // The other channel's installer and an earlier package must not stand in for the missing file.
+                "ContextDesktop-" + (develop ? "win" : "develop") + "-Setup.exe", "ContextDesktop-1.2.2" + suffix + "-full.nupkg",
+            ];
+            Assert.True(files.Remove(missing));
+            WriteReleases(folder, files);
+
+            ScriptResult result = await RunStep(folder, JobScript("desktop-windows", "Upload"), version);
+
+            Assert.NotEqual(0, result.Code);
+            Assert.Contains(missing + " is missing", result.Err, StringComparison.Ordinal);
+            Assert.Empty(StubLog(folder));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 133 AC-13: the release notes start with how to open an unsigned build on macOS and Windows.
+    [Fact]
+    public void ReleaseNotesHeader_SaysHowToOpenAnUnsignedBuild()
+    {
+        string path = Path.Combine(RepoRoot, ".github", "release-notes-header.md");
+        Assert.True(File.Exists(path), path + " is missing");
+        string text = Regex.Replace(File.ReadAllText(path), @"\s+", " ");
+
+        Assert.Contains("`Open Anyway`", text, StringComparison.Ordinal);
+        Assert.Contains("`xattr -dr com.apple.quarantine Context.app`", text, StringComparison.Ordinal);
+        Assert.Contains("`More info`", text, StringComparison.Ordinal);
+        Assert.Contains("`Run anyway`", text, StringComparison.Ordinal);
+        Assert.True(
+            text.IndexOf("`More info`", StringComparison.Ordinal) < text.IndexOf("`Run anyway`", StringComparison.Ordinal),
+            "More info comes before Run anyway");
+        Assert.Contains("not signed", text, StringComparison.Ordinal);
+        Assert.Contains("Setup.exe", text, StringComparison.Ordinal);
+        Assert.Contains("osx-arm64.zip", text, StringComparison.Ordinal);
+        Assert.Contains("osx-x64.zip", text, StringComparison.Ordinal);
+        // Plain Markdown text for `gh release create --notes-file`: nothing a workflow or a shell would expand.
+        Assert.DoesNotContain("${{", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("<script", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "--notes-file .github/release-notes-header.md",
+            JobScript("release", "Create GitHub release"),
+            StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -760,11 +1334,18 @@ public sealed class ReleaseWorkflowTests
         Assert.Equal(["contents=write"], Pairs(root["permissions"]));
 
         YamlMapping jobs = Map(root["jobs"]);
-        Assert.Equal(["release"], jobs.Keys);
+        Assert.Equal(JobNames, jobs.Keys);
         YamlMapping job = Map(jobs["release"]);
-        Assert.Equal(["if", "runs-on", "steps"], Sorted(job.Keys));
+        Assert.Equal(["if", "outputs", "runs-on", "steps"], Sorted(job.Keys));
         Assert.Equal(JobIf, Regex.Replace(Scalar(job["if"]), @"\s+", " ").Trim());
         Assert.Equal("ubuntu-latest", Scalar(job["runs-on"]));
+        Assert.Equal(
+            [
+                "tag=${{ steps.version.outputs.tag }}",
+                "target=${{ steps.version.outputs.target }}",
+                "version=${{ steps.version.outputs.version }}",
+            ],
+            Pairs(job["outputs"]));
 
         List<YamlMapping> steps = Steps(root);
         Assert.Equal(StepNames, steps.Select(step => Scalar(step["name"])));
@@ -789,7 +1370,8 @@ public sealed class ReleaseWorkflowTests
         Assert.Equal(["dotnet-version=10.0.x"], Pairs(steps[1]["with"]));
 
         YamlMapping version = steps[2];
-        Assert.Equal(["env", "name", "run"], Sorted(version.Keys));
+        Assert.Equal(["env", "id", "name", "run"], Sorted(version.Keys));
+        Assert.Equal("version", Scalar(version["id"]));
         Assert.Equal(
             [
                 "MERGE_SHA=${{ github.event.pull_request.merge_commit_sha }}",
@@ -818,6 +1400,78 @@ public sealed class ReleaseWorkflowTests
         Assert.All(
             steps.Where(step => step.ContainsKey("run")),
             step => Assert.DoesNotContain("${{", Scalar(step["run"]), StringComparison.Ordinal));
+
+        AssertDesktopJob(root, "desktop-macos", "macos-latest", MacStepNames, ["Upload"]);
+        AssertDesktopJob(root, "desktop-windows", "windows-latest", WindowsStepNames, ["Pack", "Upload"]);
+
+        // Only the Windows job sets a shell, and only as its job default.
+        Assert.False(Map(jobs["desktop-macos"]).ContainsKey("defaults"));
+        YamlMapping defaults = Map(Map(jobs["desktop-windows"])["defaults"]);
+        Assert.Equal(["run"], defaults.Keys);
+        Assert.Equal(["shell=bash"], Pairs(defaults["run"]));
+    }
+
+    /// <summary>
+    /// 133 AC-1: a desktop job needs the release job, has no if:, permissions: or outputs: of its own, takes version
+    /// and tag only through its env:, checks out the release's commit without keeping credentials, uses only the two
+    /// pinned actions, re-checks the version before any dotnet call, and gives the token only to the named steps.
+    /// </summary>
+    private static void AssertDesktopJob(
+        YamlNode root, string name, string runner, string[] stepNames, string[] tokenSteps)
+    {
+        YamlMapping job = Map(Map(Map(root)["jobs"])[name]);
+        List<string> keys = Sorted(job.Keys);
+        keys.Remove("defaults");
+        Assert.Equal(["env", "needs", "runs-on", "steps"], keys);
+        Assert.Equal("release", Scalar(job["needs"]));
+        Assert.Equal(runner, Scalar(job["runs-on"]));
+        Assert.Equal(["TAG=" + TagOutput, "VERSION=" + VersionOutput], Pairs(job["env"]));
+
+        List<YamlMapping> steps = JobSteps(root, name);
+        Assert.Equal(stepNames, steps.Select(step => Scalar(step["name"])));
+        Assert.All(steps, step => Assert.False(
+            step.ContainsKey("permissions") || step.ContainsKey("shell") || step.ContainsKey("continue-on-error")
+                || step.ContainsKey("if")));
+        Assert.All(
+            steps,
+            step => Assert.True(step.ContainsKey("uses") != step.ContainsKey("run"), "each step has uses: or run:"));
+
+        List<YamlScalar> uses = [.. steps
+            .Where(step => step.ContainsKey("uses"))
+            .Select(step => Assert.IsType<YamlScalar>(step["uses"]))];
+        Assert.Equal([CheckoutAction, SetupDotnetAction], uses.Select(scalar => scalar.Value));
+        Assert.Equal(["v4.4.0", "v4.3.1"], uses.Select(scalar => scalar.Comment));
+        Assert.Equal(["name", "uses", "with"], Sorted(steps[0].Keys));
+        Assert.Equal(["persist-credentials=false", "ref=" + TargetOutput], Pairs(steps[0]["with"]));
+        Assert.Equal(["name", "uses", "with"], Sorted(steps[2].Keys));
+        Assert.Equal(["dotnet-version=10.0.x"], Pairs(steps[2]["with"]));
+
+        // The SemVer re-check is the first script, so it runs before any dotnet call (and before setup-dotnet).
+        Assert.Equal(["name", "run"], Sorted(steps[1].Keys));
+        string check = Scalar(steps[1]["run"]);
+        Assert.Contains("if ! printf '%s' \"$VERSION\" | " + SemVerGrep + "; then", check, StringComparison.Ordinal);
+        Assert.Contains("if [ \"$TAG\" != \"v$VERSION\" ]; then", check, StringComparison.Ordinal);
+        Assert.Equal(2, Regex.Matches(check, @"(?m)^\s*exit 1\s*$").Count);
+        Assert.DoesNotContain("dotnet", check, StringComparison.Ordinal);
+        Assert.DoesNotContain("||", check, StringComparison.Ordinal);
+
+        foreach (YamlMapping step in steps.Skip(3))
+        {
+            if (tokenSteps.Contains(Scalar(step["name"])))
+            {
+                Assert.Equal(["env", "name", "run"], Sorted(step.Keys));
+                Assert.Equal(["GH_TOKEN=${{ github.token }}"], Pairs(step["env"]));
+            }
+            else
+            {
+                Assert.Equal(["name", "run"], Sorted(step.Keys));
+            }
+        }
+
+        // The needs.* values reach a script only through env:, never inside a run: script.
+        Assert.All(
+            steps.Where(step => step.ContainsKey("run")),
+            step => Assert.DoesNotContain("${{", Scalar(step["run"]), StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -829,12 +1483,23 @@ public sealed class ReleaseWorkflowTests
         string text = workflow;
         text = ReplaceOnce(text, "      - \"develop\"\n", "      - " + develop + "\n");
         text = ReplaceOnce(text, "      - \"main\"\n", "      - main\n");
-        text = ReplaceOnce(text, "dotnet-version: \"10.0.x\"\n", "dotnet-version: '10.0.x'   # any 10.0 patch\n");
+        text = ReplaceNth(text, "dotnet-version: \"10.0.x\"\n", "dotnet-version: '10.0.x'   # any 10.0 patch\n", 0);
+        text = ReplaceNth(text, "dotnet-version: \"10.0.x\"\n", "dotnet-version: 10.0.x\n", 1);
+        text = ReplaceNth(text, "    needs: release\n", "    needs: 'release' # the version comes from there\n", 0);
         text = ReplaceOnce(
             text,
-            "      - name: Check out\n        uses: " + CheckoutAction + " # v4.4.0\n",
-            "      - uses: " + CheckoutAction + "    # v4.4.0\n"
-                + "        # name after uses\n        name: \"Check out\"\n");
+            "    defaults:\n      run:\n        shell: bash\n",
+            "    defaults:\n\n      # Git Bash on the Windows runner\n      run:\n        shell: \"bash\"\n");
+        for (int i = 0; i < 3; i++)
+        {
+            text = ReplaceNth(
+                text,
+                "      - name: Check out\n        uses: " + CheckoutAction + " # v4.4.0\n",
+                "      - uses: " + CheckoutAction + "    # v4.4.0\n"
+                    + "        # name after uses\n        name: \"Check out\"\n",
+                0);
+        }
+
         text = ReplaceOnce(
             text,
             "        continue-on-error: true\n        env:\n          GH_TOKEN: ${{ github.token }}\n",
@@ -935,6 +1600,168 @@ public sealed class ReleaseWorkflowTests
         }
     }
 
+    private static readonly string MacAppScript = Path.Combine(FindRepoRoot(), ".github", "scripts", "macos-app.sh");
+
+    /// <summary>The trimmed, non-empty, non-comment lines of a script.</summary>
+    private static string[] Lines(string script) =>
+        [.. script.Split('\n').Select(line => line.Trim()).Where(line => line.Length > 0 && !line.StartsWith('#'))];
+
+    private static string NewTempFolder()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "context-release-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        return folder;
+    }
+
+    /// <summary>A stand-in for a <c>dotnet publish</c> output: the executable, a library and a nested file.</summary>
+    private static void WritePublishFolder(string folder)
+    {
+        string publish = Path.Combine(folder, "publish");
+        Directory.CreateDirectory(Path.Combine(publish, "wwwroot", "editor"));
+        File.WriteAllText(Path.Combine(publish, "Context.Desktop"), "#!/bin/sh\n");
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(
+                Path.Combine(publish, "Context.Desktop"),
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+        File.WriteAllText(Path.Combine(publish, "Context.Desktop.dll"), "dll");
+        File.WriteAllText(Path.Combine(publish, "wwwroot", "index.html"), "<!doctype html>\n");
+        File.WriteAllText(Path.Combine(publish, "wwwroot", "editor", "editor.js"), "// editor\n");
+    }
+
+    private static void WriteReleases(string folder, IEnumerable<string> files)
+    {
+        string releases = Path.Combine(folder, "Releases");
+        Directory.CreateDirectory(releases);
+        foreach (string file in files)
+        {
+            File.WriteAllText(Path.Combine(releases, file), file);
+        }
+    }
+
+    private static List<string> Entries(string folder) =>
+        [.. Directory.GetFileSystemEntries(folder).Select(path => Path.GetFileName(path) ?? "").Order(StringComparer.Ordinal)];
+
+    private static List<string> RelativeFiles(string folder) =>
+        [.. Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(folder, path))
+            .Order(StringComparer.Ordinal)];
+
+    /// <summary>Every file and folder under <paramref name="folder"/> with its last-write time.</summary>
+    private static SortedDictionary<string, DateTime> Listing(string folder)
+    {
+        SortedDictionary<string, DateTime> entries = new SortedDictionary<string, DateTime>(StringComparer.Ordinal);
+        foreach (string path in Directory.EnumerateFileSystemEntries(folder, "*", SearchOption.AllDirectories))
+        {
+            entries[Path.GetRelativePath(folder, path)] = File.GetLastWriteTimeUtc(path);
+        }
+
+        return entries;
+    }
+
+    /// <summary>The <c>key</c>/<c>string</c> pairs of an Info.plist (the DTD is not fetched).</summary>
+    private static Dictionary<string, string> ReadPlist(string path)
+    {
+        XmlReaderSettings settings = new XmlReaderSettings { DtdProcessing = DtdProcessing.Ignore, XmlResolver = null };
+        using XmlReader reader = XmlReader.Create(path, settings);
+        XElement dict = Assert.Single(XDocument.Load(reader).Root!.Elements("dict"));
+        Dictionary<string, string> values = [];
+        List<XElement> children = [.. dict.Elements()];
+        for (int i = 0; i + 1 < children.Count; i += 2)
+        {
+            Assert.Equal("key", children[i].Name.LocalName);
+            values.Add(children[i].Value, children[i + 1].Value);
+        }
+
+        return values;
+    }
+
+    /// <summary>The lines the stub commands logged: <c>&lt;command&gt; [token|no token] &lt;arguments&gt;</c>.</summary>
+    private static List<string> StubLog(string folder)
+    {
+        string path = Path.Combine(folder, "stub.log");
+        return File.Exists(path) ? [.. File.ReadAllLines(path)] : [];
+    }
+
+    /// <summary>
+    /// Runs a workflow step's script the way the runner does (<c>bash --noprofile --norc -eo pipefail</c>) in
+    /// <paramref name="folder"/>, with <c>$HOME</c> there and stub <c>vpk</c> (in <c>$HOME/.dotnet/tools</c>) and
+    /// <c>gh</c> commands that only log their arguments and whether <c>GH_TOKEN</c> was set. No network, no real tool.
+    /// </summary>
+    private static async Task<ScriptResult> RunStep(
+        string folder, string script, string version, int downloadExit = 0, int packExit = 0)
+    {
+        string tools = Path.Combine(folder, ".dotnet", "tools");
+        string bin = Path.Combine(folder, "stub-bin");
+        Directory.CreateDirectory(tools);
+        Directory.CreateDirectory(bin);
+        string stub = "#!/bin/sh\n"
+            + "token='no token'\n"
+            + "if [ -n \"${GH_TOKEN-}\" ]; then token='token'; fi\n"
+            + "printf '%s [%s] %s\\n' \"$(basename \"$0\")\" \"$token\" \"$*\" >> \"$STUB_LOG\"\n"
+            + "case \"$1\" in\n"
+            + "  download) exit \"$STUB_DOWNLOAD_EXIT\" ;;\n"
+            + "  pack) exit \"$STUB_PACK_EXIT\" ;;\n"
+            + "esac\n";
+        foreach (string path in new[] { Path.Combine(tools, "vpk"), Path.Combine(bin, "gh") })
+        {
+            File.WriteAllText(path, stub);
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+        }
+
+        string file = Path.Combine(folder, "step.sh");
+        File.WriteAllText(file, script);
+        Dictionary<string, string> environment = new Dictionary<string, string>
+        {
+            ["HOME"] = folder,
+            ["PATH"] = bin + ":" + Environment.GetEnvironmentVariable("PATH"),
+            ["VERSION"] = version,
+            ["TAG"] = "v" + version,
+            ["GH_TOKEN"] = "stub-token",
+            ["GITHUB_REPOSITORY"] = "owner/repo",
+            ["STUB_LOG"] = Path.Combine(folder, "stub.log"),
+            ["STUB_DOWNLOAD_EXIT"] = downloadExit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["STUB_PACK_EXIT"] = packExit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        };
+        return await RunBash(folder, ["--noprofile", "--norc", "-eo", "pipefail", file], environment);
+    }
+
+    /// <summary>Runs <c>bash</c> with the arguments in <paramref name="folder"/>; reports what is in the folder after.</summary>
+    private static async Task<ScriptResult> RunBash(
+        string folder, IEnumerable<string> arguments, IDictionary<string, string>? environment = null)
+    {
+        ProcessStartInfo startInfo = new ProcessStartInfo("bash")
+        {
+            WorkingDirectory = folder,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        foreach (string argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        foreach (KeyValuePair<string, string> variable in environment ?? new Dictionary<string, string>())
+        {
+            startInfo.Environment[variable.Key] = variable.Value;
+        }
+
+        using Process process = Process.Start(startInfo)!;
+        process.StandardInput.Close();
+        Task<string> error = process.StandardError.ReadToEndAsync();
+        string stdout = await process.StandardOutput.ReadToEndAsync();
+        string stderr = await error;
+        await process.WaitForExitAsync();
+        string[] files = [.. Directory.GetFileSystemEntries(folder).Select(path => Path.GetFileName(path) ?? "")];
+        return new ScriptResult(process.ExitCode, stdout, stderr, files);
+    }
+
     /// <summary>Runs only the <c>ValidateVersion</c> target of <c>Context.csproj</c> (no build).</summary>
     private static async Task<(int Code, string Output)> ValidateVersion(string version)
     {
@@ -994,6 +1821,15 @@ public sealed class ReleaseWorkflowTests
         return text.Replace(old, replacement, StringComparison.Ordinal);
     }
 
+    /// <summary>Replaces only the occurrence with the 0-based <paramref name="index"/>; it must exist.</summary>
+    private static string ReplaceNth(string text, string old, string replacement, int index)
+    {
+        MatchCollection matches = Regex.Matches(text, Regex.Escape(old));
+        Assert.True(matches.Count > index, "'" + old + "' occurs " + matches.Count + " time(s)");
+        int at = matches[index].Index;
+        return text[..at] + replacement + text[(at + old.Length)..];
+    }
+
     private static YamlMapping Map(YamlNode node) => Assert.IsType<YamlMapping>(node);
 
     private static string Scalar(YamlNode node) => Assert.IsType<YamlScalar>(node).Value;
@@ -1009,11 +1845,31 @@ public sealed class ReleaseWorkflowTests
 
     private static List<YamlMapping> Steps(string yaml) => Steps(WorkflowYaml.Parse(yaml));
 
-    private static List<YamlMapping> Steps(YamlNode root)
+    private static List<YamlMapping> Steps(YamlNode root) => JobSteps(root, "release");
+
+    private static List<YamlMapping> JobSteps(YamlNode root, string job)
     {
-        YamlNode steps = Map(Map(Map(root)["jobs"])["release"])["steps"];
+        YamlNode steps = Map(Map(Map(root)["jobs"])[job])["steps"];
         return [.. Assert.IsType<YamlSequence>(steps).Items.Select(Map)];
     }
+
+    /// <summary>The steps of every job, in file order.</summary>
+    private static List<YamlMapping> AllSteps(string yaml)
+    {
+        YamlNode root = WorkflowYaml.Parse(yaml);
+        return [.. Map(Map(root)["jobs"]).Keys.SelectMany(job => JobSteps(root, job))];
+    }
+
+    private static List<string> AllRunScripts(string yaml) =>
+        [.. AllSteps(yaml).Where(step => step.ContainsKey("run")).Select(step => Scalar(step["run"]))];
+
+    private static List<string> JobRunScripts(string yaml, string job) =>
+        [.. JobSteps(WorkflowYaml.Parse(yaml), job)
+            .Where(step => step.ContainsKey("run"))
+            .Select(step => Scalar(step["run"]))];
+
+    private static string JobScript(string job, string step) =>
+        Scalar(Assert.Single(JobSteps(WorkflowYaml.Parse(ReadWorkflow()), job), s => Scalar(s["name"]) == step)["run"]);
 
     private static YamlMapping Step(string yaml, string name) =>
         Assert.Single(Steps(yaml), step => Scalar(step["name"]) == name);

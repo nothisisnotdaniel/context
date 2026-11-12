@@ -10,9 +10,26 @@
 # - After a proper release vX.Y.Z, every -develop prerelease below X.Y.Z is deleted with its tag
 #   (.github/scripts/old-prereleases.sh); proper releases and newer prereleases stay. A failed prune
 #   only warns (continue-on-error), the release still counts.
-# - What ships is the console app only: the .NET tool package Context.<version>.nupkg (command context).
-#   The package is not signed (Context has no updater that checks a signature), there is no secret, and
-#   there is no desktop build.
+# - What ships, on every release (develop prerelease, release PR, tag):
+#   - the console app as the .NET tool package Context.<version>.nupkg (command context), from the release job;
+#   - the desktop app for macOS as Context-<version>-osx-arm64.zip and Context-<version>-osx-x64.zip (a
+#     Context.app built by .github/scripts/macos-app.sh), from the desktop-macos job;
+#   - the desktop app for Windows, packed by vpk (Velopack), from the desktop-windows job: Setup.exe, the
+#     portable zip, this version's full .nupkg, a delta .nupkg when an earlier release of the channel could be
+#     downloaded, and the feed files (releases.<channel>.json, assets.<channel>.json, RELEASES*).
+#   Both desktop jobs need the release job: they take its version, tag and commit (job outputs) and upload to
+#   the release it created. A failed desktop job leaves a release with fewer assets; re-running it replaces
+#   its own assets (--clobber).
+# - Two update channels: a prerelease version (X.Y.Z-develop.<n>) is packed with --channel develop, a proper
+#   release with vpk's default channel (win). A copy installed by Setup.exe looks at start-up for a newer
+#   build on the channel it was installed from and puts it in place after the app closes. The portable copy
+#   and the macOS zips never update themselves.
+# - Nothing is signed: there is no certificate, no notarization and no secret (github.token is the only
+#   credential). The macOS apps get only an ad-hoc signature (codesign identity "-", which Apple silicon needs
+#   to run anything). The updater checks no signature either: an update is trusted only because it comes over
+#   HTTPS from this repository's releases, which only this workflow writes. Whoever can write a release here
+#   can run code on every installed copy.
+# - vpk is pinned to an exact version, the same as the Velopack package in Context.Desktop.csproj.
 # Refs, PR fields and the run number reach the shell only through environment variables (GITHUB_REF_NAME,
 # GITHUB_REF_TYPE, GITHUB_RUN_NUMBER, GITHUB_SHA, and the Version step's env:), never through ${{ }}
 # inside a run: script.
@@ -42,6 +59,11 @@ jobs:
     # Every push runs; a pull_request event runs only for a merged PR from develop in this repository.
     if: github.event_name == 'push' || (github.event.pull_request.merged == true && github.event.pull_request.head.ref == 'develop' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
+    # For the desktop jobs: the version, the release's tag and the commit it was made on.
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      target: ${{ steps.version.outputs.target }}
     steps:
       - name: Check out
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -60,6 +82,7 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Version
+        id: version
         # PR fields are attacker-influenced text: they reach the shell only as quoted variables.
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
@@ -136,6 +159,9 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "TARGET=$TARGET" >> "$GITHUB_ENV"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
 
       # The tests run on the normal build (no version override): some tests pin the csproj version.
       - name: Test
@@ -181,7 +207,7 @@ jobs:
           case "$VERSION" in
             *-*) PRERELEASE="--prerelease" ;;
           esac
-          gh release create "$TAG" "nupkg/Context.$VERSION.nupkg" --title "Context $VERSION" --generate-notes --target "$TARGET" $PRERELEASE
+          gh release create "$TAG" "nupkg/Context.$VERSION.nupkg" --title "Context $VERSION" --notes-file .github/release-notes-header.md --generate-notes --target "$TARGET" $PRERELEASE
 
       # Housekeeping after a proper release: delete the -develop prereleases (and their tags) whose
       # version is lower than the release (.github/scripts/old-prereleases.sh). It runs only after the
@@ -207,3 +233,154 @@ jobs:
               echo "Deleting prerelease $tag"
               gh release delete "$tag" --cleanup-tag --yes || echo "::warning::Could not delete prerelease $tag"
             done
+
+  # The desktop app for macOS: one unsigned Context.app per architecture, zipped and added to the release.
+  desktop-macos:
+    needs: release
+    runs-on: macos-latest
+    # The release job's outputs reach the scripts only as environment variables.
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+      TAG: ${{ needs.release.outputs.tag }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Uploads go through gh (GH_TOKEN), so the write token is not left in .git/config.
+          persist-credentials: false
+          # The commit the release was made on.
+          ref: ${{ needs.release.outputs.target }}
+
+      - name: Check version
+        run: |
+          # The version came from another job: check it again before it reaches msbuild or a file name.
+          if ! printf '%s' "$VERSION" | LC_ALL=C grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+            echo "Version '$VERSION' is not SemVer" >&2
+            exit 1
+          fi
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "Tag '$TAG' is not 'v$VERSION'" >&2
+            exit 1
+          fi
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Publish
+        run: |
+          for RID in osx-arm64 osx-x64; do
+            dotnet publish src/Context.Desktop -c Release --self-contained -p:Version="$VERSION" -r "$RID" -o "publish/$RID"
+          done
+
+      # No certificate and no notarization: the identity "-" makes an ad-hoc signature, which Apple silicon
+      # needs to run any code. Gatekeeper still warns; .github/release-notes-header.md says how to open it.
+      - name: Bundle, ad-hoc sign and zip
+        run: |
+          for RID in osx-arm64 osx-x64; do
+            sh .github/scripts/macos-app.sh "publish/$RID" "$VERSION" "app/$RID"
+            codesign --force --deep -s - "app/$RID/Context.app"
+            codesign --verify --deep --strict "app/$RID/Context.app"
+            # ditto keeps the modes and the signature's extended attributes; the zip holds Context.app itself.
+            ditto -c -k --keepParent "app/$RID/Context.app" "Context-$VERSION-$RID.zip"
+          done
+
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$TAG" "Context-$VERSION-osx-arm64.zip" "Context-$VERSION-osx-x64.zip" --clobber
+
+  # The desktop app for Windows: a Velopack installer that updates itself, plus the packages and feed it reads.
+  desktop-windows:
+    needs: release
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    # The release job's outputs reach the scripts only as environment variables.
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+      TAG: ${{ needs.release.outputs.tag }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Uploads go through gh (GH_TOKEN), so the write token is not left in .git/config.
+          persist-credentials: false
+          # The commit the release was made on.
+          ref: ${{ needs.release.outputs.target }}
+
+      - name: Check version
+        run: |
+          # The version came from another job: check it again before it reaches msbuild or a file name.
+          if ! printf '%s' "$VERSION" | LC_ALL=C grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+            echo "Version '$VERSION' is not SemVer" >&2
+            exit 1
+          fi
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "Tag '$TAG' is not 'v$VERSION'" >&2
+            exit 1
+          fi
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "10.0.x"
+
+      # Exact version, equal to the Velopack package in Context.Desktop.csproj (ReleaseWorkflowTests compares them).
+      - name: Install vpk
+        run: dotnet tool install --global vpk --version 1.2.161
+
+      - name: Publish
+        run: dotnet publish src/Context.Desktop -c Release --self-contained -p:Version="$VERSION" -r win-x64 -o publish/win-x64
+
+      - name: Pack
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          export PATH="$HOME/.dotnet/tools:$PATH"
+          # A prerelease goes to the develop channel; a proper release to vpk's default channel (win).
+          CHANNEL=""
+          PRE=""
+          case "$VERSION" in
+            *-*)
+              CHANNEL="--channel develop"
+              PRE="--pre"
+              ;;
+          esac
+          # The newest earlier release of the same channel, so vpk can make a delta against it. When there is
+          # none yet (or the download fails) the pack goes on without a delta.
+          vpk download github --repoUrl "https://github.com/$GITHUB_REPOSITORY" --token "$GH_TOKEN" --outputDir Releases $CHANNEL $PRE || echo "::warning::No earlier release downloaded; packing without a delta"
+          # The pack needs no credential.
+          unset GH_TOKEN
+          vpk pack --packId ContextDesktop --packVersion "$VERSION" --packDir publish/win-x64 --mainExe Context.Desktop.exe --packTitle Context --runtime win-x64 --outputDir Releases $CHANNEL
+
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NAME="win"
+          SUFFIX=""
+          case "$VERSION" in
+            *-*)
+              NAME="develop"
+              SUFFIX="-develop"
+              ;;
+          esac
+          SETUP="Releases/ContextDesktop-$NAME-Setup.exe"
+          FULL="Releases/ContextDesktop-$VERSION$SUFFIX-full.nupkg"
+          DELTA="Releases/ContextDesktop-$VERSION$SUFFIX-delta.nupkg"
+          for FILE in "$SETUP" "$FULL"; do
+            if [ ! -f "$FILE" ]; then
+              echo "$FILE is missing" >&2
+              exit 1
+            fi
+          done
+          # Only this version's files: Releases/ also holds the earlier package the delta was made against.
+          set -- "$SETUP" "Releases/ContextDesktop-$NAME-Portable.zip" "$FULL" "Releases/releases.$NAME.json" "Releases/assets.$NAME.json" "Releases/RELEASES$SUFFIX"
+          if [ -f "$DELTA" ]; then
+            set -- "$@" "$DELTA"
+          fi
+          gh release upload "$TAG" "$@" --clobber
