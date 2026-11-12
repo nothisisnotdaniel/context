@@ -22,13 +22,16 @@
 #   its own assets (--clobber).
 # - Two update channels: a prerelease version (X.Y.Z-develop.<n>) is packed with --channel develop, a proper
 #   release with vpk's default channel (win). A copy installed by Setup.exe looks at start-up for a newer
-#   build on the channel it was installed from and puts it in place after the app closes. The portable copy
-#   and the macOS zips never update themselves.
+#   build on the channel it was installed from and puts it in place after the app closes (when the app stays
+#   open longer than Velopack's updater waits, 60 s, the build is put in place at the next start, which then
+#   restarts into it). The portable copy and the macOS zips never update themselves.
 # - Nothing is signed: there is no certificate, no notarization and no secret (github.token is the only
 #   credential). The macOS apps get only an ad-hoc signature (codesign identity "-", which Apple silicon needs
 #   to run anything). The updater checks no signature either: an update is trusted only because it comes over
 #   HTTPS from this repository's releases, which only this workflow writes. Whoever can write a release here
-#   can run code on every installed copy.
+#   can run code on every installed copy. The repository URL is fixed in every installed copy: never rename,
+#   transfer or delete the repository or the account while installed copies exist (whoever registers the old
+#   name afterwards controls their update feed); ship a build with the new URL first.
 # - vpk is pinned to an exact version, the same as the Velopack package in Context.Desktop.csproj.
 # Refs, PR fields and the run number reach the shell only through environment variables (GITHUB_REF_NAME,
 # GITHUB_REF_TYPE, GITHUB_RUN_NUMBER, GITHUB_SHA, and the Version step's env:), never through ${{ }}

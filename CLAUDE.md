@@ -207,7 +207,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     macOS zips never update. **Trust model:** nothing is signed (no certificate, no notarization, no signature check
     in the updater; signed builds are backlog #15). An update is trusted only as an HTTPS download from this
     repository's GitHub releases, which only the release workflow writes, so whoever can write a release here can run
-    code on every installed copy. No token is embedded in the app; while the repository is private the
+    code on every installed copy. The repository URL is fixed in every installed copy: never rename, transfer or
+    delete the repository or the account while installed copies exist (whoever registers the old name afterwards
+    controls their update feed); ship a build with the new URL first. No token is embedded in the app; while the repository is private the
     unauthenticated updater finds nothing and stays silent. The installer cannot run in `dotnet test`: after a change
     to the desktop jobs, the next develop run is the real check.
   - **Pruning:** after a proper release `vX.Y.Z` the `Prune old prereleases` step (`continue-on-error`) deletes the
@@ -284,7 +286,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     **Update:** `Program.Main` starts with `VelopackApp.Build().Run()` (Velopack's install/update hooks), and before
     the window opens `StartupUpdate(IUpdateSource).Start()` runs the silent update on a pool thread: it returns at once
     and never throws. Not `IsInstalled`: nothing is called. Otherwise `CheckAsync`; when a newer version is found,
-    `DownloadAsync` once, then `ApplyOnExit` once (put in place after the app closes, no restart). Any exception or
+    `DownloadAsync` once, then `ApplyOnExit` once (put in place after the app closes, no restart; Velopack's updater waits
+    only 60 s for the app to close, and after that `VelopackApp.Build().Run()` applies the pending package at the
+    next start and restarts into it). Any exception or
     cancellation is swallowed with no output; the next start tries again. `StartupUpdate.IncludePrereleases(version)`
     is true only for a SemVer version with a prerelease label (`StartupUpdate.CurrentVersion` is the assembly's
     informational version). `VelopackUpdateSource` is the one real source: Velopack's `UpdateManager` over
