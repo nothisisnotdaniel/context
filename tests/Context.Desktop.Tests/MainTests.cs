@@ -249,6 +249,7 @@ public sealed class MainTests : IDisposable
         await cut.Find(".note-toolbar button.save-name").ClickAsync(new MouseEventArgs());
 
         Assert.Equal("Save Plan first.", cut.Find(".main-status").TextContent);
+        Assert.Equal("Project", cut.Find(".rename-title").GetAttribute("value"));
         Assert.True(File.Exists(Path.Combine(data.Root, "Plan.md")));
         Assert.False(File.Exists(Path.Combine(data.Root, "Project.md")));
     }

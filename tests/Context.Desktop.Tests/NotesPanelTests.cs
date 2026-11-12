@@ -164,7 +164,10 @@ public sealed class NotesPanelTests : IDisposable
         Assert.True(status.ClassList.Contains("red"));
         Assert.Equal("status", status.GetAttribute("role"));
         Assert.Equal(title, cut.Find(".note-new-title").GetAttribute("value"));
+        Assert.Equal(text, status.GetAttribute("title"));
         Assert.Empty(opened);
+        await cut.Find(".note-new-title").InputAsync(new ChangeEventArgs { Value = "x" });
+        Assert.Empty(cut.FindAll(".note-entry-result"));
         Assert.Equal("a", File.ReadAllText(Path.Combine(data.Root, "Alpha.md")));
     }
 

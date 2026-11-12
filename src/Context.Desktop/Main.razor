@@ -325,7 +325,6 @@ else
 
         if (editor is not null && await editor.IsDirtyAsync())
         {
-            renaming = false;
             ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
             return;
         }

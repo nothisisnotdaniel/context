@@ -34,11 +34,13 @@
         {
             @if (shown.Kind == ActionKind.Done)
             {
-                <p class="note-entry-result accent" role="status">Created @DesktopText.OneLine(shown.Text)</p>
+                string createdText = $"Created {DesktopText.OneLine(shown.Text)}";
+                <p class="note-entry-result accent" role="status" title="@createdText">@createdText</p>
             }
             else
             {
-                <p class="note-entry-result red" role="status">@DesktopText.OneLine(shown.Text)</p>
+                string failedText = DesktopText.OneLine(shown.Text);
+                <p class="note-entry-result red" role="status" title="@failedText">@failedText</p>
             }
         }
     }
@@ -53,7 +55,11 @@
     [Parameter]
     public EventCallback<string> OnOpen { get; set; }
 
-    private void TitleTyped(ChangeEventArgs e) => newTitle = e.Value?.ToString() ?? string.Empty;
+    private void TitleTyped(ChangeEventArgs e)
+    {
+        newTitle = e.Value?.ToString() ?? string.Empty;
+        created = null;
+    }
 
     // Enter in the field or the New note button: creates the note, then opens it through OnOpen (Main asks first
     // when the open note has unsaved changes).

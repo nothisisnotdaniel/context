@@ -427,7 +427,8 @@ internal sealed class DesktopActions
 
     // Only a regular .md file directly in the note folder: no link or reparse point, no folder, and seekable. A file
     // that reports length 0 can't be told apart from a FIFO without opening it (which could block), so off Windows it
-    // is refused.
+    // is refused. Best effort: the file could still be swapped between this check and the launch, but only by someone who
+    // can already write to the data folder, and the OS picks the handler by the .md extension.
     private bool IsLaunchable(string path)
     {
         if (!string.Equals(Path.GetExtension(path), ".md", StringComparison.OrdinalIgnoreCase) || !notes.Contains(path))
