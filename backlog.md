@@ -148,6 +148,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#113](backlog/113-refuse-removed-secret-options-after-a.md) Refuse removed secret options after a command
 - [?] [#114](backlog/114-owner-only-file-mode-for-all.md) Owner-only file mode for all data files
 - [?] [#115](backlog/115-bounded-reads-for-todos-calendar-link.md) Bounded reads for todos, calendar link and notes
+- [h] [#117](backlog/117-make-the-github-repo-public.md) Make the GitHub repo public
 
 ## Dropped with the terminal UI
 
