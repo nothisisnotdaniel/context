@@ -123,7 +123,7 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal("Fresh", cut.Find(".note-title").TextContent));
     }
 
-    // 134 AC-8: the toolbar shows only while a note is open, with the three buttons.
+    // 134 AC-8: the toolbar shows only while a note is open, with its buttons (136: plus Mark sensitive).
     [Fact]
     public async Task Toolbar_OnlyWithAnOpenNote()
     {
@@ -135,7 +135,8 @@ public sealed class MainTests : IDisposable
         await Open(cut, js, "Plan");
 
         IReadOnlyList<IElement> buttons = cut.FindAll(".note-toolbar button");
-        Assert.Equal(["Rename", "Delete", "Open in default editor"], buttons.Select(b => b.TextContent).ToArray());
+        Assert.Equal(
+            ["Rename", "Delete", "Open in default editor", "Mark sensitive"], buttons.Select(b => b.TextContent).ToArray());
         Assert.All(buttons, b => Assert.Equal("button", b.GetAttribute("type")));
     }
 
@@ -151,7 +152,7 @@ public sealed class MainTests : IDisposable
         await NameButton(cut, "Big").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Equal("Can't read Big.", cut.Find(".unreadable").TextContent));
-        Assert.Equal(3, cut.FindAll(".note-toolbar button").Count);
+        Assert.Equal(4, cut.FindAll(".note-toolbar button").Count);
     }
 
     // 134 AC-8: Rename swaps in a prefilled field; Enter or Save name renames and the editor shows the new name.

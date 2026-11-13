@@ -15,7 +15,7 @@ internal static class NoteCommands
     public static void Register(CommandRegistry registry, NoteStore store)
     {
         registry.Register("/new", "Create a note", title => New(store, title));
-        registry.Register("/notes", "List notes", _ => Render(store.List()));
+        registry.Register("/notes", "List notes", _ => Render(store.List(), store.ListSensitive()));
         registry.Register("/open", "Open a note", name => Open(store, name));
         registry.Register("/export", "Write a note to a plain file", argument => Export(store, argument));
         registry.Register("/import", "Store a Markdown file as a note", path => Import(store, path));
@@ -51,9 +51,15 @@ internal static class NoteCommands
     /// Draws the <c>/notes</c> list (<see cref="NoteStore.List"/> is its data step). Note names are cleaned and
     /// escaped here.
     /// </summary>
-    internal static CommandResult Render(IReadOnlyList<NoteInfo> notes)
+    internal static CommandResult Render(IReadOnlyList<NoteInfo> notes) => Render(notes, []);
+
+    /// <summary>
+    /// Like <see cref="Render(IReadOnlyList{NoteInfo})"/>, with the <paramref name="sensitive"/> notes
+    /// (<see cref="NoteStore.ListSensitive"/>) in the same list, sorted by name, each marked with a grey <c>locked</c>.
+    /// </summary>
+    internal static CommandResult Render(IReadOnlyList<NoteInfo> notes, IReadOnlyList<NoteInfo> sensitive)
     {
-        if (notes.Count == 0)
+        if (notes.Count == 0 && sensitive.Count == 0)
         {
             return new CommandResult(new Markup("[grey]No notes yet. Type /new <title> to create one.[/]"));
         }
@@ -64,10 +70,14 @@ internal static class NoteCommands
             .AddColumn("[grey]Note[/]")
             .AddColumn("[grey]Modified[/]");
 
-        foreach (NoteInfo note in notes)
+        IEnumerable<(NoteInfo Note, bool Locked)> all = notes.Select(n => (n, false))
+            .Concat(sensitive.Select(n => (n, true)))
+            .OrderBy(r => r.Item1.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Item1.Name, StringComparer.Ordinal);
+        foreach ((NoteInfo note, bool locked) in all)
         {
             table.AddRow(
-                new Markup($"[steelblue1]{Markup.Escape(SafeText.Clean(note.Name))}[/]"),
+                new Markup($"[steelblue1]{Markup.Escape(SafeText.Clean(note.Name))}[/]{(locked ? " [grey]locked[/]" : string.Empty)}"),
                 new Markup($"[grey]{note.Modified.ToString(DateFormat, CultureInfo.InvariantCulture)}[/]"));
         }
 
@@ -87,8 +97,8 @@ internal static class NoteCommands
         {
             if (!store.TryOpen(name, out note) || note is null)
             {
-                return CommandResult.Error(
-                    $"No note named {Markup.Escape(name)}. Type [bold]/notes[/] to see all notes.");
+                return CommandResult.Error(Sensitive(store, name)
+                    ?? $"No note named {Markup.Escape(name)}. Type [bold]/notes[/] to see all notes.");
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -133,7 +143,8 @@ internal static class NoteCommands
 
         if (match is null)
         {
-            return CommandResult.Error($"No note at the start of {Markup.Escape(SafeText.Clean(argument))}. {Usage}");
+            return CommandResult.Error(SensitiveAtStart(store, argument)
+                ?? $"No note at the start of {Markup.Escape(SafeText.Clean(argument))}. {Usage}");
         }
 
         string target = FullPath(path);
@@ -191,6 +202,11 @@ internal static class NoteCommands
             return CommandResult.Error($"{Markup.Escape(error)} Rename the file and import it again.");
         }
 
+        if (Sensitive(store, title) is { } sensitive)
+        {
+            return CommandResult.Error(sensitive);
+        }
+
         byte[] content;
         try
         {
@@ -224,6 +240,27 @@ internal static class NoteCommands
         return new CommandResult(hint: new Markup(
             $"[grey]{how}[steelblue1]{Markup.Escape(SafeText.Clean(note.Name))}[/]. "
             + $"The source is unchanged; delete it if you don't need the plain copy: {shownSource}[/]"));
+    }
+
+    // The red text (as markup) for a sensitive note called name, or null when there is none. Its text is never read.
+    private static string? Sensitive(NoteStore store, string name) =>
+        store.TryFindSensitive(name, out NoteInfo? locked) && locked is not null
+            ? $"{Markup.Escape(SafeText.Clean(locked.Name))} is sensitive. Open it in the desktop app."
+            : null;
+
+    // Like Sensitive, for /export's argument: the longest leading part (split at whitespace) that names one.
+    private static string? SensitiveAtStart(NoteStore store, string argument)
+    {
+        for (int split = argument.Length - 1; split > 0; split--)
+        {
+            if (char.IsWhiteSpace(argument[split]) && argument[(split + 1)..].Trim().Length > 0
+                && Sensitive(store, argument[..split]) is { } found)
+            {
+                return found;
+            }
+        }
+
+        return Sensitive(store, argument);
     }
 
     // The absolute form of a typed path; a leading ~ means the home folder.

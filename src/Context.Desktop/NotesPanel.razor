@@ -8,18 +8,22 @@
         {
             <p class="red">Can't read the notes folder.</p>
         }
-        else if (snapshot.Notes.Count == 0)
+        else if (snapshot.Notes.Count == 0 && snapshot.Sensitive.Count == 0)
         {
             <p class="grey">No notes yet</p>
         }
         else
         {
             <ul class="note-list">
-                @foreach (NoteInfo note in snapshot.Notes)
+                @foreach ((NoteInfo note, bool locked) in Listed(snapshot))
                 {
                     string name = DesktopText.OneLine(note.Name);
                     <li class="note">
                         <button type="button" class="name cut" title="@name" @onclick="() => OnOpen.InvokeAsync(note.Name)">@name</button>
+                        @if (locked)
+                        {
+                            <span class="locked grey">locked</span>
+                        }
                         <span class="time grey">@note.Modified.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)</span>
                     </li>
                 }
@@ -30,6 +34,24 @@
                    aria-label="New note" placeholder="New note title" @oninput="TitleTyped" @onkeydown="e => Create(e)" />
             <button type="button" class="note-new" disabled="@creating" @onclick="() => Create(null)">New note</button>
         </div>
+        @if (snapshot.SensitiveSupported)
+        {
+            <div class="sensitive-entry">
+                @if (!snapshot.RecoveryReady)
+                {
+                    <button type="button" class="sensitive-setup-open" @onclick="OpenSetup">Set up sensitive notes</button>
+                }
+                <button type="button" class="sensitive-restore-open" @onclick="OpenRestore">Restore from recovery file</button>
+            </div>
+            @if (sensitiveDone.Length > 0)
+            {
+                <p class="sensitive-result accent" role="status" title="@sensitiveDone">@sensitiveDone</p>
+            }
+        }
+        @if (setupOpen)
+        {
+            <SensitiveSetup Restore="restoring" OnDone="SetupDone" OnCancel="CloseSetup" />
+        }
         @if (created is { } shown)
         {
             @if (shown.Kind == ActionKind.Done)
@@ -50,10 +72,42 @@
     private string newTitle = string.Empty;
     private bool creating;
     private ActionResult? created;
+    private bool setupOpen;
+    private bool restoring;
+    private string sensitiveDone = string.Empty;
 
     /// <summary>Called with a note's name when it is clicked.</summary>
     [Parameter]
     public EventCallback<string> OnOpen { get; set; }
+
+    // Plain and sensitive notes in one list, by name (ignoring case, then exact); a sensitive one is marked locked.
+    private static IEnumerable<(NoteInfo Note, bool Locked)> Listed(DesktopSnapshot snapshot) =>
+        snapshot.Notes.Select(n => (Note: n, Locked: false))
+            .Concat(snapshot.Sensitive.Select(n => (Note: n, Locked: true)))
+            .OrderBy(n => n.Note.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(n => n.Note.Name, StringComparer.Ordinal);
+
+    private void OpenSetup()
+    {
+        restoring = false;
+        setupOpen = true;
+        sensitiveDone = string.Empty;
+    }
+
+    private void OpenRestore()
+    {
+        restoring = true;
+        setupOpen = true;
+        sensitiveDone = string.Empty;
+    }
+
+    private void CloseSetup() => setupOpen = false;
+
+    private void SetupDone(string text)
+    {
+        setupOpen = false;
+        sensitiveDone = DesktopText.OneLine(text);
+    }
 
     private void TitleTyped(ChangeEventArgs e)
     {

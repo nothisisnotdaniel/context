@@ -1,0 +1,136 @@
+@inherits StateComponent
+@* The dialog for sensitive notes' recovery file. Setup: two password fields and a save dialog; DesktopActions then
+   makes this machine's key and writes the recovery file. Restore: one password field and an open dialog. The
+   passwords are never rendered back (the fields have no value) and leave this dialog only as action arguments.
+   Only fixed texts are shown. Focus starts on the first field and Esc cancels. *@
+
+<div class="dialog-backdrop">
+    <div class="dialog sensitive-setup" role="dialog" aria-modal="true" aria-labelledby="sensitive-setup-title" tabindex="-1"
+         @onkeydown="Key">
+        <p id="sensitive-setup-title" class="question">@(Restore ? "Restore from recovery file" : "Set up sensitive notes")</p>
+        @if (Restore)
+        {
+            <p class="setup-text">Choose your recovery file and type its password. This machine then gets its own key
+                and can open your sensitive notes.</p>
+        }
+        else
+        {
+            <p class="setup-text">Sensitive notes are sealed with a key that stays on this machine. The recovery file is
+                the only other way to open them: keep it outside the data folder, and remember its password
+                (at least @RecoveryFile.MinPasswordLength characters).</p>
+            <p class="setup-warning red">If you lose this machine's key and the recovery file or its password, your
+                sensitive notes can't be opened again.</p>
+        }
+        <input type="password" class="recovery-password" maxlength="200" disabled="@busy" aria-label="Recovery password"
+               placeholder="Recovery password" @ref="passwordField" @oninput="PasswordTyped" @onkeydown="e => Run(e)" />
+        @if (!Restore)
+        {
+            <input type="password" class="recovery-password-again" maxlength="200" disabled="@busy"
+                   aria-label="Recovery password again" placeholder="Recovery password again" @oninput="RepeatTyped"
+                   @onkeydown="e => Run(e)" />
+        }
+        <p class="setup-status red" role="alert">@error</p>
+        <div class="dialog-buttons">
+            <button type="button" class="confirm" disabled="@busy" @onclick="() => Run(null)">@(Restore ? "Choose file and restore" : "Choose where to save")</button>
+            <button type="button" class="cancel" disabled="@busy" @onclick="Cancel">Cancel</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    public const string MismatchText = "The passwords don't match.";
+
+    private ElementReference passwordField;
+    private string password = string.Empty;
+    private string repeat = string.Empty;
+    private string error = string.Empty;
+    private bool busy;
+
+    /// <summary>The OS file dialogs.</summary>
+    [Inject]
+    internal IFileDialog Dialog { get; set; } = null!;
+
+    /// <summary>False: set up (make the recovery file). True: restore from a recovery file.</summary>
+    [Parameter]
+    public bool Restore { get; set; }
+
+    /// <summary>Called with the result's text when setup or restore is done.</summary>
+    [Parameter]
+    public EventCallback<string> OnDone { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await passwordField.FocusAsync();
+        }
+    }
+
+    private void PasswordTyped(ChangeEventArgs e)
+    {
+        password = e.Value?.ToString() ?? string.Empty;
+        error = string.Empty;
+    }
+
+    private void RepeatTyped(ChangeEventArgs e)
+    {
+        repeat = e.Value?.ToString() ?? string.Empty;
+        error = string.Empty;
+    }
+
+    // Enter in a field or the confirm button: checks the entries, asks for the file, then runs the action.
+    private async Task Run(KeyboardEventArgs? key)
+    {
+        if ((key is not null && key.Key != "Enter") || busy)
+        {
+            return;
+        }
+
+        if (!Restore && !string.Equals(password, repeat, StringComparison.Ordinal))
+        {
+            error = MismatchText;
+            return;
+        }
+
+        if (!Restore && password.Length < RecoveryFile.MinPasswordLength)
+        {
+            error = DesktopActions.PasswordTooShortText;
+            return;
+        }
+
+        busy = true;
+        ActionResult result;
+        try
+        {
+            string? path = Restore ? Dialog.OpenRecoveryFile() : Dialog.SaveRecoveryFile();
+            if (path is null)
+            {
+                return;
+            }
+
+            result = Restore ? await Actions.RestoreFromRecovery(path, password) : await Actions.SetUpSensitive(password, path);
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        if (result.Kind == ActionKind.Done)
+        {
+            password = string.Empty;
+            repeat = string.Empty;
+            await OnDone.InvokeAsync(result.Text);
+        }
+        else
+        {
+            error = DesktopText.OneLine(result.Text);
+        }
+    }
+
+    private Task Cancel() => busy ? Task.CompletedTask : OnCancel.InvokeAsync();
+
+    private Task Key(KeyboardEventArgs e) => e.Key == "Escape" ? Cancel() : Task.CompletedTask;
+}

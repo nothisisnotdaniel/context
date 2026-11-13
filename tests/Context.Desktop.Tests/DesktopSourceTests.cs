@@ -10,10 +10,24 @@ public sealed class DesktopSourceTests
         + "connect-src 'self'; base-uri 'none'; form-action 'none'";
 
     // The Core calls that change data (AC-8). CalendarLink's real names are Set/Clear; Save/Delete are listed too.
-    // 134: NoteStore.Rename and NoteStore.Delete.
+    // 134: NoteStore.Rename and NoteStore.Delete. 136: sealing (SealedNote.Seal, AddRecipient), NoteStore.DeleteSensitive
+    // and the key store's two changing calls; RecoveryFile.Create is caught by Create.
     private static readonly Regex Writes = new(
-        @"\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache)\s*\(",
+        @"\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
+        + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey)\s*\(",
         RegexOptions.CultureInvariant);
+
+    // 136: the real key stores and the real file dialog, spelled in pieces: no test file may hold their names (see
+    // Tests_NeverReferenceTheRealKeyStoresOrFileDialog).
+    private const string RealWindowsStore = "Windows" + "KeyStore";
+    private const string RealMacStore = "Mac" + "KeyStore";
+    private const string RealFileDialog = "Photino" + "FileDialog";
+    private const string RealWindowsStoreFile = "src/Context.Desktop/" + RealWindowsStore + ".cs";
+    private const string RealMacStoreFile = "src/Context.Desktop/" + RealMacStore + ".cs";
+
+    // 136: SealedNote.cs makes P-256 keys in memory with .NET's ECDiffieHellman.Create; that writes no data.
+    private const string SealedNoteFile = "src/Context.Desktop/SealedNote.cs";
+    private const string KeyFactory = "ECDiffieHellman.Create(";
 
     private static readonly string[] RawMarkup = ["MarkupString", "AddMarkupContent", "@(("];
 
@@ -218,6 +232,20 @@ public sealed class DesktopSourceTests
                 text = text.Replace(InteropReference, string.Empty, StringComparison.Ordinal);
             }
 
+            if (file == SealedNoteFile)
+            {
+                Assert.Contains(KeyFactory, text, StringComparison.Ordinal);
+                text = text.Replace(KeyFactory, string.Empty, StringComparison.Ordinal);
+            }
+
+            // 136: the Windows key store is the OS store itself. Its Create/Add/Delete calls are .NET's own (CngKey,
+            // X509Store, CertificateRequest) and change the certificate store, never the data folder; that it names
+            // no Core store is checked in WindowsStore_TouchesNoDataFolder.
+            if (file == RealWindowsStoreFile)
+            {
+                continue;
+            }
+
             found.AddRange(Writes.Matches(text).Select(m => $"{file}: {m.Value}"));
         }
 
@@ -352,7 +380,8 @@ public sealed class DesktopSourceTests
         Assert.Equal(untyped, UntypedButtons(razor).Count);
     }
 
-    // 080 round 2 / 094 AC-12: every <input> is a checkbox, text, date or search field, nothing binds a value with
+    // 080 round 2 / 094 AC-12 / 136: every <input> is a checkbox, text, date, search or password field (the recovery
+    // password in SensitiveSetup), nothing binds a value with
     // @bind and there is no <textarea> (the note editor is the bundled editor, not a form field).
     [Fact]
     public void Razor_InputsAreAllowedTypesOnly()
@@ -368,7 +397,7 @@ public sealed class DesktopSourceTests
         }
 
         Assert.True(inputs >= 1, "Expected the todo checkboxes, found " + inputs);
-        Assert.True(found.Count == 0, "Inputs other than checkbox, text, date or search: " + string.Join(", ", found));
+        Assert.True(found.Count == 0, "Inputs other than checkbox, text, date, search or password: " + string.Join(", ", found));
     }
 
     // 080 round 2 / 094 (control): the input check.
@@ -379,7 +408,8 @@ public sealed class DesktopSourceTests
     [InlineData("<input type=\"date\" @onchange=\"Chosen\" />", 0)]
     [InlineData("<input type=\"search\" />", 0)]
     [InlineData("<input>", 1)]
-    [InlineData("<input type=\"password\" />", 1)]
+    [InlineData("<input type=\"password\" />", 0)]
+    [InlineData("<input type=\"password\" @bind=\"secret\" />", 1)]
     [InlineData("<input type=\"text\" @bind=\"x\" />", 1)]
     [InlineData("<input type=\"hidden\" />", 1)]
     [InlineData("<INPUT type=\"file\">", 1)]
@@ -507,6 +537,12 @@ public sealed class DesktopSourceTests
     [InlineData("notes.Rename(source.Name, title)")]
     [InlineData("notes.Delete(name)")]
     [InlineData("notes . Rename (a, b)")]
+    [InlineData("SealedNote.Seal(name, text, recipients)")]
+    [InlineData("SealedNote.AddRecipient(name, file, key, agree, added)")]
+    [InlineData("notes.DeleteSensitive(name)")]
+    [InlineData("state.KeyStore.CreateMachineKey()")]
+    [InlineData("keys.StoreRecoveryPublicKey(publicKey)")]
+    [InlineData("RecoveryFile.Create(password, out publicKey)")]
     public void Writes_Pattern_CatchesCalls(string call)
     {
         Assert.Matches(Writes, call);
@@ -527,6 +563,16 @@ public sealed class DesktopSourceTests
     [InlineData("Actions.RenameNote(name, renameText)")]
     [InlineData("Actions.DeleteNote(name, confirmed)")]
     [InlineData("Actions.OpenExternally(name)")]
+    [InlineData("Actions.MarkSensitive(name, confirmed)")]
+    [InlineData("Actions.MakePlain(name, confirmed)")]
+    [InlineData("Actions.SetUpSensitive(password, path)")]
+    [InlineData("Actions.RestoreFromRecovery(path, password)")]
+    [InlineData("SealedNote.Open(found.Name, file, machine, KeyStore.Agree)")]
+    [InlineData("State.ReadSensitive(Name)")]
+    [InlineData("State.Session.Lock()")]
+    [InlineData("State.Session.Touch()")]
+    [InlineData("Dialog.SaveRecoveryFile()")]
+    [InlineData("builder.Services.AddSingleton<IFileDialog>(dialog)")]
     public void Writes_Pattern_AllowsReads(string call)
     {
         Assert.DoesNotMatch(Writes, call);
@@ -710,6 +756,100 @@ public sealed class DesktopSourceTests
             RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs"));
     }
 
+    // 136 AC-10: native calls live only in the macOS key store.
+    [Fact]
+    public void Sources_HaveNativeCallsOnlyInTheMacStore()
+    {
+        string root = RepoFiles.Root();
+        string[] native = ["DllImport", "LibraryImport", "extern "];
+        List<string> found = RepoFiles.Sources(root, "src", ".cs", ".razor")
+            .Where(f => native.Any(n => File.ReadAllText(Path.Combine(root, f)).Contains(n, StringComparison.Ordinal)))
+            .ToList();
+
+        Assert.Equal([RealMacStoreFile], found);
+    }
+
+    // 136 AC-10: the certificate store and CNG are used only in the Windows key store.
+    [Theory]
+    [InlineData("X509Store")]
+    [InlineData("CngKey")]
+    public void Sources_UseTheCertificateStoreOnlyInTheWindowsStore(string name)
+    {
+        string root = RepoFiles.Root();
+        List<string> found = RepoFiles.Sources(root, "src", ".cs", ".razor")
+            .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains(name, StringComparison.Ordinal))
+            .ToList();
+
+        Assert.Equal([RealWindowsStoreFile], found);
+    }
+
+    // 136: the Windows key store is left out of the writing-calls scan, so it must not know the data folder at all.
+    [Theory]
+    [InlineData("NoteStore")]
+    [InlineData("TodoStore")]
+    [InlineData("CalendarLink")]
+    [InlineData("CalendarFeed")]
+    [InlineData("DesktopState")]
+    [InlineData("File.")]
+    [InlineData("Directory.")]
+    [InlineData("Path.")]
+    public void WindowsStore_TouchesNoDataFolder(string forbidden)
+    {
+        string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), RealWindowsStoreFile));
+
+        Assert.DoesNotContain(forbidden, source, StringComparison.Ordinal);
+    }
+
+    // 136: the real key stores and the real file dialog are created only in Program.cs.
+    [Fact]
+    public void Sources_NameTheRealKeyStoresAndFileDialogOnlyInThemselvesAndProgram()
+    {
+        string root = RepoFiles.Root();
+        Assert.All(new[] { RealWindowsStore, RealMacStore, RealFileDialog }, name =>
+        {
+            List<string> found = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
+                .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains(name, StringComparison.Ordinal))
+                .Order(StringComparer.Ordinal)
+                .ToList();
+            string[] expected = [ProgramFile, "src/Context.Desktop/" + name + ".cs"];
+
+            Assert.Equal(expected.Order(StringComparer.Ordinal), found);
+        });
+    }
+
+    // 136 AC-10 / AC-11: no test touches a real key store, Keychain or file dialog; tests use the fakes.
+    [Fact]
+    public void Tests_NeverReferenceTheRealKeyStoresOrFileDialog()
+    {
+        string root = RepoFiles.Root();
+        List<string> found = [];
+        foreach (string folder in new[] { "tests/Context.Tests", "tests/Context.Desktop.Tests" })
+        {
+            found.AddRange(RepoFiles.Sources(root, folder, ".cs", ".csproj")
+                .Where(f => new[] { RealWindowsStore, RealMacStore, RealFileDialog }.Any(
+                    name => File.ReadAllText(Path.Combine(root, f)).Contains(name, StringComparison.Ordinal))));
+        }
+
+        Assert.True(found.Count == 0, "Tests name a real key store or the real file dialog: " + string.Join(", ", found));
+        List<string> tests = RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs");
+        Assert.Contains("tests/Context.Desktop.Tests/FakeKeyStore.cs", tests);
+        Assert.Contains("tests/Context.Desktop.Tests/FakeFileDialog.cs", tests);
+    }
+
+    // 136: the sensitive session and the sealed format are not named by the console or the Core (see
+    // CoreDependencyTests); in the Desktop a Confirmation still comes only from ConfirmDialog, also for Mark
+    // sensitive and Make plain.
+    [Fact]
+    public void Main_AsksInAConfirmDialogBeforeMarkAndMakePlain()
+    {
+        string main = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "Main.razor"));
+
+        Assert.Contains("OnConfirm=\"MarkConfirmed\"", main, StringComparison.Ordinal);
+        Assert.Contains("OnConfirm=\"MakePlainConfirmed\"", main, StringComparison.Ordinal);
+        Assert.Contains("Actions.MarkSensitive(name, confirmed)", main, StringComparison.Ordinal);
+        Assert.Contains("Actions.MakePlain(name, confirmed)", main, StringComparison.Ordinal);
+    }
+
     private static bool MentionsJSRuntime(string source) => source.Contains("JSRuntime", StringComparison.Ordinal);
 
     private static HashSet<string> Components(string root) =>
@@ -717,11 +857,12 @@ public sealed class DesktopSourceTests
             .Select(f => Path.GetFileNameWithoutExtension(f))
             .ToHashSet(StringComparer.Ordinal);
 
-    // Every <input> that is not type="checkbox", "text", "date" or "search" or that uses @bind, and every <textarea>.
+    // Every <input> that is not type="checkbox", "text", "date", "search" or "password" or that uses @bind, and every
+    // <textarea>.
     private static List<string> BadInputs(string razor) =>
         Tag.Matches(MarkupOf(razor))
             .Where(m => m.Groups[1].Value.Equals("input", StringComparison.OrdinalIgnoreCase)
-                ? !Regex.IsMatch(m.Groups[2].Value, @"(?<![\w-])type\s*=\s*""(checkbox|text|date|search)""")
+                ? !Regex.IsMatch(m.Groups[2].Value, @"(?<![\w-])type\s*=\s*""(checkbox|text|date|search|password)""")
                     || m.Groups[2].Value.Contains("@bind", StringComparison.Ordinal)
                 : m.Groups[1].Value.Equals("textarea", StringComparison.OrdinalIgnoreCase))
             .Select(m => m.Value)

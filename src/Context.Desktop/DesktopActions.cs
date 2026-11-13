@@ -37,6 +37,12 @@ internal enum ActionReason
 
     /// <summary>Another note already has that name (ignoring case).</summary>
     Exists,
+
+    /// <summary>The sensitive note is not open, so its text is not known.</summary>
+    Locked,
+
+    /// <summary>The key store has no recovery key yet, or this OS has no key store.</summary>
+    NoKeys,
 }
 
 /// <summary>
@@ -84,6 +90,18 @@ internal sealed class DesktopActions
     public const string EmptyTodoText = "Write the todo first.";
     public const string CreateFailedText = "Can't create that note. Nothing was done.";
 
+    public const string UnsupportedText = "Sensitive notes need macOS or Windows.";
+    public const string NoRecoveryText = "Set up recovery first.";
+    public const string InboxSensitiveText = "The inbox can't be sensitive. Nothing was done.";
+    public const string RecoveryExistsText = "Recovery is already set up. Nothing was done.";
+    public const string PasswordTooShortText = "The password needs at least 12 characters.";
+    public const string RecoveryPathText = "Choose a place outside the data folder for the recovery file.";
+    public const string RecoveryFileExistsText = "That file already exists. Nothing was done.";
+    public const string RecoveryWriteFailedText = "Can't write the recovery file. Nothing was done.";
+    public const string MachineKeyFailedText = "Can't create the key on this machine. Nothing was done.";
+    public const string RecoverySavedText = "Recovery file saved. Keep it and its password safe.";
+    public const string RecoveryUnreadableText = "Can't read that recovery file.";
+
     /// <summary>The longest todo text <see cref="AddTodo"/> accepts, as in the console.</summary>
     public const int MaxTodoLength = 200;
 
@@ -130,6 +148,24 @@ internal sealed class DesktopActions
 
     /// <summary>The red line when a note's text is over <see cref="MaxNoteBytes"/>.</summary>
     public static string TooLargeText(string name) => $"{name} is larger than 5 MB. Nothing was saved.";
+
+    /// <summary>The red line when a sensitive note must be open for the action.</summary>
+    public static string UnlockFirstText(string name) => $"Unlock {name} first.";
+
+    /// <summary>The red line when a note can't be sealed.</summary>
+    public static string MarkFailedText(string name) => $"Can't mark {name} sensitive. Nothing was done.";
+
+    /// <summary>The red line when a sensitive note can't be made plain.</summary>
+    public static string MakePlainFailedText(string name) => $"Can't make {name} plain. Nothing was done.";
+
+    /// <summary>The red line when a note is too large to seal.</summary>
+    public static string TooLargeToSealText(string name) => $"{name} is larger than 5 MB. Nothing was done.";
+
+    /// <summary>The red line when a note changed on disk before a change other than a save.</summary>
+    public static string ChangedText(string name) => $"{name} changed on disk. Nothing was done.";
+
+    /// <summary>The line after a restore: how many of the sensitive notes this machine can now open.</summary>
+    public static string RestoredText(int restored, int total) => $"Restored {restored} of {total} notes.";
 
     /// <summary>The red line when a todo's text is too long.</summary>
     public static string TodoTooLongText => $"A todo can be at most {MaxTodoLength} characters. Nothing was done.";
@@ -186,6 +222,40 @@ internal sealed class DesktopActions
     /// file (no link or reparse point, no folder, seekable). Never writes and never refreshes.
     /// </summary>
     public Task<ActionResult> OpenExternally(string name) => Run(() => OpenExternallyNow(name), refresh: false);
+
+    /// <summary>
+    /// Makes the plain note <paramref name="name"/> sensitive, only when the user <paramref name="confirmed"/> it:
+    /// seals its text for this machine's key and the recovery key (both from the key store, no private-key call),
+    /// writes <c>&lt;name&gt;.ctxs</c> through a private temp file and a move that never overwrites, then deletes
+    /// the <c>.md</c>. Refused, with nothing written or deleted, for the inbox, without a recovery key, when the
+    /// note is gone, changed, not UTF-8 or over <see cref="MaxNoteBytes"/>, and on an OS without a key store.
+    /// </summary>
+    public Task<ActionResult> MarkSensitive(string name, Confirmation? confirmed) =>
+        Run(() => MarkSensitiveNow(name, confirmed));
+
+    /// <summary>
+    /// Makes the open sensitive note <paramref name="name"/> plain again, only when the user
+    /// <paramref name="confirmed"/> it: writes <c>&lt;name&gt;.md</c> from the open text (never overwriting), then
+    /// removes the sealed file through <see cref="NoteStore.DeleteSensitive"/>. No private-key call.
+    /// </summary>
+    public Task<ActionResult> MakePlain(string name, Confirmation? confirmed) => Run(() => MakePlainNow(name, confirmed));
+
+    /// <summary>
+    /// Sets up sensitive notes: creates this machine's key when there is none, makes the recovery key in memory,
+    /// writes it to the new file <paramref name="path"/> (outside the data folder, never overwriting, owner-only off
+    /// Windows) protected with <paramref name="password"/>, and only then stores the recovery public key. The
+    /// password and the private key are in no result.
+    /// </summary>
+    public Task<ActionResult> SetUpSensitive(string password, string path) => Run(() => SetUpSensitiveNow(password, path));
+
+    /// <summary>
+    /// Makes this machine able to open the sensitive notes again from the recovery file <paramref name="path"/>:
+    /// reads it (at most <see cref="RecoveryFile.MaxFileBytes"/>; the key stays in memory), creates the machine key
+    /// and stores the recovery public key when missing, and adds a wrap for the machine key to every sensitive note
+    /// the recovery key unwraps. A wrong password or file changes nothing.
+    /// </summary>
+    public Task<ActionResult> RestoreFromRecovery(string path, string password) =>
+        Run(() => RestoreFromRecoveryNow(path, password));
 
     private static ActionResult Refused(ActionReason reason, string text) => new(ActionKind.Refused, reason, text);
 
@@ -265,6 +335,18 @@ internal sealed class DesktopActions
 
     private ActionResult SaveNoteNow(EditableNote opened, string text)
     {
+        if (IsSealedPath(opened.Path))
+        {
+            try
+            {
+                return SaveSensitiveNow(opened, text);
+            }
+            catch (Exception)
+            {
+                return Failed(ActionReason.WriteFailed, NoteWriteFailedText(opened.Name));
+            }
+        }
+
         if (System.Text.Encoding.UTF8.GetByteCount(text) > MaxNoteBytes)
         {
             return Refused(ActionReason.Invalid, TooLargeText(opened.Name));
@@ -352,7 +434,9 @@ internal sealed class DesktopActions
         {
             if (!notes.TryFind(name, out NoteInfo? source) || source is null)
             {
-                return Refused(ActionReason.Missing, NoteMissingText(name));
+                return notes.TryFindSensitive(name, out NoteInfo? sealedSource) && sealedSource is not null
+                    ? RenameSensitiveNow(sealedSource, title)
+                    : Refused(ActionReason.Missing, NoteMissingText(name));
             }
 
             if (string.Equals(source.Name, title, StringComparison.Ordinal))
@@ -384,9 +468,19 @@ internal sealed class DesktopActions
 
         try
         {
-            return notes.Delete(name)
-                ? new ActionResult(ActionKind.Done, ActionReason.None, name)
-                : Refused(ActionReason.Missing, NoteMissingText(name));
+            if (notes.Delete(name))
+            {
+                return new ActionResult(ActionKind.Done, ActionReason.None, name);
+            }
+
+            // A sensitive note is deleted without being opened: no private-key call.
+            if (notes.TryFindSensitive(name, out NoteInfo? locked) && locked is not null && notes.DeleteSensitive(locked.Name))
+            {
+                state.Session.Close(locked.Name);
+                return new ActionResult(ActionKind.Done, ActionReason.None, name);
+            }
+
+            return Refused(ActionReason.Missing, NoteMissingText(name));
         }
         catch (Exception)
         {
@@ -401,7 +495,10 @@ internal sealed class DesktopActions
         {
             if (!notes.TryFind(name, out note) || note is null)
             {
-                return Refused(ActionReason.Missing, NoteMissingText(name));
+                // A sensitive note never leaves the app.
+                return notes.TryFindSensitive(name, out _)
+                    ? Refused(ActionReason.Invalid, OpenExternallyText(name))
+                    : Refused(ActionReason.Missing, NoteMissingText(name));
             }
 
             if (!IsLaunchable(note.Path))
@@ -451,5 +548,523 @@ internal sealed class DesktopActions
 
         using FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         return stream.CanSeek;
+    }
+
+    private static bool IsSealedPath(string path) =>
+        string.Equals(Path.GetExtension(path), NoteStore.SensitiveExtension, StringComparison.OrdinalIgnoreCase);
+
+    // A new file only the owner can read and write (mode 0600 off Windows); never an existing one.
+    private static void WritePrivate(string path, byte[] bytes)
+    {
+        FileStreamOptions options = new FileStreamOptions
+        {
+            Mode = FileMode.CreateNew,
+            Access = FileAccess.Write,
+            Share = FileShare.None,
+        };
+        if (!OperatingSystem.IsWindows())
+        {
+            options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        }
+
+        using FileStream stream = new FileStream(path, options);
+        stream.Write(bytes);
+    }
+
+    private static void Remove(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+        {
+            // Best effort: a leftover temp file holds only what its final file would.
+        }
+    }
+
+    // True when the file at path still hashes to version (read with the given bound).
+    private static bool IsVersion(string path, long maxBytes, string version)
+    {
+        try
+        {
+            return string.Equals(EditableNote.Hash(BoundedFile.Read(path, maxBytes)), version, StringComparison.Ordinal);
+        }
+        catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    // Writes bytes to target through a private temp file next to it. stillValid runs between the write and the move.
+    private static bool WriteThroughTemp(string target, string tempName, byte[] bytes, bool overwrite, Func<bool> stillValid)
+    {
+        string temp = Path.Combine(Path.GetDirectoryName(target) ?? string.Empty, tempName);
+        try
+        {
+            WritePrivate(temp, bytes);
+            if (!stillValid())
+            {
+                return false;
+            }
+
+            File.Move(temp, target, overwrite);
+            return true;
+        }
+        finally
+        {
+            Remove(temp);
+        }
+    }
+
+    private static string TempName(string name, string extension) => $".{name}{extension}.{Guid.NewGuid():N}.tmp";
+
+    // The machine key and the recovery key, from the key store only; null when either is missing.
+    private SealedRecipient[]? Recipients()
+    {
+        IKeyStore keys = state.KeyStore;
+        if (!keys.Supported)
+        {
+            return null;
+        }
+
+        byte[]? machine = keys.MachinePublicKey();
+        byte[]? recovery = keys.RecoveryPublicKey();
+        if (machine is null || recovery is null)
+        {
+            return null;
+        }
+
+        return [new SealedRecipient(SealedRecipient.Machine, machine), new SealedRecipient(SealedRecipient.Recovery, recovery)];
+    }
+
+    // The session's note when it is the sensitive note found on disk, else null.
+    private EditableNote? OpenSensitive(NoteInfo found)
+    {
+        EditableNote? open = state.Session.Note;
+        return open is not null
+            && string.Equals(open.Name, found.Name, StringComparison.Ordinal)
+            && string.Equals(open.Path, found.Path, StringComparison.Ordinal)
+            ? open
+            : null;
+    }
+
+    private ActionResult MarkSensitiveNow(string name, Confirmation? confirmed)
+    {
+        if (confirmed is null)
+        {
+            return Refused(ActionReason.NotConfirmed, NotConfirmedText);
+        }
+
+        if (!state.KeyStore.Supported)
+        {
+            return Refused(ActionReason.NoKeys, UnsupportedText);
+        }
+
+        try
+        {
+            if (!notes.TryFind(name, out NoteInfo? source) || source is null)
+            {
+                return Refused(ActionReason.Missing, NoteMissingText(name));
+            }
+
+            if (string.Equals(source.Name, Inbox.NoteName, StringComparison.OrdinalIgnoreCase))
+            {
+                return Refused(ActionReason.Invalid, InboxSensitiveText);
+            }
+
+            if (Recipients() is not { } recipients)
+            {
+                return Refused(ActionReason.NoKeys, NoRecoveryText);
+            }
+
+            if (new FileInfo(source.Path).Length > MaxNoteBytes)
+            {
+                return Refused(ActionReason.Invalid, TooLargeToSealText(source.Name));
+            }
+
+            if (notes.TryFindSensitive(source.Name, out _))
+            {
+                return Refused(ActionReason.Exists, ExistsText(source.Name));
+            }
+
+            // The text exactly as the file holds it (a byte order mark stays, as U+FEFF); only UTF-8 is sealed.
+            byte[] plain = BoundedFile.Read(source.Path, MaxNoteBytes);
+            string version = EditableNote.Hash(plain);
+            string text;
+            try
+            {
+                text = new System.Text.UTF8Encoding(false, throwOnInvalidBytes: true).GetString(plain);
+            }
+            catch (ArgumentException)
+            {
+                return Refused(ActionReason.Invalid, MarkFailedText(source.Name));
+            }
+
+            byte[] file = SealedNote.Seal(source.Name, text, recipients);
+            string target = Path.Combine(notes.Root, source.Name + NoteStore.SensitiveExtension);
+            bool written = WriteThroughTemp(
+                target,
+                TempName(source.Name, NoteStore.SensitiveExtension),
+                file,
+                overwrite: false,
+                () => IsVersion(source.Path, MaxNoteBytes, version));
+            if (!written)
+            {
+                return Refused(ActionReason.ChangedOnDisk, ChangedText(source.Name));
+            }
+
+            try
+            {
+                if (!IsVersion(source.Path, MaxNoteBytes, version) || !notes.Delete(source.Name))
+                {
+                    notes.DeleteSensitive(source.Name);
+                    return Refused(ActionReason.ChangedOnDisk, ChangedText(source.Name));
+                }
+            }
+            catch (Exception)
+            {
+                // The plain file could not be removed: take the sealed copy away again, so there is one note.
+                notes.DeleteSensitive(source.Name);
+                throw;
+            }
+
+            return new ActionResult(ActionKind.Done, ActionReason.None, source.Name);
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, MarkFailedText(name));
+        }
+    }
+
+    // Re-seals the open sensitive note with a new note key. Needs no private key; never writes plain text.
+    private ActionResult SaveSensitiveNow(EditableNote opened, string text)
+    {
+        string plainText = text.Replace("\r\n", "\n", StringComparison.Ordinal);
+        if (string.Equals(plainText, opened.Text, StringComparison.Ordinal))
+        {
+            return new ActionResult(ActionKind.Done, ActionReason.Unchanged, opened.Name, opened);
+        }
+
+        if (!notes.TryFindSensitive(opened.Name, out NoteInfo? found)
+            || found is null
+            || !string.Equals(found.Name, opened.Name, StringComparison.Ordinal))
+        {
+            return Refused(ActionReason.Missing, MissingText(opened.Name));
+        }
+
+        if (OpenSensitive(found) is not { } open || !string.Equals(open.Version, opened.Version, StringComparison.Ordinal))
+        {
+            return Refused(ActionReason.Locked, UnlockFirstText(opened.Name));
+        }
+
+        if (!IsVersion(found.Path, SealedNote.MaxFileBytes, opened.Version))
+        {
+            return Refused(ActionReason.ChangedOnDisk, ChangedOnDiskText(opened.Name));
+        }
+
+        string sealedText = SensitiveSession.ToSealedText(opened, plainText);
+        if (System.Text.Encoding.UTF8.GetByteCount(sealedText) > MaxNoteBytes)
+        {
+            return Refused(ActionReason.Invalid, TooLargeText(opened.Name));
+        }
+
+        if (Recipients() is not { } recipients)
+        {
+            return Refused(ActionReason.NoKeys, NoRecoveryText);
+        }
+
+        byte[] file = SealedNote.Seal(found.Name, sealedText, recipients);
+        bool written = WriteThroughTemp(
+            found.Path,
+            TempName(found.Name, NoteStore.SensitiveExtension),
+            file,
+            overwrite: true,
+            () => IsVersion(found.Path, SealedNote.MaxFileBytes, opened.Version));
+        if (!written)
+        {
+            return Refused(ActionReason.ChangedOnDisk, ChangedOnDiskText(opened.Name));
+        }
+
+        EditableNote saved = new EditableNote(
+            found.Name, found.Path, plainText, EditableNote.Hash(file), opened.HadCrlf, opened.HadBom);
+        state.Session.Open(saved);
+        return new ActionResult(ActionKind.Done, ActionReason.None, opened.Name, saved);
+    }
+
+    // A sealed file is never moved (its name is part of what is sealed): the open text is sealed again under the new
+    // name, and only then the old file is removed. Runs inside RenameNoteNow's try.
+    private ActionResult RenameSensitiveNow(NoteInfo source, string title)
+    {
+        if (string.Equals(source.Name, title, StringComparison.Ordinal))
+        {
+            return new ActionResult(ActionKind.Done, ActionReason.Unchanged, source.Name);
+        }
+
+        if (OpenSensitive(source) is not { } open)
+        {
+            return Refused(ActionReason.Locked, UnlockFirstText(source.Name));
+        }
+
+        if (notes.TryFind(title, out _) || notes.TryFindSensitive(title, out _))
+        {
+            return Refused(ActionReason.Exists, ExistsText(title));
+        }
+
+        if (Recipients() is not { } recipients)
+        {
+            return Refused(ActionReason.NoKeys, NoRecoveryText);
+        }
+
+        if (!IsVersion(source.Path, SealedNote.MaxFileBytes, open.Version))
+        {
+            return Refused(ActionReason.ChangedOnDisk, ChangedText(source.Name));
+        }
+
+        byte[] file = SealedNote.Seal(title, SensitiveSession.ToSealedText(open, open.Text), recipients);
+        string target = Path.Combine(notes.Root, title + NoteStore.SensitiveExtension);
+        try
+        {
+            WriteThroughTemp(target, TempName(title, NoteStore.SensitiveExtension), file, overwrite: false, () => true);
+        }
+        catch (IOException) when (File.Exists(target))
+        {
+            return Refused(ActionReason.Exists, ExistsText(title));
+        }
+
+        notes.DeleteSensitive(source.Name);
+        state.Session.Open(new EditableNote(title, target, open.Text, EditableNote.Hash(file), open.HadCrlf, open.HadBom));
+        return new ActionResult(ActionKind.Done, ActionReason.None, title);
+    }
+
+    private ActionResult MakePlainNow(string name, Confirmation? confirmed)
+    {
+        if (confirmed is null)
+        {
+            return Refused(ActionReason.NotConfirmed, NotConfirmedText);
+        }
+
+        try
+        {
+            if (!notes.TryFindSensitive(name, out NoteInfo? source) || source is null)
+            {
+                return Refused(ActionReason.Missing, NoteMissingText(name));
+            }
+
+            if (OpenSensitive(source) is not { } open)
+            {
+                return Refused(ActionReason.Locked, UnlockFirstText(source.Name));
+            }
+
+            if (notes.TryFind(source.Name, out _))
+            {
+                return Refused(ActionReason.Exists, ExistsText(source.Name));
+            }
+
+            if (!IsVersion(source.Path, SealedNote.MaxFileBytes, open.Version))
+            {
+                return Refused(ActionReason.ChangedOnDisk, ChangedText(source.Name));
+            }
+
+            byte[] plain = new System.Text.UTF8Encoding(false).GetBytes(SensitiveSession.ToSealedText(open, open.Text));
+            string target = Path.Combine(notes.Root, source.Name + ".md");
+            try
+            {
+                WriteThroughTemp(target, TempName(source.Name, ".md"), plain, overwrite: false, () => true);
+            }
+            catch (IOException) when (File.Exists(target))
+            {
+                return Refused(ActionReason.Exists, ExistsText(source.Name));
+            }
+
+            try
+            {
+                notes.DeleteSensitive(source.Name);
+            }
+            catch (Exception)
+            {
+                // The sealed file could not be removed: take the plain copy away again, so there is one note.
+                Remove(target);
+                throw;
+            }
+
+            state.Session.Close(source.Name);
+            return new ActionResult(ActionKind.Done, ActionReason.None, source.Name);
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, MakePlainFailedText(name));
+        }
+    }
+
+    private ActionResult SetUpSensitiveNow(string password, string path)
+    {
+        IKeyStore keys = state.KeyStore;
+        if (!keys.Supported)
+        {
+            return Refused(ActionReason.NoKeys, UnsupportedText);
+        }
+
+        if (password.Length < RecoveryFile.MinPasswordLength)
+        {
+            return Refused(ActionReason.Invalid, PasswordTooShortText);
+        }
+
+        string target;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(path) || notes.Contains(path))
+            {
+                return Refused(ActionReason.Invalid, RecoveryPathText);
+            }
+
+            target = Path.GetFullPath(path);
+            if (File.Exists(target) || Directory.Exists(target))
+            {
+                return Refused(ActionReason.Exists, RecoveryFileExistsText);
+            }
+        }
+        catch (Exception)
+        {
+            return Refused(ActionReason.Invalid, RecoveryPathText);
+        }
+
+        try
+        {
+            if (keys.RecoveryPublicKey() is not null)
+            {
+                return Refused(ActionReason.Exists, RecoveryExistsText);
+            }
+
+            if (keys.MachinePublicKey() is null)
+            {
+                keys.CreateMachineKey();
+            }
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, MachineKeyFailedText);
+        }
+
+        byte[] publicKey;
+        try
+        {
+            byte[] file = RecoveryFile.Create(password, out publicKey);
+            try
+            {
+                WritePrivate(target, file);
+            }
+            catch (IOException) when (File.Exists(target))
+            {
+                // Someone else made that file in between; it is not ours to remove.
+                return Refused(ActionReason.Exists, RecoveryFileExistsText);
+            }
+        }
+        catch (Exception)
+        {
+            Remove(target);
+            return Failed(ActionReason.WriteFailed, RecoveryWriteFailedText);
+        }
+
+        try
+        {
+            keys.StoreRecoveryPublicKey(publicKey);
+        }
+        catch (Exception)
+        {
+            // Without the stored public key the file protects nothing; it must not look like a working recovery file.
+            Remove(target);
+            return Failed(ActionReason.WriteFailed, MachineKeyFailedText);
+        }
+
+        return new ActionResult(ActionKind.Done, ActionReason.None, RecoverySavedText);
+    }
+
+    private ActionResult RestoreFromRecoveryNow(string path, string password)
+    {
+        IKeyStore keys = state.KeyStore;
+        if (!keys.Supported)
+        {
+            return Refused(ActionReason.NoKeys, UnsupportedText);
+        }
+
+        System.Security.Cryptography.ECDiffieHellman recoveryKey;
+        try
+        {
+            recoveryKey = RecoveryFile.Read(BoundedFile.Read(path, RecoveryFile.MaxFileBytes), password);
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.Unreadable, RecoveryUnreadableText);
+        }
+
+        using (recoveryKey)
+        {
+            byte[] recoveryPublic = recoveryKey.ExportSubjectPublicKeyInfo();
+            byte[] machine;
+            try
+            {
+                if (keys.MachinePublicKey() is null)
+                {
+                    keys.CreateMachineKey();
+                }
+
+                machine = keys.MachinePublicKey() ?? throw new KeyStoreException();
+                if (keys.RecoveryPublicKey() is null)
+                {
+                    keys.StoreRecoveryPublicKey(recoveryPublic);
+                }
+            }
+            catch (Exception)
+            {
+                return Failed(ActionReason.WriteFailed, MachineKeyFailedText);
+            }
+
+            SealedRecipient added = new SealedRecipient(SealedRecipient.Machine, machine);
+            IReadOnlyList<NoteInfo> sealedNotes;
+            try
+            {
+                sealedNotes = notes.ListSensitive();
+            }
+            catch (Exception)
+            {
+                return Failed(ActionReason.Unreadable, FailedText);
+            }
+
+            int restored = sealedNotes.Count(n => Restore(n, recoveryKey, recoveryPublic, added));
+            return new ActionResult(ActionKind.Done, ActionReason.None, RestoredText(restored, sealedNotes.Count));
+        }
+    }
+
+    // True when the machine key can open the note afterwards: it already could, or its wrap was added with the
+    // recovery key (which stays in memory). A note the recovery key can't unwrap is left as it is.
+    private static bool Restore(
+        NoteInfo note, System.Security.Cryptography.ECDiffieHellman recoveryKey, byte[] recoveryPublic, SealedRecipient added)
+    {
+        try
+        {
+            byte[] file = BoundedFile.Read(note.Path, SealedNote.MaxFileBytes);
+            if (SealedNote.HasKey(file, added.PublicKey))
+            {
+                return true;
+            }
+
+            string version = EditableNote.Hash(file);
+            byte[] rewrapped = SealedNote.AddRecipient(
+                note.Name, file, recoveryPublic, peer => SealedNote.Agree(recoveryKey, peer), added);
+            return WriteThroughTemp(
+                note.Path,
+                TempName(note.Name, NoteStore.SensitiveExtension),
+                rewrapped,
+                overwrite: true,
+                () => IsVersion(note.Path, SealedNote.MaxFileBytes, version));
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 }

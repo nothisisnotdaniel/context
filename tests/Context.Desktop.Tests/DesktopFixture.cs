@@ -47,6 +47,18 @@ internal sealed class DesktopFixture : IDisposable
     /// <summary>The launcher the actions use for "Open in default editor"; it only records paths.</summary>
     public FakeNoteLauncher Launcher { get; } = new();
 
+    /// <summary>The key store the state uses: in memory, supported, without keys. Set another before <see cref="CreateState"/>.</summary>
+    public FakeKeyStore Keys { get; set; } = new();
+
+    /// <summary>The file dialog the setup dialog uses; it opens no window.</summary>
+    public FakeFileDialog Dialog { get; } = new();
+
+    /// <summary>The session of the open sensitive note, on the <see cref="UtcNow"/> clock (set by <see cref="CreateState"/>).</summary>
+    public SensitiveSession? Session { get; private set; }
+
+    /// <summary>A place for a recovery file, outside the data folder; nothing is there yet.</summary>
+    public string RecoveryPath => Path.Combine(parent, "recovery.pfx");
+
     public DesktopState? State { get; private set; }
 
     public DesktopActions? Actions { get; private set; }
@@ -60,6 +72,7 @@ internal sealed class DesktopFixture : IDisposable
     public void Dispose()
     {
         Bunit.Dispose();
+        Keys.Dispose();
         if (Directory.Exists(parent))
         {
             Directory.Delete(parent, recursive: true);
@@ -78,6 +91,7 @@ internal sealed class DesktopFixture : IDisposable
         CalendarFeed feed = new CalendarFeed(Root, link, Http, FeedClock);
         Todos = new TodoStore(Root);
         Notes = new NoteStore(Root);
+        Session = new SensitiveSession(() => UtcNow);
         State = new DesktopState(
             Notes,
             Todos,
@@ -85,11 +99,14 @@ internal sealed class DesktopFixture : IDisposable
             new CalendarStore(Root, Zone),
             feed,
             () => Day,
-            () => UtcNow);
+            () => UtcNow,
+            Keys,
+            Session);
         Actions = new DesktopActions(Notes, Todos, State, Launcher);
         Bunit.Services.AddSingleton(State);
         Bunit.Services.AddSingleton(Actions);
         Bunit.Services.AddTransient<EditorInterop>();
+        Bunit.Services.AddSingleton<IFileDialog>(Dialog);
         return State;
     }
 
@@ -108,6 +125,18 @@ internal sealed class DesktopFixture : IDisposable
     {
         Directory.CreateDirectory(Root);
         File.WriteAllText(Path.Combine(Root, name + ".md"), text);
+    }
+
+    /// <summary>Writes <c>&lt;name&gt;.ctxs</c> sealed for the machine and recovery keys of <see cref="Keys"/> (both must exist).</summary>
+    public void WriteSensitive(string name, string text)
+    {
+        Directory.CreateDirectory(Root);
+        SealedRecipient[] recipients =
+        [
+            new SealedRecipient(SealedRecipient.Machine, Keys.MachinePublicKey()!),
+            new SealedRecipient(SealedRecipient.Recovery, Keys.RecoveryPublicKey()!),
+        ];
+        File.WriteAllBytes(Path.Combine(Root, name + NoteStore.SensitiveExtension), SealedNote.Seal(name, text, recipients));
     }
 
     public void AddTodo(string text, DateOnly due)

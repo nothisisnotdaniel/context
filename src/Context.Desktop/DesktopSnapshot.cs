@@ -14,7 +14,10 @@ internal sealed record DesktopSnapshot
         bool todosUnreadable,
         IReadOnlyList<NoteInfo> notes,
         bool notesUnreadable,
-        string folder)
+        string folder,
+        IReadOnlyList<NoteInfo>? sensitive = null,
+        bool sensitiveSupported = false,
+        bool recoveryReady = false)
     {
         Failed = failed;
         Today = today;
@@ -24,6 +27,9 @@ internal sealed record DesktopSnapshot
         Notes = notes;
         NotesUnreadable = notesUnreadable;
         Folder = folder;
+        Sensitive = sensitive ?? [];
+        SensitiveSupported = sensitiveSupported;
+        RecoveryReady = recoveryReady;
     }
 
     /// <summary>Returns only the type name, so formatting a snapshot never prints its raw text.</summary>
@@ -52,6 +58,15 @@ internal sealed record DesktopSnapshot
 
     /// <summary>The data folder (raw).</summary>
     public string Folder { get; }
+
+    /// <summary>Every sensitive note in <see cref="NoteStore.ListSensitive"/> order: names and times only, never text.</summary>
+    public IReadOnlyList<NoteInfo> Sensitive { get; }
+
+    /// <summary>True when this OS has a key store for sensitive notes (macOS, Windows).</summary>
+    public bool SensitiveSupported { get; }
+
+    /// <summary>True when the key store holds a recovery public key, so notes can be marked sensitive.</summary>
+    public bool RecoveryReady { get; }
 
     /// <summary>The snapshot shown when building one threw.</summary>
     public static DesktopSnapshot ForFailure(string folder, DateOnly today) =>

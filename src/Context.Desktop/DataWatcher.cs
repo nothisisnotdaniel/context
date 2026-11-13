@@ -72,6 +72,7 @@ internal sealed class DataWatcher : IDisposable
         {
             string name = parts[0];
             return HasExtension(name, ".md")
+                || HasExtension(name, NoteStore.SensitiveExtension)
                 || Same(name, TodoStore.FileName)
                 || Same(name, CalendarFeed.CacheFileName);
         }

@@ -59,6 +59,9 @@ internal sealed class NoteStore
 
     private const string Extension = ".md";
 
+    /// <summary>The extension of a sensitive note's sealed file (<c>&lt;Title&gt;.ctxs</c>).</summary>
+    public const string SensitiveExtension = ".ctxs";
+
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
     private static readonly byte[] Utf8Bom = [0xEF, 0xBB, 0xBF];
@@ -174,7 +177,7 @@ internal sealed class NoteStore
             throw new ArgumentException(error, nameof(title));
         }
 
-        if (List().Any(n => string.Equals(n.Name, title, StringComparison.OrdinalIgnoreCase)))
+        if (List().Any(n => string.Equals(n.Name, title, StringComparison.OrdinalIgnoreCase)) || IsSensitiveName(title))
         {
             throw new NoteExistsException(title);
         }
@@ -225,7 +228,7 @@ internal sealed class NoteStore
         }
 
         if (List().Any(n => !string.Equals(n.Path, source.Path, StringComparison.Ordinal)
-            && string.Equals(n.Name, title, StringComparison.OrdinalIgnoreCase)))
+            && string.Equals(n.Name, title, StringComparison.OrdinalIgnoreCase)) || IsSensitiveName(title))
         {
             throw new NoteExistsException(title);
         }
@@ -277,6 +280,59 @@ internal sealed class NoteStore
             .OrderBy(n => n.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(n => n.Name, StringComparer.Ordinal)
             .ToList();
+    }
+
+    /// <summary>
+    /// Every sensitive note: the top-level <c>*.ctxs</c> files in the root, sorted like <see cref="List"/>. The name is
+    /// the file name without <c>.ctxs</c>. The files are sealed by the desktop app; this class never reads their
+    /// content. A missing root lists as empty and is not created.
+    /// </summary>
+    public IReadOnlyList<NoteInfo> ListSensitive()
+    {
+        if (!Directory.Exists(root))
+        {
+            return [];
+        }
+
+        return Directory.EnumerateFiles(root, "*" + SensitiveExtension, SearchOption.TopDirectoryOnly)
+            .Where(p => string.Equals(Path.GetExtension(p), SensitiveExtension, StringComparison.OrdinalIgnoreCase))
+            .Select(p => new NoteInfo(Path.GetFileNameWithoutExtension(p), File.GetLastWriteTime(p), p))
+            .Where(n => n.Name.Length > 0)
+            .OrderBy(n => n.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(n => n.Name, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Finds the sensitive note called <paramref name="name"/> (trimmed): an exact match in
+    /// <see cref="ListSensitive"/> first, then one ignoring case. The name is never turned into a path.
+    /// </summary>
+    public bool TryFindSensitive(string name, out NoteInfo? match)
+    {
+        match = null;
+        string wanted = name.Trim();
+        if (wanted.Length == 0)
+        {
+            return false;
+        }
+
+        match = Find(ListSensitive(), wanted);
+        return match is not null;
+    }
+
+    /// <summary>
+    /// Deletes the sensitive note <see cref="TryFindSensitive"/> finds for <paramref name="name"/> and returns true,
+    /// or returns false and deletes nothing when there is none. Never deletes a <c>.md</c> file.
+    /// </summary>
+    public bool DeleteSensitive(string name)
+    {
+        if (!TryFindSensitive(name, out NoteInfo? match) || match is null)
+        {
+            return false;
+        }
+
+        File.Delete(match.Path);
+        return true;
     }
 
     /// <summary>
@@ -442,6 +498,11 @@ internal sealed class NoteStore
             throw new ArgumentException(error, nameof(title));
         }
 
+        if (IsSensitiveName(title))
+        {
+            throw new NoteExistsException(title);
+        }
+
         NoteInfo? existing = Find(List(), title);
         Directory.CreateDirectory(root);
         string name = existing?.Name ?? title;
@@ -483,7 +544,7 @@ internal sealed class NoteStore
             throw new ArgumentException(error, nameof(title));
         }
 
-        if (Find(List(), title) is not null)
+        if (Find(List(), title) is not null || IsSensitiveName(title))
         {
             throw new NoteExistsException(title);
         }
@@ -646,6 +707,10 @@ internal sealed class NoteStore
 
         return Path.TrimEndingDirectorySeparator(current);
     }
+
+    // True when a sensitive note has this name, ignoring case: the name is taken for plain notes.
+    private bool IsSensitiveName(string title) =>
+        ListSensitive().Any(n => string.Equals(n.Name, title, StringComparison.OrdinalIgnoreCase));
 
     private static NoteInfo? Find(IReadOnlyList<NoteInfo> notes, string name) =>
         notes.FirstOrDefault(n => string.Equals(n.Name, name, StringComparison.Ordinal))

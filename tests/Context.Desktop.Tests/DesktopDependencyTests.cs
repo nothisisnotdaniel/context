@@ -165,4 +165,15 @@ public sealed class DesktopDependencyTests
     }
 
     private static bool IsSpectre(string name) => name.StartsWith("Spectre", StringComparison.OrdinalIgnoreCase);
+
+    // 136 AC-10: sensitive notes use only what .NET ships; the desktop project gets no new package.
+    [Fact]
+    public void DesktopProject_HasExactlyItsTwoPackages()
+    {
+        XDocument desktop = XDocument.Load(Path.Combine(RepoFiles.Root(), DesktopProject));
+
+        Assert.Equal(
+            ["Photino.Blazor", "Velopack"],
+            desktop.Descendants("PackageReference").Select(e => e.Attribute("Include")?.Value ?? string.Empty).Order(StringComparer.Ordinal).ToArray());
+    }
 }

@@ -293,6 +293,11 @@ internal sealed class Cli
         CaptureResult result;
         try
         {
+            if (Sensitive(session, Inbox.NoteName) is { } sensitive)
+            {
+                return Error(sensitive);
+            }
+
             result = Inbox.Capture(session.Notes, text, now());
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -373,13 +378,27 @@ internal sealed class Cli
 
     private int Notes(Session session)
     {
-        foreach (NoteInfo note in session.Notes.List())
+        // Sensitive notes are listed by name only, marked locked; their text is never read here.
+        IEnumerable<(NoteInfo Note, bool Locked)> all = session.Notes.List().Select(n => (n, false))
+            .Concat(session.Notes.ListSensitive().Select(n => (n, true)))
+            .OrderBy(r => r.Item1.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.Item1.Name, StringComparer.Ordinal);
+        foreach ((NoteInfo note, bool locked) in all)
         {
-            Out(OneLine(note.Name));
+            Out(locked ? $"{OneLine(note.Name)}\tlocked" : OneLine(note.Name));
         }
 
         return ExitOk;
     }
+
+    /// <summary>The error line for a command that would need the text of a sensitive note.</summary>
+    internal static string SensitiveText(string name) => $"{name} is sensitive. Open it in the desktop app.";
+
+    // The error for a sensitive note called name, or null when there is none.
+    private string? Sensitive(Session session, string name) =>
+        session.Notes.TryFindSensitive(name, out NoteInfo? locked) && locked is not null
+            ? SensitiveText(OneLine(locked.Name))
+            : null;
 
     private int ShowNote(Session session, string name)
     {
@@ -388,7 +407,7 @@ internal sealed class Cli
         {
             if (!session.Notes.TryOpen(name, out note) || note is null)
             {
-                return Error($"No note named {OneLine(name.Trim())}.");
+                return Error(Sensitive(session, name) ?? $"No note named {OneLine(name.Trim())}.");
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -435,7 +454,7 @@ internal sealed class Cli
                 return Error(IndexUnreadable);
             case LinksViewKind.NoSuchNote:
             case LinksViewKind.MissingArgument:
-                return Error($"No note named {OneLine(view.Typed)}.");
+                return Error(Sensitive(session, view.Typed) ?? $"No note named {OneLine(view.Typed)}.");
             default:
                 foreach (NoteLink link in view.Links)
                 {
@@ -556,6 +575,11 @@ internal sealed class Cli
             return Error($"{OneLine(invalid)} Rename the file and import it again.");
         }
 
+        if (Sensitive(session, title) is { } sensitive)
+        {
+            return Error(sensitive);
+        }
+
         byte[] content;
         try
         {
@@ -595,7 +619,7 @@ internal sealed class Cli
         NoteStore store = session.Notes;
         if (!store.TryFind(name, out NoteInfo? match) || match is null)
         {
-            return Error($"No note named {OneLine(name.Trim())}.");
+            return Error(Sensitive(session, name) ?? $"No note named {OneLine(name.Trim())}.");
         }
 
         string target = Path.GetFullPath(path);

@@ -306,4 +306,24 @@ public sealed class CoreDependencyTests
         found.Sort(StringComparer.Ordinal);
         return found;
     }
+
+    // 136 AC-10: Core and the console app hold no sealing code and no key store; that lives in the desktop project.
+    [Theory]
+    [InlineData("AesGcm")]
+    [InlineData("ECDiffieHellman")]
+    [InlineData("IKeyStore")]
+    [InlineData("SealedNote")]
+    [InlineData("System.Security.Cryptography.X509Certificates")]
+    public void CoreAndConsoleSources_HaveNoSealingCode(string forbidden)
+    {
+        string root = RepoRoot();
+        List<string> found = new[] { "src/Context.Core", "src/Context" }
+            .SelectMany(folder => Directory.EnumerateFiles(Path.Combine(root, folder), "*.cs", SearchOption.AllDirectories))
+            .Where(f => !Relative(root, f).Contains("/obj/", StringComparison.Ordinal) && !Relative(root, f).Contains("/bin/", StringComparison.Ordinal))
+            .Where(f => File.ReadAllText(f).Contains(forbidden, StringComparison.Ordinal))
+            .Select(f => Relative(root, f))
+            .ToList();
+
+        Assert.True(found.Count == 0, forbidden + " is in: " + string.Join(", ", found));
+    }
 }

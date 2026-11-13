@@ -756,4 +756,42 @@ public sealed class NoteCommandsTests : IDisposable
         Assert.Contains("Imported Other", output);
         Assert.Equal(bytes, File.ReadAllBytes(Path.Combine(root, "Other.md")));
     }
+
+    // 136 AC-9: /notes lists a sensitive note by name with a grey locked marker.
+    [Fact]
+    public void Notes_ListsSensitiveNotesWithGreyLocked()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "Beta.md"), "b");
+        File.WriteAllText(Path.Combine(root, "Alpha.ctxs"), "sealed-bytes");
+
+        string[] main = MainView(LastFrame("/notes"));
+        (_, string output) = Run(true, "/notes");
+
+        int alpha = Array.FindIndex(main, l => l.Contains("Alpha locked", StringComparison.Ordinal));
+        int beta = Array.FindIndex(main, l => l.Contains("Beta", StringComparison.Ordinal));
+        Assert.True(alpha >= 0 && beta > alpha, string.Join("\n", main));
+        Assert.DoesNotContain("locked", main[beta], StringComparison.Ordinal);
+        Assert.Contains(Style("[grey]X[/]") + "locked", output);
+        Assert.DoesNotContain("sealed-bytes", output, StringComparison.Ordinal);
+    }
+
+    // 136 AC-9: /open, /export and /import refuse a sensitive note in red and read or write nothing.
+    [Theory]
+    [InlineData("/open Plan")]
+    [InlineData("/open plan")]
+    [InlineData("/export Plan out.md")]
+    public void SensitiveNote_IsRefusedInRed(string command)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "Plan.ctxs"), "sealed-bytes");
+
+        (int exitCode, string output) = Run(true, command);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains(RedStart() + "Plan is sensitive. Open it in the desktop app.", output);
+        Assert.DoesNotContain("sealed-bytes", output, StringComparison.Ordinal);
+        Assert.Equal(["Plan.ctxs"], Directory.GetFiles(root).Select(f => Path.GetFileName(f)!).ToArray());
+        Assert.False(File.Exists(Path.Combine(parent, "out.md")));
+    }
 }

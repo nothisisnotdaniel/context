@@ -36,7 +36,9 @@ internal sealed class DesktopState
         CalendarStore calendar,
         CalendarFeed? feed,
         Func<DateOnly> today,
-        Func<DateTime> utcNow)
+        Func<DateTime> utcNow,
+        IKeyStore? keyStore = null,
+        SensitiveSession? session = null)
     {
         this.notes = notes;
         this.todos = todos;
@@ -45,10 +47,18 @@ internal sealed class DesktopState
         this.feed = feed;
         this.today = today;
         this.utcNow = utcNow;
+        KeyStore = keyStore ?? new UnsupportedKeyStore();
+        Session = session ?? new SensitiveSession(utcNow);
     }
 
     /// <summary>Raised (on a background thread) after every refresh, once <see cref="Snapshot"/> is set.</summary>
     public event Action? Changed;
+
+    /// <summary>The OS key store of sensitive notes (one that supports nothing unless one was given).</summary>
+    public IKeyStore KeyStore { get; }
+
+    /// <summary>The open sensitive note and its idle lock.</summary>
+    public SensitiveSession Session { get; }
 
     /// <summary>The latest snapshot, or <c>null</c> before the first refresh finished.</summary>
     public DesktopSnapshot? Snapshot => snapshot;
@@ -129,6 +139,49 @@ internal sealed class DesktopState
     });
 
     /// <summary>
+    /// Opens the sensitive note called <paramref name="name"/> for editing, off the calling thread: reads its sealed
+    /// file (found in <see cref="NoteStore.ListSensitive"/>, at most <see cref="SealedNote.MaxFileBytes"/>) and
+    /// unwraps it with one <see cref="IKeyStore.Agree"/> call, which may make the OS ask the user. The opened note
+    /// becomes the <see cref="Session"/>'s note; a note the session already holds under that name is returned
+    /// without asking again. <c>null</c> when there is no such note or it can't be unlocked, whatever the reason.
+    /// Nothing is written.
+    /// </summary>
+    public Task<EditableNote?> ReadSensitive(string name) => Task.Run(() =>
+    {
+        try
+        {
+            if (!notes.TryFindSensitive(name, out NoteInfo? found) || found is null)
+            {
+                return null;
+            }
+
+            EditableNote? open = Session.Note;
+            if (open is not null
+                && string.Equals(open.Name, found.Name, StringComparison.Ordinal)
+                && string.Equals(open.Path, found.Path, StringComparison.Ordinal))
+            {
+                return open;
+            }
+
+            byte[]? machine = KeyStore.MachinePublicKey();
+            if (machine is null)
+            {
+                return null;
+            }
+
+            byte[] file = BoundedFile.Read(found.Path, SealedNote.MaxFileBytes);
+            string text = SealedNote.Open(found.Name, file, machine, KeyStore.Agree);
+            EditableNote note = SensitiveSession.ToEditable(found, text, EditableNote.Hash(file));
+            Session.Open(note);
+            return note;
+        }
+        catch (Exception)
+        {
+            return (EditableNote?)null;
+        }
+    });
+
+    /// <summary>
     /// The notes tagged <paramref name="tag"/> (normalized like <see cref="TagIndex.NormalizeTag"/>) after syncing the
     /// index, sorted by name ignoring case, off the calling thread. <c>null</c> when the index can't be read.
     /// </summary>
@@ -153,7 +206,8 @@ internal sealed class DesktopState
 
     /// <summary>
     /// The note a <c>[[link]]</c> target or a typed name names, resolved like <c>/open</c>
-    /// (<see cref="NameLookup.Resolve"/>, trimmed) against the notes in the latest snapshot. <c>null</c> if none.
+    /// (<see cref="NameLookup.Resolve"/>, trimmed) against the notes in the latest snapshot, sensitive ones included
+    /// (by name only). <c>null</c> if none.
     /// </summary>
     public string? ResolveNote(string target)
     {
@@ -163,7 +217,7 @@ internal sealed class DesktopState
             return null;
         }
 
-        return new NameLookup(current.Notes.Select(n => n.Name)).Resolve(target.Trim());
+        return new NameLookup(current.Notes.Concat(current.Sensitive).Select(n => n.Name)).Resolve(target.Trim());
     }
 
     private DesktopSnapshot Loop()
@@ -205,6 +259,19 @@ internal sealed class DesktopState
             {
                 // A failing listener must not stop the refresh loop or the other listeners.
             }
+        }
+    }
+
+    // True when notes can be marked sensitive: the key store has this machine's key and the recovery public key.
+    private bool RecoveryReady()
+    {
+        try
+        {
+            return KeyStore.Supported && KeyStore.MachinePublicKey() is not null && KeyStore.RecoveryPublicKey() is not null;
+        }
+        catch (KeyStoreException)
+        {
+            return false;
         }
     }
 
@@ -253,8 +320,22 @@ internal sealed class DesktopState
                 current = CurrentView.Build(todos, index, notes, calendar, feed, day);
             }
 
+            IReadOnlyList<NoteInfo> sensitive = [];
+            if (!notesUnreadable)
+            {
+                try
+                {
+                    sensitive = notes.ListSensitive();
+                }
+                catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+                {
+                    notesUnreadable = true;
+                }
+            }
+
             return new DesktopSnapshot(
-                false, day, current, todoList, todosUnreadable, noteList, notesUnreadable, folder);
+                false, day, current, todoList, todosUnreadable, noteList, notesUnreadable, folder, sensitive,
+                KeyStore.Supported, RecoveryReady());
         }
         catch (Exception)
         {
