@@ -11,10 +11,10 @@ public sealed class DesktopSourceTests
 
     // The Core calls that change data (AC-8). CalendarLink's real names are Set/Clear; Save/Delete are listed too.
     // 134: NoteStore.Rename and NoteStore.Delete. 136: sealing (SealedNote.Seal, AddRecipient), NoteStore.DeleteSensitive
-    // and the key store's two changing calls; RecoveryFile.Create is caught by Create.
+    // and the key store's two changing calls; RecoveryFile.Create is caught by Create. 140: Inbox.Capture.
     private static readonly Regex Writes = new(
         @"\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
-        + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey)\s*\(",
+        + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture)\s*\(",
         RegexOptions.CultureInvariant);
 
     // 136: the real key stores and the real file dialog, spelled in pieces: no test file may hold their names (see
@@ -714,6 +714,8 @@ public sealed class DesktopSourceTests
     [InlineData("state.KeyStore.CreateMachineKey()")]
     [InlineData("keys.StoreRecoveryPublicKey(publicKey)")]
     [InlineData("RecoveryFile.Create(password, out publicKey)")]
+    [InlineData("Inbox.Capture(notes, cleaned, localNow(), BeforeCaptureSave)")]
+    [InlineData("Inbox . Capture (store, text, now)")]
     public void Writes_Pattern_CatchesCalls(string call)
     {
         Assert.Matches(Writes, call);
@@ -738,6 +740,8 @@ public sealed class DesktopSourceTests
     [InlineData("Actions.MakePlain(name, confirmed)")]
     [InlineData("Actions.SetUpSensitive(password, path)")]
     [InlineData("Actions.RestoreFromRecovery(path, password)")]
+    [InlineData("Actions.CaptureText(typed)")]
+    [InlineData("@onkeydown=\"e => Capture(e)\"")]
     [InlineData("SealedNote.Open(found.Name, file, machine, KeyStore.Agree)")]
     [InlineData("State.ReadSensitive(Name)")]
     [InlineData("State.Session.Lock()")]
@@ -891,7 +895,7 @@ public sealed class DesktopSourceTests
 
         Assert.Equal([ProgramFile, RealLauncherFile], found);
         Assert.Contains(
-            "new DesktopActions(notes, todos, state, new " + RealLauncher + "(), calendarLink, feed)",
+            "notes, todos, state, new " + RealLauncher + "(), calendarLink, feed, () => DateTime.Now)",
             File.ReadAllText(Path.Combine(root, ProgramFile)),
             StringComparison.Ordinal);
     }
@@ -1056,6 +1060,58 @@ public sealed class DesktopSourceTests
     [InlineData(".note-import {")]
     [InlineData(".import-result {")]
     public void AppCss_StylesTheImport(string selector)
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+
+        Assert.Contains(selector, css, StringComparison.Ordinal);
+    }
+
+    // 140 AC-10: Inbox.Capture is called only in DesktopActions.cs, and the capture box calls the action only.
+    [Fact]
+    public void Sources_CallInboxCaptureOnlyInDesktopActions()
+    {
+        string root = RepoFiles.Root();
+        Regex call = new Regex(@"\bInbox\s*\.\s*Capture\s*\(", RegexOptions.CultureInvariant);
+        List<string> found = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
+            .Where(f => call.IsMatch(File.ReadAllText(Path.Combine(root, f))))
+            .ToList();
+
+        Assert.Equal([ActionsFile], found);
+    }
+
+    // 140 AC-10: the capture box passes the component rules (also checked for every .razor file by the scans above)
+    // and shows only fixed texts or text that went through DesktopText.OneLine.
+    [Fact]
+    public void CaptureBox_FollowsTheComponentRules()
+    {
+        string razor = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "CaptureBox.razor"));
+
+        Assert.DoesNotContain(RawMarkup, m => razor.Contains(m, StringComparison.Ordinal));
+        Assert.DoesNotContain(RazorForbidden, m => razor.Contains(m, StringComparison.Ordinal));
+        Assert.Equal(["Capture"], ActionCallers(razor));
+        Assert.Empty(ActionCallProblems(razor));
+        Assert.Empty(UntypedButtons(razor));
+        Assert.Empty(BadInputs(razor));
+        Assert.DoesNotMatch(FileSystemClass, razor);
+        Assert.DoesNotContain("@bind", razor, StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(razor, @"\bActions\s*\."));
+
+        // Every status text is the fixed Captured text or a OneLine text.
+        List<string> shown = Regex.Matches(razor, @"ShowStatus\(([^;]*)\);").Select(m => m.Groups[1].Value).ToList();
+        Assert.Equal(3, shown.Count);
+        Assert.All(
+            shown,
+            s => Assert.True(
+                s.StartsWith("DesktopText.OneLine(", StringComparison.Ordinal)
+                || s.StartsWith("DesktopActions.CapturedText,", StringComparison.Ordinal),
+                s));
+    }
+
+    // 140: the capture row is styled.
+    [Theory]
+    [InlineData(".capture-box {")]
+    [InlineData(".capture-status:empty {")]
+    public void AppCss_StylesTheCapture(string selector)
     {
         string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
 

@@ -105,6 +105,38 @@
         StateHasChanged();
     }
 
+    /// <summary>
+    /// Reads the plain note again and mounts the editor with that text, without taking the focus: after something
+    /// else (a capture) wrote the note while it was open without unsaved changes. A sensitive note, an editor that
+    /// isn't mounted or a running save is left alone; a note that can't be read any more keeps what is shown.
+    /// </summary>
+    internal async Task ReloadAsync()
+    {
+        if (Sensitive || !mounted || saving)
+        {
+            return;
+        }
+
+        EditableNote? note = await State.ReadForEdit(Name);
+        if (note is null)
+        {
+            return;
+        }
+
+        try
+        {
+            lossy = !await Interop.IsLosslessAsync(note.Text);
+            await Interop.MountAsync(host, note.Text);
+            opened = note;
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            // The page is gone; the editor keeps what it has.
+        }
+
+        StateHasChanged();
+    }
+
     public async ValueTask DisposeAsync()
     {
         Dispose();

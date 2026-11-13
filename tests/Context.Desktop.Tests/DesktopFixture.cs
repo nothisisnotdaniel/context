@@ -39,6 +39,9 @@ internal sealed class DesktopFixture : IDisposable
     /// <summary>The UTC clock of the state and the feed; tests may change it.</summary>
     public DateTime UtcNow { get; set; } = new(2026, 10, 29, 9, 0, 0, DateTimeKind.Utc);
 
+    /// <summary>The local clock of the actions (the time stamp of a capture); tests may change it.</summary>
+    public DateTime LocalNow { get; set; } = new(2026, 10, 29, 10, 5, 0, DateTimeKind.Local);
+
     /// <summary>The feed's handler; by default every request fails with HTTP 500.</summary>
     public FakeHttpHandler Http { get; set; } = FakeHttpHandler.Status(HttpStatusCode.InternalServerError);
 
@@ -117,7 +120,7 @@ internal sealed class DesktopFixture : IDisposable
             Keys,
             Session,
             link);
-        Actions = new DesktopActions(Notes, Todos, State, Launcher, link, feed);
+        Actions = new DesktopActions(Notes, Todos, State, Launcher, link, feed, () => LocalNow);
         Bunit.Services.AddSingleton(State);
         Bunit.Services.AddSingleton(Actions);
         Bunit.Services.AddTransient<EditorInterop>();

@@ -477,7 +477,8 @@ public sealed class MainTests : IDisposable
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
     }
 
-    // 138 AC-1: the Settings button and /settings show the settings at the top of the main region; Close hides them.
+    // 138 AC-1: the Settings button and /settings show the settings at the top of the main region (140: right under
+    // the capture box); Close hides them.
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -497,7 +498,8 @@ public sealed class MainTests : IDisposable
             await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
         }
 
-        IElement panel = cut.Find("main.current-region").FirstElementChild!;
+        Assert.Equal("capture-box", cut.Find("main.current-region").Children[0].ClassName);
+        IElement panel = cut.Find("main.current-region").Children[1];
         Assert.True(panel.ClassList.Contains("settings-panel"));
         Assert.Equal("Settings", panel.QuerySelector("h2")!.TextContent);
         Assert.Equal(["Exchange calendar", "Sensitive notes"], panel.QuerySelectorAll("h3").Select(h => h.TextContent).ToArray());
@@ -723,6 +725,212 @@ public sealed class MainTests : IDisposable
         await NameButton(cut, name).ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count));
         cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")));
+    }
+
+    // 140 AC-6: the capture box is the first thing in the main region, whatever else is shown there.
+    [Fact]
+    public async Task CaptureBox_AlwaysAtTheTopOfTheMainRegion()
+    {
+        data.WriteNote("Plan", "# Plan\n\n#work\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        void AssertBox()
+        {
+            IElement first = cut.Find("main.current-region").Children[0];
+            Assert.Equal("capture-box", first.ClassName);
+            Assert.Single(cut.FindAll(".capture-box"));
+            Assert.Equal("Capture", cut.Find(".capture-box input[type=text]").GetAttribute("aria-label"));
+            Assert.Equal("button", cut.Find(".capture-box button.capture").GetAttribute("type"));
+        }
+
+        AssertBox();
+        await RunPalette(cut, "/settings");
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".settings-panel")));
+        AssertBox();
+        await RunPalette(cut, "/tags");
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tags-panel")));
+        AssertBox();
+        await RunPalette(cut, "/tags work");
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-panel")));
+        AssertBox();
+        await Open(cut, js, "Plan");
+        Assert.Single(cut.FindAll(".note-editor"));
+        AssertBox();
+    }
+
+    // 140 AC-6: no capture box when the data folder can't be read.
+    [Fact]
+    public async Task CaptureBox_NotShownWhenTheFolderCantBeRead()
+    {
+        data.SaveLink(FakeHttpHandler.Link);
+        data.FeedClockThrows = new InvalidOperationException("boom");
+
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        Assert.Equal("Can't read the data folder.", cut.Find(".failed").TextContent);
+        Assert.Empty(cut.FindAll(".capture-box"));
+    }
+
+    // 140 AC-7: a capture from the box in Main writes the line and the notes list shows the new inbox note.
+    [Fact]
+    public async Task CaptureBox_Enter_WritesAndListsTheInbox()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await cut.Find("input.capture-text").InputAsync(new ChangeEventArgs { Value = "call Anna" });
+
+        await cut.Find("input.capture-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+
+        Assert.Equal("# inbox\n- 2026-10-29 10:05 call Anna\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
+        Assert.Equal("Captured.", cut.Find(".capture-status").TextContent);
+        cut.WaitForAssertion(() => Assert.Equal(["inbox"], cut.FindAll(".note-list button.name").Select(b => b.TextContent).ToArray()));
+    }
+
+    // 140 AC-8: with unsaved changes in the open inbox a capture (box or palette) writes nothing and says to save.
+    [Theory]
+    [InlineData(false, "inbox")]
+    [InlineData(true, "inbox")]
+    [InlineData(false, "Inbox")]
+    public async Task Capture_DirtyOpenInbox_RefusedNothingWritten(bool palette, string name)
+    {
+        data.WriteNote(name, "# inbox\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, name);
+        js.Edit("# inbox\n\nUnsaved\n");
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        int mounts = js.Calls("ContextEditor.mount").Count;
+
+        IElement status;
+        if (palette)
+        {
+            await RunPalette(cut, "/capture call Anna");
+            status = cut.Find(".main-status");
+        }
+        else
+        {
+            await cut.Find("input.capture-text").InputAsync(new ChangeEventArgs { Value = "call Anna" });
+            await cut.Find("button.capture").ClickAsync(new MouseEventArgs());
+            status = cut.Find(".capture-status");
+            Assert.Equal("call Anna", cut.Find("input.capture-text").GetAttribute("value"));
+        }
+
+        Assert.Equal($"Save {name} first.", status.TextContent);
+        Assert.True(status.ClassList.Contains("red"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
+    }
+
+    // 140 AC-8: with the inbox open and no unsaved changes the capture is written and the editor is mounted again
+    // with the saved text (without taking the focus), so a later save is not refused as changed on disk.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Capture_CleanOpenInbox_RemountsWithTheNewLine_ThenSaves(bool palette)
+    {
+        data.WriteNote("inbox", "# inbox\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "inbox");
+        int mounts = js.Calls("ContextEditor.mount").Count;
+        int focuses = js.Calls("ContextEditor.focus").Count;
+
+        if (palette)
+        {
+            await RunPalette(cut, "/capture call Anna");
+            Assert.Equal("Captured.", cut.Find(".main-status").TextContent);
+        }
+        else
+        {
+            await cut.Find("input.capture-text").InputAsync(new ChangeEventArgs { Value = "call Anna" });
+            await cut.Find("button.capture").ClickAsync(new MouseEventArgs());
+            Assert.Equal("Captured.", cut.Find(".capture-status").TextContent);
+        }
+
+        string captured = "# inbox\n- 2026-10-29 10:05 call Anna\n";
+        Assert.Equal(captured, File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count));
+        Assert.Equal(captured, js.MountedText());
+        Assert.Equal(focuses, js.Calls("ContextEditor.focus").Count);
+
+        js.Edit(captured + "\nMore\n");
+        await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Saved inbox.", cut.Find(".note-editor .status").TextContent));
+        Assert.Equal(captured + "\nMore\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
+    }
+
+    // 140 AC-8: with another note open and dirty, the capture is written and that editor is left alone: not
+    // mounted again, and its unsaved text still saves.
+    [Fact]
+    public async Task Capture_OtherDirtyNoteOpen_EditorUntouched()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        data.WriteNote("inbox", "# inbox\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        js.Edit("# Plan\n\nUnsaved\n");
+        int mounts = js.Calls("ContextEditor.mount").Count;
+        await cut.Find("input.capture-text").InputAsync(new ChangeEventArgs { Value = "call Anna" });
+
+        await cut.Find("button.capture").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal("Captured.", cut.Find(".capture-status").TextContent);
+        Assert.Equal("# inbox\n- 2026-10-29 10:05 call Anna\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
+        Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
+        Assert.Empty(js.Calls("ContextEditor.destroy"));
+
+        await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".note-editor .status").TextContent));
+        Assert.Equal("# Plan\n\nUnsaved\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+    }
+
+    // 140 AC-9: /capture <text> in the palette captures and shows the result in the main status line.
+    [Fact]
+    public async Task PaletteCapture_WritesAndShowsCaptured()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, "/capture idea  #work");
+
+        Assert.Equal("# inbox\n- 2026-10-29 10:05 idea  #work\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
+        Assert.Equal("Captured.", cut.Find(".main-status").TextContent);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
+        Assert.Equal(string.Empty, cut.Find(".capture-status").TextContent);
+    }
+
+    // 140 AC-9: /capture without text is a red usage line; a refusal shows its red text; both write nothing.
+    [Theory]
+    [InlineData("/capture", "Type /capture <text>.")]
+    [InlineData("/capture   ", "Type /capture <text>.")]
+    [InlineData("/capture long", "A capture can be at most 1000 characters.")]
+    public async Task PaletteCapture_NoTextOrRefused_RedLineNothingWritten(string line, string text)
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, line.EndsWith("long", StringComparison.Ordinal) ? "/capture " + new string('x', 1001) : line);
+
+        Assert.Equal(text, cut.Find(".main-status").TextContent);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.False(Directory.Exists(data.Root));
+    }
+
+    // 140 AC-9: the palette lists /capture with its usage and description.
+    [Fact]
+    public async Task Palette_OffersCapture()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "k", CtrlKey = true });
+
+        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/capture" });
+
+        IElement row = cut.FindAll(".palette-row")[0];
+        Assert.Equal("/capture <text>", row.QuerySelector(".usage")!.TextContent);
+        Assert.Equal("Append a dated line to the inbox", row.QuerySelector(".description")!.TextContent);
     }
 
     private static async Task RunPalette(IRenderedComponent<Main> cut, string line)
