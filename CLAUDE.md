@@ -179,11 +179,27 @@ Every factory agent reads this file before working on Context. Keep it short and
   Read-only token, no secrets, actions pinned to commit SHAs; `CiWorkflowTests.cs` checks the file as text.
 - **Release:** `.github/workflows/release.yml` (next to `ci.yml` there is no third workflow; `contents: write`, no secrets)
   has three triggers: a push to `develop`, a merged `develop` -> `main` pull request titled exactly `release vX.Y.Z`,
-  and a pushed `vX.Y.Z` tag. Three jobs: `release` (`ubuntu-latest`), then `desktop-macos` (`macos-latest`) and
-  `desktop-windows` (`windows-latest`, `shell: bash`), which both `needs: release`. Steps of `release`: check out,
+  and a pushed `vX.Y.Z` tag. Four jobs: `release` (`ubuntu-latest`), then `desktop-macos` (`macos-latest`) and
+  `desktop-windows` (`windows-latest`, `shell: bash`), which both `needs: release`, then `publish` (`ubuntu-latest`,
+  `needs` all three). Steps of `release`: check out,
   set up .NET, Version, `dotnet test -c Release`,
   `dotnet pack src/Context -c Release -p:Version="$VERSION"`, smoke check, create the GitHub release (notes start
-  with `.github/release-notes-header.md`: how to open an unsigned build), prune.
+  with `.github/release-notes-header.md`: how to open an unsigned build), created with `--draft`.
+  - **Draft, then publish:** The release is a draft until `publish` runs: `release` creates it, the desktop jobs upload
+    into the draft, and `publish` (no `if:`, so it is skipped when a needed job fails) makes it public. Its steps: check
+    out, the version re-check, `Publish GitHub release`, `Prune old prereleases`. The publish step reads the release
+    once (`gh release view "$TAG" --json isDraft,targetCommitish,assets`) and fails, publishing nothing, unless it is
+    a draft whose `targetCommitish` is the release's commit and that holds `Context.<version>.nupkg`, both macOS zips,
+    the Windows `Setup.exe`, this version's full `.nupkg` and `releases.<channel>.json`; only then it runs
+    `gh release edit "$TAG" --draft=false` (plus `--prerelease` for a prerelease version). A failed desktop job leaves
+    an unpublished draft that neither users nor the updater see (re-run the failed job; `publish` then runs). This is
+    what makes immutable releases work: GitHub refuses uploads into a published immutable release, so every asset is
+    uploaded first. A draft has no git tag until it is published (develop and release-PR runs); GitHub then creates
+    the tag on the draft's commit. Stale drafts of failed runs are not cleaned up, and re-running the whole workflow
+    over an existing draft is not supported. The Windows `vpk download github --token` call can see drafts (Velopack
+    1.2.161 reads the newest 10 releases and has no draft filter), so a stale draft that holds a higher Windows
+    package of the channel becomes the delta base; an installed copy that can't apply a delta falls back to the full
+    package. Delete stale drafts by hand.
   - **Versions:** a `develop` push makes a prerelease `X.Y.(Z+1)-develop.<run number>`, one patch above the highest
     release tag (`.github/scripts/develop-version.sh`; `0.0.1-develop.<n>` while there is no tag). A push that changes
     only the root `backlog.md` is skipped (`paths-ignore`) and makes no prerelease. A release PR takes its version from
@@ -206,8 +222,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     files (`releases.<channel>.json`, `assets.<channel>.json`, `RELEASES*`); never a package of an older version.
     The desktop jobs get version, tag and commit from the `release` job's outputs (job-level `env:` `VERSION`,
     `TAG`; checkout `ref`), re-check the version against SemVer before any `dotnet` call, and upload with
-    `gh release upload "$TAG" ... --clobber`, so re-running a failed desktop job works. A failed desktop job leaves
-    a release with fewer assets.
+    `gh release upload "$TAG" ... --clobber`, so re-running a failed desktop job works.
   - **Channels and updater:** two channels. A prerelease version is packed with `--channel develop`, a proper
     release with vpk's default channel (`win`). A copy installed by `Setup.exe` updates itself at start-up
     (`StartupUpdate`, see the desktop layout) from the channel it was installed from; the portable copy and the
@@ -219,15 +234,16 @@ Every factory agent reads this file before working on Context. Keep it short and
     controls their update feed); ship a build with the new URL first. No token is embedded in the app; while the repository is private the
     unauthenticated updater finds nothing and stays silent. The installer cannot run in `dotnet test`: after a change
     to the desktop jobs, the next develop run is the real check.
-  - **Pruning:** after a proper release `vX.Y.Z` the `Prune old prereleases` step (`continue-on-error`) deletes the
+  - **Pruning:** after a proper release `vX.Y.Z` is published the `Prune old prereleases` step (`continue-on-error`;
+    it runs in `publish`, after the publish step) deletes the
     `-develop` prereleases with core <= X.Y.Z and their tags (`.github/scripts/old-prereleases.sh`); proper releases
-    and higher prereleases stay.
+    and higher prereleases stay. With immutable releases on, GitHub may refuse the delete; the step then only warns.
   - **Rules:** actions pinned to commit SHAs (the same two as `ci.yml`, tag in the trailing comment); no `${{ }}`
     inside a `run:` script: PR fields, refs and the token reach the shell only through `env:` and the runner's own
-    variables. `github.token` is the only credential (the two release steps, the Windows `vpk download` and the two uploads). The three version scripts are Times' (`release-pr-version.sh` differs in one pattern: it refuses every prerelease label, Times' only `-develop`). `ReleaseWorkflowTests.cs` reads `release.yml`
+    variables. `github.token` is the only credential (the create, publish and prune steps, the Windows `vpk download` and the two uploads). The three version scripts are Times' (`release-pr-version.sh` differs in one pattern: it refuses every prerelease label, Times' only `-develop`). `ReleaseWorkflowTests.cs` reads `release.yml`
     only through the small YAML reader `tests/Context.Tests/WorkflowYaml.cs` (block mappings and sequences, plain and
     quoted scalars, `|` and `>` blocks, comments; anything else throws), so reformatting the YAML does not break the
-    tests, and it runs the scripts with `bash` (also the Windows `Pack` and `Upload` steps, against stub `vpk` and `gh` commands). `/factory release --project Context` opens the release PR.
+    tests, and it runs the scripts with `bash` (also the Windows `Pack` and `Upload` steps and the publish step, against stub `vpk` and `gh` commands). `/factory release --project Context` opens the release PR.
 - **Run:** `dotnet run --project src/Context` (console), `dotnet run --project src/Context.Desktop` (desktop window)
 - **Layout:**
   - `Context.slnx`: the solution. `Directory.Build.props` turns on `EnforceCodeStyleInBuild`.
@@ -317,7 +333,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     cancellation is swallowed with no output; the next start tries again. `StartupUpdate.IncludePrereleases(version)`
     is true only for a SemVer version with a prerelease label (`StartupUpdate.CurrentVersion` is the assembly's
     informational version). `VelopackUpdateSource` is the one real source: Velopack's `UpdateManager` over
-    `GithubSource` with the fixed repository URL, no access token, no explicit channel and no downgrade; installed
+    `GithubSource` with the fixed repository URL, no access token (so it can never list a draft release), no explicit channel and no downgrade; installed
     means Windows, installed by `Setup.exe` and not the portable copy. There is no update UI.
     `wwwroot/index.html` (CSP meta tag, only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
     and `wwwroot/editor/editor.css`.
@@ -349,7 +365,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     console renderer's. Colours by CSS class (`accent`, `grey`, `red`, dates `overdue`/`today`/`later`); long lines
     cut by CSS with the full text in `title`.
   - `tests/Context.Tests/`: references both projects; one test class per production class (Core and app alike) (`AppTests.cs` tests `App.cs`),
-    `CiWorkflowTests.cs` and `ReleaseWorkflowTests.cs` (the workflows and their three jobs, the release scripts and the tool packaging; with `WorkflowYaml.cs` and its `WorkflowYamlTests.cs`), `ViewParityTests.cs` (golden ANSI output of `/current`, `/notes`, `/tags`, `/links`, `/calendar-link`; change
+    `CiWorkflowTests.cs` and `ReleaseWorkflowTests.cs` (the workflows and their four jobs, the release scripts and the tool packaging; with `WorkflowYaml.cs` and its `WorkflowYamlTests.cs`), `ViewParityTests.cs` (golden ANSI output of `/current`, `/notes`, `/tags`, `/links`, `/calendar-link`; change
     its expected strings only when a spec changes that output), `CoreDependencyTests.cs` (architecture test: fails on any
     Spectre assembly, package, project reference or source mention in `Context.Core`), plus shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves),
     `ConsoleSession.cs` (everything wired like `Program.cs`), `RemovedFeature.cs` (the names of the removed
