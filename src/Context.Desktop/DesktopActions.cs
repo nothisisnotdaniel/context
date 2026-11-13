@@ -105,20 +105,47 @@ internal sealed class DesktopActions
     public const string RecoverySavedText = "Recovery file saved. Keep it and its password safe.";
     public const string RecoveryUnreadableText = "Can't read that recovery file.";
 
+    public const string CalendarLinkInvalidText = "The calendar link must be an https:// or webcal:// address.";
+    public const string CalendarLinkNotSavedText =
+        "Can't save the calendar link. Check that the Context folder is writable.";
+    public const string CalendarLinkNotRemovedText =
+        "Can't remove the calendar link. Check that the Context folder is writable.";
+    public const string CalendarLinkRemovedText = "Calendar link removed.";
+    public const string CalendarLinkNotSetText = "No calendar link set.";
+
+    /// <summary>
+    /// The longest calendar link <see cref="SetCalendarLink"/> accepts, in characters as typed. Core has no such
+    /// limit; the desktop field has the same <c>maxlength</c>.
+    /// </summary>
+    public const int MaxCalendarLinkLength = 2048;
+
     /// <summary>The longest todo text <see cref="AddTodo"/> accepts, as in the console.</summary>
     public const int MaxTodoLength = 200;
 
     /// <summary>The largest note text <see cref="SaveNote"/> writes (5 MB, as for imports).</summary>
     public const long MaxNoteBytes = NoteStore.MaxEditBytes;
 
+    // What CalendarLinkView.Run takes as "remove the link and the cache".
+    private const string RemoveArgument = "off";
+
     private readonly NoteStore notes;
     private readonly TodoStore todos;
     private readonly DesktopState state;
     private readonly INoteLauncher launcher;
+    private readonly CalendarLink? calendarLink;
+    private readonly CalendarFeed? calendarFeed;
     private int running;
 
-    public DesktopActions(NoteStore notes, TodoStore todos, DesktopState state, INoteLauncher launcher)
+    public DesktopActions(
+        NoteStore notes,
+        TodoStore todos,
+        DesktopState state,
+        INoteLauncher launcher,
+        CalendarLink? calendarLink = null,
+        CalendarFeed? calendarFeed = null)
     {
+        this.calendarLink = calendarLink;
+        this.calendarFeed = calendarFeed;
         this.notes = notes;
         this.todos = todos;
         this.state = state;
@@ -169,6 +196,9 @@ internal sealed class DesktopActions
 
     /// <summary>The line after a restore: how many of the sensitive notes this machine can now open.</summary>
     public static string RestoredText(int restored, int total) => $"Restored {restored} of {total} notes.";
+
+    /// <summary>The line after the calendar link was saved; <paramref name="masked"/> is the link without its secret part.</summary>
+    public static string CalendarLinkSavedText(string masked) => $"Calendar link saved ({masked}).";
 
     /// <summary>The red line when a todo's text is too long.</summary>
     public static string TodoTooLongText => $"A todo can be at most {MaxTodoLength} characters. Nothing was done.";
@@ -260,6 +290,23 @@ internal sealed class DesktopActions
     public Task<ActionResult> RestoreFromRecovery(string path, string password) =>
         Run(() => RestoreFromRecoveryNow(path, password));
 
+    /// <summary>
+    /// Saves <paramref name="value"/> as the Exchange calendar link through <see cref="CalendarLinkView.Run"/>, which
+    /// also deletes the cached calendar copy. The value is a bearer secret: it goes only into
+    /// <c>calendar-link.txt</c>, and the result holds only the masked link. A value over
+    /// <see cref="MaxCalendarLinkLength"/> characters or one <see cref="CalendarLink.Validate"/> rejects (so also
+    /// <c>off</c>) is refused first; then, when a link is already stored or its file is unreadable, replacing it
+    /// needs the user's <paramref name="confirmed"/>. Nothing is written in either case.
+    /// </summary>
+    public Task<ActionResult> SetCalendarLink(string value, Confirmation? confirmed) =>
+        Run(() => SetCalendarLinkNow(value, confirmed));
+
+    /// <summary>
+    /// Removes the Exchange calendar link and the cached calendar copy through <see cref="CalendarLinkView.Run"/>,
+    /// only when the user <paramref name="confirmed"/> it.
+    /// </summary>
+    public Task<ActionResult> RemoveCalendarLink(Confirmation? confirmed) => Run(() => RemoveCalendarLinkNow(confirmed));
+
     private static ActionResult Refused(ActionReason reason, string text) => new(ActionKind.Refused, reason, text);
 
     private static ActionResult Failed(ActionReason reason, string text) => new(ActionKind.Failed, reason, text);
@@ -304,6 +351,73 @@ internal sealed class DesktopActions
         finally
         {
             Volatile.Write(ref running, 0);
+        }
+    }
+
+    // The checks on the value come first, so a bad value gets the same answer whether or not a link is stored.
+    private ActionResult SetCalendarLinkNow(string? value, Confirmation? confirmed)
+    {
+        if (value is null || value.Length > MaxCalendarLinkLength || CalendarLink.Validate(value) is null)
+        {
+            return Refused(ActionReason.Invalid, CalendarLinkInvalidText);
+        }
+
+        if (calendarLink is null || calendarFeed is null)
+        {
+            return Failed(ActionReason.WriteFailed, CalendarLinkNotSavedText);
+        }
+
+        try
+        {
+            // Replacing a link (or an unreadable link file) also drops the downloaded copy: only when confirmed.
+            if (confirmed is null && CalendarLinkView.Show(calendarLink, calendarFeed).Kind != CalendarLinkViewKind.NotSet)
+            {
+                return Refused(ActionReason.NotConfirmed, NotConfirmedText);
+            }
+
+            CalendarLinkView saved = CalendarLinkView.Run(calendarLink, calendarFeed, value);
+            return saved.Kind switch
+            {
+                CalendarLinkViewKind.Saved =>
+                    new ActionResult(ActionKind.Done, ActionReason.None, CalendarLinkSavedText(saved.Masked ?? string.Empty)),
+                CalendarLinkViewKind.Invalid => Refused(ActionReason.Invalid, CalendarLinkInvalidText),
+                _ => Failed(ActionReason.WriteFailed, CalendarLinkNotSavedText),
+            };
+        }
+        catch (Exception)
+        {
+            // Never the exception's message: it could hold the link.
+            return Failed(ActionReason.WriteFailed, CalendarLinkNotSavedText);
+        }
+    }
+
+    private ActionResult RemoveCalendarLinkNow(Confirmation? confirmed)
+    {
+        if (confirmed is null)
+        {
+            return Refused(ActionReason.NotConfirmed, NotConfirmedText);
+        }
+
+        if (calendarLink is null || calendarFeed is null)
+        {
+            return Failed(ActionReason.WriteFailed, CalendarLinkNotRemovedText);
+        }
+
+        try
+        {
+            CalendarLinkView removed = CalendarLinkView.Run(calendarLink, calendarFeed, RemoveArgument);
+            return removed.Kind switch
+            {
+                CalendarLinkViewKind.Removed => new ActionResult(ActionKind.Done, ActionReason.None, CalendarLinkRemovedText),
+
+                // Nothing was stored (any leftover copy is gone now).
+                CalendarLinkViewKind.NotSet => new ActionResult(ActionKind.Done, ActionReason.None, CalendarLinkNotSetText),
+                _ => Failed(ActionReason.WriteFailed, CalendarLinkNotRemovedText),
+            };
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, CalendarLinkNotRemovedText);
         }
     }
 

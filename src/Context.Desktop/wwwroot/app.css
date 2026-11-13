@@ -595,8 +595,76 @@ input[type="password"]:disabled {
     margin-bottom: 0;
 }
 
-.notes-bar .tags-open {
+.notes-bar-buttons {
+    display: flex;
     flex: none;
+    gap: 6px;
+}
+
+/* The settings: the calendar link's entry row and the key table. */
+.settings-panel {
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+}
+
+.settings-panel h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 16px 0 6px;
+}
+
+.settings-panel p {
+    margin: 0 0 8px;
+    overflow-wrap: anywhere;
+}
+
+.calendar-link-entry {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.calendar-link-entry .calendar-link-field {
+    flex: 1 1 240px;
+    min-width: 0;
+}
+
+.calendar-link-entry .calendar-link-save {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: var(--on-accent);
+    flex: none;
+}
+
+.calendar-link-entry .calendar-link-remove {
+    flex: none;
+}
+
+.settings-panel .settings-result {
+    margin: 6px 0 0;
+}
+
+.settings-panel .settings-result:empty {
+    display: none;
+}
+
+.key-details th {
+    width: 110px;
+}
+
+/* The whole thumbprint is shown and can be selected: it wraps instead of being cut. */
+.key-details td {
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    -webkit-user-select: text;
+    user-select: text;
+    white-space: normal;
+}
+
+.key-details .key-thumbprint {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
 }
 
 /* The tags view: every tag with its count; the list wraps and scrolls inside a capped height. */

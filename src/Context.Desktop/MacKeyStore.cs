@@ -59,6 +59,13 @@ internal sealed class MacKeyStore : IKeyStore
         }
     }
 
+    // The Keychain key has no certificate: the fingerprint is the SHA-256 of the public key, and it never expires.
+    public KeyDetails? MachineKeyDetails()
+    {
+        byte[]? key = MachinePublicKey();
+        return key is null ? null : KeyDetails.FromPublicKey(KeyLabel, key);
+    }
+
     public byte[]? RecoveryPublicKey()
     {
         lock (gate)

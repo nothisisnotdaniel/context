@@ -97,7 +97,11 @@ internal sealed record CalendarLinkView
         return new CalendarLinkView(CalendarLinkViewKind.Saved, CalendarLink.Mask(saved));
     }
 
-    private static CalendarLinkView Show(CalendarLink link, CalendarFeed feed)
+    /// <summary>
+    /// What <c>/calendar-link</c> shows without an argument: the masked link and the time of the cached copy,
+    /// <c>NotSet</c> or <c>Unreadable</c>. Reads only; nothing is written or downloaded.
+    /// </summary>
+    internal static CalendarLinkView Show(CalendarLink link, CalendarFeed feed)
     {
         Uri? uri;
         try

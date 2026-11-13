@@ -190,5 +190,24 @@ public sealed class NotesPanelTests : IDisposable
         Assert.Equal(before, FileSnapshot.Take(data.Root));
     }
 
+    // 138 AC-1: the Settings button is a typed button that calls OnSettings; it changes nothing.
+    [Fact]
+    public async Task SettingsButton_CallsOnSettings()
+    {
+        data.WriteNote("Plan", "#work\n");
+        int asked = 0;
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
+        IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OnSettings, () => asked++));
+
+        IElement button = cut.Find(".notes button.settings-open");
+        Assert.Equal("Settings", button.TextContent);
+        Assert.Equal("button", button.GetAttribute("type"));
+        await button.ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(1, asked);
+        Assert.Equal(before, FileSnapshot.Take(data.Root));
+    }
+
     private static string Time(DateTime local) => local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
 }

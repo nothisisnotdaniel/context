@@ -10,9 +10,13 @@
     {
         <div class="layout" @onkeydown="OpenPalette">
             <aside class="notes-region">
-                <NotesPanel OnOpen="RequestOpen" OnTags="ShowTags" />
+                <NotesPanel OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" />
             </aside>
             <main class="current-region">
+                @if (settingsShown)
+                {
+                    <SettingsPanel OnClose="CloseSettings" />
+                }
                 @if (tagsShown)
                 {
                     <TagsPanel Selected="@tagShown" OnTag="ShowTag" OnClose="CloseTags" />
@@ -100,6 +104,7 @@ else
     private NoteEditor? editor;
     private string? tagShown;
     private bool tagsShown;
+    private bool settingsShown;
     private bool discarding;
     private string? pendingName;
     private bool paletteOpen;
@@ -151,11 +156,17 @@ else
         tagShown = null;
     }
 
+    // The settings: shown at the top of the main region until closed or until a note or the current view opens.
+    private void ShowSettings() => settingsShown = true;
+
+    private void CloseSettings() => settingsShown = false;
+
     // Opens the note called name (null: the current view), asking first when the open note has unsaved changes.
     private async Task RequestOpen(string? name)
     {
         if (name is not null && string.Equals(name, openName, StringComparison.Ordinal))
         {
+            settingsShown = false;
             return;
         }
 
@@ -190,6 +201,7 @@ else
         pendingName = null;
         tagShown = null;
         tagsShown = false;
+        settingsShown = false;
         renaming = false;
         deleting = false;
         marking = false;
@@ -280,6 +292,9 @@ else
                     }
                 }
 
+                break;
+            case "/settings":
+                ShowSettings();
                 break;
             case "/tags":
                 if (rest.Length == 0)

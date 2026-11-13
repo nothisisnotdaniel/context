@@ -19,6 +19,7 @@ internal sealed class DesktopState
     private readonly TagIndex index;
     private readonly CalendarStore calendar;
     private readonly CalendarFeed? feed;
+    private readonly CalendarLink? calendarLink;
     private readonly Func<DateOnly> today;
     private readonly Func<DateTime> utcNow;
 
@@ -38,8 +39,10 @@ internal sealed class DesktopState
         Func<DateOnly> today,
         Func<DateTime> utcNow,
         IKeyStore? keyStore = null,
-        SensitiveSession? session = null)
+        SensitiveSession? session = null,
+        CalendarLink? calendarLink = null)
     {
+        this.calendarLink = calendarLink;
         this.notes = notes;
         this.todos = todos;
         this.index = index;
@@ -59,6 +62,9 @@ internal sealed class DesktopState
 
     /// <summary>The open sensitive note and its idle lock.</summary>
     public SensitiveSession Session { get; }
+
+    /// <summary>The calendar's zone; times of the calendar (the last download) are shown in it.</summary>
+    public TimeZoneInfo Zone => calendar.Zone;
 
     /// <summary>The latest snapshot, or <c>null</c> before the first refresh finished.</summary>
     public DesktopSnapshot? Snapshot => snapshot;
@@ -240,6 +246,53 @@ internal sealed class DesktopState
         catch (Exception)
         {
             return new LinksView(LinksViewKind.IndexUnreadable, string.Empty, null, []);
+        }
+    });
+
+    /// <summary>
+    /// The calendar link as the settings page shows it (<see cref="CalendarLinkView.Show"/>): the masked link and
+    /// the time of the cached copy, <c>NotSet</c> or <c>Unreadable</c>, off the calling thread. The link itself never
+    /// leaves Core. Reads only (no download) and never throws: any failure gives the <c>Unreadable</c> view.
+    /// </summary>
+    public Task<CalendarLinkView> CalendarLinkSetting() => Task.Run(() =>
+    {
+        try
+        {
+            if (calendarLink is null || feed is null)
+            {
+                return new CalendarLinkView(CalendarLinkViewKind.NotSet);
+            }
+
+            return CalendarLinkView.Show(calendarLink, feed);
+        }
+        catch (Exception)
+        {
+            return new CalendarLinkView(CalendarLinkViewKind.Unreadable);
+        }
+    });
+
+    /// <summary>
+    /// The key that opens sensitive notes on this machine (<see cref="IKeyStore.MachineKeyDetails"/>), off the
+    /// calling thread. Public data only: no private-key call, and no key is created or stored. Never throws: a
+    /// failing key store gives <see cref="SensitiveKeyKind.Unreadable"/>.
+    /// </summary>
+    public Task<SensitiveKeyView> SensitiveKey() => Task.Run(() =>
+    {
+        try
+        {
+            if (!KeyStore.Supported)
+            {
+                return new SensitiveKeyView(SensitiveKeyKind.Unsupported);
+            }
+
+            KeyDetails? details = KeyStore.MachineKeyDetails();
+            return details is null
+                ? new SensitiveKeyView(SensitiveKeyKind.NotSetUp)
+                : new SensitiveKeyView(SensitiveKeyKind.Shown, details);
+        }
+        catch (Exception)
+        {
+            return new SensitiveKeyView(SensitiveKeyKind.Unreadable);
         }
     });
 

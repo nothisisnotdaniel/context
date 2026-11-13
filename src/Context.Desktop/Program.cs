@@ -49,8 +49,8 @@ internal static class Program
         CalendarFeed feed = new CalendarFeed(folder, calendarLink, http, () => DateTime.UtcNow);
         SensitiveSession session = new SensitiveSession(() => DateTime.UtcNow);
         DesktopState state = new DesktopState(
-            notes, todos, index, calendar, feed, Today, () => DateTime.UtcNow, KeyStore(), session);
-        DesktopActions actions = new DesktopActions(notes, todos, state, new ShellNoteLauncher());
+            notes, todos, index, calendar, feed, Today, () => DateTime.UtcNow, KeyStore(), session, calendarLink);
+        DesktopActions actions = new DesktopActions(notes, todos, state, new ShellNoteLauncher(), calendarLink, feed);
 
         PhotinoBlazorAppBuilder builder = PhotinoBlazorAppBuilder.CreateDefault(args);
         builder.Services.AddSingleton(state);

@@ -25,6 +25,12 @@ internal interface IKeyStore
     /// <summary>The recovery public key, or <c>null</c> when recovery is not set up.</summary>
     public byte[]? RecoveryPublicKey();
 
+    /// <summary>
+    /// What the settings page shows about this machine's key: its name, fingerprint and expiry, or <c>null</c> when
+    /// there is no machine key yet. Public data only: no private-key call, so the OS never asks the user.
+    /// </summary>
+    public KeyDetails? MachineKeyDetails();
+
     /// <summary>Creates this machine's key pair; the private key can't be exported.</summary>
     public void CreateMachineKey();
 

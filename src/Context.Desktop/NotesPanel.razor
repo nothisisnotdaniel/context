@@ -3,7 +3,10 @@
 <section class="notes">
     <div class="notes-bar">
         <h2>Notes</h2>
-        <button type="button" class="tags-open" @onclick="() => OnTags.InvokeAsync()">Tags</button>
+        <div class="notes-bar-buttons">
+            <button type="button" class="tags-open" @onclick="() => OnTags.InvokeAsync()">Tags</button>
+            <button type="button" class="settings-open" @onclick="() => OnSettings.InvokeAsync()">Settings</button>
+        </div>
     </div>
     @if (Snapshot is { } snapshot)
     {
@@ -86,6 +89,10 @@
     /// <summary>Called when the Tags button is clicked.</summary>
     [Parameter]
     public EventCallback OnTags { get; set; }
+
+    /// <summary>Called when the Settings button is clicked.</summary>
+    [Parameter]
+    public EventCallback OnSettings { get; set; }
 
     // Plain and sensitive notes in one list, by name (ignoring case, then exact); a sensitive one is marked locked.
     private static IEnumerable<(NoteInfo Note, bool Locked)> Listed(DesktopSnapshot snapshot) =>

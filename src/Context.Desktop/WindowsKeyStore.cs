@@ -42,6 +42,32 @@ internal sealed class WindowsKeyStore : IKeyStore
         }
     }
 
+    // The newest machine certificate as certmgr.msc shows it: common name, thumbprint and "valid to". Reading a
+    // certificate never uses its private key, so Windows doesn't ask.
+    public KeyDetails? MachineKeyDetails()
+    {
+        lock (gate)
+        {
+            try
+            {
+                using X509Certificate2? certificate = Find(MachineSubject, withPrivateKey: true);
+                if (certificate is null)
+                {
+                    return null;
+                }
+
+                return new KeyDetails(
+                    certificate.GetNameInfo(X509NameType.SimpleName, forIssuer: false),
+                    certificate.Thumbprint,
+                    certificate.NotAfter);
+            }
+            catch (Exception)
+            {
+                throw new KeyStoreException();
+            }
+        }
+    }
+
     public void CreateMachineKey()
     {
         lock (gate)

@@ -477,6 +477,88 @@ public sealed class MainTests : IDisposable
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
     }
 
+    // 138 AC-1: the Settings button and /settings show the settings at the top of the main region; Close hides them.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Settings_ButtonOrPalette_ShowsAtTheTop_CloseHides(bool palette)
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        Assert.Empty(cut.FindAll(".settings-panel"));
+        Assert.Equal("Settings", cut.Find(".notes-region button.settings-open").TextContent);
+
+        if (palette)
+        {
+            await RunPalette(cut, "/settings");
+        }
+        else
+        {
+            await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        }
+
+        IElement panel = cut.Find("main.current-region").FirstElementChild!;
+        Assert.True(panel.ClassList.Contains("settings-panel"));
+        Assert.Equal("Settings", panel.QuerySelector("h2")!.TextContent);
+        Assert.Equal(["Exchange calendar", "Sensitive notes"], panel.QuerySelectorAll("h3").Select(h => h.TextContent).ToArray());
+        Assert.Empty(cut.FindAll(".palette"));
+
+        await cut.Find(".settings-panel button.close").ClickAsync(new MouseEventArgs());
+
+        Assert.Empty(cut.FindAll(".settings-panel"));
+    }
+
+    // 138 AC-1: opening a note or the current view hides the settings.
+    [Fact]
+    public async Task Settings_OpeningANoteOrTheCurrentView_HidesThem()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        Assert.Single(cut.FindAll(".settings-panel"));
+        await Open(cut, js, "Plan");
+        Assert.Empty(cut.FindAll(".settings-panel"));
+
+        // The note that is already open hides them too.
+        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        Assert.Single(cut.FindAll(".settings-panel"));
+        await NameButton(cut, "Plan").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".settings-panel")));
+
+        await RunPalette(cut, "/settings");
+        Assert.Single(cut.FindAll(".settings-panel"));
+        await RunPalette(cut, "/current");
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".settings-panel")));
+    }
+
+    // 138 AC-1: opening the settings changes no file and sends no request, with or without a link stored.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Settings_Opening_ChangesNoFileAndSendsNoRequest(bool stored)
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        if (stored)
+        {
+            data.SaveLink(FakeHttpHandler.Link);
+            data.WriteCache(DesktopFixture.Calendar(), new DateTime(2026, 10, 29, 7, 30, 0, DateTimeKind.Utc));
+        }
+
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
+        int requests = data.Http.Requests;
+
+        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".settings-panel").TextContent, StringComparison.Ordinal));
+        await cut.Find(".settings-panel button.close").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(before, FileSnapshot.Take(data.Root));
+        Assert.Equal(requests, data.Http.Requests);
+        Assert.Equal(0, data.Keys.Agrees);
+    }
+
     private static IElement NameButton(IRenderedComponent<Main> cut, string name) =>
         cut.FindAll(".notes-region button.name").Single(b => b.TextContent == name);
 
