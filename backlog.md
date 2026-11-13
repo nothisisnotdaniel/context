@@ -170,6 +170,13 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#136](backlog/136-links-panel-no-has-no-linked.md) Links panel: no 'has no linked notes' flash during rename
 - [?] [#137](backlog/137-tags-and-links-panels-announce-loaded.md) Tags and links panels: announce loaded rows
 - [?] [#138](backlog/138-look-at-the-tags-and-links.md) Look at the tags and links panels in a running window
+- [?] [#139](backlog/139-bounded-read-of-calendar-link-txt.md) Bounded read of calendar-link.txt
+- [?] [#140](backlog/140-calendar-link-field-autocomplete-new-password.md) Calendar link field: autocomplete new-password
+- [?] [#141](backlog/141-clear-the-typed-calendar-link-when.md) Clear the typed calendar link when the settings panel closes
+- [?] [#142](backlog/142-lock-the-calendar-link-field-while.md) Lock the calendar link field while the replace dialog is open
+- [?] [#143](backlog/143-settings-refocus-the-link-field-after.md) Settings: refocus the link field after a refusal
+- [?] [#144](backlog/144-settings-refusal-text-asks-to-type.md) Settings: refusal text asks to type the link again
+- [?] [#145](backlog/145-look-at-the-notes-bar-buttons.md) Look at the notes bar buttons in a narrow sidebar
 
 ## Dropped with the terminal UI
 
