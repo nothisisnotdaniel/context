@@ -47,7 +47,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#10](backlog/010-editor-dirty-marker.md) Editor dirty marker → 141-editor-dirty-marker
 - [x] [#11](backlog/011-keyboard-focus-for-chips.md) Keyboard focus for chips → 142-chip-keyboard-focus
 - [x] [#12](backlog/012-clear-editor-mount-error.md) Clear editor mount error → 143-editor-mount-error
-- [ ] [#13](backlog/013-console-todos-without-numbers.md) Console todos without numbers
+- [x] [#13](backlog/013-console-todos-without-numbers.md) Console todos without numbers → 144-console-todo-picking
 - [ ] [#14](backlog/014-remove-the-interactive-console.md) Remove the interactive console (after: #4; #7; #8; #6)
 - [ ] [#15](backlog/015-signed-desktop-builds.md) Signed desktop builds (after: #116)
 - [ ] [#17](backlog/017-json-output-for-the-cli.md) JSON output for the CLI
