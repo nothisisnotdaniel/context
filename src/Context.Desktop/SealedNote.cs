@@ -58,6 +58,7 @@ internal static class SealedNote
     private const int TagSize = 16;
     private const int KeySize = 32;
     private const int PointSize = 65;
+    private const int AgreementSize = 32;
     private const int MaxJsonDepth = 8;
 
     private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
@@ -308,7 +309,19 @@ internal static class SealedNote
         Wrap wrap = parsed.Wraps.FirstOrDefault(w => string.Equals(w.Id, id, StringComparison.Ordinal))
             ?? throw new SealedNoteException();
         byte[] recipientPoint = PointOf(publicKey);
+
+        // The file's point is checked here, before any key store sees it: it must be on P-256.
+        using (Import(wrap.Point))
+        {
+        }
+
         byte[] agreement = agree([.. wrap.Point]);
+        if (agreement.Length != AgreementSize)
+        {
+            CryptographicOperations.ZeroMemory(agreement);
+            throw new SealedNoteException();
+        }
+
         byte[] wrapKey = WrapKey(agreement, wrap.Point, recipientPoint);
         byte[] noteKey = new byte[KeySize];
         try

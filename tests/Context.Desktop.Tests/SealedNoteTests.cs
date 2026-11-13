@@ -186,6 +186,38 @@ public sealed class SealedNoteTests : IDisposable
         Assert.True(SealedNote.HasKey(file, recovery.ExportSubjectPublicKeyInfo()));
     }
 
+    // Nits (security 1): a point in the file that is not on P-256 fails before the private key is asked.
+    [Fact]
+    public void Open_PointNotOnTheCurve_FailsWithoutAgree()
+    {
+        byte[] file = SealedNote.Seal("Plan", "text", Recipients());
+        JsonObject root = Parse(file);
+        byte[] point = new byte[65];
+        Array.Fill(point, (byte)1);
+        point[0] = 4;
+        foreach (JsonNode? key in root["keys"]!.AsArray())
+        {
+            key!["epk"] = Convert.ToBase64String(point);
+        }
+
+        Assert.Throws<SealedNoteException>(
+            () => SealedNote.Open("Plan", Encoding.UTF8.GetBytes(root.ToJsonString()), MachineKey(), Agree));
+
+        Assert.Equal(0, agrees);
+    }
+
+    // Nits (security 1): an agreement that is not 32 bytes is refused, whatever the key store returned.
+    [Theory]
+    [InlineData(0)]
+    [InlineData(31)]
+    [InlineData(33)]
+    public void Open_AgreementOfAnotherLength_Fails(int length)
+    {
+        byte[] file = SealedNote.Seal("Plan", "text", Recipients());
+
+        Assert.Throws<SealedNoteException>(() => SealedNote.Open("Plan", file, MachineKey(), _ => new byte[length]));
+    }
+
     // AC-2: files that are not the format fail the same way, and agree is not called.
     [Theory]
     [InlineData("")]

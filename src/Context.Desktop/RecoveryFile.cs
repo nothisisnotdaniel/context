@@ -41,6 +41,7 @@ internal static class RecoveryFile
     private const string Pbmac1Oid = "1.2.840.113549.1.5.14";
     private const string Pbkdf2Oid = "1.2.840.113549.1.5.12";
     private const string HmacSha256Oid = "1.2.840.113549.2.9";
+    private const string Aes256CbcOid = "2.16.840.1.101.3.4.1.42";
 
     private static readonly Asn1Tag Explicit0 = new(TagClass.ContextSpecific, 0, isConstructed: true);
 
@@ -68,15 +69,16 @@ internal static class RecoveryFile
         }
     }
 
-    // Create with a chosen PBKDF2 iteration count, so a test can make the weak file Read must refuse.
-    internal static byte[] Build(string password, int iterations, out byte[] publicKey)
+    // Create with a chosen PBKDF2 iteration count and cipher, so a test can make the weak files Read must refuse.
+    internal static byte[] Build(
+        string password, int iterations, out byte[] publicKey, PbeEncryptionAlgorithm cipher = PbeEncryptionAlgorithm.Aes256Cbc)
     {
         password = Normalized(password) ?? throw new RecoveryFileException();
         using ECDiffieHellman key = SealedNote.NewKey();
         publicKey = key.ExportSubjectPublicKeyInfo();
         byte[] shrouded = key.ExportEncryptedPkcs8PrivateKey(
             password.AsSpan(),
-            new PbeParameters(PbeEncryptionAlgorithm.Aes256Cbc, HashAlgorithmName.SHA256, iterations));
+            new PbeParameters(cipher, HashAlgorithmName.SHA256, iterations));
         byte[] authenticatedSafe = AuthenticatedSafe(shrouded);
         byte[] salt = RandomNumberGenerator.GetBytes(MacKeySize);
         byte[] mac = Mac(password, salt, iterations, authenticatedSafe);
@@ -275,7 +277,7 @@ internal static class RecoveryFile
         }
     }
 
-    // The key bag must be PBES2 over PBKDF2 with HMAC-SHA256 and a bounded iteration count.
+    // The key bag must be PBES2 with AES-256-CBC over PBKDF2 with HMAC-SHA256 and a bounded iteration count.
     private static void CheckKeyProtection(byte[] shrouded)
     {
         AsnReader info = new AsnReader(shrouded, AsnEncodingRules.DER).ReadSequence();
@@ -283,6 +285,7 @@ internal static class RecoveryFile
         Expect(algorithm, Pbes2Oid);
         AsnReader parameters = algorithm.ReadSequence();
         _ = ReadPbkdf2(parameters.ReadSequence(), null);
+        Expect(parameters.ReadSequence(), Aes256CbcOid);
     }
 
     // AlgorithmIdentifier of PBKDF2: salt, iterations, an optional key length and the PRF, which must be HMAC-SHA256.

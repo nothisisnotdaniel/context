@@ -144,6 +144,15 @@ public sealed class RecoveryFileTests
         Assert.Equal(publicKey, key.ExportSubjectPublicKeyInfo());
     }
 
+    // Nits (security 6): a key bag under another cipher than the one Create writes is refused.
+    [Fact]
+    public void Read_AnotherCipherThanAes256_Fails()
+    {
+        byte[] other = RecoveryFile.Build(Password, RecoveryFile.Iterations, out _, PbeEncryptionAlgorithm.Aes128Cbc);
+
+        Assert.Throws<RecoveryFileException>(() => RecoveryFile.Read(other, Password));
+    }
+
     // AC-8: a file that is not a recovery file, was changed, or is too large fails the same way.
     [Fact]
     public void Read_WrongFile_Fails()

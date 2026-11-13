@@ -164,8 +164,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     and `CngKey` only in `WindowsKeyStore.cs`; no test references `WindowsKeyStore`, `MacKeyStore` or
     `PhotinoFileDialog` (tests use `FakeKeyStore`, which counts `Agree` and can throw, and `FakeFileDialog`), so
     `dotnet test` never touches a real key store, Keychain or file dialog; no new NuGet package.
-  - **Not covered:** rollback to an older sealed file, plain remnants of the deleted `.md` (disk, backups), text in
-    process and web-view memory while a note is open. Losing both the machine key and the recovery file (or its
+  - **Not covered:** rollback to an older sealed file, a wrap dropped from a sealed file's `keys` by someone who can
+    write the data folder (the list is under no tag; the next save writes both wraps again), plain remnants of the
+    deleted `.md` (disk, backups), text in process and web-view memory while a note is open. Losing both the machine key and the recovery file (or its
     password) loses the notes. A second machine is enrolled with the recovery file; notes it creates are not readable
     on the first machine.
   - **Manual checks (no test can cover them):** on macOS and on Windows run setup, mark, open (the OS prompt
