@@ -164,6 +164,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#130](backlog/130-refuse-a-whitespace-only-recovery-password.md) Refuse a whitespace-only recovery password
 - [?] [#131](backlog/131-check-the-sensitive-setup-dialog-input.md) Check the sensitive-setup dialog input widths by eye
 - [?] [#132](backlog/132-explain-a-refused-case-only-rename.md) Explain a refused case-only rename and hidden setup buttons
+- [h] [#133](backlog/133-run-the-sensitive-notes-manual-checks.md) Run the sensitive-notes manual checks on macOS and Windows
 
 ## Dropped with the terminal UI
 
