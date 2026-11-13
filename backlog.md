@@ -182,6 +182,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#148](backlog/148-replace-bidi-and-format-characters-in.md) Replace bidi and format characters in shown text
 - [?] [#149](backlog/149-clear-earlier-import-lines-on-a.md) Clear earlier import lines on a cancelled import
 - [?] [#150](backlog/150-require-a-md-source-for-desktop.md) Require a .md source for desktop import
+- [?] [#151](backlog/151-clear-the-capture-status-line-on.md) Clear the capture status line on new input
 
 ## Dropped with the terminal UI
 
