@@ -96,6 +96,28 @@ public sealed class SensitiveFlowTests : IDisposable
         Assert.DoesNotContain("Secret", cut.Markup, StringComparison.Ordinal);
     }
 
+    // 143 AC-6: a sensitive note that unlocks but whose page editor fails to start says so, not "Can't unlock".
+    [Fact]
+    public async Task Open_Sensitive_MountThrows_ShowsEditorFailedLine()
+    {
+        data.WriteSensitive("Plan", "Secret\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.Fail("ContextEditor.mount", new Microsoft.JSInterop.JSException("boom-143"));
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await NameButton(cut, "Plan").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            "The editor couldn't start. Plan was not changed.", Assert.Single(cut.FindAll(".editor-failed")).TextContent));
+        Assert.Contains("red", cut.Find(".editor-failed").ClassList);
+        Assert.Equal("alert", cut.Find(".editor-failed").GetAttribute("role"));
+        Assert.Empty(cut.FindAll(".unreadable"));
+        Assert.DoesNotContain("Can't unlock", cut.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("boom-143", cut.Markup, StringComparison.Ordinal);
+        Assert.Equal(1, data.Keys.Agrees);
+        Assert.True(cut.Find("button.save").HasAttribute("disabled"));
+    }
+
     // AC-5: saving in the editor seals again without a private-key call.
     [Fact]
     public async Task Save_Sensitive_ReSeals_WithoutAgree()

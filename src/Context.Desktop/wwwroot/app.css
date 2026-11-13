@@ -399,6 +399,7 @@ input[type="password"]:disabled {
 
 .note-editor .lossy,
 .note-editor .unreadable,
+.note-editor .editor-failed,
 .note-editor .status {
     margin: 8px 0 0;
 }
