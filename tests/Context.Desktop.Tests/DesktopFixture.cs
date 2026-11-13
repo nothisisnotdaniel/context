@@ -60,6 +60,9 @@ internal sealed class DesktopFixture : IDisposable
     /// <summary>A place for a recovery file, outside the data folder; nothing is there yet.</summary>
     public string RecoveryPath => Path.Combine(parent, "recovery.pfx");
 
+    /// <summary>A path next to the data folder (outside it) for import sources and export targets; nothing is there yet.</summary>
+    public string Outside(string name) => Path.Combine(parent, name);
+
     public DesktopState? State { get; private set; }
 
     public DesktopActions? Actions { get; private set; }

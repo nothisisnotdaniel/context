@@ -81,6 +81,9 @@ public sealed class DesktopSourceTests
     private const string RealLauncher = "Shell" + "NoteLauncher";
     private const string RealLauncherFile = "src/Context.Desktop/" + RealLauncher + ".cs";
 
+    // 139: System.IO's file system classes as whole words (RecoveryFile. is none).
+    private static readonly Regex FileSystemClass = new(@"\b(File|Directory|Path)\.", RegexOptions.CultureInvariant);
+
     private static readonly string[] UpdateFiles =
     [
         "src/Context.Desktop/IUpdateSource.cs", "src/Context.Desktop/StartupUpdate.cs", RealUpdateSourceFile,
@@ -1002,6 +1005,61 @@ public sealed class DesktopSourceTests
         List<string> tests = RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs");
         Assert.Contains("tests/Context.Desktop.Tests/FakeKeyStore.cs", tests);
         Assert.Contains("tests/Context.Desktop.Tests/FakeFileDialog.cs", tests);
+    }
+
+    // 139 AC-10: the Core calls that read an import source and write an export copy are named only in DesktopActions.cs.
+    [Theory]
+    [InlineData("WritePlainCopy")]
+    [InlineData("ReadImport")]
+    public void Sources_NameTheTransferCallsOnlyInDesktopActions(string call)
+    {
+        string root = RepoFiles.Root();
+        List<string> found = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
+            .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains(call, StringComparison.Ordinal))
+            .ToList();
+
+        Assert.Equal([ActionsFile], found);
+    }
+
+    // 139 AC-10: no component touches the file system itself; paths only pass through to DesktopActions.
+    [Fact]
+    public void Razor_NamesNoFileSystemClass()
+    {
+        string root = RepoFiles.Root();
+        List<string> files = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".razor");
+        Assert.Contains("src/Context.Desktop/NotesPanel.razor", files);
+        List<string> found = [];
+        foreach (string file in files)
+        {
+            found.AddRange(FileSystemClass.Matches(File.ReadAllText(Path.Combine(root, file))).Select(m => $"{file}: {m.Value}"));
+        }
+
+        Assert.True(found.Count == 0, "Components name a file system class: " + string.Join(", ", found));
+    }
+
+    // 139 AC-10 (control): whole words only, so RecoveryFile. does not count.
+    [Theory]
+    [InlineData("File.Exists(path)", true)]
+    [InlineData("System.IO.Directory.CreateDirectory(x)", true)]
+    [InlineData("Path.Combine(a, b)", true)]
+    [InlineData("@RecoveryFile.MinPasswordLength", false)]
+    [InlineData("line.Source", false)]
+    [InlineData("note.Path)", false)]
+    [InlineData("Dialog.OpenMarkdownFiles()", false)]
+    public void FileSystemClass_Pattern(string source, bool match)
+    {
+        Assert.Equal(match, FileSystemClass.IsMatch(source));
+    }
+
+    // 139 AC-6 / AC-8: the import row and its result lines are styled.
+    [Theory]
+    [InlineData(".note-import {")]
+    [InlineData(".import-result {")]
+    public void AppCss_StylesTheImport(string selector)
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+
+        Assert.Contains(selector, css, StringComparison.Ordinal);
     }
 
     // 136: the sensitive session and the sealed format are not named by the console or the Core (see

@@ -10,7 +10,7 @@
     {
         <div class="layout" @onkeydown="OpenPalette">
             <aside class="notes-region">
-                <NotesPanel OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" />
+                <NotesPanel @ref="notesPanel" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" />
             </aside>
             <main class="current-region">
                 @if (settingsShown)
@@ -25,7 +25,7 @@
                 {
                     <TagPanel Tag="@tag" OnOpen="RequestOpen" OnClose="CloseTag" />
                 }
-                <p class="main-status @statusClass" role="status">@statusText</p>
+                <p class="main-status cut @statusClass" role="status" title="@statusText">@statusText</p>
                 @if (openName is { } name)
                 {
                     <div class="note-toolbar">
@@ -48,6 +48,7 @@
                             else
                             {
                                 <button type="button" class="open-external" disabled="@running" @onclick="OpenOutside">Open in default editor</button>
+                                <button type="button" class="export" disabled="@running" @onclick="Export">Export</button>
                                 @if (snapshot.SensitiveSupported)
                                 {
                                     <button type="button" class="mark-sensitive" disabled="@running" @onclick="AskMark">Mark sensitive</button>
@@ -119,6 +120,11 @@ else
     private bool openSensitive;
     private bool marking;
     private bool unsealing;
+    private NotesPanel? notesPanel;
+
+    /// <summary>The OS file dialogs.</summary>
+    [Inject]
+    internal IFileDialog Dialog { get; set; } = null!;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -240,6 +246,30 @@ else
                 else
                 {
                     await RequestOpen(found);
+                }
+
+                break;
+            case "/import":
+                // What was typed after the command is ignored: the files come from the OS dialog only.
+                if (notesPanel is not null)
+                {
+                    await notesPanel.Import();
+                }
+
+                break;
+            case "/export":
+                // As above: the target comes from the OS save dialog only.
+                if (await ExportTarget() is { } chosen)
+                {
+                    running = true;
+                    try
+                    {
+                        ShowExported(await Actions.ExportNote(chosen.Name, chosen.Target));
+                    }
+                    finally
+                    {
+                        running = false;
+                    }
                 }
 
                 break;
@@ -646,6 +676,59 @@ else
             ShowStatus(DesktopText.OneLine(opened.Text), "red");
         }
     }
+
+    // The toolbar's button: writes the open plain note's saved text to the file chosen in the OS save dialog.
+    private async Task Export()
+    {
+        if (await ExportTarget() is not { } chosen)
+        {
+            return;
+        }
+
+        running = true;
+        try
+        {
+            ShowExported(await Actions.ExportNote(chosen.Name, chosen.Target));
+        }
+        finally
+        {
+            running = false;
+        }
+    }
+
+    // The open note and where to write it, or null (with the reason in the status line) when there is nothing to
+    // write: no note open, a sensitive note, unsaved changes, or the dialog was cancelled.
+    private async Task<(string Name, string Target)?> ExportTarget()
+    {
+        if (openName is not { } name)
+        {
+            ShowStatus("Open a note first.", "red");
+            return null;
+        }
+
+        if (running)
+        {
+            return null;
+        }
+
+        if (openSensitive)
+        {
+            ShowStatus(DesktopActions.ExportSensitiveText(DesktopText.OneLine(name)), "red");
+            return null;
+        }
+
+        if (editor is not null && await editor.IsDirtyAsync())
+        {
+            ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
+            return null;
+        }
+
+        string? target = Dialog.SaveExportFile(name + ".md");
+        return target is null ? null : (name, target);
+    }
+
+    private void ShowExported(ActionResult exported) =>
+        ShowStatus(DesktopText.OneLine(exported.Text), exported.Kind == ActionKind.Done ? "accent" : "red");
 
     private void ShowStatus(string text, string cssClass)
     {

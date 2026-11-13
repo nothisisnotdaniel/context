@@ -32,6 +32,8 @@
     internal static readonly IReadOnlyList<PaletteCommand> Commands =
     [
         new PaletteCommand("/current", "/current", "Show the current view"),
+        new PaletteCommand("/export", "/export", "Save a copy of the open note outside Context"),
+        new PaletteCommand("/import", "/import", "Choose Markdown files to store as notes"),
         new PaletteCommand("/new", "/new <title>", "Create a note and open it"),
         new PaletteCommand("/open", "/open <note>", "Open a note"),
         new PaletteCommand("/save", "/save", "Save the open note"),

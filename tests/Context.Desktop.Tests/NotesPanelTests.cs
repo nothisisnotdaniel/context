@@ -209,5 +209,195 @@ public sealed class NotesPanelTests : IDisposable
         Assert.Equal(before, FileSnapshot.Take(data.Root));
     }
 
+    // 139 AC-6: the Import button is a typed button; a cancelled dialog calls no action and shows no text.
+    [Fact]
+    public async Task Import_Cancelled_NothingHappens()
+    {
+        data.WriteNote("Plan", "text\n");
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+        SortedDictionary<string, string> before = Files();
+        int builds = data.State!.Builds;
+
+        IElement button = cut.Find(".notes button.import");
+        Assert.Equal("Import", button.TextContent);
+        Assert.Equal("button", button.GetAttribute("type"));
+        await button.ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(1, data.Dialog.ImportOpens);
+        Assert.Empty(cut.FindAll(".import-result"));
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Equal(before, Files());
+        Assert.Equal(builds, data.State.Builds);
+    }
+
+    // 139 AC-6: each chosen file gets one line in the chosen order (accent done, red refused); new notes are listed.
+    [Fact]
+    public async Task Import_SeveralFiles_OneLineEachInOrder()
+    {
+        string beta = Source("Beta.md", "b\n");
+        string missing = data.Outside("Gone.md");
+        string alpha = Source("Alpha.md", "a\n");
+        data.Dialog.ImportPaths = [beta, missing, alpha];
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        await cut.Find("button.import").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(1, data.Dialog.ImportOpens);
+        IElement region = cut.Find(".import-result");
+        Assert.Equal("status", region.GetAttribute("role"));
+        IReadOnlyList<IElement> lines = cut.FindAll(".import-result p");
+        Assert.Equal(
+            [
+                "Imported Beta. The source is unchanged; delete it if you don't need the plain copy: " + beta,
+                "No such file: " + missing,
+                "Imported Alpha. The source is unchanged; delete it if you don't need the plain copy: " + alpha,
+            ],
+            lines.Select(l => l.TextContent).ToArray());
+        Assert.Equal([true, false, true], lines.Select(l => l.ClassList.Contains("accent")).ToArray());
+        Assert.Equal([false, true, false], lines.Select(l => l.ClassList.Contains("red")).ToArray());
+        Assert.All(lines, l => Assert.Equal(l.TextContent, l.GetAttribute("title")));
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Equal(["Alpha.md", "Beta.md"], Files().Keys);
+        Assert.Equal("b\n", File.ReadAllText(Path.Combine(data.Root, "Beta.md")));
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Alpha", "Beta"], cut.FindAll("li.note button.name").Select(n => n.TextContent).ToArray()));
+    }
+
+    // 139 AC-6: more than 100 files are refused as a whole.
+    [Fact]
+    public async Task Import_Over100Files_RefusedNothingImported()
+    {
+        data.Dialog.ImportPaths = Enumerable.Range(0, 101).Select(i => Source($"N{i}.md", "x\n")).ToList();
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        await cut.Find("button.import").ClickAsync(new MouseEventArgs());
+
+        IElement line = Assert.Single(cut.FindAll(".import-result p"));
+        Assert.Equal("Choose at most 100 files.", line.TextContent);
+        Assert.True(line.ClassList.Contains("red"));
+        Assert.False(Directory.Exists(data.Root));
+    }
+
+    // 139 AC-6: exactly 100 files are all imported.
+    [Fact]
+    public async Task Import_100Files_AllImported()
+    {
+        data.Dialog.ImportPaths = Enumerable.Range(0, 100).Select(i => Source($"N{i}.md", "x\n")).ToList();
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        await cut.Find("button.import").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(100, cut.FindAll(".import-result p.accent").Count);
+        Assert.Equal(100, Files().Count);
+    }
+
+    // 139 AC-7: a file that would replace a note is not written on the first pass; one dialog asks, and Confirm
+    // replaces exactly that note.
+    [Fact]
+    public async Task Import_ReplacingFile_AsksThenReplaces()
+    {
+        data.WriteNote("Plan", "old\n");
+        string plan = Source("plan.md", "new\n");
+        string other = Source("Other.md", "other\n");
+        data.Dialog.ImportPaths = [plan, other];
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        await cut.Find("button.import").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal("old\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.Equal("other\n", File.ReadAllText(Path.Combine(data.Root, "Other.md")));
+        IElement dialog = Assert.Single(cut.FindAll("[role=dialog]"));
+        Assert.Equal("Replace Plan?", dialog.QuerySelector(".question")!.TextContent);
+        Assert.Equal("Replace", dialog.QuerySelector("button.confirm")!.TextContent);
+        Assert.StartsWith("Imported Other.", Assert.Single(cut.FindAll(".import-result p")).TextContent, StringComparison.Ordinal);
+
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Equal("new\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.Equal("other\n", File.ReadAllText(Path.Combine(data.Root, "Other.md")));
+        Assert.Equal(["Other.md", "Plan.md"], Files().Keys);
+        IReadOnlyList<IElement> lines = cut.FindAll(".import-result p");
+        Assert.Equal(
+            ["Replaced Plan. The source is unchanged; delete it if you don't need the plain copy: " + plan],
+            lines.Take(1).Select(l => l.TextContent).ToArray());
+        Assert.True(lines[0].ClassList.Contains("accent"));
+        Assert.StartsWith("Imported Other.", lines[1].TextContent, StringComparison.Ordinal);
+        Assert.Equal(1, data.Dialog.ImportOpens);
+    }
+
+    // 139 AC-7: several replacing files are asked about together; Cancel or Esc leaves every one of them unchanged.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Import_ReplacingFiles_CancelOrEsc_LeavesThemUnchanged(bool esc)
+    {
+        data.WriteNote("Plan", "old plan\n");
+        data.WriteNote("Ideas", "old ideas\n");
+        data.Dialog.ImportPaths = [Source("Plan.md", "new\n"), Source("Fresh.md", "fresh\n"), Source("Ideas.md", "new\n")];
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        await cut.Find("button.import").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal("Replace 2 notes? Plan, Ideas", cut.Find("[role=dialog] .question").TextContent);
+        SortedDictionary<string, string> before = Files();
+        if (esc)
+        {
+            await cut.Find("[role=dialog]").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        }
+        else
+        {
+            await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        }
+
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Equal(before, Files());
+        Assert.Equal("old plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.Equal("old ideas\n", File.ReadAllText(Path.Combine(data.Root, "Ideas.md")));
+        IReadOnlyList<IElement> lines = cut.FindAll(".import-result p");
+        Assert.Equal("Not replaced: Plan", lines[0].TextContent);
+        Assert.StartsWith("Imported Fresh.", lines[1].TextContent, StringComparison.Ordinal);
+        Assert.Equal("Not replaced: Ideas", lines[2].TextContent);
+        Assert.False(lines[0].ClassList.Contains("accent"));
+    }
+
+    // 139 AC-11: a path with a control character or a line break is shown on one line with it replaced.
+    [Fact]
+    public async Task Import_ControlCharacterInThePath_ShownOnOneLine()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return; // Windows paths can't hold control characters.
+        }
+
+        string folder = data.Outside("odd\u0007\nfolder");
+        Directory.CreateDirectory(folder);
+        string source = Path.Combine(folder, "Plan.md");
+        File.WriteAllText(source, "text\n");
+        data.Dialog.ImportPaths = [source, Path.Combine(folder, "Gone.md")];
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        await cut.Find("button.import").ClickAsync(new MouseEventArgs());
+
+        IReadOnlyList<IElement> lines = cut.FindAll(".import-result p");
+        Assert.Equal(2, lines.Count);
+        Assert.All(lines, l =>
+        {
+            Assert.Contains("odd\uFFFD folder", l.TextContent, StringComparison.Ordinal);
+            Assert.DoesNotContain('\n', l.TextContent);
+            Assert.DoesNotContain('\u0007', l.TextContent);
+            Assert.DoesNotContain('\u0007', l.GetAttribute("title")!);
+        });
+    }
+
+    private string Source(string name, string text)
+    {
+        string path = data.Outside(name);
+        File.WriteAllText(path, text);
+        return path;
+    }
+
+    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName);
+
     private static string Time(DateTime local) => local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
 }

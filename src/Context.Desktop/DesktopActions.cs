@@ -105,6 +105,9 @@ internal sealed class DesktopActions
     public const string RecoverySavedText = "Recovery file saved. Keep it and its password safe.";
     public const string RecoveryUnreadableText = "Can't read that recovery file.";
 
+    public const string ImportInsideText = "That file is already in the Context folder. Nothing changed.";
+    public const string ExportInsideText = "Export to a path outside the Context folder. Nothing was written.";
+
     public const string CalendarLinkInvalidText = "The calendar link must be an https:// or webcal:// address.";
     public const string CalendarLinkNotSavedText =
         "Can't save the calendar link. Check that the Context folder is writable.";
@@ -199,6 +202,40 @@ internal sealed class DesktopActions
 
     /// <summary>The line after the calendar link was saved; <paramref name="masked"/> is the link without its secret part.</summary>
     public static string CalendarLinkSavedText(string masked) => $"Calendar link saved ({masked}).";
+
+    /// <summary>The line after an import; <paramref name="replaced"/> when it took an existing note's place.</summary>
+    public static string ImportedText(string name, string path, bool replaced) =>
+        $"{(replaced ? "Replaced" : "Imported")} {name}. The source is unchanged; delete it if you don't need the plain copy: {path}";
+
+    /// <summary>The red line when the file's name is no valid title; <paramref name="reason"/> is the <see cref="NoteStore.ValidateTitle"/> text.</summary>
+    public static string ImportTitleText(string reason) => $"{reason} Rename the file and import it again.";
+
+    /// <summary>The red line when the file to import is missing (or is a folder).</summary>
+    public static string NoSuchFileText(string path) => $"No such file: {path}";
+
+    /// <summary>The red line when the file to import is over <see cref="NoteStore.MaxImportBytes"/>.</summary>
+    public static string ImportTooLargeText(string path) => $"Can't import a file over 5 MB: {path}";
+
+    /// <summary>The red line when a file or a note can't be read.</summary>
+    public static string CantReadText(string pathOrName) => $"Can't read {pathOrName}.";
+
+    /// <summary>The red line when the file's title names a sensitive note.</summary>
+    public static string ImportSensitiveText(string name) => $"{name} is sensitive. Nothing was imported.";
+
+    /// <summary>The red line when the imported note can't be stored.</summary>
+    public static string ImportSaveFailedText(string name) => $"Can't save {name}. Nothing changed.";
+
+    /// <summary>The line after an export.</summary>
+    public static string ExportedText(string name, string path) => $"Exported {name} to {path}";
+
+    /// <summary>The red line when the export target is already there.</summary>
+    public static string ExportExistsText(string path) => $"That file already exists; choose a new name: {path}";
+
+    /// <summary>The red line when a sensitive note is asked to be exported.</summary>
+    public static string ExportSensitiveText(string name) => $"{name} is sensitive. Make it plain to export it.";
+
+    /// <summary>The red line when the export target can't be written.</summary>
+    public static string CantWriteText(string path) => $"Can't write {path}.";
 
     /// <summary>The red line when a todo's text is too long.</summary>
     public static string TodoTooLongText => $"A todo can be at most {MaxTodoLength} characters. Nothing was done.";
@@ -306,6 +343,24 @@ internal sealed class DesktopActions
     /// only when the user <paramref name="confirmed"/> it.
     /// </summary>
     public Task<ActionResult> RemoveCalendarLink(Confirmation? confirmed) => Run(() => RemoveCalendarLinkNow(confirmed));
+
+    /// <summary>
+    /// Stores the file at <paramref name="path"/> (fully qualified, outside the data folder, at most
+    /// <see cref="NoteStore.MaxImportBytes"/>) as the note named after it, with its exact bytes, through
+    /// <see cref="NoteStore.Save"/>; the source is only read. When a plain note with that title exists (ignoring case)
+    /// it is replaced only when the user <paramref name="confirmed"/> it: without that the answer is Refused with
+    /// <see cref="ActionReason.NotConfirmed"/> (no other answer of this action has that reason) and its text is the
+    /// existing note's name, for the question. A title that names a sensitive note is always refused.
+    /// </summary>
+    public Task<ActionResult> ImportNote(string path, Confirmation? confirmed) => Run(() => ImportNoteNow(path, confirmed));
+
+    /// <summary>
+    /// Writes the saved text of the plain note <paramref name="name"/> (UTF-8, no BOM) to the new file
+    /// <paramref name="path"/> (fully qualified, outside the data folder) through
+    /// <see cref="NoteStore.WritePlainCopy"/>, which never overwrites. A sensitive note is refused, locked or open,
+    /// without a private-key call. Changes nothing in the data folder and never refreshes.
+    /// </summary>
+    public Task<ActionResult> ExportNote(string name, string path) => Run(() => ExportNoteNow(name, path), refresh: false);
 
     private static ActionResult Refused(ActionReason reason, string text) => new(ActionKind.Refused, reason, text);
 
@@ -636,6 +691,156 @@ internal sealed class DesktopActions
         catch (Exception)
         {
             return Failed(ActionReason.WriteFailed, OpenExternallyText(name));
+        }
+    }
+
+    // The console's /import with the path from the OS dialog, which is still untrusted: every check runs again here.
+    private ActionResult ImportNoteNow(string? path, Confirmation? confirmed)
+    {
+        string shown = path ?? string.Empty;
+        string source;
+        string title;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
+            {
+                return Refused(ActionReason.Unreadable, CantReadText(shown));
+            }
+
+            source = Path.GetFullPath(path);
+            shown = source;
+            if (notes.Contains(source))
+            {
+                return Refused(ActionReason.Invalid, ImportInsideText);
+            }
+
+            title = NoteStore.NormalizeTitle(Path.GetFileName(source));
+        }
+        catch (Exception)
+        {
+            return Refused(ActionReason.Unreadable, CantReadText(shown));
+        }
+
+        string? invalid = NoteStore.ValidateTitle(title);
+        if (invalid is not null)
+        {
+            return Refused(ActionReason.Invalid, ImportTitleText(invalid));
+        }
+
+        byte[] content;
+        try
+        {
+            if (notes.TryFindSensitive(title, out NoteInfo? locked) && locked is not null)
+            {
+                return Refused(ActionReason.Exists, ImportSensitiveText(locked.Name));
+            }
+
+            content = NoteStore.ReadImport(source);
+        }
+        catch (FileNotFoundException)
+        {
+            return Refused(ActionReason.Missing, NoSuchFileText(shown));
+        }
+        catch (InvalidDataException)
+        {
+            return Refused(ActionReason.Invalid, ImportTooLargeText(shown));
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.Unreadable, CantReadText(shown));
+        }
+
+        try
+        {
+            // Replacing a note destroys its text: only with the user's confirmation. The text is the note's name.
+            if (confirmed is null && notes.TryFind(title, out NoteInfo? existing) && existing is not null)
+            {
+                return Refused(ActionReason.NotConfirmed, existing.Name);
+            }
+
+            (NoteInfo note, bool replaced) = notes.Save(title, content);
+            return new ActionResult(ActionKind.Done, ActionReason.None, ImportedText(note.Name, shown, replaced));
+        }
+        catch (NoteExistsException e)
+        {
+            // A sensitive note with that name appeared in between.
+            return Refused(ActionReason.Exists, ImportSensitiveText(e.Name));
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, ImportSaveFailedText(title));
+        }
+    }
+
+    // The console's /export with the path from the OS save dialog, checked again here.
+    private ActionResult ExportNoteNow(string name, string? path)
+    {
+        string shown = path ?? string.Empty;
+        string target;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
+            {
+                return Refused(ActionReason.Invalid, CantWriteText(shown));
+            }
+
+            target = Path.GetFullPath(path);
+            shown = target;
+            if (notes.Contains(target))
+            {
+                return Refused(ActionReason.Invalid, ExportInsideText);
+            }
+        }
+        catch (Exception)
+        {
+            return Refused(ActionReason.Invalid, CantWriteText(shown));
+        }
+
+        NoteInfo? note;
+        try
+        {
+            if (!notes.TryFind(name, out note) || note is null)
+            {
+                // A sensitive note is never written out as plain text, and never opened for it.
+                return notes.TryFindSensitive(name, out NoteInfo? locked) && locked is not null
+                    ? Refused(ActionReason.Locked, ExportSensitiveText(locked.Name))
+                    : Refused(ActionReason.Missing, NoteMissingText(name));
+            }
+
+            if (File.Exists(target) || Directory.Exists(target))
+            {
+                return Refused(ActionReason.Exists, ExportExistsText(shown));
+            }
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.Unreadable, CantReadText(name));
+        }
+
+        string text;
+        try
+        {
+            // Decoded like the console's File.ReadAllText (UTF-8 unless a byte order mark says otherwise), but bounded.
+            byte[] bytes = BoundedFile.Read(note.Path, MaxNoteBytes);
+            using MemoryStream stream = new MemoryStream(bytes, writable: false);
+            using StreamReader reader = new StreamReader(stream, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            text = reader.ReadToEnd();
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.Unreadable, CantReadText(note.Name));
+        }
+
+        try
+        {
+            NoteStore.WritePlainCopy(target, text);
+            return new ActionResult(ActionKind.Done, ActionReason.None, ExportedText(note.Name, shown));
+        }
+        catch (Exception)
+        {
+            return File.Exists(target)
+                ? Refused(ActionReason.Exists, ExportExistsText(shown))
+                : Failed(ActionReason.WriteFailed, CantWriteText(shown));
         }
     }
 
