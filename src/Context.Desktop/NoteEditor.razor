@@ -20,6 +20,10 @@
     {
         <p class="red unreadable" role="alert">@(Sensitive ? "Can't unlock" : "Can't read") @DisplayName.</p>
     }
+    @if (editorFailed)
+    {
+        <p class="red editor-failed" role="alert">The editor couldn't start. @DisplayName was not changed.</p>
+    }
     @if (lossy)
     {
         <p class="grey lossy">Saving will reformat parts of this note.</p>
@@ -33,6 +37,7 @@
     private EditableNote? opened;
     private bool mounted;
     private bool unreadable;
+    private bool editorFailed;
     private bool lossy;
     private bool saving;
     private bool dirty;
@@ -192,11 +197,24 @@
             await Interop.MountAsync(host, note.Text);
             opened = note;
             mounted = true;
-            await Interop.FocusAsync(host);
         }
         catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
         {
-            unreadable = true;
+            // The note was read; only the page's editor didn't start. Nothing is open, so nothing can be saved.
+            editorFailed = true;
+            lossy = false;
+        }
+
+        if (mounted)
+        {
+            try
+            {
+                await Interop.FocusAsync(host);
+            }
+            catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+            {
+                // The editor is mounted and works; it only didn't take the focus.
+            }
         }
 
         StateHasChanged();

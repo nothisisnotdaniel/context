@@ -41,6 +41,20 @@ internal sealed class EditorJs
         js.Setup<string>("ContextEditor.getMarkdown", _ => true).SetResult(markdown);
     }
 
+    /// <summary>Makes every later <paramref name="identifier"/> call (<c>ContextEditor.mount</c>, <c>focus</c> or
+    /// <c>isLossless</c>) fail with <paramref name="exception"/>.</summary>
+    public void Fail(string identifier, Exception exception)
+    {
+        if (identifier == "ContextEditor.isLossless")
+        {
+            js.Setup<bool>(identifier, _ => true).SetException(exception);
+        }
+        else
+        {
+            js.SetupVoid(identifier, _ => true).SetException(exception);
+        }
+    }
+
     /// <summary>The calls of <paramref name="identifier"/> so far.</summary>
     public IReadOnlyList<JSRuntimeInvocation> Calls(string identifier) =>
         js.Invocations.Where(i => i.Identifier == identifier).ToList();

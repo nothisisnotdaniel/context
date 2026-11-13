@@ -2,6 +2,7 @@ using System.Text;
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.AspNetCore.Components.Web;
+using Microsoft.JSInterop;
 
 namespace Context.Tests;
 
@@ -60,6 +61,7 @@ public sealed class NoteEditorTests : IDisposable
         Assert.True(line.ClassList.Contains("red"));
         Assert.Empty(js.Calls("ContextEditor.mount"));
         Assert.True(cut.Find("button.save").HasAttribute("disabled"));
+        Assert.Empty(cut.FindAll(".editor-failed"));
     }
 
     // A note over 5 MB is not sent to the page editor: the red line, nothing mounted.
@@ -75,6 +77,122 @@ public sealed class NoteEditorTests : IDisposable
 
         Assert.Equal("Can't read Big.", cut.Find(".unreadable").TextContent);
         Assert.Empty(js.Calls("ContextEditor.mount"));
+        Assert.Empty(cut.FindAll(".editor-failed"));
+    }
+
+    // 143 AC-1, AC-5: the note was read but the page editor's mount failed: its own red line, not "Can't read",
+    // and nothing of the exception's text.
+    [Fact]
+    public async Task Open_MountThrows_EditorFailedLine()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.Fail("ContextEditor.mount", new JSException("boom-143"));
+
+        IRenderedComponent<NoteEditor> cut = await RenderFailed("Plan");
+
+        AssertFailedLine(cut, "Plan");
+        Assert.Single(js.Calls("ContextEditor.mount"));
+        Assert.Empty(js.Calls("ContextEditor.focus"));
+        Assert.DoesNotContain("boom-143", cut.Markup, StringComparison.Ordinal);
+    }
+
+    // 143 AC-1: the name in the line is the one-line form of the note's name.
+    [Fact]
+    public async Task Open_MountThrows_LineNamesTheNoteOnOneLine()
+    {
+        EditorJs js = new EditorJs(data.Bunit);
+        js.Fail("ContextEditor.mount", new JSException("boom-143"));
+        data.WriteNote("Plan", "# Plan\n");
+        await data.RefreshAsync();
+        string name = "Plan";
+        IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p.Add(e => e.Name, name));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".editor-failed")));
+
+        Assert.Equal(
+            $"The editor couldn't start. {DesktopText.OneLine(name)} was not changed.",
+            cut.Find(".editor-failed").TextContent);
+    }
+
+    // 143 AC-2, AC-5: a failed isLossless shows the same line; nothing is mounted and no lossy line shows.
+    [Fact]
+    public async Task Open_IsLosslessThrows_EditorFailedLineNoMount()
+    {
+        data.WriteNote("Plan", "* star\n");
+        EditorJs js = new EditorJs(data.Bunit, lossless: false);
+        js.Fail("ContextEditor.isLossless", new JSException("boom-143"));
+
+        IRenderedComponent<NoteEditor> cut = await RenderFailed("Plan");
+
+        AssertFailedLine(cut, "Plan");
+        Assert.Empty(js.Calls("ContextEditor.mount"));
+        Assert.Empty(cut.FindAll(".lossy"));
+        Assert.DoesNotContain("boom-143", cut.Markup, StringComparison.Ordinal);
+    }
+
+    // 143 AC-3: every exception a page call can end with gives the line, and rendering throws nothing.
+    [Theory]
+    [InlineData("js")]
+    [InlineData("disconnected")]
+    [InlineData("canceled")]
+    public async Task Open_MountThrows_AnyPageException_EditorFailedLine(string kind)
+    {
+        data.WriteNote("Plan", "* star\n");
+        EditorJs js = new EditorJs(data.Bunit, lossless: false);
+        Exception thrown = kind switch
+        {
+            "js" => new JSException("boom-143"),
+            "disconnected" => new JSDisconnectedException("boom-143"),
+            _ => new TaskCanceledException("boom-143"),
+        };
+        js.Fail("ContextEditor.mount", thrown);
+
+        IRenderedComponent<NoteEditor> cut = await RenderFailed("Plan");
+
+        AssertFailedLine(cut, "Plan");
+        Assert.Empty(cut.FindAll(".lossy"));
+        Assert.DoesNotContain("boom-143", cut.Markup, StringComparison.Ordinal);
+    }
+
+    // 143 AC-4: after a failed start nothing can be saved, the page is not asked for dirt and the file is untouched.
+    [Fact]
+    public async Task Open_MountThrows_NothingToSave_FileUntouched()
+    {
+        data.WriteNote("Plan", "# Plan\r\n\r\nText\r\n");
+        string path = Path.Combine(data.Root, "Plan.md");
+        byte[] before = File.ReadAllBytes(path);
+        EditorJs js = new EditorJs(data.Bunit, dirty: true, markdown: "changed\n");
+        js.Fail("ContextEditor.mount", new JSException("boom-143"));
+
+        IRenderedComponent<NoteEditor> cut = await RenderFailed("Plan");
+
+        Assert.True(cut.Find("button.save").HasAttribute("disabled"));
+        Assert.Null(await cut.InvokeAsync(() => cut.Instance.PrepareSaveAsync()));
+        Assert.False(await cut.InvokeAsync(() => cut.Instance.IsDirtyAsync()));
+        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        Assert.Empty(js.Calls("ContextEditor.isDirty"));
+        Assert.Empty(js.Calls("ContextEditor.getMarkdown"));
+        Assert.Equal(before, File.ReadAllBytes(path));
+    }
+
+    // 143 AC-7: a mounted editor that only didn't take the focus works and shows no error.
+    [Fact]
+    public async Task Open_FocusThrows_EditorWorks_NoError()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.Fail("ContextEditor.focus", new JSException("boom-143"));
+
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+
+        Assert.Single(js.Calls("ContextEditor.focus"));
+        Assert.Empty(cut.FindAll(".editor-failed"));
+        Assert.Empty(cut.FindAll(".unreadable"));
+        Assert.False(cut.Find("button.save").HasAttribute("disabled"));
+        SaveRequest? request = await cut.InvokeAsync(() => cut.Instance.PrepareSaveAsync());
+        Assert.NotNull(request);
+        Assert.Equal("Plan", request.Note.Name);
+        Assert.DoesNotContain("boom-143", cut.Markup, StringComparison.Ordinal);
     }
 
     // AC-8: the Save button saves the editor's Markdown and says so.
@@ -432,6 +550,23 @@ public sealed class NoteEditorTests : IDisposable
             .Add(e => e.Sensitive, true));
         cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")));
         return cut;
+    }
+
+    private async Task<IRenderedComponent<NoteEditor>> RenderFailed(string name)
+    {
+        await data.RefreshAsync();
+        IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p.Add(e => e.Name, name));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".editor-failed")));
+        return cut;
+    }
+
+    private static void AssertFailedLine(IRenderedComponent<NoteEditor> cut, string name)
+    {
+        IElement line = Assert.Single(cut.FindAll("p.editor-failed"));
+        Assert.Equal(["red", "editor-failed"], line.ClassList.ToArray());
+        Assert.Equal("alert", line.GetAttribute("role"));
+        Assert.Equal($"The editor couldn't start. {name} was not changed.", line.TextContent);
+        Assert.Empty(cut.FindAll(".unreadable"));
     }
 
     private async Task<IRenderedComponent<NoteEditor>> Render(string name)

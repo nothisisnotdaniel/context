@@ -486,6 +486,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     does (`/new` alone: red `Type /new <title>.`). The page editor is `wwwroot/editor/editor.js`
     (`globalThis.ContextEditor`), built from `editor/src/` (`schema.js`, `markdown.js` with markdown-it `html: false`,
     `view.js`, `index.js`); `isLossless` false shows the grey `Saving will reformat parts of this note.`
+    A note that was read (or unlocked) but whose page editor didn't start (`isLossless` or `mount` threw) shows red
+    `The editor couldn't start. <name> was not changed.` (`p.editor-failed`, never together with `.unreadable`) and
+    can't be saved, while a failed `focus` after a mount shows nothing.
     **Update:** `Program.Main` starts with `VelopackApp.Build().Run()` (Velopack's install/update hooks), and before
     the window opens `StartupUpdate(IUpdateSource).Start()` runs the silent update on a pool thread: it returns at once
     and never throws. Not `IsInstalled`: nothing is called. Otherwise `CheckAsync`; when a newer version is found,

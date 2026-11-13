@@ -225,6 +225,22 @@ public sealed class DesktopSourceTests
         Assert.Contains(selector, css, StringComparison.Ordinal);
     }
 
+    // 143 AC-9: the editor-failed line shares the margin rule of the unreadable line and has no rule of its own.
+    [Fact]
+    public void AppCss_EditorFailed_OnlyInTheUnreadableRule()
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+
+        int at = css.IndexOf(".note-editor .unreadable", StringComparison.Ordinal);
+        Assert.True(at >= 0);
+        int start = css.LastIndexOf('}', at) + 1;
+        int brace = css.IndexOf('{', at);
+        string[] selectors = css[start..brace].Split(',').Select(sel => sel.Trim()).ToArray();
+        Assert.Contains(".note-editor .editor-failed", selectors);
+        Assert.Contains(".note-editor .unreadable", selectors);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(css, "editor-failed"));
+    }
+
     [Fact]
     public void EditorCss_StylesOnlyTheEditorBody()
     {
