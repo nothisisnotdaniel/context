@@ -89,13 +89,15 @@
             return;
         }
 
-        if (!Restore && !string.Equals(password, repeat, StringComparison.Ordinal))
+        // Both entries are compared and measured in the form the key is derived from (Unicode form C).
+        string? first = RecoveryFile.Normalized(password);
+        if (!Restore && (first is null || !string.Equals(first, RecoveryFile.Normalized(repeat), StringComparison.Ordinal)))
         {
-            error = MismatchText;
+            error = first is null ? DesktopActions.PasswordUnusableText : MismatchText;
             return;
         }
 
-        if (!Restore && password.Length < RecoveryFile.MinPasswordLength)
+        if (!Restore && first is not null && first.Length < RecoveryFile.MinPasswordLength)
         {
             error = DesktopActions.PasswordTooShortText;
             return;

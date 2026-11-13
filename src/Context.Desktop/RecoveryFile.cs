@@ -49,17 +49,38 @@ internal static class RecoveryFile
     /// <paramref name="password"/>; <paramref name="publicKey"/> gets the key's SubjectPublicKeyInfo. The private
     /// key exists nowhere else and is gone when this returns.
     /// </summary>
-    public static byte[] Create(string password, out byte[] publicKey)
+    public static byte[] Create(string password, out byte[] publicKey) => Build(password, Iterations, out publicKey);
+
+    /// <summary>
+    /// The password as it goes into the key derivation: Unicode form C, so the same visible password gives the same
+    /// key however a machine or input method composed it. <c>null</c> for text that has no such form (a lone
+    /// surrogate). Lengths and comparisons of recovery passwords use this form.
+    /// </summary>
+    public static string? Normalized(string password)
     {
+        try
+        {
+            return password.Normalize(NormalizationForm.FormC);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    // Create with a chosen PBKDF2 iteration count, so a test can make the weak file Read must refuse.
+    internal static byte[] Build(string password, int iterations, out byte[] publicKey)
+    {
+        password = Normalized(password) ?? throw new RecoveryFileException();
         using ECDiffieHellman key = SealedNote.NewKey();
         publicKey = key.ExportSubjectPublicKeyInfo();
         byte[] shrouded = key.ExportEncryptedPkcs8PrivateKey(
             password.AsSpan(),
-            new PbeParameters(PbeEncryptionAlgorithm.Aes256Cbc, HashAlgorithmName.SHA256, Iterations));
+            new PbeParameters(PbeEncryptionAlgorithm.Aes256Cbc, HashAlgorithmName.SHA256, iterations));
         byte[] authenticatedSafe = AuthenticatedSafe(shrouded);
         byte[] salt = RandomNumberGenerator.GetBytes(MacKeySize);
-        byte[] mac = Mac(password, salt, Iterations, authenticatedSafe);
-        return Pfx(authenticatedSafe, salt, mac);
+        byte[] mac = Mac(password, salt, iterations, authenticatedSafe);
+        return Pfx(authenticatedSafe, salt, iterations, mac);
     }
 
     /// <summary>
@@ -74,6 +95,8 @@ internal static class RecoveryFile
             {
                 throw new RecoveryFileException();
             }
+
+            password = Normalized(password) ?? throw new RecoveryFileException();
 
             AsnReader outer = new AsnReader(file, AsnEncodingRules.DER);
             AsnReader pfx = outer.ReadSequence();
@@ -147,7 +170,7 @@ internal static class RecoveryFile
         return safe.Encode();
     }
 
-    private static byte[] Pfx(byte[] authenticatedSafe, byte[] salt, byte[] mac)
+    private static byte[] Pfx(byte[] authenticatedSafe, byte[] salt, int iterations, byte[] mac)
     {
         AsnWriter pfx = new AsnWriter(AsnEncodingRules.DER);
         using (pfx.PushSequence())
@@ -169,7 +192,7 @@ internal static class RecoveryFile
                                 using (pfx.PushSequence())
                                 {
                                     pfx.WriteOctetString(salt);
-                                    pfx.WriteInteger(Iterations);
+                                    pfx.WriteInteger(iterations);
                                     pfx.WriteInteger(MacKeySize);
                                     WriteHmacSha256(pfx);
                                 }
@@ -263,12 +286,13 @@ internal static class RecoveryFile
     }
 
     // AlgorithmIdentifier of PBKDF2: salt, iterations, an optional key length and the PRF, which must be HMAC-SHA256.
+    // A file with fewer iterations than Create writes is refused: its password protection would be weaker.
     private static (byte[] Salt, int Iterations) ReadPbkdf2(AsnReader function, int? keyLength)
     {
         Expect(function, Pbkdf2Oid);
         AsnReader parameters = function.ReadSequence();
         byte[] salt = parameters.ReadOctetString();
-        if (!parameters.TryReadInt32(out int iterations) || iterations < 1 || iterations > MaxIterations)
+        if (!parameters.TryReadInt32(out int iterations) || iterations < Iterations || iterations > MaxIterations)
         {
             throw new RecoveryFileException();
         }

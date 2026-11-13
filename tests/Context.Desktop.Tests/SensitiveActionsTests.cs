@@ -186,6 +186,22 @@ public sealed class SensitiveActionsTests : IDisposable
         Assert.Equal(0, data.Keys.Agrees);
     }
 
+    // Round 2 (security 1): a password set up decomposed restores when typed composed.
+    [Fact]
+    public async Task SetUpThenRestore_PasswordInAnotherUnicodeForm_Restores()
+    {
+        data.WriteNote("Plan", "plan text\n");
+        await data.RefreshAsync();
+        Assert.Equal(ActionKind.Done, (await data.Actions!.SetUpSensitive("cafe\u0301 au lait long", data.RecoveryPath)).Kind);
+        await data.Actions.MarkSensitive("Plan", new Confirmation());
+        data.Keys.LoseMachineKey();
+
+        ActionResult result = await data.Actions.RestoreFromRecovery(data.RecoveryPath, "caf\u00E9 au lait long");
+
+        Assert.Equal((ActionKind.Done, "Restored 1 of 1 notes."), (result.Kind, result.Text));
+        Assert.Equal("plan text\n", (await data.State!.ReadSensitive("Plan"))!.Text);
+    }
+
     // AC-4: an existing machine key is kept.
     [Fact]
     public async Task SetUpSensitive_KeepsAnExistingMachineKey()
@@ -204,6 +220,8 @@ public sealed class SensitiveActionsTests : IDisposable
     // AC-4: refused, with no file written and no key made or stored.
     [Theory]
     [InlineData("short", nameof(ActionReason.Invalid), "The password needs at least 12 characters.")]
+    [InlineData("short once composed", nameof(ActionReason.Invalid), "The password needs at least 12 characters.")]
+    [InlineData("lone surrogate", nameof(ActionReason.Invalid), "That password can't be used.")]
     [InlineData("inside", nameof(ActionReason.Invalid), DesktopActions.RecoveryPathText)]
     [InlineData("empty path", nameof(ActionReason.Invalid), DesktopActions.RecoveryPathText)]
     [InlineData("exists", nameof(ActionReason.Exists), DesktopActions.RecoveryFileExistsText)]
@@ -217,6 +235,13 @@ public sealed class SensitiveActionsTests : IDisposable
         {
             case "short":
                 password = "elevenchars";
+                break;
+            case "short once composed":
+                // Twelve UTF-16 units as typed, eleven characters in the form the key is derived from.
+                password = "elevenchare\u0301";
+                break;
+            case "lone surrogate":
+                password = "long enough \uD800 password";
                 break;
             case "inside":
                 path = Path.Combine(data.Root, "sub", "recovery.pfx");

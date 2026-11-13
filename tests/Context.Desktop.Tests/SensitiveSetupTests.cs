@@ -44,11 +44,14 @@ public sealed class SensitiveSetupTests : IDisposable
     [InlineData("long enough password", "long enough passwore", "The passwords don't match.")]
     [InlineData("elevenchars", "elevenchars", "The password needs at least 12 characters.")]
     [InlineData("", "", "The password needs at least 12 characters.")]
+    [InlineData("elevenchare\u0301", "elevenchar\u00E9", "The password needs at least 12 characters.")]
+    [InlineData("long enough <lone surrogate> password", "long enough <lone surrogate> password", "That password can't be used.")]
     public async Task Setup_BadPasswords_RefusedBeforeTheFileDialog(string first, string second, string text)
     {
         data.Dialog.SavePath = data.RecoveryPath;
         IRenderedComponent<SensitiveSetup> cut = await Render(restore: false);
-        await Type(cut, first, second);
+        // An attribute can't carry a lone surrogate, so the row names it and it is put in here.
+        await Type(cut, first.Replace("<lone surrogate>", "\uD800", StringComparison.Ordinal), second.Replace("<lone surrogate>", "\uD800", StringComparison.Ordinal));
 
         await cut.Find("button.confirm").ClickAsync(new MouseEventArgs());
 
@@ -100,6 +103,22 @@ public sealed class SensitiveSetupTests : IDisposable
         Assert.NotNull(data.Keys.RecoveryPublicKey());
         Assert.NotNull(data.Keys.MachinePublicKey());
         Assert.Empty(FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    // Round 2 (security 1): the two entries are compared in Unicode form C, so the same visible password typed
+    // composed and decomposed is not a mismatch.
+    [Fact]
+    public async Task Setup_SamePasswordInTwoUnicodeForms_IsNoMismatch()
+    {
+        data.Dialog.SavePath = data.RecoveryPath;
+        IRenderedComponent<SensitiveSetup> cut = await Render(restore: false);
+        await Type(cut, "caf\u00E9 au lait long", "cafe\u0301 au lait long");
+
+        await cut.Find("button.confirm").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Single(done));
+        using System.Security.Cryptography.ECDiffieHellman key = RecoveryFile.Read(File.ReadAllBytes(data.RecoveryPath), "caf\u00E9 au lait long");
+        Assert.Equal(data.Keys.RecoveryPublicKey(), key.ExportSubjectPublicKeyInfo());
     }
 
     // AC-4: a refusal of the action (here: the chosen file exists) is shown in red and the dialog stays.

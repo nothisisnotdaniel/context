@@ -117,8 +117,10 @@ public sealed class RemovedFeatureSourceTests
         string text = File.ReadAllText(path);
 
         Assert.Empty(Hits(root, [path]));
-        Assert.DoesNotContain("/encrypt", text, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("/decrypt", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("at rest", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("encrypt", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("decrypt", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ciphertext", text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("**Data is plain:**", text, StringComparison.Ordinal);
         Assert.Single(
             text.Split('\n'),

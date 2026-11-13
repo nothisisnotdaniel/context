@@ -127,8 +127,11 @@ Every factory agent reads this file before working on Context. Keep it short and
   - **Recovery file (`RecoveryFile.cs`):** `Create(password, out publicKey)` makes a new P-256 key in memory and
     returns it as PKCS#12 bytes (one shrouded key bag: PBES2, AES-256-CBC, PBKDF2-HMAC-SHA256 with 600,000
     iterations; integrity PBMAC1 with the same PBKDF2), built with `AsnWriter`; `Read(file, password)` returns the
-    key (file at most 1 MB) or throws `RecoveryFileException`. It touches no file itself. The password needs at least
-    12 characters (`MinPasswordLength`).
+    key (file at most 1 MB) or throws `RecoveryFileException`, also for a file with fewer than 600,000 PBKDF2
+    iterations. It touches no file itself. Both normalise the password to Unicode form C first
+    (`RecoveryFile.Normalized`; text without such a form is refused), so a password typed composed on one machine
+    and decomposed on another gives the same key. The password needs at least 12 characters (`MinPasswordLength`),
+    counted on that form; the dialog compares its two entries on it as well.
   - **Actions (`DesktopActions`, the only write path):** `SetUpSensitive(password, path)` (creates the machine key if
     missing, writes the `.pfx` with `FileMode.CreateNew` and `0600` off Windows, and only then stores the recovery
     public key; refused for a short password, a path inside the data folder or that exists, or when recovery is

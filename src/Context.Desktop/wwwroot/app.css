@@ -310,7 +310,7 @@ input[type="password"] {
 
 input[type="text"]:focus-visible,
 input[type="date"]:focus-visible,
-input[type="search"],
+input[type="search"]:focus-visible,
 input[type="password"]:focus-visible {
     border-color: var(--accent-strong);
     outline: 2px solid var(--accent-strong);
@@ -319,7 +319,7 @@ input[type="password"]:focus-visible {
 
 input[type="text"]:disabled,
 input[type="date"]:disabled,
-input[type="search"],
+input[type="search"]:disabled,
 input[type="password"]:disabled {
     opacity: 0.5;
 }

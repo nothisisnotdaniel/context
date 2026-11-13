@@ -100,6 +100,50 @@ public sealed class RecoveryFileTests
         Assert.Null(failure.InnerException);
     }
 
+    // Round 2 (security 1): the password is used in Unicode form C, so a composed and a decomposed spelling of the
+    // same visible password open the same file, in both directions.
+    [Theory]
+    [InlineData("caf\u00E9 au lait long", "cafe\u0301 au lait long")]
+    [InlineData("cafe\u0301 au lait long", "caf\u00E9 au lait long")]
+    public void Read_PasswordInAnotherUnicodeForm_OpensTheFile(string made, string typed)
+    {
+        Assert.NotEqual(made, typed);
+        byte[] file = RecoveryFile.Create(made, out byte[] publicKey);
+
+        using ECDiffieHellman key = RecoveryFile.Read(file, typed);
+
+        Assert.Equal(publicKey, key.ExportSubjectPublicKeyInfo());
+        Assert.Equal("caf\u00E9 au lait long", RecoveryFile.Normalized(typed));
+    }
+
+    // Round 2 (security 1): text without a normal form (a lone surrogate) is refused on both sides.
+    [Fact]
+    public void Password_WithALoneSurrogate_IsRefused()
+    {
+        string broken = "long enough \uD800 password";
+
+        Assert.Null(RecoveryFile.Normalized(broken));
+        Assert.Throws<RecoveryFileException>(() => RecoveryFile.Create(broken, out _));
+        Assert.Throws<RecoveryFileException>(() => RecoveryFile.Read(Made.Value.File, broken));
+    }
+
+    // Round 2 (security 2): a file whose password protection is weaker than what Create writes is refused, even
+    // with the right password; the same file at the full count opens.
+    [Theory]
+    [InlineData(1)]
+    [InlineData(1_000)]
+    [InlineData(RecoveryFile.Iterations - 1)]
+    public void Read_FewerIterationsThanCreateWrites_Fails(int iterations)
+    {
+        byte[] weak = RecoveryFile.Build(Password, iterations, out _);
+
+        Assert.Throws<RecoveryFileException>(() => RecoveryFile.Read(weak, Password));
+
+        byte[] full = RecoveryFile.Build(Password, RecoveryFile.Iterations, out byte[] publicKey);
+        using ECDiffieHellman key = RecoveryFile.Read(full, Password);
+        Assert.Equal(publicKey, key.ExportSubjectPublicKeyInfo());
+    }
+
     // AC-8: a file that is not a recovery file, was changed, or is too large fails the same way.
     [Fact]
     public void Read_WrongFile_Fails()

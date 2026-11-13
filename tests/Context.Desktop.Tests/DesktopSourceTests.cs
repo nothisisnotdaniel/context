@@ -1027,4 +1027,20 @@ public sealed class DesktopSourceTests
 
         return problems;
     }
+
+    // 136 round 2 (ui 1): the focus and disabled looks of a field apply only in that state, for every input type.
+    [Theory]
+    [InlineData("text")]
+    [InlineData("date")]
+    [InlineData("search")]
+    [InlineData("password")]
+    public void AppCss_FocusAndDisabledRules_NameTheStateForEveryInputType(string type)
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+        string bare = $"input[type=\"{type}\"]";
+
+        Assert.Single(Regex.Matches(css, Regex.Escape(bare) + @"(?=[,\s]*[,{])"));
+        Assert.Single(Regex.Matches(css, Regex.Escape(bare + ":focus-visible")));
+        Assert.Single(Regex.Matches(css, Regex.Escape(bare + ":disabled")));
+    }
 }

@@ -95,6 +95,9 @@ internal sealed class DesktopActions
     public const string InboxSensitiveText = "The inbox can't be sensitive. Nothing was done.";
     public const string RecoveryExistsText = "Recovery is already set up. Nothing was done.";
     public const string PasswordTooShortText = "The password needs at least 12 characters.";
+
+    /// <summary>Shown when the recovery password holds text that has no Unicode normal form.</summary>
+    public const string PasswordUnusableText = "That password can't be used.";
     public const string RecoveryPathText = "Choose a place outside the data folder for the recovery file.";
     public const string RecoveryFileExistsText = "That file already exists. Nothing was done.";
     public const string RecoveryWriteFailedText = "Can't write the recovery file. Nothing was done.";
@@ -908,6 +911,13 @@ internal sealed class DesktopActions
             return Refused(ActionReason.NoKeys, UnsupportedText);
         }
 
+        if (RecoveryFile.Normalized(password) is not { } normalized)
+        {
+            return Refused(ActionReason.Invalid, PasswordUnusableText);
+        }
+
+        // From here on the password is its Unicode form C, the form RecoveryFile derives the key from.
+        password = normalized;
         if (password.Length < RecoveryFile.MinPasswordLength)
         {
             return Refused(ActionReason.Invalid, PasswordTooShortText);
