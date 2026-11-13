@@ -678,6 +678,73 @@ public sealed class DesktopSourceTests
         Assert.Contains("\"OnDirty\"", text, StringComparison.Ordinal);
     }
 
+    // 142 AC-4: chipDom is the only place that makes a tab stop, and only the tag and noteLink nodes use it.
+    [Fact]
+    public void EditorSchema_MakesOnlyChipsTabStops()
+    {
+        string text = EditorFile("editor/src/schema.js");
+
+        Assert.Single(Regex.Matches(text, "tabindex"));
+        Match chipDom = Regex.Match(text, @"export function chipDom\(kind, raw\) \{.*?\n\}\n", RegexOptions.Singleline);
+        Assert.True(chipDom.Success, "chipDom not found");
+        Assert.Contains("tabindex: \"0\"", chipDom.Value, StringComparison.Ordinal);
+
+        // Each call sits in the toDOM of the node of the same name: the last node opened above it.
+        MatchCollection calls = Regex.Matches(text, @"toDOM\(node\) \{ return chipDom\(""(\w+)"", node\.attrs\.raw\); \}");
+        Assert.Equal(["tag", "noteLink"], calls.Select(m => m.Groups[1].Value));
+        Assert.Equal(
+            ["tag", "noteLink"],
+            calls.Select(m => Regex.Matches(text[..m.Index], @"(?m)^    (\w+): \{").Last().Groups[1].Value));
+        Assert.Equal(3, Regex.Matches(text, @"chipDom\(").Count);
+    }
+
+    // 142 AC-5: Enter on a focused chip goes through a keydown handler in the source and in the committed bundle,
+    // and the page still calls back only through OnTag, OnLink and (141) OnDirty.
+    [Theory]
+    [InlineData("editor/src/view.js")]
+    [InlineData("wwwroot/editor/editor.js")]
+    public void Editor_OpensChipsOnKeydown_WithoutANewCallback(string file)
+    {
+        string text = EditorFile(file);
+
+        Assert.Matches(@"handleDOMEvents:\s*\{\s*(?://[^\n]*\n\s*)*keydown\(", text);
+        Assert.Contains("opensChip", text, StringComparison.Ordinal);
+        Assert.Equal(
+            ["OnDirty", "OnLink", "OnTag"],
+            Regex.Matches(text, @"invokeMethodAsync\(""(\w+)""").Select(m => m.Groups[1].Value).Distinct().Order(StringComparer.Ordinal));
+    }
+
+    // 142 AC-6: the chip rules are the same in the source and the committed stylesheet, exactly one of them is the
+    // focus ring (the app's), and none of them removes an outline.
+    [Fact]
+    public void EditorCss_ShowsAFocusRingOnChips()
+    {
+        List<(string Selector, string Block)> source = ChipRules(EditorFile("editor/src/editor.css"));
+        List<(string Selector, string Block)> committed = ChipRules(EditorFile("wwwroot/editor/editor.css"));
+
+        Assert.Equal(source.Select(r => r.Block), committed.Select(r => r.Block));
+        foreach (List<(string Selector, string Block)> rules in new[] { source, committed })
+        {
+            (string Selector, string Block) ring = Assert.Single(rules, r => r.Selector == ".note-editor-body .chip:focus-visible");
+            Assert.Contains("outline: 2px solid var(--accent-strong)", ring.Block, StringComparison.Ordinal);
+            Assert.Contains("outline-offset: 2px", ring.Block, StringComparison.Ordinal);
+            Assert.All(rules, r => Assert.DoesNotMatch(@"outline:\s*(none|0)\b", r.Block));
+        }
+    }
+
+    // Every rule block whose selector contains ".note-editor-body .chip", in file order: the selector and the text
+    // from the selector to the closing brace.
+    private static List<(string Selector, string Block)> ChipRules(string css)
+    {
+        return Regex.Matches(css.Replace("\r\n", "\n"), @"(?m)^([^\s{}/*][^{}]*)\{[^}]*\}")
+            .Where(m => m.Groups[1].Value.Contains(".note-editor-body .chip", StringComparison.Ordinal))
+            .Select(m => (m.Groups[1].Value.Trim(), m.Value))
+            .ToList();
+    }
+
+    private static string EditorFile(string file) =>
+        File.ReadAllText(Path.Combine([RepoFiles.Root(), RepoFiles.DesktopFolder, .. file.Split('/')]));
+
     // 094 AC-3: the editor's own sources build no HTML from strings and evaluate no code.
     [Fact]
     public void EditorSources_UseNoHtmlStringsOrEval()

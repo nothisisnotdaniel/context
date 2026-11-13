@@ -24,6 +24,15 @@ public sealed class EditorBundle
             return engine.Evaluate($"String(ContextEditor.{function}(input))").AsString();
         }
     }
+
+    /// <summary>Evaluates a JavaScript expression and returns its result as JSON text.</summary>
+    public string Json(string expression)
+    {
+        lock (engine)
+        {
+            return engine.Evaluate($"JSON.stringify({expression})").AsString();
+        }
+    }
 }
 
 // 094 AC-1 to AC-4: the editor's Markdown round trip, its tags and links, raw HTML and lossy notes, run on the
@@ -192,6 +201,45 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
             .Select(f => kind + "/" + Path.GetFileName(f))
             .Order(StringComparer.Ordinal)
             .ToList();
+    }
+
+    // 142 AC-1, AC-2: a chip is a span the keyboard can reach, with a role that says what Enter does.
+    [Theory]
+    [InlineData("tag", "#work", "chip tag accent", "button")]
+    [InlineData("noteLink", "[[A|b]]", "chip note-link accent", "link")]
+    public void ChipDom_IsAFocusableSpanWithARole(string kind, string raw, string cssClass, string role)
+    {
+        string call = $"ContextEditor.chipDom({JsonSerializer.Serialize(kind)}, {JsonSerializer.Serialize(raw)})";
+        using JsonDocument spec = JsonDocument.Parse(bundle.Json(call));
+        JsonElement[] parts = spec.RootElement.EnumerateArray().ToArray();
+
+        Assert.Equal(3, parts.Length);
+        Assert.Equal("span", parts[0].GetString());
+        Dictionary<string, string?> attributes = parts[1].EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString());
+        Assert.Equal(4, attributes.Count);
+        Assert.Equal(cssClass, attributes["class"]);
+        Assert.Equal(raw, attributes["title"]);
+        Assert.Equal("0", attributes["tabindex"]);
+        Assert.Equal(role, attributes["role"]);
+        Assert.Equal(raw, parts[2].GetString());
+    }
+
+    // 142 AC-3: only a bare Enter opens a focused chip.
+    [Theory]
+    [InlineData("{ key: 'Enter' }", true)]
+    [InlineData("{ key: 'Enter', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false }", true)]
+    [InlineData("{ key: 'Tab' }", false)]
+    [InlineData("{ key: ' ' }", false)]
+    [InlineData("{ key: 'Escape' }", false)]
+    [InlineData("{ key: 'Backspace' }", false)]
+    [InlineData("{ key: 'a' }", false)]
+    [InlineData("{ key: 'Enter', ctrlKey: true }", false)]
+    [InlineData("{ key: 'Enter', metaKey: true }", false)]
+    [InlineData("{ key: 'Enter', altKey: true }", false)]
+    [InlineData("{ key: 'Enter', shiftKey: true }", false)]
+    public void OpensChip_OnlyForEnterWithoutModifiers(string keyEvent, bool expected)
+    {
+        Assert.Equal(expected ? "true" : "false", bundle.Json($"ContextEditor.opensChip({keyEvent})"));
     }
 
     private static string Read(string file)

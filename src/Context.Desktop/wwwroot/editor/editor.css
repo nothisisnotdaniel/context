@@ -151,6 +151,11 @@ img.ProseMirror-separator {
   padding: 0 6px;
 }
 
+.note-editor-body .chip:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
 .note-editor-body .link {
   text-decoration: underline;
 }
