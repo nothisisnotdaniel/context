@@ -177,6 +177,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#143](backlog/143-settings-refocus-the-link-field-after.md) Settings: refocus the link field after a refusal
 - [?] [#144](backlog/144-settings-refusal-text-asks-to-type.md) Settings: refusal text asks to type the link again
 - [?] [#145](backlog/145-look-at-the-notes-bar-buttons.md) Look at the notes bar buttons in a narrow sidebar
+- [h] [#146](backlog/146-check-desktop-settings-key-details-on.md) Check desktop settings key details on Windows and macOS
 
 ## Dropped with the terminal UI
 
