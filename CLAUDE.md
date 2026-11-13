@@ -367,7 +367,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Todos`, `Notes`, unreadable flags, `Folder`) off the UI thread with `Refresh()` (one at a time; requests during a run
     coalesce into one more run) and raises `Changed`; `Tick()` refreshes when the day changed or 5 min passed.
     `DataWatcher` (one `FileSystemWatcher` with subfolders, `IsRelevant` filter, 300 ms debounce, 30 s tick timer;
-    never creates the folder) calls them. Components (`App`, `Main`, `CurrentPanel`, `TodoPanel`, `NotesPanel`)
+    never creates the folder) calls them. Components (`App`, `Main`, `CurrentPanel`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `LinksPanel`)
     inherit `StateComponent`, which injects the state and `DesktopActions` (internal types can't be
     public parameters). `DesktopActions` (with `ActionResult`: `ActionKind` `Done`/`Refused`/`Failed`, `ActionReason`,
     raw text) is the only write path: it never throws, runs one action at a time (`Busy`), refreshes the state after a change and has the test
@@ -399,6 +399,16 @@ Every factory agent reads this file before working on Context. Keep it short and
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
     `/current`, `/new`, `/open`, `/save`, `/tags`, `/todo` with `CommandMatcher` (shared with `CommandRegistry.Match`).
+    **Tags and links:** `TagsPanel` (the `Tags` button in `NotesPanel`, or `/tags` without an argument; `Main`'s
+    `tagsShown`) lists `DesktopState.Tags()` (`TagsView.Build`): one button per tag with its grey note count; a click
+    shows `TagPanel` for it below the list (`aria-pressed` on that button); its `Close` hides both, `TagPanel`'s only
+    itself, and opening a note or the current view hides both. `/tags <tag>` opens `TagPanel` directly. `LinksPanel`
+    sits under `NoteEditor` and lists `DesktopState.Links(name)` (`LinksView.Build`): per `NoteLink` the name (a button
+    through `RequestOpen`; a missing target is grey text), the console's link text and the shared tags as buttons
+    (`TagPanel`); grey `<name> has no linked notes.`, red `Can't read the links.`, and for a sensitive note only grey
+    `Sensitive notes have no links.` with no lookup. Both read only (no `Actions.`), run under `indexGate`, never
+    throw, and reload in `StateComponent.OnStateChangedAsync` (called after every `State.Changed`) keeping the shown
+    rows meanwhile; a result for another note or an older request is dropped.
     `TodoPanel` has an entry row (`DesktopActions.AddTodo`). `NotesPanel` has a new-note entry row (text field + `New
     note`; Enter or the button calls `CreateNote`; on Done the field clears, the note opens through `Main`'s `RequestOpen`
     (a dirty editor asks first) and a `role="status"` line shows `Created <name>` (accent), else the red text). While a
@@ -466,7 +476,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
     JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `DesktopDependencyTests` (no Spectre, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
-    CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule), `DesktopFixture` (temp folder, injected
+    CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),
     `FileSnapshot` (bytes and last-write times of a folder, to prove nothing changed) and `RepoFiles`.
 - **Style:**

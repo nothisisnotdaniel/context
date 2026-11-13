@@ -171,5 +171,24 @@ public sealed class NotesPanelTests : IDisposable
         Assert.Equal("a", File.ReadAllText(Path.Combine(data.Root, "Alpha.md")));
     }
 
+    // 137 AC-1: the Tags button is a typed button that calls OnTags; it changes nothing.
+    [Fact]
+    public async Task TagsButton_CallsOnTags()
+    {
+        data.WriteNote("Plan", "#work\n");
+        int asked = 0;
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
+        IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OnTags, () => asked++));
+
+        IElement button = cut.Find(".notes button.tags-open");
+        Assert.Equal("Tags", button.TextContent);
+        Assert.Equal("button", button.GetAttribute("type"));
+        await button.ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(1, asked);
+        Assert.Equal(before, FileSnapshot.Take(data.Root));
+    }
+
     private static string Time(DateTime local) => local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
 }

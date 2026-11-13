@@ -1,7 +1,10 @@
 @inherits StateComponent
 
 <section class="notes">
-    <h2>Notes</h2>
+    <div class="notes-bar">
+        <h2>Notes</h2>
+        <button type="button" class="tags-open" @onclick="() => OnTags.InvokeAsync()">Tags</button>
+    </div>
     @if (Snapshot is { } snapshot)
     {
         @if (snapshot.NotesUnreadable)
@@ -79,6 +82,10 @@
     /// <summary>Called with a note's name when it is clicked.</summary>
     [Parameter]
     public EventCallback<string> OnOpen { get; set; }
+
+    /// <summary>Called when the Tags button is clicked.</summary>
+    [Parameter]
+    public EventCallback OnTags { get; set; }
 
     // Plain and sensitive notes in one list, by name (ignoring case, then exact); a sensitive one is marked locked.
     private static IEnumerable<(NoteInfo Note, bool Locked)> Listed(DesktopSnapshot snapshot) =>

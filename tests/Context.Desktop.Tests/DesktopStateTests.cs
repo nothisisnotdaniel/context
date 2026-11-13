@@ -199,4 +199,68 @@ public sealed class DesktopStateTests : IDisposable
         Assert.True(File.Exists(Path.Combine(data.Root, TagIndex.FileName)));
         Assert.Equal("{\"left\":\"over\"}", File.ReadAllText(key));
     }
+
+    // 137: Tags() gives what the Core view gives, every tag with its count.
+    [Fact]
+    public async Task Tags_SameAsTheCoreView()
+    {
+        data.WriteNote("Plan", "#work #[big project]\n");
+        data.WriteNote("Other", "#Work\n");
+        DesktopState state = data.CreateState();
+
+        TagsView view = await state.Tags();
+
+        TagIndex index = new TagIndex(data.Root);
+        TagsView expected = TagsView.Build(index, data.Notes!, string.Empty);
+        Assert.Equal(TagsViewKind.AllTags, view.Kind);
+        Assert.Equal(expected.Tags.Select(t => (t.Tag, t.Count)).ToArray(), view.Tags.Select(t => (t.Tag, t.Count)).ToArray());
+        Assert.Contains(("work", 2), view.Tags.Select(t => (t.Tag, t.Count)));
+        Assert.Contains(("big project", 1), view.Tags.Select(t => (t.Tag, t.Count)));
+    }
+
+    // 137: Links() gives what the Core view gives for that note.
+    [Fact]
+    public async Task Links_SameAsTheCoreView()
+    {
+        data.WriteNote("Plan", "#work [[Other]] [[Ghost]]\n");
+        data.WriteNote("Other", "#work [[Plan]]\n");
+        data.WriteNote("Alone", "x\n");
+        DesktopState state = data.CreateState();
+
+        LinksView view = await state.Links("Plan");
+        LinksView alone = await state.Links("Alone");
+        LinksView none = await state.Links("Nowhere");
+
+        TagIndex index = new TagIndex(data.Root);
+        LinksView expected = LinksView.Build(index, data.Notes!, "Plan");
+        Assert.Equal(LinksViewKind.Links, view.Kind);
+        Assert.Equal("Plan", view.Note);
+        Assert.Equal(
+            expected.Links.Select(l => (l.Note, l.Direction, l.Missing, string.Join(",", l.SharedTags))).ToArray(),
+            view.Links.Select(l => (l.Note, l.Direction, l.Missing, string.Join(",", l.SharedTags))).ToArray());
+        Assert.Equal(
+            [("Ghost", NoteLinkDirection.To, true, string.Empty), ("Other", NoteLinkDirection.Both, false, "work")],
+            view.Links.Select(l => (l.Note, l.Direction, l.Missing, string.Join(",", l.SharedTags))).Order().ToArray());
+        Assert.Equal(LinksViewKind.NoLinks, alone.Kind);
+        Assert.Equal(LinksViewKind.NoSuchNote, none.Kind);
+    }
+
+    // 137: a context.db that is not a database gives IndexUnreadable from both, and the file is left alone.
+    [Fact]
+    public async Task TagsAndLinks_CorruptIndex_IndexUnreadable()
+    {
+        string text = "this is not a database, just some text that fills the header....";
+        data.WriteNote("Plan", "#work\n");
+        data.WriteFile(TagIndex.FileName, text);
+        DesktopState state = data.CreateState();
+
+        TagsView tags = await state.Tags();
+        LinksView links = await state.Links("Plan");
+
+        Assert.Equal(TagsViewKind.IndexUnreadable, tags.Kind);
+        Assert.Empty(tags.Tags);
+        Assert.Equal(LinksViewKind.IndexUnreadable, links.Kind);
+        Assert.Empty(links.Links);
+        Assert.Equal(text, File.ReadAllText(Path.Combine(data.Root, TagIndex.FileName)));
+    }
 }
