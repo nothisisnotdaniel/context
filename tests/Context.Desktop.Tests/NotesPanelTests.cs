@@ -224,7 +224,8 @@ public sealed class NotesPanelTests : IDisposable
         await button.ClickAsync(new MouseEventArgs());
 
         Assert.Equal(1, data.Dialog.ImportOpens);
-        Assert.Empty(cut.FindAll(".import-result"));
+        Assert.Empty(cut.FindAll(".import-result p"));
+        Assert.Equal("status", cut.Find(".import-result").GetAttribute("role"));
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal(before, Files());
         Assert.Equal(builds, data.State.Builds);

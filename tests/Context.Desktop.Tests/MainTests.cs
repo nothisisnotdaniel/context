@@ -700,7 +700,8 @@ public sealed class MainTests : IDisposable
         await RunPalette(cut, "/import");
 
         Assert.Equal(1, data.Dialog.ImportOpens);
-        Assert.Empty(cut.FindAll(".import-result"));
+        Assert.Empty(cut.FindAll(".import-result p"));
+        Assert.Equal("status", cut.Find(".import-result").GetAttribute("role"));
 
         string source = data.Outside("Plan.md");
         File.WriteAllText(source, "new\n");

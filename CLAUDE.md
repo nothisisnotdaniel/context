@@ -444,7 +444,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     write <path>.`; no refresh). Only the replace question carries `NotConfirmed`, no answer holds an exception message, and
     every path and name shown goes through `DesktopText.OneLine`. `NotesPanel` has `Import` (or `/import`, which
     `Main` passes to `NotesPanel.Import()`; a typed argument is ignored): at most 100 files (`Choose at most 100
-    files.`), one line per file in the chosen order in a `role="status"` region (accent Done, red otherwise, cut by
+    files.`), one line per file in the chosen order in a `role="status"` region that is always in the page (accent Done, red otherwise, cut by
     CSS with the full text in `title`); files that would replace a note are written only after one `ConfirmDialog`
     (`Replace <name>?` or `Replace <n> notes? <names>`, confirm label `Replace`), and Cancel or Esc leaves grey `Not
     replaced: <name>`. The toolbar of a plain note has `Export` (or `/export`; argument ignored; no note open: red

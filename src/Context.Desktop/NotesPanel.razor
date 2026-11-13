@@ -43,18 +43,15 @@
         <div class="note-import">
             <button type="button" class="import" disabled="@importing" @onclick="Import">Import</button>
         </div>
-        @if (importLines.Any(l => l.Text is not null))
-        {
-            <div class="import-result" role="status">
-                @foreach (ImportLine line in importLines)
+        <div class="import-result" role="status">
+            @foreach (ImportLine line in importLines)
+            {
+                @if (line.Text is { } lineText)
                 {
-                    @if (line.Text is { } lineText)
-                    {
-                        <p class="import-line cut @line.Css" title="@lineText">@lineText</p>
-                    }
+                    <p class="import-line cut @line.Css" title="@lineText">@lineText</p>
                 }
-            </div>
-        }
+            }
+        </div>
         @if (replaceQuestion is { } question)
         {
             <ConfirmDialog Question="@question" ConfirmLabel="Replace" Busy="importing"
