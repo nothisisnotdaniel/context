@@ -2,6 +2,17 @@
 // toDOM never builds <img>, <a href> or inline styles: images are a grey text placeholder and links are plain spans.
 import { Schema } from "prosemirror-model";
 
+const chips = {
+  tag: { name: "tag", role: "button" },
+  noteLink: { name: "note-link", role: "link" },
+};
+
+/** The toDOM spec of a chip (kind "tag" or "noteLink"): a span the keyboard can reach, with raw as its text. */
+export function chipDom(kind, raw) {
+  const chip = chips[kind];
+  return ["span", { class: "chip " + chip.name + " accent", title: raw, tabindex: "0", role: chip.role }, raw];
+}
+
 export const schema = new Schema({
   nodes: {
     doc: {
@@ -79,7 +90,7 @@ export const schema = new Schema({
       atom: true,
       selectable: true,
       attrs: { raw: {}, tag: {} },
-      toDOM(node) { return ["span", { class: "chip tag accent", title: node.attrs.raw }, node.attrs.raw]; },
+      toDOM(node) { return chipDom("tag", node.attrs.raw); },
     },
     // [[Note]] or [[Note|alias]]; raw keeps the text exactly as written, target is the trimmed inner text.
     noteLink: {
@@ -88,7 +99,7 @@ export const schema = new Schema({
       atom: true,
       selectable: true,
       attrs: { raw: {}, target: {} },
-      toDOM(node) { return ["span", { class: "chip note-link accent", title: node.attrs.raw }, node.attrs.raw]; },
+      toDOM(node) { return chipDom("noteLink", node.attrs.raw); },
     },
     image: {
       inline: true,

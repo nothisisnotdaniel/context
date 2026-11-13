@@ -1,5 +1,6 @@
 // The editor in the page: one ProseMirror view per host element. DOM is built only through ProseMirror's
-// renderer and document.createElement; tag and link clicks are reported to .NET, which decides what to open.
+// renderer and document.createElement; tag and link clicks (and Enter on a focused chip) are reported to .NET,
+// which decides what to open.
 import { EditorState } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { keymap } from "prosemirror-keymap";
@@ -117,6 +118,37 @@ function reportDirty(editor) {
   }
 }
 
+/** True for the one key that opens a focused chip: Enter without Ctrl, Meta, Alt or Shift. */
+export function opensChip(event) {
+  return event.key === "Enter" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
+}
+
+// Tells .NET to open a tag or note link chip; true when node is one. Clicks and Enter share it.
+function openChip(node, dotnet) {
+  if (node.type === schema.nodes.tag) {
+    dotnet.invokeMethodAsync("OnTag", node.attrs.raw).catch(() => {});
+    return true;
+  }
+  if (node.type === schema.nodes.noteLink) {
+    dotnet.invokeMethodAsync("OnLink", node.attrs.raw).catch(() => {});
+    return true;
+  }
+  return false;
+}
+
+// The tag or noteLink node a focused chip element stands for, or null.
+function chipNode(view, target) {
+  if (!target || !target.classList || !target.classList.contains("chip")) {
+    return null;
+  }
+  try {
+    const node = view.state.doc.nodeAt(view.posAtDOM(target, 0));
+    return node && (node.type === schema.nodes.tag || node.type === schema.nodes.noteLink) ? node : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Opens markdown in a new editor inside element; tag and link clicks and dirty flips call back into dotnet. */
 export function mount(element, markdown, dotnet) {
   destroy(element);
@@ -162,15 +194,22 @@ export function mount(element, markdown, dotnet) {
       }
     },
     handleClickOn(view, pos, node) {
-      if (node.type === schema.nodes.tag) {
-        dotnet.invokeMethodAsync("OnTag", node.attrs.raw).catch(() => {});
+      return openChip(node, dotnet);
+    },
+    handleDOMEvents: {
+      // A keydown on a focused chip never reaches the keymaps: Enter opens the chip like a click, every other key
+      // keeps its browser default (Tab moves on) and changes no text.
+      keydown(view, event) {
+        const node = chipNode(view, event.target);
+        if (!node) {
+          return false;
+        }
+        if (opensChip(event)) {
+          event.preventDefault();
+          openChip(node, dotnet);
+        }
         return true;
-      }
-      if (node.type === schema.nodes.noteLink) {
-        dotnet.invokeMethodAsync("OnLink", node.attrs.raw).catch(() => {});
-        return true;
-      }
-      return false;
+      },
     },
   });
   editor.view = view;
