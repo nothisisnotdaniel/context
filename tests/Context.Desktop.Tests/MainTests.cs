@@ -136,7 +136,7 @@ public sealed class MainTests : IDisposable
 
         IReadOnlyList<IElement> buttons = cut.FindAll(".note-toolbar button");
         Assert.Equal(
-            ["Rename", "Delete", "Open in default editor", "Mark sensitive"], buttons.Select(b => b.TextContent).ToArray());
+            ["Rename", "Delete", "Open in default editor", "Export", "Mark sensitive"], buttons.Select(b => b.TextContent).ToArray());
         Assert.All(buttons, b => Assert.Equal("button", b.GetAttribute("type")));
     }
 
@@ -152,7 +152,7 @@ public sealed class MainTests : IDisposable
         await NameButton(cut, "Big").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Equal("Can't read Big.", cut.Find(".unreadable").TextContent));
-        Assert.Equal(4, cut.FindAll(".note-toolbar button").Count);
+        Assert.Equal(5, cut.FindAll(".note-toolbar button").Count);
     }
 
     // 134 AC-8: Rename swaps in a prefilled field; Enter or Save name renames and the editor shows the new name.
@@ -561,6 +561,161 @@ public sealed class MainTests : IDisposable
 
     private static IElement NameButton(IRenderedComponent<Main> cut, string name) =>
         cut.FindAll(".notes-region button.name").Single(b => b.TextContent == name);
+
+    // 139 AC-8 / AC-9: Export (button or palette) asks the OS where to save, suggesting <name>.md, and writes the
+    // saved text there; a typed argument is never a path.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Export_ButtonOrPalette_WritesTheChosenFile(bool palette)
+    {
+        data.WriteNote("Plan", "# Plan\n\nText\n");
+        string target = data.Outside("Copy.md");
+        string typed = data.Outside("typed.md");
+        data.Dialog.ExportPath = target;
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+
+        if (palette)
+        {
+            await RunPalette(cut, "/export " + typed);
+        }
+        else
+        {
+            IElement button = cut.Find(".note-toolbar button.export");
+            Assert.Equal("Export", button.TextContent);
+            Assert.Equal("button", button.GetAttribute("type"));
+            await button.ClickAsync(new MouseEventArgs());
+        }
+
+        Assert.Equal(1, data.Dialog.ExportSaves);
+        Assert.Equal("Plan.md", data.Dialog.SuggestedName);
+        Assert.Equal("# Plan\n\nText\n", File.ReadAllText(target));
+        Assert.False(File.Exists(typed));
+        IElement status = cut.Find(".main-status");
+        Assert.Equal($"Exported Plan to {target}", status.TextContent);
+        Assert.Equal(status.TextContent, status.GetAttribute("title"));
+        Assert.True(status.ClassList.Contains("accent"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    // 139 AC-8: a cancelled save dialog does nothing; a refusal shows the action's red text.
+    [Fact]
+    public async Task Export_CancelledThenExistingTarget_NothingThenRedText()
+    {
+        data.WriteNote("Plan", "text\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+
+        await cut.Find("button.export").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(1, data.Dialog.ExportSaves);
+        Assert.Equal(string.Empty, cut.Find(".main-status").TextContent);
+
+        string target = data.Outside("Taken.md");
+        File.WriteAllText(target, "theirs\n");
+        data.Dialog.ExportPath = target;
+        await cut.Find("button.export").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(2, data.Dialog.ExportSaves);
+        Assert.Equal("That file already exists; choose a new name: " + target, cut.Find(".main-status").TextContent);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Equal("theirs\n", File.ReadAllText(target));
+    }
+
+    // 139 AC-8 / AC-9: with unsaved changes Export asks to save first and opens no dialog.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Export_DirtyEditor_SaveFirst_NoDialog(bool palette)
+    {
+        data.WriteNote("Plan", "text\n");
+        data.Dialog.ExportPath = data.Outside("Copy.md");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        js.Edit("unsaved\n");
+
+        if (palette)
+        {
+            await RunPalette(cut, "/export");
+        }
+        else
+        {
+            await cut.Find("button.export").ClickAsync(new MouseEventArgs());
+        }
+
+        Assert.Equal("Save Plan first.", cut.Find(".main-status").TextContent);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Equal(0, data.Dialog.ExportSaves);
+        Assert.False(File.Exists(data.Outside("Copy.md")));
+    }
+
+    // 139 AC-9: /export with no note open is a red line and opens no dialog.
+    [Fact]
+    public async Task PaletteExport_NoNoteOpen_RedLine()
+    {
+        data.WriteNote("Plan", "text\n");
+        data.Dialog.ExportPath = data.Outside("Copy.md");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, "/export Plan " + data.Outside("Copy.md"));
+
+        Assert.Equal("Open a note first.", cut.Find(".main-status").TextContent);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Equal(0, data.Dialog.ExportSaves);
+        Assert.False(File.Exists(data.Outside("Copy.md")));
+    }
+
+    // 139 AC-9: /import does what the Import button does; the typed argument is ignored and never used as a path.
+    [Fact]
+    public async Task PaletteImport_ChoosesFilesInTheDialog_IgnoresTheArgument()
+    {
+        string typed = data.Outside("Typed.md");
+        File.WriteAllText(typed, "typed\n");
+        string chosen = data.Outside("Chosen.md");
+        File.WriteAllText(chosen, "chosen\n");
+        data.Dialog.ImportPaths = [chosen];
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, "/import " + typed);
+
+        Assert.Equal(1, data.Dialog.ImportOpens);
+        Assert.Equal(["Chosen.md"], FileSnapshot.Take(data.Root, TagIndex.FileName).Keys);
+        cut.WaitForAssertion(() => Assert.StartsWith(
+            "Imported Chosen.", Assert.Single(cut.FindAll(".import-result p")).TextContent, StringComparison.Ordinal));
+        cut.WaitForAssertion(() => Assert.Contains("Chosen", cut.Find(".note-list").TextContent));
+    }
+
+    // 139 AC-9: /import with a cancelled dialog changes nothing; a replacing file asks in the same dialog as the button.
+    [Fact]
+    public async Task PaletteImport_CancelledThenReplacing_NothingThenAsks()
+    {
+        data.WriteNote("Plan", "old\n");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, "/import");
+
+        Assert.Equal(1, data.Dialog.ImportOpens);
+        Assert.Empty(cut.FindAll(".import-result p"));
+        Assert.Equal("status", cut.Find(".import-result").GetAttribute("role"));
+
+        string source = data.Outside("Plan.md");
+        File.WriteAllText(source, "new\n");
+        data.Dialog.ImportPaths = [source];
+        await RunPalette(cut, "/import");
+
+        cut.WaitForAssertion(() => Assert.Equal("Replace Plan?", cut.Find("[role=dialog] .question").TextContent));
+        Assert.Equal("old\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal("new\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        cut.WaitForAssertion(() => Assert.StartsWith(
+            "Replaced Plan.", Assert.Single(cut.FindAll(".import-result p")).TextContent, StringComparison.Ordinal));
+    }
 
     private static async Task Open(IRenderedComponent<Main> cut, EditorJs js, string name)
     {

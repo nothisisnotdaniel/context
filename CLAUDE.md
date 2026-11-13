@@ -401,7 +401,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     file bytes, read through `BoundedFile`): a bigger or non-seekable note can't be opened (`Can't read <name>.`), a save
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
-    `/current`, `/new`, `/open`, `/save`, `/settings`, `/tags`, `/todo` with `CommandMatcher` (shared with `CommandRegistry.Match`).
+    `/current`, `/export`, `/import`, `/new`, `/open`, `/save`, `/settings`, `/tags`, `/todo` with `CommandMatcher` (shared with `CommandRegistry.Match`).
     **Settings:** `SettingsPanel` (the `Settings` button in `NotesPanel`, or `/settings`; `Main`'s `settingsShown`;
     at the top of the main region; `Close`, opening a note or the current view hides it) has two sections, both
     reloaded after every `State.Changed`. *Exchange calendar* shows `DesktopState.CalendarLinkSetting()`
@@ -427,6 +427,31 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Sensitive notes have no links.` with no lookup. Both read only (no `Actions.`), run under `indexGate`, never
     throw, and reload in `StateComponent.OnStateChangedAsync` (called after every `State.Changed`) keeping the shown
     rows meanwhile; a result for another note or an older request is dropped.
+    **Import and export:** the only paths the desktop reads or writes outside the data folder come from the OS
+    dialog (`IFileDialog.OpenMarkdownFiles()`: several `*.md`, empty when cancelled or failed;
+    `SaveExportFile(suggestedName)`: `null` when cancelled, adds `.md` to a name without extension; Photino's save
+    dialog takes no file name, so `PhotinoFileDialog` shows the suggestion in the dialog title), never from typed
+    text, and both actions still re-check everything. `DesktopActions.ImportNote(path, Confirmation?)` (not fully
+    qualified: `Can't read <path>.`; `NoteStore.Contains`: `That file is already in the Context folder. Nothing
+    changed.`; `<ValidateTitle text> Rename the file and import it again.`; `<name> is sensitive. Nothing was
+    imported.`; `NoteStore.ReadImport`: `No such file: <path>`, `Can't import a file over 5 MB: <path>`, `Can't read
+    <path>.`; an existing plain note without a confirmation is Refused `NotConfirmed` with the note's name as text;
+    else `NoteStore.Save` and `Imported|Replaced <name>. The source is unchanged; delete it if you don't need the
+    plain copy: <path>`) and `ExportNote(name, path)` (`Export to a path outside the Context folder. Nothing was
+    written.`; `<name> no longer exists. Nothing was done.`; `<name> is sensitive. Make it plain to export it.`
+    without any `Agree`; an existing file or directory: `That file already exists; choose a new name: <path>`;
+    `Can't read <name>.`; `NoteStore.WritePlainCopy` with `FileMode.CreateNew`: `Exported <name> to <path>` or `Can't
+    write <path>.`; no refresh). Only the replace question carries `NotConfirmed`, no answer holds an exception message, and
+    every path and name shown goes through `DesktopText.OneLine`. `NotesPanel` has `Import` (or `/import`, which
+    `Main` passes to `NotesPanel.Import()`; a typed argument is ignored): at most 100 files (`Choose at most 100
+    files.`), one line per file in the chosen order in a `role="status"` region that is always in the page (accent Done, red otherwise, cut by
+    CSS with the full text in `title`); files that would replace a note are written only after one `ConfirmDialog`
+    (`Replace <name>?` or `Replace <n> notes? <names>`, confirm label `Replace`), and Cancel or Esc leaves grey `Not
+    replaced: <name>`. The toolbar of a plain note has `Export` (or `/export`; argument ignored; no note open: red
+    `Open a note first.`; a sensitive note has no button and `/export` shows the sensitive text without a dialog):
+    a dirty editor is refused with `Save <name> first.`, else `SaveExportFile("<name>.md")` and `ExportNote`'s text
+    in the toolbar's status line. Rules (`DesktopSourceTests`): `WritePlainCopy` and `ReadImport` are named in
+    `Context.Desktop` only in `DesktopActions.cs`, and no `.razor` file matches `\b(File|Directory|Path)\.`.
     `TodoPanel` has an entry row (`DesktopActions.AddTodo`). `NotesPanel` has a new-note entry row (text field + `New
     note`; Enter or the button calls `CreateNote`; on Done the field clears, the note opens through `Main`'s `RequestOpen`
     (a dirty editor asks first) and a `role="status"` line shows `Created <name>` (accent), else the red text). While a
@@ -498,9 +523,9 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `CalendarLinkActionsTests`, `KeyDetailsTests`, `DesktopDependencyTests` (no Spectre, no Jint
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `CalendarLinkActionsTests`, `KeyDetailsTests`, `DesktopDependencyTests` (no Spectre, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
-    CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
+    CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules, the transfer calls and no file system class in `.razor`), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),
     `FileSnapshot` (bytes and last-write times of a folder, to prove nothing changed) and `RepoFiles`.
 - **Style:**

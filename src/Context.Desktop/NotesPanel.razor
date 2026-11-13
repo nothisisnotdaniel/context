@@ -40,6 +40,23 @@
                    aria-label="New note" placeholder="New note title" @oninput="TitleTyped" @onkeydown="e => Create(e)" />
             <button type="button" class="note-new" disabled="@creating" @onclick="() => Create(null)">New note</button>
         </div>
+        <div class="note-import">
+            <button type="button" class="import" disabled="@importing" @onclick="Import">Import</button>
+        </div>
+        <div class="import-result" role="status">
+            @foreach (ImportLine line in importLines)
+            {
+                @if (line.Text is { } lineText)
+                {
+                    <p class="import-line cut @line.Css" title="@lineText">@lineText</p>
+                }
+            }
+        </div>
+        @if (replaceQuestion is { } question)
+        {
+            <ConfirmDialog Question="@question" ConfirmLabel="Replace" Busy="importing"
+                           OnConfirm="ReplaceConfirmed" OnCancel="ReplaceCancelled" />
+        }
         @if (snapshot.SensitiveSupported)
         {
             <div class="sensitive-entry">
@@ -81,6 +98,19 @@
     private bool setupOpen;
     private bool restoring;
     private string sensitiveDone = string.Empty;
+
+    /// <summary>The most files one import takes.</summary>
+    public const int MaxImportFiles = 100;
+
+    public const string TooManyFilesText = "Choose at most 100 files.";
+
+    private IReadOnlyList<ImportLine> importLines = [];
+    private bool importing;
+    private string? replaceQuestion;
+
+    /// <summary>The OS file dialogs.</summary>
+    [Inject]
+    internal IFileDialog Dialog { get; set; } = null!;
 
     /// <summary>Called with a note's name when it is clicked.</summary>
     [Parameter]
@@ -154,6 +184,128 @@
         {
             newTitle = string.Empty;
             await OnOpen.InvokeAsync(result.Text);
+        }
+    }
+
+    // The button, and the palette's /import (Main calls this from its own event handler): asks the OS for Markdown
+    // files and stores each as a note. A file that would replace a note is left for the question afterwards.
+    internal async Task Import()
+    {
+        if (importing || replaceQuestion is not null)
+        {
+            return;
+        }
+
+        IReadOnlyList<string> chosen = Dialog.OpenMarkdownFiles();
+        if (chosen.Count == 0)
+        {
+            return;
+        }
+
+        if (chosen.Count > MaxImportFiles)
+        {
+            importLines = [new ImportLine { Text = TooManyFilesText, Css = "red" }];
+            StateHasChanged();
+            return;
+        }
+
+        List<ImportLine> lines = chosen.Select(c => new ImportLine { Source = c }).ToList();
+        importLines = lines;
+        importing = true;
+        try
+        {
+            foreach (ImportLine line in lines)
+            {
+                ActionResult result = await Actions.ImportNote(line.Source, null);
+                if (result.Reason == ActionReason.NotConfirmed)
+                {
+                    line.Replaces = result.Text;
+                }
+                else
+                {
+                    line.Show(result);
+                }
+
+                StateHasChanged();
+            }
+        }
+        finally
+        {
+            importing = false;
+        }
+
+        List<string> names = lines
+            .Where(l => l.Replaces is not null)
+            .Select(l => l.Replaces!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (names.Count == 1)
+        {
+            replaceQuestion = $"Replace {names[0]}?";
+        }
+        else if (names.Count > 1)
+        {
+            replaceQuestion = $"Replace {names.Count} notes? {string.Join(", ", names)}";
+        }
+
+        StateHasChanged();
+    }
+
+    // Confirmed in the dialog: the waiting files replace their notes.
+    private async Task ReplaceConfirmed(Confirmation confirmed)
+    {
+        if (importing)
+        {
+            return;
+        }
+
+        importing = true;
+        try
+        {
+            foreach (ImportLine line in importLines.Where(l => l.Text is null))
+            {
+                line.Show(await Actions.ImportNote(line.Source, confirmed));
+            }
+        }
+        finally
+        {
+            importing = false;
+            replaceQuestion = null;
+        }
+    }
+
+    // Cancel or Esc in the dialog: the waiting files are dropped and their notes stay as they are.
+    private void ReplaceCancelled()
+    {
+        if (importing)
+        {
+            return;
+        }
+
+        foreach (ImportLine line in importLines.Where(l => l.Text is null))
+        {
+            line.Text = $"Not replaced: {DesktopText.OneLine(line.Replaces ?? string.Empty)}";
+            line.Css = "grey";
+        }
+
+        replaceQuestion = null;
+    }
+
+    // One chosen file: where it is, the note it would replace (while that waits for the question) and its result line.
+    private sealed class ImportLine
+    {
+        public string Source { get; init; } = string.Empty;
+
+        public string? Replaces { get; set; }
+
+        public string? Text { get; set; }
+
+        public string Css { get; set; } = string.Empty;
+
+        public void Show(ActionResult result)
+        {
+            Text = DesktopText.OneLine(result.Text);
+            Css = result.Kind == ActionKind.Done ? "accent" : "red";
         }
     }
 }

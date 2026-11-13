@@ -462,7 +462,26 @@ input[type="password"]:disabled {
     white-space: nowrap;
 }
 
-/* The open note's toolbar (Rename, Delete, Open in default editor) and its inline rename field. */
+/* Import: the button under the new-note row and one result line per chosen file. */
+.note-import {
+    display: flex;
+    margin-top: 8px;
+}
+
+/* Always in the page, so screen readers announce the lines when they arrive; empty it takes no room. */
+.import-result {
+    margin: 0;
+}
+
+.import-result .import-line {
+    margin: 2px 0 0;
+}
+
+.import-result .import-line:first-child {
+    margin-top: 6px;
+}
+
+/* The open note's toolbar (Rename, Delete, Open in default editor, Export) and its inline rename field. */
 .note-toolbar {
     align-items: center;
     display: flex;

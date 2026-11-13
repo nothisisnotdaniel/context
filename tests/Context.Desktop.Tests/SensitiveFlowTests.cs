@@ -65,7 +65,7 @@ public sealed class SensitiveFlowTests : IDisposable
         Assert.All(cut.FindAll(".note-toolbar button"), b => Assert.Equal("button", b.GetAttribute("type")));
 
         await Open(cut, js, "Other");
-        Assert.Equal(["Rename", "Delete", "Open in default editor", "Mark sensitive"], ToolbarButtons(cut));
+        Assert.Equal(["Rename", "Delete", "Open in default editor", "Export", "Mark sensitive"], ToolbarButtons(cut));
     }
 
     // AC-5: a refused OS prompt, a lost key or a changed file shows one red line and no editor.
@@ -357,7 +357,7 @@ public sealed class SensitiveFlowTests : IDisposable
         Assert.Equal(["Plan.md"], RootFiles());
         Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         Assert.Empty(cut.FindAll("li.note .locked"));
-        cut.WaitForAssertion(() => Assert.Equal(["Rename", "Delete", "Open in default editor", "Mark sensitive"], ToolbarButtons(cut)));
+        cut.WaitForAssertion(() => Assert.Equal(["Rename", "Delete", "Open in default editor", "Export", "Mark sensitive"], ToolbarButtons(cut)));
         Assert.Equal(1, data.Keys.Agrees);
     }
 
@@ -413,10 +413,35 @@ public sealed class SensitiveFlowTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
 
-        Assert.Equal(["Rename", "Delete", "Open in default editor"], ToolbarButtons(cut));
+        Assert.Equal(["Rename", "Delete", "Open in default editor", "Export"], ToolbarButtons(cut));
         Assert.Empty(cut.FindAll(".sensitive-entry"));
         Assert.Empty(cut.FindAll("button.sensitive-setup-open"));
         Assert.Empty(cut.FindAll("button.sensitive-restore-open"));
+    }
+
+    // 139 AC-8 / AC-9: a sensitive note has no Export button, and /export refuses it without a dialog or a key call.
+    [Fact]
+    public async Task Export_Sensitive_NoButton_PaletteRefused()
+    {
+        data.WriteSensitive("Plan", "Secret\n");
+        data.Dialog.ExportPath = data.Outside("Copy.md");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        int agrees = data.Keys.Agrees;
+
+        Assert.Empty(cut.FindAll(".note-toolbar button.export"));
+        Assert.DoesNotContain("Export", ToolbarButtons(cut));
+
+        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
+        await cut.Find(".palette-input").InputAsync(new Microsoft.AspNetCore.Components.ChangeEventArgs { Value = "/export" });
+        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+
+        Assert.Equal("Plan is sensitive. Make it plain to export it.", cut.Find(".main-status").TextContent);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Equal(0, data.Dialog.ExportSaves);
+        Assert.Equal(agrees, data.Keys.Agrees);
+        Assert.False(File.Exists(data.Outside("Copy.md")));
     }
 
     private static string[] ToolbarButtons(IRenderedComponent<Main> cut) =>
