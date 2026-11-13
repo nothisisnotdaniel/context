@@ -46,7 +46,10 @@ public sealed class DesktopStateTests : IDisposable
         {
             foreach (FieldInfo field in type.GetFields(All))
             {
-                Assert.False(IsLinkType(field.FieldType), $"{type.Name}.{field.Name} is a {field.FieldType.Name}");
+                // 138: the state holds the CalendarLink reader for the settings page (it knows the folder, not
+                // the link; the feed held one all along). The link itself, a Uri, is still in no member.
+                bool reader = type == typeof(DesktopState) && field.FieldType == typeof(CalendarLink);
+                Assert.False(!reader && IsLinkType(field.FieldType), $"{type.Name}.{field.Name} is a {field.FieldType.Name}");
             }
 
             foreach (PropertyInfo property in type.GetProperties(All))
@@ -162,6 +165,96 @@ public sealed class DesktopStateTests : IDisposable
 
         Assert.Equal(2, state.Builds);
         Assert.Equal(2, data.Http.Requests);
+    }
+
+    // 138 AC-2: the calendar link as the settings page shows it: read only, no download, only the masked link.
+    [Fact]
+    public async Task CalendarLinkSetting_NotSetShownUnreadable_ReadsOnly()
+    {
+        DesktopState state = data.CreateState();
+
+        CalendarLinkView none = await state.CalendarLinkSetting();
+
+        Assert.Equal(CalendarLinkViewKind.NotSet, none.Kind);
+        Assert.False(Directory.Exists(data.Root));
+
+        data.SaveLink(FakeHttpHandler.Link);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
+        CalendarLinkView fresh = await state.CalendarLinkSetting();
+
+        Assert.Equal(CalendarLinkViewKind.Shown, fresh.Kind);
+        Assert.Equal("https://" + FakeHttpHandler.Host + "/…", fresh.Masked);
+        Assert.Null(fresh.CachedAtUtc);
+
+        DateTime at = new(2026, 10, 29, 7, 30, 0, DateTimeKind.Utc);
+        data.WriteCache(DesktopFixture.Calendar(), at);
+        CalendarLinkView cached = await state.CalendarLinkSetting();
+
+        Assert.Equal(at, cached.CachedAtUtc);
+        Assert.Equal(DesktopFixture.Zone, state.Zone);
+        foreach (CalendarLinkView view in new[] { fresh, cached })
+        {
+            Assert.Equal("CalendarLinkView", view.ToString());
+            Assert.DoesNotContain(FakeHttpHandler.PathToken, view.Masked!, StringComparison.Ordinal);
+            Assert.DoesNotContain(FakeHttpHandler.QueryToken, view.Masked!, StringComparison.Ordinal);
+        }
+
+        File.Delete(Path.Combine(data.Root, CalendarFeed.CacheFileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root));
+
+        data.WriteFile(CalendarLink.FileName, "not a link\n");
+        CalendarLinkView damaged = await state.CalendarLinkSetting();
+
+        Assert.Equal(CalendarLinkViewKind.Unreadable, damaged.Kind);
+        Assert.Null(damaged.Masked);
+        Assert.Equal("not a link\n", File.ReadAllText(Path.Combine(data.Root, CalendarLink.FileName)));
+        Assert.Equal(0, data.Http.Requests);
+        Assert.Equal(0, state.Builds);
+    }
+
+    // 138 AC-10: the machine key's details come from the key store without a private-key call or a new key.
+    [Fact]
+    public async Task SensitiveKey_UnsupportedNotSetUpShownUnreadable_NoAgreeNoNewKey()
+    {
+        FakeKeyStore keys = new FakeKeyStore { Supported = false };
+        data.Keys = keys;
+        DesktopState state = data.CreateState();
+
+        SensitiveKeyView unsupported = await state.SensitiveKey();
+
+        Assert.Equal(SensitiveKeyKind.Unsupported, unsupported.Kind);
+        Assert.Equal(0, keys.DetailsReads);
+
+        keys.Supported = true;
+        SensitiveKeyView notSetUp = await state.SensitiveKey();
+
+        Assert.Equal(SensitiveKeyKind.NotSetUp, notSetUp.Kind);
+        Assert.Null(notSetUp.Details);
+
+        keys.CreateMachineKey();
+        int created = keys.MachineKeysCreated;
+        SensitiveKeyView shown = await state.SensitiveKey();
+
+        Assert.Equal(SensitiveKeyKind.Shown, shown.Kind);
+        Assert.Equal("Context sensitive notes", shown.Details!.Name);
+        Assert.Equal(SealedNote.KeyId(keys.MachinePublicKey()!), shown.Details.Fingerprint, ignoreCase: true);
+        Assert.Null(shown.Details.ExpiresUtc);
+
+        keys.Details = new KeyDetails("Context sensitive notes", "0A1B", new DateTime(2076, 11, 13, 0, 0, 0, DateTimeKind.Utc));
+        SensitiveKeyView certificate = await state.SensitiveKey();
+
+        Assert.Same(keys.Details, certificate.Details);
+
+        keys.DetailsThrow = true;
+        SensitiveKeyView unreadable = await state.SensitiveKey();
+
+        Assert.Equal(SensitiveKeyKind.Unreadable, unreadable.Kind);
+        Assert.Null(unreadable.Details);
+        Assert.Equal(0, keys.Agrees);
+        Assert.Equal(created, keys.MachineKeysCreated);
+        Assert.Null(keys.RecoveryPublicKey());
+        Assert.False(Directory.Exists(data.Root));
+        Assert.Equal(0, state.Builds);
     }
 
     private static bool IsLinkType(Type type) =>

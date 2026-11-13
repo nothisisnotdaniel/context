@@ -114,7 +114,10 @@ Every factory agent reads this file before working on Context. Keep it short and
     private key, password or plain text is ever written to the data folder.
   - **Keys (`IKeyStore`):** `Supported`, `MachinePublicKey()`, `RecoveryPublicKey()` (SubjectPublicKeyInfo, `null`
     when absent; read from the OS store, never from the data folder, so a planted file can't add a recipient),
-    `CreateMachineKey()`, `StoreRecoveryPublicKey(spki)` and `Agree(peerPoint)` (the one private-key call; the OS may
+    `CreateMachineKey()`, `StoreRecoveryPublicKey(spki)`, `MachineKeyDetails()` (public data for the settings page:
+    `KeyDetails` with `Name`, `Fingerprint`, `ExpiresUtc`; `null` without a machine key, never a prompt; Windows gives
+    the certificate's common name, thumbprint and `NotAfter`, macOS `KeyDetails.FromPublicKey`, the upper-case hex
+    SHA-256 of the public key with no expiry) and `Agree(peerPoint)` (the one private-key call; the OS may
     prompt), failing with `KeyStoreException`. `WindowsKeyStore` (`CurrentUser\My`, .NET classes only): a P-256 CNG
     key with `ExportPolicy.None`, in the TPM provider when it can agree, else in the software provider behind a
     UI-protected key, tied to the self-issued certificate `CN=Context sensitive notes`; the recovery public key is
@@ -398,7 +401,22 @@ Every factory agent reads this file before working on Context. Keep it short and
     file bytes, read through `BoundedFile`): a bigger or non-seekable note can't be opened (`Can't read <name>.`), a save
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
-    `/current`, `/new`, `/open`, `/save`, `/tags`, `/todo` with `CommandMatcher` (shared with `CommandRegistry.Match`).
+    `/current`, `/new`, `/open`, `/save`, `/settings`, `/tags`, `/todo` with `CommandMatcher` (shared with `CommandRegistry.Match`).
+    **Settings:** `SettingsPanel` (the `Settings` button in `NotesPanel`, or `/settings`; `Main`'s `settingsShown`;
+    at the top of the main region; `Close`, opening a note or the current view hides it) has two sections, both
+    reloaded after every `State.Changed`. *Exchange calendar* shows `DesktopState.CalendarLinkSetting()`
+    (`CalendarLinkView.Show`: grey `No calendar link set.`, the masked link with the last download in the calendar's
+    zone, or red `Can't read calendar-link.txt. …`), one `<input type="password">` (no `value`, no `@bind`,
+    `maxlength` `DesktopActions.MaxCalendarLinkLength` = 2048; rebuilt with a new `@key` after a save so the typed
+    link leaves the DOM, and the component's `typed` copy is cleared on save and on `Close`), `Save link` / Enter
+    (`DesktopActions.SetCalendarLink(value, Confirmation?)`: length and `CalendarLink.Validate` first, so `off` is
+    Refused and never removes the link; with a link stored or unreadable and no confirmation it is Refused
+    `NotConfirmed` and the panel asks in a `ConfirmDialog`) and `Remove link`
+    (`DesktopActions.RemoveCalendarLink(Confirmation)`); both go through `CalendarLinkView.Run`, delete the cached
+    calendar copy and answer with fixed texts and the mask only. *Sensitive notes* shows `DesktopState.SensitiveKey()`
+    (`SensitiveKeyView`: `Unsupported`, `NotSetUp`, `Unreadable` or `Shown` with `KeyDetails`): rows `Name`,
+    `Thumbprint` (whole, selectable) and `Expires` (`yyyy-MM-dd` in UTC or `Does not expire`); it never calls
+    `Agree` and creates no key. Both reads run off the UI thread and never throw.
     **Tags and links:** `TagsPanel` (the `Tags` button in `NotesPanel`, or `/tags` without an argument; `Main`'s
     `tagsShown`) lists `DesktopState.Tags()` (`TagsView.Build`): one button per tag with its grey note count; a click
     shows `TagPanel` for it below the list (`aria-pressed` on that button); its `Close` hides both, `TagPanel`'s only
@@ -460,7 +478,13 @@ Every factory agent reads this file before working on Context. Keep it short and
     The editor sources (`editor/src/*.js`) use no `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`,
     `eval` or `new Function`. Every `<input>` is `type="checkbox"`, `"text"`, `"date"`, `"search"` or `"password"`, without `@bind`,
     and there is no `<textarea>`. No CDN or external fonts; error
-    lines are fixed texts, never exception messages; the calendar link stays inside `CalendarFeed`. Texts match the
+    lines are fixed texts, never exception messages. The calendar link is a bearer secret: in `Context.Desktop` the type `CalendarLink` is
+    named only in `Program.cs`, `DesktopState.cs` and `DesktopActions.cs`; no file calls `.Get()` on it or reads
+    `.AbsoluteUri`, `.OriginalString`, `.PathAndQuery` or `.Query`; `CalendarLinkView.Run` is named only in
+    `DesktopActions.cs`, and components name only `CalendarLinkView`/`CalendarLinkViewKind`, so the page sees the
+    mask alone. No `.razor`, `.cs`, `index.html` or editor source names `localStorage`, `sessionStorage`,
+    `indexedDB`, `document.cookie`, `NavigationManager` or `NavigateTo`, and `SettingsPanel.razor`,
+    `DesktopActions.cs` and `DesktopState.cs` name no `ILogger`, `Console.`, `Debug.` or `Trace.`. Texts match the
     console renderer's. Colours by CSS class (`accent`, `grey`, `red`, dates `overdue`/`today`/`later`); long lines
     cut by CSS with the full text in `title`.
   - `tests/Context.Tests/`: references both projects; one test class per production class (Core and app alike) (`AppTests.cs` tests `App.cs`),
@@ -474,9 +498,9 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `DesktopDependencyTests` (no Spectre, no Jint
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `CalendarLinkActionsTests`, `KeyDetailsTests`, `DesktopDependencyTests` (no Spectre, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
-    CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
+    CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),
     `FileSnapshot` (bytes and last-write times of a folder, to prove nothing changed) and `RepoFiles`.
 - **Style:**

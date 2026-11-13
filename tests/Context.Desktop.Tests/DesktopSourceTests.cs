@@ -49,6 +49,30 @@ public sealed class DesktopSourceTests
     // The .cs files that may name DesktopActions (besides DesktopActions.cs itself).
     private const string ProgramFile = "src/Context.Desktop/Program.cs";
 
+    // 138: where the calendar link may be named, and the page that sets it.
+    private const string StateFile = "src/Context.Desktop/DesktopState.cs";
+    private const string SettingsFile = "src/Context.Desktop/SettingsPanel.razor";
+
+    // The link's type as a whole word: CalendarLinkView, SetCalendarLink and CalendarLinkSetting don't count.
+    private static readonly Regex LinkType = new(@"\bCalendarLink\b", RegexOptions.CultureInvariant);
+
+    // A read of the link's text: the link's Get(), or the members of Uri that hold the path or the query.
+    private static readonly Regex LinkText = new(
+        @"\.\s*(Get\s*\(\s*\)|(AbsoluteUri|OriginalString|PathAndQuery|Query)\b)", RegexOptions.CultureInvariant);
+
+    private static readonly Regex LinkRun = new(@"\bCalendarLinkView\s*\.\s*Run\b", RegexOptions.CultureInvariant);
+
+    // A Core type that holds or reads the link, unlike the masked view, its kind and the feed's status.
+    private static readonly Regex LinkCoreType = new(
+        @"\b(CalendarLink|CalendarLinkException|CalendarFeed)\b", RegexOptions.CultureInvariant);
+
+    private static readonly Regex Storage = new(
+        @"\b(localStorage|sessionStorage|indexedDB|NavigationManager|NavigateTo)\b|\bdocument\s*\.\s*cookie\b",
+        RegexOptions.CultureInvariant);
+
+    private static readonly Regex Logging = new(
+        @"\bILogger\b|\b(Console|Debug|Trace)\s*\.", RegexOptions.CultureInvariant);
+
     // Spelled in pieces: no test file may hold the real source's name (see Tests_NeverReferenceTheRealUpdateSource).
     private const string RealUpdateSource = "Velopack" + "UpdateSource";
     private const string RealUpdateSourceFile = "src/Context.Desktop/" + RealUpdateSource + ".cs";
@@ -453,6 +477,150 @@ public sealed class DesktopSourceTests
         Assert.Equal(count, PlainEvents(razor, ["ConfirmDialog"]).Count);
     }
 
+    // 138 AC-9: the calendar link's type is named only where it is wired, read for the settings and written.
+    [Fact]
+    public void Sources_NameTheCalendarLinkOnlyInProgramStateAndActions()
+    {
+        string root = RepoFiles.Root();
+        List<string> found = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
+            .Where(f => LinkType.IsMatch(File.ReadAllText(Path.Combine(root, f))))
+            .ToList();
+
+        Assert.Equal([ActionsFile, StateFile, ProgramFile], found.Order(StringComparer.Ordinal).ToArray());
+    }
+
+    // 138 AC-9: nothing in the desktop project reads the link's text.
+    [Fact]
+    public void Sources_NeverReadTheCalendarLinksText()
+    {
+        string root = RepoFiles.Root();
+        List<string> found = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
+            .Where(f => LinkText.IsMatch(File.ReadAllText(Path.Combine(root, f))))
+            .ToList();
+
+        Assert.True(found.Count == 0, "The link's text is read in: " + string.Join(", ", found));
+    }
+
+    // 138 AC-9: the calendar link is changed only by DesktopActions; components see only the masked view.
+    [Fact]
+    public void Sources_RunTheCalendarLinkCommandOnlyInDesktopActions()
+    {
+        string root = RepoFiles.Root();
+        List<string> files = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor");
+        List<string> runs = files.Where(f => LinkRun.IsMatch(File.ReadAllText(Path.Combine(root, f)))).ToList();
+        List<string> razor = files
+            .Where(f => f.EndsWith(".razor", StringComparison.Ordinal))
+            .Where(f => LinkCoreType.IsMatch(File.ReadAllText(Path.Combine(root, f))))
+            .ToList();
+
+        Assert.Equal([ActionsFile], runs.ToArray());
+        Assert.True(razor.Count == 0, "A component names a calendar-link type other than the view: " + string.Join(", ", razor));
+        Assert.Contains("CalendarLinkView", File.ReadAllText(Path.Combine(root, SettingsFile)), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("CalendarLink link", true, false, false, true)]
+    [InlineData("new CalendarLink(root)", true, false, false, true)]
+    [InlineData("CalendarLink? calendarLink = null", true, false, false, true)]
+    [InlineData("State.CalendarLinkSetting()", false, false, false, false)]
+    [InlineData("Actions.SetCalendarLink(typed, null)", false, false, false, false)]
+    [InlineData("Actions.RemoveCalendarLink(confirmed)", false, false, false, false)]
+    [InlineData("CalendarLinkView view; CalendarLinkViewKind.Shown", false, false, false, false)]
+    [InlineData("DesktopActions.MaxCalendarLinkLength", false, false, false, false)]
+    [InlineData("calendarLink", false, false, false, false)]
+    [InlineData("link.Get()", false, true, false, false)]
+    [InlineData("link . Get ( )", false, true, false, false)]
+    [InlineData("uri.AbsoluteUri", false, true, false, false)]
+    [InlineData("uri.OriginalString", false, true, false, false)]
+    [InlineData("uri.PathAndQuery", false, true, false, false)]
+    [InlineData("uri.Query", false, true, false, false)]
+    [InlineData("items.GetValueOrDefault(1)", false, false, false, false)]
+    [InlineData("tags.QueryTags()", false, false, false, false)]
+    [InlineData("CalendarLinkView.Run(link, feed, value)", false, false, true, false)]
+    [InlineData("CalendarLinkView . Run(link, feed, value)", false, false, true, false)]
+    [InlineData("CalendarLinkView.Show(link, feed)", false, false, false, false)]
+    [InlineData("Run(() => 1)", false, false, false, false)]
+    [InlineData("CalendarFeed feed", false, false, false, true)]
+    [InlineData("catch (CalendarLinkException)", false, false, false, true)]
+    [InlineData("CalendarFeedStatus.Stale", false, false, false, false)]
+    public void CalendarLink_Patterns(string source, bool type, bool text, bool run, bool core)
+    {
+        Assert.Equal(type, LinkType.IsMatch(source));
+        Assert.Equal(text, LinkText.IsMatch(source));
+        Assert.Equal(run, LinkRun.IsMatch(source));
+        Assert.Equal(core, LinkCoreType.IsMatch(source));
+    }
+
+    // 138 AC-9: nothing can put the link into browser storage or a URL.
+    [Fact]
+    public void Sources_UseNoBrowserStorageOrNavigation()
+    {
+        string root = RepoFiles.Root();
+        List<string> files = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor");
+        files.Add(RepoFiles.DesktopFolder + "/wwwroot/index.html");
+        string editor = Path.Combine(root, RepoFiles.DesktopFolder, "editor", "src");
+        files.AddRange(Directory.EnumerateFiles(editor, "*.js").Select(f => RepoFiles.Relative(root, f)));
+        Assert.Contains(RepoFiles.DesktopFolder + "/editor/src/index.js", files);
+
+        List<string> found = files.Where(f => Storage.IsMatch(File.ReadAllText(Path.Combine(root, f)))).ToList();
+
+        Assert.True(found.Count == 0, "Browser storage or navigation in: " + string.Join(", ", found));
+    }
+
+    [Theory]
+    [InlineData("localStorage.setItem('a', b)", true)]
+    [InlineData("window.sessionStorage", true)]
+    [InlineData("indexedDB.open('x')", true)]
+    [InlineData("document.cookie = x", true)]
+    [InlineData("document . cookie", true)]
+    [InlineData("@inject NavigationManager Navigation", true)]
+    [InlineData("nav.NavigateTo(url)", true)]
+    [InlineData("document.createElement('div')", false)]
+    [InlineData("storage", false)]
+    public void Storage_Pattern(string source, bool match)
+    {
+        Assert.Equal(match, Storage.IsMatch(source));
+    }
+
+    // 138 AC-9: the files that hold the link, or the typed value, log nothing.
+    [Theory]
+    [InlineData(SettingsFile)]
+    [InlineData(ActionsFile)]
+    [InlineData(StateFile)]
+    public void LinkFiles_LogNothing(string file)
+    {
+        string text = File.ReadAllText(Path.Combine(RepoFiles.Root(), file));
+
+        Assert.False(Logging.IsMatch(text), file + " logs");
+    }
+
+    [Theory]
+    [InlineData("ILogger<Main> log", true)]
+    [InlineData("Console.WriteLine(x)", true)]
+    [InlineData("Console . Error.WriteLine(x)", true)]
+    [InlineData("Debug.WriteLine(x)", true)]
+    [InlineData("System.Diagnostics.Trace.TraceError(x)", true)]
+    [InlineData("AnsiConsole text", false)]
+    [InlineData("StackTrace trace", false)]
+    [InlineData("IConsole console", false)]
+    public void Logging_Pattern(string source, bool match)
+    {
+        Assert.Equal(match, Logging.IsMatch(source));
+    }
+
+    // 138 AC-10: the settings and the key table are styled.
+    [Theory]
+    [InlineData(".settings-panel {")]
+    [InlineData(".calendar-link-entry {")]
+    [InlineData(".key-details td {")]
+    [InlineData(".notes-bar-buttons {")]
+    public void AppCss_StylesTheSettings(string selector)
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+
+        Assert.Contains(selector, css, StringComparison.Ordinal);
+    }
+
     // AC-10 / 094 AC-12: only EditorInterop.cs uses JavaScript interop (IJSRuntime, [JSInvokable]).
     [Fact]
     public void Sources_MentionJSRuntimeOnlyInEditorInterop()
@@ -720,7 +888,7 @@ public sealed class DesktopSourceTests
 
         Assert.Equal([ProgramFile, RealLauncherFile], found);
         Assert.Contains(
-            "new DesktopActions(notes, todos, state, new " + RealLauncher + "())",
+            "new DesktopActions(notes, todos, state, new " + RealLauncher + "(), calendarLink, feed)",
             File.ReadAllText(Path.Combine(root, ProgramFile)),
             StringComparison.Ordinal);
     }

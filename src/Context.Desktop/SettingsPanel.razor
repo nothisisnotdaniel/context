@@ -1,0 +1,279 @@
+@inherits StateComponent
+@* The settings: the Exchange calendar link (set, replace, remove) and the key that opens sensitive notes. The link
+   is a bearer secret: it is typed into a password field that has no value, kept in one field of this component
+   until it is saved or the panel closes, handed only to DesktopActions and never rendered back; what is shown is
+   the masked link from DesktopState.CalendarLinkSetting. Both sections reload whenever the state changes. *@
+
+<section class="settings-panel" aria-label="Settings">
+    <div class="panel-bar">
+        <h2>Settings</h2>
+        <button type="button" class="close" disabled="@busy" @onclick="Close">Close</button>
+    </div>
+    <h3>Exchange calendar</h3>
+    @if (link is null)
+    {
+        <p class="calendar-link-state grey">Loading…</p>
+    }
+    else if (link.Kind == CalendarLinkViewKind.Unreadable)
+    {
+        <p class="calendar-link-state red">@UnreadableText</p>
+    }
+    else if (link.Kind == CalendarLinkViewKind.Shown)
+    {
+        <p class="calendar-link-state">Calendar link: <span class="masked accent">@DesktopText.OneLine(link.Masked ?? string.Empty)</span> <span class="downloaded grey">(@Downloaded(link))</span></p>
+    }
+    else
+    {
+        <p class="calendar-link-state grey">@DesktopActions.CalendarLinkNotSetText</p>
+    }
+    <div class="calendar-link-entry">
+        <input type="password" class="calendar-link-field" @key="fieldKey" maxlength="@DesktopActions.MaxCalendarLinkLength"
+               autocomplete="off" spellcheck="false" disabled="@busy" aria-label="Calendar link"
+               placeholder="https:// or webcal:// link" @oninput="LinkTyped" @onkeydown="e => Save(e)" />
+        <button type="button" class="calendar-link-save" disabled="@(busy || typed.Length == 0)" @onclick="() => Save(null)">Save link</button>
+        @if (link is not null && link.Kind != CalendarLinkViewKind.NotSet)
+        {
+            <button type="button" class="calendar-link-remove" disabled="@busy" @onclick="AskRemove">Remove link</button>
+        }
+    </div>
+    <p class="settings-result @resultClass" role="status">@resultText</p>
+    <h3>Sensitive notes</h3>
+    @if (key is null)
+    {
+        <p class="sensitive-key-state grey">Loading…</p>
+    }
+    else if (key.Kind == SensitiveKeyKind.Unsupported)
+    {
+        <p class="sensitive-key-state grey">@DesktopActions.UnsupportedText</p>
+    }
+    else if (key.Kind == SensitiveKeyKind.Unreadable || key.Details is null && key.Kind == SensitiveKeyKind.Shown)
+    {
+        <p class="sensitive-key-state red">Can't read the key.</p>
+    }
+    else if (key.Details is { } details)
+    {
+        <table class="key-details">
+            <tbody>
+                <tr>
+                    <th scope="row">Name</th>
+                    <td class="key-name">@DesktopText.OneLine(details.Name)</td>
+                </tr>
+                <tr>
+                    <th scope="row">Thumbprint</th>
+                    <td class="key-thumbprint">@DesktopText.OneLine(details.Fingerprint)</td>
+                </tr>
+                <tr>
+                    <th scope="row">Expires</th>
+                    <td class="key-expires">@Expires(details)</td>
+                </tr>
+            </tbody>
+        </table>
+    }
+    else
+    {
+        <p class="sensitive-key-state grey">Sensitive notes are not set up.</p>
+    }
+    @if (replacing)
+    {
+        <ConfirmDialog Question="@ReplaceQuestion" ConfirmLabel="Replace" Busy="busy"
+                       OnConfirm="ReplaceConfirmed" OnCancel="CancelDialog" />
+    }
+    @if (removing)
+    {
+        <ConfirmDialog Question="@RemoveQuestion" ConfirmLabel="Remove" Busy="busy"
+                       OnConfirm="RemoveConfirmed" OnCancel="CancelDialog" />
+    }
+</section>
+
+@code {
+    public const string UnreadableText = "Can't read calendar-link.txt. Set the link again or remove it.";
+    public const string ReplaceQuestion = "Replace the calendar link? The downloaded calendar copy is deleted too.";
+    public const string RemoveQuestion = "Remove the calendar link? The downloaded calendar copy is deleted too.";
+
+    private const string TimeFormat = "yyyy-MM-dd HH:mm";
+    private const string DateFormat = "yyyy-MM-dd";
+
+    private CalendarLinkView? link;
+    private SensitiveKeyView? key;
+    private int request;
+
+    // The typed link: never rendered, cleared once it is saved and when the panel closes.
+    private string typed = string.Empty;
+
+    // Changes after a save, so the field is built anew and the page keeps no copy of what was typed.
+    private int fieldKey;
+    private bool busy;
+    private bool replacing;
+    private bool removing;
+    private string resultText = string.Empty;
+    private string resultClass = string.Empty;
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    protected override Task OnInitializedAsync() => Load();
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    private static string Expires(KeyDetails details) =>
+        details.ExpiresUtc is DateTime expires
+            ? expires.ToString(DateFormat, CultureInfo.InvariantCulture)
+            : "Does not expire";
+
+    // The console's wording, with the time in the calendar's zone.
+    private string Downloaded(CalendarLinkView shown) =>
+        shown.CachedAtUtc is DateTime cached
+            ? "last download " + TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(cached, DateTimeKind.Utc), State.Zone)
+                .ToString(TimeFormat, CultureInfo.InvariantCulture)
+            : "not downloaded yet";
+
+    // Keeps what is shown while it reloads; only the newest request's result is used. Both reads change nothing.
+    private async Task Load()
+    {
+        int mine = ++request;
+        CalendarLinkView linkNow = await State.CalendarLinkSetting();
+        SensitiveKeyView keyNow = await State.SensitiveKey();
+        if (mine == request)
+        {
+            link = linkNow;
+            key = keyNow;
+        }
+    }
+
+    private void LinkTyped(ChangeEventArgs e)
+    {
+        typed = e.Value?.ToString() ?? string.Empty;
+        ShowResult(string.Empty, string.Empty);
+    }
+
+    // Enter in the field or Save link. With a link already stored the action answers "not confirmed" (after it
+    // checked the value), and the dialog asks before the old link and its downloaded copy go.
+    private async Task Save(KeyboardEventArgs? pressed)
+    {
+        if ((pressed is not null && pressed.Key != "Enter") || busy || typed.Length == 0)
+        {
+            return;
+        }
+
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.SetCalendarLink(typed, null);
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        if (result.Kind == ActionKind.Refused && result.Reason == ActionReason.NotConfirmed)
+        {
+            ShowResult(string.Empty, string.Empty);
+            replacing = true;
+            return;
+        }
+
+        await Saved(result);
+    }
+
+    private async Task ReplaceConfirmed(Confirmation confirmed)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.SetCalendarLink(typed, confirmed);
+        }
+        finally
+        {
+            busy = false;
+            replacing = false;
+        }
+
+        await Saved(result);
+    }
+
+    private void AskRemove()
+    {
+        if (!busy)
+        {
+            ShowResult(string.Empty, string.Empty);
+            removing = true;
+        }
+    }
+
+    private async Task RemoveConfirmed(Confirmation confirmed)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.RemoveCalendarLink(confirmed);
+        }
+        finally
+        {
+            busy = false;
+            removing = false;
+        }
+
+        ShowResult(DesktopText.OneLine(result.Text), result.Kind == ActionKind.Done ? "accent" : "red");
+        await Load();
+    }
+
+    private void CancelDialog()
+    {
+        if (!busy)
+        {
+            replacing = false;
+            removing = false;
+        }
+    }
+
+    // After a save the typed link is dropped and the field replaced by a new, empty one.
+    private async Task Saved(ActionResult result)
+    {
+        if (result.Kind == ActionKind.Done)
+        {
+            typed = string.Empty;
+            fieldKey++;
+            ShowResult(DesktopText.OneLine(result.Text), "accent");
+        }
+        else
+        {
+            ShowResult(DesktopText.OneLine(result.Text), "red");
+        }
+
+        await Load();
+    }
+
+    private Task Close()
+    {
+        if (busy)
+        {
+            return Task.CompletedTask;
+        }
+
+        typed = string.Empty;
+        return OnClose.InvokeAsync();
+    }
+
+    private void ShowResult(string text, string cssClass)
+    {
+        resultText = text;
+        resultClass = cssClass;
+    }
+}

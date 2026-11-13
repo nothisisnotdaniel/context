@@ -9,6 +9,8 @@ internal sealed class UnsupportedKeyStore : IKeyStore
 
     public byte[]? RecoveryPublicKey() => null;
 
+    public KeyDetails? MachineKeyDetails() => null;
+
     public void CreateMachineKey() => throw new KeyStoreException();
 
     public void StoreRecoveryPublicKey(byte[] publicKey) => throw new KeyStoreException();

@@ -28,6 +28,15 @@ internal sealed class FakeKeyStore : IKeyStore, IDisposable
     /// <summary>When true, <see cref="StoreRecoveryPublicKey"/> fails.</summary>
     public bool StoreThrows { get; set; }
 
+    /// <summary>What <see cref="MachineKeyDetails"/> returns instead of the details made from the machine key.</summary>
+    public KeyDetails? Details { get; set; }
+
+    /// <summary>When true, <see cref="MachineKeyDetails"/> fails.</summary>
+    public bool DetailsThrow { get; set; }
+
+    /// <summary>How often <see cref="MachineKeyDetails"/> was called.</summary>
+    public int DetailsReads { get; private set; }
+
     /// <summary>A store that already has a machine key and a recovery public key (whose private half is dropped).</summary>
     public static FakeKeyStore Ready()
     {
@@ -42,6 +51,22 @@ internal sealed class FakeKeyStore : IKeyStore, IDisposable
     public byte[]? MachinePublicKey() => machine?.ExportSubjectPublicKeyInfo();
 
     public byte[]? RecoveryPublicKey() => recovery;
+
+    public KeyDetails? MachineKeyDetails()
+    {
+        DetailsReads++;
+        if (DetailsThrow)
+        {
+            throw new KeyStoreException();
+        }
+
+        if (Details is not null)
+        {
+            return Details;
+        }
+
+        return machine is null ? null : KeyDetails.FromPublicKey("Context sensitive notes", machine.ExportSubjectPublicKeyInfo());
+    }
 
     public void CreateMachineKey()
     {
