@@ -238,6 +238,202 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Equal([tag], tags);
     }
 
+    // 141 AC-1: a freshly opened note shows no dot, plain or sensitive.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Open_NoDirtyDot(bool sensitive)
+    {
+        IRenderedComponent<NoteEditor> cut = await RenderPlan(sensitive);
+
+        Assert.Empty(cut.FindAll(".dirty-dot"));
+    }
+
+    // 141 AC-2: the page's OnDirty(true) shows one labelled dot right after the title, not inside it.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OnDirtyTrue_ShowsOneDotAfterTheTitle(bool sensitive)
+    {
+        IRenderedComponent<NoteEditor> cut = await RenderPlan(sensitive);
+        EditorInterop page = PageOf(cut);
+
+        await cut.InvokeAsync(() => page.OnDirty(true));
+        await cut.InvokeAsync(() => page.OnDirty(true));
+
+        IElement dot = Assert.Single(cut.FindAll(".dirty-dot"));
+        Assert.Equal("img", dot.GetAttribute("role"));
+        Assert.Equal("Unsaved changes", dot.GetAttribute("aria-label"));
+        Assert.Equal("Unsaved changes", dot.GetAttribute("title"));
+        IElement title = cut.Find(".editor-bar h2.note-title");
+        Assert.Equal(
+            ["H2.note-title cut", "SPAN.dirty-dot", "BUTTON.save"],
+            cut.Find(".editor-bar").Children.Select(c => c.TagName + "." + c.ClassName).ToArray());
+        Assert.Empty(title.QuerySelectorAll(".dirty-dot"));
+        Assert.Equal("Plan", title.TextContent);
+        Assert.Equal("Plan", title.GetAttribute("title"));
+    }
+
+    // 141 AC-3: a successful save (button or Ctrl/Cmd+S) removes the dot at once; the mocked page never calls back.
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Save_Done_RemovesDot(bool ctrl, bool meta)
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+        js.Edit("# Plan\n\nMore\n");
+        await cut.InvokeAsync(() => js.Page().OnDirty(true));
+        Assert.Single(cut.FindAll(".dirty-dot"));
+
+        if (ctrl || meta)
+        {
+            await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = ctrl, MetaKey = meta });
+        }
+        else
+        {
+            await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+        }
+
+        Assert.Equal("Saved Plan.", cut.Find(".status").TextContent);
+        Assert.Equal("# Plan\n\nMore\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.Empty(cut.FindAll(".dirty-dot"));
+    }
+
+    // 141 AC-4: a refused save (changed on disk, deleted) keeps the dot next to the red line.
+    [Theory]
+    [InlineData(false, "Plan changed on disk since you opened it. Nothing was saved.")]
+    [InlineData(true, "Plan no longer exists. Nothing was saved.")]
+    public async Task Save_Refused_KeepsDot(bool delete, string expected)
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+        js.Edit("# Plan\n\nMine\n");
+        await cut.InvokeAsync(() => js.Page().OnDirty(true));
+        if (delete)
+        {
+            File.Delete(Path.Combine(data.Root, "Plan.md"));
+        }
+        else
+        {
+            data.WriteNote("Plan", "# Theirs\n");
+        }
+
+        await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+
+        IElement status = cut.Find(".status");
+        Assert.Equal(expected, status.TextContent);
+        Assert.True(status.ClassList.Contains("red"));
+        Assert.Single(cut.FindAll(".dirty-dot"));
+    }
+
+    // 141 AC-5: the page's OnDirty(false) (everything undone) removes the dot.
+    [Fact]
+    public async Task OnDirtyFalse_RemovesDot()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+        await cut.InvokeAsync(() => js.Page().OnDirty(true));
+        Assert.Single(cut.FindAll(".dirty-dot"));
+
+        await cut.InvokeAsync(() => js.Page().OnDirty(false));
+
+        Assert.Empty(cut.FindAll(".dirty-dot"));
+    }
+
+    // 141 AC-6: a reload that mounts fresh text leaves no dot.
+    [Fact]
+    public async Task Reload_MountsFreshText_NoDot()
+    {
+        data.WriteNote("inbox", "# inbox\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<NoteEditor> cut = await Render("inbox");
+        await cut.InvokeAsync(() => js.Page().OnDirty(true));
+        Assert.Single(cut.FindAll(".dirty-dot"));
+        data.WriteNote("inbox", "# inbox\n- captured\n");
+
+        await cut.InvokeAsync(() => cut.Instance.ReloadAsync());
+
+        Assert.Equal(2, js.Calls("ContextEditor.mount").Count);
+        Assert.Equal("# inbox\n- captured\n", js.MountedText());
+        Assert.Empty(cut.FindAll(".dirty-dot"));
+    }
+
+    // 141 AC-7: a late OnDirty from the page after the editor was disposed neither throws nor renders.
+    [Fact]
+    public async Task OnDirty_AfterDispose_DoesNothing()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+        EditorInterop page = js.Page();
+        await data.Bunit.DisposeComponentsAsync();
+        int renders = cut.RenderCount;
+
+        await page.OnDirty(true);
+        await page.OnDirty(false);
+
+        Assert.Equal(renders, cut.RenderCount);
+    }
+
+    // 141 AC-8: OnDirty is callable from the page and only raises DirtyChanged; IsDirtyAsync still asks the page.
+    [Fact]
+    public async Task OnDirty_IsJSInvokable_AndOnlyRaisesDirtyChanged()
+    {
+        Assert.NotNull(typeof(EditorInterop).GetMethod(nameof(EditorInterop.OnDirty))!
+            .GetCustomAttributes(typeof(Microsoft.JSInterop.JSInvokableAttribute), inherit: false)
+            .SingleOrDefault());
+
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        int calls = data.Bunit.JSInterop.Invocations.Count;
+        List<bool> raised = [];
+        js.Page().DirtyChanged += value =>
+        {
+            raised.Add(value);
+            return Task.CompletedTask;
+        };
+
+        await cut.InvokeAsync(() => js.Page().OnDirty(true));
+
+        Assert.Equal([true], raised);
+        Assert.Equal(calls, data.Bunit.JSInterop.Invocations.Count);
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Single(cut.FindAll(".dirty-dot"));
+        Assert.False(await cut.InvokeAsync(() => cut.Instance.IsDirtyAsync()));
+        Assert.Single(js.Calls("ContextEditor.isDirty"));
+    }
+
+    private EditorInterop PageOf(IRenderedComponent<NoteEditor> cut) =>
+        ((Microsoft.JSInterop.DotNetObjectReference<EditorInterop>)data.Bunit.JSInterop.Invocations
+            .Last(i => i.Identifier == "ContextEditor.mount").Arguments[2]!).Value;
+
+    private async Task<IRenderedComponent<NoteEditor>> RenderPlan(bool sensitive)
+    {
+        if (!sensitive)
+        {
+            data.WriteNote("Plan", "# Plan\n");
+            _ = new EditorJs(data.Bunit);
+            return await Render("Plan");
+        }
+
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("Plan", "# Plan\n");
+        _ = new EditorJs(data.Bunit);
+        await data.RefreshAsync();
+        IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p
+            .Add(e => e.Name, "Plan")
+            .Add(e => e.Sensitive, true));
+        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")));
+        return cut;
+    }
+
     private async Task<IRenderedComponent<NoteEditor>> Render(string name)
     {
         await data.RefreshAsync();

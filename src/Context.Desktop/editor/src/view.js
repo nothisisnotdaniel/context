@@ -108,10 +108,20 @@ function listItemView(node, view, getPos) {
   };
 }
 
-/** Opens markdown in a new editor inside element; tag and link clicks call back into dotnet. */
+// Tells .NET when the editor's dirty state flipped (never per keystroke); it only shows a marker there.
+function reportDirty(editor) {
+  const dirty = !editor.view.state.doc.eq(editor.clean);
+  if (dirty !== editor.dirty) {
+    editor.dirty = dirty;
+    editor.dotnet.invokeMethodAsync("OnDirty", dirty).catch(() => {});
+  }
+}
+
+/** Opens markdown in a new editor inside element; tag and link clicks and dirty flips call back into dotnet. */
 export function mount(element, markdown, dotnet) {
   destroy(element);
   const doc = parse(markdown);
+  const editor = { view: null, clean: doc, dirty: false, dotnet };
   const state = EditorState.create({
     doc,
     plugins: [
@@ -145,6 +155,12 @@ export function mount(element, markdown, dotnet) {
     state,
     nodeViews: { list_item: listItemView },
     attributes: { class: "note-editor-body", spellcheck: "true" },
+    dispatchTransaction(tr) {
+      view.updateState(view.state.apply(tr));
+      if (tr.docChanged) {
+        reportDirty(editor);
+      }
+    },
     handleClickOn(view, pos, node) {
       if (node.type === schema.nodes.tag) {
         dotnet.invokeMethodAsync("OnTag", node.attrs.raw).catch(() => {});
@@ -157,7 +173,8 @@ export function mount(element, markdown, dotnet) {
       return false;
     },
   });
-  editors.set(element, { view, clean: doc });
+  editor.view = view;
+  editors.set(element, editor);
 }
 
 /** The editor's text as Markdown. */
@@ -177,6 +194,7 @@ export function markClean(element) {
   const editor = editors.get(element);
   if (editor) {
     editor.clean = editor.view.state.doc;
+    reportDirty(editor);
   }
 }
 

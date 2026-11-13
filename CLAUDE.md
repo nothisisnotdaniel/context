@@ -397,7 +397,10 @@ Every factory agent reads this file before working on Context. Keep it short and
     SHA-256 `Version`, CRLF and BOM flags), mounts the page editor through `EditorInterop` (the only class that touches
     `IJSRuntime`; `[JSInvokable]` `OnTag`/`OnLink` only navigate) and saves on the Save button or Ctrl/Cmd+S through
     `DesktopActions.SaveNote` -> `NoteStore.SaveIfUnchanged` (unchanged text writes nothing; version re-checked before
-    the move; CRLF and BOM kept; temp file mode `0600`). Open and save both stop at `NoteStore.MaxEditBytes` (5 MB of plain
+    the move; CRLF and BOM kept; temp file mode `0600`). While the page's editor differs from the saved text, a
+    `span.dirty-dot` (`role="img"`, `Unsaved changes`) shows right after the note title: the page calls
+    `EditorInterop.OnDirty(bool)` only when that state flips (`DirtyChanged`), a `Done` save and a reload clear it, and
+    it is display only (every decision still asks `IsDirtyAsync`). Open and save both stop at `NoteStore.MaxEditBytes` (5 MB of plain
     file bytes, read through `BoundedFile`): a bigger or non-seekable note can't be opened (`Can't read <name>.`), a save
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
