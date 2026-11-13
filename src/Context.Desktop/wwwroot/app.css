@@ -581,3 +581,122 @@ input[type="password"]:disabled {
 .sensitive-setup .setup-status:empty {
     display: none;
 }
+
+/* The Tags button beside the notes heading. */
+.notes-bar {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.notes-bar h2 {
+    margin-bottom: 0;
+}
+
+.notes-bar .tags-open {
+    flex: none;
+}
+
+/* The tags view: every tag with its count; the list wraps and scrolls inside a capped height. */
+.tags-panel {
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+}
+
+.tag-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    list-style: none;
+    margin: 10px 0 0;
+    max-height: 30vh;
+    overflow-y: auto;
+    padding: 2px;
+}
+
+.tag-row {
+    align-items: baseline;
+    display: flex;
+    gap: 5px;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.tag-button {
+    color: var(--accent-strong);
+    max-width: 100%;
+    min-width: 0;
+}
+
+.tag-list .tag-button[aria-pressed="true"] {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: var(--on-accent);
+}
+
+.tag-row .count {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+}
+
+/* The linked notes under the open note: name, link text, shared tags. */
+.links-panel {
+    border-top: 1px solid var(--line);
+    margin-top: 16px;
+    padding-top: 12px;
+}
+
+.links-panel h2 {
+    margin-top: 0;
+}
+
+.link-rows {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.link-row {
+    align-items: baseline;
+    display: flex;
+    gap: 10px;
+    padding: 3px 0;
+}
+
+.link-row .name {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.link-row .note-button {
+    background: none;
+    border: none;
+    border-radius: 3px;
+    color: var(--accent-strong);
+    padding: 0;
+    text-align: left;
+}
+
+.link-row .note-button:hover:not(:disabled) {
+    text-decoration: underline;
+}
+
+.link-row .link-kind {
+    flex: none;
+}
+
+.link-row .link-kind:empty {
+    display: none;
+}
+
+.link-tags {
+    display: flex;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    gap: 4px;
+    justify-content: flex-end;
+    min-width: 0;
+}

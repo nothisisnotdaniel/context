@@ -12,7 +12,7 @@ internal sealed class DesktopState
 
     private readonly object gate = new();
 
-    // One user of the tag index at a time: the snapshot build and NotesWithTag.
+    // One user of the tag index at a time: the snapshot build, NotesWithTag, Tags and Links.
     private readonly object indexGate = new();
     private readonly NoteStore notes;
     private readonly TodoStore todos;
@@ -201,6 +201,45 @@ internal sealed class DesktopState
         catch (Exception)
         {
             return null;
+        }
+    });
+
+    /// <summary>
+    /// Every tag with its note count (<see cref="TagsView.Build"/> without an argument) after syncing the index, off
+    /// the calling thread. Never throws: any failure gives the <see cref="TagsViewKind.IndexUnreadable"/> view.
+    /// </summary>
+    public Task<TagsView> Tags() => Task.Run(() =>
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                return TagsView.Build(index, notes, string.Empty);
+            }
+        }
+        catch (Exception)
+        {
+            return new TagsView(TagsViewKind.IndexUnreadable, string.Empty, [], []);
+        }
+    });
+
+    /// <summary>
+    /// The notes linked to the note called <paramref name="name"/> by shared tags or <c>[[note links]]</c>
+    /// (<see cref="LinksView.Build"/>) after syncing the index, off the calling thread. Never throws: any failure
+    /// gives the <see cref="LinksViewKind.IndexUnreadable"/> view.
+    /// </summary>
+    public Task<LinksView> Links(string name) => Task.Run(() =>
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                return LinksView.Build(index, notes, name);
+            }
+        }
+        catch (Exception)
+        {
+            return new LinksView(LinksViewKind.IndexUnreadable, string.Empty, null, []);
         }
     });
 

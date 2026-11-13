@@ -10,9 +10,13 @@
     {
         <div class="layout" @onkeydown="OpenPalette">
             <aside class="notes-region">
-                <NotesPanel OnOpen="RequestOpen" />
+                <NotesPanel OnOpen="RequestOpen" OnTags="ShowTags" />
             </aside>
             <main class="current-region">
+                @if (tagsShown)
+                {
+                    <TagsPanel Selected="@tagShown" OnTag="ShowTag" OnClose="CloseTags" />
+                }
                 @if (tagShown is { } tag)
                 {
                     <TagPanel Tag="@tag" OnOpen="RequestOpen" OnClose="CloseTag" />
@@ -49,6 +53,7 @@
                     </div>
                     <NoteEditor @key="(name, openSensitive)" @ref="editor" Name="@name" Sensitive="openSensitive"
                                 OnTag="ShowTag" OnOpenNote="RequestOpen" OnIdle="LockOpen" OnLocked="Locked" />
+                    <LinksPanel Name="@name" Sensitive="openSensitive" OnOpen="RequestOpen" OnTag="ShowTag" />
                 }
                 else
                 {
@@ -94,6 +99,7 @@ else
     private string? openName;
     private NoteEditor? editor;
     private string? tagShown;
+    private bool tagsShown;
     private bool discarding;
     private string? pendingName;
     private bool paletteOpen;
@@ -136,6 +142,15 @@ else
 
     private void CloseTag() => tagShown = null;
 
+    // The tags view: every tag with its note count; a click on one shows the tag panel below it.
+    private void ShowTags() => tagsShown = true;
+
+    private void CloseTags()
+    {
+        tagsShown = false;
+        tagShown = null;
+    }
+
     // Opens the note called name (null: the current view), asking first when the open note has unsaved changes.
     private async Task RequestOpen(string? name)
     {
@@ -174,6 +189,7 @@ else
             && snapshot.Sensitive.Any(n => string.Equals(n.Name, name, StringComparison.Ordinal));
         pendingName = null;
         tagShown = null;
+        tagsShown = false;
         renaming = false;
         deleting = false;
         marking = false;
@@ -268,7 +284,7 @@ else
             case "/tags":
                 if (rest.Length == 0)
                 {
-                    ShowStatus("Type /tags <tag>.", "red");
+                    ShowTags();
                 }
                 else
                 {

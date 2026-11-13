@@ -27,5 +27,17 @@ public abstract class StateComponent : ComponentBase, IDisposable
 
     protected override void OnInitialized() => State.Changed += OnChanged;
 
-    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+    /// <summary>
+    /// Called on the renderer's thread after every state change, right after the re-render was requested. A
+    /// component that loads its own data reloads it here (read-only) and then calls <c>StateHasChanged</c>.
+    /// </summary>
+    protected virtual Task OnStateChangedAsync() => Task.CompletedTask;
+
+    private void OnChanged() => _ = InvokeAsync(Reload);
+
+    private Task Reload()
+    {
+        StateHasChanged();
+        return OnStateChangedAsync();
+    }
 }

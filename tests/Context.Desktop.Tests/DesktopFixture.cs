@@ -1,4 +1,5 @@
 using System.Net;
+using System.Reflection;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -73,11 +74,21 @@ internal sealed class DesktopFixture : IDisposable
     {
         Bunit.Dispose();
         Keys.Dispose();
-        if (Directory.Exists(parent))
+
+        // A panel's index read may still run on a pool thread; it writes context.db, so wait for it to finish
+        // (and keep later ones out) while the folder is deleted.
+        lock (State is null ? new object() : IndexGate(State))
         {
-            Directory.Delete(parent, recursive: true);
+            if (Directory.Exists(parent))
+            {
+                Directory.Delete(parent, recursive: true);
+            }
         }
     }
+
+    /// <summary>The lock every index read of the state takes; a test holds it to keep a load waiting.</summary>
+    public static object IndexGate(DesktopState state) =>
+        typeof(DesktopState).GetField("indexGate", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(state)!;
 
     /// <summary>Builds the state and the actions (once) and registers both with <see cref="Bunit"/>.</summary>
     public DesktopState CreateState()

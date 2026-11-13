@@ -334,6 +334,149 @@ public sealed class MainTests : IDisposable
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
     }
 
+    // 137 AC-4, AC-5: the links panel sits under the open note; a name opens that note, a shared tag shows the
+    // tag panel while the note stays open.
+    [Fact]
+    public async Task LinksPanel_UnderTheOpenNote_NameOpens_TagShowsTagPanel()
+    {
+        data.WriteNote("Plan", "#work [[Other]] [[Ghost]]\n");
+        data.WriteNote("Other", "#work\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        Assert.Empty(cut.FindAll(".links-panel"));
+        await Open(cut, js, "Plan");
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Ghost", "Other"],
+            cut.FindAll(".links-panel .link-row .name").Select(n => n.TextContent).Order(StringComparer.Ordinal).ToArray()));
+        IElement region = cut.Find(".current-region");
+        Assert.True(region.Children.Index().Single(c => c.Item.ClassList.Contains("note-editor")).Index
+            < region.Children.Index().Single(c => c.Item.ClassList.Contains("links-panel")).Index);
+        Assert.Equal("Linked notes", cut.Find(".links-panel h2").TextContent);
+
+        await cut.Find(".links-panel .link-tags button").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Other", "Plan"], cut.FindAll(".tag-panel .note-button").Select(b => b.TextContent).ToArray()));
+        Assert.Equal("#work", cut.Find(".tag-panel h2 .accent").TextContent);
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        Assert.Single(js.Calls("ContextEditor.mount"));
+
+        await cut.Find(".links-panel button.name").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("Other", cut.Find(".note-title").TextContent));
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Plan"], cut.FindAll(".links-panel .link-row .name").Select(n => n.TextContent).ToArray()));
+        Assert.Equal("linked from", cut.Find(".links-panel .link-kind").TextContent);
+    }
+
+    // 137 AC-5: with unsaved changes, a linked note's name asks to discard first.
+    [Fact]
+    public async Task LinksPanel_DirtyEditor_AsksBeforeOpening()
+    {
+        data.WriteNote("Plan", "[[Other]]\n");
+        data.WriteNote("Other", "x\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".links-panel button.name")));
+        js.Edit("[[Other]]\n\nUnsaved\n");
+
+        await cut.Find(".links-panel button.name").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent);
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("Other", cut.Find(".note-title").TextContent));
+    }
+
+    // 137 AC-8: the panel follows the data, and after a rename it shows the links of the new name.
+    [Fact]
+    public async Task LinksPanel_FollowsRefreshAndRename()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        data.WriteNote("Other", "#work\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        cut.WaitForAssertion(() => Assert.Equal("Plan has no linked notes.", cut.Find(".links-panel p[role=status]").TextContent));
+
+        data.WriteNote("Third", "see [[Plan]] and [[Project]]\n");
+        await data.State!.Refresh();
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Third"], cut.FindAll(".links-panel .link-row .name").Select(n => n.TextContent).ToArray()));
+
+        await cut.Find(".note-toolbar button.rename").ClickAsync(new MouseEventArgs());
+        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
+        await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+
+        cut.WaitForAssertion(() => Assert.Equal("Project", cut.Find(".note-title").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Third"], cut.FindAll(".links-panel .link-row .name").Select(n => n.TextContent).ToArray()));
+        cut.WaitForAssertion(() => Assert.Equal(1, js.Calls("ContextEditor.mount").Count - 1));
+        Assert.DoesNotContain("Plan has no linked notes.", cut.Find(".links-panel").TextContent);
+    }
+
+    // 137 AC-7: a sensitive note, open or after it locked, shows only the grey line and costs no extra Agree.
+    [Fact]
+    public async Task LinksPanel_SensitiveNote_GreyLine_NoExtraAgree()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("Secret", "#work [[Other]]\n");
+        data.WriteNote("Other", "#work [[Secret]]\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await Open(cut, js, "Secret");
+        await data.State!.Refresh();
+
+        cut.WaitForAssertion(() => Assert.Equal("Sensitive notes have no links.", cut.Find(".links-panel p[role=status]").TextContent));
+        Assert.True(cut.Find(".links-panel p[role=status]").ClassList.Contains("grey"));
+        Assert.Empty(cut.FindAll(".links-panel .link-rows"));
+        Assert.Equal(1, data.Keys.Agrees);
+    }
+
+    // 137 AC-7: a sensitive note that can't be unlocked shows the same line; nothing but the open asked for the key.
+    [Fact]
+    public async Task LinksPanel_LockedSensitiveNote_GreyLine()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("Secret", "#work\n");
+        data.Keys.AgreeThrows = true;
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await NameButton(cut, "Secret").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Can't unlock Secret.", cut.Find(".unreadable").TextContent));
+        Assert.Equal("Sensitive notes have no links.", cut.Find(".links-panel p[role=status]").TextContent);
+        Assert.Equal(1, data.Keys.Agrees);
+        Assert.Empty(js.Calls("ContextEditor.mount"));
+    }
+
+    // 137 AC-9: showing the tags view, a tag's notes and the links panel changes no user data.
+    [Fact]
+    public async Task TagsAndLinksPanels_ChangeNoUserData()
+    {
+        data.WriteNote("Plan", "#work [[Other]]\n");
+        data.WriteNote("Other", "#work\n");
+        data.AddTodo("Due #work", DesktopFixture.Today);
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+
+        await Open(cut, js, "Plan");
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".links-panel .link-row")));
+        await RunPalette(cut, "/tags");
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tags-panel .tag-list button")));
+        await cut.Find(".tags-panel .tag-list button").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll(".tag-panel .note-button").Count));
+        await data.State!.Refresh();
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".links-panel .link-row")));
+
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
     private static IElement NameButton(IRenderedComponent<Main> cut, string name) =>
         cut.FindAll(".notes-region button.name").Single(b => b.TextContent == name);
 
