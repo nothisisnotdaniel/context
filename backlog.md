@@ -43,7 +43,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#6](backlog/006-desktop-tags-and-links.md) Desktop tags and links → 137-desktop-tags-links
 - [x] [#7](backlog/007-desktop-settings.md) Desktop settings → 138-desktop-settings
 - [x] [#8](backlog/008-desktop-import-and-export.md) Desktop import and export → 139-desktop-import-export
-- [ ] [#9](backlog/009-quick-capture-in-the-desktop-app.md) Quick capture in the desktop app
+- [x] [#9](backlog/009-quick-capture-in-the-desktop-app.md) Quick capture in the desktop app → 140-desktop-quick-capture
 - [ ] [#10](backlog/010-editor-dirty-marker.md) Editor dirty marker
 - [ ] [#11](backlog/011-keyboard-focus-for-chips.md) Keyboard focus for chips
 - [ ] [#12](backlog/012-clear-editor-mount-error.md) Clear editor mount error
