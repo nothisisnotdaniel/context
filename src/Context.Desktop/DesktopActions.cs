@@ -125,12 +125,12 @@ internal sealed class DesktopActions
     /// <summary>The largest note text <see cref="SaveNote"/> writes (5 MB, as for imports).</summary>
     public const long MaxNoteBytes = NoteStore.MaxEditBytes;
 
-    private readonly NoteStore notes;
-    private readonly TodoStore todos;
-    private readonly DesktopState state;
     // What CalendarLinkView.Run takes as "remove the link and the cache".
     private const string RemoveArgument = "off";
 
+    private readonly NoteStore notes;
+    private readonly TodoStore todos;
+    private readonly DesktopState state;
     private readonly INoteLauncher launcher;
     private readonly CalendarLink? calendarLink;
     private readonly CalendarFeed? calendarFeed;
