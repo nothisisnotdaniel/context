@@ -217,6 +217,7 @@ public sealed class DesktopSourceTests
     [InlineData(".editor-host:focus-within")]
     [InlineData(".note-entry {")]
     [InlineData(".note-toolbar {")]
+    [InlineData(".dirty-dot {")]
     public void AppCss_StylesEditingComponents(string selector)
     {
         string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
@@ -650,13 +651,31 @@ public sealed class DesktopSourceTests
     public void JSInvokable_MethodsChangeNothing()
     {
         string text = File.ReadAllText(Path.Combine(RepoFiles.Root(), InteropFile));
-        MatchCollection invokable = Regex.Matches(text, @"\[JSInvokable\]\s*public\s+Task\s+(\w+)\(string raw\)\s*=>\s*([^;]*);");
+        MatchCollection invokable = Regex.Matches(
+            text, @"\[JSInvokable\]\s*public\s+Task\s+(\w+)\((?:string raw|bool dirty)\)\s*=>\s*([^;]*);");
 
-        Assert.Equal(["OnTag", "OnLink"], invokable.Select(m => m.Groups[1].Value).ToArray());
-        Assert.Equal(2, Regex.Matches(text, @"\[JSInvokable").Count);
-        Assert.All(invokable, m => Assert.Matches(@"^(TagClicked|LinkClicked)\?\.Invoke\(raw\) \?\? Task\.CompletedTask$", m.Groups[2].Value));
+        Assert.Equal(["OnTag", "OnLink", "OnDirty"], invokable.Select(m => m.Groups[1].Value).ToArray());
+        Assert.Equal(3, Regex.Matches(text, @"\[JSInvokable").Count);
+        Assert.All(invokable, m => Assert.Matches(
+            @"^(TagClicked\?\.Invoke\(raw\)|LinkClicked\?\.Invoke\(raw\)|DirtyChanged\?\.Invoke\(dirty\)) \?\? Task\.CompletedTask$",
+            m.Groups[2].Value));
+        Assert.Equal(
+            "DirtyChanged?.Invoke(dirty) ?? Task.CompletedTask",
+            invokable.Single(m => m.Groups[1].Value == "OnDirty").Groups[2].Value);
+        Assert.Contains("js.InvokeAsync<bool>(\"ContextEditor.isDirty\", element)", text, StringComparison.Ordinal);
         Assert.DoesNotMatch(ActionsCall, text);
         Assert.DoesNotMatch(ActionsName, text);
+    }
+
+    // 141 AC-9: the editor source and the committed bundle both report dirty flips through the OnDirty callback.
+    [Theory]
+    [InlineData("editor/src/view.js")]
+    [InlineData("wwwroot/editor/editor.js")]
+    public void Editor_ReportsDirtyFlips(string file)
+    {
+        string text = File.ReadAllText(Path.Combine([RepoFiles.Root(), RepoFiles.DesktopFolder, .. file.Split('/')]));
+
+        Assert.Contains("\"OnDirty\"", text, StringComparison.Ordinal);
     }
 
     // 094 AC-3: the editor's own sources build no HTML from strings and evaluate no code.

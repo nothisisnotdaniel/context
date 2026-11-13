@@ -2,13 +2,18 @@
 @implements IAsyncDisposable
 @* The note editor: the bundled ProseMirror editor (EditorInterop) in a host element, a Save button and a status
    line. Saving goes through DesktopActions.SaveNote only from the Save button and Ctrl/Cmd+S. Tag and link clicks
-   come back from the page as events and only open things. A sensitive note is read through DesktopState.ReadSensitive
+   come back from the page as events and only open things; the page's dirty flips only show or hide the dot next
+   to the name (every decision still asks IsDirtyAsync). A sensitive note is read through DesktopState.ReadSensitive
    (the one place the OS is asked for the key); its text lives only in the SensitiveSession and in the page's editor,
    and the editor tells its parent when the session locked or sat idle. *@
 
 <section class="note-editor" @onkeydown="e => Save(e)" @oninput="Used">
     <div class="editor-bar">
         <h2 class="note-title cut" title="@DisplayName">@DisplayName</h2>
+        @if (dirty)
+        {
+            <span class="dirty-dot" role="img" aria-label="Unsaved changes" title="Unsaved changes"></span>
+        }
         <button type="button" class="save" disabled="@(opened is null || saving)" @onclick="() => Save(null)">Save</button>
     </div>
     @if (unreadable)
@@ -30,6 +35,7 @@
     private bool unreadable;
     private bool lossy;
     private bool saving;
+    private bool dirty;
     private string statusText = string.Empty;
     private string statusClass = string.Empty;
 
@@ -95,6 +101,7 @@
             }
 
             await Interop.MarkCleanAsync(host);
+            dirty = false;
             ShowStatus($"Saved {DesktopText.OneLine(result.Text)}.", "accent");
         }
         else
@@ -128,6 +135,7 @@
             lossy = !await Interop.IsLosslessAsync(note.Text);
             await Interop.MountAsync(host, note.Text);
             opened = note;
+            dirty = false;
         }
         catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
         {
@@ -150,6 +158,7 @@
 
         Interop.TagClicked -= TagClicked;
         Interop.LinkClicked -= LinkClicked;
+        Interop.DirtyChanged -= DirtyChanged;
         await Interop.DestroyAsync();
     }
 
@@ -179,6 +188,7 @@
             lossy = !await Interop.IsLosslessAsync(note.Text);
             Interop.TagClicked += TagClicked;
             Interop.LinkClicked += LinkClicked;
+            Interop.DirtyChanged += DirtyChanged;
             await Interop.MountAsync(host, note.Text);
             opened = note;
             mounted = true;
@@ -256,6 +266,16 @@
         }
 
         await OnOpenNote.InvokeAsync(name);
+    });
+
+    // Display only: shows or hides the dot; nothing is read or written.
+    private Task DirtyChanged(bool changed) => InvokeAsync(() =>
+    {
+        if (dirty != changed)
+        {
+            dirty = changed;
+            StateHasChanged();
+        }
     });
 
     private void ShowStatus(string text, string cssClass)

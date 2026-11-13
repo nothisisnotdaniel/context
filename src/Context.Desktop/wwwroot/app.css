@@ -378,6 +378,19 @@ input[type="password"]:disabled {
     flex: none;
 }
 
+/* The dot sits right after the name; the Save button keeps the right edge whether it shows or not. */
+.editor-bar .save {
+    margin-left: auto;
+}
+
+.dirty-dot {
+    background: var(--accent-strong);
+    border-radius: 50%;
+    flex: none;
+    height: 8px;
+    width: 8px;
+}
+
 .tag-panel {
     border-bottom: 1px solid var(--line);
     margin-bottom: 16px;
