@@ -631,7 +631,7 @@ input[type="password"]:disabled {
     min-width: 0;
 }
 
-.tag-button[aria-pressed="true"] {
+.tag-list .tag-button[aria-pressed="true"] {
     background: var(--accent-strong);
     border-color: var(--accent-strong);
     color: var(--on-accent);
