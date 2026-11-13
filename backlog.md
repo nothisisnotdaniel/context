@@ -155,6 +155,9 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#120](backlog/120-pin-the-nuget-source-for-the.md) Pin the NuGet source for the desktop packages
 - [ ] [#121](backlog/121-open-empty-notes-in-the-default.md) Open empty notes in the default editor on macOS and Linux
 - [ ] [#122](backlog/122-update-links-when-a-note-is.md) Update [[links]] when a note is renamed in the desktop app
+- [?] [#124](backlog/124-check-the-tag-and-uploaded-assets.md) Check the tag and uploaded assets before publishing a release
+- [?] [#125](backlog/125-handle-a-leftover-draft-with-the.md) Handle a leftover draft with the same tag
+- [?] [#126](backlog/126-keep-stale-drafts-out-of-the.md) Keep stale drafts out of the Windows delta base
 
 ## Dropped with the terminal UI
 
