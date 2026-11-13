@@ -9,8 +9,8 @@ namespace Context.Tests;
 
 /// <summary>
 /// Checks the release flow: <c>.github/workflows/release.yml</c> (read only through <see cref="WorkflowYaml"/>), the
-/// scripts in <c>.github/scripts/</c> and the Windows pack and upload steps (run with <c>bash</c>, no network; the
-/// steps against stub <c>vpk</c> and <c>gh</c> commands), the tool packaging in <c>Context.csproj</c>, the Velopack
+/// scripts in <c>.github/scripts/</c> and the Windows pack and upload steps and the publish step (run with
+/// <c>bash</c>, no network; the steps against stub <c>vpk</c> and <c>gh</c> commands), the tool packaging in <c>Context.csproj</c>, the Velopack
 /// version in <c>Context.Desktop.csproj</c> and the release entry in <c>CLAUDE.md</c>.
 /// </summary>
 public sealed class ReleaseWorkflowTests
@@ -29,7 +29,13 @@ public sealed class ReleaseWorkflowTests
     private const string PackCommand = "dotnet pack src/Context -c Release -p:Version=\"$VERSION\"";
     private const string ReleaseCommand =
         "gh release create \"$TAG\" \"nupkg/Context.$VERSION.nupkg\" --title \"Context $VERSION\""
-        + " --notes-file .github/release-notes-header.md --generate-notes --target \"$TARGET\" $PRERELEASE";
+        + " --notes-file .github/release-notes-header.md --generate-notes --target \"$TARGET\" --draft $PRERELEASE";
+
+    private const string ViewCommand =
+        "gh release view \"$TAG\" --json isDraft,targetCommitish,assets"
+        + " --jq '.isDraft, .targetCommitish, .assets[].name'";
+
+    private const string ReleaseTarget = "0123456789abcdef0123456789abcdef01234567";
 
     private const string PublishCommand =
         "dotnet publish src/Context.Desktop -c Release --self-contained -p:Version=\"$VERSION\"";
@@ -41,7 +47,12 @@ public sealed class ReleaseWorkflowTests
     private static readonly string[] StepNames =
     [
         "Check out", "Set up .NET", "Version", "Test", "Pack", "Smoke check the packed tool",
-        "Create GitHub release", "Prune old prereleases",
+        "Create GitHub release",
+    ];
+
+    private static readonly string[] PublishStepNames =
+    [
+        "Check out", "Check version", "Publish GitHub release", "Prune old prereleases",
     ];
 
     private static readonly string[] MacStepNames =
@@ -54,7 +65,7 @@ public sealed class ReleaseWorkflowTests
         "Check out", "Check version", "Set up .NET", "Install vpk", "Publish", "Pack", "Upload",
     ];
 
-    private static readonly string[] JobNames = ["release", "desktop-macos", "desktop-windows"];
+    private static readonly string[] JobNames = ["release", "desktop-macos", "desktop-windows", "publish"];
 
     private static readonly string RepoRoot = FindRepoRoot();
 
@@ -76,9 +87,12 @@ public sealed class ReleaseWorkflowTests
         string[] lines = workflow.Split('\n');
         string ci = File.ReadAllText(Path.Combine(RepoRoot, ".github", "workflows", "ci.yml"));
 
-        // The same two actions in each of the three jobs, and no other.
+        // The same two actions in each of the first three jobs, only the checkout in publish, and no other.
         Assert.Equal(
-            [CheckoutAction, SetupDotnetAction, CheckoutAction, SetupDotnetAction, CheckoutAction, SetupDotnetAction],
+            [
+                CheckoutAction, SetupDotnetAction, CheckoutAction, SetupDotnetAction, CheckoutAction, SetupDotnetAction,
+                CheckoutAction,
+            ],
             uses.Select(scalar => scalar.Value));
         Assert.All(uses, scalar => Assert.EndsWith(
             scalar.Value == CheckoutAction ? " # v4.4.0" : " # v4.3.1",
@@ -132,9 +146,9 @@ public sealed class ReleaseWorkflowTests
             .SelectMany(step => Map(step["env"]).Entries)
             .Where(entry => !Scalar(entry.Value).StartsWith("${{ github.event.pull_request.", StringComparison.Ordinal))
             .Select(entry => entry.Key + "=" + Scalar(entry.Value))];
-        // Release, prune, the macOS upload, the Windows vpk download (in Pack) and the Windows upload.
-        Assert.Equal(Enumerable.Repeat("GH_TOKEN=${{ github.token }}", 5), tokens);
-        Assert.Equal(5, Regex.Matches(workflow, Regex.Escape("${{ github.token }}")).Count);
+        // Create, the macOS upload, the Windows vpk download (in Pack), the Windows upload, publish and prune.
+        Assert.Equal(Enumerable.Repeat("GH_TOKEN=${{ github.token }}", 6), tokens);
+        Assert.Equal(6, Regex.Matches(workflow, Regex.Escape("${{ github.token }}")).Count);
         Assert.DoesNotContain("GITHUB_TOKEN", workflow, StringComparison.Ordinal);
     }
 
@@ -168,6 +182,15 @@ public sealed class ReleaseWorkflowTests
     [InlineData("desktop job without needs")]
     [InlineData("desktop job with its own permissions")]
     [InlineData("secret in a desktop job")]
+    [InlineData("publish without the macOS job")]
+    [InlineData("publish without the Windows job")]
+    [InlineData("publish with its own permissions")]
+    [InlineData("publish with an if")]
+    [InlineData("expression in a publish run")]
+    [InlineData("credentials kept in publish")]
+    [InlineData("release not created as a draft")]
+    [InlineData("second script that publishes")]
+    [InlineData("prune before publish")]
     public void StructureCheck_FailsOnUnsafeCopy(string change)
     {
         string workflow = ReadWorkflow();
@@ -200,6 +223,30 @@ public sealed class ReleaseWorkflowTests
                 "      TAG: ${{ needs.release.outputs.tag }}\n",
                 "      TAG: ${{ needs.release.outputs.tag }}\n      KEY: ${{ secrets.SIGNING_KEY }}\n",
                 0),
+            // 135 AC-9: the publish job must wait for both desktop jobs, keep the workflow's token scope, never run
+            // after a failed job, take its values only through env:, keep no credentials, and the release must
+            // start as a draft that only the publish step makes public.
+            "publish without the macOS job" => ReplaceOnce(workflow, "      - desktop-macos\n", string.Empty),
+            "publish without the Windows job" => ReplaceOnce(workflow, "      - desktop-windows\n", string.Empty),
+            "publish with its own permissions" => ReplaceOnce(
+                workflow, "  publish:\n", "  publish:\n    permissions: write-all\n"),
+            "publish with an if" => ReplaceOnce(workflow, "  publish:\n", "  publish:\n    if: always()\n"),
+            "expression in a publish run" => ReplaceOnce(
+                workflow,
+                "gh release edit \"$TAG\" --draft=false $PRE",
+                "gh release edit \"${{ needs.release.outputs.tag }}\" --draft=false $PRE"),
+            "credentials kept in publish" => ReplaceNth(
+                workflow, "          persist-credentials: false\n", "          persist-credentials: true\n", 3),
+            "release not created as a draft" => ReplaceOnce(
+                workflow, "--target \"$TARGET\" --draft $PRERELEASE", "--target \"$TARGET\" $PRERELEASE"),
+            "second script that publishes" => ReplaceOnce(
+                workflow,
+                "gh release upload \"$TAG\" \"$@\" --clobber",
+                "gh release upload \"$TAG\" \"$@\" --clobber\n          gh release edit \"$TAG\" --draft=false"),
+            "prune before publish" => ReplaceOnce(
+                ReplaceOnce(workflow, "      - name: Publish GitHub release\n", "      - name: Prune old prereleases\n"),
+                "      - name: Prune old prereleases\n        continue-on-error: true\n",
+                "      - name: Publish GitHub release\n        continue-on-error: true\n"),
             "pull_request_target" => ReplaceOnce(workflow, "\n  pull_request:\n", "\n  pull_request_target:\n"),
             "extra trigger" => ReplaceOnce(workflow, "\non:\n", "\non:\n  workflow_dispatch:\n"),
             "expression in run" => ReplaceOnce(
@@ -251,9 +298,17 @@ public sealed class ReleaseWorkflowTests
             "HTTPS from this repository's releases, which only this workflow writes",
             "github.token is the only credential",
             "--clobber",
+            // 135 AC-11: draft first, published last, and what a failed desktop job leaves behind.
+            "Four jobs",
+            "The release is a draft until the publish job runs",
+            "A failed desktop job leaves an unpublished draft",
+            "re-run the failed job",
+            "the publish job deletes every -develop prerelease below X.Y.Z",
+            "This is what makes immutable releases work",
         ];
         Assert.All(expected, text => Assert.Contains(text, flat, StringComparison.Ordinal));
         Assert.DoesNotContain("there is no desktop build", flat, StringComparison.Ordinal);
+        Assert.DoesNotContain("leaves a release with fewer assets", flat, StringComparison.Ordinal);
     }
 
     // AC-2: the version is set first, the tests run on the normal build, then the pack takes the version.
@@ -279,12 +334,12 @@ public sealed class ReleaseWorkflowTests
     {
         List<string> scripts = RunScripts(ReadWorkflow());
 
-        Assert.Equal(6, scripts.Count);
+        Assert.Equal(5, scripts.Count);
         Assert.All(scripts, script => Assert.DoesNotContain("${{", script, StringComparison.Ordinal));
 
-        // 133 AC-1: the same for every run: script of the two desktop jobs.
+        // 133 AC-1, 135 AC-4: the same for every run: script of the two desktop jobs and of publish.
         List<string> all = AllRunScripts(ReadWorkflow());
-        Assert.Equal(6 + 4 + 5, all.Count);
+        Assert.Equal(5 + 4 + 5 + 3, all.Count);
         Assert.All(all, script => Assert.DoesNotContain("${{", script, StringComparison.Ordinal));
         Assert.All(all, script => Assert.DoesNotContain("eval", script, StringComparison.Ordinal));
     }
@@ -674,9 +729,16 @@ public sealed class ReleaseWorkflowTests
     }
 
     // AC-9: one .nupkg, the title, generated notes, on $TARGET; --prerelease only for a version with '-'.
+    // 135 AC-1: as a draft, and it is the last step of the release job (the prune step moved to publish).
     [Fact]
     public void ReleaseStep_CreatesTheReleaseWithTheNupkg_AndMarksPrereleases()
     {
+        List<YamlMapping> steps = Steps(ReadWorkflow());
+        Assert.Equal("Create GitHub release", Scalar(steps[^1]["name"]));
+        Assert.Contains(" --target \"$TARGET\" --draft $PRERELEASE", ReleaseCommand, StringComparison.Ordinal);
+        Assert.DoesNotContain(steps, step => Scalar(step["name"]).Contains("Prune", StringComparison.Ordinal));
+        Assert.All(RunScripts(ReadWorkflow()), s => Assert.DoesNotContain("old-prereleases", s, StringComparison.Ordinal));
+
         string release = Assert.Single(
             RunScripts(ReadWorkflow()),
             script => script.Contains("gh release create", StringComparison.Ordinal));
@@ -689,12 +751,35 @@ public sealed class ReleaseWorkflowTests
     }
 
     // AC-9: the prune step skips prereleases, fails on a failed listing and deletes only filtered tags.
+    // 135 AC-7: it is the last step of the publish job, right after the publish step, with the same script.
     [Fact]
     public void PruneStep_SkipsPrereleases_AndDeletesOnlyFilteredTags()
     {
         string script = Assert.Single(
-            RunScripts(ReadWorkflow()),
+            AllRunScripts(ReadWorkflow()),
             s => s.Contains("old-prereleases.sh", StringComparison.Ordinal));
+        List<YamlMapping> publish = JobSteps(WorkflowYaml.Parse(ReadWorkflow()), "publish");
+        Assert.Equal("Publish GitHub release", Scalar(publish[^2]["name"]));
+        Assert.Equal("Prune old prereleases", Scalar(publish[^1]["name"]));
+        Assert.Equal(script, Scalar(publish[^1]["run"]));
+        Assert.Equal("true", Scalar(publish[^1]["continue-on-error"]));
+        Assert.Equal(
+            [
+                "case \"$VERSION\" in",
+                "*-*)",
+                "echo \"Version '$VERSION' is a prerelease; nothing to prune\"",
+                "exit 0",
+                ";;",
+                "esac",
+                "set -o pipefail",
+                "gh release list --limit 1000 --json tagName,isPrerelease --jq '.[] | select(.isPrerelease) | .tagName' |",
+                "sh .github/scripts/old-prereleases.sh \"$VERSION\" |",
+                "while IFS= read -r tag; do",
+                "echo \"Deleting prerelease $tag\"",
+                "gh release delete \"$tag\" --cleanup-tag --yes || echo \"::warning::Could not delete prerelease $tag\"",
+                "done",
+            ],
+            Lines(script).Where(line => !line.StartsWith('#')));
 
         int skip = script.IndexOf("case \"$VERSION\" in", StringComparison.Ordinal);
         int hyphen = script.IndexOf("*-*)", Math.Max(skip, 0), StringComparison.Ordinal);
@@ -853,6 +938,15 @@ public sealed class ReleaseWorkflowTests
     [InlineData("commit SHAs")]
     [InlineData("tests/Context.Tests/WorkflowYaml.cs")]
     [InlineData("context --version")]
+    [InlineData("Four jobs: `release` (`ubuntu-latest`)")]
+    [InlineData("`publish` (`ubuntu-latest`, `needs` all three)")]
+    [InlineData("created with `--draft`")]
+    [InlineData("The release is a draft until `publish` runs")]
+    [InlineData("A failed desktop job leaves an unpublished draft")]
+    [InlineData("re-run the failed job")]
+    [InlineData("`gh release edit \"$TAG\" --draft=false`")]
+    [InlineData("runs in `publish`")]
+    [InlineData("This is what makes immutable releases work")]
     public void ClaudeMd_DescribesTheReleaseFlow(string expected)
     {
         string text = File.ReadAllText(Path.Combine(RepoRoot, "CLAUDE.md")).ReplaceLineEndings("\n");
@@ -865,6 +959,8 @@ public sealed class ReleaseWorkflowTests
         Assert.DoesNotContain("the only workflow", text, StringComparison.Ordinal);
         Assert.DoesNotContain("there is no desktop build", text, StringComparison.Ordinal);
         Assert.DoesNotContain("console app only", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("leaves a release with fewer assets", Regex.Replace(text, @"\s+", " "), StringComparison.Ordinal);
+        Assert.DoesNotContain("Three jobs", text, StringComparison.Ordinal);
     }
 
     // 133 AC-2: both architectures are published self-contained with the version, then bundled, ad-hoc signed,
@@ -1279,6 +1375,192 @@ public sealed class ReleaseWorkflowTests
         }
     }
 
+    // 135 AC-5, AC-6: the publish step, run with bash against a stub gh. With a draft on the release's commit that
+    // holds every needed asset it publishes with one `gh release edit`, and adds --prerelease only for a prerelease.
+    [Theory]
+    [InlineData("1.2.4-develop.7", " --prerelease")]
+    [InlineData("0.0.1-develop.9", " --prerelease")]
+    [InlineData("1.2.3", "")]
+    public async Task PublishStep_PublishesACompleteDraft(string version, string prerelease)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            // More assets than the needed ones (portable zip, delta, the other feed files) are fine.
+            List<string> assets = PublishAssets(version);
+            assets.AddRange(["ContextDesktop-win-Portable.zip", "RELEASES", "assets.win.json", "extra.txt"]);
+            ScriptResult result = await RunStep(
+                folder, JobScript("publish", "Publish GitHub release"), version, view: ReleaseView("true", ReleaseTarget, assets));
+
+            Assert.True(result.Code == 0, "Publish exit " + result.Code + ": " + result.Err);
+            Assert.Equal(
+                [
+                    "gh [token] release view v" + version
+                        + " --json isDraft,targetCommitish,assets --jq .isDraft, .targetCommitish, .assets[].name",
+                    "gh [token] release edit v" + version + " --draft=false" + prerelease,
+                ],
+                StubLog(folder));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 135 AC-5: anything but this run's complete draft fails the step before `gh release edit` is called: a release
+    // that is already public, one on another commit, one that cannot be read, and each needed asset missing (also
+    // when only the other channel's or another version's file is there).
+    [Theory]
+    [InlineData("1.2.4-develop.7", "not a draft")]
+    [InlineData("1.2.3", "not a draft")]
+    [InlineData("1.2.3", "wrong target")]
+    [InlineData("1.2.3", "target is a longer text")]
+    [InlineData("1.2.3", "no target")]
+    [InlineData("1.2.3", "view fails")]
+    [InlineData("1.2.3", "empty view")]
+    [InlineData("1.2.3", "no assets")]
+    [InlineData("1.2.3", "asset 0")]
+    [InlineData("1.2.3", "asset 1")]
+    [InlineData("1.2.3", "asset 2")]
+    [InlineData("1.2.3", "asset 3")]
+    [InlineData("1.2.3", "asset 4")]
+    [InlineData("1.2.3", "asset 5")]
+    [InlineData("1.2.4-develop.7", "asset 0")]
+    [InlineData("1.2.4-develop.7", "asset 1")]
+    [InlineData("1.2.4-develop.7", "asset 2")]
+    [InlineData("1.2.4-develop.7", "asset 3")]
+    [InlineData("1.2.4-develop.7", "asset 4")]
+    [InlineData("1.2.4-develop.7", "asset 5")]
+    [InlineData("1.2.3", "other channel")]
+    [InlineData("1.2.4-develop.7", "other channel")]
+    [InlineData("1.2.3", "other version")]
+    [InlineData("1.2.3", "longer names only")]
+    public async Task PublishStep_RefusesAnythingButACompleteDraft(string version, string situation)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            List<string> assets = PublishAssets(version);
+            string draft = "true";
+            string target = ReleaseTarget;
+            int viewExit = 0;
+            string? view = null;
+            switch (situation)
+            {
+                case "not a draft":
+                    draft = "false";
+                    break;
+                case "wrong target":
+                    target = "76543210fedcba9876543210fedcba9876543210";
+                    break;
+                case "target is a longer text":
+                    target = ReleaseTarget + "0";
+                    break;
+                case "no target":
+                    view = "true\n" + string.Join('\n', assets) + "\n";
+                    break;
+                case "view fails":
+                    viewExit = 1;
+                    break;
+                case "empty view":
+                    view = string.Empty;
+                    break;
+                case "no assets":
+                    assets.Clear();
+                    break;
+                case "other channel":
+                    assets = PublishAssets(version.Contains('-', StringComparison.Ordinal) ? "1.2.4" : "1.2.3-develop.1");
+                    assets[0] = "Context." + version + ".nupkg";
+                    assets[1] = "Context-" + version + "-osx-arm64.zip";
+                    assets[2] = "Context-" + version + "-osx-x64.zip";
+                    break;
+                case "other version":
+                    assets = PublishAssets("1.2.2");
+                    break;
+                case "longer names only":
+                    assets = [.. assets.Select(name => name + ".sha256").Concat(assets.Select(name => "old-" + name))];
+                    break;
+                default:
+                    assets.RemoveAt(int.Parse(situation["asset ".Length..], System.Globalization.CultureInfo.InvariantCulture));
+                    break;
+            }
+
+            ScriptResult result = await RunStep(
+                folder,
+                JobScript("publish", "Publish GitHub release"),
+                version,
+                view: view ?? ReleaseView(draft, target, assets),
+                viewExit: viewExit);
+
+            Assert.NotEqual(0, result.Code);
+            List<string> log = StubLog(folder);
+            Assert.StartsWith("gh [token] release view v" + version + " ", Assert.Single(log), StringComparison.Ordinal);
+            Assert.DoesNotContain(log, line => line.Contains(" edit ", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 135 AC-6: a failing `gh release edit` fails the step (it is the script's last command, with no `||`).
+    [Theory]
+    [InlineData("1.2.3")]
+    [InlineData("1.2.4-develop.7")]
+    public async Task PublishStep_FailsWhenTheEditFails(string version)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            ScriptResult result = await RunStep(
+                folder,
+                JobScript("publish", "Publish GitHub release"),
+                version,
+                view: ReleaseView("true", ReleaseTarget, PublishAssets(version)),
+                editExit: 1);
+
+            Assert.NotEqual(0, result.Code);
+            Assert.Equal(2, StubLog(folder).Count);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 135 AC-2: both desktop jobs still upload into the release by its tag, replacing their own assets on a re-run.
+    [Fact]
+    public void DesktopJobs_UploadIntoTheDraftByTag()
+    {
+        string workflow = ReadWorkflow();
+
+        Assert.Contains(
+            "gh release upload \"$TAG\" \"Context-$VERSION-osx-arm64.zip\" \"Context-$VERSION-osx-x64.zip\" --clobber",
+            JobScript("desktop-macos", "Upload"),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "gh release upload \"$TAG\" \"$@\" --clobber", JobScript("desktop-windows", "Upload"), StringComparison.Ordinal);
+        Assert.Equal(2, AllRunScripts(workflow).Count(script => script.Contains("gh release upload", StringComparison.Ordinal)));
+        Assert.All(
+            JobRunScripts(workflow, "release").Concat(JobRunScripts(workflow, "publish")),
+            script => Assert.DoesNotContain("gh release upload", script, StringComparison.Ordinal));
+    }
+
     // 133 AC-13: the release notes start with how to open an unsigned build on macOS and Windows.
     [Fact]
     public void ReleaseNotesHeader_SaysHowToOpenAnUnsignedBuild()
@@ -1388,13 +1670,14 @@ public sealed class ReleaseWorkflowTests
         Assert.Equal(PackCommand, Scalar(steps[4]["run"]).Trim());
         Assert.Equal(["name", "run"], Sorted(steps[5].Keys));
 
+        // 135 AC-1: the release is created as a draft, by the last step of this job.
         YamlMapping release = steps[6];
+        Assert.Equal(7, steps.Count);
         Assert.Equal(["env", "name", "run"], Sorted(release.Keys));
         Assert.Equal(["GH_TOKEN=${{ github.token }}"], Pairs(release["env"]));
-        YamlMapping prune = steps[7];
-        Assert.Equal(["continue-on-error", "env", "name", "run"], Sorted(prune.Keys));
-        Assert.Equal("true", Scalar(prune["continue-on-error"]));
-        Assert.Equal(["GH_TOKEN=${{ github.token }}"], Pairs(prune["env"]));
+        Assert.Equal(
+            ["PRERELEASE=\"\"", "case \"$VERSION\" in", "*-*) PRERELEASE=\"--prerelease\" ;;", "esac", ReleaseCommand],
+            Lines(Scalar(release["run"])).Where(line => !line.StartsWith('#')));
 
         // Event fields, refs and the token reach a script only as environment variables.
         Assert.All(
@@ -1409,6 +1692,91 @@ public sealed class ReleaseWorkflowTests
         YamlMapping defaults = Map(Map(jobs["desktop-windows"])["defaults"]);
         Assert.Equal(["run"], defaults.Keys);
         Assert.Equal(["shell=bash"], Pairs(defaults["run"]));
+
+        AssertPublishJob(root);
+
+        // 135 AC-8: one script creates the release, one publishes it, and nothing outside publish ends the draft.
+        List<string> all = [.. jobs.Keys.SelectMany(name => RunScriptsOf(root, name))];
+        Assert.Single(all, script => script.Contains("gh release create", StringComparison.Ordinal));
+        Assert.Single(all, script => script.Contains("gh release edit", StringComparison.Ordinal));
+        Assert.All(
+            jobs.Keys.Where(name => name != "publish").SelectMany(name => RunScriptsOf(root, name)),
+            script => Assert.DoesNotContain("--draft=false", script, StringComparison.Ordinal));
+        Assert.All(
+            jobs.Keys.Where(name => name != "publish").SelectMany(name => RunScriptsOf(root, name)),
+            script => Assert.DoesNotContain("gh release edit", script, StringComparison.Ordinal));
+        Assert.All(
+            RunScriptsOf(root, "desktop-macos").Concat(RunScriptsOf(root, "desktop-windows")),
+            script => Assert.DoesNotContain("gh release create", script, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// 135 AC-3, AC-4, AC-7: the publish job needs all three other jobs and has no if:, permissions: or outputs:
+    /// (so a failed or skipped needed job skips it), takes version, tag and target only through its env:, checks
+    /// out the release's commit without keeping credentials, uses no other action, re-checks the version first,
+    /// and gives the token only to the publish and prune steps, in that order.
+    /// </summary>
+    private static void AssertPublishJob(YamlNode root)
+    {
+        YamlMapping job = Map(Map(Map(root)["jobs"])["publish"]);
+        Assert.Equal(["env", "needs", "runs-on", "steps"], Sorted(job.Keys));
+        Assert.Equal(["release", "desktop-macos", "desktop-windows"], Strings(job["needs"]));
+        Assert.Equal("ubuntu-latest", Scalar(job["runs-on"]));
+        Assert.Equal(["TAG=" + TagOutput, "TARGET=" + TargetOutput, "VERSION=" + VersionOutput], Pairs(job["env"]));
+
+        List<YamlMapping> steps = JobSteps(root, "publish");
+        Assert.Equal(PublishStepNames, steps.Select(step => Scalar(step["name"])));
+        Assert.All(steps, step => Assert.False(
+            step.ContainsKey("permissions") || step.ContainsKey("shell") || step.ContainsKey("if")));
+        Assert.All(
+            steps,
+            step => Assert.True(step.ContainsKey("uses") != step.ContainsKey("run"), "each step has uses: or run:"));
+
+        YamlScalar uses = Assert.IsType<YamlScalar>(Assert.Single(steps, step => step.ContainsKey("uses"))["uses"]);
+        Assert.Equal(CheckoutAction, uses.Value);
+        Assert.Equal("v4.4.0", uses.Comment);
+        Assert.Equal(["name", "uses", "with"], Sorted(steps[0].Keys));
+        Assert.Equal(["persist-credentials=false", "ref=" + TargetOutput], Pairs(steps[0]["with"]));
+
+        AssertVersionCheck(steps[1]);
+
+        YamlMapping publish = steps[2];
+        Assert.Equal(["env", "name", "run"], Sorted(publish.Keys));
+        Assert.Equal(["GH_TOKEN=${{ github.token }}"], Pairs(publish["env"]));
+        YamlMapping prune = steps[3];
+        Assert.Equal(["continue-on-error", "env", "name", "run"], Sorted(prune.Keys));
+        Assert.Equal("true", Scalar(prune["continue-on-error"]));
+        Assert.Equal(["GH_TOKEN=${{ github.token }}"], Pairs(prune["env"]));
+
+        // Read first, publish last: one view, then one edit as the script's last command, and nothing after a
+        // failed check (every check ends in exit 1, no `||` that could swallow a failure).
+        string script = Scalar(publish["run"]);
+        List<string> lines = [.. Lines(script).Where(line => !line.StartsWith('#'))];
+        Assert.Equal("gh release edit \"$TAG\" --draft=false $PRE", lines[^1]);
+        Assert.Single(lines, line => line.Contains("gh release edit", StringComparison.Ordinal));
+        Assert.Equal("INFO=\"$(" + ViewCommand + ")\"", Assert.Single(lines, line => line.Contains("gh release view", StringComparison.Ordinal)));
+        Assert.Equal(2, Regex.Matches(script, @"\bgh ").Count);
+        Assert.DoesNotContain("||", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("--draft=false", Scalar(prune["run"]), StringComparison.Ordinal);
+        Assert.Contains("old-prereleases.sh", Scalar(prune["run"]), StringComparison.Ordinal);
+
+        // The needs.* values reach a script only through env:, never inside a run: script.
+        Assert.All(
+            steps.Where(step => step.ContainsKey("run")),
+            step => Assert.DoesNotContain("${{", Scalar(step["run"]), StringComparison.Ordinal));
+    }
+
+    /// <summary>The SemVer and tag re-check that every job after <c>release</c> runs as its first script.</summary>
+    private static void AssertVersionCheck(YamlMapping step)
+    {
+        Assert.Equal(["name", "run"], Sorted(step.Keys));
+        string check = Scalar(step["run"]);
+        Assert.Contains("if ! printf '%s' \"$VERSION\" | " + SemVerGrep + "; then", check, StringComparison.Ordinal);
+        Assert.Contains("if [ \"$TAG\" != \"v$VERSION\" ]; then", check, StringComparison.Ordinal);
+        Assert.Equal(2, Regex.Matches(check, @"(?m)^\s*exit 1\s*$").Count);
+        Assert.DoesNotContain("dotnet", check, StringComparison.Ordinal);
+        Assert.DoesNotContain("gh ", check, StringComparison.Ordinal);
+        Assert.DoesNotContain("||", check, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1447,13 +1815,7 @@ public sealed class ReleaseWorkflowTests
         Assert.Equal(["dotnet-version=10.0.x"], Pairs(steps[2]["with"]));
 
         // The SemVer re-check is the first script, so it runs before any dotnet call (and before setup-dotnet).
-        Assert.Equal(["name", "run"], Sorted(steps[1].Keys));
-        string check = Scalar(steps[1]["run"]);
-        Assert.Contains("if ! printf '%s' \"$VERSION\" | " + SemVerGrep + "; then", check, StringComparison.Ordinal);
-        Assert.Contains("if [ \"$TAG\" != \"v$VERSION\" ]; then", check, StringComparison.Ordinal);
-        Assert.Equal(2, Regex.Matches(check, @"(?m)^\s*exit 1\s*$").Count);
-        Assert.DoesNotContain("dotnet", check, StringComparison.Ordinal);
-        Assert.DoesNotContain("||", check, StringComparison.Ordinal);
+        AssertVersionCheck(steps[1]);
 
         foreach (YamlMapping step in steps.Skip(3))
         {
@@ -1490,7 +1852,11 @@ public sealed class ReleaseWorkflowTests
             text,
             "    defaults:\n      run:\n        shell: bash\n",
             "    defaults:\n\n      # Git Bash on the Windows runner\n      run:\n        shell: \"bash\"\n");
-        for (int i = 0; i < 3; i++)
+        text = ReplaceOnce(
+            text,
+            "    needs:\n      - release\n      - desktop-macos\n",
+            "    needs: # every other job\n\n      - \"release\"\n      - 'desktop-macos'\n");
+        for (int i = 0; i < 4; i++)
         {
             text = ReplaceNth(
                 text,
@@ -1684,13 +2050,36 @@ public sealed class ReleaseWorkflowTests
         return File.Exists(path) ? [.. File.ReadAllLines(path)] : [];
     }
 
+    /// <summary>The six assets a release must hold before it is published (135 AC-5), in the spec's order.</summary>
+    private static List<string> PublishAssets(string version)
+    {
+        bool prerelease = version.Contains('-', StringComparison.Ordinal);
+        string name = prerelease ? "develop" : "win";
+        string suffix = prerelease ? "-develop" : string.Empty;
+        return
+        [
+            "Context." + version + ".nupkg",
+            "Context-" + version + "-osx-arm64.zip",
+            "Context-" + version + "-osx-x64.zip",
+            "ContextDesktop-" + name + "-Setup.exe",
+            "ContextDesktop-" + version + suffix + "-full.nupkg",
+            "releases." + name + ".json",
+        ];
+    }
+
+    /// <summary>What <c>gh release view</c> prints for the publish step's <c>--jq</c>: draft flag, commit, asset names.</summary>
+    private static string ReleaseView(string draft, string target, IEnumerable<string> assets) =>
+        string.Concat(new[] { draft, target }.Concat(assets).Select(line => line + "\n"));
+
     /// <summary>
     /// Runs a workflow step's script the way the runner does (<c>bash --noprofile --norc -eo pipefail</c>) in
     /// <paramref name="folder"/>, with <c>$HOME</c> there and stub <c>vpk</c> (in <c>$HOME/.dotnet/tools</c>) and
-    /// <c>gh</c> commands that only log their arguments and whether <c>GH_TOKEN</c> was set. No network, no real tool.
+    /// <c>gh</c> commands that only log their arguments and whether <c>GH_TOKEN</c> was set (<c>gh release view</c>
+    /// also prints <paramref name="view"/>, what the real one prints after its <c>--jq</c>). No network, no real tool.
     /// </summary>
     private static async Task<ScriptResult> RunStep(
-        string folder, string script, string version, int downloadExit = 0, int packExit = 0)
+        string folder, string script, string version, int downloadExit = 0, int packExit = 0, string view = "",
+        int viewExit = 0, int editExit = 0)
     {
         string tools = Path.Combine(folder, ".dotnet", "tools");
         string bin = Path.Combine(folder, "stub-bin");
@@ -1703,6 +2092,10 @@ public sealed class ReleaseWorkflowTests
             + "case \"$1\" in\n"
             + "  download) exit \"$STUB_DOWNLOAD_EXIT\" ;;\n"
             + "  pack) exit \"$STUB_PACK_EXIT\" ;;\n"
+            + "esac\n"
+            + "case \"$2\" in\n"
+            + "  view) cat \"$STUB_VIEW\"; exit \"$STUB_VIEW_EXIT\" ;;\n"
+            + "  edit) exit \"$STUB_EDIT_EXIT\" ;;\n"
             + "esac\n";
         foreach (string path in new[] { Path.Combine(tools, "vpk"), Path.Combine(bin, "gh") })
         {
@@ -1715,17 +2108,23 @@ public sealed class ReleaseWorkflowTests
 
         string file = Path.Combine(folder, "step.sh");
         File.WriteAllText(file, script);
+        string viewFile = Path.Combine(folder, "stub-view.txt");
+        File.WriteAllText(viewFile, view);
         Dictionary<string, string> environment = new Dictionary<string, string>
         {
             ["HOME"] = folder,
             ["PATH"] = bin + ":" + Environment.GetEnvironmentVariable("PATH"),
             ["VERSION"] = version,
             ["TAG"] = "v" + version,
+            ["TARGET"] = ReleaseTarget,
             ["GH_TOKEN"] = "stub-token",
             ["GITHUB_REPOSITORY"] = "owner/repo",
             ["STUB_LOG"] = Path.Combine(folder, "stub.log"),
             ["STUB_DOWNLOAD_EXIT"] = downloadExit.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["STUB_PACK_EXIT"] = packExit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["STUB_VIEW"] = viewFile,
+            ["STUB_VIEW_EXIT"] = viewExit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["STUB_EDIT_EXIT"] = editExit.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
         return await RunBash(folder, ["--noprofile", "--norc", "-eo", "pipefail", file], environment);
     }
@@ -1867,6 +2266,9 @@ public sealed class ReleaseWorkflowTests
         [.. JobSteps(WorkflowYaml.Parse(yaml), job)
             .Where(step => step.ContainsKey("run"))
             .Select(step => Scalar(step["run"]))];
+
+    private static List<string> RunScriptsOf(YamlNode root, string job) =>
+        [.. JobSteps(root, job).Where(step => step.ContainsKey("run")).Select(step => Scalar(step["run"]))];
 
     private static string JobScript(string job, string step) =>
         Scalar(Assert.Single(JobSteps(WorkflowYaml.Parse(ReadWorkflow()), job), s => Scalar(s["name"]) == step)["run"]);

@@ -603,6 +603,8 @@ public sealed class DesktopSourceTests
 
     // 133 AC-11: GitHub releases of this repository over HTTPS, no token, no explicit channel (the installed one
     // stays), no downgrade; installed means Windows and not the portable copy; applying asks for no restart.
+    // 135 AC-10: the null token is what keeps a draft release out of the updater's sight (GitHub lists drafts only
+    // to a caller with write access), so a release is never installed before the publish job made it public.
     [Fact]
     public void RealUpdateSource_UsesThisRepositorysReleases_WithoutTokenChannelOrDowngrade()
     {

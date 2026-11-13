@@ -1,4 +1,6 @@
-# Builds, tests and packs Context as a .NET tool, then attaches the .nupkg to a GitHub release.
+# Builds, tests and packs Context as a .NET tool, then attaches the .nupkg and the desktop builds to a GitHub
+# release. Four jobs: release creates the release as a draft, desktop-macos and desktop-windows upload into
+# the draft, and publish makes it public once every asset is there.
 # - A push to develop makes a prerelease X.Y.(Z+1)-develop.<run number>, one patch above the
 #   highest release tag (.github/scripts/develop-version.sh). A push that changes only the root
 #   backlog.md is skipped (paths-ignore), so it makes no prerelease.
@@ -7,9 +9,9 @@
 #   PRs from other branches and fork PRs are skipped by the job's if:.
 # - A pushed version tag vX.Y.Z makes the release for that tag. The tag's commit must be on main,
 #   and -develop tags are refused (those are only made by develop builds).
-# - After a proper release vX.Y.Z, every -develop prerelease below X.Y.Z is deleted with its tag
-#   (.github/scripts/old-prereleases.sh); proper releases and newer prereleases stay. A failed prune
-#   only warns (continue-on-error), the release still counts.
+# - After a proper release vX.Y.Z is published, the publish job deletes every -develop prerelease below X.Y.Z
+#   with its tag (.github/scripts/old-prereleases.sh); proper releases and newer prereleases stay. A failed
+#   prune only warns (continue-on-error), the release still counts.
 # - What ships, on every release (develop prerelease, release PR, tag):
 #   - the console app as the .NET tool package Context.<version>.nupkg (command context), from the release job;
 #   - the desktop app for macOS as Context-<version>-osx-arm64.zip and Context-<version>-osx-x64.zip (a
@@ -18,8 +20,14 @@
 #     portable zip, this version's full .nupkg, a delta .nupkg when an earlier release of the channel could be
 #     downloaded, and the feed files (releases.<channel>.json, assets.<channel>.json, RELEASES*).
 #   Both desktop jobs need the release job: they take its version, tag and commit (job outputs) and upload to
-#   the release it created. A failed desktop job leaves a release with fewer assets; re-running it replaces
-#   its own assets (--clobber).
+#   the draft it created; re-running a desktop job replaces its own assets (--clobber).
+# - The release is a draft until the publish job runs. publish needs all three other jobs, checks that the
+#   draft sits on the release's commit and holds the console package, both macOS zips and the Windows
+#   installer, full package and feed, and only then publishes it. A failed desktop job leaves an unpublished
+#   draft: users and the updater never see a half-filled release (re-run the failed job, publish then runs).
+#   This is what makes immutable releases work: GitHub refuses uploads into a published immutable release,
+#   so every asset is uploaded before the release is published. A draft has no git tag yet (develop and
+#   release-PR runs); GitHub creates the tag on the draft's commit when it is published.
 # - Two update channels: a prerelease version (X.Y.Z-develop.<n>) is packed with --channel develop, a proper
 #   release with vpk's default channel (win). A copy installed by Setup.exe looks at start-up for a newer
 #   build on the channel it was installed from and puts it in place after the app closes (when the app stays
@@ -202,6 +210,7 @@ jobs:
           SMOKE_CONFIG="$(mktemp -d "$RUNNER_TEMP/smoke-config.XXXXXX")"
           XDG_CONFIG_HOME="$SMOKE_CONFIG" context tags
 
+      # A draft: the desktop jobs upload into it and the publish job makes it public (see the header).
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -210,32 +219,7 @@ jobs:
           case "$VERSION" in
             *-*) PRERELEASE="--prerelease" ;;
           esac
-          gh release create "$TAG" "nupkg/Context.$VERSION.nupkg" --title "Context $VERSION" --notes-file .github/release-notes-header.md --generate-notes --target "$TARGET" $PRERELEASE
-
-      # Housekeeping after a proper release: delete the -develop prereleases (and their tags) whose
-      # version is lower than the release (.github/scripts/old-prereleases.sh). It runs only after the
-      # release was created, so continue-on-error cannot hide a failed release, only a failed prune.
-      - name: Prune old prereleases
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          case "$VERSION" in
-            *-*)
-              echo "Version '$VERSION' is a prerelease; nothing to prune"
-              exit 0
-              ;;
-          esac
-          # Without a shell: key, run: is bash -e with no pipefail: a failed listing must fail the step (a warning).
-          set -o pipefail
-          # Tag names are external text: they reach the shell only as data, and only exact
-          # v<X.Y.Z>-develop.<n> matches at or below the release come out of the filter.
-          gh release list --limit 1000 --json tagName,isPrerelease --jq '.[] | select(.isPrerelease) | .tagName' |
-            sh .github/scripts/old-prereleases.sh "$VERSION" |
-            while IFS= read -r tag; do
-              echo "Deleting prerelease $tag"
-              gh release delete "$tag" --cleanup-tag --yes || echo "::warning::Could not delete prerelease $tag"
-            done
+          gh release create "$TAG" "nupkg/Context.$VERSION.nupkg" --title "Context $VERSION" --notes-file .github/release-notes-header.md --generate-notes --target "$TARGET" --draft $PRERELEASE
 
   # The desktop app for macOS: one unsigned Context.app per architecture, zipped and added to the release.
   desktop-macos:
@@ -387,3 +371,99 @@ jobs:
             set -- "$@" "$DELTA"
           fi
           gh release upload "$TAG" "$@" --clobber
+
+  # Makes the draft public. It needs all three jobs and has no if:, so it is skipped when one of them fails
+  # (or is skipped): the release then stays an unpublished draft.
+  publish:
+    needs:
+      - release
+      - desktop-macos
+      - desktop-windows
+    runs-on: ubuntu-latest
+    # The release job's outputs reach the scripts only as environment variables.
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+      TAG: ${{ needs.release.outputs.tag }}
+      TARGET: ${{ needs.release.outputs.target }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Everything goes through gh (GH_TOKEN), so the write token is not left in .git/config.
+          persist-credentials: false
+          # The commit the release was made on (the prune step runs its script from there).
+          ref: ${{ needs.release.outputs.target }}
+
+      - name: Check version
+        run: |
+          # The version came from another job: check it again before it reaches a file name.
+          if ! printf '%s' "$VERSION" | LC_ALL=C grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+            echo "Version '$VERSION' is not SemVer" >&2
+            exit 1
+          fi
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "Tag '$TAG' is not 'v$VERSION'" >&2
+            exit 1
+          fi
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NAME="win"
+          SUFFIX=""
+          PRE=""
+          case "$VERSION" in
+            *-*)
+              NAME="develop"
+              SUFFIX="-develop"
+              PRE="--prerelease"
+              ;;
+          esac
+          # One read: line 1 is the draft flag, line 2 the commit the release sits on, then one asset name a line.
+          INFO="$(gh release view "$TAG" --json isDraft,targetCommitish,assets --jq '.isDraft, .targetCommitish, .assets[].name')"
+          DRAFT="$(sed -n '1p' <<< "$INFO")"
+          COMMIT="$(sed -n '2p' <<< "$INFO")"
+          ASSETS="$(sed -n '3,$p' <<< "$INFO")"
+          # Only this run's own draft is published: GitHub puts the tag on the draft's commit at that moment.
+          if [ "$DRAFT" != "true" ]; then
+            echo "Release $TAG is not a draft; nothing is published" >&2
+            exit 1
+          fi
+          if [ "$COMMIT" != "$TARGET" ]; then
+            echo "Release $TAG sits on '$COMMIT', not on '$TARGET'; nothing is published" >&2
+            exit 1
+          fi
+          # What every release must hold before users or the updater can see it.
+          for ASSET in "Context.$VERSION.nupkg" "Context-$VERSION-osx-arm64.zip" "Context-$VERSION-osx-x64.zip" "ContextDesktop-$NAME-Setup.exe" "ContextDesktop-$VERSION$SUFFIX-full.nupkg" "releases.$NAME.json"; do
+            if ! grep -Fxq -- "$ASSET" <<< "$ASSETS"; then
+              echo "Release $TAG has no asset $ASSET; nothing is published" >&2
+              exit 1
+            fi
+          done
+          gh release edit "$TAG" --draft=false $PRE
+
+      # Housekeeping after a proper release: delete the -develop prereleases (and their tags) whose
+      # version is lower than the release (.github/scripts/old-prereleases.sh). It runs only after the
+      # release was published, so continue-on-error cannot hide a failed release, only a failed prune.
+      - name: Prune old prereleases
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "$VERSION" in
+            *-*)
+              echo "Version '$VERSION' is a prerelease; nothing to prune"
+              exit 0
+              ;;
+          esac
+          # Without a shell: key, run: is bash -e with no pipefail: a failed listing must fail the step (a warning).
+          set -o pipefail
+          # Tag names are external text: they reach the shell only as data, and only exact
+          # v<X.Y.Z>-develop.<n> matches at or below the release come out of the filter.
+          gh release list --limit 1000 --json tagName,isPrerelease --jq '.[] | select(.isPrerelease) | .tagName' |
+            sh .github/scripts/old-prereleases.sh "$VERSION" |
+            while IFS= read -r tag; do
+              echo "Deleting prerelease $tag"
+              gh release delete "$tag" --cleanup-tag --yes || echo "::warning::Could not delete prerelease $tag"
+            done
