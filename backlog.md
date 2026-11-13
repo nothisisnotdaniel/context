@@ -41,7 +41,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#123](backlog/123-publish-releases-only-after-all-desktop.md) Publish releases only after all desktop assets are uploaded → 135-release-draft-publish
 - [x] [#5](backlog/005-sensitive-notes-with-certificate-unlock.md) Sensitive notes with certificate unlock (after: #3; #4) → 136-sensitive-notes-cert
 - [x] [#6](backlog/006-desktop-tags-and-links.md) Desktop tags and links → 137-desktop-tags-links
-- [ ] [#7](backlog/007-desktop-settings.md) Desktop settings
+- [x] [#7](backlog/007-desktop-settings.md) Desktop settings → 138-desktop-settings
 - [ ] [#8](backlog/008-desktop-import-and-export.md) Desktop import and export
 - [ ] [#9](backlog/009-quick-capture-in-the-desktop-app.md) Quick capture in the desktop app
 - [ ] [#10](backlog/010-editor-dirty-marker.md) Editor dirty marker
