@@ -187,6 +187,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [h] [#153](backlog/153-check-the-unsaved-changes-dot-in.md) Check the unsaved-changes dot in both themes
 - [?] [#154](backlog/154-ignore-held-enter-repeats-on-a.md) Ignore held Enter repeats on a focused chip
 - [h] [#155](backlog/155-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view
+- [?] [#156](backlog/156-hide-the-empty-editor-box-when.md) Hide the empty editor box when the editor fails to start
 
 ## Dropped with the terminal UI
 
