@@ -107,10 +107,10 @@ public sealed class RemovedFeatureSourceTests
         }
     }
 
-    // AC-10: the conventions file has no section on the removed feature and does not name it anywhere, and one line
-    // says the data is plain.
+    // AC-10: the conventions file has no section on the removed feature and does not name it anywhere. 136: one line
+    // says what is stored plain and that only sensitive notes are sealed, and one entry describes those.
     [Fact]
-    public void ClaudeMd_DoesNotMentionTheRemovedFeature_AndSaysDataIsPlain()
+    public void ClaudeMd_DoesNotMentionTheRemovedFeature_AndSaysWhatIsSealed()
     {
         string root = RepoRoot();
         string path = Path.Combine(root, "CLAUDE.md");
@@ -118,13 +118,14 @@ public sealed class RemovedFeatureSourceTests
 
         Assert.Empty(Hits(root, [path]));
         Assert.DoesNotContain("at rest", text, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("/encrypt", text, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("/decrypt", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("encrypt", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("decrypt", text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("ciphertext", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("**Data is plain:**", text, StringComparison.Ordinal);
         Assert.Single(
             text.Split('\n'),
-            line => line.Contains("**Data is plain:**", StringComparison.Ordinal));
-        Assert.Single(text.Split('\n'), line => line.Contains("encrypt", StringComparison.OrdinalIgnoreCase));
+            line => line.Contains("**Data is plain, except sensitive notes:**", StringComparison.Ordinal));
+        Assert.Single(text.Split('\n'), line => line.StartsWith("- **Sensitive notes:**", StringComparison.Ordinal));
     }
 
     // AC-2: Program.cs registers exactly the command classes ConsoleSession does, so the tests on that session hold

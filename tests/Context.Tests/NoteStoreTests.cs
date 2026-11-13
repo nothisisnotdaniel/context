@@ -670,4 +670,82 @@ public sealed class NoteStoreTests : IDisposable
         Assert.True(File.Exists(Path.Combine(root, "notes.txt")));
         Assert.Equal(["Plan"], store.List().Select(n => n.Name).ToArray());
     }
+
+    // 136 AC-9: a sensitive note is a top-level <name>.ctxs; Core lists it by name and never as a plain note.
+    [Fact]
+    public void ListSensitive_ListsTopLevelSealedFiles_ByNameOnly()
+    {
+        Directory.CreateDirectory(Path.Combine(root, "sub"));
+        File.WriteAllText(Path.Combine(root, "Plan.md"), "plain");
+        File.WriteAllText(Path.Combine(root, "beta.ctxs"), "sealed-b");
+        File.WriteAllText(Path.Combine(root, "Alpha.ctxs"), "sealed-a");
+        File.WriteAllText(Path.Combine(root, "sub", "Inner.ctxs"), "sealed-i");
+        File.WriteAllText(Path.Combine(root, ".Alpha.ctxs.1234.tmp"), "temp");
+        NoteStore store = new NoteStore(root);
+
+        IReadOnlyList<NoteInfo> found = store.ListSensitive();
+
+        Assert.Equal(".ctxs", NoteStore.SensitiveExtension);
+        Assert.Equal(["Alpha", "beta"], found.Select(n => n.Name).ToArray());
+        Assert.Equal(Path.Combine(root, "Alpha.ctxs"), found[0].Path);
+        Assert.Equal(["Plan"], store.List().Select(n => n.Name).ToArray());
+        Assert.Empty(new NoteStore(Path.Combine(parent, "nothing")).ListSensitive());
+        Assert.False(Directory.Exists(Path.Combine(parent, "nothing")));
+    }
+
+    // 136 AC-9: found by name ignoring case, exact case first; never opened or read as a plain note.
+    [Fact]
+    public void TryFindSensitive_FindsByName_AndPlainLookupsMiss()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "Plan.ctxs"), "sealed");
+        File.WriteAllText(Path.Combine(root, "Other.md"), "plain");
+        NoteStore store = new NoteStore(root);
+
+        Assert.True(store.TryFindSensitive(" plan ", out NoteInfo? found));
+        Assert.Equal("Plan", found!.Name);
+        Assert.False(store.TryFindSensitive("Other", out _));
+        Assert.False(store.TryFindSensitive("Gone", out _));
+        Assert.False(store.TryFind("Plan", out _));
+        Assert.False(store.TryOpen("Plan", out _));
+    }
+
+    // 136 AC-7: DeleteSensitive removes only the .ctxs; Delete never removes one.
+    [Fact]
+    public void DeleteSensitive_RemovesOnlyTheSealedFile()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "Plan.ctxs"), "sealed");
+        File.WriteAllText(Path.Combine(root, "Plan.md"), "plain");
+        File.WriteAllText(Path.Combine(root, "Only.ctxs"), "sealed");
+        NoteStore store = new NoteStore(root);
+
+        Assert.False(store.Delete("Only"));
+        Assert.True(File.Exists(Path.Combine(root, "Only.ctxs")));
+        Assert.False(store.DeleteSensitive("Gone"));
+
+        Assert.True(store.DeleteSensitive("plan"));
+
+        Assert.False(File.Exists(Path.Combine(root, "Plan.ctxs")));
+        Assert.Equal("plain", File.ReadAllText(Path.Combine(root, "Plan.md")));
+        Assert.True(File.Exists(Path.Combine(root, "Only.ctxs")));
+    }
+
+    // 136 AC-7: a sensitive note's name is taken: no plain note is created, saved or renamed onto it.
+    [Fact]
+    public void SensitiveName_IsTakenForPlainNotes()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "Plan.ctxs"), "sealed");
+        File.WriteAllText(Path.Combine(root, "Other.md"), "plain");
+        NoteStore store = new NoteStore(root);
+
+        Assert.Throws<NoteExistsException>(() => store.Create("plan"));
+        Assert.Throws<NoteExistsException>(() => store.CreateWithText("Plan", "text"));
+        Assert.Throws<NoteExistsException>(() => store.Save("PLAN", "text"u8.ToArray()));
+        Assert.Throws<NoteExistsException>(() => store.Rename("Other", "Plan"));
+
+        Assert.Equal(["Other.md", "Plan.ctxs"], Directory.GetFiles(root).Select(f => Path.GetFileName(f)!).Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal("sealed", File.ReadAllText(Path.Combine(root, "Plan.ctxs")));
+    }
 }

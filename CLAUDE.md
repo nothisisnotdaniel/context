@@ -84,7 +84,93 @@ Every factory agent reads this file before working on Context. Keep it short and
     feeds use `RRULE` a lot, so recurring meetings only show on their first occurrence. Tests use
     `FakeHttpHandler` and never touch the network; feed tests take their timeout from
     `CalendarFeedTests.TimeoutFor` (100 ms only with `FakeHttpHandler.Hang()`, 30 s for every handler that answers).
-- **Data is plain:** every file in the data folder is stored as plain bytes; nothing is encrypted.
+- **Data is plain, except sensitive notes:** every file in the data folder is stored as plain bytes, except the notes
+  the desktop user marked sensitive (`<Title>.ctxs`, see Sensitive notes). Todos, the inbox, calendar files and
+  `context.db` are never sealed.
+- **Sensitive notes:** (job 136, desktop only) a single note can be marked sensitive; it is then a sealed top-level
+  `<Title>.ctxs` file instead of `<Title>.md`. The console, the command line, `context.db` and search see only its
+  name, marked `locked`.
+  - **Core (managed, no crypto):** `NoteStore.SensitiveExtension` (`.ctxs`), `ListSensitive()` (top-level `*.ctxs` as
+    `NoteInfo`), `TryFindSensitive(name, out NoteInfo?)` (matched against `ListSensitive()` only, exact then ignoring
+    case, never turned into a path) and `DeleteSensitive(name)`. `List()`, `TryFind` and `Delete` stay `.md`-only;
+    `Create`, `CreateWithText`, `Save` and `Rename` treat a sensitive name as taken (ignoring case). A `.ctxs` is never
+    moved (its name is sealed in). `TagIndex` never reads one, so its tags and links are in no table and a `[[link]]`
+    to it shows as missing.
+  - **Console / command line:** `notes` prints `<name>\tlocked`, `/notes` a grey `locked`; `note show`, `export`,
+    `links`, `/open` and `/export` on one answer `<name> is sensitive. Open it in the desktop app.`
+    (`Cli.SensitiveText`, exit 1, red in the console); `import` and `capture` onto a sensitive name exit 1 and write
+    nothing.
+  - **File format (`SealedNote.cs`, v1):** UTF-8 JSON, at most 8 MB, read through `BoundedFile`:
+    `{"v":1,"nonce":b64(12),"tag":b64(16),"text":b64,"keys":[{"id","kind":"machine"|"recovery","epk":b64(65),"nonce","tag","key":b64(32)}]}`
+    with 1 to 8 keys. The text is sealed with AES-256-GCM under a fresh random note key on every save; AAD is UTF-8
+    `context-note-v1\n<Name>` (the file stem, exact case). Each entry in `keys` wraps the note key for one recipient:
+    ephemeral P-256 ECDH with the recipient's public key, HKDF-SHA256 (salt `epk || recipient public point`, info
+    `context-note-key-v1`) to a 32-byte key, AES-256-GCM with AAD = `id`. `id` is the lower-case hex SHA-256 of the
+    recipient's SubjectPublicKeyInfo (`SealedNote.KeyId`). `Seal(name, text, recipients)`,
+    `Open(name, file, recipientSpki, agree)` (uses only the wrap whose `id` is that key's; `agree` is called at most
+    once), `HasKey`, `AddRecipient`. Every failure is one `SealedNoteException` without a text. Key bytes are zeroed
+    with `CryptographicOperations.ZeroMemory` after use. The sealed text is the note as a plain file would hold it (a
+    leading U+FEFF stands for a byte order mark, line endings are kept); only valid UTF-8 notes can be marked. No
+    private key, password or plain text is ever written to the data folder.
+  - **Keys (`IKeyStore`):** `Supported`, `MachinePublicKey()`, `RecoveryPublicKey()` (SubjectPublicKeyInfo, `null`
+    when absent; read from the OS store, never from the data folder, so a planted file can't add a recipient),
+    `CreateMachineKey()`, `StoreRecoveryPublicKey(spki)` and `Agree(peerPoint)` (the one private-key call; the OS may
+    prompt), failing with `KeyStoreException`. `WindowsKeyStore` (`CurrentUser\My`, .NET classes only): a P-256 CNG
+    key with `ExportPolicy.None`, in the TPM provider when it can agree, else in the software provider behind a
+    UI-protected key, tied to the self-issued certificate `CN=Context sensitive notes`; the recovery public key is
+    the certificate `CN=Context sensitive notes recovery` without a private key. `MacKeyStore` (the only file with
+    P/Invoke: Security.framework and CoreFoundation): a non-extractable P-256 key from `SecKeyCreateRandomKey`, in the
+    Secure Enclave with a user-presence access control when macOS allows it (builds are only ad-hoc signed, so it
+    often doesn't), else a non-extractable login-Keychain key; `SecKeyCopyKeyExchangeResult` for `Agree`; the recovery
+    public key is a generic-password item. `UnsupportedKeyStore` on every other OS (`Supported` false). `Program.cs`
+    picks the store; nothing else names the real ones.
+  - **Recovery file (`RecoveryFile.cs`):** `Create(password, out publicKey)` makes a new P-256 key in memory and
+    returns it as PKCS#12 bytes (one shrouded key bag: PBES2, AES-256-CBC, PBKDF2-HMAC-SHA256 with 600,000
+    iterations; integrity PBMAC1 with the same PBKDF2), built with `AsnWriter`; `Read(file, password)` returns the
+    key (file at most 1 MB) or throws `RecoveryFileException`, also for a file with fewer than 600,000 PBKDF2
+    iterations. It touches no file itself. Both normalise the password to Unicode form C first
+    (`RecoveryFile.Normalized`; text without such a form is refused), so a password typed composed on one machine
+    and decomposed on another gives the same key. The password needs at least 12 characters (`MinPasswordLength`),
+    counted on that form; the dialog compares its two entries on it as well.
+  - **Actions (`DesktopActions`, the only write path):** `SetUpSensitive(password, path)` (creates the machine key if
+    missing, writes the `.pfx` with `FileMode.CreateNew` and `0600` off Windows, and only then stores the recovery
+    public key; refused for a short password, a path inside the data folder or that exists, or when recovery is
+    already set up), `MarkSensitive(name, confirmation)` (seals for the machine and the recovery key through a `0600`
+    temp file and a no-overwrite move, then deletes the `.md`; zero `Agree` calls; refused without a confirmation, for
+    `inbox`, without recovery `Set up recovery first.`, over 5 MB, and on an unsupported OS `Sensitive notes need
+    macOS or Windows.`), `MakePlain(name, confirmation)`, `RestoreFromRecovery(path, password)` (reads the `.pfx`,
+    creates the machine key and stores the recovery public key when missing, adds a machine wrap to every sensitive
+    note the recovery key opens: `Restored <n> of <m> notes.`; a wrong password or file: Failed `Can't read that
+    recovery file.`, nothing changed). `SaveNote` on a sensitive note re-seals with a new note key (zero `Agree`
+    calls, same changed-on-disk check, never a `.md` or a plain temp file); `RenameNote` seals the open text under the
+    new name and then removes the old file through `DeleteSensitive` (only while the note is open, else `Unlock <name>
+    first.`); `DeleteNote` removes a `.ctxs` through `DeleteSensitive` (locked or open, zero `Agree` calls);
+    `OpenExternally` refuses a sensitive note. Results hold fixed texts only, never a key, a password or an exception
+    message.
+  - **Open and lock:** `DesktopState.ReadSensitive(name)` is the only caller of `IKeyStore.Agree` for opening (once
+    per open); the text then lives only in `SensitiveSession` (one open note, no key) and in the page's editor.
+    `NoteEditor` (`Sensitive`) shows red `Can't unlock <name>.` when that fails. The session locks through the `Lock`
+    button, `Tick()` after 5 minutes without an open, a save or editor input (`Program.cs` ticks every 15 s; the
+    clock is injected) and when the window closes; leaving the note drops the text as well. On idle `Main` saves a
+    dirty note first and keeps it open when that save is refused. Reopening asks the OS again.
+  - **UI:** `NotesPanel` lists sensitive notes with plain ones by name, with the visible word `locked`, and has
+    `Set up sensitive notes` (until recovery is set up) and `Restore from recovery file`, which open `SensitiveSetup`
+    (password fields without a value, the loss warning, the OS file dialog through `IFileDialog` /
+    `PhotinoFileDialog`; `The passwords don't match.`). The toolbar of a plain note has `Mark sensitive`, of a
+    sensitive note `Make plain` and `Lock` instead of `Open in default editor`; both mark and make-plain ask in a
+    `ConfirmDialog` and need a saved note.
+  - **Rules (tests):** no file in `src/Context.Core/` or `src/Context/` mentions `AesGcm`, `ECDiffieHellman`,
+    `IKeyStore` or `SealedNote`; `DllImport`/`LibraryImport`/`extern ` appear only in `MacKeyStore.cs`; `X509Store`
+    and `CngKey` only in `WindowsKeyStore.cs`; no test references `WindowsKeyStore`, `MacKeyStore` or
+    `PhotinoFileDialog` (tests use `FakeKeyStore`, which counts `Agree` and can throw, and `FakeFileDialog`), so
+    `dotnet test` never touches a real key store, Keychain or file dialog; no new NuGet package.
+  - **Not covered:** rollback to an older sealed file, a wrap dropped from a sealed file's `keys` by someone who can
+    write the data folder (the list is under no tag; the next save writes both wraps again), plain remnants of the
+    deleted `.md` (disk, backups), text in process and web-view memory while a note is open. Losing both the machine key and the recovery file (or its
+    password) loses the notes. A second machine is enrolled with the recovery file; notes it creates are not readable
+    on the first machine.
+  - **Manual checks (no test can cover them):** on macOS and on Windows run setup, mark, open (the OS prompt
+    appears), lock, restart, restore from the `.pfx`.
 - **How it runs:** an interactive session that stays open until `/quit` (exit code 0). A Spectre
   `Layout` fills the terminal: the main view on the left, the `Todos` sidebar on the right (fixed
   32 columns), one hint row, then a 3-line bordered input panel at the bottom. After each command
@@ -338,7 +424,10 @@ Every factory agent reads this file before working on Context. Keep it short and
     `wwwroot/index.html` (CSP meta tag, only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
     and `wwwroot/editor/editor.css`.
   - **Desktop rules:** the Core writing calls (`Create`, `Save`, `SaveIfUnchanged`, `Add`, `Complete`, `Set`, `Clear`, `Delete`,
-    `Rename`, `ClearCache`) appear only in `DesktopActions.cs` (`DotNetObjectReference.Create(` once in `EditorInterop.cs` is the one exemption; the reads still write
+    `Rename`, `ClearCache`, and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
+    `StoreRecoveryPublicKey`) appear only in `DesktopActions.cs` (exemptions: `DotNetObjectReference.Create(` once in
+    `EditorInterop.cs`, `ECDiffieHellman.Create(` in `SealedNote.cs`, and `WindowsKeyStore.cs`, whose .NET calls change
+    the certificate store and which names no Core store, `File.`, `Directory.` or `Path.`; the reads still write
     only through `TagIndex.Sync` and `CalendarFeed.Fetch`, as in the console). `DesktopActions` is named only by
     `.razor` files, `Program.cs` and `StateComponent`, never by `DesktopState`, `DataWatcher` or `DesktopSnapshot`, so
     nothing writes on render, refresh, the watcher or the tick. In `.razor` files every `@code` method that calls
@@ -359,7 +448,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `<button` has `type="button"`; no plain HTML event attributes (`on<event>=` without `@`); only `EditorInterop.cs`
     mentions `IJSRuntime`/`JSRuntime`/`JSInvokable`, and its `[JSInvokable]` methods only raise events (never `Actions.`).
     The editor sources (`editor/src/*.js`) use no `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`,
-    `eval` or `new Function`. Every `<input>` is `type="checkbox"`, `"text"`, `"date"` or `"search"`, without `@bind`,
+    `eval` or `new Function`. Every `<input>` is `type="checkbox"`, `"text"`, `"date"`, `"search"` or `"password"`, without `@bind`,
     and there is no `<textarea>`. No CDN or external fonts; error
     lines are fixed texts, never exception messages; the calendar link stays inside `CalendarFeed`. Texts match the
     console renderer's. Colours by CSS class (`accent`, `grey`, `red`, dates `overdue`/`today`/`later`); long lines

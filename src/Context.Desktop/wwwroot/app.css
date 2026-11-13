@@ -146,6 +146,12 @@ ol {
     min-width: 0;
 }
 
+/* A sensitive note's marker in the notes list: the word, not a colour. */
+.note .locked {
+    flex: none;
+    font-size: 12px;
+}
+
 .note .time {
     flex: none;
     font-size: 12px;
@@ -290,7 +296,8 @@ input[type="checkbox"]:disabled {
 /* Text and date fields (todo entry, command palette), themed for light and dark. */
 input[type="text"],
 input[type="date"],
-input[type="search"] {
+input[type="search"],
+input[type="password"] {
     background: var(--background);
     border: 1px solid var(--line);
     border-radius: 6px;
@@ -303,7 +310,8 @@ input[type="search"] {
 
 input[type="text"]:focus-visible,
 input[type="date"]:focus-visible,
-input[type="search"]:focus-visible {
+input[type="search"]:focus-visible,
+input[type="password"]:focus-visible {
     border-color: var(--accent-strong);
     outline: 2px solid var(--accent-strong);
     outline-offset: 0;
@@ -311,7 +319,8 @@ input[type="search"]:focus-visible {
 
 input[type="text"]:disabled,
 input[type="date"]:disabled,
-input[type="search"]:disabled {
+input[type="search"]:disabled,
+input[type="password"]:disabled {
     opacity: 0.5;
 }
 
@@ -536,4 +545,39 @@ input[type="search"]:disabled {
 
 .palette .none {
     margin: 4px 10px;
+}
+
+/* Sensitive notes: the setup and restore buttons under the notes list, and their dialog. */
+.sensitive-entry {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 12px;
+}
+
+.sensitive-result {
+    margin: 6px 0 0;
+    overflow-wrap: anywhere;
+}
+
+.sensitive-setup {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.sensitive-setup .question {
+    font-weight: 600;
+    margin: 0;
+}
+
+.sensitive-setup .setup-text,
+.sensitive-setup .setup-warning,
+.sensitive-setup .setup-status {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.sensitive-setup .setup-status:empty {
+    display: none;
 }

@@ -710,4 +710,24 @@ public sealed class TagIndexTests : IDisposable
         command.CommandText = sql;
         command.ExecuteNonQuery();
     }
+
+    // 136 AC-3: a sensitive note has no row in any table; a link to it counts as missing.
+    [Fact]
+    public void Sync_SensitiveNote_HasNoRows()
+    {
+        WriteNote("Plan", "#secret [[Other]]");
+        WriteNote("Other", "#kept [[Plan]]");
+        index.Sync(store);
+        Assert.Contains(("Plan", "secret"), Rows());
+
+        File.Delete(Path.Combine(root, "Plan.md"));
+        File.WriteAllText(Path.Combine(root, "Plan.ctxs"), "#secret [[Other]]");
+        index.Sync(store);
+
+        Assert.Equal([("Other", "kept")], Rows());
+        Assert.Equal([("Other", "Plan")], LinkRows());
+        Assert.Null(index.FindNote("Plan"));
+        NoteLink link = Assert.Single(index.Links("Other"));
+        Assert.True(link.Missing);
+    }
 }

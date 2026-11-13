@@ -22,11 +22,14 @@ internal static class RemovedFeature
     /// <summary>The first bytes of a file the removed feature wrote, plus a version byte.</summary>
     public static readonly byte[] Magic = [0x00, 0x43, 0x54, 0x58, 0x45, 0x01];
 
-    /// <summary>The words no file under <c>src/</c> or <c>tests/</c> and not <c>CLAUDE.md</c> may contain (ignoring case).</summary>
+    /// <summary>
+    /// The words no file under <c>src/</c> or <c>tests/</c> and not <c>CLAUDE.md</c> may contain (ignoring case).
+    /// 136: the generic word for sealing data is no longer in this list, because .NET names such as
+    /// <c>PbeEncryptionAlgorithm</c> contain it and sensitive notes need them.
+    /// </summary>
     public static readonly string[] Words =
     [
         "Vau" + "lt",
-        "Encry" + "ption",
         KeyFileName,
         "pass" + "phrase",
         "Locked" + "Panel",

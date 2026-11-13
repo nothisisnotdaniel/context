@@ -2,16 +2,18 @@
 @implements IAsyncDisposable
 @* The note editor: the bundled ProseMirror editor (EditorInterop) in a host element, a Save button and a status
    line. Saving goes through DesktopActions.SaveNote only from the Save button and Ctrl/Cmd+S. Tag and link clicks
-   come back from the page as events and only open things. *@
+   come back from the page as events and only open things. A sensitive note is read through DesktopState.ReadSensitive
+   (the one place the OS is asked for the key); its text lives only in the SensitiveSession and in the page's editor,
+   and the editor tells its parent when the session locked or sat idle. *@
 
-<section class="note-editor" @onkeydown="e => Save(e)">
+<section class="note-editor" @onkeydown="e => Save(e)" @oninput="Used">
     <div class="editor-bar">
         <h2 class="note-title cut" title="@DisplayName">@DisplayName</h2>
         <button type="button" class="save" disabled="@(opened is null || saving)" @onclick="() => Save(null)">Save</button>
     </div>
     @if (unreadable)
     {
-        <p class="red unreadable" role="alert">Can't read @DisplayName.</p>
+        <p class="red unreadable" role="alert">@(Sensitive ? "Can't unlock" : "Can't read") @DisplayName.</p>
     }
     @if (lossy)
     {
@@ -47,6 +49,18 @@
     /// <summary>Called with the note's name when a link to an existing note is clicked.</summary>
     [Parameter]
     public EventCallback<string> OnOpenNote { get; set; }
+
+    /// <summary>True when <see cref="Name"/> is a sensitive note: it is unlocked instead of read.</summary>
+    [Parameter]
+    public bool Sensitive { get; set; }
+
+    /// <summary>Called when the open sensitive note sat unused for too long; the parent saves and locks it.</summary>
+    [Parameter]
+    public EventCallback OnIdle { get; set; }
+
+    /// <summary>Called when the open sensitive note was locked; the parent takes this editor down.</summary>
+    [Parameter]
+    public EventCallback OnLocked { get; set; }
 
     private string DisplayName => DesktopText.OneLine(Name);
 
@@ -94,6 +108,14 @@
     public async ValueTask DisposeAsync()
     {
         Dispose();
+        if (Sensitive)
+        {
+            // Leaving a sensitive note drops its text; the next open asks the OS again.
+            State.Session.Locked -= SessionLocked;
+            State.Session.IdleReached -= SessionIdle;
+            State.Session.Close(Name);
+        }
+
         Interop.TagClicked -= TagClicked;
         Interop.LinkClicked -= LinkClicked;
         await Interop.DestroyAsync();
@@ -106,7 +128,13 @@
             return;
         }
 
-        EditableNote? note = await State.ReadForEdit(Name);
+        if (Sensitive)
+        {
+            State.Session.Locked += SessionLocked;
+            State.Session.IdleReached += SessionIdle;
+        }
+
+        EditableNote? note = Sensitive ? await State.ReadSensitive(Name) : await State.ReadForEdit(Name);
         if (note is null)
         {
             unreadable = true;
@@ -134,6 +162,7 @@
 
     private async Task Save(KeyboardEventArgs? key)
     {
+        Used();
         if (key is not null && !((key.CtrlKey || key.MetaKey) && string.Equals(key.Key, "s", StringComparison.OrdinalIgnoreCase)))
         {
             return;
@@ -155,6 +184,19 @@
             saving = false;
         }
     }
+
+    // Typing, pasting and saving count as use of an open sensitive note.
+    private void Used()
+    {
+        if (Sensitive)
+        {
+            State.Session.Touch();
+        }
+    }
+
+    private void SessionLocked() => _ = InvokeAsync(() => OnLocked.InvokeAsync());
+
+    private void SessionIdle() => _ = InvokeAsync(() => OnIdle.InvokeAsync());
 
     private Task TagClicked(string raw) => InvokeAsync(async () =>
     {

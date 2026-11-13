@@ -774,4 +774,74 @@ public sealed class CliTests : IDisposable
         AssertUsage(result);
         Assert.DoesNotContain("topSecret55aa", result.Err, StringComparison.Ordinal);
     }
+
+    // 136 AC-9 --------------------------------------------------------------------------------------
+
+    private void WriteSealed(string name)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, name + ".ctxs"), "{\"v\":1,\"text\":\"c2VhbGVk\"}");
+    }
+
+    // 136 AC-9: notes lists a sensitive note by name with a locked marker, sorted with the plain ones.
+    [Fact]
+    public void Notes_ListsSensitiveNotesAsLocked()
+    {
+        WriteNote("Beta", "b");
+        WriteSealed("alpha");
+        WriteSealed("Gamma");
+
+        Result result = Run("notes");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(["alpha\tlocked", "Beta", "Gamma\tlocked"], result.Out.Split('\n', StringSplitOptions.RemoveEmptyEntries));
+        Assert.Equal(string.Empty, result.Err);
+    }
+
+    // 136 AC-9: no command prints, exports or follows a sensitive note; each ends with exit 1 and one line.
+    [Theory]
+    [InlineData("note", "show", "Plan")]
+    [InlineData("note", "show", "plan")]
+    [InlineData("links", "Plan")]
+    [InlineData("export", "Plan", "out.md")]
+    public void SensitiveNote_IsNeverReadByTheConsoleCommands(params string[] args)
+    {
+        WriteSealed("Plan");
+        WriteNote("Other", "[[Plan]] #tag");
+        if (args[0] == "export")
+        {
+            args[2] = Path.Combine(outside, "out.md");
+        }
+
+        Dictionary<string, string> before = Snapshot();
+
+        Result result = Run(args);
+
+        AssertError(result, 1, "Plan is sensitive. Open it in the desktop app.");
+        Assert.DoesNotContain("c2VhbGVk", result.Out + result.Err, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(outside, "out.md")));
+        before.Remove(TagIndex.FileName);
+        Dictionary<string, string> after = Snapshot();
+        after.Remove(TagIndex.FileName);
+        Assert.Equal(before, after);
+    }
+
+    // 136 AC-9: import and capture never write a plain note over or beside a sensitive one.
+    [Fact]
+    public void ImportAndCapture_OntoASensitiveNote_WriteNothing()
+    {
+        WriteSealed("Plan");
+        WriteSealed("Inbox");
+        Directory.CreateDirectory(outside);
+        string source = Path.Combine(outside, "Plan.md");
+        File.WriteAllText(source, "imported");
+        Dictionary<string, string> before = Snapshot();
+
+        Result imported = Run("import", source);
+        Result captured = Run("capture", "a thought");
+
+        AssertError(imported, 1, "Plan is sensitive. Open it in the desktop app.");
+        AssertError(captured, 1, "Inbox is sensitive. Open it in the desktop app.");
+        Assert.Equal(before, Snapshot());
+    }
 }

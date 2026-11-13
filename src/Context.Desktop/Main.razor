@@ -32,10 +32,23 @@
                         {
                             <button type="button" class="rename" disabled="@running" @onclick="StartRename">Rename</button>
                             <button type="button" class="delete" disabled="@running" @onclick="AskDelete">Delete</button>
-                            <button type="button" class="open-external" disabled="@running" @onclick="OpenOutside">Open in default editor</button>
+                            @if (openSensitive)
+                            {
+                                <button type="button" class="make-plain" disabled="@running" @onclick="AskMakePlain">Make plain</button>
+                                <button type="button" class="lock" disabled="@running" @onclick="LockOpen">Lock</button>
+                            }
+                            else
+                            {
+                                <button type="button" class="open-external" disabled="@running" @onclick="OpenOutside">Open in default editor</button>
+                                @if (snapshot.SensitiveSupported)
+                                {
+                                    <button type="button" class="mark-sensitive" disabled="@running" @onclick="AskMark">Mark sensitive</button>
+                                }
+                            }
                         }
                     </div>
-                    <NoteEditor @key="name" @ref="editor" Name="@name" OnTag="ShowTag" OnOpenNote="RequestOpen" />
+                    <NoteEditor @key="(name, openSensitive)" @ref="editor" Name="@name" Sensitive="openSensitive"
+                                OnTag="ShowTag" OnOpenNote="RequestOpen" OnIdle="LockOpen" OnLocked="Locked" />
                 }
                 else
                 {
@@ -55,6 +68,16 @@
         {
             <ConfirmDialog Question="@($"Delete {DesktopText.OneLine(doomed)}? This can't be undone.")" ConfirmLabel="Delete"
                            Busy="running" OnConfirm="DeleteConfirmed" OnCancel="CancelDelete" />
+        }
+        @if (marking && openName is { } sealing)
+        {
+            <ConfirmDialog Question="@($"Mark {DesktopText.OneLine(sealing)} sensitive? It will open only in this app, with this machine's key or the recovery file.")"
+                           ConfirmLabel="Mark sensitive" Busy="running" OnConfirm="MarkConfirmed" OnCancel="CancelSensitive" />
+        }
+        @if (unsealing && openName is { } plain)
+        {
+            <ConfirmDialog Question="@($"Make {DesktopText.OneLine(plain)} plain? It will be stored as readable text again.")"
+                           ConfirmLabel="Make plain" Busy="running" OnConfirm="MakePlainConfirmed" OnCancel="CancelSensitive" />
         }
         @if (paletteOpen)
         {
@@ -82,6 +105,9 @@ else
     private ElementReference renameField;
     private bool focusRename;
     private bool deleting;
+    private bool openSensitive;
+    private bool marking;
+    private bool unsealing;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -94,7 +120,8 @@ else
 
     private void OpenPalette(KeyboardEventArgs e)
     {
-        if ((e.CtrlKey || e.MetaKey) && string.Equals(e.Key, "k", StringComparison.OrdinalIgnoreCase) && !discarding && !deleting)
+        if ((e.CtrlKey || e.MetaKey) && string.Equals(e.Key, "k", StringComparison.OrdinalIgnoreCase) && !discarding && !deleting
+            && !marking && !unsealing)
         {
             paletteOpen = true;
         }
@@ -142,10 +169,15 @@ else
     private void ShowNote(string? name)
     {
         openName = name;
+        openSensitive = name is not null
+            && Snapshot is { } snapshot
+            && snapshot.Sensitive.Any(n => string.Equals(n.Name, name, StringComparison.Ordinal));
         pendingName = null;
         tagShown = null;
         renaming = false;
         deleting = false;
+        marking = false;
+        unsealing = false;
         if (name is null)
         {
             editor = null;
@@ -403,6 +435,157 @@ else
         {
             ShowStatus(DesktopText.OneLine(deleted.Text), "red");
         }
+    }
+
+    // Mark sensitive and Make plain: refused while the editor has unsaved changes, otherwise asked in a dialog.
+    private async Task AskMark()
+    {
+        if (await CleanForSensitive())
+        {
+            marking = true;
+        }
+    }
+
+    private async Task AskMakePlain()
+    {
+        if (await CleanForSensitive())
+        {
+            unsealing = true;
+        }
+    }
+
+    private async Task<bool> CleanForSensitive()
+    {
+        if (openName is not { } name || running)
+        {
+            return false;
+        }
+
+        if (editor is not null && await editor.IsDirtyAsync())
+        {
+            ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
+            return false;
+        }
+
+        renaming = false;
+        ShowStatus(string.Empty, string.Empty);
+        return true;
+    }
+
+    private void CancelSensitive()
+    {
+        if (!running)
+        {
+            marking = false;
+            unsealing = false;
+        }
+    }
+
+    // Confirmed in the dialog: seals the open note and shows the current view; the note is then locked.
+    private async Task MarkConfirmed(Confirmation confirmed)
+    {
+        if (openName is not { } name || running)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult marked;
+        try
+        {
+            marked = await Actions.MarkSensitive(name, confirmed);
+        }
+        finally
+        {
+            running = false;
+            marking = false;
+        }
+
+        if (marked.Kind == ActionKind.Done)
+        {
+            ShowNote(null);
+            ShowStatus($"Marked {DesktopText.OneLine(marked.Text)} sensitive.", "accent");
+        }
+        else
+        {
+            ShowStatus(DesktopText.OneLine(marked.Text), "red");
+        }
+    }
+
+    // Confirmed in the dialog: writes the open sensitive note as a plain note and opens that.
+    private async Task MakePlainConfirmed(Confirmation confirmed)
+    {
+        if (openName is not { } name || running)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult made;
+        try
+        {
+            made = await Actions.MakePlain(name, confirmed);
+        }
+        finally
+        {
+            running = false;
+            unsealing = false;
+        }
+
+        if (made.Kind == ActionKind.Done)
+        {
+            ShowNote(made.Text);
+            ShowStatus($"Made {DesktopText.OneLine(made.Text)} plain.", "accent");
+        }
+        else
+        {
+            ShowStatus(DesktopText.OneLine(made.Text), "red");
+        }
+    }
+
+    // The Lock button, and the editor's idle signal: unsaved changes are saved first; when that save is refused the
+    // note stays open and the editor shows why.
+    private async Task LockOpen()
+    {
+        if (openName is null || !openSensitive || running)
+        {
+            return;
+        }
+
+        if (editor is not null && await editor.IsDirtyAsync() && await editor.PrepareSaveAsync() is { } request)
+        {
+            running = true;
+            ActionResult saved;
+            try
+            {
+                saved = await Actions.SaveNote(request.Note, request.Text);
+                await editor.ApplySaveAsync(saved);
+            }
+            finally
+            {
+                running = false;
+            }
+
+            if (saved.Kind != ActionKind.Done)
+            {
+                return;
+            }
+        }
+
+        State.Session.Lock();
+        Locked();
+    }
+
+    // The session locked (Lock, idle, the window closing): the editor is taken down, and with it the note's text.
+    private void Locked()
+    {
+        if (openName is not { } name || !openSensitive)
+        {
+            return;
+        }
+
+        ShowNote(null);
+        ShowStatus($"Locked {DesktopText.OneLine(name)}.", "grey");
     }
 
     private async Task OpenOutside()
