@@ -462,6 +462,35 @@ input[type="password"]:disabled {
     white-space: nowrap;
 }
 
+/* Quick capture: one row at the top of the main region; the result line sits under it and takes no room when empty. */
+.capture-box {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.capture-box .capture-text {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+.capture-box .capture {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: var(--on-accent);
+    flex: none;
+}
+
+.capture-status {
+    flex: 1 1 100%;
+    margin: 0;
+}
+
+.capture-status:empty {
+    display: none;
+}
+
 /* Import: the button under the new-note row and one result line per chosen file. */
 .note-import {
     display: flex;

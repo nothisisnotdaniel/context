@@ -90,6 +90,13 @@ internal sealed class DesktopActions
     public const string EmptyTodoText = "Write the todo first.";
     public const string CreateFailedText = "Can't create that note. Nothing was done.";
 
+    public const string CapturedText = "Captured.";
+    public const string CaptureEmptyText = "Type something to capture.";
+    public const string CaptureSensitiveText = Inbox.NoteName + " is sensitive. Nothing was captured.";
+    public const string CaptureTooLargeText = Inbox.NoteName + " is too large. Nothing was captured.";
+    public const string CaptureChangedText = Inbox.NoteName + " kept changing on disk. Nothing was captured.";
+    public const string CaptureFailedText = "Can't write " + Inbox.NoteName + ". Nothing was captured.";
+
     public const string UnsupportedText = "Sensitive notes need macOS or Windows.";
     public const string NoRecoveryText = "Set up recovery first.";
     public const string InboxSensitiveText = "The inbox can't be sensitive. Nothing was done.";
@@ -137,6 +144,7 @@ internal sealed class DesktopActions
     private readonly INoteLauncher launcher;
     private readonly CalendarLink? calendarLink;
     private readonly CalendarFeed? calendarFeed;
+    private readonly Func<DateTime> localNow;
     private int running;
 
     public DesktopActions(
@@ -145,8 +153,10 @@ internal sealed class DesktopActions
         DesktopState state,
         INoteLauncher launcher,
         CalendarLink? calendarLink = null,
-        CalendarFeed? calendarFeed = null)
+        CalendarFeed? calendarFeed = null,
+        Func<DateTime>? localNow = null)
     {
+        this.localNow = localNow ?? (() => DateTime.Now);
         this.calendarLink = calendarLink;
         this.calendarFeed = calendarFeed;
         this.notes = notes;
@@ -240,8 +250,24 @@ internal sealed class DesktopActions
     /// <summary>The red line when a todo's text is too long.</summary>
     public static string TodoTooLongText => $"A todo can be at most {MaxTodoLength} characters. Nothing was done.";
 
+    /// <summary>The red line when a capture's text is too long.</summary>
+    public static string CaptureTooLongText => $"A capture can be at most {Inbox.MaxTextLength} characters.";
+
     /// <summary>Test hook: runs on the worker thread right before an action's checks and write.</summary>
     internal Action? BeforeWrite { get; set; }
+
+    /// <summary>Test hook: runs before every save attempt of <see cref="CaptureText"/>, after the inbox was read.</summary>
+    internal Action? BeforeCaptureSave { get; set; }
+
+    /// <summary>
+    /// Appends <paramref name="text"/> as one dated line (<c>- yyyy-MM-dd HH:mm &lt;text&gt;</c>, local time) to the
+    /// <c>inbox</c> note through <see cref="Inbox.Capture(NoteStore, string, DateTime)"/>, creating the note when it
+    /// is missing. The text is cleaned to one line first; empty or over <see cref="Inbox.MaxTextLength"/> characters
+    /// is refused. Nothing is written either when the inbox is a sensitive note (no key-store call), would grow past
+    /// <see cref="MaxNoteBytes"/>, keeps changing on disk or can't be read or written. The result's text is
+    /// <see cref="CapturedText"/> when done.
+    /// </summary>
+    public Task<ActionResult> CaptureText(string text) => Run(() => CaptureTextNow(text));
 
     /// <summary>
     /// Marks <paramref name="todo"/> done, which removes the stored todo with the same id through
@@ -567,6 +593,40 @@ internal sealed class DesktopActions
         catch (Exception)
         {
             return Failed(ActionReason.WriteFailed, TodosWriteFailedText);
+        }
+    }
+
+    private ActionResult CaptureTextNow(string? text)
+    {
+        string cleaned = Inbox.Clean(text ?? string.Empty);
+        if (cleaned.Length == 0)
+        {
+            return Refused(ActionReason.Invalid, CaptureEmptyText);
+        }
+
+        if (cleaned.Length > Inbox.MaxTextLength)
+        {
+            return Refused(ActionReason.Invalid, CaptureTooLongText);
+        }
+
+        try
+        {
+            // A sealed inbox is never opened for a capture: no key is asked for and nothing is written.
+            if (notes.TryFindSensitive(Inbox.NoteName, out _))
+            {
+                return Refused(ActionReason.Exists, CaptureSensitiveText);
+            }
+
+            return Inbox.Capture(notes, cleaned, localNow(), BeforeCaptureSave) switch
+            {
+                CaptureResult.Captured => new ActionResult(ActionKind.Done, ActionReason.None, CapturedText),
+                CaptureResult.TooLarge => Refused(ActionReason.Invalid, CaptureTooLargeText),
+                _ => Refused(ActionReason.ChangedOnDisk, CaptureChangedText),
+            };
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, CaptureFailedText);
         }
     }
 

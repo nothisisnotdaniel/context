@@ -31,6 +31,7 @@
     /// <summary>The commands the palette offers.</summary>
     internal static readonly IReadOnlyList<PaletteCommand> Commands =
     [
+        new PaletteCommand("/capture", "/capture <text>", "Append a dated line to the inbox"),
         new PaletteCommand("/current", "/current", "Show the current view"),
         new PaletteCommand("/export", "/export", "Save a copy of the open note outside Context"),
         new PaletteCommand("/import", "/import", "Choose Markdown files to store as notes"),

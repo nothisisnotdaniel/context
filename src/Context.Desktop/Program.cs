@@ -50,7 +50,8 @@ internal static class Program
         SensitiveSession session = new SensitiveSession(() => DateTime.UtcNow);
         DesktopState state = new DesktopState(
             notes, todos, index, calendar, feed, Today, () => DateTime.UtcNow, KeyStore(), session, calendarLink);
-        DesktopActions actions = new DesktopActions(notes, todos, state, new ShellNoteLauncher(), calendarLink, feed);
+        DesktopActions actions = new DesktopActions(
+            notes, todos, state, new ShellNoteLauncher(), calendarLink, feed, () => DateTime.Now);
 
         PhotinoBlazorAppBuilder builder = PhotinoBlazorAppBuilder.CreateDefault(args);
         builder.Services.AddSingleton(state);

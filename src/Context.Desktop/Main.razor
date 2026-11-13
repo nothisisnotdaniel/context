@@ -13,6 +13,7 @@
                 <NotesPanel @ref="notesPanel" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" />
             </aside>
             <main class="current-region">
+                <CaptureBox Guard="CaptureHeld" OnCaptured="Captured" />
                 @if (settingsShown)
                 {
                     <SettingsPanel OnClose="CloseSettings" />
@@ -230,6 +231,36 @@ else
         string rest = space < 0 ? string.Empty : trimmed[(space + 1)..].Trim();
         switch (command)
         {
+            case "/capture":
+                if (rest.Length == 0)
+                {
+                    ShowStatus("Type /capture <text>.", "red");
+                }
+                else if (await CaptureHeld() is { } held)
+                {
+                    ShowStatus(DesktopText.OneLine(held), "red");
+                }
+                else if (!running)
+                {
+                    running = true;
+                    ActionResult captured;
+                    try
+                    {
+                        captured = await Actions.CaptureText(rest);
+                    }
+                    finally
+                    {
+                        running = false;
+                    }
+
+                    ShowStatus(DesktopText.OneLine(captured.Text), captured.Kind == ActionKind.Done ? "accent" : "red");
+                    if (captured.Kind == ActionKind.Done)
+                    {
+                        await Captured();
+                    }
+                }
+
+                break;
             case "/current":
                 await RequestOpen(null);
                 break;
@@ -365,6 +396,34 @@ else
             default:
                 ShowStatus("Unknown command.", "red");
                 break;
+        }
+    }
+
+    // True when the note in the editor is the plain inbox note, the one a capture appends to.
+    private bool InboxOpen() =>
+        openName is { } name
+        && !openSensitive
+        && string.Equals(name, State.ResolveNote(Inbox.NoteName) ?? Inbox.NoteName, StringComparison.OrdinalIgnoreCase);
+
+    // Asked before a capture (the box and the palette): the open inbox has unsaved changes, which a capture would
+    // leave stuck behind "changed on disk". Null when the capture may run.
+    private async Task<string?> CaptureHeld()
+    {
+        if (InboxOpen() && openName is { } name && editor is not null && await editor.IsDirtyAsync())
+        {
+            return $"Save {name} first.";
+        }
+
+        return null;
+    }
+
+    // After a capture: an open inbox shows the new line, and its next save starts from the file as it is now. Text
+    // typed into the editor since the check is kept instead.
+    private async Task Captured()
+    {
+        if (InboxOpen() && editor is not null && !await editor.IsDirtyAsync())
+        {
+            await editor.ReloadAsync();
         }
     }
 

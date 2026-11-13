@@ -1,0 +1,88 @@
+@inherits StateComponent
+@* Quick capture: one text field and a button. Enter or the button appends the typed text as a dated line to the
+   inbox note through DesktopActions.CaptureText; the line next to the box says how that ended. The parent may hold
+   a capture back (Guard: the open inbox has unsaved changes) and hears when one was written (OnCaptured). *@
+
+<div class="capture-box">
+    <input type="text" class="capture-text" value="@typed" maxlength="@Inbox.MaxTextLength" disabled="@capturing"
+           aria-label="Capture" placeholder="Capture to inbox" @ref="field" @oninput="Typed" @onkeydown="e => Capture(e)" />
+    <button type="button" class="capture" disabled="@capturing" @onclick="() => Capture(null)">Capture</button>
+    <p class="capture-status cut @statusClass" role="status" title="@statusText">@statusText</p>
+</div>
+
+@code {
+    private ElementReference field;
+    private string typed = string.Empty;
+    private bool capturing;
+    private bool refocus;
+    private string statusText = string.Empty;
+    private string statusClass = string.Empty;
+
+    /// <summary>Asked before every capture: the reason nothing may be captured now (shown in red), or <c>null</c>.</summary>
+    [Parameter]
+    public Func<Task<string?>>? Guard { get; set; }
+
+    /// <summary>Called after a capture was written.</summary>
+    [Parameter]
+    public EventCallback OnCaptured { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // A capture started with Enter disables the field while it runs; give the focus back once it is enabled again.
+        if (refocus && !capturing)
+        {
+            refocus = false;
+            await field.FocusAsync();
+        }
+    }
+
+    private void Typed(ChangeEventArgs e) => typed = e.Value?.ToString() ?? string.Empty;
+
+    // Enter in the field (key) or the button (null).
+    private async Task Capture(KeyboardEventArgs? key)
+    {
+        if ((key is not null && key.Key != "Enter") || capturing)
+        {
+            return;
+        }
+
+        capturing = true;
+        bool done = false;
+        try
+        {
+            if (Guard is not null && await Guard() is { } held)
+            {
+                ShowStatus(DesktopText.OneLine(held), "red");
+                return;
+            }
+
+            ActionResult result = await Actions.CaptureText(typed);
+            done = result.Kind == ActionKind.Done;
+            if (done)
+            {
+                typed = string.Empty;
+                ShowStatus(DesktopActions.CapturedText, "accent");
+            }
+            else
+            {
+                ShowStatus(DesktopText.OneLine(result.Text), "red");
+            }
+        }
+        finally
+        {
+            capturing = false;
+            refocus = key is not null;
+        }
+
+        if (done)
+        {
+            await OnCaptured.InvokeAsync();
+        }
+    }
+
+    private void ShowStatus(string text, string cssClass)
+    {
+        statusText = text;
+        statusClass = cssClass;
+    }
+}

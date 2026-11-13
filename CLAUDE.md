@@ -401,7 +401,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     file bytes, read through `BoundedFile`): a bigger or non-seekable note can't be opened (`Can't read <name>.`), a save
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
-    `/current`, `/export`, `/import`, `/new`, `/open`, `/save`, `/settings`, `/tags`, `/todo` with `CommandMatcher` (shared with `CommandRegistry.Match`).
+    `/capture`, `/current`, `/export`, `/import`, `/new`, `/open`, `/save`, `/settings`, `/tags`, `/todo` with `CommandMatcher` (shared with `CommandRegistry.Match`).
     **Settings:** `SettingsPanel` (the `Settings` button in `NotesPanel`, or `/settings`; `Main`'s `settingsShown`;
     at the top of the main region; `Close`, opening a note or the current view hides it) has two sections, both
     reloaded after every `State.Changed`. *Exchange calendar* shows `DesktopState.CalendarLinkSetting()`
@@ -452,6 +452,23 @@ Every factory agent reads this file before working on Context. Keep it short and
     a dirty editor is refused with `Save <name> first.`, else `SaveExportFile("<name>.md")` and `ExportNote`'s text
     in the toolbar's status line. Rules (`DesktopSourceTests`): `WritePlainCopy` and `ReadImport` are named in
     `Context.Desktop` only in `DesktopActions.cs`, and no `.razor` file matches `\b(File|Directory|Path)\.`.
+    **Quick capture:** `CaptureBox` is the first thing in `Main`'s main region, whatever else is shown there (not
+    with `Can't read the data folder.`): a text field (`aria-label="Capture"`, placeholder `Capture to inbox`,
+    `maxlength` `Inbox.MaxTextLength`), a `Capture` button and a `role="status"` line. Enter or the button calls
+    `DesktopActions.CaptureText(text)` once: on Done the field is emptied and the line shows accent `Captured.`, else
+    the red text and the typed text stays; both are disabled meanwhile, and after Enter the field has the focus again.
+    `CaptureText` cleans the text with `Inbox.Clean` (empty: Refused `Type something to capture.`; over 1000: `A
+    capture can be at most 1000 characters.`), refuses a sensitive inbox without any key-store call (`inbox is
+    sensitive. Nothing was captured.`) and then calls `Inbox.Capture` with the injected local clock (`Func<DateTime>`
+    constructor argument; `Program.cs` passes `() => DateTime.Now`, `DesktopFixture` `LocalNow`): Done `Captured.`
+    and a refresh, `inbox is too large. Nothing was captured.`, `inbox kept changing on disk. Nothing was captured.`,
+    or Failed `Can't write inbox. Nothing was captured.` (test hook `BeforeCaptureSave`, run before every save
+    attempt). The palette's `/capture <text>` runs the same action and answers in the main status line (`/capture`
+    alone: red `Type /capture <text>.`). Both ask `Main.CaptureHeld` first (the box through its `Guard` parameter):
+    with the plain inbox note open and unsaved changes nothing is written and the line is red `Save <name> first.`
+    After a capture `Main.Captured` (the box's `OnCaptured`) calls `NoteEditor.ReloadAsync` when the inbox is open
+    without unsaved changes: the note is read again and the page editor mounted with it, without taking the focus,
+    so the new line shows and a later save is not refused as changed on disk; another open note is left alone.
     `TodoPanel` has an entry row (`DesktopActions.AddTodo`). `NotesPanel` has a new-note entry row (text field + `New
     note`; Enter or the button calls `CreateNote`; on Done the field clears, the note opens through `Main`'s `RequestOpen`
     (a dirty editor asks first) and a `role="status"` line shows `Created <name>` (accent), else the red text). While a
@@ -477,7 +494,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `wwwroot/index.html` (CSP meta tag, only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
     and `wwwroot/editor/editor.css`.
   - **Desktop rules:** the Core writing calls (`Create`, `Save`, `SaveIfUnchanged`, `Add`, `Complete`, `Set`, `Clear`, `Delete`,
-    `Rename`, `ClearCache`, and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
+    `Rename`, `ClearCache`, `Capture` (`Inbox.Capture`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
     `StoreRecoveryPublicKey`) appear only in `DesktopActions.cs` (exemptions: `DotNetObjectReference.Create(` once in
     `EditorInterop.cs`, `ECDiffieHellman.Create(` in `SealedNote.cs`, and `WindowsKeyStore.cs`, whose .NET calls change
     the certificate store and which names no Core store, `File.`, `Directory.` or `Path.`; the reads still write
@@ -523,7 +540,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `CalendarLinkActionsTests`, `KeyDetailsTests`, `DesktopDependencyTests` (no Spectre, no Jint
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `CaptureActionsTests` (`CaptureText`) and `CaptureBoxTests`, `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `CalendarLinkActionsTests`, `KeyDetailsTests`, `DesktopDependencyTests` (no Spectre, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
     CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules, the transfer calls and no file system class in `.razor`), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),
