@@ -281,11 +281,23 @@ internal sealed class TodoStore
                 while (id == Guid.Empty || used.Contains(id) || !taken.Add(id));
             }
 
-            todos.Add(new TodoItem(id, item.Text!, item.Due!.Value, created, item.Done));
+            todos.Add(new TodoItem(id, item.Text!, item.Due!.Value, created, AsUtc(item.Done)));
         }
 
         return todos;
     }
+
+    /// <summary>
+    /// A stored done time as UTC: a value with an offset (read as local time) is converted, one with no zone is taken
+    /// as UTC, so <see cref="TodoItem.Done"/> is always UTC and is written back with <c>Z</c>.
+    /// </summary>
+    private static DateTime? AsUtc(DateTime? value) => value switch
+    {
+        null => null,
+        { Kind: DateTimeKind.Utc } utc => utc,
+        { Kind: DateTimeKind.Local } local => local.ToUniversalTime(),
+        { } unspecified => DateTime.SpecifyKind(unspecified, DateTimeKind.Utc),
+    };
 
     /// <summary>
     /// The stored id, or <see cref="Guid.Empty"/> when it is absent, null or bad. <paramref name="bad"/> is

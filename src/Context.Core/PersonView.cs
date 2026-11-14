@@ -22,9 +22,10 @@ internal enum PersonViewKind
 /// <summary>
 /// The data of a person page (<c>context person &lt;name&gt;</c> and the desktop person panel), with no rendering:
 /// the notes that mention the person with <c>@[...]</c>, the appointments that mention them or list them as an
-/// attendee, and the open and done todos whose text mentions them. Everything is read from disk: the calendar files and the cached copy of the published calendar, never
-/// the network. All text in it (the name, note names, appointment titles and locations, file names) is raw outside
-/// text, and so is todo text: every front end must clean it (<see cref="SafeText.Clean"/>) and escape it for its own output.
+/// attendee, and the open and done todos whose text mentions them. Everything is read from disk: the calendar files
+/// and the cached copy of the published calendar, never the network. All text in it (the name, note names,
+/// appointment titles and locations, file names, todo text) is raw outside text: every front end must clean it
+/// (<see cref="SafeText.Clean"/>) and escape it for its own output.
 /// </summary>
 internal sealed record PersonView
 {
@@ -126,7 +127,7 @@ internal sealed record PersonView
     /// <summary>The day a done todo was done, in <see cref="Zone"/>.</summary>
     public DateOnly DoneDate(TodoItem todo) =>
         todo.Done is { } done
-            ? DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(done, DateTimeKind.Utc), Zone))
+            ? DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(done, Zone))
             : throw new ArgumentException("The todo is not done.", nameof(todo));
 
     /// <summary>

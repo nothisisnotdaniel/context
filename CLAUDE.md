@@ -279,7 +279,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     note's own folder, named after `Title`. `Save` (import) and `Create` stay top-level only.
   - **Todos:** `TodoStore` keeps the list in `<root>/todos.json` (same root as notes; System.Text.Json,
     camelCase, UTF-8 no BOM). `List()` gives the **open** todos sorted by `Due`, then `Created` (UTC), then file
-    order. A done todo (job 159) stays in the file with `done` (UTC date-time; `TodoItem.Done`, written only when set,
+    order. A done todo (job 159) stays in the file with `done` (UTC date-time, an offset converted and no zone taken as UTC on read; `TodoItem.Done`, written only when set,
     so a list without done todos has the same bytes as before; absent or `null` = open; any other non-date-time value
     makes the file unreadable like a bad `due`). `ListDone()` sorts the done ones by `Done` descending, then `Created`,
     then file order. `Add`/`Migrate` keep done todos; ids and `DerivedId` cover both (`done` is not in the key). An

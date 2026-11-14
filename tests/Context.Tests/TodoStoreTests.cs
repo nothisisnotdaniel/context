@@ -966,6 +966,26 @@ public sealed class TodoStoreTests : IDisposable
         Assert.Single(Directory.GetFiles(root));
     }
 
+    // 159 nit: a hand-edited done with an offset or without a zone is read as UTC and written back with Z.
+    [Theory]
+    [InlineData("2026-11-14T10:30:00+02:00")]
+    [InlineData("2026-11-14T08:30:00")]
+    [InlineData("2026-11-14T08:30:00Z")]
+    public void Done_OffsetOrNoZone_ReadAsUtc(string done)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath,
+            "[{\"id\":\"" + IdA + "\",\"text\":\"a\",\"due\":\"2026-11-03\",\"created\":\"2026-10-01T09:00:00Z\",\"done\":\"" + done + "\"},"
+            + "{\"text\":\"b\",\"due\":\"2026-11-03\",\"created\":\"2026-10-01T09:00:00Z\"}]");
+
+        TodoItem read = Assert.Single(new TodoStore(root).ListDone());
+        Assert.Equal(DoneAt, read.Done);
+        Assert.Equal(DateTimeKind.Utc, read.Done!.Value.Kind);
+
+        Assert.True(new TodoStore(root).Migrate());
+        Assert.Contains("\"done\": \"2026-11-14T08:30:00Z\"", File.ReadAllText(FilePath), StringComparison.Ordinal);
+    }
+
     // 159 AC-3: "done": null is an open todo.
     [Fact]
     public void DoneNull_IsOpen()
