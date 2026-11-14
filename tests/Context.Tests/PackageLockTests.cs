@@ -150,7 +150,7 @@ public sealed partial class PackageLockTests
     {
         string text = Workflow(file);
 
-        foreach (string forbidden in (string[])["--force-evaluate", "RestoreLockedMode", "RestorePackagesWithLockFile", "--no-dependencies", "NuGetLockFilePath"])
+        foreach (string forbidden in (string[])["--force-evaluate", "RestoreLockedMode", "RestorePackagesWithLockFile", "--no-dependencies", "NuGetLockFilePath", "p:CI", "CI="])
         {
             Assert.DoesNotContain(forbidden, text, StringComparison.Ordinal);
         }
@@ -185,7 +185,7 @@ public sealed partial class PackageLockTests
 
     /// <summary>
     /// The RIDs of every <c>dotnet publish -r</c> in <c>release.yml</c>, sorted; <c>-r "$RID"</c> takes the list of the
-    /// nearest <c>for RID in ...; do</c> above it.
+    /// enclosing <c>for RID in ...; do</c> loop (a <c>done</c> line ends it).
     /// </summary>
     private static string[] PublishedRids()
     {
@@ -199,6 +199,10 @@ public sealed partial class PackageLockTests
             if (loopMatch.Success)
             {
                 loop = loopMatch.Groups[1].Value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            }
+            else if (LoopEnd().IsMatch(line))
+            {
+                loop = [];
             }
 
             if (!line.Contains("dotnet publish", StringComparison.Ordinal))
@@ -237,10 +241,13 @@ public sealed partial class PackageLockTests
     [GeneratedRegex(@"^\s*for RID in ([^;]+); do")]
     private static partial Regex RidLoop();
 
+    [GeneratedRegex(@"^\s*done\b")]
+    private static partial Regex LoopEnd();
+
     [GeneratedRegex(@"\s-r\s+(""[^""]+""|\S+)")]
     private static partial Regex PublishRid();
 
-    [GeneratedRegex(@"(?m)^\s*CI\s*:")]
+    [GeneratedRegex(@"\bCI\s*:")]
     private static partial Regex CiEnvKey();
 
     private static string RepoRoot()
