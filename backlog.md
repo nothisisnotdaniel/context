@@ -199,6 +199,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#165](backlog/165-show-json-as-an-option-in.md) Show --json as an option in the CLI help
 - [?] [#166](backlog/166-harden-the-todos-json-read.md) Harden the todos.json read
 - [h] [#167](backlog/167-check-the-first-todos-json-id.md) Check the first todos.json id migration
+- [ ] [#168](backlog/168-aliases-for-people.md) Aliases for people (after: #51)
 
 ## Dropped with the terminal UI
 
