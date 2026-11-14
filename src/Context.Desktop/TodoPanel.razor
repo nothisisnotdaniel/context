@@ -18,13 +18,34 @@
                 @foreach (TodoItem todo in snapshot.Todos)
                 {
                     string text = DesktopText.OneLine(todo.Text);
+                    IReadOnlyList<PersonSegment> segments = PersonParser.Segments(text);
                     string when = todo.Due < snapshot.Today ? "overdue" : todo.Due == snapshot.Today ? "today" : "later";
                     <li class="todo">
                         <label class="todo-line">
                             <input type="checkbox" class="done" checked="@(asking?.Id == todo.Id)"
                                    disabled="@(asking is not null || running || adding)" @onchange="() => Ask(todo)" />
                             <span class="date @when">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
-                            <span class="text cut" title="@text">@text</span>
+                            @* A mention opens the person's page; its click stops there, so the checkbox never ticks. *@
+                            <span class="text cut" title="@text">@if (segments.Any(s => s.IsMention))
+                                {
+                                    @foreach (PersonSegment segment in segments)
+                                    {
+                                        @if (segment.Name is { } mentioned)
+                                        {
+                                            <button type="button" class="mention" title="@segment.Text"
+                                                    @onclick="() => OnPerson.InvokeAsync(mentioned)"
+                                                    @onclick:preventDefault="true" @onclick:stopPropagation="true">@segment.Text</button>
+                                        }
+                                        else
+                                        {
+                                            <span class="plain">@segment.Text</span>
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    @text
+                                }</span>
                         </label>
                     </li>
                 }
@@ -80,6 +101,11 @@
 
 @code {
     private TodoItem? asking;
+
+    /// <summary>Called with the normalized name of a person mention clicked in a todo's text.</summary>
+    [Parameter]
+    public EventCallback<string> OnPerson { get; set; }
+
     private bool running;
     private ActionResult? result;
     private string newText = string.Empty;

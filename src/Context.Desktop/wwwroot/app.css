@@ -184,6 +184,29 @@ ol {
     margin: 0;
 }
 
+/* A person mention in a todo's text, styled like the editor's mention chip: a long name is cut, the full text is in
+   its title. */
+.todo .mention {
+    background: none;
+    border: 1px dashed var(--line);
+    border-radius: 10px;
+    color: inherit;
+    cursor: pointer;
+    display: inline-block;
+    font: inherit;
+    max-width: 24em;
+    overflow: hidden;
+    padding: 0 6px;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
+    white-space: nowrap;
+}
+
+.todo .mention:focus-visible {
+    outline: 2px solid var(--accent-strong);
+    outline-offset: 2px;
+}
+
 table {
     border-collapse: collapse;
     table-layout: fixed;
@@ -781,7 +804,8 @@ input[type="password"]:disabled {
     font-variant-numeric: tabular-nums;
 }
 
-/* The person page's panel above the linked notes: the notes that mention the person, then their appointments. */
+/* The person page's panel above the linked notes: the notes that mention the person, their appointments, then their
+   open and done todos. */
 .person-panel {
     border-top: 1px solid var(--line);
     margin-top: 16px;
@@ -793,14 +817,16 @@ input[type="password"]:disabled {
 }
 
 .person-notes,
-.person-appointments {
+.person-appointments,
+.person-todos {
     list-style: none;
     margin: 0 0 12px;
     padding: 0;
 }
 
 .person-notes li,
-.person-appointment {
+.person-appointment,
+.person-todo {
     align-items: baseline;
     display: flex;
     gap: 10px;
@@ -823,13 +849,19 @@ input[type="password"]:disabled {
 }
 
 .person-appointment .date,
-.person-appointment .time {
+.person-appointment .time,
+.person-todo .date {
     flex: none;
     font-variant-numeric: tabular-nums;
 }
 
 .person-appointment .title {
     flex: 0 1 auto;
+    min-width: 0;
+}
+
+.person-todo .text {
+    flex: 1 1 auto;
     min-width: 0;
 }
 

@@ -1,8 +1,8 @@
 @inherits StateComponent
-@* The person page of the open note (DesktopState.Person): the notes that mention the person with @[...] and the
+@* The person page of the open note (DesktopState.Person): the notes that mention the person with @[...], the
    appointments from the calendar files and the cached published calendar that mention them or list them as an
-   attendee, with one red line above them per alias on the page that links to no one or to another person. It reads
-   only (no download), and reloads whenever the state changes. *@
+   attendee, then the open and the done todos that mention them, with one red line above them per alias on the page
+   that links to no one or to another person. It reads only (no download), and reloads whenever the state changes. *@
 
 <section class="person-panel" aria-label="Person">
     @if (view is null)
@@ -15,13 +15,16 @@
         {
             <p class="red alias-clash" role="status">@DesktopText.OneLine(clash.Text)</p>
         }
-        @if (view.IndexUnreadable && view.Appointments.Count == 0)
+        @if (view.Kind != PersonViewKind.Mentions)
         {
-            <p class="red" role="status">Can't read the mentions.</p>
-        }
-        else if (view.Kind != PersonViewKind.Mentions)
-        {
-            <p class="grey" role="status">No notes or appointments mention @DesktopText.OneLine(Person).</p>
+            @if (view.IndexUnreadable)
+            {
+                <p class="red" role="status">Can't read the mentions.</p>
+            }
+            else if (!view.TodosUnreadable)
+            {
+                <p class="grey" role="status">No notes, appointments or todos mention @DesktopText.OneLine(Person).</p>
+            }
         }
         else
         {
@@ -62,6 +65,38 @@
                     }
                 </ul>
             }
+            @if (view.OpenTodos.Count > 0)
+            {
+                <h2>Open todos</h2>
+                <ul class="person-todos open-todos">
+                    @foreach (TodoItem todo in view.OpenTodos)
+                    {
+                        string text = DesktopText.OneLine(todo.Text);
+                        <li class="person-todo">
+                            <span class="date grey">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                            <span class="text cut" title="@text">@text</span>
+                        </li>
+                    }
+                </ul>
+            }
+            @if (view.DoneTodos.Count > 0)
+            {
+                <h2>Done todos</h2>
+                <ul class="person-todos done-todos">
+                    @foreach (TodoItem todo in view.DoneTodos)
+                    {
+                        string text = DesktopText.OneLine(todo.Text);
+                        <li class="person-todo">
+                            <span class="date grey">@view.DoneDate(todo).ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                            <span class="text cut" title="@text">@text</span>
+                        </li>
+                    }
+                </ul>
+            }
+        }
+        @if (view.TodosUnreadable)
+        {
+            <p class="red" role="status">Can't read the todos.</p>
         }
     }
 </section>

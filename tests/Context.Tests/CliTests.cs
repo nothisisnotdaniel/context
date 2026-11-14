@@ -1169,8 +1169,9 @@ public sealed class CliTests : IDisposable
         Assert.Equal(string.Empty, result.Err);
         string[] lines = result.Out.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal(["Notes", "A plan", "b notes", "Appointments"], lines[..4]);
-        Assert.NotEmpty(lines[4..]);
-        Assert.All(lines[4..], l => Assert.Matches(@"^\d{4}-\d{2}-\d{2}\t(all day|\d{2}:\d{2}-(\d{2}:\d{2}|…))\t@\[Anna Schmidt\] ", l));
+        Assert.NotEmpty(lines[4..^2]);
+        Assert.Equal(["Todos", "Done todos"], lines[^2..]);
+        Assert.All(lines[4..^2], l => Assert.Matches(@"^\d{4}-\d{2}-\d{2}\t(all day|\d{2}:\d{2}-(\d{2}:\d{2}|…))\t@\[Anna Schmidt\] ", l));
         Assert.Equal(before, SnapshotWithoutDb());
         Assert.Equal(0, http.Requests);
     }
@@ -1184,7 +1185,7 @@ public sealed class CliTests : IDisposable
         Result result = Run("person", "Bob");
 
         Assert.Equal(0, result.Code);
-        Assert.Equal("Notes\nAppointments\n2026-10-28\t09:00-09:00\t(no title)\n2026-10-27\t09:00-10:00\tCall @[Bob]\n", result.Out);
+        Assert.Equal("Notes\nAppointments\n2026-10-28\t09:00-09:00\t(no title)\n2026-10-27\t09:00-10:00\tCall @[Bob]\nTodos\nDone todos\n", result.Out);
         Assert.DoesNotContain("example.com", result.Out, StringComparison.Ordinal);
     }
 
@@ -1197,7 +1198,7 @@ public sealed class CliTests : IDisposable
 
         Assert.Equal(0, result.Code);
         Assert.Equal(string.Empty, result.Err);
-        Assert.Equal("No notes or appointments mention Carl Lee.\n", result.Out);
+        Assert.Equal("No notes, appointments or todos mention Carl Lee.\n", result.Out);
     }
 
     [Theory]
@@ -1240,7 +1241,7 @@ public sealed class CliTests : IDisposable
         Result result = Run("person", "Anna");
 
         Assert.Equal(1, result.Code);
-        Assert.Equal("Notes\nA\nAppointments\n", result.Out);
+        Assert.Equal("Notes\nA\nAppointments\nTodos\nDone todos\n", result.Out);
         Assert.Equal(["Can't read calendar/bad.ics"], result.ErrLines);
     }
 
@@ -1381,7 +1382,7 @@ public sealed class CliTests : IDisposable
 
         Assert.Equal(0, result.Code);
         Assert.Equal(string.Empty, result.Err);
-        Assert.Equal("Notes\nA\nB\nAppointments\n2026-10-27\t09:00-10:00\tCall\n", result.Out);
+        Assert.Equal("Notes\nA\nB\nAppointments\n2026-10-27\t09:00-10:00\tCall\nTodos\nDone todos\n", result.Out);
         Assert.Equal("Anna Schmidt\t2\n", Run("people").Out);
     }
 
@@ -1396,7 +1397,7 @@ public sealed class CliTests : IDisposable
         Result result = Run("person", "Anna");
 
         Assert.Equal(0, result.Code);
-        Assert.Equal("Notes\nA\nAppointments\n2026-10-27\t09:00-10:00\tCall\n", result.Out);
+        Assert.Equal("Notes\nA\nAppointments\n2026-10-27\t09:00-10:00\tCall\nTodos\nDone todos\n", result.Out);
         Assert.Equal([hint], result.ErrLines);
 
         WriteIcs("bad.ics", "not a calendar");
@@ -1404,5 +1405,76 @@ public sealed class CliTests : IDisposable
 
         Assert.Equal(1, failing.Code);
         Assert.Equal([hint, "Can't read calendar/bad.ics"], failing.ErrLines);
+    }
+
+    // 159 AC-7 -----------------------------------------------------------------------------------
+
+    // Writes todos straight into todos.json: an open one per (text, due) and the done ones done at the given times.
+    private void WriteTodos(params (string Text, string Due, DateTime? Done)[] todos)
+    {
+        foreach ((string text, string due, DateTime? done) in todos)
+        {
+            TodoItem todo = new TodoStore(root, () => Now).Add(text, DateOnly.Parse(due, System.Globalization.CultureInfo.InvariantCulture));
+            if (done is { } at)
+            {
+                new TodoStore(root, () => at).Complete(todo.Id);
+            }
+        }
+    }
+
+    [Fact]
+    public void Person_PrintsTodosThenDoneTodos_OneLine_InOrder()
+    {
+        WriteNote("A", "@[Anna]");
+        WriteTodos(
+            ("Call @[Anna]\nabout\u0007 it", "2026-11-05", null),
+            ("Ask @[anna] first", "2026-11-01", null),
+            ("Only @[Bob]", "2026-11-01", null),
+            ("Booked room for @[Anna]", "2026-10-20", new DateTime(2026, 10, 21, 8, 0, 0, DateTimeKind.Utc)),
+            ("Sent @[ANNA] the plan", "2026-10-25", new DateTime(2026, 10, 27, 23, 30, 0, DateTimeKind.Utc)));
+        Dictionary<string, string> before = SnapshotWithoutDb();
+
+        Result result = Run("person", "Anna");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(string.Empty, result.Err);
+        Assert.Equal(
+            "Notes\nA\nAppointments\nTodos\n2026-11-01\tAsk @[anna] first\n2026-11-05\tCall @[Anna] about\uFFFD it\n"
+                + "Done todos\n2026-10-27\tSent @[ANNA] the plan\n2026-10-21\tBooked room for @[Anna]\n",
+            result.Out);
+        Assert.Equal(before, SnapshotWithoutDb());
+    }
+
+    [Fact]
+    public void Person_OnlyTodos_IsFound_NothingAtAll_NewEmptyLine()
+    {
+        WriteTodos(("Call @[Carl]", "2026-11-05", null));
+
+        Assert.Equal("Notes\nAppointments\nTodos\n2026-11-05\tCall @[Carl]\nDone todos\n", Run("person", "Carl").Out);
+
+        Result none = Run("person", "Dora");
+        Assert.Equal(0, none.Code);
+        Assert.Equal(string.Empty, none.Err);
+        Assert.Equal("No notes, appointments or todos mention Dora.\n", none.Out);
+    }
+
+    [Fact]
+    public void Person_UnreadableTodos_ErrorOnStderr_ExitOne_OtherSectionsPrinted()
+    {
+        WriteNote("A", "@[Anna]");
+        File.WriteAllText(Path.Combine(root, TodoStore.FileName), "[{\"text\":\"@[Anna]\",\"due\":\"2026-11-03\",\"done\":\"nope\"}]");
+        Dictionary<string, string> before = SnapshotWithoutDb();
+
+        Result result = Run("person", "Anna");
+
+        Assert.Equal(1, result.Code);
+        Assert.Equal("Notes\nA\nAppointments\nTodos\nDone todos\n", result.Out);
+        Assert.Equal(["Can't read todos.json."], result.ErrLines);
+
+        Result none = Run("person", "Dora");
+        Assert.Equal(1, none.Code);
+        Assert.Equal("No notes, appointments or todos mention Dora.\n", none.Out);
+        Assert.Equal(["Can't read todos.json."], none.ErrLines);
+        Assert.Equal(before, SnapshotWithoutDb());
     }
 }

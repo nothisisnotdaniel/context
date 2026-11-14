@@ -57,7 +57,7 @@ public sealed class PersonPanelTests : IDisposable
         IRenderedComponent<PersonPanel> cut = Render("Anna");
 
         cut.WaitForAssertion(() => Assert.Equal(
-            "No notes or appointments mention Anna.", cut.Find("p[role=status]").TextContent), Wait);
+            "No notes, appointments or todos mention Anna.", cut.Find("p[role=status]").TextContent), Wait);
         Assert.True(cut.Find("p[role=status]").ClassList.Contains("grey"));
         Assert.Empty(cut.FindAll("ul"));
     }
@@ -103,7 +103,7 @@ public sealed class PersonPanelTests : IDisposable
         await data.RefreshAsync();
         IRenderedComponent<PersonPanel> cut = Render("Anna");
         cut.WaitForAssertion(() => Assert.Equal(
-            "No notes or appointments mention Anna.", cut.Find("p[role=status]").TextContent), Wait);
+            "No notes, appointments or todos mention Anna.", cut.Find("p[role=status]").TextContent), Wait);
 
         data.WriteNote("Plan", "now @[anna]\n");
         File.SetLastWriteTimeUtc(Path.Combine(data.Root, "Plan.md"), DateTime.UtcNow.AddSeconds(5));
@@ -184,7 +184,7 @@ public sealed class PersonPanelTests : IDisposable
         Assert.Equal(
             ["alias-clash", "alias-clash", "grey"],
             section.Children.Select(c => c.ClassList.Contains("alias-clash") ? "alias-clash" : c.ClassName ?? c.TagName).ToArray());
-        Assert.Equal("No notes or appointments mention Anna Schmidt.", cut.Find("p.grey[role=status]").TextContent);
+        Assert.Equal("No notes, appointments or todos mention Anna Schmidt.", cut.Find("p.grey[role=status]").TextContent);
 
         // With mentions the lines stay above the headings.
         data.WriteNote("Plan", "@[AS]\n");
@@ -210,6 +210,108 @@ public sealed class PersonPanelTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Equal(["Plan"], NoteNames(cut)), Wait);
         Assert.Empty(cut.FindAll("p.alias-clash"));
+    }
+
+    // 159: marks the todo with this text done at noon UTC on the given day.
+    private void CompleteTodo(string text, int day)
+    {
+        TodoItem todo = data.Todos!.List().Single(t => t.Text == text);
+        new TodoStore(data.Root, () => new DateTime(2026, 10, day, 12, 0, 0, DateTimeKind.Utc)).Complete(todo.Id);
+    }
+
+    private static string[] TodoRows(IRenderedComponent<PersonPanel> cut, string list) =>
+        cut.FindAll($"ul.{list} .person-todo")
+            .Select(r => r.QuerySelector(".date")!.TextContent + "|" + r.QuerySelector(".text")!.TextContent)
+            .ToArray();
+
+    // 159 AC-9: Open todos (due date, text), then Done todos (done date, text), after the notes and appointments; no
+    // checkboxes; todo text is one-line text, never markup.
+    [Fact]
+    public async Task Render_Todos_OpenThenDone_AfterAppointments()
+    {
+        WriteAnna();
+        data.AddTodo("Call @[anna] <b>now</b>\nplease", DesktopFixture.Today.AddDays(3));
+        data.AddTodo("Ask @[Anna]", DesktopFixture.Today);
+        data.AddTodo("Only @[Bob]", DesktopFixture.Today);
+        data.AddTodo("Book room for @[Anna]", DesktopFixture.Today.AddDays(-5));
+        data.AddTodo("Thank @[ANNA]", DesktopFixture.Today.AddDays(-4));
+        await data.RefreshAsync();
+        CompleteTodo("Book room for @[Anna]", 20);
+        CompleteTodo("Thank @[ANNA]", 22);
+
+        IRenderedComponent<PersonPanel> cut = Render("Anna");
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Mentioned in", "Appointments", "Open todos", "Done todos"],
+            cut.FindAll("h2").Select(h => h.TextContent).ToArray()), Wait);
+        Assert.Equal(
+            ["2026-10-29|Ask @[Anna]", "2026-11-01|Call @[anna] <b>now</b> please"],
+            TodoRows(cut, "open-todos"));
+        Assert.Equal(["2026-10-22|Thank @[ANNA]", "2026-10-20|Book room for @[Anna]"], TodoRows(cut, "done-todos"));
+        Assert.Equal("Call @[anna] <b>now</b> please", cut.Find("ul.open-todos li:nth-child(2) .text").GetAttribute("title"));
+        Assert.Empty(cut.FindAll("b"));
+        Assert.Empty(cut.FindAll("input"));
+        Assert.Empty(cut.FindAll("p[role=status]"));
+        Assert.Equal(
+            ["H2", "UL", "H2", "UL", "H2", "UL", "H2", "UL"],
+            cut.Find("section.person-panel").Children.Select(c => c.TagName).ToArray());
+    }
+
+    // 159 AC-9: each todo section only when non-empty; a person mentioned only in a done todo is found.
+    [Fact]
+    public async Task Render_OnlyDoneTodo_OnlyDoneSection()
+    {
+        data.AddTodo("Thank @[Carl]", DesktopFixture.Today);
+        await data.RefreshAsync();
+        CompleteTodo("Thank @[Carl]", 28);
+
+        IRenderedComponent<PersonPanel> cut = Render("Carl");
+
+        cut.WaitForAssertion(() => Assert.Equal(["Done todos"], cut.FindAll("h2").Select(h => h.TextContent).ToArray()), Wait);
+        Assert.Equal(["2026-10-28|Thank @[Carl]"], TodoRows(cut, "done-todos"));
+        Assert.Empty(cut.FindAll("ul.open-todos"));
+    }
+
+    // 159 AC-9: an unreadable todos.json shows the red line; the notes and appointments still render.
+    [Fact]
+    public async Task Render_BadTodos_RedLine_NotesAndAppointmentsStill()
+    {
+        WriteAnna();
+        data.WriteFile(TodoStore.FileName, "[{\"text\":\"@[Anna]\",\"due\":\"2026-11-03\",\"done\":\"nope\"}]");
+        await data.RefreshAsync();
+
+        IRenderedComponent<PersonPanel> cut = Render("Anna");
+
+        cut.WaitForAssertion(() => Assert.Equal(["Plan", "Review"], NoteNames(cut)), Wait);
+        IElement line = cut.Find("p[role=status]");
+        Assert.Equal("Can't read the todos.", line.TextContent);
+        Assert.True(line.ClassList.Contains("red"));
+        Assert.Equal(2, cut.FindAll(".person-appointment").Count);
+        Assert.Empty(cut.FindAll(".person-todos"));
+
+        // With nothing else found, only the red line shows (no claim that no todo mentions the person).
+        IRenderedComponent<PersonPanel> nobody = Render("Dora");
+        nobody.WaitForAssertion(() => Assert.Equal("Can't read the todos.", nobody.Find("p[role=status]").TextContent), Wait);
+        Assert.Single(nobody.FindAll("p"));
+    }
+
+    // 159 AC-9: an unreadable context.db shows its red line and still renders the todo sections.
+    [Fact]
+    public async Task Render_BadIndex_TodoSectionsStill()
+    {
+        data.WriteNote("Plan", "@[Anna]\n");
+        data.AddTodo("Ask @[Anna]", DesktopFixture.Today);
+        data.AddTodo("Thank @[Anna]", DesktopFixture.Today);
+        data.WriteFile(TagIndex.FileName, NotADatabase);
+        await data.RefreshAsync();
+        CompleteTodo("Thank @[Anna]", 28);
+
+        IRenderedComponent<PersonPanel> cut = Render("Anna");
+
+        cut.WaitForAssertion(() => Assert.Equal("Can't read the mentions.", cut.Find("p[role=status]").TextContent), Wait);
+        Assert.Empty(cut.FindAll(".person-notes"));
+        Assert.Equal(["2026-10-29|Ask @[Anna]"], TodoRows(cut, "open-todos"));
+        Assert.Equal(["2026-10-28|Thank @[Anna]"], TodoRows(cut, "done-todos"));
     }
 
     private IRenderedComponent<PersonPanel> Render(string person) =>

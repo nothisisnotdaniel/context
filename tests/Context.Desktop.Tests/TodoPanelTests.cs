@@ -202,6 +202,85 @@ public sealed class TodoPanelTests : IDisposable
         Assert.Equal(files, Files());
     }
 
+    // 159 AC-8: each mention is a typed button showing the raw text, between plain-text spans; the text still reads
+    // as before and the full text stays in the title.
+    [Fact]
+    public async Task Render_Mentions_ButtonsBetweenPlainSpans()
+    {
+        data.AddTodo("Call @[ Anna ] and @[Bob] about `@[Carl]`", DesktopFixture.Today);
+        data.AddTodo("No mention here", DesktopFixture.Today.AddDays(1));
+        await data.RefreshAsync();
+
+        IRenderedComponent<TodoPanel> cut = data.Bunit.Render<TodoPanel>();
+
+        IElement text = cut.Find("li.todo:nth-child(1) .text");
+        Assert.Equal(
+            ["SPAN:Call ", "BUTTON:@[ Anna ]", "SPAN: and ", "BUTTON:@[Bob]", "SPAN: about `@[Carl]`"],
+            text.Children.Select(c => c.TagName + ":" + c.TextContent).ToArray());
+        Assert.Equal("Call @[ Anna ] and @[Bob] about `@[Carl]`", text.TextContent);
+        Assert.Equal("Call @[ Anna ] and @[Bob] about `@[Carl]`", text.GetAttribute("title"));
+        Assert.All(cut.FindAll("button.mention"), b => Assert.Equal("button", b.GetAttribute("type")));
+        Assert.Equal(["@[ Anna ]", "@[Bob]"], cut.FindAll("button.mention").Select(b => b.GetAttribute("title")!).ToArray());
+        Assert.NotNull(cut.Find("li.todo:nth-child(1) label button.mention"));
+
+        // A todo without a mention renders as before: one text span, no button.
+        IElement plain = cut.Find("li.todo:nth-child(2) .text");
+        Assert.Empty(plain.Children);
+        Assert.Equal("No mention here", plain.TextContent);
+        Assert.Empty(cut.FindAll("li.todo:nth-child(2) button"));
+    }
+
+    // 159 AC-8: clicking a mention calls OnPerson with the normalized name; the checkbox stays unticked, no dialog
+    // opens and nothing is written.
+    [Fact]
+    public async Task Mention_Click_CallsOnPerson_NoTickNoDialog()
+    {
+        data.AddTodo("Call @[ anna   Schmidt ] now", DesktopFixture.Today);
+        await data.RefreshAsync();
+        List<string> people = [];
+        IRenderedComponent<TodoPanel> cut = data.Bunit.Render<TodoPanel>(p => p
+            .Add(c => c.OnPerson, (string name) => people.Add(name)));
+        SortedDictionary<string, string> files = Files();
+
+        await cut.Find("button.mention").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(["anna Schmidt"], people);
+        Assert.False(Box(cut, 0).HasAttribute("checked"));
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Equal(files, Files());
+        Assert.Contains("onclick:stopPropagation", SourceOf("TodoPanel.razor"), StringComparison.Ordinal);
+    }
+
+    // 159 AC-8: hostile text in a mentioning todo is still text; the button carries only the raw mention.
+    [Fact]
+    public async Task Mention_HostileText_Encoded()
+    {
+        data.AddTodo("<img src=x onerror=alert(1)> @[Anna] \u0001", DesktopFixture.Today);
+        await data.RefreshAsync();
+
+        IRenderedComponent<TodoPanel> cut = data.Bunit.Render<TodoPanel>();
+
+        Assert.Empty(cut.FindAll("img"));
+        Assert.Equal("<img src=x onerror=alert(1)> @[Anna] �", cut.Find(".text").TextContent);
+        Assert.Equal("@[Anna]", cut.Find("button.mention").TextContent);
+    }
+
+    // 159 AC-8: done todos are not shown in the list.
+    [Fact]
+    public async Task Render_DoneTodos_NotShown()
+    {
+        data.AddTodo("Open @[Anna]", DesktopFixture.Today);
+        data.AddTodo("Done @[Anna]", DesktopFixture.Today);
+        TodoStore store = new TodoStore(data.Root);
+        store.Complete(store.List().Single(t => t.Text == "Done @[Anna]").Id);
+
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+
+        Assert.Equal(["Open @[Anna]"], cut.FindAll("li.todo .text").Select(t => t.TextContent).ToArray());
+    }
+
+    private static string SourceOf(string file) => File.ReadAllText(Path.Combine(RepoFiles.Root(), "src", "Context.Desktop", file));
+
     private static IElement Box(IRenderedComponent<TodoPanel> cut, int index) =>
         cut.FindAll("li.todo input[type=checkbox]")[index];
 

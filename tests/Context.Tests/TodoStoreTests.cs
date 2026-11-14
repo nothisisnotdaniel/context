@@ -112,7 +112,7 @@ public sealed class TodoStoreTests : IDisposable
         Assert.Equal([b, a], read);
     }
 
-    // AC-6 / 080: Complete removes the todo with that id and returns it.
+    // AC-6 / 080 / 159 AC-2: Complete takes the todo with that id off the open list and returns it, done.
     [Fact]
     public void Complete_RemovesThatId_ReturnsIt()
     {
@@ -123,8 +123,20 @@ public sealed class TodoStoreTests : IDisposable
 
         TodoItem? done = store.Complete(b.Id);
 
-        Assert.Equal(b, done);
+        AssertDoneOf(b, done);
         Assert.Equal(["a", "c"], new TodoStore(root).List().Select(t => t.Text));
+    }
+
+    // The done copy of open: the same id, text, due and created, with Done set.
+    private static void AssertDoneOf(TodoItem open, TodoItem? done)
+    {
+        Assert.NotNull(done);
+        Assert.Equal(open.Id, done.Id);
+        Assert.Equal(open.Text, done.Text);
+        Assert.Equal(open.Due, done.Due);
+        Assert.Equal(open.Created, done.Created);
+        Assert.Null(open.Done);
+        Assert.NotNull(done.Done);
     }
 
     // 080: an id no todo has returns null and changes nothing.
@@ -165,7 +177,7 @@ public sealed class TodoStoreTests : IDisposable
 
         TodoItem? done = store.Complete(shown.Id);
 
-        Assert.Equal(later, done);
+        AssertDoneOf(later, done);
         Assert.Equal(["sooner"], store.List().Select(t => t.Text));
     }
 
@@ -232,7 +244,7 @@ public sealed class TodoStoreTests : IDisposable
         TodoStore store = new TodoStore(root);
         IReadOnlyList<TodoItem> before = store.List();
 
-        Assert.Equal(before[1], store.Complete(before[1].Id));
+        AssertDoneOf(before[1], store.Complete(before[1].Id));
 
         Assert.Equal([before[0], before[2]], store.List());
         Assert.Contains($"\"id\": \"{before[0].Id}\"", File.ReadAllText(FilePath));
@@ -702,9 +714,291 @@ public sealed class TodoStoreTests : IDisposable
         Assert.True(store.Migrate(out _));
         TodoItem c = before.Single(t => t.Text == "c");
 
-        Assert.Equal(c, store.Complete(c.Id));
+        AssertDoneOf(c, store.Complete(c.Id));
 
         Assert.Equal(before.Where(t => t.Text != "c"), store.List());
+    }
+
+    // 159: the ids and the clock for the done tests.
+    private static readonly Guid IdA = new("aaaaaaaa-0000-0000-0000-000000000001");
+    private static readonly Guid IdB = new("bbbbbbbb-0000-0000-0000-000000000002");
+    private static readonly DateTime DoneAt = new(2026, 11, 14, 8, 30, 0, DateTimeKind.Utc);
+
+    // 159: a todo the way every build writes it: id, text, due, created, then done only when it is set.
+    private static string JsonTodo(Guid id, string text, string due, string created, string? done = null) =>
+        "  {\n"
+        + $"    \"id\": \"{id}\",\n"
+        + $"    \"text\": \"{text}\",\n"
+        + $"    \"due\": \"{due}\",\n"
+        + $"    \"created\": \"{created}\"" + (done is null ? "\n" : $",\n    \"done\": \"{done}\"\n")
+        + "  }";
+
+    private static string JsonList(params string[] todos) => "[\n" + string.Join(",\n", todos) + "\n]\n";
+
+    // 159 AC-1: a file from before this job lists the same todos with the same ids, and nothing is done.
+    [Fact]
+    public void PreJobFile_ListsSameTodosAndIds_ListDoneEmpty()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath,
+            "[{\"id\":\"" + IdA + "\",\"text\":\"a\",\"due\":\"2026-11-04\",\"created\":\"2026-10-01T09:00:00Z\"},"
+            + "{\"text\":\"b\",\"due\":\"2026-11-03\",\"created\":\"2026-10-01T09:00:00Z\"}]");
+        byte[] before = File.ReadAllBytes(FilePath);
+        TodoStore store = new TodoStore(root);
+        DateTime created = new(2026, 10, 1, 9, 0, 0, DateTimeKind.Utc);
+
+        Assert.Equal(
+            [
+                new TodoItem(TodoStore.DerivedId("b", new DateOnly(2026, 11, 3), created, 0), "b", new DateOnly(2026, 11, 3), created),
+                new TodoItem(IdA, "a", new DateOnly(2026, 11, 4), created),
+            ],
+            store.List());
+        Assert.Empty(store.ListDone());
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+    }
+
+    // 159 AC-1: with no done todo, Add writes exactly the bytes a build from before this job writes (no done field).
+    [Fact]
+    public void Add_NoDoneTodo_SameBytesAsBefore()
+    {
+        Guid[] ids = [IdA, IdB];
+        int next = 0;
+        TodoStore store = new TodoStore(root, () => Start, () => ids[next++]);
+        store.Add("Buy milk", new DateOnly(2026, 11, 3));
+        store.Add("Call", new DateOnly(2026, 11, 1));
+
+        string expected = JsonList(
+            JsonTodo(IdA, "Buy milk", "2026-11-03", "2026-10-28T09:00:00Z"),
+            JsonTodo(IdB, "Call", "2026-11-01", "2026-10-28T09:00:00Z"));
+        Assert.Equal(Encoding.UTF8.GetBytes(expected), File.ReadAllBytes(FilePath));
+    }
+
+    // 159 AC-1: with no done todo, Migrate writes exactly the bytes a build from before this job writes.
+    [Fact]
+    public void Migrate_NoDoneTodo_SameBytesAsBefore()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath,
+            "[{\"text\":\"a\",\"due\":\"2026-11-04\",\"created\":\"2026-10-01T09:00:00Z\"},"
+            + "{\"id\":\"" + IdB + "\",\"text\":\"b\",\"due\":\"2026-11-03\",\"created\":\"2026-10-01T09:00:00Z\",\"done\":null}]");
+        DateTime created = new(2026, 10, 1, 9, 0, 0, DateTimeKind.Utc);
+        Guid derived = TodoStore.DerivedId("a", new DateOnly(2026, 11, 4), created, 0);
+
+        Assert.True(new TodoStore(root).Migrate());
+
+        string expected = JsonList(
+            JsonTodo(derived, "a", "2026-11-04", "2026-10-01T09:00:00Z"),
+            JsonTodo(IdB, "b", "2026-11-03", "2026-10-01T09:00:00Z"));
+        Assert.Equal(Encoding.UTF8.GetBytes(expected), File.ReadAllBytes(FilePath));
+    }
+
+    // 159 AC-2: Complete sets Done from the clock; the todo stays in the file with its fields, plus done.
+    [Fact]
+    public void Complete_SetsDoneFromClock_KeepsTodoInFile()
+    {
+        new TodoStore(root, () => Start, () => IdA).Add("Buy milk", new DateOnly(2026, 11, 3));
+        new TodoStore(root, () => Start, () => IdB).Add("Call", new DateOnly(2026, 11, 1));
+        TodoStore store = new TodoStore(root, () => DoneAt);
+
+        TodoItem? done = store.Complete(IdA);
+
+        Assert.Equal(new TodoItem(IdA, "Buy milk", new DateOnly(2026, 11, 3), Start, DoneAt), done);
+        Assert.Equal(DateTimeKind.Utc, done!.Done!.Value.Kind);
+        string expected = JsonList(
+            JsonTodo(IdA, "Buy milk", "2026-11-03", "2026-10-28T09:00:00Z", "2026-11-14T08:30:00Z"),
+            JsonTodo(IdB, "Call", "2026-11-01", "2026-10-28T09:00:00Z"));
+        Assert.Equal(expected, File.ReadAllText(FilePath));
+        TodoStore fresh = new TodoStore(root);
+        Assert.Equal([IdB], fresh.List().Select(t => t.Id));
+        Assert.Equal([done], fresh.ListDone());
+        AssertNoTempFile();
+    }
+
+    // 159 AC-2: two done todos are both kept; the latest done comes first.
+    [Fact]
+    public void Complete_Two_BothKept_LatestDoneFirst()
+    {
+        new TodoStore(root, () => Start, () => IdA).Add("a", new DateOnly(2026, 11, 3));
+        new TodoStore(root, () => Start.AddMinutes(1), () => IdB).Add("b", new DateOnly(2026, 11, 4));
+
+        new TodoStore(root, () => DoneAt).Complete(IdB);
+        new TodoStore(root, () => DoneAt.AddHours(1)).Complete(IdA);
+
+        TodoStore store = new TodoStore(root);
+        Assert.Empty(store.List());
+        Assert.Equal(
+            [(IdA, DoneAt.AddHours(1)), (IdB, DoneAt)],
+            store.ListDone().Select(t => (t.Id, t.Done!.Value)));
+    }
+
+    // 159 AC-2: equal done times fall back to created, then file order.
+    [Fact]
+    public void ListDone_SameDone_ByCreatedThenFileOrder()
+    {
+        Guid idC = new("cccccccc-0000-0000-0000-000000000003");
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, JsonList(
+            JsonTodo(IdA, "a", "2026-11-03", "2026-10-02T09:00:00Z", "2026-11-14T08:30:00Z"),
+            JsonTodo(IdB, "b", "2026-11-03", "2026-10-01T09:00:00Z", "2026-11-14T08:30:00Z"),
+            JsonTodo(idC, "c", "2026-11-01", "2026-10-02T09:00:00Z", "2026-11-14T08:30:00Z")));
+
+        Assert.Equal([IdB, IdA, idC], new TodoStore(root).ListDone().Select(t => t.Id));
+    }
+
+    // 159 AC-2: completing a done todo again returns null and writes nothing.
+    [Fact]
+    public void Complete_AlreadyDone_ReturnsNull_WritesNothing()
+    {
+        new TodoStore(root, () => Start, () => IdA).Add("a", new DateOnly(2026, 11, 3));
+        new TodoStore(root, () => DoneAt).Complete(IdA);
+        byte[] before = File.ReadAllBytes(FilePath);
+        DateTime written = File.GetLastWriteTimeUtc(FilePath);
+
+        Assert.Null(new TodoStore(root, () => DoneAt.AddDays(1)).Complete(IdA));
+
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+        Assert.Equal(written, File.GetLastWriteTimeUtc(FilePath));
+        Assert.Equal(DoneAt, Assert.Single(new TodoStore(root).ListDone()).Done);
+    }
+
+    // 159 AC-3: a done todo survives Add, another Complete and Migrate with its marker.
+    [Fact]
+    public void DoneTodo_SurvivesAddCompleteAndMigrate()
+    {
+        new TodoStore(root, () => Start, () => IdA).Add("a", new DateOnly(2026, 11, 3));
+        new TodoStore(root, () => DoneAt).Complete(IdA);
+        TodoItem doneA = Assert.Single(new TodoStore(root).ListDone());
+
+        TodoItem b = new TodoStore(root, () => Start, () => IdB).Add("b", new DateOnly(2026, 11, 4));
+        Assert.Equal([doneA], new TodoStore(root).ListDone());
+
+        TodoItem c = new TodoStore(root, () => Start).Add("c", new DateOnly(2026, 11, 5));
+        new TodoStore(root, () => DoneAt.AddHours(2)).Complete(b.Id);
+        Assert.Equal([b.Id, IdA], new TodoStore(root).ListDone().Select(t => t.Id));
+
+        // An older build dropped c's id: Migrate writes it again and keeps both done markers.
+        string text = File.ReadAllText(FilePath).Replace($"\"id\": \"{c.Id}\",", string.Empty, StringComparison.Ordinal);
+        File.WriteAllText(FilePath, text);
+        Assert.True(new TodoStore(root).Migrate());
+
+        TodoStore store = new TodoStore(root);
+        Assert.Equal(["c"], store.List().Select(t => t.Text));
+        Assert.Equal(
+            [(b.Id, DoneAt.AddHours(2)), (IdA, DoneAt)],
+            store.ListDone().Select(t => (t.Id, t.Done!.Value)));
+    }
+
+    // 159 AC-3: a done todo stored without an id gets its derived id (done is not part of the key) and keeps done.
+    [Fact]
+    public void Migrate_DoneTodoWithoutId_DerivedId_KeepsDone()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath,
+            "[{\"text\":\"a\",\"due\":\"2026-11-04\",\"created\":\"2026-10-01T09:00:00Z\",\"done\":\"2026-11-14T08:30:00Z\"}]");
+        DateTime created = new(2026, 10, 1, 9, 0, 0, DateTimeKind.Utc);
+        Guid derived = TodoStore.DerivedId("a", new DateOnly(2026, 11, 4), created, 0);
+        Assert.Equal(derived, Assert.Single(new TodoStore(root).ListDone()).Id);
+
+        Assert.True(new TodoStore(root).Migrate());
+
+        Assert.Equal(
+            JsonList(JsonTodo(derived, "a", "2026-11-04", "2026-10-01T09:00:00Z", "2026-11-14T08:30:00Z")),
+            File.ReadAllText(FilePath));
+        Assert.False(new TodoStore(root).Migrate());
+    }
+
+    // 159 AC-3: a new todo never takes the id of a done one.
+    [Fact]
+    public void Add_IdOfDoneTodo_NeverReused()
+    {
+        new TodoStore(root, () => Start, () => IdA).Add("a", new DateOnly(2026, 11, 3));
+        new TodoStore(root, () => DoneAt).Complete(IdA);
+
+        TodoItem added = new TodoStore(root, () => Start, () => IdA).Add("b", new DateOnly(2026, 11, 3));
+
+        Assert.NotEqual(IdA, added.Id);
+        Assert.NotEqual(Guid.Empty, added.Id);
+        TodoStore store = new TodoStore(root);
+        Assert.Equal([added.Id], store.List().Select(t => t.Id));
+        Assert.Equal([IdA], store.ListDone().Select(t => t.Id));
+    }
+
+    // 159 AC-3: a derived id never equals a done todo's stored id either.
+    [Fact]
+    public void DerivedId_SkipsStoredIdOfDoneTodo()
+    {
+        DateTime created = new(2026, 10, 1, 9, 0, 0, DateTimeKind.Utc);
+        Guid taken = TodoStore.DerivedId("a", new DateOnly(2026, 11, 4), created, 0);
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath,
+            "[{\"text\":\"a\",\"due\":\"2026-11-04\",\"created\":\"2026-10-01T09:00:00Z\"},"
+            + "{\"id\":\"" + taken + "\",\"text\":\"x\",\"due\":\"2026-11-04\",\"created\":\"2026-10-01T09:00:00Z\",\"done\":\"2026-11-14T08:30:00Z\"}]");
+
+        TodoStore store = new TodoStore(root);
+
+        Assert.Equal(TodoStore.DerivedId("a", new DateOnly(2026, 11, 4), created, 1), Assert.Single(store.List()).Id);
+        Assert.Equal(taken, Assert.Single(store.ListDone()).Id);
+    }
+
+    // 159 AC-3: a done value that is not null and not a date-time string makes the file unreadable, never overwritten.
+    [Theory]
+    [InlineData("\"nope\"")]
+    [InlineData("42")]
+    [InlineData("true")]
+    [InlineData("\"\"")]
+    [InlineData("{}")]
+    public void BadDone_Unreadable_NeverOverwritten(string done)
+    {
+        Directory.CreateDirectory(root);
+        string content = "[{\"id\":\"" + IdA + "\",\"text\":\"a\",\"due\":\"2026-11-03\",\"created\":\"2026-10-01T09:00:00Z\",\"done\":"
+            + done + "}]";
+        byte[] original = Encoding.UTF8.GetBytes(content);
+        File.WriteAllBytes(FilePath, original);
+        TodoStore store = Store();
+
+        TodoStoreException error = Assert.Throws<TodoStoreException>(() => store.List());
+        Assert.Equal("Can't read todos.json.", error.Message);
+        Assert.Throws<TodoStoreException>(() => store.ListDone());
+        Assert.Throws<TodoStoreException>(() => store.Add("x", new DateOnly(2026, 11, 3)));
+        Assert.Throws<TodoStoreException>(() => store.Complete(IdA));
+        Assert.False(store.Migrate());
+        Assert.Equal(original, File.ReadAllBytes(FilePath));
+        Assert.Single(Directory.GetFiles(root));
+    }
+
+    // 159 nit: a hand-edited done with an offset or without a zone is read as UTC and written back with Z.
+    [Theory]
+    [InlineData("2026-11-14T10:30:00+02:00")]
+    [InlineData("2026-11-14T08:30:00")]
+    [InlineData("2026-11-14T08:30:00Z")]
+    public void Done_OffsetOrNoZone_ReadAsUtc(string done)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath,
+            "[{\"id\":\"" + IdA + "\",\"text\":\"a\",\"due\":\"2026-11-03\",\"created\":\"2026-10-01T09:00:00Z\",\"done\":\"" + done + "\"},"
+            + "{\"text\":\"b\",\"due\":\"2026-11-03\",\"created\":\"2026-10-01T09:00:00Z\"}]");
+
+        TodoItem read = Assert.Single(new TodoStore(root).ListDone());
+        Assert.Equal(DoneAt, read.Done);
+        Assert.Equal(DateTimeKind.Utc, read.Done!.Value.Kind);
+
+        Assert.True(new TodoStore(root).Migrate());
+        Assert.Contains("\"done\": \"2026-11-14T08:30:00Z\"", File.ReadAllText(FilePath), StringComparison.Ordinal);
+    }
+
+    // 159 AC-3: "done": null is an open todo.
+    [Fact]
+    public void DoneNull_IsOpen()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath,
+            "[{\"id\":\"" + IdA + "\",\"text\":\"a\",\"due\":\"2026-11-03\",\"created\":\"2026-10-01T09:00:00Z\",\"done\":null}]");
+        TodoStore store = new TodoStore(root, () => DoneAt);
+
+        Assert.Null(Assert.Single(store.List()).Done);
+        Assert.Empty(store.ListDone());
+        Assert.NotNull(store.Complete(IdA));
+        Assert.Equal(DoneAt, Assert.Single(store.ListDone()).Done);
     }
 
     private bool CanCreateFileInRoot()

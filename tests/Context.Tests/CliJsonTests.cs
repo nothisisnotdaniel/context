@@ -685,7 +685,7 @@ public sealed class CliJsonTests : IDisposable
                 + "{\"start\":\"2026-10-28T00:00:00\\u002B01:00\",\"end\":\"2026-10-29T00:00:00\\u002B01:00\",\"allDay\":true,"
                 + "\"title\":\"Off\",\"location\":null},"
                 + "{\"start\":\"2026-10-27T10:00:00\\u002B01:00\",\"end\":\"2026-10-27T11:00:00\\u002B01:00\",\"allDay\":false,"
-                + "\"title\":\"Call @[Anna]\",\"location\":\"Room 1\"}]}\n",
+                + "\"title\":\"Call @[Anna]\",\"location\":\"Room 1\"}],\"todos\":[],\"doneTodos\":[]}\n",
             result.Out);
         Assert.DoesNotContain("example.com", result.Out, StringComparison.Ordinal);
     }
@@ -696,7 +696,7 @@ public sealed class CliJsonTests : IDisposable
     {
         WriteNote("A", "x");
 
-        Assert.Equal("{\"person\":\"Carl\",\"notes\":[],\"appointments\":[]}\n", Run("person", "Carl", "--json").Out);
+        Assert.Equal("{\"person\":\"Carl\",\"notes\":[],\"appointments\":[],\"todos\":[],\"doneTodos\":[]}\n", Run("person", "Carl", "--json").Out);
 
         BreakIndex();
         AssertError(Run("person", "Carl", "--json"), 1, "Can't read context.db.");
@@ -753,13 +753,43 @@ public sealed class CliJsonTests : IDisposable
         Result result = Run("person", "as", "--json");
 
         AssertDocument(result);
-        Assert.Equal("{\"person\":\"Anna Schmidt\",\"notes\":[\"A\",\"B\"],\"appointments\":[]}\n", result.Out);
+        Assert.Equal("{\"person\":\"Anna Schmidt\",\"notes\":[\"A\",\"B\"],\"appointments\":[],\"todos\":[],\"doneTodos\":[]}\n", result.Out);
 
         File.WriteAllText(Path.Combine(root, "people", "Anna Berg.md"), "# Anna Berg\naliases:: Anna\n");
         Result ambiguous = Run("person", "Anna", "--json");
 
         Assert.Equal(0, ambiguous.Code);
-        Assert.Equal("{\"person\":\"Anna\",\"notes\":[\"B\"],\"appointments\":[]}\n", ambiguous.Out);
+        Assert.Equal("{\"person\":\"Anna\",\"notes\":[\"B\"],\"appointments\":[],\"todos\":[],\"doneTodos\":[]}\n", ambiguous.Out);
         Assert.Equal(["@[Anna] is an alias of more than one person: Anna Berg, Anna Schmidt."], ambiguous.ErrLines);
+    }
+
+    // 159 AC-7: person adds todos [{due,text}] and doneTodos [{due,done,text}] after the existing fields; done is the
+    // day in the zone; null for both when todos.json can't be read (with the stderr line and exit code 1).
+    [Fact]
+    public void Person_Todos_FieldsInOrder_UnreadableIsNull()
+    {
+        WriteNote("A", "@[Anna]");
+        TodoItem open = new TodoStore(root, () => Now).Add("Call @[Anna] & <co>", new DateOnly(2026, 11, 5));
+        TodoItem done = new TodoStore(root, () => Now).Add("Sent @[anna]\nthe plan", new DateOnly(2026, 10, 25));
+        new TodoStore(root, () => new DateTime(2026, 10, 27, 23, 30, 0, DateTimeKind.Utc)).Complete(done.Id);
+
+        Result result = Run("person", "Anna", "--json");
+
+        AssertDocument(result);
+        Assert.Equal(
+            "{\"person\":\"Anna\",\"notes\":[\"A\"],\"appointments\":[],"
+                + "\"todos\":[{\"due\":\"2026-11-05\",\"text\":\"Call @[Anna] \\u0026 \\u003Cco\\u003E\"}],"
+                + "\"doneTodos\":[{\"due\":\"2026-10-25\",\"done\":\"2026-10-28\",\"text\":\"Sent @[anna] the plan\"}]}\n",
+            result.Out);
+        Assert.NotEqual(Guid.Empty, open.Id);
+
+        File.WriteAllText(Path.Combine(root, TodoStore.FileName), "[{\"text\":\"@[Anna]\",\"due\":\"2026-11-03\",\"done\":42}]");
+        Result unreadable = Run("person", "Anna", "--json");
+
+        Assert.Equal(1, unreadable.Code);
+        Assert.Equal(
+            "{\"person\":\"Anna\",\"notes\":[\"A\"],\"appointments\":[],\"todos\":null,\"doneTodos\":null}\n",
+            unreadable.Out);
+        Assert.Equal(["Can't read todos.json."], unreadable.ErrLines);
     }
 }

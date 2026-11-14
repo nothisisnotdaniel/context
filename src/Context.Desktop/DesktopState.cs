@@ -250,8 +250,8 @@ internal sealed class DesktopState
     });
 
     /// <summary>
-    /// The person page of <paramref name="name"/> (<see cref="PersonView.Build"/>): the notes that mention the person
-    /// and their appointments from the calendar files and the cached published calendar, after syncing the index, off
+    /// The person page of <paramref name="name"/> (<see cref="PersonView.Build"/>): the notes that mention the person,
+    /// their appointments from the calendar files and the cached published calendar, and their open and done todos, after syncing the index, off
     /// the calling thread. Reads only (no download) and never throws: any failure gives a <c>NoMentions</c> view with
     /// <see cref="PersonView.IndexUnreadable"/> set.
     /// </summary>
@@ -261,7 +261,7 @@ internal sealed class DesktopState
         {
             lock (indexGate)
             {
-                return PersonView.Build(index, notes, calendar, feed, name);
+                return PersonView.Build(index, notes, calendar, feed, name, todos);
             }
         }
         catch (Exception)
