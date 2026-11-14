@@ -151,9 +151,9 @@ internal sealed class TagIndex
     /// <summary>
     /// The parser version the stored tags were made with, kept in <c>PRAGMA user_version</c>. When the
     /// database has an older one, <see cref="Sync"/> re-parses every note once. 1: <c>#[bracket tags]</c>.
-    /// 2: <c>[[note links]]</c>.
+    /// 2: <c>[[note links]]</c>. 3: subpages (full names, link targets up to <see cref="NoteLinkParser.MaxTargetLength"/>).
     /// </summary>
-    public const int ParserVersion = 2;
+    public const int ParserVersion = 3;
 
     /// <summary>
     /// How long opening <c>context.db</c> and starting <see cref="Sync"/>'s write transaction wait while another

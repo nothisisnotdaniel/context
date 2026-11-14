@@ -716,6 +716,46 @@ public sealed class SensitiveActionsTests : IDisposable
 
     private string Parent() => Path.GetDirectoryName(data.Root)!;
 
+    // 152 AC-12: a subpage, and a note with subpages, are refused before any key is used.
+    [Theory]
+    [InlineData("Meetings/Meeting 1", "Only top-level notes can be sensitive.")]
+    [InlineData("meetings", "A note with subpages can't be sensitive.")]
+    public async Task MarkSensitive_SubpageOrParent_Refused(string name, string text)
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteNote("Meetings", "# Meetings\n");
+        data.WriteFile(Path.Combine("Meetings", "Meeting 1.md"), "# Meeting 1\n");
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult result = await data.Actions!.MarkSensitive(name, new Confirmation());
+
+        Assert.Equal(ActionKind.Refused, result.Kind);
+        Assert.Equal(ActionReason.Invalid, result.Reason);
+        Assert.Equal(text, result.Text);
+        Assert.Equal(before, Files());
+        Assert.Equal(0, data.Keys.Agrees);
+        Assert.Equal(DesktopActions.ChildSensitiveText, "Only top-level notes can be sensitive.");
+        Assert.Equal(DesktopActions.ParentSensitiveText, "A note with subpages can't be sensitive.");
+    }
+
+    // 152 AC-12: a sensitive name blocks only top-level titles; a subpage may share it.
+    [Fact]
+    public async Task SensitiveName_BlocksOnlyTopLevel()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("Plan", "secret");
+        data.WriteNote("Meetings", "# Meetings\n");
+        await data.RefreshAsync();
+
+        ActionResult child = await data.Actions!.CreateSubpage("Meetings", "Plan");
+        ActionResult top = await data.Actions.CreateNote("plan");
+
+        Assert.Equal(ActionKind.Done, child.Kind);
+        Assert.Equal("Meetings/Plan", child.Text);
+        Assert.Equal(ActionKind.Refused, top.Kind);
+    }
+
     private string[] RootFiles() => FileSnapshot.Take(data.Root, TagIndex.FileName).Keys.ToArray();
 
     private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName);

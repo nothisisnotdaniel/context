@@ -534,12 +534,16 @@ input[type="password"]:disabled {
     margin-bottom: 8px;
 }
 
-.note-toolbar .rename-title {
+.note-toolbar .rename-title,
+.note-toolbar .subpage-title,
+.note-toolbar .move-parent {
     flex: 1 1 auto;
     min-width: 0;
 }
 
-.note-toolbar .save-name {
+.note-toolbar .save-name,
+.note-toolbar .create-subpage,
+.note-toolbar .move-here {
     background: var(--accent-strong);
     border-color: var(--accent-strong);
     color: var(--on-accent);
@@ -829,4 +833,86 @@ input[type="password"]:disabled {
     gap: 4px;
     justify-content: flex-end;
     min-width: 0;
+}
+
+/* The notes tree: each note is a row (toggle, title, time); a note's subpages are a nested, indented list. */
+.note-list .note {
+    display: block;
+    padding: 0;
+}
+
+.note-row {
+    align-items: baseline;
+    display: flex;
+    gap: 6px;
+    padding: 3px 0;
+}
+
+.note-row .name {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.note-children {
+    list-style: none;
+    margin: 0;
+    padding-left: 16px;
+}
+
+.note-row .toggle,
+.note-row .toggle-space {
+    flex: none;
+    width: 18px;
+}
+
+.note-row .toggle {
+    background: none;
+    border: none;
+    border-radius: 3px;
+    color: var(--accent-strong);
+    padding: 0;
+    text-align: center;
+}
+
+/* No border to tint on hover, so the toggle gets a soft background; focus keeps the global button:focus-visible ring. */
+.note-row .toggle:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent-strong) 15%, transparent);
+}
+
+/* The open subpage's ancestors above the toolbar; long titles are cut, the full name is in the title attribute. */
+.breadcrumb ol {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    list-style: none;
+    margin: 0 0 6px;
+    padding: 0;
+}
+
+.breadcrumb li {
+    display: flex;
+    gap: 4px;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.breadcrumb li + li::before {
+    color: var(--grey);
+    content: "/";
+}
+
+.breadcrumb .crumb {
+    background: none;
+    border: none;
+    color: var(--accent-strong);
+    max-width: 20em;
+    padding: 0;
+}
+
+.breadcrumb .crumb:hover:not(:disabled) {
+    text-decoration: underline;
+}
+
+.breadcrumb .crumb-current {
+    max-width: 30em;
 }

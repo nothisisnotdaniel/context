@@ -8,6 +8,19 @@ scriptable command-line tool, `context`.
 `context help` lists every command. Results go to stdout, errors to stderr as one line. Exit codes: 0 success,
 1 error, 2 usage error.
 
+### Subpages
+
+A note can have subpages: the children of `Meetings.md` are the `.md` files in the `Meetings/` folder next to it, to
+any depth. A subpage's name is its path with `/` on every OS, so `notes` lists `Meetings/Meeting 1` right after
+`Meetings`, and `note show`, `links` and `export` take that name (quote it when it has spaces):
+
+```sh
+context note show "Meetings/Meeting 1"
+```
+
+The name is only matched against the note list, never used as a file path. `import` and `capture` write top-level
+notes only; subpages are created, moved and deleted in the desktop app.
+
 ### JSON output
 
 Add `--json` to a read command (`version`, `todos`, `notes`, `note show`, `tags`, `links`, `current`) to get one

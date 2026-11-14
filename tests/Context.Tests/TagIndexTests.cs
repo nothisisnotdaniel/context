@@ -356,7 +356,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(2, TagIndex.ParserVersion);
+        Assert.Equal(3, TagIndex.ParserVersion);
     }
 
     // 024 AC-6
@@ -612,7 +612,7 @@ public sealed class TagIndexTests : IDisposable
 
         Assert.Equal([("A", "Beta")], LinkRows());
         Assert.Equal([("A", "work")], Rows());
-        Assert.Equal(2, UserVersion());
+        Assert.Equal(TagIndex.ParserVersion, UserVersion());
         Assert.Equal(["Beta|To|False|"], index.Links("A").Select(Describe));
     }
 
@@ -729,5 +729,95 @@ public sealed class TagIndexTests : IDisposable
         Assert.Null(index.FindNote("Plan"));
         NoteLink link = Assert.Single(index.Links("Other"));
         Assert.True(link.Missing);
+    }
+
+    // Writes a note below the root, creating the folders of its parents.
+    private void WriteNested(string name, string text)
+    {
+        string path = Path.Combine([root, .. name.Split('/')]) + ".md";
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, text);
+    }
+
+    private List<string> NoteRows()
+    {
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT name FROM notes ORDER BY name";
+        using SqliteDataReader reader = command.ExecuteReader();
+        List<string> rows = [];
+        while (reader.Read())
+        {
+            rows.Add(reader.GetString(0));
+        }
+
+        return rows;
+    }
+
+    // 152 AC-9: subpages are stored by full name and [[Parent/Title]] resolves ignoring case.
+    [Fact]
+    public void Sync_Subpages_ByFullName_AndLinksResolve()
+    {
+        WriteNested("Meetings", "#work");
+        WriteNested("Meetings/Meeting 1", "#work #call");
+        WriteNested("Plan", "see [[meetings/MEETING 1]]");
+        WriteNested("Orphan/Child", "#work");
+
+        index.Sync(store);
+
+        Assert.Equal(["Meetings", "Meetings/Meeting 1", "Plan"], NoteRows());
+        Assert.Equal([("Meetings", "work"), ("Meetings/Meeting 1", "call"), ("Meetings/Meeting 1", "work")], Rows());
+        Assert.Equal(["Meetings", "Meetings/Meeting 1"], index.NotesWithTag("work"));
+        Assert.Equal("Meetings/Meeting 1", index.FindNote("meetings/meeting 1"));
+        Assert.Equal(["Meetings/Meeting 1|To|False|"], index.Links("Plan").Select(Describe));
+        Assert.Equal("Meetings/Meeting 1", new NameLookup(store.List().Select(n => n.Name)).Resolve("MEETINGS/meeting 1"));
+    }
+
+    // 152 AC-9: after a rename or move, the old names are gone from notes, note_tags and note_links.
+    [Fact]
+    public void Sync_AfterRenameAndMove_OldNamesGone()
+    {
+        WriteNested("Meetings", "#work");
+        WriteNested("Meetings/Meeting 1", "#call [[Plan]]");
+        WriteNested("Archive", "plain");
+        WriteNested("Plan", "plain");
+        index.Sync(store);
+
+        store.Rename("Meetings", "Calls");
+        index.Sync(store);
+
+        Assert.Equal(["Archive", "Calls", "Calls/Meeting 1", "Plan"], NoteRows());
+        Assert.Equal([("Calls", "work"), ("Calls/Meeting 1", "call")], Rows());
+        Assert.Equal([("Calls/Meeting 1", "Plan")], LinkRows());
+
+        store.Move("Calls/Meeting 1", "Archive");
+        index.Sync(store);
+
+        Assert.Equal(["Archive", "Archive/Meeting 1", "Calls", "Plan"], NoteRows());
+        Assert.Equal([("Archive/Meeting 1", "call"), ("Calls", "work")], Rows());
+        Assert.Equal([("Archive/Meeting 1", "Plan")], LinkRows());
+    }
+
+    // 152 AC-2 / AC-9: a version 2 database is re-parsed once and keeps every top-level note's tags and links.
+    [Fact]
+    public void Sync_VersionTwoDatabase_ReparsesOnce_KeepsTopLevel()
+    {
+        WriteNote("A", "#work [[Beta]]");
+        WriteNote("Beta", "#home");
+        index.Sync(store);
+        using (SqliteConnection connection = Open())
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "PRAGMA user_version = 2;";
+            command.ExecuteNonQuery();
+        }
+
+        index.Sync(store);
+
+        Assert.Equal(3, TagIndex.ParserVersion);
+        Assert.Equal(3, UserVersion());
+        Assert.Equal(["A", "Beta"], NoteRows());
+        Assert.Equal([("A", "work"), ("Beta", "home")], Rows());
+        Assert.Equal([("A", "Beta")], LinkRows());
     }
 }

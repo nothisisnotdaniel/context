@@ -441,11 +441,24 @@ internal sealed class Cli
 
     private int Notes(Session session)
     {
-        // Sensitive notes are listed by name only, marked locked; their text is never read here.
-        IEnumerable<(NoteInfo Note, bool Locked)> all = session.Notes.List().Select(n => (n, false))
-            .Concat(session.Notes.ListSensitive().Select(n => (n, true)))
-            .OrderBy(r => r.Item1.Name, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(r => r.Item1.Name, StringComparer.Ordinal);
+        // Sensitive notes are listed by name only, marked locked; their text is never read here. They are top-level
+        // only, so they sort among the top-level notes, and each plain note keeps its subpages right after it.
+        List<List<(NoteInfo Note, bool Locked)>> blocks = [];
+        foreach (NoteInfo note in session.Notes.List())
+        {
+            if (note.Parent is null || blocks.Count == 0)
+            {
+                blocks.Add([]);
+            }
+
+            blocks[^1].Add((note, false));
+        }
+
+        blocks.AddRange(session.Notes.ListSensitive().Select(n => new List<(NoteInfo Note, bool Locked)> { (n, true) }));
+        IEnumerable<(NoteInfo Note, bool Locked)> all = blocks
+            .OrderBy(b => b[0].Note.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(b => b[0].Note.Name, StringComparer.Ordinal)
+            .SelectMany(b => b);
         if (session.Json)
         {
             return Json(w =>

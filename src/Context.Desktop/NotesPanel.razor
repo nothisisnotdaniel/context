@@ -1,4 +1,5 @@
 @inherits StateComponent
+@using Microsoft.AspNetCore.Components.Rendering
 
 <section class="notes">
     <div class="notes-bar">
@@ -20,20 +21,7 @@
         }
         else
         {
-            <ul class="note-list">
-                @foreach ((NoteInfo note, bool locked) in Listed(snapshot))
-                {
-                    string name = DesktopText.OneLine(note.Name);
-                    <li class="note">
-                        <button type="button" class="name cut" title="@name" @onclick="() => OnOpen.InvokeAsync(note.Name)">@name</button>
-                        @if (locked)
-                        {
-                            <span class="locked grey">locked</span>
-                        }
-                        <span class="time grey">@note.Modified.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)</span>
-                    </li>
-                }
-            </ul>
+            RenderTree(__builder, Tree(snapshot), top: true);
         }
         <div class="note-entry">
             <input type="text" class="note-new-title" value="@newTitle" maxlength="200" disabled="@creating"
@@ -116,6 +104,10 @@
     [Parameter]
     public EventCallback<string> OnOpen { get; set; }
 
+    /// <summary>The open note's full name, or null; its ancestors are expanded when it changes.</summary>
+    [Parameter]
+    public string? OpenName { get; set; }
+
     /// <summary>Called when the Tags button is clicked.</summary>
     [Parameter]
     public EventCallback OnTags { get; set; }
@@ -124,12 +116,106 @@
     [Parameter]
     public EventCallback OnSettings { get; set; }
 
-    // Plain and sensitive notes in one list, by name (ignoring case, then exact); a sensitive one is marked locked.
-    private static IEnumerable<(NoteInfo Note, bool Locked)> Listed(DesktopSnapshot snapshot) =>
-        snapshot.Notes.Select(n => (Note: n, Locked: false))
-            .Concat(snapshot.Sensitive.Select(n => (Note: n, Locked: true)))
+    // The full names of the notes whose subpages are shown. Kept across State.Changed; a name that no longer has
+    // subpages simply shows no toggle.
+    private readonly HashSet<string> expanded = new(StringComparer.Ordinal);
+    private string? expandedFor;
+
+    // Opening a note shows it in the tree: every ancestor is expanded (once per newly opened note, so the user can
+    // still collapse them afterwards).
+    protected override void OnParametersSet()
+    {
+        if (OpenName is { } open && !string.Equals(open, expandedFor, StringComparison.Ordinal))
+        {
+            expanded.UnionWith(Enumerable.Range(1, Math.Max(0, open.Length - 1))
+                .Where(i => open[i] == '/')
+                .Select(i => open[..i]));
+        }
+
+        expandedFor = OpenName;
+    }
+
+    private void Toggle(string name)
+    {
+        if (!expanded.Remove(name))
+        {
+            expanded.UnionWith([name]);
+        }
+    }
+
+    // Plain notes as a tree (List() order: siblings by title, each note followed by its subpages), with the sensitive
+    // notes, which are top-level only and marked locked, sorted among the top-level notes by name.
+    private static List<TreeNode> Tree(DesktopSnapshot snapshot)
+    {
+        ILookup<string, NoteInfo> byParent = snapshot.Notes
+            .Where(n => n.Parent is not null)
+            .ToLookup(n => n.Parent!, StringComparer.Ordinal);
+        TreeNode Build(NoteInfo note) => new TreeNode(note, locked: false, byParent[note.Name].Select(Build).ToList());
+        return snapshot.Notes
+            .Where(n => n.Parent is null)
+            .Select(Build)
+            .Concat(snapshot.Sensitive.Select(n => new TreeNode(n, locked: true, [])))
             .OrderBy(n => n.Note.Name, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(n => n.Note.Name, StringComparer.Ordinal);
+            .ThenBy(n => n.Note.Name, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    // One level of the tree: a row per note (toggle when it has subpages, its title, locked, time) and, when expanded,
+    // its subpages as a nested list.
+    private void RenderTree(RenderTreeBuilder __builder, List<TreeNode> nodes, bool top)
+    {
+        <ul class="@(top ? "note-list" : "note-list note-children")">
+            @foreach (TreeNode node in nodes)
+            {
+                NoteInfo note = node.Note;
+                string name = DesktopText.OneLine(note.Name);
+                string title = DesktopText.OneLine(note.Title);
+                bool open = node.Children.Count > 0 && expanded.Contains(note.Name);
+                string toggleLabel = (open ? "Collapse " : "Expand ") + name;
+                string toggleMark = open ? "▾" : "▸";
+                <li class="note" @key="note.Name">
+                    <div class="note-row">
+                        @if (node.Children.Count > 0)
+                        {
+                            <button type="button" class="toggle" aria-expanded="@(open ? "true" : "false")"
+                                    aria-label="@toggleLabel" @onclick="() => Toggle(note.Name)">@toggleMark</button>
+                        }
+                        else
+                        {
+                            <span class="toggle-space"></span>
+                        }
+                        <button type="button" class="name cut" title="@name" @onclick="() => OnOpen.InvokeAsync(note.Name)">@title</button>
+                        @if (node.Locked)
+                        {
+                            <span class="locked grey">locked</span>
+                        }
+                        <span class="time grey">@note.Modified.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)</span>
+                    </div>
+                    @if (open)
+                    {
+                        RenderTree(__builder, node.Children, top: false);
+                    }
+                </li>
+            }
+        </ul>
+    }
+
+    // A note in the tree with its subpages.
+    private sealed class TreeNode
+    {
+        public TreeNode(NoteInfo note, bool locked, List<TreeNode> children)
+        {
+            Note = note;
+            Locked = locked;
+            Children = children;
+        }
+
+        public NoteInfo Note { get; }
+
+        public bool Locked { get; }
+
+        public List<TreeNode> Children { get; }
+    }
 
     private void OpenSetup()
     {

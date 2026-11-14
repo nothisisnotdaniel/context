@@ -1048,4 +1048,73 @@ public sealed class CliTests : IDisposable
         AssertError(captured, 1, "Inbox is sensitive. Open it in the desktop app.");
         Assert.Equal(before, Snapshot());
     }
+
+    // 152 ------------------------------------------------------------------------------------------
+
+    private void WriteNested(string name, string text)
+    {
+        string path = Path.Combine([root, .. name.Split('/')]) + ".md";
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, text);
+    }
+
+    // 152 AC-10: notes prints full names depth-first, with sensitive notes sorted among the top level.
+    [Fact]
+    public void Notes_PrintsSubpagesByFullName_InListOrder()
+    {
+        WriteNested("Meetings", "m");
+        WriteNested("Meetings/Meeting 2", "2");
+        WriteNested("Meetings/meeting 1", "1");
+        WriteNested("Meetings/meeting 1/Notes", "n");
+        WriteNested("Zeta", "z");
+        WriteSealed("Alpha");
+        WriteSealed("Plan");
+
+        Result result = Run("notes");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(
+            ["Alpha\tlocked", "Meetings", "Meetings/meeting 1", "Meetings/meeting 1/Notes", "Meetings/Meeting 2", "Plan\tlocked", "Zeta"],
+            result.Out.Split('\n', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    // 152 AC-10: note show, links, export and tags take and print a subpage's full name.
+    [Fact]
+    public void SubpageByFullName_ShowLinksExportTags()
+    {
+        WriteNested("Meetings", "#work [[Meetings/Meeting 1]]");
+        WriteNested("Meetings/Meeting 1", "# Meeting 1\n#work");
+        string target = Path.Combine(outside, "m1.md");
+
+        Result show = Run("note", "show", "Meetings/Meeting", "1");
+        Result links = Run("links", "meetings/meeting 1");
+        Result tags = Run("tags", "work");
+        Result export = Run("export", "Meetings/Meeting 1", target);
+        Result path = Run("note", "show", Path.Combine(root, "Meetings", "Meeting 1"));
+
+        Assert.Equal((0, "# Meeting 1\n#work\n"), (show.Code, show.Out));
+        Assert.Equal((0, "Meetings\tlinked from\t#work\n"), (links.Code, links.Out));
+        Assert.Equal((0, "Meetings\nMeetings/Meeting 1\n"), (tags.Code, tags.Out));
+        Assert.Equal((0, "Exported Meetings/Meeting 1.\n"), (export.Code, export.Out));
+        Assert.Equal("# Meeting 1\n#work", File.ReadAllText(target));
+        Assert.Equal(1, path.Code);
+    }
+
+    // 152 AC-10: import and capture still write only top-level notes.
+    [Fact]
+    public void ImportAndCapture_WriteTopLevelOnly()
+    {
+        WriteNested("Meetings", "m");
+        WriteNested("Meetings/inbox", "child inbox");
+        string source = Path.Combine(outside, "Meeting 1.md");
+        File.WriteAllText(source, "# Meeting 1\n");
+
+        Assert.Equal(0, Run("import", source).Code);
+        Assert.Equal(0, Run("capture", "hello").Code);
+
+        Assert.Equal("# Meeting 1\n", Read("Meeting 1.md"));
+        Assert.StartsWith("# inbox\n", Read("inbox.md"), StringComparison.Ordinal);
+        Assert.Equal("child inbox", Read(Path.Combine("Meetings", "inbox.md")));
+        Assert.Equal(["inbox.md"], Directory.GetFiles(Path.Combine(root, "Meetings")).Select(f => Path.GetFileName(f)).ToArray());
+    }
 }

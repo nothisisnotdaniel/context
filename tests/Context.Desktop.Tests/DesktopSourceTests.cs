@@ -12,9 +12,10 @@ public sealed class DesktopSourceTests
     // The Core calls that change data (AC-8). CalendarLink's real names are Set/Clear; Save/Delete are listed too.
     // 134: NoteStore.Rename and NoteStore.Delete. 136: sealing (SealedNote.Seal, AddRecipient), NoteStore.DeleteSensitive
     // and the key store's two changing calls; RecoveryFile.Create is caught by Create. 140: Inbox.Capture.
+    // 152: NoteStore.CreateChild and NoteStore.Move.
     private static readonly Regex Writes = new(
         @"\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
-        + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture)\s*\(",
+        + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture|CreateChild|Move)\s*\(",
         RegexOptions.CultureInvariant);
 
     // 136: the real key stores and the real file dialog, spelled in pieces: no test file may hold their names (see
@@ -810,6 +811,8 @@ public sealed class DesktopSourceTests
     [InlineData("notes.Rename(source.Name, title)")]
     [InlineData("notes.Delete(name)")]
     [InlineData("notes . Rename (a, b)")]
+    [InlineData("notes.CreateChild(owner.Name, normalized)")]
+    [InlineData("notes.Move(source.Name, owner?.Name)")]
     [InlineData("SealedNote.Seal(name, text, recipients)")]
     [InlineData("SealedNote.AddRecipient(name, file, key, agree, added)")]
     [InlineData("notes.DeleteSensitive(name)")]

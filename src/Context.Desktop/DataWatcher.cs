@@ -40,8 +40,9 @@ internal sealed class DataWatcher : IDisposable
     /// <summary>
     /// True for a path whose change the window shows: a top-level <c>*.md</c> note (any case),
     /// <c>todos.json</c>, <c>calendar-link.ics</c> or a top-level <c>calendar/*.ics</c>
-    /// file. False for the index (<c>context.db*</c>), temp files, <c>calendar-link.txt</c>, notes in subfolders
-    /// and anything outside <paramref name="root"/>. A successful <see cref="CalendarFeed.Fetch"/> rewrites
+    /// file, and a subpage: a <c>*.md</c> file at any depth below a folder. False for the index (<c>context.db*</c>),
+    /// temp files, <c>calendar-link.txt</c>, a <c>.md</c> below a folder whose name starts with <c>.</c> or below the
+    /// top-level <c>calendar/</c>, and anything outside <paramref name="root"/>. A successful <see cref="CalendarFeed.Fetch"/> rewrites
     /// <c>calendar-link.ics</c>, so it causes one extra refresh; that one is served from the fresh cache (no request).
     /// </summary>
     public static bool IsRelevant(string root, string path)
@@ -77,7 +78,21 @@ internal sealed class DataWatcher : IDisposable
                 || Same(name, CalendarFeed.CacheFileName);
         }
 
-        return parts.Length == 2 && Same(parts[0], CalendarStore.FolderName) && HasExtension(parts[1], ".ics");
+        if (Same(parts[0], CalendarStore.FolderName))
+        {
+            return parts.Length == 2 && HasExtension(parts[1], ".ics");
+        }
+
+        // A subpage at any depth, except below a hidden folder (temp files, tool folders).
+        for (int i = 0; i < parts.Length - 1; i++)
+        {
+            if (parts[i].Length == 0 || parts[i].StartsWith('.'))
+            {
+                return false;
+            }
+        }
+
+        return HasExtension(parts[^1], ".md");
     }
 
     public void Dispose()

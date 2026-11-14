@@ -19,7 +19,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Pooling=False`, parameterized SQL only): `notes(name, modified)` (last-write UTC ticks, NULL for a
     note that couldn't be read so it is retried), `note_tags(note, tag)` and `note_links(note, target)`. `Sync(NoteStore)` updates it
     in one transaction and only re-parses files whose time changed. `PRAGMA user_version` holds the parser
-    version (`TagIndex.ParserVersion`, now 2: note links); when it is lower, `Sync` clears every stored time in the same
+    version (`TagIndex.ParserVersion`, now 3: subpages by full name); when it is lower, `Sync` clears every stored time in the same
     transaction (so all notes are re-parsed once) and then sets it. Bump it whenever parsing changes. Queries: `Tags()`, `NotesWithTag`,
     `FindNote`, `Links`. A database that can't be opened or isn't valid throws `TagIndexException` (an
     `IOException`) and is never deleted or overwritten. The file database waits up to `TagIndex.BusyTimeout` (5 s; an
@@ -28,7 +28,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     and `CurrentView.Build` call `Sync` first and report that error as a view kind or flag (`IndexUnreadable`); the
     command line then writes `Can't read context.db.` to stderr and exits 1.
   - **Note links:** `NoteLinkParser.Parse` finds `[[Note name]]` anywhere in a line (`[[`, text with no `[` up to the
-    first `]` on the line, then `]]`; trimmed; empty or over 103 chars (`MaxTargetLength`) is no link; distinct ignoring
+    first `]` on the line, then `]]`; trimmed; empty or over 403 chars (`MaxTargetLength` = `NoteStore.MaxNameLength + 3`) is no link; distinct ignoring
     case, first spelling kept), skipping fences and code spans through `TagParser.LinesOutsideFences` and
     `TagParser.SkipCodeSpan` (shared, not copied). It scans each line once (cached next `]` and `[`). `[[...]]` is never
     a tag and `#[...]` never a link; `|alias` and `#heading` are part of the target. Targets are stored as written and
@@ -92,6 +92,10 @@ Every factory agent reads this file before working on Context. Keep it short and
 - **Sensitive notes:** (job 136, desktop only) a single note can be marked sensitive; it is then a sealed top-level
   `<Title>.ctxs` file instead of `<Title>.md`. The command line, `context.db` and search see only its
   name, marked `locked`.
+  - **Top-level only** (job 152): a `.ctxs` below the top level is never listed. `MarkSensitive` is Refused/`Invalid`
+    with no key call for a subpage (`Only top-level notes can be sensitive.`) and for a note with subpages (`A note
+    with subpages can't be sensitive.`). A sensitive name blocks only top-level titles; a sensitive note's toolbar has
+    no `New subpage` and no `Move`.
   - **Core (managed, no crypto):** `NoteStore.SensitiveExtension` (`.ctxs`), `ListSensitive()` (top-level `*.ctxs` as
     `NoteInfo`), `TryFindSensitive(name, out NoteInfo?)` (matched against `ListSensitive()` only, exact then ignoring
     case, never turned into a path) and `DeleteSensitive(name)`. `List()`, `TryFind` and `Delete` stay `.md`-only;
@@ -201,6 +205,23 @@ Every factory agent reads this file before working on Context. Keep it short and
     returns the new `NoteInfo`, the note itself when the title is exactly its name (nothing written), or `null` when no
     note matches. `Delete(name)` deletes the file `TryFind(name)` found and returns true, else false (nothing deleted,
     never anything outside `List()`). There is no trash; only the desktop uses them (no command-line command).
+  - **Subpages** (job 152): the children of `X.md` are the `*.md` files in the folder `X/` next to it (exact case
+    first, then ignoring case), recursively. `NoteInfo` has `Name` (`Parent/Title`, `/` on every OS), `Title` (last
+    segment) and `Parent` (null at the top level). `List()` is depth-first: siblings by title ignoring case, then
+    exact, each note followed by its subpages. Never read or listed: a folder that is a symlink or reparse point (so
+    no loops and no way out of the root), starts with `.`, is the top-level `calendar/`, or has no matching `.md`;
+    a child whose title fails `ValidateTitle` or whose full name is over `NoteStore.MaxNameLength` (400). Below the
+    top level a folder that can't be read lists as empty. `TryFind` matches against `List()` names only (paths,
+    `..` and `\` find nothing). `CreateChild(parent, title)` writes `<parent folder>/<title>.md` with `# <title>\n`
+    (`CreateNew`, creating the folder); `ArgumentException` for a bad title, a missing parent, a `calendar`
+    top-level ancestor or a name over 400, `NoteExistsException` for a sibling with that title. `Rename` changes only
+    the last segment and moves the child folder too; `Move(name, newParent?)` (null or blank: top level) moves the
+    note and its subtree, refusing a move under itself or a subpage, under `calendar` or over 400 characters. Both
+    never overwrite (`File.Move` then `Directory.Move`; when the folder move fails the file is moved back and the
+    exception propagates; `BeforeFolderMove` is the test hook) and check clashes against siblings (at the top level
+    also sensitive names). `Descendants(name)` counts the notes below; `Delete` removes the note and every listed
+    descendant, then only the child folders that are now empty. `SaveIfUnchanged` writes its temp file in the
+    note's own folder, named after `Title`. `Save` (import) and `Create` stay top-level only.
   - **Todos:** `TodoStore` keeps the list in `<root>/todos.json` (same root as notes; System.Text.Json,
     camelCase, UTF-8 no BOM). `List()` sorts by `Due`, then `Created` (UTC), then file order. Writes go to
     a temp file in the root, then `File.Move(..., overwrite: true)`; a file that can't be read or parsed
@@ -414,8 +435,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     only in Debug). `DesktopState` builds a `DesktopSnapshot` (`Failed`, `Today`, `CurrentView? Current`,
     `Todos`, `Notes`, unreadable flags, `Folder`) off the UI thread with `Refresh()` (one at a time; requests during a run
     coalesce into one more run) and raises `Changed`; `Tick()` refreshes when the day changed or 5 min passed.
-    `DataWatcher` (one `FileSystemWatcher` with subfolders, `IsRelevant` filter, 300 ms debounce, 30 s tick timer;
-    never creates the folder) calls them. Components (`App`, `Main`, `CurrentPanel`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `LinksPanel`)
+    `DataWatcher` (one `FileSystemWatcher` with subfolders, `IsRelevant` filter: the top-level files as before, plus
+    a `.md` at any depth except under a folder starting with `.` or under the top-level `calendar/`; 300 ms
+    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `CurrentPanel`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `LinksPanel`)
     inherit `StateComponent`, which injects the state and `DesktopActions` (internal types can't be
     public parameters). `DesktopActions` (with `ActionResult`: `ActionKind` `Done`/`Refused`/`Failed`, `ActionReason`,
     raw text) is the only write path: it never throws, runs one action at a time (`Busy`), refreshes the state after a change and has the test
@@ -425,7 +447,13 @@ Every factory agent reads this file before working on Context. Keep it short and
     existing: Refused/`Exists` `Note <name> already exists.`; else Failed `Can't create that note. Nothing was done.`),
     `RenameNote(name, newTitle)` (`NoteStore.Rename`; same name: Done/`Unchanged`, no refresh; same invalid/exists texts;
     gone: Refused/`Missing` `<name> no longer exists. Nothing was done.`), `DeleteNote(name, confirmation)` (no
-    confirmation: `NotConfirmed`; `NoteStore.Delete`) and `OpenExternally(name)`, which never writes or refreshes: it
+    confirmation: `NotConfirmed`; `NoteStore.Delete`, the whole subtree), `CreateSubpage(parent, title)`
+    (`NoteStore.CreateChild`; Done text is the full name; the `CreateNote` texts, a missing parent `<parent> no longer
+    exists. Nothing was done.`, too long `A note's full name can be at most 400 characters.`, below `calendar`
+    `<parent> can't have subpages. Nothing was done.`), `MoveNote(name, newParent)` (`NoteStore.Move`; the parent is
+    matched through `TryFind` only, unknown: Refused/`Missing` `No note called <parent>. Nothing was moved.`; under
+    itself: `A note can't move under itself or one of its subpages. Nothing was moved.`; already there:
+    Done/`Unchanged`; Done text is the new full name) and `OpenExternally(name)`, which never writes or refreshes: it
     resolves `name` through `TryFind` and calls `INoteLauncher.Launch(path)` once, only when the path is `.md`, inside
     the root (`NoteStore.Contains`) and a regular file (no symlink/reparse point, seekable; an empty file is refused off
     Windows because it can't be told from a FIFO), else Refused `Can't open <name> in another app.` (Failed with the
@@ -527,7 +555,18 @@ Every factory agent reads this file before working on Context. Keep it short and
     field (Enter or `Save name` renames and reopens the note under the new name; Esc or `Cancel` restores the toolbar;
     a dirty editor is refused with red `Save <name> first.`), `Delete` asks `Delete <name>? This can't be undone.`
     (`ConfirmDialog`, confirm label `Delete`; on confirm the main region returns to the current view) and `Open in
-    default editor` calls `OpenExternally` (red text on failure). The palette's `/new <title>` does what the entry row
+    default editor` calls `OpenExternally` (red text on failure). Subpages (job 152): `NotesPanel` draws the notes
+    as nested `ul.note-list` lists (`note-children` below the top), each row showing `Title` with the full name in
+    `title`, and a toggle `<button>` (`aria-expanded`, `aria-label` `Expand <name>`/`Collapse <name>`) for a note with
+    subpages; notes start collapsed, `Main` passes `OpenName` so opening a note expands its ancestors, and the
+    expanded set survives `State.Changed`. An open subpage shows `<nav class="breadcrumb" aria-label="Breadcrumb">`
+    above the toolbar: each ancestor a `button.crumb` opening it through `RequestOpen`, the last item a span with
+    `aria-current="page"`. The plain-note toolbar also has `New subpage` (field `Subpage title`, `Create subpage` /
+    `Cancel`, Enter/Esc; Done opens the page and shows `Created <full name>`) and `Move` (field `New parent`, prefilled
+    with the parent, empty = top level, `Move here` / `Cancel`; Done reopens the note and shows `Moved to <name>`);
+    both, like Rename, refuse a dirty editor with `Save <name> first.`. Rename prefills `Title`, Export suggests
+    `<Title>.md`, and Delete of a note with subpages asks `Delete <name> and its <n> subpages? This can't be undone.`
+    (`1 subpage` for one). The palette's `/new <title>` does what the entry row
     does (`/new` alone: red `Type /new <title>.`). The page editor is `wwwroot/editor/editor.js`
     (`globalThis.ContextEditor`), built from `editor/src/` (`schema.js`, `markdown.js` with markdown-it `html: false`,
     `view.js`, `index.js`); `isLossless` false shows the grey `Saving will reformat parts of this note.`
@@ -548,7 +587,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `wwwroot/index.html` (CSP meta tag, only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
     and `wwwroot/editor/editor.css`.
   - **Desktop rules:** the Core writing calls (`Create`, `Save`, `SaveIfUnchanged`, `Add`, `Complete`, `Set`, `Clear`, `Delete`,
-    `Rename`, `ClearCache`, `Capture` (`Inbox.Capture`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
+    `Rename`, `CreateChild`, `Move`, `ClearCache`, `Capture` (`Inbox.Capture`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
     `StoreRecoveryPublicKey`) appear only in `DesktopActions.cs` (exemptions: `DotNetObjectReference.Create(` once in
     `EditorInterop.cs`, `ECDiffieHellman.Create(` in `SealedNote.cs`, and `WindowsKeyStore.cs`, whose .NET calls change
     the certificate store and which names no Core store, `File.`, `Directory.` or `Path.`; the reads still write
