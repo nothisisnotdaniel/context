@@ -580,6 +580,7 @@ internal sealed class RecurrenceRule
     private static List<T>? ReadList<T>(string value, TryRead<T> read)
     {
         List<T> result = [];
+        HashSet<T> seen = [];
         foreach (string item in value.Split(','))
         {
             if (!read(item.Trim(), out T parsed))
@@ -587,7 +588,7 @@ internal sealed class RecurrenceRule
                 return null;
             }
 
-            if (!result.Contains(parsed))
+            if (seen.Add(parsed))
             {
                 result.Add(parsed);
             }

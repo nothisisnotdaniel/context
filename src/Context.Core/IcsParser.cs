@@ -576,8 +576,7 @@ internal static class IcsParser
             return new SourceTime(time, false, true, null);
         }
 
-        string? zoneId = content.Parameter("TZID");
-        TimeZoneInfo? source = zoneId is null ? null : FindZone(zoneId);
+        TimeZoneInfo? source = content.Zone();
         if (source is null || source.Id == local.Id)
         {
             return new SourceTime(time, false, false, null);
@@ -847,6 +846,8 @@ internal static class IcsParser
     {
         private readonly string name;
         private readonly List<KeyValuePair<string, string>> parameters;
+        private bool zoneRead;
+        private TimeZoneInfo? zone;
 
         private ContentLine(string name, List<KeyValuePair<string, string>> parameters, string value)
         {
@@ -856,6 +857,22 @@ internal static class IcsParser
         }
 
         public string Value { get; }
+
+        /// <summary>
+        /// The zone named by the <c>TZID</c> parameter, or <c>null</c> (local) when there is none or it is unknown.
+        /// Looked up once per line, so a list property with many values resolves its zone only once.
+        /// </summary>
+        public TimeZoneInfo? Zone()
+        {
+            if (!zoneRead)
+            {
+                string? zoneId = Parameter("TZID");
+                zone = zoneId is null ? null : FindZone(zoneId);
+                zoneRead = true;
+            }
+
+            return zone;
+        }
 
         public bool Is(string property) => name.Equals(property, StringComparison.OrdinalIgnoreCase);
 
