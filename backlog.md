@@ -62,7 +62,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#169](backlog/169-todos-linked-to-people.md) Todos linked to people (after: #51; #168) → 159-todo-person-links
 - [x] [#46](backlog/046-meeting-prep.md) Meeting prep → 160-meeting-prep-notes
 - [x] [#36](backlog/036-claude-md-tidy-ups.md) CLAUDE.md tidy-ups → 153-claude-md-tidy
-- [ ] [#35](backlog/035-strong-name-core.md) Strong-name Core
+- [x] [#35](backlog/035-strong-name-core.md) Strong-name Core → 161-strong-name-core
 - [ ] [#26](backlog/026-recurring-appointments.md) Recurring appointments
 - [ ] [#28](backlog/028-tag-and-link-parser-fixes.md) Tag and link parser fixes
 - [ ] [#43](backlog/043-daily-note.md) Daily note
