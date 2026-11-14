@@ -382,6 +382,11 @@ Every factory agent reads this file before working on Context. Keep it short and
   (Node from `brew install node`) and commit the rebuilt `wwwroot/editor/editor.js` and `editor.css`; `dotnet build`
   and `dotnet test` never need Node. `node_modules` is ignored and `editor/**` is excluded from the C# project.
 - **Build:** `dotnet build` (must stay at 0 warnings)
+- **Strong name:** (job 161) every assembly is public-signed (`PublicSign`) with the committed `Context.snk`, which
+  holds the public key only; no private key exists anywhere, so no real signing happens. Its purpose is that
+  `InternalsVisibleTo` names friends by name and `PublicKey`, so an assembly that only copies a friend's name gets no
+  access to internals. It is not a security boundary: the key is public, anyone can public-sign with it, and .NET does
+  not verify strong-name signatures. `Context.Desktop` suppresses CS8002 (Photino has no strong name); no other project does.
 - **Package lock files:** every project commits its `packages.lock.json` (`RestorePackagesWithLockFile` in
   `Directory.Build.props`; direct and transitive packages with their `contentHash`; `Context.Core` and
   `Context.Desktop` list `RuntimeIdentifiers` `osx-arm64;osx-x64;win-x64`, the RIDs `release.yml` publishes, so the
@@ -493,12 +498,15 @@ Every factory agent reads this file before working on Context. Keep it short and
     tests, and it runs the scripts with `bash` (also the Windows `Pack` and `Upload` steps and the publish step, against stub `vpk` and `gh` commands, and the macOS signing step and scripts against stub `codesign`, `security`, `xcrun`, `spctl` and `ditto` that log their calls and can fail or answer `Invalid`; never a real keychain, certificate or Apple account). `/factory release --project Context` opens the release PR.
 - **Run:** `dotnet run --project src/Context -- help` (command line; any `Cli` command after `--`), `dotnet run --project src/Context.Desktop` (desktop window)
 - **Layout:**
-  - `Context.slnx`: the solution. `Directory.Build.props` turns on `EnforceCodeStyleInBuild`, lock files and locked restore on CI.
+  - `Context.slnx`: the solution. `Directory.Build.props` turns on `EnforceCodeStyleInBuild`, lock files and locked restore on CI,
+    and public signing for all five projects (`SignAssembly`, `PublicSign`, `AssemblyOriginatorKeyFile` = `Context.snk`, `ContextPublicKey` = its hex).
   - `src/Context.Core/`: class library with the data and storage code, no UI. Its only package is
     `Microsoft.Data.Sqlite`. **No project references a terminal UI library** (`CoreDependencyTests` and
     `DesktopDependencyTests` fail on the removed console's library: assembly, package, restored graph or a mention in `src/`).
     Types stay `internal` in `namespace Context;`; `InternalsVisibleTo` grants `Context`, `Context.Tests`,
-    `Context.Desktop` and `Context.Desktop.Tests`.
+    `Context.Desktop` and `Context.Desktop.Tests`, each by name and `PublicKey` (`Key="$(ContextPublicKey)"`; every
+    assembly is public-signed with the committed `Context.snk`, see **Strong name**). `Context` grants only
+    `Context.Tests` and `Context.Desktop` only `Context.Desktop.Tests`, the same way; no `InternalsVisibleTo` is name-only.
     It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, picking a todo by its text in `TodoPicker.cs`, tag parsing in `TagParser.cs`,
     `[[note link]]` parsing in `NoteLinkParser.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
@@ -725,9 +733,11 @@ Every factory agent reads this file before working on Context. Keep it short and
     cut by CSS with the full text in `title`.
   - `tests/Context.Tests/`: references both projects; test files use the file-scoped `namespace Context.Tests;`;
     one test class per production class (Core and `Cli` alike), `CiWorkflowTests.cs`, `ReleaseWorkflowTests.cs` and
-    `CoreDependencyTests.cs` (the workflows and their four jobs, the release scripts and the tool packaging, with
+    `CoreDependencyTests.cs` and `StrongNameTests.cs` (the workflows and their four jobs, the release scripts and the tool packaging, with
     `WorkflowYaml.cs` and its `WorkflowYamlTests.cs`; the architecture test: no P/Invoke and no sealing code in Core,
-    and no terminal UI assembly, package or source mention in any project), plus shared helpers such as
+    and no terminal UI assembly, package or source mention in any project; the strong-name test: the `Context.snk` key on
+    Core, `Context` and the tests, keyed `InternalsVisibleTo`, a name-only `Context.Desktop` dynamic assembly refused, no
+    tracked private key), plus shared helpers such as
     `RemovedFeature.cs` and `RemovedConsole.cs` (the names of the removed whole-folder protection and of the removed
     terminal console, spelled in pieces; `RemovedFeatureSourceTests.cs` fails when `src/`, `tests/` or this file
     names either again) and `FakeHttpHandler.cs` (canned HTTP responses). The view tests (`CurrentViewTests`, `TagsViewTests`, `LinksViewTests`, `FindViewTests`, `CalendarLinkViewTests`) check the view data field by field. Note, todo, tag and calendar tests use their
@@ -735,7 +745,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `CaptureActionsTests` (`CaptureText`) and `CaptureBoxTests`, `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `CalendarLinkActionsTests`, `KeyDetailsTests`, `DesktopDependencyTests` (no terminal UI library, no Jint
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `CaptureActionsTests` (`CaptureText`) and `CaptureBoxTests`, `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `CalendarLinkActionsTests`, `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
     CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules, the transfer calls and no file system class in `.razor`), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),

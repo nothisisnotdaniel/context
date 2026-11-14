@@ -9,6 +9,9 @@
     <Nullable>enable</Nullable>
     <!-- The editor's npm project: its built bundle lands in wwwroot/editor; the sources and node_modules are not content. -->
     <DefaultItemExcludes>$(DefaultItemExcludes);editor/**</DefaultItemExcludes>
+    <!-- CS8002: Photino.Blazor and Photino.NET have no strong name. The app is public-signed only so that Core's
+         InternalsVisibleTo can name it by key; .NET does not check strong names when it loads assemblies. -->
+    <NoWarn>$(NoWarn);CS8002</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -28,7 +31,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Context.Desktop.Tests" />
+    <InternalsVisibleTo Include="Context.Desktop.Tests" Key="$(ContextPublicKey)" />
   </ItemGroup>
 
 </Project>

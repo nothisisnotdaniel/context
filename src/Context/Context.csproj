@@ -25,7 +25,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Context.Tests" />
+    <InternalsVisibleTo Include="Context.Tests" Key="$(ContextPublicKey)" />
   </ItemGroup>
 
   <!-- Release builds pass -p:Version from the workflow; refuse anything that is not SemVer. -->
