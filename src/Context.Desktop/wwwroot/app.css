@@ -828,9 +828,10 @@ input[type="password"]:disabled {
     min-width: 0;
 }
 
+/* A long title never squeezes the location away: it keeps at least a few characters. */
 .person-appointment .location {
     flex: 0 1 auto;
-    min-width: 0;
+    min-width: 4em;
 }
 
 /* The linked notes under the open note: name, link text, shared tags. */
