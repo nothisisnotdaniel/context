@@ -26,6 +26,8 @@ internal static class RemovedFeature
     /// The words no file under <c>src/</c> or <c>tests/</c> and not <c>CLAUDE.md</c> may contain (ignoring case).
     /// 136: the generic word for sealing data is no longer in this list, because .NET names such as
     /// <c>PbeEncryptionAlgorithm</c> contain it and sensitive notes need them.
+    /// 149: the bare method name is no longer in this list, because <c>TodoStore.Migrate()</c> stores todo ids; the
+    /// removed feature's own call and result type still are.
     /// </summary>
     public static readonly string[] Words =
     [
@@ -35,6 +37,7 @@ internal static class RemovedFeature
         "Locked" + "Panel",
         "Read" + "Secret",
         "Decrypt" + "All",
-        "Migr" + "ate(",
+        "encryption.Migr" + "ate(",
+        "Migr" + "ationResult",
     ];
 }

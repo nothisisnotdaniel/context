@@ -268,17 +268,23 @@ public sealed class TodoStoreTests : IDisposable
         Assert.Throws<TodoStoreException>(() => new TodoStore(root).List());
     }
 
+    // Files that exist but are not a valid todo list.
+    public static TheoryData<string> CorruptContents => new()
+    {
+        "not json",
+        "",
+        "null",
+        "{}",
+        "[null]",
+        "[{\"due\":\"2026-11-03\"}]",
+        "[{\"text\":\"x\"}]",
+        "[{\"text\":\"x\",\"due\":\"03.11.2026\"}]",
+        "[{\"text\":5,\"due\":\"2026-11-03\"}]",
+    };
+
     // AC-8
     [Theory]
-    [InlineData("not json")]
-    [InlineData("")]
-    [InlineData("null")]
-    [InlineData("{}")]
-    [InlineData("[null]")]
-    [InlineData("[{\"due\":\"2026-11-03\"}]")]
-    [InlineData("[{\"text\":\"x\"}]")]
-    [InlineData("[{\"text\":\"x\",\"due\":\"03.11.2026\"}]")]
-    [InlineData("[{\"text\":5,\"due\":\"2026-11-03\"}]")]
+    [MemberData(nameof(CorruptContents))]
     public void CorruptFile_ListThrows_AddAndCompleteLeaveBytesUnchanged(string content)
     {
         Directory.CreateDirectory(root);
@@ -322,5 +328,203 @@ public sealed class TodoStoreTests : IDisposable
         TodoItem todo = Assert.Single(Store().List());
         Assert.Equal(id, todo.Id);
         Assert.Equal("Buy milk", todo.Text);
+    }
+
+    // 149: two identical todos and one without created, none with an id.
+    private const string Legacy = "[\n  {\"text\": \"twin\", \"due\": \"2026-11-03\", \"created\": \"2026-10-01T09:00:00Z\"},\n"
+        + "  {\"text\": \"twin\", \"due\": \"2026-11-03\", \"created\": \"2026-10-01T09:00:00Z\"},\n"
+        + "  {\"text\": \"other\", \"due\": \"2026-11-01\"}\n]\n";
+
+    private void AssertNoTempFile() =>
+        Assert.Empty(Directory.GetFiles(root, ".todos.json.*.tmp"));
+
+    // The ids stored in todos.json, in file order.
+    private List<Guid> StoredIds() =>
+        System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(FilePath), "\"id\": \"([0-9a-f-]{36})\"")
+            .Select(m => Guid.Parse(m.Groups[1].Value))
+            .ToList();
+
+    // 149 AC-1, AC-9
+    [Fact]
+    public void Migrate_LegacyFile_StoresTheIdsListReturned()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, Legacy);
+        TodoStore store = new TodoStore(root);
+        IReadOnlyList<TodoItem> before = store.List();
+
+        Assert.True(store.Migrate());
+
+        List<Guid> stored = StoredIds();
+        Assert.Equal(3, stored.Count);
+        Assert.Equal(before.Select(t => t.Id).ToHashSet(), stored.ToHashSet());
+        AssertNoTempFile();
+    }
+
+    // 149 AC-1: the stored ids are in file order: the twins first, then the todo without created.
+    [Fact]
+    public void Migrate_LegacyFile_KeepsFileOrder()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, Legacy);
+        TodoStore store = new TodoStore(root);
+        IReadOnlyList<TodoItem> before = store.List();
+
+        store.Migrate();
+
+        TodoItem other = before.Single(t => t.Text == "other");
+        List<TodoItem> twins = before.Where(t => t.Text == "twin").ToList();
+        Assert.Equal([twins[0].Id, twins[1].Id, other.Id], StoredIds());
+    }
+
+    // 149 AC-2
+    [Fact]
+    public void Migrate_Twice_SecondWritesNothing_ListUnchanged()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, Legacy);
+        IReadOnlyList<TodoItem> before = new TodoStore(root).List();
+
+        Assert.True(new TodoStore(root).Migrate());
+        string text = File.ReadAllText(FilePath);
+        DateTime written = File.GetLastWriteTimeUtc(FilePath);
+
+        Assert.False(new TodoStore(root).Migrate());
+
+        Assert.Equal(text, File.ReadAllText(FilePath));
+        Assert.Equal(written, File.GetLastWriteTimeUtc(FilePath));
+        IReadOnlyList<TodoItem> after = new TodoStore(root).List();
+        Assert.Equal(
+            before.Select(t => (t.Id, t.Text, t.Due, t.Created.Ticks)),
+            after.Select(t => (t.Id, t.Text, t.Due, t.Created.Ticks)));
+        AssertNoTempFile();
+    }
+
+    // 149 AC-3
+    [Fact]
+    public void Migrate_AllIdsStored_WritesNothing()
+    {
+        Store().Add("a", new DateOnly(2026, 11, 3));
+        Store().Add("b", new DateOnly(2026, 11, 3));
+        byte[] bytes = File.ReadAllBytes(FilePath);
+        DateTime written = File.GetLastWriteTimeUtc(FilePath);
+
+        Assert.False(Store().Migrate());
+
+        Assert.Equal(bytes, File.ReadAllBytes(FilePath));
+        Assert.Equal(written, File.GetLastWriteTimeUtc(FilePath));
+    }
+
+    // 149 AC-4
+    [Fact]
+    public void Migrate_EmptyOrRepeatedId_FirstHolderKeepsIt()
+    {
+        Directory.CreateDirectory(root);
+        Guid kept = new Guid("aaaaaaaa-0000-0000-0000-000000000001");
+        File.WriteAllText(FilePath,
+            $"[{{\"id\":\"{kept}\",\"text\":\"a\",\"due\":\"2026-11-03\"}},"
+            + $"{{\"id\":\"{kept}\",\"text\":\"b\",\"due\":\"2026-11-03\"}},"
+            + $"{{\"id\":\"{Guid.Empty}\",\"text\":\"c\",\"due\":\"2026-11-03\"}}]");
+        IReadOnlyList<TodoItem> before = new TodoStore(root).List();
+
+        Assert.True(new TodoStore(root).Migrate());
+
+        Assert.Equal(before.Select(t => t.Id), StoredIds());
+        Assert.Equal(kept, StoredIds()[0]);
+        Assert.Equal(before, new TodoStore(root).List());
+        Assert.False(new TodoStore(root).Migrate());
+    }
+
+    // 149 AC-5
+    [Fact]
+    public void Migrate_AfterAnOlderBuildDroppedTheIds_StoresTheSameIdsAgain()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, Legacy);
+        Assert.True(new TodoStore(root).Migrate());
+        List<Guid> first = StoredIds();
+
+        // An older build reads and rewrites the list without the id field.
+        string dropped = System.Text.RegularExpressions.Regex.Replace(
+            File.ReadAllText(FilePath), "\\s*\"id\": \"[0-9a-f-]{36}\",", string.Empty);
+        Assert.DoesNotContain("\"id\"", dropped, StringComparison.Ordinal);
+        File.WriteAllText(FilePath, dropped);
+
+        Assert.True(new TodoStore(root).Migrate());
+
+        Assert.Equal(first, StoredIds());
+    }
+
+    // 149 AC-6
+    [Fact]
+    public void Migrate_MissingFile_CreatesNothing()
+    {
+        Assert.False(new TodoStore(root).Migrate());
+
+        Assert.False(Directory.Exists(root));
+    }
+
+    // 149 AC-7
+    [Theory]
+    [MemberData(nameof(CorruptContents))]
+    [InlineData("[{\"id\":\"nope\",\"text\":\"a\",\"due\":\"2026-11-03\"}]")]
+    public void Migrate_CorruptFile_ReturnsFalse_LeavesBytes(string content)
+    {
+        Directory.CreateDirectory(root);
+        byte[] original = Encoding.UTF8.GetBytes(content);
+        File.WriteAllBytes(FilePath, original);
+        TodoStore store = Store();
+
+        Assert.False(store.Migrate());
+
+        Assert.Equal(original, File.ReadAllBytes(FilePath));
+        Assert.Single(Directory.GetFiles(root));
+        Assert.Throws<TodoStoreException>(() => store.List());
+    }
+
+    // 149 AC-7: a file that can't be opened is not touched either.
+    [Fact]
+    public void Migrate_UnreadableFile_ReturnsFalse_LeavesIt()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, Legacy);
+        File.SetUnixFileMode(FilePath, UnixFileMode.None);
+        try
+        {
+            TodoStore store = new TodoStore(root);
+            if (TryOpen())
+            {
+                return; // Running as a user that can read anything; there is nothing to check.
+            }
+
+            Assert.False(store.Migrate());
+
+            Assert.Throws<TodoStoreException>(() => store.List());
+            Assert.Single(Directory.GetFiles(root));
+        }
+        finally
+        {
+            File.SetUnixFileMode(FilePath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+
+        Assert.Equal(Legacy, File.ReadAllText(FilePath));
+    }
+
+    private bool TryOpen()
+    {
+        try
+        {
+            using FileStream stream = File.OpenRead(FilePath);
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 }

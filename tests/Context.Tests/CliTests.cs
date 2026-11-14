@@ -456,6 +456,48 @@ public sealed class CliTests : IDisposable
         Assert.DoesNotContain("n-th", text, StringComparison.Ordinal);
     }
 
+    // 149: two identical todos and one without created, none with an id.
+    private const string LegacyTodos = "[{\"text\":\"twin\",\"due\":\"2026-11-03\",\"created\":\"2026-10-01T09:00:00Z\"},"
+        + "{\"text\":\"twin\",\"due\":\"2026-11-03\",\"created\":\"2026-10-01T09:00:00Z\"},"
+        + "{\"text\":\"other\",\"due\":\"2026-11-01\"}]";
+
+    // 149 AC-8
+    [Fact]
+    public void Todos_LegacyFile_SameOutput_StoresIds()
+    {
+        Directory.CreateDirectory(root);
+        string path = Path.Combine(root, TodoStore.FileName);
+        File.WriteAllText(path, LegacyTodos);
+        IReadOnlyList<TodoItem> before = new TodoStore(root).List();
+
+        Result result = Run("todos");
+
+        Assert.Equal((0, "2026-11-01\tother\n2026-11-03\ttwin\n2026-11-03\ttwin\n", string.Empty),
+            (result.Code, result.Out, result.Err));
+        string text = File.ReadAllText(path);
+        foreach (TodoItem todo in before)
+        {
+            Assert.Contains($"\"id\": \"{todo.Id}\"", text, StringComparison.Ordinal);
+        }
+
+        Assert.Empty(Directory.GetFiles(root, ".todos.json.*.tmp"));
+    }
+
+    // 149 AC-8
+    [Theory]
+    [InlineData("help")]
+    [InlineData("version")]
+    public void HelpAndVersion_LegacyTodos_FileUnchanged(string command)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, TodoStore.FileName), LegacyTodos);
+        Dictionary<string, string> before = Snapshot();
+
+        Assert.Equal(0, Run(command).Code);
+
+        Assert.Equal(before, Snapshot());
+    }
+
     [Theory]
     [InlineData("todos")]
     [InlineData("todo", "add", "today", "x")]

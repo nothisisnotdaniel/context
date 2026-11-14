@@ -207,10 +207,14 @@ Every factory agent reads this file before working on Context. Keep it short and
     throws `TodoStoreException` and is never overwritten. Each `TodoItem` has a `Guid Id` (stored as `id`, never
     shown to the user; new ones from `Guid.NewGuid` or the injected `newId`). A todo stored without an id (files from
     before ids), or with an empty or repeated one, gets `TodoStore.DerivedId` (SHA-256 of created, due, text and its
-    rank among identical todos), so reads never write and the id stays the same until the next write stores it; an
-    `id` that is not a GUID makes the file unreadable. `Complete(Guid id)` removes that todo in one read and write
-    and returns it, or returns `null` and writes nothing. `context todo add <yyyy-MM-dd|today|tomorrow> <text>` and
-    the desktop's entry row add (text at most 200 chars, past dates allowed); `context todo done <text>` picks the
+    rank among identical todos). Reads never write; instead `TodoStore.Migrate()` runs once at start (the desktop
+    before the watcher and first refresh; the CLI commands `todos`, `todo add`, `todo done` and `current` before their
+    first read) and writes the derived ids into the file when any is missing, empty or repeated (returns `true`), else
+    writes nothing; a missing or unreadable file is never written and `Migrate` never throws. Derivation on read stays
+    the fallback for a file changed while the app runs, and an older build that drops the ids gets the same ids
+    written again on the next start; an `id` that is not a GUID makes the file unreadable. `Complete(Guid id)`
+    removes that todo in one read and write and returns it, or returns `null` and writes nothing.
+    `context todo add <yyyy-MM-dd|today|tomorrow> <text>` and the desktop's entry row add (text at most 200 chars, past dates allowed); `context todo done <text>` picks the
     todo by its text and removes it by its id; the desktop removes the ticked todo by its id.
     **No todo numbers anywhere** (command line and desktop alike): a todo is shown as date and text, picked
     by its text and removed by its hidden id. `TodoPicker.Pick(todos, query)` (Core, used by `context
