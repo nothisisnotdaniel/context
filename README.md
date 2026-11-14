@@ -31,7 +31,7 @@ plain ASCII; any JSON parser, `ConvertFrom-Json` included, reads them back.
 PowerShell examples:
 
 ```powershell
-# Todos due this week
+# Todos due this week (due is ISO yyyy-MM-dd, which the [datetime] cast reads the same in every culture)
 $todos = (context todos --json | ConvertFrom-Json).todos
 $todos | Where-Object { [datetime]$_.due -le (Get-Date).AddDays(7) } | ForEach-Object { "$($_.due) $($_.text)" }
 

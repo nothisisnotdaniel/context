@@ -123,7 +123,7 @@ internal sealed class Cli
 
         string name = args[0].ToLowerInvariant();
         string[] rest = args[1..];
-        if (json && name is "help" or "--help" or "-h" or "capture" or "todo" or "import" or "export")
+        if (json && (name is "help" or "--help" or "-h" or "capture" or "todo" or "import" or "export"))
         {
             // Checked before any argument: nothing is written and the folder is not created.
             return Usage(JsonOnly);
