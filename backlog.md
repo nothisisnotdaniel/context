@@ -223,6 +223,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#189](backlog/189-resolve-person-aliases-without-an-allocation.md) Resolve person aliases without an allocation per mention row
 - [?] [#190](backlog/190-show-the-unreadable-todos-line-at.md) Show the unreadable-todos line at the top of the person page
 - [ ] [#191](backlog/191-archive-done-todos-a-month-after.md) Archive done todos a month after they are done
+- [?] [#192](backlog/192-keep-match-words-visible-next-to.md) Keep match words visible next to long related-note titles
+- [?] [#193](backlog/193-give-the-related-notes-row-a.md) Give the related-notes row a proper row header
 
 ## Dropped with the terminal UI
 
