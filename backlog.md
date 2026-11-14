@@ -190,6 +190,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#156](backlog/156-hide-the-empty-editor-box-when.md) Hide the empty editor box when the editor fails to start
 - [?] [#157](backlog/157-list-the-matching-todos-when-done.md) List the matching todos when /done is ambiguous
 - [?] [#158](backlog/158-same-done-usage-hint-in-the.md) Same /done usage hint in the console and the CLI
+- [?] [#159](backlog/159-fix-the-todo-hint-in-context.md) Fix the /todo hint in context current
+- [?] [#160](backlog/160-replace-the-console-text-parity-rule.md) Replace the console text-parity rule in CLAUDE.md
 
 ## Dropped with the terminal UI
 
