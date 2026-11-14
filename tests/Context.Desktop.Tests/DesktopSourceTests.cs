@@ -664,6 +664,7 @@ public sealed class DesktopSourceTests
     }
 
     // 094 AC-9: the [JSInvokable] methods only raise EditorInterop's events; none calls Actions or DesktopActions.
+    // 156 AC-10: OnPerson is one more of them.
     [Fact]
     public void JSInvokable_MethodsChangeNothing()
     {
@@ -671,10 +672,10 @@ public sealed class DesktopSourceTests
         MatchCollection invokable = Regex.Matches(
             text, @"\[JSInvokable\]\s*public\s+Task\s+(\w+)\((?:string raw|bool dirty)\)\s*=>\s*([^;]*);");
 
-        Assert.Equal(["OnTag", "OnLink", "OnDirty"], invokable.Select(m => m.Groups[1].Value).ToArray());
-        Assert.Equal(3, Regex.Matches(text, @"\[JSInvokable").Count);
+        Assert.Equal(["OnTag", "OnLink", "OnPerson", "OnDirty"], invokable.Select(m => m.Groups[1].Value).ToArray());
+        Assert.Equal(4, Regex.Matches(text, @"\[JSInvokable").Count);
         Assert.All(invokable, m => Assert.Matches(
-            @"^(TagClicked\?\.Invoke\(raw\)|LinkClicked\?\.Invoke\(raw\)|DirtyChanged\?\.Invoke\(dirty\)) \?\? Task\.CompletedTask$",
+            @"^(TagClicked\?\.Invoke\(raw\)|LinkClicked\?\.Invoke\(raw\)|PersonClicked\?\.Invoke\(raw\)|DirtyChanged\?\.Invoke\(dirty\)) \?\? Task\.CompletedTask$",
             m.Groups[2].Value));
         Assert.Equal(
             "DirtyChanged?.Invoke(dirty) ?? Task.CompletedTask",
@@ -695,7 +696,8 @@ public sealed class DesktopSourceTests
         Assert.Contains("\"OnDirty\"", text, StringComparison.Ordinal);
     }
 
-    // 142 AC-4: chipDom is the only place that makes a tab stop, and only the tag and noteLink nodes use it.
+    // 142 AC-4: chipDom is the only place that makes a tab stop, and only the tag, noteLink and (156) mention nodes
+    // use it.
     [Fact]
     public void EditorSchema_MakesOnlyChipsTabStops()
     {
@@ -708,15 +710,15 @@ public sealed class DesktopSourceTests
 
         // Each call sits in the toDOM of the node of the same name: the last node opened above it.
         MatchCollection calls = Regex.Matches(text, @"toDOM\(node\) \{ return chipDom\(""(\w+)"", node\.attrs\.raw\); \}");
-        Assert.Equal(["tag", "noteLink"], calls.Select(m => m.Groups[1].Value));
+        Assert.Equal(["tag", "noteLink", "mention"], calls.Select(m => m.Groups[1].Value));
         Assert.Equal(
-            ["tag", "noteLink"],
+            ["tag", "noteLink", "mention"],
             calls.Select(m => Regex.Matches(text[..m.Index], @"(?m)^    (\w+): \{").Last().Groups[1].Value));
-        Assert.Equal(3, Regex.Matches(text, @"chipDom\(").Count);
+        Assert.Equal(4, Regex.Matches(text, @"chipDom\(").Count);
     }
 
     // 142 AC-5: Enter on a focused chip goes through a keydown handler in the source and in the committed bundle,
-    // and the page still calls back only through OnTag, OnLink and (141) OnDirty.
+    // and the page still calls back only through OnTag, OnLink, (141) OnDirty and (156) OnPerson.
     [Theory]
     [InlineData("editor/src/view.js")]
     [InlineData("wwwroot/editor/editor.js")]
@@ -727,7 +729,7 @@ public sealed class DesktopSourceTests
         Assert.Matches(@"handleDOMEvents:\s*\{\s*(?://[^\n]*\n\s*)*keydown\(", text);
         Assert.Contains("opensChip", text, StringComparison.Ordinal);
         Assert.Equal(
-            ["OnDirty", "OnLink", "OnTag"],
+            ["OnDirty", "OnLink", "OnPerson", "OnTag"],
             Regex.Matches(text, @"invokeMethodAsync\(""(\w+)""").Select(m => m.Groups[1].Value).Distinct().Order(StringComparer.Ordinal));
     }
 

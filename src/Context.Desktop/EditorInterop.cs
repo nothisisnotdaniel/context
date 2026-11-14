@@ -5,9 +5,9 @@ namespace Context;
 
 /// <summary>
 /// The only bridge to JavaScript: calls the bundled editor (<c>wwwroot/editor/editor.js</c>, global
-/// <c>ContextEditor</c>) for one host element and passes its tag and link clicks and its dirty flips back as events.
-/// It never changes data: its <see cref="JSInvokableAttribute"/> methods only raise <see cref="TagClicked"/>,
-/// <see cref="LinkClicked"/> and <see cref="DirtyChanged"/>, and the component decides what to open or show.
+/// <c>ContextEditor</c>) for one host element and passes its tag, link and mention clicks and its dirty flips back as
+/// events. It never changes data: its <see cref="JSInvokableAttribute"/> methods only raise <see cref="TagClicked"/>,
+/// <see cref="LinkClicked"/>, <see cref="PersonClicked"/> and <see cref="DirtyChanged"/>, and the component decides what to open or show.
 /// </summary>
 internal sealed class EditorInterop
 {
@@ -25,6 +25,9 @@ internal sealed class EditorInterop
 
     /// <summary>Raised with the raw text of a clicked note link, as written (<c>[[Note]]</c>).</summary>
     public event Func<string, Task>? LinkClicked;
+
+    /// <summary>Raised with the raw text of a clicked person mention, as written (<c>@[Anna Schmidt]</c>).</summary>
+    public event Func<string, Task>? PersonClicked;
 
     /// <summary>
     /// Raised when the page's editor went from saved to changed (<c>true</c>) or back (<c>false</c>). For display
@@ -63,6 +66,10 @@ internal sealed class EditorInterop
     /// <summary>Called by the editor when a note link is clicked.</summary>
     [JSInvokable]
     public Task OnLink(string raw) => LinkClicked?.Invoke(raw) ?? Task.CompletedTask;
+
+    /// <summary>Called by the editor when a person mention is clicked.</summary>
+    [JSInvokable]
+    public Task OnPerson(string raw) => PersonClicked?.Invoke(raw) ?? Task.CompletedTask;
 
     /// <summary>Called by the editor when its text became changed or unchanged against the saved text.</summary>
     [JSInvokable]

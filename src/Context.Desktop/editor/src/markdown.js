@@ -1,5 +1,5 @@
-// Markdown <-> document. markdown-it in CommonMark mode with raw HTML off, plus two inline rules that mirror the C#
-// TagParser and NoteLinkParser. The serializer writes the house style (- bullets, * emphasis, ** strong, ``` fences)
+// Markdown <-> document. markdown-it in CommonMark mode with raw HTML off, plus three inline rules that mirror the C#
+// TagParser, NoteLinkParser and PersonParser. The serializer writes the house style (- bullets, * emphasis, ** strong, ``` fences)
 // and escapes only what would otherwise parse differently, so a note in that style comes back byte for byte.
 import MarkdownIt from "markdown-it";
 import { MarkdownParser, MarkdownSerializer, defaultMarkdownSerializer } from "prosemirror-markdown";
@@ -7,6 +7,7 @@ import { schema } from "./schema.js";
 
 const MaxTagLength = 50;
 const MaxTargetLength = 103;
+const MaxTitleLength = 100;
 
 const LetterRe = /^\p{L}$/u;
 const LetterOrDigitRe = /^[\p{L}\p{Nd}]$/u;
@@ -15,6 +16,51 @@ const WhiteRe = /^\s$/;
 function isLetter(c) { return c !== undefined && c.length === 1 && LetterRe.test(c); }
 function isTagChar(c) { return c !== undefined && c.length === 1 && (LetterOrDigitRe.test(c) || c === "-" || c === "_"); }
 function isWhite(c) { return c !== undefined && WhiteRe.test(c); }
+
+// .NET's char.IsWhiteSpace, which PersonParser uses: JavaScript's \s without U+FEFF, plus U+0085.
+function isNetWhite(c) { return c !== undefined && (c === "\u0085" || (c !== "\ufeff" && WhiteRe.test(c))); }
+
+// .NET's char.IsControl: U+0000-U+001F and U+007F-U+009F.
+function isControl(c) { const code = c.charCodeAt(0); return code <= 0x1f || (code >= 0x7f && code <= 0x9f); }
+
+// PersonParser.RefusedChars plus the characters NoteStore.ValidateTitle refuses on every OS.
+const PersonRefused = "[<>\"|?*/\\:";
+
+const ReservedNames = new Set([
+  "CON", "PRN", "AUX", "NUL",
+  "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "COM\u00b9", "COM\u00b2", "COM\u00b3",
+  "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9", "LPT\u00b9", "LPT\u00b2", "LPT\u00b3",
+]);
+
+// PersonParser.Normalize: trimmed, whitespace runs become one space; null when it is empty, holds a refused or
+// control character, is over 100 chars, starts with a dot, ends with a dot or is a name Windows reserves.
+export function normalizePerson(text) {
+  let out = "";
+  let pendingSpace = false;
+  for (const c of text.split("")) {
+    if (isNetWhite(c)) {
+      pendingSpace = out.length > 0;
+      continue;
+    }
+    if (PersonRefused.includes(c) || isControl(c)) {
+      return null;
+    }
+    if (pendingSpace) {
+      out += " ";
+      pendingSpace = false;
+    }
+    out += c;
+    if (out.length > MaxTitleLength) {
+      return null;
+    }
+  }
+  if (out.length === 0 || out.startsWith(".") || out.endsWith(".")) {
+    return null;
+  }
+  const dot = out.indexOf(".");
+  const stem = (dot < 0 ? out : out.slice(0, dot)).replace(/ +$/, "");
+  return ReservedNames.has(stem.toUpperCase()) ? null : out;
+}
 
 // TagParser.NormalizeBracket: trimmed, whitespace runs become one space, a letter first, then tag chars or spaces,
 // at most 50 chars, lower-cased; null when it is not a tag.
@@ -91,12 +137,44 @@ function tagRule(state, silent) {
   return true;
 }
 
-// [[Note]], as in NoteLinkParser: text with no '[' up to the first ']' on the line, then "]]"; never after '#'.
+// @[Person name], as in PersonParser: '@' at the start of a line or after whitespace, then '[', text up to the first
+// ']' on the line, not followed by '('.
+function mentionRule(state, silent) {
+  const src = state.src;
+  const pos = state.pos;
+  const max = state.posMax;
+  if (src[pos] !== "@" || src[pos + 1] !== "[" || pos + 1 >= max) {
+    return false;
+  }
+  if (pos > 0 && !isNetWhite(src[pos - 1])) {
+    return false;
+  }
+  let close = pos + 2;
+  while (close < max && src[close] !== "]" && src[close] !== "\n") {
+    close++;
+  }
+  if (close >= max || src[close] !== "]" || src[close + 1] === "(") {
+    return false;
+  }
+  const name = normalizePerson(src.slice(pos + 2, close));
+  if (name === null) {
+    return false;
+  }
+  if (!silent) {
+    const token = state.push("mention", "", 0);
+    token.content = src.slice(pos, close + 1);
+    token.meta = { name };
+  }
+  state.pos = close + 1;
+  return true;
+}
+
+// [[Note]], as in NoteLinkParser: text with no '[' up to the first ']' on the line, then "]]"; never after '#' or '@'.
 function noteLinkRule(state, silent) {
   const src = state.src;
   const pos = state.pos;
   const max = state.posMax;
-  if (src[pos] !== "[" || src[pos + 1] !== "[" || (pos > 0 && src[pos - 1] === "#")) {
+  if (src[pos] !== "[" || src[pos + 1] !== "[" || (pos > 0 && (src[pos - 1] === "#" || src[pos - 1] === "@"))) {
     return false;
   }
   let close = pos + 2;
@@ -122,6 +200,7 @@ function noteLinkRule(state, silent) {
 const md = MarkdownIt("commonmark", { html: false, linkify: false, typographer: false });
 md.inline.ruler.before("link", "note_link", noteLinkRule);
 md.inline.ruler.before("link", "tag", tagRule);
+md.inline.ruler.before("link", "mention", mentionRule);
 
 const TaskRe = /^\[([ xX])\](?: |$)/;
 
@@ -185,6 +264,7 @@ const parser = new MarkdownParser(schema, tokenizer, {
   code_inline: { mark: "code", noCloseToken: true },
   tag: { node: "tag", getAttrs: tok => ({ raw: tok.content, tag: tok.meta.tag }) },
   note_link: { node: "noteLink", getAttrs: tok => ({ raw: tok.content, target: tok.meta.target }) },
+  mention: { node: "mention", getAttrs: tok => ({ raw: tok.content, name: tok.meta.name }) },
 });
 
 // ---- Escaping: only what would otherwise parse as something else ----
@@ -272,7 +352,7 @@ function firstChar(node) {
   if (node.isText) {
     return node.text[0];
   }
-  if (node.type.name === "tag" || node.type.name === "noteLink") {
+  if (node.type.name === "tag" || node.type.name === "noteLink" || node.type.name === "mention") {
     return node.attrs.raw[0];
   }
   return "";
@@ -314,6 +394,9 @@ const serializer = new MarkdownSerializer({
   noteLink(state, node) {
     state.write(node.attrs.raw);
   },
+  mention(state, node) {
+    state.write(node.attrs.raw);
+  },
   text(state, node, parent, index) {
     if (state.inAutolink) {
       state.text(node.text, false);
@@ -353,21 +436,29 @@ export function isLossless(markdown) {
   return roundTrip(markdown) === markdown;
 }
 
-/** The tags (normalized, distinct) and link targets (distinct ignoring case) the editor finds, as JSON. */
+/**
+ * The tags (normalized, distinct), link targets (distinct ignoring case) and mentioned people (distinct ignoring case,
+ * first spelling kept) the editor finds, as JSON.
+ */
 export function inlineNodes(markdown) {
   const tags = [];
   const links = [];
+  const mentions = [];
   const seenLinks = new Set();
+  const seenMentions = new Set();
   parse(markdown).descendants(node => {
     if (node.type.name === "tag" && !tags.includes(node.attrs.tag)) {
       tags.push(node.attrs.tag);
     } else if (node.type.name === "noteLink" && !seenLinks.has(node.attrs.target.toLowerCase())) {
       seenLinks.add(node.attrs.target.toLowerCase());
       links.push(node.attrs.target);
+    } else if (node.type.name === "mention" && !seenMentions.has(node.attrs.name.toLowerCase())) {
+      seenMentions.add(node.attrs.name.toLowerCase());
+      mentions.push(node.attrs.name);
     }
     return true;
   });
-  return JSON.stringify({ tags, links });
+  return JSON.stringify({ tags, links, mentions });
 }
 
 /** The parsed document as JSON. */

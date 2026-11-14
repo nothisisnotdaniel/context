@@ -1267,4 +1267,83 @@ public sealed class MainTests : IDisposable
         await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = line });
         await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
     }
+
+    // 156 AC-10, AC-11: a mention opens the person page (creating people and the page), whose PersonPanel sits
+    // above the links panel and lists the mentioning note; that note's button opens it again.
+    [Fact]
+    public async Task Mention_OpensPersonPage_PanelAboveLinks()
+    {
+        data.WriteNote("Plan", "Call @[Anna] about [[Other]]\n");
+        data.WriteNote("Other", "x\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        Assert.Empty(cut.FindAll(".person-panel"));
+        int mounts = js.Calls("ContextEditor.mount").Count;
+
+        await cut.InvokeAsync(() => js.Page().OnPerson("@[Anna]"));
+
+        cut.WaitForAssertion(() => Assert.Equal("people/Anna", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        Assert.Equal("# people\n", File.ReadAllText(Path.Combine(data.Root, "people.md")));
+        Assert.Equal("# Anna\n", File.ReadAllText(Path.Combine(data.Root, "people", "Anna.md")));
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Plan"], cut.FindAll(".person-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
+        Assert.Equal("Mentioned in", cut.Find(".person-panel h2").TextContent);
+        IElement region = cut.Find(".current-region");
+        int person = region.Children.Index().Single(c => c.Item.ClassList.Contains("person-panel")).Index;
+        Assert.True(region.Children.Index().Single(c => c.Item.ClassList.Contains("note-editor")).Index < person);
+        Assert.True(person < region.Children.Index().Single(c => c.Item.ClassList.Contains("links-panel")).Index);
+
+        await cut.Find(".person-panel .note-button").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-title").TextContent), Wait);
+        Assert.Empty(cut.FindAll(".person-panel"));
+    }
+
+    // 156 AC-10: with unsaved changes a mention asks to discard first; nothing is created until the user agrees,
+    // and keeping the edits creates nothing.
+    [Fact]
+    public async Task Mention_DirtyEditor_AsksFirst()
+    {
+        data.WriteNote("Plan", "@[Anna]\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        js.Edit("@[Anna]\n\nUnsaved\n");
+
+        await cut.InvokeAsync(() => js.Page().OnPerson("@[Anna]"));
+
+        Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent);
+        Assert.False(File.Exists(Path.Combine(data.Root, "people.md")));
+        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        Assert.False(File.Exists(Path.Combine(data.Root, "people.md")));
+
+        await cut.InvokeAsync(() => js.Page().OnPerson("@[Anna]"));
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("people/Anna", cut.Find(".note-title").TextContent), Wait);
+        Assert.Equal("# Anna\n", File.ReadAllText(Path.Combine(data.Root, "people", "Anna.md")));
+    }
+
+    // 156 AC-10: a sensitive people note gives the red refusal; the open note stays and nothing is written.
+    [Fact]
+    public async Task Mention_SensitivePeople_RefusedRedLine()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("people", "# people\n");
+        data.WriteNote("Plan", "@[Anna]\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+
+        await cut.InvokeAsync(() => js.Page().OnPerson("@[Anna]"));
+
+        cut.WaitForAssertion(() => Assert.Contains(
+            cut.FindAll(".red"), e => e.TextContent == "Can't make a page for Anna. Nothing was done."), Wait);
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        Assert.False(Directory.Exists(Path.Combine(data.Root, "people")));
+        Assert.Equal(0, data.Keys.Agrees);
+    }
 }

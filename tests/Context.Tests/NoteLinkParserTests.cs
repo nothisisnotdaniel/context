@@ -110,4 +110,12 @@ public sealed class NoteLinkParserTests
 
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), $"took {watch.Elapsed}");
     }
+
+    // 156 AC-2: a mention is no link, "@[[x]]" is neither, and a link is no mention.
+    [Fact]
+    public void Parse_Mention_IsNoLink()
+    {
+        Assert.Empty(NoteLinkParser.Parse("@[Anna] and @[[Anna]]"));
+        Assert.Empty(PersonParser.Parse("[[Anna]] and @[[Anna]]"));
+    }
 }

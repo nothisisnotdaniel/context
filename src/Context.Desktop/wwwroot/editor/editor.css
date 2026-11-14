@@ -156,6 +156,17 @@ img.ProseMirror-separator {
   outline-offset: 2px;
 }
 
+/* A person mention: a long name is cut, the full text stays in the chip's title. */
+.note-editor-body .chip.mention {
+  border-style: dashed;
+  display: inline-block;
+  max-width: 24em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
 .note-editor-body .link {
   text-decoration: underline;
 }

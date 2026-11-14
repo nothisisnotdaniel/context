@@ -7,7 +7,7 @@ namespace Context.Tests;
 public sealed class CliJsonTests : IDisposable
 {
     private const string JsonOnly =
-        "--json works only with version, todos, notes, note show, tags, links and current. Run 'context help'.";
+        "--json works only with version, todos, notes, note show, tags, links, people, person and current. Run 'context help'.";
 
     private static readonly DateOnly Today = new(2026, 10, 29);
     private static readonly DateTime Now = new(2026, 10, 29, 9, 0, 0, DateTimeKind.Utc);
@@ -651,5 +651,55 @@ public sealed class CliJsonTests : IDisposable
             string after = line[(at + "context ".Length)..];
             Assert.Contains(reads, r => after.StartsWith(r, StringComparison.Ordinal));
         }
+    }
+
+    // 156 AC-8: people pins its field names and order.
+    [Fact]
+    public void People_FieldsInOrder()
+    {
+        WriteNote("A", "@[Anna Schmidt] @[bob]");
+        WriteNote("B", "@[ANNA schmidt]");
+
+        Result result = Run("people", "--json");
+
+        AssertDocument(result);
+        Assert.Equal(
+            "{\"people\":[{\"person\":\"ANNA schmidt\",\"count\":2},{\"person\":\"bob\",\"count\":1}]}\n",
+            result.Out);
+    }
+
+    // 156 AC-8: person pins its field names and order; a missing location is null and times use the usual format.
+    [Fact]
+    public void Person_FieldsInOrder()
+    {
+        WriteNote("A", "@[Anna]");
+        WriteIcs("a.ics", "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Call @[Anna]\r\nDTSTART:20261027T090000Z\r\n"
+            + "DTEND:20261027T100000Z\r\nLOCATION:Room 1\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nSUMMARY:Off\r\n"
+            + "DTSTART;VALUE=DATE:20261028\r\nATTENDEE;CN=anna:mailto:anna@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+
+        Result result = Run("person", "anna", "--json");
+
+        AssertDocument(result);
+        Assert.Equal(
+            "{\"person\":\"Anna\",\"notes\":[\"A\"],\"appointments\":["
+                + "{\"start\":\"2026-10-28T00:00:00\\u002B01:00\",\"end\":\"2026-10-29T00:00:00\\u002B01:00\",\"allDay\":true,"
+                + "\"title\":\"Off\",\"location\":null},"
+                + "{\"start\":\"2026-10-27T10:00:00\\u002B01:00\",\"end\":\"2026-10-27T11:00:00\\u002B01:00\",\"allDay\":false,"
+                + "\"title\":\"Call @[Anna]\",\"location\":\"Room 1\"}]}\n",
+            result.Out);
+        Assert.DoesNotContain("example.com", result.Out, StringComparison.Ordinal);
+    }
+
+    // 156 AC-8: no mentions gives empty arrays; a bad index is the usual error line.
+    [Fact]
+    public void Person_NoMentions_EmptyArrays_BadDbIsError()
+    {
+        WriteNote("A", "x");
+
+        Assert.Equal("{\"person\":\"Carl\",\"notes\":[],\"appointments\":[]}\n", Run("person", "Carl", "--json").Out);
+
+        BreakIndex();
+        AssertError(Run("person", "Carl", "--json"), 1, "Can't read context.db.");
+        AssertError(Run("people", "--json"), 1, "Can't read context.db.");
     }
 }

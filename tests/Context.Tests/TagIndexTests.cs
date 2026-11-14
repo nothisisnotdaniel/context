@@ -356,7 +356,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(3, TagIndex.ParserVersion);
+        Assert.Equal(4, TagIndex.ParserVersion);
     }
 
     // 024 AC-6
@@ -814,10 +814,125 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(3, TagIndex.ParserVersion);
-        Assert.Equal(3, UserVersion());
+        Assert.Equal(4, TagIndex.ParserVersion);
+        Assert.Equal(4, UserVersion());
         Assert.Equal(["A", "Beta"], NoteRows());
         Assert.Equal([("A", "work"), ("Beta", "home")], Rows());
         Assert.Equal([("A", "Beta")], LinkRows());
+    }
+
+    /// <summary>Every (note, person, spelling) row of <c>note_people</c>, read directly.</summary>
+    private List<(string Note, string Person, string Spelling)> PeopleRows()
+    {
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT note, person, spelling FROM note_people ORDER BY note, person";
+        using SqliteDataReader reader = command.ExecuteReader();
+        List<(string, string, string)> rows = [];
+        while (reader.Read())
+        {
+            rows.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2)));
+        }
+
+        return rows;
+    }
+
+    private static string Describe(PersonCount person) => $"{person.Person}|{person.Count}";
+
+    // 156 AC-3: Sync stores each note's mentions by key with the spelling, and drops them with the note.
+    [Fact]
+    public void Sync_StoresMentions_ByKey_AndDropsThemWithTheNote()
+    {
+        WriteNote("Plan", "Call @[Anna  Schmidt] and @[ANNA schmidt], then @[Bob].");
+        WriteNote("Other", "`@[Anna]` @[a/b] a@[Bob]");
+        index.Sync(store);
+
+        Assert.Equal([("Plan", "anna schmidt", "Anna Schmidt"), ("Plan", "bob", "Bob")], PeopleRows());
+
+        EditNote("Plan", "Only @[Bob] now");
+        index.Sync(store);
+        Assert.Equal([("Plan", "bob", "Bob")], PeopleRows());
+
+        File.Delete(Path.Combine(root, "Plan.md"));
+        index.Sync(store);
+        Assert.Empty(PeopleRows());
+    }
+
+    // 156 AC-3: a person is found ignoring case and whitespace runs, and never in their own page.
+    [Fact]
+    public void NotesMentioning_IgnoresCaseAndSpaces_NeverTheOwnPage()
+    {
+        WriteNote("people", "# people");
+        WriteNested("people/Anna Schmidt", "I am @[Anna Schmidt]");
+        WriteNote("b plan", "@[ANNA  schmidt]");
+        WriteNote("A plan", "@[anna schmidt]");
+        WriteNote("Other", "@[Bob]");
+        index.Sync(store);
+
+        Assert.Equal(["A plan", "b plan"], index.NotesMentioning("anna schmidt"));
+        Assert.Equal(["A plan", "b plan"], index.NotesMentioning("  Anna   SCHMIDT "));
+        Assert.Empty(index.NotesMentioning("Carl"));
+    }
+
+    // 156 AC-4: each person once, sorted ignoring case, with counts; the page title wins, else the ordinal-first spelling.
+    [Fact]
+    public void People_OncePerPerson_SortedWithCounts_PageTitleOrFirstSpelling()
+    {
+        WriteNote("people", "# people");
+        WriteNested("people/Anna Schmidt", "@[anna schmidt] is me");
+        WriteNote("A", "@[anna schmidt] @[bob] @[Carl]");
+        WriteNote("B", "@[ANNA SCHMIDT] @[Bob]");
+        WriteNote("C", "@[BOB]");
+        index.Sync(store);
+
+        Assert.Equal(["Anna Schmidt|2", "BOB|3", "Carl|1"], index.People().Select(Describe));
+        Assert.Equal("Anna Schmidt", index.PersonName("ANNA schmidt"));
+        Assert.Equal("BOB", index.PersonName("bob"));
+        Assert.Null(index.PersonName("nobody"));
+        Assert.Equal(nameof(PersonCount), new PersonCount("x", 1).ToString());
+    }
+
+    // 156 AC-4: a person mentioned only on their own page is not listed.
+    [Fact]
+    public void People_OnlyOnTheirOwnPage_IsNotListed()
+    {
+        WriteNote("People", "# People");
+        WriteNested("People/Anna", "@[Anna]");
+        index.Sync(store);
+
+        Assert.Empty(index.People());
+        Assert.Empty(index.NotesMentioning("anna"));
+    }
+
+    // 156 AC-3: a version 3 database is re-parsed once, so mentions written before the upgrade are found.
+    [Fact]
+    public void Sync_VersionThreeDatabase_ReparsesOnce()
+    {
+        WriteNote("A", "@[Anna] #work");
+        string a = Path.Combine(root, "A.md");
+        DateTime time = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(a, time);
+        index.Sync(store);
+        using (SqliteConnection connection = Open())
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "DROP TABLE note_people; PRAGMA user_version = 3;";
+            command.ExecuteNonQuery();
+        }
+
+        Assert.Equal(3, UserVersion());
+
+        index.Sync(store);
+
+        Assert.Equal(4, UserVersion());
+        Assert.Equal([("A", "anna", "Anna")], PeopleRows());
+        Assert.Equal([("A", "work")], Rows());
+
+        // Upgraded once: an unchanged time is not re-parsed again.
+        File.WriteAllText(a, "@[Bob]");
+        File.SetLastWriteTimeUtc(a, time);
+        index.Sync(store);
+
+        Assert.Equal([("A", "anna", "Anna")], PeopleRows());
     }
 }

@@ -95,7 +95,7 @@ public sealed class CliTests : IDisposable
         foreach (string usage in new[]
         {
             "capture <text...>", "todos", "todo add <yyyy-MM-dd|today|tomorrow> <text...>", "todo done <text...>", "notes",
-            "note show <name...>", "tags [tag...]", "links <note...>", "current", "import <path>",
+            "note show <name...>", "tags [tag...]", "links <note...>", "people", "person <name...>", "current", "import <path>",
             "export <note> <path>", "version",
         })
         {
@@ -1116,5 +1116,130 @@ public sealed class CliTests : IDisposable
         Assert.StartsWith("# inbox\n", Read("inbox.md"), StringComparison.Ordinal);
         Assert.Equal("child inbox", Read(Path.Combine("Meetings", "inbox.md")));
         Assert.Equal(["inbox.md"], Directory.GetFiles(Path.Combine(root, "Meetings")).Select(f => Path.GetFileName(f)).ToArray());
+    }
+
+    // 156 AC-7 -----------------------------------------------------------------------------------
+
+    // Every file but context.db (and its journal) with its bytes.
+    private Dictionary<string, string> SnapshotWithoutDb() =>
+        Snapshot()
+            .Where(f => !f.Key.StartsWith(TagIndex.FileName, StringComparison.Ordinal))
+            .ToDictionary(f => f.Key, f => f.Value);
+
+    private void WritePersonData()
+    {
+        WriteNote("people", "# people");
+        Directory.CreateDirectory(Path.Combine(root, "people"));
+        File.WriteAllText(Path.Combine(root, "people", "Anna Schmidt.md"), "# Anna Schmidt\n@[Anna Schmidt]\n");
+        WriteNote("b notes", "met @[anna  SCHMIDT] and @[Bob]");
+        WriteNote("A plan", "ask @[Anna Schmidt]\n`@[Carl]`");
+        WriteIcs("work.ics", CalendarFeedTests.Ics.Replace(
+            "SUMMARY:", "SUMMARY:@[Anna Schmidt] ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void People_PrintsNameAndCount_WritesOnlyContextDb()
+    {
+        WritePersonData();
+        Dictionary<string, string> before = SnapshotWithoutDb();
+
+        Result result = Run("people");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(string.Empty, result.Err);
+        Assert.Equal("Anna Schmidt\t2\nBob\t1\n", result.Out);
+        Assert.Equal(before, SnapshotWithoutDb());
+        Assert.True(File.Exists(Path.Combine(root, TagIndex.FileName)));
+        Assert.Equal(0, http.Requests);
+    }
+
+    [Theory]
+    [InlineData("anna", "schmidt")]
+    [InlineData("@[Anna", "Schmidt]")]
+    [InlineData("ANNA  SCHMIDT")]
+    public void Person_PrintsNotesThenAppointments_WritesOnlyContextDb(params string[] name)
+    {
+        WritePersonData();
+        Dictionary<string, string> before = SnapshotWithoutDb();
+
+        Result result = Run(["person", .. name]);
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(string.Empty, result.Err);
+        string[] lines = result.Out.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(["Notes", "A plan", "b notes", "Appointments"], lines[..4]);
+        Assert.NotEmpty(lines[4..]);
+        Assert.All(lines[4..], l => Assert.Matches(@"^\d{4}-\d{2}-\d{2}\t(all day|\d{2}:\d{2}-(\d{2}:\d{2}|…))\t@\[Anna Schmidt\] ", l));
+        Assert.Equal(before, SnapshotWithoutDb());
+        Assert.Equal(0, http.Requests);
+    }
+
+    [Fact]
+    public void Person_AppointmentLine_DateTimeTitle()
+    {
+        WriteIcs("a.ics", "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Call @[Bob]\r\nDTSTART:20261027T090000Z\r\nDTEND:20261027T100000Z\r\n"
+            + "END:VEVENT\r\nBEGIN:VEVENT\r\nDTSTART:20261028T090000Z\r\nATTENDEE;CN=bob:mailto:bob@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+
+        Result result = Run("person", "Bob");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal("Notes\nAppointments\n2026-10-28\t09:00-09:00\t(no title)\n2026-10-27\t09:00-10:00\tCall @[Bob]\n", result.Out);
+        Assert.DoesNotContain("example.com", result.Out, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Person_NoMentions_SaysSo_ExitZero()
+    {
+        WriteNote("A", "@[Bob]");
+
+        Result result = Run("person", "Carl", "Lee");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(string.Empty, result.Err);
+        Assert.Equal("No notes or appointments mention Carl Lee.\n", result.Out);
+    }
+
+    [Theory]
+    [InlineData("person")]
+    [InlineData("person", " ")]
+    [InlineData("person", "@[]")]
+    public void Person_NoName_IsUsageError(params string[] args)
+    {
+        Result result = Run(args);
+
+        AssertUsage(result);
+        Assert.Equal("Type: context person <name>. Run 'context help'.", result.ErrLines[0]);
+    }
+
+    [Fact]
+    public void People_WithArguments_IsUsageError()
+    {
+        AssertUsage(Run("people", "x"));
+    }
+
+    [Theory]
+    [InlineData("people")]
+    [InlineData("person", "Anna")]
+    public void PeopleCommands_BadContextDb_IsError(params string[] args)
+    {
+        WriteNote("A", "@[Anna]");
+        File.WriteAllText(Path.Combine(root, TagIndex.FileName), "not a database at all, not at all, really not");
+        Dictionary<string, string> before = Snapshot();
+
+        AssertError(Run(args), 1, "Can't read context.db.");
+        Assert.Equal(before, Snapshot());
+    }
+
+    [Fact]
+    public void Person_UnreadableCalendarFile_NamedOnStderr_ExitOne()
+    {
+        WriteNote("A", "@[Anna]");
+        WriteIcs("bad.ics", "not a calendar");
+
+        Result result = Run("person", "Anna");
+
+        Assert.Equal(1, result.Code);
+        Assert.Equal("Notes\nA\nAppointments\n", result.Out);
+        Assert.Equal(["Can't read calendar/bad.ics"], result.ErrLines);
     }
 }

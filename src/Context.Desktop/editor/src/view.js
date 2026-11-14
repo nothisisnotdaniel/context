@@ -1,5 +1,5 @@
 // The editor in the page: one ProseMirror view per host element. DOM is built only through ProseMirror's
-// renderer and document.createElement; tag and link clicks (and Enter on a focused chip) are reported to .NET,
+// renderer and document.createElement; tag, link and mention clicks (and Enter on a focused chip) are reported to .NET,
 // which decides what to open.
 import { EditorState } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
@@ -123,7 +123,7 @@ export function opensChip(event) {
   return event.key === "Enter" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
 }
 
-// Tells .NET to open a tag or note link chip; true when node is one. Clicks and Enter share it.
+// Tells .NET to open a tag, note link or mention chip; true when node is one. Clicks and Enter share it.
 function openChip(node, dotnet) {
   if (node.type === schema.nodes.tag) {
     dotnet.invokeMethodAsync("OnTag", node.attrs.raw).catch(() => {});
@@ -133,23 +133,29 @@ function openChip(node, dotnet) {
     dotnet.invokeMethodAsync("OnLink", node.attrs.raw).catch(() => {});
     return true;
   }
+  if (node.type === schema.nodes.mention) {
+    dotnet.invokeMethodAsync("OnPerson", node.attrs.raw).catch(() => {});
+    return true;
+  }
   return false;
 }
 
-// The tag or noteLink node a focused chip element stands for, or null.
+// The tag, noteLink or mention node a focused chip element stands for, or null.
 function chipNode(view, target) {
   if (!target || !target.classList || !target.classList.contains("chip")) {
     return null;
   }
   try {
     const node = view.state.doc.nodeAt(view.posAtDOM(target, 0));
-    return node && (node.type === schema.nodes.tag || node.type === schema.nodes.noteLink) ? node : null;
+    return node && (node.type === schema.nodes.tag || node.type === schema.nodes.noteLink || node.type === schema.nodes.mention)
+      ? node
+      : null;
   } catch {
     return null;
   }
 }
 
-/** Opens markdown in a new editor inside element; tag and link clicks and dirty flips call back into dotnet. */
+/** Opens markdown in a new editor inside element; tag, link and mention clicks and dirty flips call back into dotnet. */
 export function mount(element, markdown, dotnet) {
   destroy(element);
   const doc = parse(markdown);
