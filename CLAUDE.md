@@ -245,6 +245,15 @@ Every factory agent reads this file before working on Context. Keep it short and
   `Run 'context help'.`; unknown commands never touch the folder). All text from disk goes through `SafeText.Clean`
   (one-line fields also `\n` to space). Tests (`CliTests`) use the
   internal constructor with a fixed zone.
+  **`--json`** (job 148; exact token ignoring case, any position, repeats allowed, removed before parsing) makes
+  `version`, `todos`, `notes`, `note show`, `tags`, `links` and `current` write one compact object + `\n`
+  (`CliJson.cs`, `Utf8JsonWriter` with the default encoder, so `+ & ' <` and non-ASCII are `\uXXXX`): `{version}`,
+  `{todos:[{due,text}]}`, `{notes:[{name,locked}]}`, `{name,text}`, `{tags:[{tag,count}]}` or `{tag,notes:[]}`,
+  `{note,links:[{note,direction:none|to|from|both,missing,sharedTags}]}`, `{today,appointments:[{start,end,allDay,
+  title,location}],calendar:{status,cachedAt,unreadableFiles},due:[{due,text,overdue}],linkedNotes:[{name,tags}]}`
+  (absent = `null`, tags raw without `#`, times `yyyy-MM-ddTHH:mm:sszzz` in the zone; `due`/`linkedNotes` `null` when
+  unreadable). Names and order are a public contract (`CliJsonTests`, README). Errors stay text; with `help` or a
+  write command it is a usage error before anything is read. `README.md` has PowerShell examples.
 - **Stack:** .NET 10 (`net10.0`), C# with nullable reference types and implicit usings on.
   `Microsoft.Data.Sqlite` 10.0.14 for `context.db`
   (referenced by `Context.Core` only; it reaches the command-line tool and the desktop through the project reference). The command-line tool has no package of its own. Tests: xUnit.
