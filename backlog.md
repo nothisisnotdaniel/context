@@ -195,6 +195,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#161](backlog/161-signed-windows-builds.md) Signed Windows builds
 - [?] [#162](backlog/162-move-the-signing-secrets-into-a.md) Move the signing secrets into a GitHub environment
 - [?] [#163](backlog/163-call-signing-tools-by-absolute-path.md) Call signing tools by absolute path
+- [h] [#164](backlog/164-set-up-apple-signing-and-check.md) Set up Apple signing and check the first signed build
 
 ## Dropped with the terminal UI
 
