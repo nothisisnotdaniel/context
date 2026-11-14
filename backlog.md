@@ -196,6 +196,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#162](backlog/162-move-the-signing-secrets-into-a.md) Move the signing secrets into a GitHub environment
 - [?] [#163](backlog/163-call-signing-tools-by-absolute-path.md) Call signing tools by absolute path
 - [h] [#164](backlog/164-set-up-apple-signing-and-check.md) Set up Apple signing and check the first signed build
+- [?] [#165](backlog/165-show-json-as-an-option-in.md) Show --json as an option in the CLI help
 
 ## Dropped with the terminal UI
 
