@@ -849,7 +849,8 @@ internal sealed class Cli
     }
 
     // One appointment as a JSON object: start, end, allDay, title, location (null when missing).
-    private static void WriteAppointment(Utf8JsonWriter w, Appointment appointment, TimeZoneInfo zone)
+    private static void WriteAppointment(
+        Utf8JsonWriter w, Appointment appointment, TimeZoneInfo zone, Action<Utf8JsonWriter>? extra = null)
     {
         w.WriteStartObject();
         w.WriteString("start", CliJson.Time(appointment.Start, zone));
@@ -865,8 +866,35 @@ internal sealed class Cli
             w.WriteString("location", OneLine(appointment.Location));
         }
 
+        extra?.Invoke(w);
         w.WriteEndObject();
     }
+
+    // current's related:[{name,tags,words}] of one appointment, or null when the index can't be read.
+    private static void WriteRelated(Utf8JsonWriter w, IReadOnlyList<RelatedNote>? related)
+    {
+        if (related is null)
+        {
+            w.WriteNull("related");
+            return;
+        }
+
+        w.WriteStartArray("related");
+        foreach (RelatedNote note in related)
+        {
+            w.WriteStartObject();
+            w.WriteString("name", OneLine(note.Name));
+            CliJson.Strings(w, "tags", note.Tags.Select(OneLine));
+            CliJson.Strings(w, "words", note.Words.Select(OneLine));
+            w.WriteEndObject();
+        }
+
+        w.WriteEndArray();
+    }
+
+    // The third column of a related line: the tags as #tag or #[a b], then the shared title words.
+    private static string RelatedMatches(RelatedNote note) =>
+        OneLine(string.Join(' ', note.Tags.Select(TagParser.Format).Concat(note.Words)));
 
     // The text of the link column; empty for a link by shared tags only.
     private static string LinkText(NoteLink link)
@@ -904,11 +932,19 @@ internal sealed class Cli
             Out($"No appointments today. Put .ics files in {OneLine(view.Folder)} to see them here.");
         }
 
-        foreach (Appointment appointment in view.Appointments)
+        for (int i = 0; i < view.Appointments.Count; i++)
         {
+            Appointment appointment = view.Appointments[i];
             string title = appointment.Title.Length == 0 ? "(no title)" : appointment.Title;
             Out($"{view.TimeText(appointment)}\t{OneLine(title)}\t{OneLine(appointment.Location ?? string.Empty)}");
+            foreach (RelatedNote note in view.Related[i])
+            {
+                Out($"related\t{OneLine(note.Name)}\t{RelatedMatches(note)}");
+            }
         }
+
+        // The index is read for the appointments too, so a bad context.db is reported once, also with nothing due.
+        bool relatedFailed = view.IndexUnreadable && view.Appointments.Count > 0;
 
         foreach (string file in view.UnreadableCalendarFiles)
         {
@@ -931,6 +967,11 @@ internal sealed class Cli
         if (view.TodosUnreadable)
         {
             Err(TodosUnreadable);
+            if (relatedFailed)
+            {
+                Err(IndexUnreadable);
+            }
+
             return ExitError;
         }
 
@@ -938,6 +979,12 @@ internal sealed class Cli
         if (view.Due.Count == 0)
         {
             Out("Nothing due today. Add one with /todo today <text>.");
+            if (relatedFailed)
+            {
+                Err(IndexUnreadable);
+                return ExitError;
+            }
+
             return failed ? ExitError : ExitOk;
         }
 
@@ -982,14 +1029,16 @@ internal sealed class Cli
             Err($"Can't download the Exchange calendar ({OneLine(view.Reason ?? string.Empty)}).");
         }
 
-        // As in plain: the index is only looked at when something is due.
+        // As in plain: the index is looked at when something is due or there is an appointment; reported once.
         bool indexFailed = !view.TodosUnreadable && view.Due.Count > 0 && view.IndexUnreadable;
+        bool relatedFailed = view.Appointments.Count > 0 && view.IndexUnreadable;
         if (view.TodosUnreadable)
         {
             failed = true;
             Err(TodosUnreadable);
         }
-        else if (indexFailed)
+
+        if (indexFailed || relatedFailed)
         {
             failed = true;
             Err(IndexUnreadable);
@@ -1005,9 +1054,10 @@ internal sealed class Cli
         {
             w.WriteString("today", Date(view.Today));
             w.WriteStartArray("appointments");
-            foreach (Appointment appointment in view.Appointments)
+            for (int i = 0; i < view.Appointments.Count; i++)
             {
-                WriteAppointment(w, appointment, shownZone);
+                IReadOnlyList<RelatedNote>? related = relatedFailed ? null : view.Related[i];
+                WriteAppointment(w, view.Appointments[i], shownZone, writer => WriteRelated(writer, related));
             }
 
             w.WriteEndArray();

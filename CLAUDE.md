@@ -21,7 +21,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     in one transaction and only re-parses files whose time changed. `PRAGMA user_version` holds the parser
     version (`TagIndex.ParserVersion`, now 5: `key:: value` attributes); when it is lower, `Sync` clears every stored time in the same
     transaction (so all notes are re-parsed once) and then sets it. Bump it whenever parsing changes. Queries: `Tags()`, `NotesWithTag`,
-    `FindNote`, `Links`, `People()`, `NotesMentioning`, `NotesWithAttribute(key, value)` (by `AttributeParser.ValueKey`), `NotesWithoutAttribute(key)`. A database that can't be opened or isn't valid throws `TagIndexException` (an
+    `NoteTags()`, `FindNote`, `Links`, `People()`, `NotesMentioning`, `NotesWithAttribute(key, value)` (by `AttributeParser.ValueKey`), `NotesWithoutAttribute(key)`. A database that can't be opened or isn't valid throws `TagIndexException` (an
     `IOException`) and is never deleted or overwritten. The file database waits up to `TagIndex.BusyTimeout` (5 s; an
     internal constructor argument shortens it for tests) for another process's lock, and `Sync` starts with
     `BEGIN IMMEDIATE`, so the desktop app and a command-line run can share it. `TagsView.Build`, `LinksView.Build`
@@ -102,8 +102,23 @@ Every factory agent reads this file before working on Context. Keep it short and
     through tags: `TagParser.Parse` on the text of each due todo (at run time, not stored), then
     `TagIndex.NotesWithTag` after `Sync`; each note once, sorted by name ignoring case, with its matching
     tags. Flags instead of exceptions: `TodosUnreadable` for a bad `todos.json` (the day and the appointments are
-    still there) and `IndexUnreadable` for a bad `context.db` (the due todos are still there). When nothing is due
-    the index is not synced. Order in both front ends: day, appointments, due todos, linked notes.
+    still there) and `IndexUnreadable` for a bad `context.db` (the due todos are still there). With no appointment
+    and nothing due the index is not synced. Order in both front ends: day, appointments, due todos, linked notes.
+    **Meeting prep** (job 160, `MeetingPrep.cs`): `Related` (parallel to `Appointments`, same count and order) holds
+    up to `MeetingPrep.MaxRelated` (3) `RelatedNote(Name, Tags, Words)` per appointment. `MeetingPrep.Words(text)`:
+    maximal `char.IsLetterOrDigit` runs, lower-cased invariant, without runs under 3 chars, digit-only runs and
+    `StopWords` (English and German fillers such as `the`, `meeting`, `weekly`, `und`, `für`), each once. An
+    appointment's words come from its `Title` and `Attendees` (never `Location`). A note matches through a tag when
+    every `Words(tag)` (at least one) is an appointment word, and through a word of its `Title` (last segment). Ranked
+    by `Tags.Count + Words.Count` descending, then name ignoring case, then ordinal. `Build` syncs once when there is
+    an appointment or something due and reads the index through one `TagIndex.NoteTags()` (every `(note, tag)` row)
+    plus `NoteStore.List()`, matching in memory (`TagIndex.Reads`, internal, counts `Run` calls for tests); only
+    listed `.md` notes count, so sealed notes never appear. A bad `context.db` also empties every `Related` list.
+    `context current` writes `related\t<name>\t<#tags then words>` after each appointment line and, with appointments,
+    `Can't read context.db.` once on stderr (exit 1, after `Can't read todos.json.` when both). `CurrentPanel`
+    (`OnOpen`, from `Main.RequestOpen`) draws a `tr.related` row with one `note-button` per note (`Title`, full name
+    in `title`) and grey `.matches` under each shown appointment (not counted toward `MaxAppointmentRows`), and red
+    `Can't read the related notes.` after the table when the index is unreadable.
   - **Calendar:** the user puts iCalendar files in `<root>/calendar/`. `CalendarStore(root, TimeZoneInfo)`
     reads only the top-level `*.ics` files (case-insensitive, no subfolders, never writes anything); a file over
     5 MB (`MaxFileBytes`) is not read. `Day(d)` returns a `CalendarDay`: the events whose local span overlaps
@@ -350,9 +365,9 @@ Every factory agent reads this file before working on Context. Keep it short and
   `{note,links:[{note,direction:none|to|from|both,missing,sharedTags}]}`, `{people:[{person,count}]}`,
   `{person,notes:[],appointments:[{start,end,allDay,title,location}],todos:[{due,text}],doneTodos:[{due,done,text}]}`
   (`done` as `yyyy-MM-dd`; `todos`/`doneTodos` `null` when `todos.json` is unreadable), `{key,value,notes:[]}` (`find`), `{types:[{type,attributes:[]}]}` (`types`; text: `<type>\t<attr, attr>`), `{today,appointments:[{start,end,allDay,
-  title,location}],calendar:{status,cachedAt,unreadableFiles},due:[{due,text,overdue}],linkedNotes:[{name,tags}]}`
+  title,location,related:[{name,tags,words}]}],calendar:{status,cachedAt,unreadableFiles},due:[{due,text,overdue}],linkedNotes:[{name,tags}]}`
   (absent = `null`, tags raw without `#`, times `yyyy-MM-ddTHH:mm:sszzz` in the zone; `due`/`linkedNotes` `null` when
-  unreadable). Names and order are a public contract (`CliJsonTests`, README). Errors stay text; with `help` or a
+  unreadable, `related` `null` when `context.db` can't be read; `person`'s appointments have no `related`). Names and order are a public contract (`CliJsonTests`, README). Errors stay text; with `help` or a
   write command it is a usage error before anything is read. `README.md` has PowerShell examples.
 - **Stack:** .NET 10 (`net10.0`), C# with nullable reference types and implicit usings on.
   `Microsoft.Data.Sqlite` 10.0.14 for `context.db`
@@ -488,7 +503,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `[[note link]]` parsing in `NoteLinkParser.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
-    `CurrentView.cs` (the current view), the inbox capture in `Inbox.cs`, the todo input rules (`TryParseDate`,
+    `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the inbox capture in `Inbox.cs`, the todo input rules (`TryParseDate`,
     `MaxTextLength`) in `TodoInput.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`) and `CalendarLinkView.cs`
     (the calendar link), and the command ranking for the desktop palette in `CommandMatcher.cs`; the notes list is `NoteStore.List()` itself.
   - **Data step in Core, drawing in the front end:** a view's Core data step returns plain types (a kind plus raw
@@ -496,7 +511,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     components through `DesktopState`) only map that view to their output. Cleaning (`SafeText.Clean`,
     `DesktopText.OneLine`), fixed message texts and row caps live in the front end, so each one draws the same
     data its own way.
-    View records (and `DueTodo`, `LinkedNote`) override `ToString()` to return only their type name, so their raw text
+    View records (and `DueTodo`, `LinkedNote`, `RelatedNote`) override `ToString()` to return only their type name, so their raw text
     never leaks through formatting; nobody formats a view directly.
   - `src/Context/`: the command-line tool (references `Context.Core` by `ProjectReference`, no package; packed as the
     .NET tool `context`). `Program.cs` only wires things up: whatever the arguments, it sets UTF-8 output and returns

@@ -47,6 +47,12 @@ public sealed class CurrentViewTests : IDisposable
         File.WriteAllText(Path.Combine(folder, name), text);
     }
 
+    private void WriteSealed(string name)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, name + NoteStore.SensitiveExtension), "{}");
+    }
+
     private static string Calendar(params string[] events) =>
         "BEGIN:VCALENDAR\r\n" + string.Concat(events) + "END:VCALENDAR\r\n";
 
@@ -185,7 +191,10 @@ public sealed class CurrentViewTests : IDisposable
         Assert.Equal("Standup", Assert.Single(view.Appointments).Title);
         Assert.Empty(view.Due);
         Assert.Empty(view.LinkedNotes);
-        Assert.False(File.Exists(DbPath));
+        // 160: the appointment still gets its related notes, so the index is synced.
+        Assert.Empty(Assert.Single(view.Related));
+        Assert.False(view.IndexUnreadable);
+        Assert.True(File.Exists(DbPath));
     }
 
     // AC-4
@@ -403,8 +412,111 @@ public sealed class CurrentViewTests : IDisposable
         Assert.True(badTodos.TodosUnreadable);
         Assert.Empty(badTodos.Due);
         Assert.Empty(badTodos.LinkedNotes);
-        Assert.False(badTodos.IndexUnreadable);
+        // 160: the appointment makes the view read the index, so the bad file shows here too.
+        Assert.True(badTodos.IndexUnreadable);
+        Assert.Empty(Assert.Single(badTodos.Related));
         Assert.Equal(garbage, File.ReadAllBytes(DbPath));
+    }
+
+    // 160 AC-5: Related runs parallel to Appointments, field by field.
+    [Fact]
+    public void Build_Related_ParallelToAppointments()
+    {
+        WriteCalendar("a.ics", Calendar(
+            Event("Lunch", ":20261029T120000", ":20261029T130000"),
+            Event("ACME kickoff", ":20261029T090000", ":20261029T100000")));
+        WriteNote("Clients", "#acme");
+        WriteNote("ACME Rollout", "text");
+        WriteNote("gamma", "#other");
+        WriteSealed("ACME secret");
+
+        CurrentView view = Build();
+
+        Assert.Equal(["ACME kickoff", "Lunch"], view.Appointments.Select(a => a.Title));
+        Assert.Equal(2, view.Related.Count);
+        Assert.Equal(["ACME Rollout", "Clients"], view.Related[0].Select(r => r.Name));
+        Assert.Equal((string[])[], view.Related[0][0].Tags);
+        Assert.Equal(["acme"], view.Related[0][0].Words);
+        Assert.Equal(["acme"], view.Related[0][1].Tags);
+        Assert.Equal((string[])[], view.Related[0][1].Words);
+        Assert.Empty(view.Related[1]);
+        Assert.False(view.IndexUnreadable);
+        Assert.Empty(view.Due);
+        Assert.Empty(view.LinkedNotes);
+    }
+
+    // 160 AC-5: one sync and one NoteTags read, whatever the number of appointments.
+    [Fact]
+    public void Build_Related_ReadsIndexTheSameFor1And10Appointments()
+    {
+        WriteNote("Plan alpha", "#beta #gamma");
+        WriteCalendar("a.ics", Calendar(Event("Alpha beta gamma", ":20261029T090000", ":20261029T091000")));
+        TagIndex one = new TagIndex(root);
+        CurrentView first = CurrentView.Build(Todos(), one, new NoteStore(root), new CalendarStore(root, Zone), null, Today);
+
+        string[] events = Enumerable.Range(0, 10)
+            .Select(i => Event($"Alpha beta gamma delta{i}", $":20261029T1{i}0000", $":20261029T1{i}1000"))
+            .ToArray();
+        WriteCalendar("a.ics", Calendar(events));
+        TagIndex ten = new TagIndex(root);
+        CurrentView second = CurrentView.Build(Todos(), ten, new NoteStore(root), new CalendarStore(root, Zone), null, Today);
+
+        Assert.Single(first.Appointments);
+        Assert.Equal(10, second.Appointments.Count);
+        Assert.All(second.Related, r => Assert.Equal("Plan alpha", Assert.Single(r).Name));
+        Assert.Equal(2, one.Reads);
+        Assert.Equal(one.Reads, ten.Reads);
+    }
+
+    // 160 AC-5: a bad context.db: IndexUnreadable, every Related list empty, appointments and due unchanged.
+    [Fact]
+    public void Build_Related_BadDb_EveryListEmpty()
+    {
+        WriteCalendar("a.ics", Calendar(
+            Event("Plan", ":20261029T090000", ":20261029T100000"),
+            Event("Plan two", ":20261029T110000", ":20261029T120000")));
+        WriteNote("Plan", "#plan");
+        Todos().Add("Due #plan", Today);
+        byte[] garbage = new byte[2048];
+        new Random(5).NextBytes(garbage);
+        File.WriteAllBytes(DbPath, garbage);
+
+        CurrentView view = Build();
+
+        Assert.True(view.IndexUnreadable);
+        Assert.Equal(["Plan", "Plan two"], view.Appointments.Select(a => a.Title));
+        Assert.Equal(2, view.Related.Count);
+        Assert.All(view.Related, Assert.Empty);
+        Assert.Equal([new DueTodo(Today, "Due #plan", false)], view.Due);
+        Assert.Empty(view.LinkedNotes);
+        Assert.Equal(garbage, File.ReadAllBytes(DbPath));
+    }
+
+    // 160 AC-5: no appointments and nothing due: no context.db is created, Related is empty.
+    [Fact]
+    public void Build_EmptyDay_NoDbAndNoRelated()
+    {
+        WriteNote("Plan", "#plan");
+
+        CurrentView view = Build();
+
+        Assert.Empty(view.Appointments);
+        Assert.Empty(view.Related);
+        Assert.False(view.IndexUnreadable);
+        Assert.False(File.Exists(DbPath));
+    }
+
+    // 160: a hand-built view without related lists gets one empty list per appointment.
+    [Fact]
+    public void Constructor_WithoutRelated_OneEmptyListPerAppointment()
+    {
+        DateTime start = Today.ToDateTime(new TimeOnly(9, 0));
+        Appointment appointment = new Appointment("x", null, start, start.AddHours(1), false);
+        CurrentView view = new CurrentView(
+            Today, Zone, [appointment, appointment], "f", [], CalendarFeedStatus.NotConfigured, null, null, false, [], [], false);
+
+        Assert.Equal(2, view.Related.Count);
+        Assert.All(view.Related, Assert.Empty);
     }
 
     // AC-1 (042)

@@ -362,8 +362,8 @@ public sealed class CliJsonTests : IDisposable
         Assert.Equal((0, string.Empty), (result.Code, result.Err));
         Assert.Equal(
             "{\"today\":\"2026-10-29\",\"appointments\":["
-                + "{\"start\":\"2026-10-29T00:00:00\\u002B01:00\",\"end\":\"2026-10-30T00:00:00\\u002B01:00\",\"allDay\":true,\"title\":\"\",\"location\":null},"
-                + "{\"start\":\"2026-10-29T11:00:00\\u002B01:00\",\"end\":\"2026-10-29T12:00:00\\u002B01:00\",\"allDay\":false,\"title\":\"Review\",\"location\":\"Room 1\"}],"
+                + "{\"start\":\"2026-10-29T00:00:00\\u002B01:00\",\"end\":\"2026-10-30T00:00:00\\u002B01:00\",\"allDay\":true,\"title\":\"\",\"location\":null,\"related\":[]},"
+                + "{\"start\":\"2026-10-29T11:00:00\\u002B01:00\",\"end\":\"2026-10-29T12:00:00\\u002B01:00\",\"allDay\":false,\"title\":\"Review\",\"location\":\"Room 1\",\"related\":[]}],"
                 + "\"calendar\":{\"status\":\"notConfigured\",\"cachedAt\":null,\"unreadableFiles\":[]},"
                 + "\"due\":[{\"due\":\"2026-10-28\",\"text\":\"late #work\",\"overdue\":true},{\"due\":\"2026-10-29\",\"text\":\"now\",\"overdue\":false}],"
                 + "\"linkedNotes\":[{\"name\":\"A\",\"tags\":[\"work\"]},{\"name\":\"B\",\"tags\":[\"work\"]}]}\n",
@@ -478,6 +478,55 @@ public sealed class CliJsonTests : IDisposable
 
         Assert.Equal((plain.Code, plain.Err), (result.Code, result.Err));
         Assert.EndsWith("\"due\":[],\"linkedNotes\":[]}\n", result.Out, StringComparison.Ordinal);
+    }
+
+    // 160 AC-7: each current appointment has related:[{name,tags,words}], tags raw without #.
+    [Fact]
+    public void Current_Related_Shape()
+    {
+        Fixture();
+        WriteNote("Home Office", "#[home office] #work\n");
+        WriteIcs(
+            "work.ics",
+            "BEGIN:VCALENDAR\r\n"
+                + "BEGIN:VEVENT\r\nSUMMARY:Work from home office\r\nDTSTART:20261029T100000Z\r\nDTEND:20261029T110000Z\r\nEND:VEVENT\r\n"
+                + "END:VCALENDAR\r\n");
+
+        Result result = Run("current", "--json");
+
+        JsonElement document = AssertDocument(result);
+        Assert.Equal(string.Empty, result.Err);
+        Assert.Equal(
+            "[{\"name\":\"Home Office\",\"tags\":[\"home office\",\"work\"],\"words\":[\"home\",\"office\"]},"
+                + "{\"name\":\"B\",\"tags\":[\"home\",\"work\"],\"words\":[]},"
+                + "{\"name\":\"A\",\"tags\":[\"work\"],\"words\":[]}]",
+            document.GetProperty("appointments")[0].GetProperty("related").GetRawText());
+    }
+
+    // 160 AC-7: a bad context.db makes related null, with one stderr line, also when nothing is due.
+    [Fact]
+    public void Current_BadContextDb_RelatedNull()
+    {
+        WriteIcs(
+            "work.ics",
+            "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Plan\r\nDTSTART:20261029T100000Z\r\nDTEND:20261029T110000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+        WriteNote("Plan", "#plan");
+        BreakIndex();
+
+        Result nothingDue = Run("current", "--json");
+
+        JsonElement document = AssertDocument(nothingDue, Cli.ExitError);
+        Assert.Equal(["Can't read context.db."], nothingDue.ErrLines);
+        Assert.Equal(JsonValueKind.Null, document.GetProperty("appointments")[0].GetProperty("related").ValueKind);
+        Assert.Equal("[]", document.GetProperty("linkedNotes").GetRawText());
+
+        WriteTodos(("2026-10-29", "\"x #plan\""));
+        Result due = Run("current", "--json");
+
+        document = AssertDocument(due, Cli.ExitError);
+        Assert.Equal(["Can't read context.db."], due.ErrLines);
+        Assert.Equal(JsonValueKind.Null, document.GetProperty("appointments")[0].GetProperty("related").ValueKind);
+        Assert.Equal(JsonValueKind.Null, document.GetProperty("linkedNotes").ValueKind);
     }
 
     // AC-11 --------------------------------------------------------------------------------------

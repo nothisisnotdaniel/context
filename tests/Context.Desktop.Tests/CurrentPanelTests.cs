@@ -1,5 +1,6 @@
 using AngleSharp.Dom;
 using Bunit;
+using Microsoft.AspNetCore.Components.Web;
 
 namespace Context.Tests;
 
@@ -7,6 +8,9 @@ public sealed class CurrentPanelTests : IDisposable
 {
     private const string Xss = "<script>alert(1)</script>";
     private const string XssImage = "<img src=x onerror=alert(1)>";
+
+    // Opening a note from Main reads it on Task.Run; every wait for that passes this bounded timeout.
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
 
     private readonly DesktopFixture data = new();
 
@@ -233,6 +237,136 @@ public sealed class CurrentPanelTests : IDisposable
         Assert.NotEmpty(cut.FindAll(".note"));
         Assert.DoesNotContain("TOKEN123", cut.Markup, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("secret-host", cut.Markup, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<IRenderedComponent<CurrentPanel>> RenderWithOpen(List<string> opened)
+    {
+        await data.RefreshAsync();
+        return data.Bunit.Render<CurrentPanel>(p => p.Add(c => c.OnOpen, (string name) => opened.Add(name)));
+    }
+
+    // 160 AC-8: a tr.related row under each appointment with related notes: one button per note (Title shown, full
+    // name in title), grey matches; a click raises OnOpen with the full name.
+    [Fact]
+    public async Task Render_RelatedRows_ButtonsAndOpen()
+    {
+        data.WriteCalendar("a.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("ACME kickoff", "20261029T090000", "20261029T100000"),
+            DesktopFixture.Event("Lunch", "20261029T120000", "20261029T130000")));
+        data.WriteNote("Clients", "#acme #[acme kickoff]\n");
+        data.WriteNote("projects", "# projects\n");
+        data.WriteFile(Path.Combine("projects", "ACME Rollout.md"), "# ACME Rollout\n");
+        List<string> opened = [];
+
+        IRenderedComponent<CurrentPanel> cut = await RenderWithOpen(opened);
+
+        IReadOnlyList<IElement> rows = cut.FindAll("table.appointments tbody tr");
+        Assert.Equal(["appointment", "related", "appointment"], rows.Select(r => r.ClassName));
+        IReadOnlyList<IElement> buttons = rows[1].QuerySelectorAll("button").ToList();
+        Assert.Equal(["Clients", "ACME Rollout"], buttons.Select(b => b.TextContent));
+        Assert.Equal(["Clients", "projects/ACME Rollout"], buttons.Select(b => b.GetAttribute("title")));
+        Assert.All(buttons, b => Assert.Equal("button", b.GetAttribute("type")));
+        IReadOnlyList<IElement> matches = rows[1].QuerySelectorAll(".matches").ToList();
+        Assert.Equal(["#acme #[acme kickoff]", "acme"], matches.Select(m => m.TextContent));
+        Assert.All(matches, m => Assert.True(m.ClassList.Contains("grey")));
+
+        await cut.FindAll("tr.related button")[1].ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(["projects/ACME Rollout"], opened);
+        Assert.Empty(cut.FindAll("p.related-failed"));
+    }
+
+    // 160 AC-8: in Main, a related button opens the note through RequestOpen.
+    [Fact]
+    public async Task Main_RelatedButton_OpensTheNote()
+    {
+        data.WriteCalendar("a.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("Plan review", "20261029T090000", "20261029T100000")));
+        data.WriteNote("Plan", "# Plan\n");
+        _ = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await cut.Find("tr.related button").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-title").TextContent), Wait);
+    }
+
+    // 160 AC-8: related rows don't count toward the 15 rows, and hidden appointments show none.
+    [Fact]
+    public async Task Render_SixteenAppointments_RelatedRowsOutsideTheCap()
+    {
+        string[] events = Enumerable.Range(0, 16)
+            .Select(i => DesktopFixture.Event($"Topic{i:00} acme", $"20261029T{8 + i / 4:00}{i % 4 * 15:00}00",
+                $"20261029T{8 + i / 4:00}{i % 4 * 15 + 10:00}00"))
+            .ToArray();
+        data.WriteCalendar("a.ics", DesktopFixture.Calendar(events));
+        data.WriteNote("ACME", "x");
+
+        IRenderedComponent<CurrentPanel> cut = await data.RenderAsync<CurrentPanel>();
+
+        Assert.Equal(14, cut.FindAll("tr.appointment").Count);
+        Assert.Equal(14, cut.FindAll("tr.related").Count);
+        Assert.Equal("… 2 more", Assert.Single(cut.FindAll("tr.more")).TextContent.Trim());
+        Assert.Equal(29, cut.FindAll("table.appointments tbody tr").Count);
+    }
+
+    // 160 AC-8: a bad context.db with appointments shows the red related line after the table and no related rows.
+    [Fact]
+    public async Task Render_BadIndex_WithAppointments_RelatedRedLine()
+    {
+        data.WriteCalendar("a.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("Plan", "20261029T090000", "20261029T100000")));
+        data.WriteNote("Plan", "#plan\n");
+        data.WriteFile(TagIndex.FileName, "this is not a database, just some text that fills the header....");
+
+        IRenderedComponent<CurrentPanel> cut = await data.RenderAsync<CurrentPanel>();
+
+        IElement line = Assert.Single(cut.FindAll("p.red"));
+        Assert.Equal("Can't read the related notes.", line.TextContent);
+        Assert.Equal("TABLE", line.PreviousElementSibling!.TagName);
+        Assert.Empty(cut.FindAll("tr.related"));
+    }
+
+    // 160 AC-8: with appointments and due todos both, both red lines show, each after its own table.
+    [Fact]
+    public async Task Render_BadIndex_AppointmentsAndDue_BothRedLines()
+    {
+        data.WriteCalendar("a.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("Plan", "20261029T090000", "20261029T100000")));
+        data.AddTodo("Call #work", DesktopFixture.Today);
+        data.WriteFile(TagIndex.FileName, "this is not a database, just some text that fills the header....");
+
+        IRenderedComponent<CurrentPanel> cut = await data.RenderAsync<CurrentPanel>();
+
+        Assert.Equal(
+            [
+                "Can't read the related notes.",
+                "Can't read context.db. Move it out of the Context folder and it is rebuilt from your notes.",
+            ],
+            cut.FindAll("p.red").Select(p => p.TextContent));
+    }
+
+    // 160 AC-8: control characters in a note name are cleaned in the button text and its title.
+    [Fact]
+    public async Task Render_RelatedName_ControlCharsCleaned()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            // Windows file names can't hold control chars.
+            return;
+        }
+
+        data.WriteCalendar("a.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("ACME", "20261029T090000", "20261029T100000")));
+        data.WriteNote("ACME \u0007" + XssImage, "x");
+
+        IRenderedComponent<CurrentPanel> cut = await data.RenderAsync<CurrentPanel>();
+
+        IElement button = cut.Find("tr.related button");
+        Assert.Equal("ACME �" + XssImage, button.TextContent);
+        Assert.Equal("ACME �" + XssImage, button.GetAttribute("title"));
+        Assert.Empty(cut.FindAll("img"));
+        Assert.DoesNotContain("\u0007", cut.Markup, StringComparison.Ordinal);
     }
 
     private static string[] Cells(IElement row) => row.Children.Select(c => c.TextContent).ToArray();
