@@ -4,9 +4,9 @@ namespace Context.Tests;
 
 // 147: SensitiveFlowTests waits for work behind Task.Run (real ECDH and AES-GCM), so every WaitForAssertion passes the
 // class's bounded Wait constant; no test file changes bUnit's global default wait instead.
+// 150: MainTests and EditingFlowTests open notes through DesktopState.ReadForEdit on Task.Run and follow the same rule.
 public sealed class WaitTimeoutSourceTests
 {
-    private const string SensitiveFlowFile = "tests/Context.Desktop.Tests/SensitiveFlowTests.cs";
     private const string TestsFolder = "tests/Context.Desktop.Tests";
     private const string Call = "WaitForAssertion(";
 
@@ -18,15 +18,18 @@ public sealed class WaitTimeoutSourceTests
         @"private\s+static\s+readonly\s+TimeSpan\s+Wait\s*=\s*TimeSpan\.FromSeconds\((\d+)\)\s*;",
         RegexOptions.CultureInvariant);
 
-    [Fact]
-    public void SensitiveFlowTests_EveryWaitForAssertion_PassesTheWaitConstant()
+    [Theory]
+    [InlineData("tests/Context.Desktop.Tests/SensitiveFlowTests.cs")]
+    [InlineData("tests/Context.Desktop.Tests/MainTests.cs")]
+    [InlineData("tests/Context.Desktop.Tests/EditingFlowTests.cs")]
+    public void EveryWaitForAssertion_PassesTheWaitConstant(string file)
     {
-        string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), SensitiveFlowFile));
+        string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), file));
 
         MatchCollection constants = WaitConstant.Matches(source);
         Assert.True(
             constants.Count == 1,
-            $"{SensitiveFlowFile} needs exactly one 'private static readonly TimeSpan Wait = TimeSpan.FromSeconds(<n>);', "
+            $"{file} needs exactly one 'private static readonly TimeSpan Wait = TimeSpan.FromSeconds(<n>);', "
             + $"found {constants.Count}");
         Match constant = constants[0];
         int seconds = int.Parse(constant.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
@@ -46,7 +49,7 @@ public sealed class WaitTimeoutSourceTests
             }
         }
 
-        Assert.True(calls > 0, "No " + Call + " call found in " + SensitiveFlowFile);
+        Assert.True(calls > 0, "No " + Call + " call found in " + file);
         Assert.Empty(missing);
     }
 

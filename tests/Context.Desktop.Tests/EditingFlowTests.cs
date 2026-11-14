@@ -9,6 +9,10 @@ namespace Context.Tests;
 // through Main with the page's editor mocked.
 public sealed class EditingFlowTests : IDisposable
 {
+    // 150: opening a note runs DesktopState.ReadForEdit on Task.Run, which can take over bUnit's 1 s default on a busy
+    // runner. Every wait passes this bounded timeout; a real failure still fails within it.
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
+
     private readonly DesktopFixture data = new();
 
     public void Dispose() => data.Dispose();
@@ -55,7 +59,7 @@ public sealed class EditingFlowTests : IDisposable
         await NameButton(cut, "Other").ClickAsync(new MouseEventArgs());
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.mount").Count));
+        cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.mount").Count), Wait);
         Assert.Equal("Other", cut.Find(".note-title").TextContent);
         Assert.Equal("# Other\n", js.MountedText());
         Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
@@ -74,7 +78,7 @@ public sealed class EditingFlowTests : IDisposable
         await NameButton(cut, "Other").ClickAsync(new MouseEventArgs());
 
         Assert.Empty(cut.FindAll("[role=dialog]"));
-        cut.WaitForAssertion(() => Assert.Equal("Other", cut.Find(".note-title").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Other", cut.Find(".note-title").TextContent), Wait);
     }
 
     // AC-7 / AC-11: /current from the palette with unsaved changes asks, then shows /current.
@@ -91,7 +95,7 @@ public sealed class EditingFlowTests : IDisposable
 
         Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".current-region .current")));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".current-region .current")), Wait);
         Assert.Empty(cut.FindAll(".note-editor"));
     }
 
@@ -111,12 +115,12 @@ public sealed class EditingFlowTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Equal(
             ["Alpha", "beta", "Plan"],
-            cut.FindAll(".tag-panel .note-button").Select(b => b.TextContent).ToArray()));
+            cut.FindAll(".tag-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Equal("#work", cut.Find(".tag-panel h2 .accent").TextContent);
 
         await cut.FindAll(".tag-panel .note-button")[1].ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("beta", cut.Find(".note-title").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("beta", cut.Find(".note-title").TextContent), Wait);
         Assert.Empty(cut.FindAll(".tag-panel"));
     }
 
@@ -132,7 +136,7 @@ public sealed class EditingFlowTests : IDisposable
 
         await cut.InvokeAsync(() => js.Page().OnLink("[[other]]"));
 
-        cut.WaitForAssertion(() => Assert.Equal("Other", cut.Find(".note-title").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Other", cut.Find(".note-title").TextContent), Wait);
     }
 
     // AC-11: Ctrl+K and Cmd+K open the palette as a dialog with focus in its text field; Esc closes it.
@@ -191,7 +195,7 @@ public sealed class EditingFlowTests : IDisposable
 
         await RunPalette(cut, "/opne plan");
 
-        cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-title").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-title").TextContent), Wait);
         Assert.Empty(cut.FindAll(".palette"));
     }
 
@@ -231,7 +235,7 @@ public sealed class EditingFlowTests : IDisposable
 
         await RunPalette(cut, "/tags #[Big  Project]");
 
-        cut.WaitForAssertion(() => Assert.Equal(["Plan"], cut.FindAll(".tag-panel .note-button").Select(b => b.TextContent).ToArray()));
+        cut.WaitForAssertion(() => Assert.Equal(["Plan"], cut.FindAll(".tag-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Equal("#[big project]", cut.Find(".tag-panel h2 .accent").TextContent);
         await cut.Find(".tag-panel button.close").ClickAsync(new MouseEventArgs());
         Assert.Empty(cut.FindAll(".tag-panel"));
@@ -261,7 +265,7 @@ public sealed class EditingFlowTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Equal(
             expected.Select(t => TagParser.Format(t.Tag) + " " + t.Count).ToArray(),
-            cut.FindAll(".current-region .tags-panel .tag-row").Select(r => r.QuerySelector("button")!.TextContent + " " + r.QuerySelector(".count")!.TextContent).ToArray()));
+            cut.FindAll(".current-region .tags-panel .tag-row").Select(r => r.QuerySelector("button")!.TextContent + " " + r.QuerySelector(".count")!.TextContent).ToArray()), Wait);
         Assert.Equal(["#[big project] 1", "#work 2"], expected.Select(t => TagParser.Format(t.Tag) + " " + t.Count).Order(StringComparer.Ordinal).ToArray());
         Assert.Equal("Tags", cut.Find(".tags-panel h2").TextContent);
         Assert.Empty(cut.FindAll(".tag-panel"));
@@ -270,7 +274,7 @@ public sealed class EditingFlowTests : IDisposable
         await TagButton(cut, "#work").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Equal(
-            ["Alpha", "Plan"], cut.FindAll(".tag-panel .note-button").Select(b => b.TextContent).ToArray()));
+            ["Alpha", "Plan"], cut.FindAll(".tag-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Equal("true", TagButton(cut, "#work").GetAttribute("aria-pressed"));
         Assert.Equal("false", TagButton(cut, "#[big project]").GetAttribute("aria-pressed"));
         IElement region = cut.Find(".current-region");
@@ -278,7 +282,7 @@ public sealed class EditingFlowTests : IDisposable
             < region.Children.Index().Single(c => c.Item.ClassList.Contains("tag-panel")).Index);
 
         await TagButton(cut, "#[big project]").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal(["Plan"], cut.FindAll(".tag-panel .note-button").Select(b => b.TextContent).ToArray()));
+        cut.WaitForAssertion(() => Assert.Equal(["Plan"], cut.FindAll(".tag-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Equal("true", TagButton(cut, "#[big project]").GetAttribute("aria-pressed"));
         Assert.Equal("false", TagButton(cut, "#work").GetAttribute("aria-pressed"));
 
@@ -288,7 +292,7 @@ public sealed class EditingFlowTests : IDisposable
         Assert.Empty(cut.FindAll(".tag-list button[aria-pressed=true]"));
 
         await TagButton(cut, "#work").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-panel")));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-panel")), Wait);
         await cut.Find(".tags-panel button.close").ClickAsync(new MouseEventArgs());
         Assert.Empty(cut.FindAll(".tags-panel"));
         Assert.Empty(cut.FindAll(".tag-panel"));
@@ -303,7 +307,7 @@ public sealed class EditingFlowTests : IDisposable
 
         await RunPalette(cut, "/tags work");
 
-        cut.WaitForAssertion(() => Assert.Equal(["Plan"], cut.FindAll(".tag-panel .note-button").Select(b => b.TextContent).ToArray()));
+        cut.WaitForAssertion(() => Assert.Equal(["Plan"], cut.FindAll(".tag-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Empty(cut.FindAll(".tags-panel"));
     }
 
@@ -322,19 +326,19 @@ public sealed class EditingFlowTests : IDisposable
         }
 
         await cut.Find(".notes-region button.tags-open").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-list button")));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-list button")), Wait);
         await TagButton(cut, "#work").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-panel .note-button")));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-panel .note-button")), Wait);
 
         if (note)
         {
             await cut.Find(".tag-panel .note-button").ClickAsync(new MouseEventArgs());
-            cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-title").TextContent));
+            cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-title").TextContent), Wait);
         }
         else
         {
             await RunPalette(cut, "/current");
-            cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".current-region .current")));
+            cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".current-region .current")), Wait);
         }
 
         Assert.Empty(cut.FindAll(".tags-panel"));
@@ -348,12 +352,12 @@ public sealed class EditingFlowTests : IDisposable
         data.WriteNote("Plan", "#work\n");
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await RunPalette(cut, "/tags");
-        cut.WaitForAssertion(() => Assert.Equal("1", cut.Find(".tag-row .count").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("1", cut.Find(".tag-row .count").TextContent), Wait);
 
         data.WriteNote("Other", "#work #play\n");
         await data.State!.Refresh();
 
-        cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll(".tag-row").Count));
+        cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll(".tag-row").Count), Wait);
         Assert.Equal("2", cut.FindAll(".tag-row").Single(r => r.QuerySelector("button")!.TextContent == "#work").QuerySelector(".count")!.TextContent);
     }
 
@@ -411,8 +415,8 @@ public sealed class EditingFlowTests : IDisposable
     {
         int mounts = js.Calls("ContextEditor.mount").Count;
         await NameButton(cut, name).ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count));
-        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")));
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
     }
 
     private static async Task RunPalette(IRenderedComponent<Main> cut, string line)

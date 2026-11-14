@@ -592,7 +592,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),
     `FileSnapshot` (bytes and last-write times of a folder, to prove nothing changed), `RepoFiles` and `WaitTimeoutSourceTests` (the wait rule). A `WaitForAssertion` that waits for work behind `Task.Run` (such as
     every wait in `SensitiveFlowTests`, which runs real ECDH and AES-GCM) passes an explicit, bounded timeout from a named
-    constant in its class, and no test ever changes `BunitContext.DefaultWaitTimeout`.
+    constant in its class, and no test ever changes `BunitContext.DefaultWaitTimeout`. The guard checks `SensitiveFlowTests.cs`,
+    `MainTests.cs` and `EditingFlowTests.cs`: each has exactly one `Wait` constant (10-30 s) and every `WaitForAssertion`
+    in them passes it as the last argument.
 - **Style:**
   - `Cli` writes plain text through injected `TextWriter`s (stdout, stderr) and mentions no `Console.` (checked
     by `CliTests`); only `Program.cs` names `Console`. The desktop shows text through Blazor components only.
