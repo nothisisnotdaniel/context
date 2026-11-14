@@ -332,6 +332,7 @@ internal sealed class Cli
 
     private int Todos(Session session)
     {
+        session.Todos.Migrate();
         IReadOnlyList<TodoItem> todos;
         try
         {
@@ -369,6 +370,7 @@ internal sealed class Cli
 
     private int AddTodo(Session session, string text, DateOnly due)
     {
+        session.Todos.Migrate();
         TodoItem todo;
         try
         {
@@ -384,6 +386,7 @@ internal sealed class Cli
 
     private int DoneTodo(Session session, string query)
     {
+        session.Todos.Migrate();
         TodoItem? done;
         try
         {
@@ -592,6 +595,7 @@ internal sealed class Cli
 
     private int Current(Session session)
     {
+        session.Todos.Migrate();
         CurrentView view = CurrentView.Build(
             session.Todos, session.Index, session.Notes, session.Calendar, session.Feed, today());
         if (session.Json)

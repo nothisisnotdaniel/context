@@ -43,8 +43,9 @@ internal sealed class TodoStoreException : IOException
 /// The todo list, kept as JSON in <c>&lt;root&gt;/todos.json</c> (UTF-8, no BOM). Every write goes to a
 /// temp file in the root first and then replaces <c>todos.json</c>, so the file is never half-written.
 /// Each todo has an <c>id</c>. A todo stored without one (files from before ids), or with an empty or repeated one,
-/// gets an id derived from its content and position among identical todos, so reads never write and the id stays
-/// the same until the next write stores it.
+/// gets an id derived from its content and position among identical todos. <see cref="Migrate"/>, called once when
+/// the desktop app or a todo-reading command starts, writes those derived ids into the file; reads never write, and
+/// derivation stays the fallback for a file changed while the app runs.
 /// </summary>
 internal sealed class TodoStore
 {
@@ -125,6 +126,48 @@ internal sealed class TodoStore
     }
 
     /// <summary>
+    /// Stores the ids <see cref="List"/> would return when some todo has no stored, non-empty, unique id: writes
+    /// the list once, in file order with the same text, due and created, and returns <c>true</c>. Returns
+    /// <c>false</c> and writes nothing when every id is already stored, the file is missing, or it can't be read,
+    /// parsed or written (an unreadable file is never touched; the next <see cref="List"/> reports it). Never throws
+    /// for those.
+    /// </summary>
+    public bool Migrate()
+    {
+        if (!File.Exists(FilePath))
+        {
+            return false;
+        }
+
+        List<TodoItem> todos;
+        bool stored;
+        try
+        {
+            todos = Read(out stored);
+        }
+        catch (TodoStoreException)
+        {
+            return false;
+        }
+
+        if (stored)
+        {
+            return false;
+        }
+
+        try
+        {
+            Write(todos);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// The id of a todo stored without a usable one: the first 16 bytes of SHA-256 over its created ticks, due
     /// date, text and <paramref name="attempt"/> (the n-th identical todo in file order, then retries on a clash).
     /// </summary>
@@ -140,8 +183,12 @@ internal sealed class TodoStore
         return new Guid(hash.AsSpan(0, 16));
     }
 
-    private List<TodoItem> Read()
+    private List<TodoItem> Read() => Read(out _);
+
+    /// <param name="allStored"><c>true</c> when every todo has a stored, non-empty, unique id (or the file is missing).</param>
+    private List<TodoItem> Read(out bool allStored)
     {
+        allStored = true;
         string path = FilePath;
         if (!File.Exists(path))
         {
@@ -188,6 +235,7 @@ internal sealed class TodoStore
             Guid id = item.Id ?? Guid.Empty;
             if (id == Guid.Empty || !taken.Add(id))
             {
+                allStored = false;
                 int attempt = 0;
                 do
                 {

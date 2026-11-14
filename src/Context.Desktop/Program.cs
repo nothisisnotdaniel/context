@@ -82,6 +82,10 @@ internal static class Program
         });
         using Timer idle = new Timer(_ => session.Tick(), null, TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15));
 
+        // Todos stored without a usable id get their derived ids written once, before the watcher and the first
+        // refresh; an unreadable file is left alone and shows as unreadable.
+        todos.Migrate();
+
         using DataWatcher watcher = new DataWatcher(folder, state);
         watcher.Start();
         _ = state.Refresh();
