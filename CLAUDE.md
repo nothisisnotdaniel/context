@@ -577,7 +577,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
     CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules, the transfer calls and no file system class in `.razor`), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),
-    `FileSnapshot` (bytes and last-write times of a folder, to prove nothing changed) and `RepoFiles`.
+    `FileSnapshot` (bytes and last-write times of a folder, to prove nothing changed), `RepoFiles` and `WaitTimeoutSourceTests` (the wait rule). A `WaitForAssertion` that waits for work behind `Task.Run` (such as
+    every wait in `SensitiveFlowTests`, which runs real ECDH and AES-GCM) passes an explicit, bounded timeout from a named
+    constant in its class, and no test ever changes `BunitContext.DefaultWaitTimeout`.
 - **Style:**
   - `Cli` writes plain text through injected `TextWriter`s (stdout, stderr) and mentions no `Console.` (checked
     by `CliTests`); only `Program.cs` names `Console`. The desktop shows text through Blazor components only.

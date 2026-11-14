@@ -7,6 +7,10 @@ namespace Context.Tests;
 // 136 AC-5 to AC-7: sensitive notes through Main, with the page's editor mocked and a key store in memory.
 public sealed class SensitiveFlowTests : IDisposable
 {
+    // 147: opening a sensitive note runs real ECDH and AES-GCM on Task.Run, which can take over bUnit's 1 s default on a
+    // busy runner. Every wait passes this bounded timeout; a real failure still fails within it.
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
+
     private readonly DesktopFixture data = new();
 
     public SensitiveFlowTests()
@@ -89,7 +93,7 @@ public sealed class SensitiveFlowTests : IDisposable
 
         await NameButton(cut, "Plan").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Can't unlock Plan.", cut.Find(".unreadable").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Can't unlock Plan.", cut.Find(".unreadable").TextContent), Wait);
         Assert.Contains("red", cut.Find(".unreadable").ClassList);
         Assert.Empty(js.Calls("ContextEditor.mount"));
         Assert.True(cut.Find("button.save").HasAttribute("disabled"));
@@ -108,7 +112,7 @@ public sealed class SensitiveFlowTests : IDisposable
         await NameButton(cut, "Plan").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Equal(
-            "The editor couldn't start. Plan was not changed.", Assert.Single(cut.FindAll(".editor-failed")).TextContent));
+            "The editor couldn't start. Plan was not changed.", Assert.Single(cut.FindAll(".editor-failed")).TextContent), Wait);
         Assert.Contains("red", cut.Find(".editor-failed").ClassList);
         Assert.Equal("alert", cut.Find(".editor-failed").GetAttribute("role"));
         Assert.Empty(cut.FindAll(".unreadable"));
@@ -130,7 +134,7 @@ public sealed class SensitiveFlowTests : IDisposable
 
         await cut.Find("button.save").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".note-editor .status").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".note-editor .status").TextContent), Wait);
         Assert.Equal(1, data.Keys.Agrees);
         Assert.Equal("new text\n", Unsealed("Plan"));
         Assert.Equal(["Plan.ctxs"], RootFiles());
@@ -147,7 +151,7 @@ public sealed class SensitiveFlowTests : IDisposable
 
         await cut.Find("button.lock").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.destroy")));
+        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.destroy")), Wait);
         Assert.Empty(cut.FindAll(".note-editor"));
         Assert.Single(cut.FindAll(".current-region .current"));
         Assert.Equal("Locked Plan.", cut.Find(".main-status").TextContent);
@@ -176,7 +180,7 @@ public sealed class SensitiveFlowTests : IDisposable
         data.UtcNow = data.UtcNow.AddSeconds(1);
         Assert.True(data.Session.Tick());
 
-        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".note-editor")));
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".note-editor")), Wait);
         Assert.Single(js.Calls("ContextEditor.destroy"));
         Assert.Equal("Locked Plan.", cut.Find(".main-status").TextContent);
         Assert.Null(data.Session.Note);
@@ -214,7 +218,7 @@ public sealed class SensitiveFlowTests : IDisposable
 
         Assert.True(data.Session!.Tick());
 
-        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".note-editor")));
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".note-editor")), Wait);
         Assert.Equal("Locked Plan.", cut.Find(".main-status").TextContent);
         Assert.Null(data.Session.Note);
         Assert.Equal(1, data.Keys.Agrees);
@@ -237,7 +241,7 @@ public sealed class SensitiveFlowTests : IDisposable
         data.Session!.Tick();
 
         cut.WaitForAssertion(() => Assert.Equal(
-            "Plan changed on disk since you opened it. Nothing was saved.", cut.Find(".note-editor .status").TextContent));
+            "Plan changed on disk since you opened it. Nothing was saved.", cut.Find(".note-editor .status").TextContent), Wait);
         Assert.Contains("red", cut.Find(".note-editor .status").ClassList);
         Assert.Single(cut.FindAll(".note-editor"));
         Assert.Empty(js.Calls("ContextEditor.destroy"));
@@ -256,7 +260,7 @@ public sealed class SensitiveFlowTests : IDisposable
 
         data.Session!.Lock();
 
-        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".note-editor")));
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".note-editor")), Wait);
         Assert.Single(js.Calls("ContextEditor.destroy"));
         Assert.Null(data.Session.Note);
         Assert.DoesNotContain("Secret", cut.Markup, StringComparison.Ordinal);
@@ -302,7 +306,7 @@ public sealed class SensitiveFlowTests : IDisposable
         await cut.Find("button.mark-sensitive").ClickAsync(new MouseEventArgs());
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Marked Plan sensitive.", cut.Find(".main-status").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Marked Plan sensitive.", cut.Find(".main-status").TextContent), Wait);
         Assert.Contains("accent", cut.Find(".main-status").ClassList);
         Assert.Equal(["Plan.ctxs"], RootFiles());
         Assert.Empty(cut.FindAll(".note-editor"));
@@ -323,7 +327,7 @@ public sealed class SensitiveFlowTests : IDisposable
         await cut.Find("button.mark-sensitive").ClickAsync(new MouseEventArgs());
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Set up recovery first.", cut.Find(".main-status").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Set up recovery first.", cut.Find(".main-status").TextContent), Wait);
         Assert.Contains("red", cut.Find(".main-status").ClassList);
         Assert.Equal(["Plan.md"], RootFiles());
         Assert.Single(cut.FindAll(".note-editor"));
@@ -375,11 +379,11 @@ public sealed class SensitiveFlowTests : IDisposable
         Assert.Equal(["Plan.ctxs"], RootFiles());
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Made Plan plain.", cut.Find(".main-status").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Made Plan plain.", cut.Find(".main-status").TextContent), Wait);
         Assert.Equal(["Plan.md"], RootFiles());
         Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         Assert.Empty(cut.FindAll("li.note .locked"));
-        cut.WaitForAssertion(() => Assert.Equal(["Rename", "Delete", "Open in default editor", "Export", "Mark sensitive"], ToolbarButtons(cut)));
+        cut.WaitForAssertion(() => Assert.Equal(["Rename", "Delete", "Open in default editor", "Export", "Mark sensitive"], ToolbarButtons(cut)), Wait);
         Assert.Equal(1, data.Keys.Agrees);
     }
 
@@ -396,10 +400,10 @@ public sealed class SensitiveFlowTests : IDisposable
         await cut.Find("input.rename-title").InputAsync(new Microsoft.AspNetCore.Components.ChangeEventArgs { Value = "Project" });
         await cut.Find("button.save-name").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Project", cut.Find(".note-title").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Project", cut.Find(".note-title").TextContent), Wait);
         Assert.Equal(["Project.ctxs"], RootFiles());
         Assert.Equal(["Rename", "Delete", "Make plain", "Lock"], ToolbarButtons(cut));
-        cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.mount").Count));
+        cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.mount").Count), Wait);
         Assert.Equal("Secret\n", js.MountedText());
         Assert.Equal(1, data.Keys.Agrees);
         Assert.Equal("Secret\n", Unsealed("Project"));
@@ -419,8 +423,8 @@ public sealed class SensitiveFlowTests : IDisposable
         Assert.Equal(["Other.md", "Plan.ctxs"], RootFiles());
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal(["Other.md"], RootFiles()));
-        cut.WaitForAssertion(() => Assert.Equal(["Other"], cut.FindAll("li.note button.name").Select(b => b.TextContent).ToArray()));
+        cut.WaitForAssertion(() => Assert.Equal(["Other.md"], RootFiles()), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(["Other"], cut.FindAll("li.note button.name").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Empty(cut.FindAll(".note-editor"));
         Assert.Equal(1, data.Keys.Agrees);
     }
@@ -482,7 +486,7 @@ public sealed class SensitiveFlowTests : IDisposable
     {
         int mounts = js.Calls("ContextEditor.mount").Count;
         await NameButton(cut, name).ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count));
-        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")));
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
     }
 }
