@@ -874,6 +874,11 @@ input[type="password"]:disabled {
     text-align: center;
 }
 
+/* No border to tint on hover, so the toggle gets a soft background; focus keeps the global button:focus-visible ring. */
+.note-row .toggle:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent-strong) 15%, transparent);
+}
+
 /* The open subpage's ancestors above the toolbar; long titles are cut, the full name is in the title attribute. */
 .breadcrumb ol {
     display: flex;
