@@ -29,7 +29,19 @@ public sealed class ReleaseWorkflowTests
     private const string PackCommand = "dotnet pack src/Context -c Release -p:Version=\"$VERSION\"";
     private const string ReleaseCommand =
         "gh release create \"$TAG\" \"nupkg/Context.$VERSION.nupkg\" --title \"Context $VERSION\""
-        + " --notes-file .github/release-notes-header.md --generate-notes --target \"$TARGET\" --draft $PRERELEASE";
+        + " --notes-file \"$RUNNER_TEMP/release-notes.md\" --generate-notes --target \"$TARGET\" --draft $PRERELEASE";
+
+    private const string NotesCommand =
+        "sh .github/scripts/release-notes.sh \"$MACOS_SIGNING\" > \"$RUNNER_TEMP/release-notes.md\"";
+
+    private const string SigningVariable = "${{ vars.MACOS_SIGNING }}";
+    private const string AdHocStep = "Bundle, ad-hoc sign and zip";
+    private const string SigningStep = "Bundle, sign, notarize and zip";
+
+    private static readonly string[] SigningSecrets =
+    [
+        "MACOS_CERTIFICATE_P12", "MACOS_CERTIFICATE_PASSWORD", "NOTARY_KEY_P8", "NOTARY_KEY_ID", "NOTARY_ISSUER_ID",
+    ];
 
     private const string ViewCommand =
         "gh release view \"$TAG\" --json isDraft,targetCommitish,assets"
@@ -57,7 +69,7 @@ public sealed class ReleaseWorkflowTests
 
     private static readonly string[] MacStepNames =
     [
-        "Check out", "Check version", "Set up .NET", "Publish", "Bundle, ad-hoc sign and zip", "Upload",
+        "Check out", "Check version", "Set up .NET", "Publish", AdHocStep, SigningStep, "Upload",
     ];
 
     private static readonly string[] WindowsStepNames =
@@ -103,53 +115,118 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("uses: " + SetupDotnetAction + " # v4.3.1", ci, StringComparison.Ordinal);
     }
 
-    // AC-2 (133 AC-1, AC-2, AC-6): nothing is signed with a certificate (the macOS apps only ad-hoc, identity "-"),
-    // no secret, and github.token is the only credential.
+    // 146 AC-1, AC-2: the exact list of secret-bearing steps, of vars. uses and of GH_TOKEN uses. The five secrets
+    // reach only the env: of the signing step (which has no token), the switch only the job-level env: of release
+    // and desktop-macos, and github.token the same six steps as before.
     [Fact]
-    public void Workflow_SignsOnlyAdHoc_HasNoSecret_AndOnlyTheGitHubToken()
+    public void Workflow_ScopesSecretsToTheSigningStep_TheSwitchToTwoJobs_AndTheTokenToSixSteps()
     {
         string workflow = ReadWorkflow();
-        List<YamlMapping> steps = AllSteps(workflow);
+        YamlNode root = WorkflowYaml.Parse(workflow);
+        YamlMapping jobs = Map(Map(root)["jobs"]);
 
-        Assert.DoesNotContain("secrets.", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("pull_request_target", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("id-token", workflow, StringComparison.Ordinal);
+
+        // Step level: every env: entry that is not a PR field, as job/step: KEY=value.
+        List<string> stepEnv = [.. jobs.Keys.SelectMany(job => JobSteps(root, job)
+            .Where(step => step.ContainsKey("env"))
+            .SelectMany(step => Map(step["env"]).Entries
+                .Where(entry => !Scalar(entry.Value).StartsWith("${{ github.event.pull_request.", StringComparison.Ordinal))
+                .Select(entry => job + "/" + Scalar(step["name"]) + ": " + entry.Key + "=" + Scalar(entry.Value))))];
+        List<string> expected =
+        [
+            "release/Create GitHub release: GH_TOKEN=${{ github.token }}",
+            .. SigningSecrets.Select(name => "desktop-macos/" + SigningStep + ": " + name + "=${{ secrets." + name + " }}"),
+            "desktop-macos/Upload: GH_TOKEN=${{ github.token }}",
+            "desktop-windows/Pack: GH_TOKEN=${{ github.token }}",
+            "desktop-windows/Upload: GH_TOKEN=${{ github.token }}",
+            "publish/Publish GitHub release: GH_TOKEN=${{ github.token }}",
+            "publish/Prune old prereleases: GH_TOKEN=${{ github.token }}",
+        ];
+        Assert.Equal(expected, stepEnv);
+
+        // Job level: the switch in release and desktop-macos, nothing but the release outputs elsewhere.
+        List<string> jobEnv = [.. jobs.Keys
+            .Where(job => Map(jobs[job]).ContainsKey("env"))
+            .SelectMany(job => Map(Map(jobs[job])["env"]).Entries
+                .Where(entry => !Scalar(entry.Value).StartsWith("${{ needs.release.outputs.", StringComparison.Ordinal))
+                .Select(entry => job + ": " + entry.Key + "=" + Scalar(entry.Value)))];
         Assert.Equal(
-            ["Bundle, ad-hoc sign and zip"],
-            steps.Select(step => Scalar(step["name"])).Where(name => name.Contains("sign", StringComparison.OrdinalIgnoreCase)));
+            ["release: MACOS_SIGNING=" + SigningVariable, "desktop-macos: MACOS_SIGNING=" + SigningVariable], jobEnv);
+
+        // The file text (comments included) names secrets., vars. and the token nowhere else.
+        Assert.Equal(5, Regex.Matches(workflow, @"secrets\.").Count);
+        Assert.Equal(2, Regex.Matches(workflow, @"vars\.").Count);
+        Assert.Equal(2, Regex.Matches(workflow, Regex.Escape(SigningVariable)).Count);
+        Assert.Equal(6, Regex.Matches(workflow, Regex.Escape("${{ github.token }}")).Count);
+        Assert.DoesNotContain("GITHUB_TOKEN", workflow, StringComparison.Ordinal);
+
+        // Every step if: reads the switch from the job's env:, and only the two bundle steps have one.
+        List<string> conditions = [.. jobs.Keys.SelectMany(job => JobSteps(root, job)
+            .Where(step => step.ContainsKey("if"))
+            .Select(step => job + "/" + Scalar(step["name"]) + ": " + Scalar(step["if"])))];
+        Assert.Equal(
+            [
+                "desktop-macos/" + AdHocStep + ": env.MACOS_SIGNING != 'on'",
+                "desktop-macos/" + SigningStep + ": env.MACOS_SIGNING == 'on'",
+            ],
+            conditions);
+
+        // No script reads the switch or a secret any other way, and no script outside the macOS job signs.
         Assert.All(AllRunScripts(workflow), script =>
         {
+            Assert.DoesNotContain("vars.", script, StringComparison.Ordinal);
+            Assert.DoesNotContain("secrets.", script, StringComparison.Ordinal);
             Assert.DoesNotContain("openssl", script, StringComparison.Ordinal);
             Assert.DoesNotContain(".sig", script, StringComparison.Ordinal);
-            Assert.DoesNotContain("--sign", script, StringComparison.Ordinal);
-            Assert.DoesNotContain("signtool", script, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("notarytool", script, StringComparison.Ordinal);
-            Assert.DoesNotContain("--azure", script, StringComparison.Ordinal);
+            Assert.DoesNotContain("set -x", script, StringComparison.Ordinal);
         });
+        Assert.All(
+            JobRunScripts(workflow, "release")
+                .Concat(JobRunScripts(workflow, "desktop-windows"))
+                .Concat(JobRunScripts(workflow, "publish")),
+            script =>
+            {
+                Assert.DoesNotContain("codesign", script, StringComparison.Ordinal);
+                Assert.DoesNotContain("notarytool", script, StringComparison.Ordinal);
+                Assert.DoesNotContain("macos-sign", script, StringComparison.Ordinal);
+                Assert.All(SigningSecrets, name => Assert.DoesNotContain(name, script, StringComparison.Ordinal));
+            });
 
-        // Every codesign call either makes the ad-hoc signature or verifies it; no script outside the macOS job signs.
+        // The only codesign calls in the workflow itself are the ad-hoc path's; the signed path goes through the scripts.
         List<string> codesign = [.. AllRunScripts(workflow)
             .SelectMany(script => script.Split('\n'))
             .Select(line => line.Trim())
-            .Where(line => line.Contains("codesign", StringComparison.Ordinal) && !line.StartsWith('#'))];
+            .Where(line => line.StartsWith("codesign ", StringComparison.Ordinal))];
         Assert.Equal(
             [
                 "codesign --force --deep -s - \"app/$RID/Context.app\"",
                 "codesign --verify --deep --strict \"app/$RID/Context.app\"",
             ],
             codesign);
-        Assert.All(
-            JobRunScripts(workflow, "release").Concat(JobRunScripts(workflow, "desktop-windows")),
-            script => Assert.DoesNotContain("codesign", script, StringComparison.Ordinal));
+    }
 
-        List<string> tokens = [.. steps
-            .Where(step => step.ContainsKey("env"))
-            .SelectMany(step => Map(step["env"]).Entries)
-            .Where(entry => !Scalar(entry.Value).StartsWith("${{ github.event.pull_request.", StringComparison.Ordinal))
-            .Select(entry => entry.Key + "=" + Scalar(entry.Value))];
-        // Create, the macOS upload, the Windows vpk download (in Pack), the Windows upload, publish and prune.
-        Assert.Equal(Enumerable.Repeat("GH_TOKEN=${{ github.token }}", 6), tokens);
-        Assert.Equal(6, Regex.Matches(workflow, Regex.Escape("${{ github.token }}")).Count);
-        Assert.DoesNotContain("GITHUB_TOKEN", workflow, StringComparison.Ordinal);
+    // 146 AC-10: the Windows job is byte-for-byte what it was before signing came to the macOS job, and nothing
+    // in the workflow signs a Windows build.
+    [Fact]
+    public void WindowsJob_IsUnchanged_AndNothingSignsForWindows()
+    {
+        string workflow = ReadWorkflow();
+        int start = workflow.IndexOf("  desktop-windows:\n", StringComparison.Ordinal);
+        int end = workflow.IndexOf("\n  # Makes the draft public", StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start, "the desktop-windows job is not where it was");
+        string job = workflow[start..end];
+
+        Assert.Equal(
+            "DF58DE1BFB2167C2B48D34C9B1DEC048D443E5E7DF06BCD62930328E6B9795EF",
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(job))));
+        Assert.All(AllRunScripts(workflow), script =>
+        {
+            Assert.DoesNotContain("signtool", script, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("--azure", script, StringComparison.Ordinal);
+            Assert.DoesNotContain("--sign", script, StringComparison.Ordinal);
+        });
     }
 
     // AC-12: the structure check reads only the parsed model, so reformatting the YAML keeps it passing.
@@ -182,6 +259,15 @@ public sealed class ReleaseWorkflowTests
     [InlineData("desktop job without needs")]
     [InlineData("desktop job with its own permissions")]
     [InlineData("secret in a desktop job")]
+    [InlineData("secret at job level in release")]
+    [InlineData("secret in a release step")]
+    [InlineData("secret in a desktop-windows step")]
+    [InlineData("signing step without if")]
+    [InlineData("ad-hoc step without if")]
+    [InlineData("if that reads vars")]
+    [InlineData("signing step with GH_TOKEN")]
+    [InlineData("secret in the upload step")]
+    [InlineData("switch in desktop-windows")]
     [InlineData("publish without the macOS job")]
     [InlineData("publish without the Windows job")]
     [InlineData("publish with its own permissions")]
@@ -223,6 +309,41 @@ public sealed class ReleaseWorkflowTests
                 "      TAG: ${{ needs.release.outputs.tag }}\n",
                 "      TAG: ${{ needs.release.outputs.tag }}\n      KEY: ${{ secrets.SIGNING_KEY }}\n",
                 0),
+            // 146 AC-1, AC-2: a secret only in the signing step's env:, which has its if: and no token; the switch
+            // only through the job-level env: of release and desktop-macos.
+            "secret at job level in release" => ReplaceNth(
+                workflow,
+                "      MACOS_SIGNING: " + SigningVariable + "\n",
+                "      MACOS_SIGNING: " + SigningVariable + "\n      KEY: ${{ secrets.NOTARY_KEY_P8 }}\n",
+                0),
+            "secret in a release step" => ReplaceNth(
+                workflow,
+                "          GH_TOKEN: ${{ github.token }}\n",
+                "          GH_TOKEN: ${{ github.token }}\n          KEY: ${{ secrets.NOTARY_KEY_P8 }}\n",
+                0),
+            "secret in a desktop-windows step" => ReplaceNth(
+                workflow,
+                "          GH_TOKEN: ${{ github.token }}\n",
+                "          GH_TOKEN: ${{ github.token }}\n          KEY: ${{ secrets.NOTARY_KEY_P8 }}\n",
+                2),
+            "secret in the upload step" => ReplaceNth(
+                workflow,
+                "          GH_TOKEN: ${{ github.token }}\n",
+                "          GH_TOKEN: ${{ github.token }}\n          KEY: ${{ secrets.NOTARY_KEY_P8 }}\n",
+                1),
+            "signing step without if" => ReplaceOnce(workflow, "        if: env.MACOS_SIGNING == 'on'\n", string.Empty),
+            "ad-hoc step without if" => ReplaceOnce(workflow, "        if: env.MACOS_SIGNING != 'on'\n", string.Empty),
+            "if that reads vars" => ReplaceOnce(
+                workflow, "        if: env.MACOS_SIGNING == 'on'\n", "        if: vars.MACOS_SIGNING == 'on'\n"),
+            "signing step with GH_TOKEN" => ReplaceOnce(
+                workflow,
+                "          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}\n",
+                "          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}\n          GH_TOKEN: ${{ github.token }}\n"),
+            "switch in desktop-windows" => ReplaceNth(
+                workflow,
+                "      TAG: ${{ needs.release.outputs.tag }}\n",
+                "      TAG: ${{ needs.release.outputs.tag }}\n      MACOS_SIGNING: " + SigningVariable + "\n",
+                1),
             // 135 AC-9: the publish job must wait for both desktop jobs, keep the workflow's token scope, never run
             // after a failed job, take its values only through env:, keep no credentials, and the release must
             // start as a draft that only the publish step makes public.
@@ -292,7 +413,21 @@ public sealed class ReleaseWorkflowTests
             "--channel develop",
             "default channel (win)",
             "looks at start-up for a newer build",
-            "Nothing is signed",
+            // 146 AC-11: the switch, every secret by name, the scripts, the entitlements file and the trust model.
+            "the macOS app can be signed and notarized, the Windows build is unsigned, and the updater checks no signature",
+            "repository variable MACOS_SIGNING (empty, off or on",
+            "MACOS_CERTIFICATE_P12",
+            "MACOS_CERTIFICATE_PASSWORD",
+            "NOTARY_KEY_P8",
+            "NOTARY_KEY_ID",
+            "NOTARY_ISSUER_ID",
+            ".github/scripts/macos-sign.sh",
+            ".github/scripts/macos-notarize.sh",
+            ".github/scripts/release-notes.sh",
+            ".github/scripts/macos-entitlements.plist",
+            "allow-jit only",
+            "It fails closed",
+            "nothing falls back to the ad-hoc signature",
             "ad-hoc signature",
             "checks no signature",
             "HTTPS from this repository's releases, which only this workflow writes",
@@ -309,6 +444,8 @@ public sealed class ReleaseWorkflowTests
         Assert.All(expected, text => Assert.Contains(text, flat, StringComparison.Ordinal));
         Assert.DoesNotContain("there is no desktop build", flat, StringComparison.Ordinal);
         Assert.DoesNotContain("leaves a release with fewer assets", flat, StringComparison.Ordinal);
+        Assert.DoesNotContain("Nothing is signed", flat, StringComparison.Ordinal);
+        Assert.DoesNotContain("release-notes-header", workflow, StringComparison.Ordinal);
     }
 
     // AC-2: the version is set first, the tests run on the normal build, then the pack takes the version.
@@ -339,7 +476,7 @@ public sealed class ReleaseWorkflowTests
 
         // 133 AC-1, 135 AC-4: the same for every run: script of the two desktop jobs and of publish.
         List<string> all = AllRunScripts(ReadWorkflow());
-        Assert.Equal(5 + 4 + 5 + 3, all.Count);
+        Assert.Equal(5 + 5 + 5 + 3, all.Count);
         Assert.All(all, script => Assert.DoesNotContain("${{", script, StringComparison.Ordinal));
         Assert.All(all, script => Assert.DoesNotContain("eval", script, StringComparison.Ordinal));
     }
@@ -745,8 +882,8 @@ public sealed class ReleaseWorkflowTests
         string[] lines = [.. release.Split('\n').Select(line => line.Trim()).Where(line => line.Length > 0)];
 
         Assert.Equal(
-            ["PRERELEASE=\"\"", "case \"$VERSION\" in", "*-*) PRERELEASE=\"--prerelease\" ;;", "esac", ReleaseCommand],
-            lines);
+            ["PRERELEASE=\"\"", "case \"$VERSION\" in", "*-*) PRERELEASE=\"--prerelease\" ;;", "esac", NotesCommand, ReleaseCommand],
+            lines.Where(line => !line.StartsWith('#')));
         Assert.DoesNotContain("$GITHUB_SHA", release, StringComparison.Ordinal);
     }
 
@@ -915,7 +1052,20 @@ public sealed class ReleaseWorkflowTests
     [InlineData("`paths-ignore`")]
     [InlineData("`Prune old prereleases`")]
     [InlineData("`Context.<version>.nupkg`")]
-    [InlineData("nothing is signed")]
+    [InlineData("the macOS app can be signed and notarized, the Windows build is unsigned, and the updater checks no signature")]
+    [InlineData("repository variable `MACOS_SIGNING`")]
+    [InlineData("`env.MACOS_SIGNING`")]
+    [InlineData("`MACOS_CERTIFICATE_P12`")]
+    [InlineData("`MACOS_CERTIFICATE_PASSWORD`")]
+    [InlineData("`NOTARY_KEY_P8`")]
+    [InlineData("`NOTARY_KEY_ID`")]
+    [InlineData("`NOTARY_ISSUER_ID`")]
+    [InlineData(".github/scripts/macos-sign.sh <Context.app> <identity> <entitlements>")]
+    [InlineData(".github/scripts/macos-notarize.sh <Context.app> <zip> <key.p8> <key-id> <issuer-id>")]
+    [InlineData(".github/scripts/macos-entitlements.plist")]
+    [InlineData("`com.apple.security.cs.allow-jit`")]
+    [InlineData("`Bundle, sign, notarize and zip`")]
+    [InlineData("fails closed")]
     [InlineData("`desktop-macos` (`macos-latest`)")]
     [InlineData("`desktop-windows` (`windows-latest`, `shell: bash`)")]
     [InlineData("`needs: release`")]
@@ -930,10 +1080,11 @@ public sealed class ReleaseWorkflowTests
     [InlineData("updates itself at start-up")]
     [InlineData("**Trust model:**")]
     [InlineData("no signature check in the updater")]
+    [InlineData("the Windows build is unsigned")]
     [InlineData("HTTPS download from this repository's GitHub releases, which only the release workflow writes")]
     [InlineData("No token is embedded")]
-    [InlineData("`github.token` is the only credential")]
-    [InlineData(".github/release-notes-header.md")]
+    [InlineData("`github.token` is the only credential of every other step")]
+    [InlineData(".github/scripts/release-notes.sh <macos>")]
     [InlineData("--clobber`, so re-running a failed desktop job works")]
     [InlineData("commit SHAs")]
     [InlineData("tests/Context.Tests/WorkflowYaml.cs")]
@@ -961,13 +1112,29 @@ public sealed class ReleaseWorkflowTests
         Assert.DoesNotContain("console app only", text, StringComparison.Ordinal);
         Assert.DoesNotContain("leaves a release with fewer assets", Regex.Replace(text, @"\s+", " "), StringComparison.Ordinal);
         Assert.DoesNotContain("Three jobs", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("release-notes-header", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("builds are only ad-hoc signed", Regex.Replace(text, @"\s+", " "), StringComparison.Ordinal);
     }
 
     // 133 AC-2: both architectures are published self-contained with the version, then bundled, ad-hoc signed,
     // verified and zipped, and both zips are uploaded to the release's tag.
+    // 146 AC-1, AC-3: this is the path while signing is not on, and its three scripts are what they were.
     [Fact]
     public void MacJob_PublishesBundlesSignsAdHocZipsAndUploadsBothArchitectures()
     {
+        YamlMapping adHoc = Assert.Single(
+            JobSteps(WorkflowYaml.Parse(ReadWorkflow()), "desktop-macos"), step => Scalar(step["name"]) == AdHocStep);
+        Assert.Equal("env.MACOS_SIGNING != 'on'", Scalar(adHoc["if"]));
+        Assert.Equal(
+            "for RID in osx-arm64 osx-x64; do\n"
+                + "  sh .github/scripts/macos-app.sh \"publish/$RID\" \"$VERSION\" \"app/$RID\"\n"
+                + "  codesign --force --deep -s - \"app/$RID/Context.app\"\n"
+                + "  codesign --verify --deep --strict \"app/$RID/Context.app\"\n"
+                + "  # ditto keeps the modes and the signature's extended attributes; the zip holds Context.app itself.\n"
+                + "  ditto -c -k --keepParent \"app/$RID/Context.app\" \"Context-$VERSION-$RID.zip\"\n"
+                + "done",
+            Scalar(adHoc["run"]).TrimEnd('\n'));
+
         string[] publish = Lines(JobScript("desktop-macos", "Publish"));
         Assert.Equal(
             ["for RID in osx-arm64 osx-x64; do", PublishCommand + " -r \"$RID\" -o \"publish/$RID\"", "done"],
@@ -1561,16 +1728,851 @@ public sealed class ReleaseWorkflowTests
             script => Assert.DoesNotContain("gh release upload", script, StringComparison.Ordinal));
     }
 
-    // 133 AC-13: the release notes start with how to open an unsigned build on macOS and Windows.
-    [Fact]
-    public void ReleaseNotesHeader_SaysHowToOpenAnUnsignedBuild()
+    // 146 AC-9: the release notes header comes from release-notes.sh. Off (or empty) is the text the header file
+    // had: how to open an unsigned build on macOS and Windows.
+    [Theory]
+    [InlineData("off")]
+    [InlineData("")]
+    public async Task ReleaseNotes_Off_SayHowToOpenAnUnsignedBuild(string macos)
     {
-        string path = Path.Combine(RepoRoot, ".github", "release-notes-header.md");
-        Assert.True(File.Exists(path), path + " is missing");
-        string text = Regex.Replace(File.ReadAllText(path), @"\s+", " ");
+        ScriptResult result = await RunScript("release-notes.sh", macos, string.Empty, string.Empty);
 
+        Assert.True(result.Code == 0, "exit " + result.Code + ": " + result.Err);
+        Assert.Equal(string.Empty, result.Err);
+        Assert.Empty(result.FilesCreated);
+        Assert.StartsWith("## Desktop app (unsigned test builds)\n", result.Out, StringComparison.Ordinal);
+        string text = Regex.Replace(result.Out, @"\s+", " ");
         Assert.Contains("`Open Anyway`", text, StringComparison.Ordinal);
         Assert.Contains("`xattr -dr com.apple.quarantine Context.app`", text, StringComparison.Ordinal);
+        Assert.Contains("The desktop builds are not signed yet", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("notarized", text, StringComparison.Ordinal);
+        AssertSharedReleaseNotes(result.Out);
+    }
+
+    // 146 AC-9: with signing on the macOS paragraph says signed and notarized and names no workaround; the Windows,
+    // update and console-tool text is the same as with signing off.
+    [Fact]
+    public async Task ReleaseNotes_On_SayTheMacBuildIsSignedAndNotarized_AndKeepTheRest()
+    {
+        ScriptResult on = await RunScript("release-notes.sh", "on", string.Empty, string.Empty);
+        ScriptResult off = await RunScript("release-notes.sh", "off", string.Empty, string.Empty);
+
+        Assert.True(on.Code == 0, "exit " + on.Code + ": " + on.Err);
+        Assert.Equal(string.Empty, on.Err);
+        Assert.StartsWith("## Desktop app\n", on.Out, StringComparison.Ordinal);
+        string text = Regex.Replace(on.Out, @"\s+", " ");
+        Assert.Contains("- **macOS:**", text, StringComparison.Ordinal);
+        Assert.Contains("signed and notarized by Apple", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Open Anyway", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("xattr", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("quarantine", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("unsigned test builds", text, StringComparison.Ordinal);
+        Assert.Contains("The Windows build is not signed yet", text, StringComparison.Ordinal);
+        AssertSharedReleaseNotes(on.Out);
+
+        // From the Windows paragraph on, both texts are the same bytes.
+        string marker = "- **Windows:**";
+        Assert.Equal(
+            off.Out[off.Out.IndexOf(marker, StringComparison.Ordinal)..],
+            on.Out[on.Out.IndexOf(marker, StringComparison.Ordinal)..]);
+    }
+
+    // 146 AC-9: any other value is refused with nothing on stdout, and is never evaluated.
+    [Theory]
+    [InlineData("ON")]
+    [InlineData("On")]
+    [InlineData("true")]
+    [InlineData("on ")]
+    [InlineData(" off")]
+    [InlineData("on\n")]
+    [InlineData("on; touch MARKER")]
+    [InlineData("$(touch MARKER)")]
+    [InlineData("`touch MARKER`")]
+    public async Task ReleaseNotes_RefuseAnyOtherValue(string macos)
+    {
+        ScriptResult result = await RunScript("release-notes.sh", macos, string.Empty, string.Empty);
+
+        Assert.NotEqual(0, result.Code);
+        Assert.Equal(string.Empty, result.Out);
+        Assert.Equal("usage: release-notes.sh <macos: on, off or empty>\n", result.Err);
+        Assert.Empty(result.FilesCreated);
+    }
+
+    // 146 AC-9: the release job writes the header to a file under $RUNNER_TEMP and passes it to gh; the script
+    // prints plain Markdown from quoted here-documents and never evaluates its argument.
+    [Fact]
+    public async Task ReleaseNotes_ReachGhThroughANotesFile_AndTheScriptEvaluatesNothing()
+    {
+        string release = JobScript("release", "Create GitHub release");
+        Assert.Contains(NotesCommand + "\n", release, StringComparison.Ordinal);
+        Assert.Contains("--notes-file \"$RUNNER_TEMP/release-notes.md\" --generate-notes", release, StringComparison.Ordinal);
+        Assert.True(
+            release.IndexOf(NotesCommand, StringComparison.Ordinal) < release.IndexOf("gh release create", StringComparison.Ordinal),
+            "the notes are written before the release is created");
+        Assert.False(File.Exists(Path.Combine(RepoRoot, ".github", "release-notes-header.md")));
+
+        string source = ScriptSource("release-notes.sh");
+        string code = CodeLines(source);
+        Assert.StartsWith("#!/bin/sh\n", source, StringComparison.Ordinal);
+        Assert.Contains("set -eu\n", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("eval", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("sh -c", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("set -x", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("${{", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("<script", source, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(3, Regex.Matches(code, @"cat <<'NOTES'").Count);
+        Assert.Equal(3, Regex.Matches(code, @"<<").Count);
+
+        // No argument at all is refused as well.
+        if (!OperatingSystem.IsWindows())
+        {
+            string folder = NewTempFolder();
+            try
+            {
+                ScriptResult none = await RunBash(folder, [Path.Combine(RepoRoot, ".github", "scripts", "release-notes.sh")]);
+                Assert.NotEqual(0, none.Code);
+                Assert.Equal(string.Empty, none.Out);
+            }
+            finally
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    // 146 AC-1: the macOS job's first script fails unless the switch is empty, off or on (exact case).
+    [Theory]
+    [InlineData("", true)]
+    [InlineData("off", true)]
+    [InlineData("on", true)]
+    [InlineData("ON", false)]
+    [InlineData("On", false)]
+    [InlineData("true", false)]
+    [InlineData("on ", false)]
+    [InlineData("onn", false)]
+    [InlineData("$(touch MARKER)", false)]
+    public async Task MacCheckVersion_AcceptsOnlyEmptyOffOrOn(string value, bool accepted)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            ScriptResult result = await RunMac(
+                folder,
+                JobScript("desktop-macos", "Check version"),
+                new Dictionary<string, string> { ["VERSION"] = "1.2.3", ["TAG"] = "v1.2.3", ["MACOS_SIGNING"] = value });
+
+            Assert.Equal(accepted, result.Code == 0);
+            Assert.Equal(accepted ? string.Empty : "MACOS_SIGNING must be empty, 'off' or 'on'\n", result.Err);
+            Assert.Equal(string.Empty, result.Out);
+            Assert.Empty(StubLog(folder));
+            Assert.DoesNotContain("MARKER", result.FilesCreated);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 146 AC-8: with signing on each architecture goes through macos-app.sh, macos-sign.sh and macos-notarize.sh, in
+    // that order, to the same asset name, and the Upload step is the same script as with signing off.
+    [Fact]
+    public void MacJob_SignedPath_BundlesSignsNotarizesAndUploadsTheSameNames()
+    {
+        string[] lines = Lines(JobScript("desktop-macos", SigningStep));
+        string[] expected =
+        [
+            "for RID in osx-arm64 osx-x64; do",
+            "APP=\"app/$RID/Context.app\"",
+            "sh .github/scripts/macos-app.sh \"publish/$RID\" \"$VERSION\" \"app/$RID\" || fail bundle \"$RID\"",
+            "sh .github/scripts/macos-sign.sh \"$APP\" \"$IDENTITY\" .github/scripts/macos-entitlements.plist || CODE=\"$?\"",
+            "sh .github/scripts/macos-notarize.sh \"$APP\" \"Context-$VERSION-$RID.zip\" \"$P8\" \"$NOTARY_KEY_ID\" \"$NOTARY_ISSUER_ID\" || CODE=\"$?\"",
+            "done",
+        ];
+        int at = -1;
+        foreach (string line in expected)
+        {
+            int next = Array.IndexOf(lines, line, at + 1);
+            Assert.True(next > at, "'" + line + "' is missing or out of order");
+            at = next;
+        }
+
+        Assert.Equal("done", lines[^1]);
+        string script = JobScript("desktop-macos", SigningStep);
+        Assert.DoesNotContain(lines, line => line.StartsWith("codesign ", StringComparison.Ordinal));
+        // No ad-hoc identity ("-s -" followed by a space or the line end; "-s -k" is the keychain call's own option).
+        Assert.DoesNotMatch(@"-s -(\s|$)", script);
+        Assert.DoesNotContain("--deep", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("set -x", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("gh ", script, StringComparison.Ordinal);
+        Assert.Contains("umask 077\n", script, StringComparison.Ordinal);
+        // The tight umask ends before the first bundle is built.
+        Assert.True(
+            script.IndexOf("umask \"$UMASK_BEFORE\"\n", StringComparison.Ordinal) > script.IndexOf("umask 077\n", StringComparison.Ordinal)
+            && script.IndexOf("umask \"$UMASK_BEFORE\"\n", StringComparison.Ordinal) < script.IndexOf("macos-app.sh", StringComparison.Ordinal),
+            "the umask is not put back before macos-app.sh");
+        Assert.Contains("trap cleanup EXIT\n", script, StringComparison.Ordinal);
+        Assert.Equal(
+            ["gh release upload \"$TAG\" \"Context-$VERSION-osx-arm64.zip\" \"Context-$VERSION-osx-x64.zip\" --clobber"],
+            Lines(JobScript("desktop-macos", "Upload")));
+        Assert.Equal("Upload", MacStepNames[^1]);
+    }
+
+    // 146 AC-5: the entitlements file holds exactly one key, allow-jit = true.
+    [Fact]
+    public void Entitlements_HoldOnlyAllowJit()
+    {
+        string path = Path.Combine(RepoRoot, ".github", "scripts", "macos-entitlements.plist");
+        XmlReaderSettings settings = new XmlReaderSettings { DtdProcessing = DtdProcessing.Ignore, XmlResolver = null };
+        using XmlReader reader = XmlReader.Create(path, settings);
+        XElement root = XDocument.Load(reader).Root!;
+
+        Assert.Equal("plist", root.Name.LocalName);
+        XElement dict = Assert.Single(root.Elements());
+        Assert.Equal("dict", dict.Name.LocalName);
+        List<XElement> children = [.. dict.Elements()];
+        Assert.Equal(["key", "true"], children.Select(child => child.Name.LocalName));
+        Assert.Equal("com.apple.security.cs.allow-jit", children[0].Value);
+    }
+
+    // 146 AC-4: every file under Contents/MacOS except the main executable, then the main executable, then the
+    // bundle, each with the hardened-runtime options and the identity; never --deep or "-" when signing; then verify.
+    [Fact]
+    public async Task MacSignScript_SignsInsideOut_ThenVerifies()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            WriteApp(folder);
+
+            ScriptResult result = await RunMac(folder, SignCall("out/Context.app", SigningIdentity, "ent.plist"));
+
+            Assert.True(result.Code == 0, "exit " + result.Code + ": " + result.Err);
+            string sign = "codesign --force --timestamp --options runtime --entitlements ent.plist -s " + SigningIdentity + " ";
+            string macos = "out/Context.app/Contents/MacOS/";
+            Assert.Equal(
+                [
+                    sign + macos + "Context.Desktop.dll " + macos + "wwwroot/editor/editor.js " + macos + "wwwroot/index.html",
+                    sign + macos + "Context.Desktop",
+                    sign + "out/Context.app",
+                    "codesign --verify --deep --strict out/Context.app",
+                ],
+                MacLog(folder));
+            Assert.Equal(string.Empty, result.Err);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 146 AC-4: a wrong argument count, the ad-hoc identity, a missing bundle or entitlements file: no codesign call.
+    [Theory]
+    [InlineData("no arguments")]
+    [InlineData("two arguments")]
+    [InlineData("four arguments")]
+    [InlineData("ad-hoc identity")]
+    [InlineData("option as identity")]
+    [InlineData("empty identity")]
+    [InlineData("no bundle")]
+    [InlineData("no main executable")]
+    [InlineData("no entitlements")]
+    public async Task MacSignScript_Refuses_WithoutCallingCodesign(string change)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            WriteApp(folder);
+            string app = "out/Context.app";
+            if (change == "no bundle")
+            {
+                Directory.Delete(Path.Combine(folder, "out"), recursive: true);
+            }
+            else if (change == "no main executable")
+            {
+                File.Delete(Path.Combine(folder, "out", "Context.app", "Contents", "MacOS", "Context.Desktop"));
+            }
+            else if (change == "no entitlements")
+            {
+                File.Delete(Path.Combine(folder, "ent.plist"));
+            }
+
+            string[] arguments = change switch
+            {
+                "no arguments" => [],
+                "two arguments" => [app, SigningIdentity],
+                "four arguments" => [app, SigningIdentity, "ent.plist", "extra"],
+                "ad-hoc identity" => [app, "-", "ent.plist"],
+                "option as identity" => [app, "--deep", "ent.plist"],
+                "empty identity" => [app, string.Empty, "ent.plist"],
+                _ => [app, SigningIdentity, "ent.plist"],
+            };
+            SortedDictionary<string, DateTime> before = Listing(folder);
+
+            ScriptResult result = await RunMac(folder, [MacScript("macos-sign.sh"), .. arguments]);
+
+            Assert.Equal(1, result.Code);
+            Assert.Equal(string.Empty, result.Out);
+            Assert.Single(result.Err.TrimEnd('\n').Split('\n'));
+            Assert.Empty(MacLog(folder));
+            Assert.Equal(before, WithoutStubs(Listing(folder)));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 146 AC-3, AC-4: a failed codesign call stops the script: exit 2 while signing (nothing later is signed), exit 3
+    // when the verification fails.
+    [Theory]
+    [InlineData("codesign --force*editor.js*", 2, 1)]
+    [InlineData("codesign --force*/Context.Desktop", 2, 2)]
+    [InlineData("codesign --force*/Context.app", 2, 3)]
+    [InlineData("codesign --verify*", 3, 4)]
+    public async Task MacSignScript_StopsAtTheFirstFailedCall(string fail, int code, int calls)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            WriteApp(folder);
+
+            ScriptResult result = await RunMac(
+                folder,
+                SignCall("out/Context.app", SigningIdentity, "ent.plist"),
+                new Dictionary<string, string> { ["STUB_FAIL"] = fail });
+
+            Assert.Equal(code, result.Code);
+            Assert.Equal(calls, MacLog(folder).Count);
+            Assert.Contains("macos-sign.sh: ", result.Err, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 146 AC-7: zip, submit and wait, staple, validate, assess, then the final zip again from the stapled app.
+    [Fact]
+    public async Task MacNotarizeScript_SubmitsStaplesAssesses_ThenWritesTheZip()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            WriteApp(folder);
+            File.WriteAllText(Path.Combine(folder, "key.p8"), NotaryKey);
+
+            ScriptResult result = await RunMac(
+                folder, NotarizeCall("out/Context.app", "zips/Context-1.2.3-osx-arm64.zip", "key.p8", NotaryKeyId, NotaryIssuer));
+
+            Assert.True(result.Code == 0, "exit " + result.Code + ": " + result.Err);
+            Assert.Equal(
+                [
+                    "ditto -c -k --keepParent out/Context.app zips/notarize.X/submit.zip",
+                    "xcrun notarytool submit zips/notarize.X/submit.zip --key key.p8 --key-id " + NotaryKeyId + " --issuer "
+                        + NotaryIssuer + " --wait",
+                    "xcrun stapler staple out/Context.app",
+                    "xcrun stapler validate out/Context.app",
+                    "spctl --assess --type execute out/Context.app",
+                    "ditto -c -k --keepParent out/Context.app zips/notarize.X/final.zip",
+                ],
+                MacLog(folder).Where(line => !line.StartsWith("p8 ", StringComparison.Ordinal)));
+            // Only the final zip is left next to it, and the key never reaches the output.
+            Assert.Equal(["Context-1.2.3-osx-arm64.zip"], Entries(Path.Combine(folder, "zips")));
+            Assert.Contains("status: Accepted", result.Out, StringComparison.Ordinal);
+            Assert.DoesNotContain(NotaryKey, result.Out + result.Err, StringComparison.Ordinal);
+            Assert.Equal(string.Empty, result.Err);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 146 AC-3, AC-7: any failed step (also exit code 0 with the status Invalid) exits non-zero with the stage's
+    // code, calls nothing after it and leaves no file at the zip's name.
+    [Theory]
+    [InlineData("ditto*submit.zip", false, 2, 1)]
+    [InlineData("xcrun notarytool*", false, 2, 2)]
+    [InlineData("", true, 2, 2)]
+    [InlineData("xcrun stapler staple*", false, 3, 3)]
+    [InlineData("xcrun stapler validate*", false, 3, 4)]
+    [InlineData("spctl*", false, 4, 5)]
+    [InlineData("ditto*final.zip", false, 5, 6)]
+    public async Task MacNotarizeScript_FailedStep_LeavesNoZip(string fail, bool invalid, int code, int calls)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            WriteApp(folder);
+            File.WriteAllText(Path.Combine(folder, "key.p8"), NotaryKey);
+            Dictionary<string, string> environment = [];
+            if (fail.Length > 0)
+            {
+                environment["STUB_FAIL"] = fail;
+            }
+
+            if (invalid)
+            {
+                environment["STUB_INVALID_AT"] = "0";
+            }
+
+            ScriptResult result = await RunMac(
+                folder,
+                NotarizeCall("out/Context.app", "zips/Context-1.2.3-osx-arm64.zip", "key.p8", NotaryKeyId, NotaryIssuer),
+                environment);
+
+            Assert.Equal(code, result.Code);
+            Assert.Equal(calls, MacLog(folder).Count(line => !line.StartsWith("p8 ", StringComparison.Ordinal)));
+            Assert.Empty(Entries(Path.Combine(folder, "zips")));
+            Assert.Contains("macos-notarize.sh: ", result.Err, StringComparison.Ordinal);
+            Assert.DoesNotContain(NotaryKey, result.Out + result.Err, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 146 AC-7: a wrong or missing argument is refused before anything is created or called.
+    [Theory]
+    [InlineData("no arguments")]
+    [InlineData("four arguments")]
+    [InlineData("six arguments")]
+    [InlineData("empty key id")]
+    [InlineData("empty issuer")]
+    [InlineData("no bundle")]
+    [InlineData("no key file")]
+    [InlineData("zip already there")]
+    public async Task MacNotarizeScript_Refuses_BeforeAnythingIsCreated(string change)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            WriteApp(folder);
+            string app = "out/Context.app";
+            string zip = "zips/x.zip";
+            if (change != "no key file")
+            {
+                File.WriteAllText(Path.Combine(folder, "key.p8"), NotaryKey);
+            }
+
+            if (change == "no bundle")
+            {
+                Directory.Delete(Path.Combine(folder, "out"), recursive: true);
+            }
+            else if (change == "zip already there")
+            {
+                File.WriteAllText(Path.Combine(folder, "zips", "x.zip"), "old");
+            }
+
+            string[] arguments = change switch
+            {
+                "no arguments" => [],
+                "four arguments" => [app, zip, "key.p8", NotaryKeyId],
+                "six arguments" => [app, zip, "key.p8", NotaryKeyId, NotaryIssuer, "extra"],
+                "empty key id" => [app, zip, "key.p8", string.Empty, NotaryIssuer],
+                "empty issuer" => [app, zip, "key.p8", NotaryKeyId, string.Empty],
+                _ => [app, zip, "key.p8", NotaryKeyId, NotaryIssuer],
+            };
+            SortedDictionary<string, DateTime> before = Listing(folder);
+
+            ScriptResult result = await RunMac(folder, [MacScript("macos-notarize.sh"), .. arguments]);
+
+            Assert.Equal(1, result.Code);
+            Assert.Equal(string.Empty, result.Out);
+            Assert.Single(result.Err.TrimEnd('\n').Split('\n'));
+            Assert.Empty(MacLog(folder));
+            Assert.Equal(before, WithoutStubs(Listing(folder)));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 146 AC-4, AC-7: both scripts are POSIX sh in the style of macos-app.sh and never evaluate an argument.
+    [Theory]
+    [InlineData("macos-sign.sh")]
+    [InlineData("macos-notarize.sh")]
+    public void MacSigningScripts_EvaluateNothing(string script)
+    {
+        string source = ScriptSource(script);
+        string code = CodeLines(source);
+
+        Assert.StartsWith("#!/bin/sh\n", source, StringComparison.Ordinal);
+        Assert.Contains("set -eu\n", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("eval", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("sh -c", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("set -x", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("curl", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("-s -", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("gh ", code, StringComparison.Ordinal);
+        if (script == "macos-sign.sh")
+        {
+            // --deep only verifies; the three signing calls never have it.
+            Assert.Equal("codesign --verify --deep --strict \"$app\"", Assert.Single(
+                Lines(source), line => line.Contains("--deep", StringComparison.Ordinal))
+                .Replace("if ! ", string.Empty, StringComparison.Ordinal)
+                .Replace("; then", string.Empty, StringComparison.Ordinal));
+            Assert.Equal(
+                3,
+                Regex.Matches(code, Regex.Escape(
+                    "codesign --force --timestamp --options runtime --entitlements \"$entitlements\" -s \"$identity\"")).Count);
+        }
+    }
+
+    // 146 AC-3, AC-6, AC-8: the signing step with every secret set: a new keychain under $RUNNER_TEMP with a random
+    // password, the decoded .p12 and the .p8 readable only by the user, the one Developer ID identity by its hash,
+    // then per architecture bundle, sign, notarize; both zips at their asset names; keychain and key files removed;
+    // no secret value in the output.
+    [Theory]
+    [InlineData("1.2.3")]
+    [InlineData("1.2.4-develop.7")]
+    public async Task SigningStep_SignsAndNotarizesBothArchitectures_AndCleansUp(string version)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            ScriptResult result = await RunSigningStep(folder, version);
+
+            Assert.True(result.Code == 0, "exit " + result.Code + ": " + result.Err);
+            string keychain = "runner-temp/macos-signing.X/signing.keychain-db";
+            List<string> expected =
+            [
+                "security create-keychain -p <random> " + keychain,
+                "security set-keychain-settings -lut 21600 " + keychain,
+                "security unlock-keychain -p <random> " + keychain,
+                "security import runner-temp/macos-signing.X/certificate.p12 -k " + keychain + " -f pkcs12 -P "
+                    + CertificatePassword + " -T /usr/bin/codesign",
+                "p12 -rw------- " + CertificateBytes,
+                "security set-key-partition-list -S apple-tool:,apple: -s -k <random> " + keychain,
+                "security list-keychains -d user -s " + keychain,
+                "security find-identity -v -p codesigning " + keychain,
+            ];
+            foreach (string rid in new[] { "osx-arm64", "osx-x64" })
+            {
+                string app = "app/" + rid + "/Context.app";
+                string macos = app + "/Contents/MacOS/";
+                string sign = "codesign --force --timestamp --options runtime --entitlements"
+                    + " .github/scripts/macos-entitlements.plist -s " + SigningIdentity + " ";
+                expected.AddRange(
+                [
+                    sign + macos + "Context.Desktop.dll " + macos + "wwwroot/editor/editor.js " + macos + "wwwroot/index.html",
+                    sign + macos + "Context.Desktop",
+                    sign + app,
+                    "codesign --verify --deep --strict " + app,
+                    "ditto -c -k --keepParent " + app + " ./notarize.X/submit.zip",
+                    "xcrun notarytool submit ./notarize.X/submit.zip --key runner-temp/macos-signing.X/notary-key.p8 --key-id "
+                        + NotaryKeyId + " --issuer " + NotaryIssuer + " --wait",
+                    "p8 -rw------- " + NotaryKey,
+                    "xcrun stapler staple " + app,
+                    "xcrun stapler validate " + app,
+                    "spctl --assess --type execute " + app,
+                    "ditto -c -k --keepParent " + app + " ./notarize.X/final.zip",
+                ]);
+            }
+
+            expected.Add("security delete-keychain " + keychain);
+            Assert.Equal(expected, MacLog(folder));
+
+            // AC-8: the same two asset names as the ad-hoc path, each written from its own stapled app.
+            foreach (string rid in new[] { "osx-arm64", "osx-x64" })
+            {
+                Assert.Equal(
+                    "zip of app/" + rid + "/Context.app\n",
+                    File.ReadAllText(Path.Combine(folder, "Context-" + version + "-" + rid + ".zip")));
+            }
+
+            Assert.DoesNotContain(result.FilesCreated, name => name.StartsWith("notarize.", StringComparison.Ordinal));
+            // AC-6: the keychain, the .p12 and the .p8 are gone.
+            Assert.Empty(Entries(Path.Combine(folder, "runner-temp")));
+            AssertNoSecret(result);
+            // The random keychain password is 48 hex characters, new on every run.
+            Assert.Matches("^security create-keychain -p [0-9a-f]{48} ", StubLog(folder)[0]);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 146 AC-6, AC-8 (round 1 security 1): the umask that keeps the key files private does not reach the bundle. Under
+    // the runner's usual umask the signed Context.app has the same modes as the ad-hoc one (everyone can read and
+    // run it), while the .p12 and the .p8 stay readable only by the user.
+    [Fact]
+    public async Task SigningStep_ShippedAppKeepsTheAdHocModes_AndTheKeyFilesStayPrivate()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string signed = NewTempFolder();
+        string adHoc = NewTempFolder();
+        try
+        {
+            Dictionary<string, List<string>> modes = [];
+            foreach ((string folder, string step) in new[] { (signed, SigningStep), (adHoc, AdHocStep) })
+            {
+                ScriptResult result = await RunSigningStep(folder, "1.2.3", step: step, prefix: "umask 022\n");
+
+                Assert.True(result.Code == 0, "exit " + result.Code + ": " + result.Err);
+                List<string> found = [];
+                foreach (string rid in new[] { "osx-arm64", "osx-x64" })
+                {
+                    string app = Path.Combine(folder, "app", rid, "Context.app");
+                    foreach (string path in new[]
+                    {
+                        app,
+                        Path.Combine(app, "Contents"),
+                        Path.Combine(app, "Contents", "MacOS"),
+                        Path.Combine(app, "Contents", "MacOS", "Context.Desktop"),
+                        Path.Combine(app, "Contents", "MacOS", "Context.Desktop.dll"),
+                        Path.Combine(app, "Contents", "MacOS", "wwwroot", "editor", "editor.js"),
+                        Path.Combine(app, "Contents", "Info.plist"),
+                    })
+                    {
+                        found.Add(Path.GetRelativePath(folder, path) + " " + Convert.ToString((int)File.GetUnixFileMode(path), 8));
+                    }
+                }
+
+                modes[step] = found;
+            }
+
+            Assert.Equal(modes[AdHocStep], modes[SigningStep]);
+            Assert.Contains("app/osx-arm64/Context.app 755", modes[SigningStep]);
+            Assert.Contains("app/osx-arm64/Context.app/Contents/MacOS/Context.Desktop 755", modes[SigningStep]);
+            Assert.Contains("app/osx-x64/Context.app/Contents/MacOS/Context.Desktop.dll 644", modes[SigningStep]);
+            Assert.Contains("app/osx-x64/Context.app/Contents/Info.plist 644", modes[SigningStep]);
+            List<string> log = MacLog(signed);
+            Assert.Contains("p12 -rw------- " + CertificateBytes, log);
+            Assert.Equal(2, log.Count(line => line == "p8 -rw------- " + NotaryKey));
+        }
+        finally
+        {
+            Directory.Delete(signed, recursive: true);
+            Directory.Delete(adHoc, recursive: true);
+        }
+    }
+
+    // 146 AC-3: a missing or empty secret fails the step before any tool is called, with one stderr line that names
+    // the variable; nothing is bundled, zipped or left under $RUNNER_TEMP.
+    [Theory]
+    [InlineData("MACOS_CERTIFICATE_P12", false)]
+    [InlineData("MACOS_CERTIFICATE_P12", true)]
+    [InlineData("MACOS_CERTIFICATE_PASSWORD", false)]
+    [InlineData("MACOS_CERTIFICATE_PASSWORD", true)]
+    [InlineData("NOTARY_KEY_P8", false)]
+    [InlineData("NOTARY_KEY_P8", true)]
+    [InlineData("NOTARY_KEY_ID", false)]
+    [InlineData("NOTARY_KEY_ID", true)]
+    [InlineData("NOTARY_ISSUER_ID", false)]
+    [InlineData("NOTARY_ISSUER_ID", true)]
+    public async Task SigningStep_MissingSecret_FailsBeforeAnyTool(string name, bool empty)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            ScriptResult result = await RunSigningStep(
+                folder, "1.2.3", new Dictionary<string, string?> { [name] = empty ? string.Empty : null });
+
+            Assert.NotEqual(0, result.Code);
+            Assert.Equal(name + " is not set; nothing was signed\n", result.Err);
+            Assert.Equal(string.Empty, result.Out);
+            Assert.Empty(MacLog(folder));
+            Assert.Empty(Entries(Path.Combine(folder, "runner-temp")));
+            Assert.DoesNotContain("app", result.FilesCreated);
+            Assert.DoesNotContain(result.FilesCreated, file => file.EndsWith(".zip", StringComparison.Ordinal));
+            AssertNoSecret(result);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 146 AC-3, AC-6: a failed tool, a notarization that is not Accepted or a certificate without exactly one
+    // Developer ID Application identity fails the step with one line of its own naming the stage and the
+    // architecture; no file at the failing architecture's asset name, the later architecture is not started,
+    // nothing falls back to ad-hoc, and the keychain and key files are removed all the same.
+    [Theory]
+    [InlineData("security create-keychain*", 0, "", "import", "")]
+    [InlineData("security import*", 0, "", "import", "")]
+    [InlineData("security set-key-partition-list*", 0, "", "import", "")]
+    [InlineData("security find-identity*", 0, "", "import", "")]
+    [InlineData("", 0, "no identity", "import", "")]
+    [InlineData("", 0, "two identities", "import", "")]
+    [InlineData("", 0, "other identity", "import", "")]
+    [InlineData("codesign --force*", 0, "", "sign", "osx-arm64")]
+    [InlineData("codesign --force*", 2, "", "sign", "osx-arm64")]
+    [InlineData("codesign --force*", 3, "", "sign", "osx-x64")]
+    [InlineData("codesign --verify*", 0, "", "verify", "osx-arm64")]
+    [InlineData("codesign --verify*", 1, "", "verify", "osx-x64")]
+    [InlineData("xcrun notarytool*", 0, "", "notarize", "osx-arm64")]
+    [InlineData("xcrun notarytool*", 1, "", "notarize", "osx-x64")]
+    [InlineData("", 0, "invalid 0", "notarize", "osx-arm64")]
+    [InlineData("", 0, "invalid 1", "notarize", "osx-x64")]
+    [InlineData("xcrun stapler staple*", 0, "", "staple", "osx-arm64")]
+    [InlineData("xcrun stapler staple*", 1, "", "staple", "osx-x64")]
+    [InlineData("xcrun stapler validate*", 1, "", "staple", "osx-x64")]
+    [InlineData("spctl*", 0, "", "assess", "osx-arm64")]
+    [InlineData("spctl*", 1, "", "assess", "osx-x64")]
+    [InlineData("ditto*final.zip", 1, "", "notarize", "osx-x64")]
+    public async Task SigningStep_FailedStage_FailsClosed(string fail, int skip, string answer, string stage, string rid)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            Dictionary<string, string?> environment = new Dictionary<string, string?>
+            {
+                ["STUB_FAIL_SKIP"] = skip.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            };
+            if (fail.Length > 0)
+            {
+                environment["STUB_FAIL"] = fail;
+            }
+
+            if (answer.StartsWith("invalid ", StringComparison.Ordinal))
+            {
+                environment["STUB_INVALID_AT"] = answer["invalid ".Length..];
+            }
+
+            string identity = "  1) " + SigningIdentity + " \"Developer ID Application: Example (TEAM123456)\"\n";
+            string? identities = answer switch
+            {
+                "no identity" => "     0 valid identities found\n",
+                "two identities" => identity
+                    + "  2) 89ABCDEF0123456789ABCDEF0123456789ABCDEF \"Developer ID Application: Other (TEAM654321)\"\n"
+                    + "     2 valid identities found\n",
+                "other identity" => "  1) " + SigningIdentity + " \"Apple Development: Example (TEAM123456)\"\n"
+                    + "     1 valid identities found\n",
+                _ => null,
+            };
+
+            ScriptResult result = await RunSigningStep(folder, "1.2.3", environment, identities);
+
+            Assert.NotEqual(0, result.Code);
+            string where = rid.Length > 0 ? rid : "before any architecture";
+            Assert.Equal(
+                ["macOS signing failed: " + stage + " (" + where + "); nothing is uploaded"],
+                result.Err.Split('\n').Where(line => line.StartsWith("macOS signing failed", StringComparison.Ordinal)));
+
+            List<string> log = MacLog(folder);
+            // No file at the failing architecture's asset name, and the later architecture was not started.
+            if (rid != "osx-x64")
+            {
+                Assert.DoesNotContain(result.FilesCreated, file => file.EndsWith(".zip", StringComparison.Ordinal));
+                Assert.DoesNotContain(log, line => line.Contains("osx-x64", StringComparison.Ordinal));
+                Assert.False(Directory.Exists(Path.Combine(folder, "app", "osx-x64")));
+            }
+            else
+            {
+                // The finished arm64 zip may remain; it is never uploaded because the step failed.
+                Assert.Equal(
+                    ["Context-1.2.3-osx-arm64.zip"],
+                    result.FilesCreated.Where(file => file.EndsWith(".zip", StringComparison.Ordinal)));
+            }
+
+            if (rid.Length == 0)
+            {
+                Assert.False(Directory.Exists(Path.Combine(folder, "app")));
+                Assert.DoesNotContain(log, line => line.StartsWith("codesign", StringComparison.Ordinal));
+            }
+
+            // Nothing falls back to ad-hoc, and signing never uses --deep.
+            Assert.All(log.Where(line => line.StartsWith("codesign --force", StringComparison.Ordinal)), line =>
+            {
+                Assert.DoesNotContain(" -s - ", line, StringComparison.Ordinal);
+                Assert.DoesNotContain("--deep", line, StringComparison.Ordinal);
+                Assert.Contains(" -s " + SigningIdentity + " ", line, StringComparison.Ordinal);
+            });
+            Assert.DoesNotContain(result.FilesCreated, name => name.StartsWith("notarize.", StringComparison.Ordinal));
+            // The trap ran: the keychain, the .p12 and the .p8 are gone.
+            Assert.Equal("security delete-keychain runner-temp/macos-signing.X/signing.keychain-db", log[^1]);
+            Assert.Empty(Entries(Path.Combine(folder, "runner-temp")));
+            AssertNoSecret(result);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 146 AC-3: Upload is the step after the signing step and has no if:, so a failed signing step skips it.
+    [Fact]
+    public void UploadStep_RunsOnlyAfterTheBundleStepsSucceeded()
+    {
+        List<YamlMapping> steps = JobSteps(WorkflowYaml.Parse(ReadWorkflow()), "desktop-macos");
+        List<string> names = [.. steps.Select(step => Scalar(step["name"]))];
+
+        Assert.Equal(names.IndexOf(SigningStep) + 1, names.IndexOf("Upload"));
+        Assert.Equal(names.IndexOf(AdHocStep) + 1, names.IndexOf(SigningStep));
+        Assert.All(steps, step => Assert.False(step.ContainsKey("continue-on-error")));
+        Assert.False(steps[^1].ContainsKey("if"));
+        Assert.DoesNotContain("||", Scalar(steps[^1]["run"]), StringComparison.Ordinal);
+    }
+
+    private const string SigningIdentity = "0123456789ABCDEF0123456789ABCDEF01234567";
+    private const string CertificateBytes = "p12-bytes-CERTSECRET";
+    private const string CertificatePassword = "p12-password-SECRET";
+    private const string NotaryKey = "P8-KEY-TEXT-SECRET";
+    private const string NotaryKeyId = "KEYID-SECRET";
+    private const string NotaryIssuer = "ISSUER-SECRET";
+
+    /// <summary>The Windows, update and console-tool text every release notes header has (146 AC-9).</summary>
+    private static void AssertSharedReleaseNotes(string notes)
+    {
+        string text = Regex.Replace(notes, @"\s+", " ");
         Assert.Contains("`More info`", text, StringComparison.Ordinal);
         Assert.Contains("`Run anyway`", text, StringComparison.Ordinal);
         Assert.True(
@@ -1580,13 +2582,238 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("Setup.exe", text, StringComparison.Ordinal);
         Assert.Contains("osx-arm64.zip", text, StringComparison.Ordinal);
         Assert.Contains("osx-x64.zip", text, StringComparison.Ordinal);
+        Assert.Contains("The installed app keeps itself up to date", text, StringComparison.Ordinal);
+        Assert.Contains("The macOS copy does not update itself", text, StringComparison.Ordinal);
+        Assert.Contains(
+            "- **Console tool:** `Context.<version>.nupkg` is the .NET tool package (command `context`).",
+            text,
+            StringComparison.Ordinal);
         // Plain Markdown text for `gh release create --notes-file`: nothing a workflow or a shell would expand.
         Assert.DoesNotContain("${{", text, StringComparison.Ordinal);
         Assert.DoesNotContain("<script", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(
-            "--notes-file .github/release-notes-header.md",
-            JobScript("release", "Create GitHub release"),
-            StringComparison.Ordinal);
+    }
+
+    private static void AssertNoSecret(ScriptResult result)
+    {
+        string output = result.Out + result.Err;
+        string[] secrets =
+        [
+            CertificateBytes, Convert.ToBase64String(Encoding.UTF8.GetBytes(CertificateBytes)), CertificatePassword,
+            NotaryKey, NotaryKeyId, NotaryIssuer,
+        ];
+        Assert.All(secrets, secret => Assert.DoesNotContain(secret, output, StringComparison.Ordinal));
+    }
+
+    /// <summary>A listing without the stub tools that <see cref="RunMac(string, string[], Dictionary{string, string}?, string?)"/> adds.</summary>
+    private static SortedDictionary<string, DateTime> WithoutStubs(SortedDictionary<string, DateTime> listing)
+    {
+        SortedDictionary<string, DateTime> rest = new SortedDictionary<string, DateTime>(StringComparer.Ordinal);
+        foreach (KeyValuePair<string, DateTime> entry in listing)
+        {
+            if (!entry.Key.StartsWith("stub-bin", StringComparison.Ordinal))
+            {
+                rest[entry.Key] = entry.Value;
+            }
+        }
+
+        return rest;
+    }
+
+    private static string MacScript(string script) => Path.Combine(RepoRoot, ".github", "scripts", script);
+
+    private static string[] SignCall(string app, string identity, string entitlements) =>
+        [MacScript("macos-sign.sh"), app, identity, entitlements];
+
+    private static string[] NotarizeCall(string app, string zip, string key, string keyId, string issuer) =>
+        [MacScript("macos-notarize.sh"), app, zip, key, keyId, issuer];
+
+    /// <summary>A stand-in Context.app in <c>out/</c>, an entitlements file and an empty <c>zips/</c> folder.</summary>
+    private static void WriteApp(string folder)
+    {
+        WritePublishFolder(folder);
+        string contents = Path.Combine(folder, "out", "Context.app", "Contents");
+        Directory.CreateDirectory(contents);
+        Directory.Move(Path.Combine(folder, "publish"), Path.Combine(contents, "MacOS"));
+        File.WriteAllText(Path.Combine(contents, "Info.plist"), "<plist/>\n");
+        File.WriteAllText(Path.Combine(folder, "ent.plist"), "<plist/>\n");
+        Directory.CreateDirectory(Path.Combine(folder, "zips"));
+    }
+
+    /// <summary>
+    /// The stub log without the folder's own path and the random parts (the <c>mktemp</c> suffixes and the keychain
+    /// password), and with the files of a several-file <c>codesign</c> call sorted (find gives them in any order).
+    /// </summary>
+    private static List<string> MacLog(string folder)
+    {
+        List<string> lines = [];
+        foreach (string raw in StubLog(folder))
+        {
+            string line = raw.Replace(folder + "/", string.Empty, StringComparison.Ordinal);
+            line = Regex.Replace(line, @"macos-signing\.[A-Za-z0-9]+", "macos-signing.X");
+            line = Regex.Replace(line, @"notarize\.[A-Za-z0-9]+/", "notarize.X/");
+            line = Regex.Replace(line, @" -(p|k) [0-9a-f]{48} ", " -$1 <random> ");
+            Match sign = Regex.Match(line, @"^(codesign --force .* -s \S+) (\S+( \S+)+)$");
+            if (sign.Success)
+            {
+                line = sign.Groups[1].Value + " "
+                    + string.Join(' ', sign.Groups[2].Value.Split(' ').Order(StringComparer.Ordinal));
+            }
+
+            lines.Add(line);
+        }
+
+        return lines;
+    }
+
+    /// <summary>
+    /// Runs the signing step of the macOS job in <paramref name="folder"/> (a copy of <c>.github/scripts</c>, a publish
+    /// folder per architecture, <c>runner-temp/</c> as <c>$RUNNER_TEMP</c>) with every secret set; a <c>null</c> value
+    /// in <paramref name="environment"/> removes a variable.
+    /// </summary>
+    private static async Task<ScriptResult> RunSigningStep(
+        string folder, string version, Dictionary<string, string?>? environment = null, string? identities = null,
+        string step = SigningStep, string prefix = "")
+    {
+        string scripts = Path.Combine(folder, ".github", "scripts");
+        Directory.CreateDirectory(scripts);
+        foreach (string script in Directory.GetFiles(Path.Combine(RepoRoot, ".github", "scripts")))
+        {
+            File.Copy(script, Path.Combine(scripts, Path.GetFileName(script)));
+        }
+
+        foreach (string rid in new[] { "osx-arm64", "osx-x64" })
+        {
+            string scratch = Path.Combine(folder, "scratch");
+            WritePublishFolder(scratch);
+            Directory.CreateDirectory(Path.Combine(folder, "publish"));
+            Directory.Move(Path.Combine(scratch, "publish"), Path.Combine(folder, "publish", rid));
+            // As dotnet publish leaves them on the runner: everyone can read and run the executable.
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(
+                    Path.Combine(folder, "publish", rid, "Context.Desktop"),
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead
+                        | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+            }
+            Directory.Delete(scratch);
+        }
+
+        Directory.CreateDirectory(Path.Combine(folder, "runner-temp"));
+        Dictionary<string, string?> all = new Dictionary<string, string?>
+        {
+            ["VERSION"] = version,
+            ["TAG"] = "v" + version,
+            ["MACOS_SIGNING"] = "on",
+            ["RUNNER_TEMP"] = Path.Combine(folder, "runner-temp"),
+            ["MACOS_CERTIFICATE_P12"] = Convert.ToBase64String(Encoding.UTF8.GetBytes(CertificateBytes)),
+            ["MACOS_CERTIFICATE_PASSWORD"] = CertificatePassword,
+            ["NOTARY_KEY_P8"] = NotaryKey,
+            ["NOTARY_KEY_ID"] = NotaryKeyId,
+            ["NOTARY_ISSUER_ID"] = NotaryIssuer,
+        };
+        foreach (KeyValuePair<string, string?> variable in environment ?? [])
+        {
+            all[variable.Key] = variable.Value;
+        }
+
+        Dictionary<string, string> set = [];
+        foreach (KeyValuePair<string, string?> variable in all)
+        {
+            if (variable.Value is not null)
+            {
+                set[variable.Key] = variable.Value;
+            }
+        }
+
+        return await RunMac(folder, prefix + JobScript("desktop-macos", step), set, identities);
+    }
+
+    /// <summary>Runs a step's script as the macOS runner does (<c>bash -e</c>) against the stub tools.</summary>
+    private static async Task<ScriptResult> RunMac(
+        string folder, string script, Dictionary<string, string>? environment = null, string? identities = null)
+    {
+        string file = Path.Combine(folder, "step.sh");
+        File.WriteAllText(file, script);
+        return await RunMac(folder, ["--noprofile", "--norc", "-e", file], environment, identities);
+    }
+
+    /// <summary>
+    /// Runs <c>bash</c> in <paramref name="folder"/> with stub <c>codesign</c>, <c>security</c>, <c>xcrun</c>,
+    /// <c>spctl</c> and <c>ditto</c> first on <c>PATH</c>: no real keychain, certificate, Apple account or network. Each
+    /// stub logs its name and arguments to <c>stub.log</c>. A call that matches the glob <c>STUB_FAIL</c> exits 1
+    /// (after <c>STUB_FAIL_SKIP</c> matching calls passed); the <c>STUB_INVALID_AT</c>-th <c>notarytool</c> call (from
+    /// 0) answers <c>Invalid</c> with exit code 0. <c>security import</c> and <c>notarytool</c> also log the mode and
+    /// the text of the key file they were given, <c>find-identity</c> prints <paramref name="identities"/>, and
+    /// <c>ditto</c> writes its zip.
+    /// </summary>
+    private static async Task<ScriptResult> RunMac(
+        string folder, string[] arguments, Dictionary<string, string>? environment = null, string? identities = null)
+    {
+        string bin = Path.Combine(folder, "stub-bin");
+        Directory.CreateDirectory(bin);
+        string stub = "#!/bin/sh\n"
+            + "name=\"$(basename \"$0\")\"\n"
+            + "line=\"$name $*\"\n"
+            + "calls=0\n"
+            + "if [ -f \"$STUB_LOG\" ]; then calls=\"$(grep -c '^xcrun notarytool ' \"$STUB_LOG\" || true)\"; fi\n"
+            + "printf '%s\\n' \"$line\" >> \"$STUB_LOG\"\n"
+            + "case \"$line\" in\n"
+            + "  $STUB_FAIL)\n"
+            + "    seen=0\n"
+            + "    if [ -f \"$STUB_HITS\" ]; then seen=\"$(grep -c '' \"$STUB_HITS\" || true)\"; fi\n"
+            + "    echo hit >> \"$STUB_HITS\"\n"
+            + "    if [ \"$seen\" -ge \"$STUB_FAIL_SKIP\" ]; then echo \"$name: stub failure\" >&2; exit 1; fi\n"
+            + "    ;;\n"
+            + "esac\n"
+            + "case \"$line\" in\n"
+            + "  'security create-keychain '*) : > \"$4\" ;;\n"
+            + "  'security delete-keychain '*) rm -f \"$2\" ;;\n"
+            + "  'security import '*) printf 'p12 %s %s\\n' \"$(ls -ln \"$2\" | cut -c1-10)\" \"$(cat \"$2\")\" >> \"$STUB_LOG\" ;;\n"
+            + "  'security find-identity '*) cat \"$STUB_IDENTITIES\" ;;\n"
+            + "  'xcrun notarytool submit '*)\n"
+            + "    printf 'p8 %s %s\\n' \"$(ls -ln \"$5\" | cut -c1-10)\" \"$(cat \"$5\")\" >> \"$STUB_LOG\"\n"
+            + "    status=Accepted\n"
+            + "    if [ \"$calls\" -eq \"$STUB_INVALID_AT\" ]; then status=Invalid; fi\n"
+            + "    printf 'Current status: In Progress...\\nCurrent status: %s...\\nProcessing complete\\n  id: 0000-1111\\n  status: %s\\n' \"$status\" \"$status\"\n"
+            + "    ;;\n"
+            + "  'ditto -c -k --keepParent '*)\n"
+            + "    if [ ! -d \"$4\" ]; then exit 1; fi\n"
+            + "    printf 'zip of %s\\n' \"$4\" > \"$5\"\n"
+            + "    ;;\n"
+            + "esac\n"
+            + "exit 0\n";
+        foreach (string tool in new[] { "codesign", "security", "xcrun", "spctl", "ditto" })
+        {
+            string path = Path.Combine(bin, tool);
+            File.WriteAllText(path, stub);
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+        }
+
+        string identityFile = Path.Combine(bin, "identities.txt");
+        File.WriteAllText(
+            identityFile,
+            identities ?? "  1) " + SigningIdentity + " \"Developer ID Application: Example (TEAM123456)\"\n"
+                + "     1 valid identities found\n");
+        Dictionary<string, string> all = new Dictionary<string, string>
+        {
+            ["HOME"] = folder,
+            ["PATH"] = bin + ":" + Environment.GetEnvironmentVariable("PATH"),
+            ["STUB_LOG"] = Path.Combine(folder, "stub.log"),
+            ["STUB_HITS"] = Path.Combine(bin, "hits.txt"),
+            ["STUB_FAIL"] = "no such call",
+            ["STUB_FAIL_SKIP"] = "0",
+            ["STUB_INVALID_AT"] = "-1",
+            ["STUB_IDENTITIES"] = identityFile,
+        };
+        foreach (KeyValuePair<string, string> variable in environment ?? [])
+        {
+            all[variable.Key] = variable.Value;
+        }
+
+        return await RunBash(folder, arguments, all);
     }
 
     /// <summary>
@@ -1618,7 +2845,9 @@ public sealed class ReleaseWorkflowTests
         YamlMapping jobs = Map(root["jobs"]);
         Assert.Equal(JobNames, jobs.Keys);
         YamlMapping job = Map(jobs["release"]);
-        Assert.Equal(["if", "outputs", "runs-on", "steps"], Sorted(job.Keys));
+        Assert.Equal(["env", "if", "outputs", "runs-on", "steps"], Sorted(job.Keys));
+        // 146 AC-1: the signing switch is the only job-level variable of the release job (no secret).
+        Assert.Equal(["MACOS_SIGNING=" + SigningVariable], Pairs(job["env"]));
         Assert.Equal(JobIf, Regex.Replace(Scalar(job["if"]), @"\s+", " ").Trim());
         Assert.Equal("ubuntu-latest", Scalar(job["runs-on"]));
         Assert.Equal(
@@ -1676,7 +2905,7 @@ public sealed class ReleaseWorkflowTests
         Assert.Equal(["env", "name", "run"], Sorted(release.Keys));
         Assert.Equal(["GH_TOKEN=${{ github.token }}"], Pairs(release["env"]));
         Assert.Equal(
-            ["PRERELEASE=\"\"", "case \"$VERSION\" in", "*-*) PRERELEASE=\"--prerelease\" ;;", "esac", ReleaseCommand],
+            ["PRERELEASE=\"\"", "case \"$VERSION\" in", "*-*) PRERELEASE=\"--prerelease\" ;;", "esac", NotesCommand, ReleaseCommand],
             Lines(Scalar(release["run"])).Where(line => !line.StartsWith('#')));
 
         // Event fields, refs and the token reach a script only as environment variables.
@@ -1767,13 +2996,13 @@ public sealed class ReleaseWorkflowTests
     }
 
     /// <summary>The SemVer and tag re-check that every job after <c>release</c> runs as its first script.</summary>
-    private static void AssertVersionCheck(YamlMapping step)
+    private static void AssertVersionCheck(YamlMapping step, int exits = 2)
     {
         Assert.Equal(["name", "run"], Sorted(step.Keys));
         string check = Scalar(step["run"]);
         Assert.Contains("if ! printf '%s' \"$VERSION\" | " + SemVerGrep + "; then", check, StringComparison.Ordinal);
         Assert.Contains("if [ \"$TAG\" != \"v$VERSION\" ]; then", check, StringComparison.Ordinal);
-        Assert.Equal(2, Regex.Matches(check, @"(?m)^\s*exit 1\s*$").Count);
+        Assert.Equal(exits, Regex.Matches(check, @"(?m)^\s*exit 1\s*$").Count);
         Assert.DoesNotContain("dotnet", check, StringComparison.Ordinal);
         Assert.DoesNotContain("gh ", check, StringComparison.Ordinal);
         Assert.DoesNotContain("||", check, StringComparison.Ordinal);
@@ -1793,13 +3022,20 @@ public sealed class ReleaseWorkflowTests
         Assert.Equal(["env", "needs", "runs-on", "steps"], keys);
         Assert.Equal("release", Scalar(job["needs"]));
         Assert.Equal(runner, Scalar(job["runs-on"]));
-        Assert.Equal(["TAG=" + TagOutput, "VERSION=" + VersionOutput], Pairs(job["env"]));
+        bool mac = name == "desktop-macos";
+        Assert.Equal(
+            mac
+                ? ["MACOS_SIGNING=" + SigningVariable, "TAG=" + TagOutput, "VERSION=" + VersionOutput]
+                : ["TAG=" + TagOutput, "VERSION=" + VersionOutput],
+            Pairs(job["env"]));
 
         List<YamlMapping> steps = JobSteps(root, name);
         Assert.Equal(stepNames, steps.Select(step => Scalar(step["name"])));
         Assert.All(steps, step => Assert.False(
-            step.ContainsKey("permissions") || step.ContainsKey("shell") || step.ContainsKey("continue-on-error")
-                || step.ContainsKey("if")));
+            step.ContainsKey("permissions") || step.ContainsKey("shell") || step.ContainsKey("continue-on-error")));
+        // Only the two bundle steps of the macOS job have an if: (checked below); a failed step still stops the job.
+        Assert.All(steps, step => Assert.True(
+            !step.ContainsKey("if") || (mac && (Scalar(step["name"]) == AdHocStep || Scalar(step["name"]) == SigningStep))));
         Assert.All(
             steps,
             step => Assert.True(step.ContainsKey("uses") != step.ContainsKey("run"), "each step has uses: or run:"));
@@ -1815,11 +3051,32 @@ public sealed class ReleaseWorkflowTests
         Assert.Equal(["dotnet-version=10.0.x"], Pairs(steps[2]["with"]));
 
         // The SemVer re-check is the first script, so it runs before any dotnet call (and before setup-dotnet).
-        AssertVersionCheck(steps[1]);
+        AssertVersionCheck(steps[1], mac ? 3 : 2);
+        if (mac)
+        {
+            // 146 AC-1: the switch is checked in the first script: only empty, off or on.
+            Assert.Equal(
+                ["case \"$MACOS_SIGNING\" in", "'' | off | on) ;;", "*)", "echo \"MACOS_SIGNING must be empty, 'off' or 'on'\" >&2", "exit 1", ";;", "esac"],
+                Lines(Scalar(steps[1]["run"])).SkipWhile(line => !line.StartsWith("case ", StringComparison.Ordinal)));
+        }
 
         foreach (YamlMapping step in steps.Skip(3))
         {
-            if (tokenSteps.Contains(Scalar(step["name"])))
+            if (mac && Scalar(step["name"]) == AdHocStep)
+            {
+                // 146 AC-3: the ad-hoc path runs only while signing is not on.
+                Assert.Equal(["if", "name", "run"], Sorted(step.Keys));
+                Assert.Equal("env.MACOS_SIGNING != 'on'", Scalar(step["if"]));
+            }
+            else if (mac && Scalar(step["name"]) == SigningStep)
+            {
+                // 146 AC-2: the one step with secrets: its if:, the five secrets and no token.
+                Assert.Equal(["env", "if", "name", "run"], Sorted(step.Keys));
+                Assert.Equal("env.MACOS_SIGNING == 'on'", Scalar(step["if"]));
+                Assert.Equal(
+                    Sorted(SigningSecrets.Select(secret => secret + "=${{ secrets." + secret + " }}")), Pairs(step["env"]));
+            }
+            else if (tokenSteps.Contains(Scalar(step["name"])))
             {
                 Assert.Equal(["env", "name", "run"], Sorted(step.Keys));
                 Assert.Equal(["GH_TOKEN=${{ github.token }}"], Pairs(step["env"]));

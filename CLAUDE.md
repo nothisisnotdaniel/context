@@ -124,8 +124,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     UI-protected key, tied to the self-issued certificate `CN=Context sensitive notes`; the recovery public key is
     the certificate `CN=Context sensitive notes recovery` without a private key. `MacKeyStore` (the only file with
     P/Invoke: Security.framework and CoreFoundation): a non-extractable P-256 key from `SecKeyCreateRandomKey`, in the
-    Secure Enclave with a user-presence access control when macOS allows it (builds are only ad-hoc signed, so it
-    often doesn't), else a non-extractable login-Keychain key; `SecKeyCopyKeyExchangeResult` for `Agree`; the recovery
+    Secure Enclave with a user-presence access control when macOS allows it (an ad-hoc signed build, which is what
+    ships while the release's `MACOS_SIGNING` switch is not `on`, often isn't allowed; a Developer ID signed and
+    notarized build is not yet checked here), else a non-extractable login-Keychain key; `SecKeyCopyKeyExchangeResult` for `Agree`; the recovery
     public key is a generic-password item. `UnsupportedKeyStore` on every other OS (`Supported` false). `Program.cs`
     picks the store; nothing else names the real ones.
   - **Recovery file (`RecoveryFile.cs`):** `Create(password, out publicKey)` makes a new P-256 key in memory and
@@ -261,14 +262,15 @@ Every factory agent reads this file before working on Context. Keep it short and
 - **CI:** `.github/workflows/ci.yml` (GitHub Actions, `ubuntu-latest`) runs on every push to `develop` and `main`
   and on every pull request: `dotnet restore`, `dotnet build --no-restore -warnaserror`, `dotnet test --no-build`, at the repo root.
   Read-only token, no secrets, actions pinned to commit SHAs; `CiWorkflowTests.cs` checks the file as text.
-- **Release:** `.github/workflows/release.yml` (next to `ci.yml` there is no third workflow; `contents: write`, no secrets)
+- **Release:** `.github/workflows/release.yml` (next to `ci.yml` there is no third workflow; `contents: write`; secrets only in the macOS signing step, see Signing)
   has three triggers: a push to `develop`, a merged `develop` -> `main` pull request titled exactly `release vX.Y.Z`,
   and a pushed `vX.Y.Z` tag. Four jobs: `release` (`ubuntu-latest`), then `desktop-macos` (`macos-latest`) and
   `desktop-windows` (`windows-latest`, `shell: bash`), which both `needs: release`, then `publish` (`ubuntu-latest`,
   `needs` all three). Steps of `release`: check out,
   set up .NET, Version, `dotnet test -c Release`,
   `dotnet pack src/Context -c Release -p:Version="$VERSION"`, smoke check, create the GitHub release (notes start
-  with `.github/release-notes-header.md`: how to open an unsigned build), created with `--draft`.
+  with the output of `.github/scripts/release-notes.sh <macos>`, written to `$RUNNER_TEMP/release-notes.md`: how to
+  open the desktop builds), created with `--draft`.
   - **Draft, then publish:** The release is a draft until `publish` runs: `release` creates it, the desktop jobs upload
     into the draft, and `publish` (no `if:`, so it is skipped when a needed job fails) makes it public. Its steps: check
     out, the version re-check, `Publish GitHub release`, `Prune old prereleases`. The publish step reads the release
@@ -299,8 +301,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     SQLite native library fails the release. Nothing goes to nuget.org. (2) The desktop app for macOS:
     `Context-<version>-osx-arm64.zip` and `Context-<version>-osx-x64.zip`, each a `Context.app` built by
     `.github/scripts/macos-app.sh <publish-dir> <version> <out-dir>` (Info.plist + all published files in
-    `Contents/MacOS/`; it neither signs nor zips), ad-hoc signed (`codesign -s -`, the only identity) and zipped
-    with `ditto`. (3) The desktop app for Windows, packed by `vpk` (`--packId ContextDesktop`, `--mainExe
+    `Contents/MacOS/`; it neither signs nor zips), then either ad-hoc signed (`codesign -s -`) and zipped with
+    `ditto`, or signed with a Developer ID and notarized (see Signing); the asset names are the same either way. (3) The desktop app for Windows, packed by `vpk` (`--packId ContextDesktop`, `--mainExe
     Context.Desktop.exe`): `Setup.exe`, the portable zip, this version's full `.nupkg`, a delta `.nupkg` when
     `vpk download github` found an earlier release of the channel (a failed download only warns), and the feed
     files (`releases.<channel>.json`, `assets.<channel>.json`, `RELEASES*`); never a package of an older version.
@@ -310,24 +312,55 @@ Every factory agent reads this file before working on Context. Keep it short and
   - **Channels and updater:** two channels. A prerelease version is packed with `--channel develop`, a proper
     release with vpk's default channel (`win`). A copy installed by `Setup.exe` updates itself at start-up
     (`StartupUpdate`, see the desktop layout) from the channel it was installed from; the portable copy and the
-    macOS zips never update. **Trust model:** nothing is signed (no certificate, no notarization, no signature check
-    in the updater; signed builds are backlog #15). An update is trusted only as an HTTPS download from this
+    macOS zips never update. **Trust model:** the macOS app can be signed and notarized, the Windows build is unsigned,
+    and the updater checks no signature (no signature check in the updater; Windows signing is a later backlog
+    item). An update is trusted only as an HTTPS download from this
     repository's GitHub releases, which only the release workflow writes, so whoever can write a release here can run
     code on every installed copy. The repository URL is fixed in every installed copy: never rename, transfer or
     delete the repository or the account while installed copies exist (whoever registers the old name afterwards
     controls their update feed); ship a build with the new URL first. No token is embedded in the app; while the repository is private the
     unauthenticated updater finds nothing and stays silent. The installer cannot run in `dotnet test`: after a change
     to the desktop jobs, the next develop run is the real check.
+  - **Signing (macOS only):** the switch is the repository variable `MACOS_SIGNING` (empty, `off` or `on`, exact
+    case). `vars.` appears only as `vars.MACOS_SIGNING` in the job-level `env:` of `release` and `desktop-macos`;
+    scripts and step `if:`s read `env.MACOS_SIGNING`. Each job reads the variable when it starts, so change it only
+    between runs (else the notes can name the other kind of build). The macOS `Check version` step fails on any other value, and
+    `release-notes.sh` refuses it too. Not `on` (the default): the step `Bundle, ad-hoc sign and zip`
+    (`if: env.MACOS_SIGNING != 'on'`) runs as before and no secret is read. `on`: the step `Bundle, sign, notarize and
+    zip` (`if: env.MACOS_SIGNING == 'on'`) runs instead; it is the only place a secret appears (its `env:`, no
+    `GH_TOKEN`): `MACOS_CERTIFICATE_P12` (base64 of the Developer ID Application `.p12`),
+    `MACOS_CERTIFICATE_PASSWORD`, `NOTARY_KEY_P8` (the text of the App Store Connect API key file), `NOTARY_KEY_ID`,
+    `NOTARY_ISSUER_ID`. The step checks that all five are set (one stderr line with the name, never a value), then
+    under `umask 077` (put back before the first bundle is built, so the shipped app keeps the ad-hoc build's file
+    modes) makes a folder in `$RUNNER_TEMP` with the decoded `.p12`, the `.p8` and a new keychain with a
+    random password (`security create-keychain`, `import -P` with the password in argv on the single-use runner,
+    `set-key-partition-list`, `list-keychains -s`), requires exactly one `Developer ID Application:` identity and
+    passes its SHA-1 hash on; a `trap` deletes the keychain and the folder on every exit. Per architecture:
+    `macos-app.sh`, then `.github/scripts/macos-sign.sh <Context.app> <identity> <entitlements>` (every regular file
+    under `Contents/MacOS` except the main executable, then the main executable, then the bundle, each `codesign
+    --force --timestamp --options runtime --entitlements <file> -s <identity>`; never `--deep` for signing, identity
+    `-` refused; then `codesign --verify --deep --strict`; exit 2 sign, 3 verify) with
+    `.github/scripts/macos-entitlements.plist` (one key, `com.apple.security.cs.allow-jit`), then
+    `.github/scripts/macos-notarize.sh <Context.app> <zip> <key.p8> <key-id> <issuer-id>` (`ditto` zip, `xcrun
+    notarytool submit --wait` whose reported status must be `Accepted`, `xcrun stapler staple` and `validate`, `spctl
+    --assess --type execute`, then the final zip again from the stapled app, moved into place last; exit 2 notarize,
+    3 staple, 4 assess, 5 final zip). It fails closed: a failure prints `macOS signing failed: <stage>
+    (<architecture>); nothing is uploaded` (stages `import`, `bundle`, `sign`, `verify`, `notarize`, `staple`,
+    `assess`), leaves no file at that architecture's asset name, starts no later architecture, skips `Upload` and
+    never falls back to ad-hoc, so the release stays an unpublished draft. The signing secrets are reachable by
+    every `develop` push, as the release token is; setting the variable back to `off` (repository admins only)
+    quietly ships ad-hoc builds again. Real signing, notarization and the first start under the hardened runtime
+    cannot run in `dotnet test`: the first develop run with the switch `on` is the real check.
   - **Pruning:** after a proper release `vX.Y.Z` is published the `Prune old prereleases` step (`continue-on-error`;
     it runs in `publish`, after the publish step) deletes the
     `-develop` prereleases with core <= X.Y.Z and their tags (`.github/scripts/old-prereleases.sh`); proper releases
     and higher prereleases stay. With immutable releases on, GitHub may refuse the delete; the step then only warns.
   - **Rules:** actions pinned to commit SHAs (the same two as `ci.yml`, tag in the trailing comment); no `${{ }}`
     inside a `run:` script: PR fields, refs and the token reach the shell only through `env:` and the runner's own
-    variables. `github.token` is the only credential (the create, publish and prune steps, the Windows `vpk download` and the two uploads). The three version scripts are Times' (`release-pr-version.sh` differs in one pattern: it refuses every prerelease label, Times' only `-develop`). `ReleaseWorkflowTests.cs` reads `release.yml`
+    variables. `github.token` is the only credential of every other step than the signing step (the create, publish and prune steps, the Windows `vpk download` and the two uploads). The new scripts are POSIX `sh` in the style of `macos-app.sh` (`set -eu`, usage refusal before anything is created, arguments never evaluated, no `set -x`). The three version scripts are Times' (`release-pr-version.sh` differs in one pattern: it refuses every prerelease label, Times' only `-develop`). `ReleaseWorkflowTests.cs` reads `release.yml`
     only through the small YAML reader `tests/Context.Tests/WorkflowYaml.cs` (block mappings and sequences, plain and
     quoted scalars, `|` and `>` blocks, comments; anything else throws), so reformatting the YAML does not break the
-    tests, and it runs the scripts with `bash` (also the Windows `Pack` and `Upload` steps and the publish step, against stub `vpk` and `gh` commands). `/factory release --project Context` opens the release PR.
+    tests, and it runs the scripts with `bash` (also the Windows `Pack` and `Upload` steps and the publish step, against stub `vpk` and `gh` commands, and the macOS signing step and scripts against stub `codesign`, `security`, `xcrun`, `spctl` and `ditto` that log their calls and can fail or answer `Invalid`; never a real keychain, certificate or Apple account). `/factory release --project Context` opens the release PR.
 - **Run:** `dotnet run --project src/Context -- help` (command line; any `Cli` command after `--`), `dotnet run --project src/Context.Desktop` (desktop window)
 - **Layout:**
   - `Context.slnx`: the solution. `Directory.Build.props` turns on `EnforceCodeStyleInBuild`.

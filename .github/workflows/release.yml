@@ -33,13 +33,33 @@
 #   build on the channel it was installed from and puts it in place after the app closes (when the app stays
 #   open longer than Velopack's updater waits, 60 s, the build is put in place at the next start, which then
 #   restarts into it). The portable copy and the macOS zips never update themselves.
-# - Nothing is signed: there is no certificate, no notarization and no secret (github.token is the only
-#   credential). The macOS apps get only an ad-hoc signature (codesign identity "-", which Apple silicon needs
-#   to run anything). The updater checks no signature either: an update is trusted only because it comes over
-#   HTTPS from this repository's releases, which only this workflow writes. Whoever can write a release here
-#   can run code on every installed copy. The repository URL is fixed in every installed copy: never rename,
-#   transfer or delete the repository or the account while installed copies exist (whoever registers the old
-#   name afterwards controls their update feed); ship a build with the new URL first.
+# - Signing: the macOS app can be signed and notarized, the Windows build is unsigned, and the updater checks no
+#   signature.
+#   - The switch is the repository variable MACOS_SIGNING (empty, off or on; anything else fails the macOS
+#     job). It reaches the release and desktop-macos jobs as the job-level environment variable MACOS_SIGNING,
+#     and every script and step if: reads it only from there. Each job reads the variable when it starts:
+#     changing it during a run, or before re-running a failed desktop-macos job, can leave release notes that
+#     name the other kind of build, so change it only between runs.
+#   - Not on (the default): the macOS apps get only an ad-hoc signature (codesign identity "-", which Apple
+#     silicon needs to run anything), and no secret is read.
+#   - On: the step "Bundle, sign, notarize and zip" builds each Context.app (.github/scripts/macos-app.sh),
+#     signs it with the one Developer ID Application identity of the certificate for the hardened runtime
+#     (.github/scripts/macos-sign.sh with .github/scripts/macos-entitlements.plist: allow-jit only), has Apple
+#     notarize it, staples the ticket and zips it (.github/scripts/macos-notarize.sh). Its secrets are
+#     MACOS_CERTIFICATE_P12 (the certificate and key as base64 of the .p12 file), MACOS_CERTIFICATE_PASSWORD
+#     (the .p12 password), NOTARY_KEY_P8 (the text of the App Store Connect API key file), NOTARY_KEY_ID and
+#     NOTARY_ISSUER_ID. Only that one step sees them, and it has no GitHub token. The certificate is imported
+#     into a throwaway keychain under $RUNNER_TEMP that is deleted when the step ends. It fails closed: a
+#     missing secret or a failed stage (import, sign, verify, notarize, staple, assess) fails the job, nothing
+#     is uploaded and nothing falls back to the ad-hoc signature, so the release stays an unpublished draft.
+#   - The asset names are the same either way, and the release notes header
+#     (.github/scripts/release-notes.sh) says which kind of macOS build it is.
+#   - github.token is the only credential every other step has. The updater checks no signature: an update
+#     is trusted only because it comes over HTTPS from this repository's releases, which only this workflow
+#     writes. Whoever can write a release here can run code on every installed copy. The repository URL is
+#     fixed in every installed copy: never rename, transfer or delete the repository or the account while
+#     installed copies exist (whoever registers the old name afterwards controls their update feed); ship a
+#     build with the new URL first.
 # - vpk is pinned to an exact version, the same as the Velopack package in Context.Desktop.csproj.
 # Refs, PR fields and the run number reach the shell only through environment variables (GITHUB_REF_NAME,
 # GITHUB_REF_TYPE, GITHUB_RUN_NUMBER, GITHUB_SHA, and the Version step's env:), never through ${{ }}
@@ -70,6 +90,9 @@ jobs:
     # Every push runs; a pull_request event runs only for a merged PR from develop in this repository.
     if: github.event_name == 'push' || (github.event.pull_request.merged == true && github.event.pull_request.head.ref == 'develop' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
+    # The macOS signing switch (a repository variable, no secret): the release notes say which build ships.
+    env:
+      MACOS_SIGNING: ${{ vars.MACOS_SIGNING }}
     # For the desktop jobs: the version, the release's tag and the commit it was made on.
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -219,16 +242,20 @@ jobs:
           case "$VERSION" in
             *-*) PRERELEASE="--prerelease" ;;
           esac
-          gh release create "$TAG" "nupkg/Context.$VERSION.nupkg" --title "Context $VERSION" --notes-file .github/release-notes-header.md --generate-notes --target "$TARGET" --draft $PRERELEASE
+          # The header says how to open the desktop builds; a switch value other than empty, off or on fails here.
+          sh .github/scripts/release-notes.sh "$MACOS_SIGNING" > "$RUNNER_TEMP/release-notes.md"
+          gh release create "$TAG" "nupkg/Context.$VERSION.nupkg" --title "Context $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" --generate-notes --target "$TARGET" --draft $PRERELEASE
 
-  # The desktop app for macOS: one unsigned Context.app per architecture, zipped and added to the release.
+  # The desktop app for macOS: one Context.app per architecture, zipped and added to the release. Signed and
+  # notarized when the repository variable MACOS_SIGNING is on, else only ad-hoc signed (see the header).
   desktop-macos:
     needs: release
     runs-on: macos-latest
-    # The release job's outputs reach the scripts only as environment variables.
+    # The release job's outputs and the signing switch reach the scripts only as environment variables.
     env:
       VERSION: ${{ needs.release.outputs.version }}
       TAG: ${{ needs.release.outputs.tag }}
+      MACOS_SIGNING: ${{ vars.MACOS_SIGNING }}
     steps:
       - name: Check out
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -249,6 +276,14 @@ jobs:
             echo "Tag '$TAG' is not 'v$VERSION'" >&2
             exit 1
           fi
+          # The signing switch: only empty, off or on. A typo must not quietly ship the ad-hoc build.
+          case "$MACOS_SIGNING" in
+            '' | off | on) ;;
+            *)
+              echo "MACOS_SIGNING must be empty, 'off' or 'on'" >&2
+              exit 1
+              ;;
+          esac
 
       - name: Set up .NET
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
@@ -261,9 +296,10 @@ jobs:
             dotnet publish src/Context.Desktop -c Release --self-contained -p:Version="$VERSION" -r "$RID" -o "publish/$RID"
           done
 
-      # No certificate and no notarization: the identity "-" makes an ad-hoc signature, which Apple silicon
-      # needs to run any code. Gatekeeper still warns; .github/release-notes-header.md says how to open it.
+      # Signing off: no certificate and no notarization. The identity "-" makes an ad-hoc signature, which Apple
+      # silicon needs to run any code. Gatekeeper still warns; the release notes say how to open it.
       - name: Bundle, ad-hoc sign and zip
+        if: env.MACOS_SIGNING != 'on'
         run: |
           for RID in osx-arm64 osx-x64; do
             sh .github/scripts/macos-app.sh "publish/$RID" "$VERSION" "app/$RID"
@@ -271,6 +307,90 @@ jobs:
             codesign --verify --deep --strict "app/$RID/Context.app"
             # ditto keeps the modes and the signature's extended attributes; the zip holds Context.app itself.
             ditto -c -k --keepParent "app/$RID/Context.app" "Context-$VERSION-$RID.zip"
+          done
+
+      # Signing on: Developer ID signature, hardened runtime, notarization and a stapled ticket. The only step
+      # that sees a secret, and it has no GitHub token. It fails closed: any failure ends the job before Upload,
+      # and nothing falls back to the ad-hoc signature.
+      - name: Bundle, sign, notarize and zip
+        if: env.MACOS_SIGNING == 'on'
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          # Every secret must be there before any tool is called. Only the name is printed, never a value.
+          # ${!NAME-} is bash's indirect expansion: this step needs bash, the macOS runner's default shell.
+          for NAME in MACOS_CERTIFICATE_P12 MACOS_CERTIFICATE_PASSWORD NOTARY_KEY_P8 NOTARY_KEY_ID NOTARY_ISSUER_ID; do
+            if [ -z "${!NAME-}" ]; then
+              echo "$NAME is not set; nothing was signed" >&2
+              exit 1
+            fi
+          done
+          # Everything secret lives in one folder that only this user can read, and goes away on every exit.
+          # The tight umask covers only the key files and the keychain: it is put back before the first bundle
+          # is built, so the Context.app that ships keeps the modes of the ad-hoc build.
+          UMASK_BEFORE="$(umask)"
+          umask 077
+          WORK="$(mktemp -d "$RUNNER_TEMP/macos-signing.XXXXXX")"
+          KEYCHAIN="$WORK/signing.keychain-db"
+          P12="$WORK/certificate.p12"
+          P8="$WORK/notary-key.p8"
+          cleanup() {
+            security delete-keychain "$KEYCHAIN" > /dev/null 2>&1 || true
+            rm -rf "$WORK"
+          }
+          trap cleanup EXIT
+          # One line of this step's own per failure: the stage and the architecture. No file stays at the asset name.
+          fail() {
+            if [ -n "${2-}" ]; then
+              rm -f "Context-$VERSION-$2.zip"
+            fi
+            echo "macOS signing failed: $1 (${2:-before any architecture}); nothing is uploaded" >&2
+            exit 1
+          }
+          # The certificate goes into a new keychain with a random password; codesign may use its key unasked.
+          import_certificate() {
+            KEYCHAIN_PASSWORD="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')" &&
+              [ "${#KEYCHAIN_PASSWORD}" -eq 48 ] &&
+              printf '%s' "$MACOS_CERTIFICATE_P12" | base64 --decode > "$P12" &&
+              printf '%s\n' "$NOTARY_KEY_P8" > "$P8" &&
+              security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN" &&
+              security set-keychain-settings -lut 21600 "$KEYCHAIN" &&
+              security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN" &&
+              security import "$P12" -k "$KEYCHAIN" -f pkcs12 -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign > /dev/null &&
+              security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null &&
+              security list-keychains -d user -s "$KEYCHAIN" &&
+              IDENTITIES="$(security find-identity -v -p codesigning "$KEYCHAIN")"
+          }
+          import_certificate || fail import
+          # Exactly one Developer ID Application identity, named by its SHA-1 hash from here on.
+          IDENTITY="$(printf '%s\n' "$IDENTITIES" | sed -n 's/^ *[0-9][0-9]*) \([0-9A-F]\{40\}\) "Developer ID Application: .*$/\1/p')"
+          if [ "$(printf '%s' "$IDENTITY" | grep -c '' || true)" != "1" ]; then
+            echo "The certificate must hold exactly one 'Developer ID Application:' identity" >&2
+            fail import
+          fi
+          umask "$UMASK_BEFORE"
+          for RID in osx-arm64 osx-x64; do
+            APP="app/$RID/Context.app"
+            sh .github/scripts/macos-app.sh "publish/$RID" "$VERSION" "app/$RID" || fail bundle "$RID"
+            CODE=0
+            sh .github/scripts/macos-sign.sh "$APP" "$IDENTITY" .github/scripts/macos-entitlements.plist || CODE="$?"
+            case "$CODE" in
+              0) ;;
+              3) fail verify "$RID" ;;
+              *) fail sign "$RID" ;;
+            esac
+            CODE=0
+            sh .github/scripts/macos-notarize.sh "$APP" "Context-$VERSION-$RID.zip" "$P8" "$NOTARY_KEY_ID" "$NOTARY_ISSUER_ID" || CODE="$?"
+            case "$CODE" in
+              0) ;;
+              3) fail staple "$RID" ;;
+              4) fail assess "$RID" ;;
+              *) fail notarize "$RID" ;;
+            esac
           done
 
       - name: Upload
