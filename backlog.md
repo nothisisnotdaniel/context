@@ -202,6 +202,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#168](backlog/168-aliases-for-people.md) Aliases for people (after: #51)
 - [ ] [#169](backlog/169-todos-linked-to-people.md) Todos linked to people (after: #51; #168)
 - [ ] [#170](backlog/170-pages-in-a-hierarchy.md) Pages in a hierarchy
+- [?] [#171](backlog/171-name-the-bad-todo-id-in.md) Name the bad todo id in the CLI warning
 
 ## Dropped with the terminal UI
 
