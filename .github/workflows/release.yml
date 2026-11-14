@@ -13,7 +13,7 @@
 #   with its tag (.github/scripts/old-prereleases.sh); proper releases and newer prereleases stay. A failed
 #   prune only warns (continue-on-error), the release still counts.
 # - What ships, on every release (develop prerelease, release PR, tag):
-#   - the console app as the .NET tool package Context.<version>.nupkg (command context), from the release job;
+#   - the command-line tool as the .NET tool package Context.<version>.nupkg (command context), from the release job;
 #   - the desktop app for macOS as Context-<version>-osx-arm64.zip and Context-<version>-osx-x64.zip (a
 #     Context.app built by .github/scripts/macos-app.sh), from the desktop-macos job;
 #   - the desktop app for Windows, packed by vpk (Velopack), from the desktop-windows job: Setup.exe, the
@@ -22,7 +22,7 @@
 #   Both desktop jobs need the release job: they take its version, tag and commit (job outputs) and upload to
 #   the draft it created; re-running a desktop job replaces its own assets (--clobber).
 # - The release is a draft until the publish job runs. publish needs all three other jobs, checks that the
-#   draft sits on the release's commit and holds the console package, both macOS zips and the Windows
+#   draft sits on the release's commit and holds the command-line tool package, both macOS zips and the Windows
 #   installer, full package and feed, and only then publishes it. A failed desktop job leaves an unpublished
 #   draft: users and the updater never see a half-filled release (re-run the failed job, publish then runs).
 #   This is what makes immutable releases work: GitHub refuses uploads into a published immutable release,

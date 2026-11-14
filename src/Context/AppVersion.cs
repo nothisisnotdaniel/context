@@ -16,7 +16,7 @@ internal static class AppVersion
     /// <c>dotnet test</c>).
     /// </summary>
     internal static string Current =>
-        Format(typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion);
+        Format(typeof(AppVersion).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion);
 
     /// <summary>
     /// Strips everything from the first <c>+</c> and trims; null, empty or whitespace gives <c>unknown</c>.

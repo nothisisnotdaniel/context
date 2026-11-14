@@ -108,39 +108,54 @@ public sealed class TagsViewTests : IDisposable
         Assert.Equal(garbage, File.ReadAllBytes(DbPath));
     }
 
-    // AC-7: the renderer only maps the view.
+    // AC-6 (145): every kind with every field, as raw data (no escaping, no markup).
     [Fact]
-    public void Render_HandBuiltViews_MatchGolden()
+    public void Build_EveryKind_EveryField()
     {
-        TagsView none = new TagsView(TagsViewKind.AllTags, string.Empty, [], []);
-        Assert.Equal(ViewParityTests.Goldens["Tags_None"], ViewParityTests.Render(TagCommands.Render(none), "/r"));
-        TagsView list = new TagsView(
-            TagsViewKind.AllTags,
-            string.Empty,
-            [new TagCount("big plan", 1), new TagCount("work", 2), new TagCount("x", 1)],
-            []);
-        Assert.Equal(ViewParityTests.Goldens["Tags_List"], ViewParityTests.Render(TagCommands.Render(list), "/r"));
-        TagsView hit = new TagsView(TagsViewKind.NotesWithTag, "big plan", [], ["A [1]"]);
-        Assert.Equal(ViewParityTests.Goldens["Tags_Hit_Spaces"], ViewParityTests.Render(TagCommands.Render(hit), "/r"));
-        TagsView miss = new TagsView(TagsViewKind.NoSuchTag, "no such", [], []);
-        Assert.Equal(ViewParityTests.Goldens["Tags_Miss"], ViewParityTests.Render(TagCommands.Render(miss), "/r"));
-        TagsView bad = new TagsView(TagsViewKind.IndexUnreadable, string.Empty, [], []);
-        Assert.Equal(ViewParityTests.Goldens["Tags_BadDb_All"], ViewParityTests.Render(TagCommands.Render(bad), "/r"));
+        WriteNote("N", "no tags");
+        AssertView(Build(string.Empty), TagsViewKind.AllTags, string.Empty, [], []);
+
+        WriteNote("A", "#work #[big plan]");
+        WriteNote("B", "#work #[x]y");
+        AssertView(
+            Build(string.Empty), TagsViewKind.AllTags, string.Empty, [("big plan", 1), ("work", 2), ("x", 1)], []);
+        AssertView(Build("[Big   Plan]"), TagsViewKind.NotesWithTag, "big plan", [], ["A"]);
+        AssertView(Build("#[no such]"), TagsViewKind.NoSuchTag, "no such", [], []);
+
+        byte[] garbage = new byte[2048];
+        new Random(9).NextBytes(garbage);
+        File.WriteAllBytes(DbPath, garbage);
+        AssertView(Build(string.Empty), TagsViewKind.IndexUnreadable, string.Empty, [], []);
     }
 
-    // AC-7: /notes renders NoteStore.List() data without touching the store.
+    // AC-6 (145): the notes list is NoteStore.List() itself: raw name, modified time and path, sorted by name.
     [Fact]
-    public void RenderNotes_HandBuilt_MatchesGolden()
+    public void NotesList_NameModifiedPath_Raw()
     {
-        DateTime modified = new(2026, 10, 1, 8, 15, 0, DateTimeKind.Local);
-        NoteInfo[] notes =
-        [
-            new NoteInfo("Odd [red]name", modified, "/r/x.md"),
-            new NoteInfo("Shopping", modified, "/r/y.md"),
-        ];
+        Assert.Empty(new NoteStore(root).List());
 
-        Assert.Equal(ViewParityTests.Goldens["Notes_List"], ViewParityTests.Render(NoteCommands.Render(notes), "/r"));
-        Assert.Equal(ViewParityTests.Goldens["Notes_Empty"], ViewParityTests.Render(NoteCommands.Render([]), "/r"));
+        DateTime modified = new(2026, 10, 1, 8, 15, 0, DateTimeKind.Local);
+        WriteNote("Shopping", "# Shopping\n");
+        WriteNote("Odd [red]name", "x");
+        File.SetLastWriteTime(Path.Combine(root, "Shopping.md"), modified);
+        File.SetLastWriteTime(Path.Combine(root, "Odd [red]name.md"), modified);
+
+        IReadOnlyList<NoteInfo> notes = new NoteStore(root).List();
+
+        Assert.Equal(["Odd [red]name", "Shopping"], notes.Select(n => n.Name));
+        Assert.All(notes, n => Assert.Equal(modified, n.Modified));
+        Assert.Equal(
+            [Path.Combine(root, "Odd [red]name.md"), Path.Combine(root, "Shopping.md")],
+            notes.Select(n => n.Path));
+    }
+
+    private static void AssertView(
+        TagsView view, TagsViewKind kind, string tag, (string Tag, int Count)[] tags, string[] notes)
+    {
+        Assert.Equal(kind, view.Kind);
+        Assert.Equal(tag, view.Tag);
+        Assert.Equal(tags, view.Tags.Select(t => (t.Tag, t.Count)));
+        Assert.Equal(notes, view.Notes);
     }
 
     // AC-3 (042)

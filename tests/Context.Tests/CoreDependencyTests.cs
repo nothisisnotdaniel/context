@@ -4,7 +4,8 @@ using System.Xml.Linq;
 
 namespace Context.Tests;
 
-// Architecture test: Context.Core must never depend on Spectre.Console (see CLAUDE.md).
+// Architecture test: nothing in the repo depends on Spectre.Console, the removed console's terminal library
+// (see CLAUDE.md).
 // This is the one allowed exception to "one test class per production class".
 public sealed class CoreDependencyTests
 {
@@ -86,41 +87,105 @@ public sealed class CoreDependencyTests
             m => (m.Attributes & System.Reflection.MethodAttributes.PinvokeImpl) != 0);
     }
 
-    // AC-6 (control for AC-1)
+    private static readonly string[] AllProjects =
+    [
+        "src/Context.Core",
+        "src/Context",
+        "src/Context.Desktop",
+        "tests/Context.Tests",
+        "tests/Context.Desktop.Tests",
+    ];
+
+    // 145 AC-3: the command-line tool and these tests reference no Spectre assembly either.
     [Fact]
-    public void AppAssembly_ReferencesSpectreAssembly()
+    public void AppAndTestAssemblies_ReferenceNoSpectreAssembly()
     {
-        Assembly app = typeof(App).Assembly;
+        Assembly app = typeof(Cli).Assembly;
         Assert.Equal("Context", app.GetName().Name);
 
-        Assert.Contains("Spectre.Console", SpectreAssemblyReferences(app));
+        List<string> found = [.. SpectreAssemblyReferences(app), .. SpectreAssemblyReferences(typeof(CoreDependencyTests).Assembly)];
+
+        Assert.True(found.Count == 0, "Spectre assemblies are referenced: " + string.Join(", ", found));
     }
 
-    // AC-6 (control for AC-2)
+    // 145 AC-3: no project file of the repo has a Spectre package.
     [Fact]
-    public void AppProject_HasSpectrePackageReference()
+    public void EveryProject_HasNoSpectrePackageReference()
     {
         string root = RepoRoot();
 
-        Assert.Contains(AppProject + ": Spectre.Console", SpectrePackageReferences(root, AppProject));
+        List<string> found = AllProjects
+            .SelectMany(folder => SpectrePackageReferences(root, folder + "/" + Path.GetFileName(folder) + ".csproj"))
+            .Distinct()
+            .ToList();
+
+        Assert.True(found.Count == 0, "Spectre package references: " + string.Join(", ", found));
     }
 
-    // AC-6 (control for AC-3)
+    // 145 AC-3: no restored graph of the repo has a Spectre package.
     [Fact]
-    public void AppRestoredGraph_HasSpectrePackage()
+    public void EveryRestoredGraph_HasNoSpectrePackage()
     {
         string root = RepoRoot();
 
-        Assert.Contains("Spectre.Console", SpectreAssetPackages(root, "src/Context"));
+        List<string> found = AllProjects
+            .SelectMany(folder => SpectreAssetPackages(root, folder).Select(id => folder + ": " + id))
+            .ToList();
+
+        Assert.True(found.Count == 0, "Restored graphs contain Spectre packages: " + string.Join(", ", found));
     }
 
-    // AC-6 (control for AC-4)
+    // 145 AC-3: nothing under src/ mentions Spectre, and no test file imports it.
     [Fact]
-    public void AppSources_MentionSpectre()
+    public void Sources_DoNotMentionSpectre()
     {
         string root = RepoRoot();
+        string import = "using " + "Spectre";
+        List<string> tests = Directory.EnumerateFiles(Path.Combine(root, "tests"), "*.cs", SearchOption.AllDirectories)
+            .Where(f => !IsBuildOutput(Path.GetRelativePath(root, f)))
+            .Where(f => File.ReadAllText(f).Contains(import, StringComparison.OrdinalIgnoreCase))
+            .Select(f => Relative(root, f))
+            .ToList();
 
-        Assert.Contains("src/Context/App.cs", SpectreSourceFiles(root, "src/Context"));
+        List<string> found = SpectreSourceFiles(root, "src");
+
+        Assert.True(File.Exists(Path.Combine(root, "src/Context/Cli.cs")), "Cli.cs not found");
+        Assert.True(found.Count == 0, "Files under src/ mention Spectre: " + string.Join(", ", found));
+        Assert.True(tests.Count == 0, "Test files import Spectre: " + string.Join(", ", tests));
+    }
+
+    // 145 AC-3 (control): the three scans do find a Spectre package and a Spectre mention when there is one.
+    [Fact]
+    public void TheScans_FindSpectre_WhenItIsThere()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "context-dependency-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(folder, "app", "obj"));
+        Directory.CreateDirectory(Path.Combine(folder, "app", "sub"));
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(folder, "app", "app.csproj"),
+                "<Project><ItemGroup><PackageReference Include=\"Spectre.Console\" Version=\"1.0.0\" /></ItemGroup></Project>");
+            File.WriteAllText(
+                Path.Combine(folder, "app", "obj", "project.assets.json"),
+                "{\"targets\":{\"net10.0\":{\"Spectre.Console/1.0.0\":{}}},\"libraries\":{\"Spectre.Console/1.0.0\":{}}}");
+            File.WriteAllText(Path.Combine(folder, "app", "sub", "Page.razor"), "<p>@(typeof(SPECTRE.Console.Table))</p>");
+            File.WriteAllText(Path.Combine(folder, "app", "Clean.cs"), "nothing here");
+
+            Assert.Equal(["app/app.csproj: Spectre.Console"], SpectrePackageReferences(folder, "app/app.csproj"));
+            Assert.Equal(["Spectre.Console"], SpectreAssetPackages(folder, "app"));
+            Assert.Equal(["app/app.csproj", "app/sub/Page.razor"], SpectreSourceFiles(folder, "."));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    private static bool IsBuildOutput(string relativePath)
+    {
+        string[] segments = relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return segments.Contains("bin") || segments.Contains("obj") || segments.Contains("node_modules");
     }
 
     // AC-5: the helpers below return the offending items by name so a failure says what broke the rule.
@@ -270,19 +335,17 @@ public sealed class CoreDependencyTests
         }
     }
 
-    // Returns the root-relative paths of *.cs, *.csproj, *.props and *.targets files under the folder (bin/ and
-    // obj/ skipped) whose text contains "Spectre".
+    // Returns the root-relative paths of *.cs, *.razor, *.csproj, *.props and *.targets files under the folder
+    // (bin/, obj/ and node_modules/ skipped at any depth) whose text contains "Spectre".
     private static List<string> SpectreSourceFiles(string root, string folder)
     {
         string projectDirectory = Path.Combine(root, folder);
-        string[] extensions = [".cs", ".csproj", ".props", ".targets"];
+        string[] extensions = [".cs", ".razor", ".csproj", ".props", ".targets"];
         List<string> found = [];
 
         foreach (string file in Directory.EnumerateFiles(projectDirectory, "*", SearchOption.AllDirectories))
         {
-            string[] segments = Path.GetRelativePath(projectDirectory, file).Split(
-                Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (segments.Length > 1 && (segments[0] == "bin" || segments[0] == "obj"))
+            if (IsBuildOutput(Path.GetRelativePath(projectDirectory, file)))
             {
                 continue;
             }
