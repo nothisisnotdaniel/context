@@ -56,6 +56,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#170](backlog/170-pages-in-a-hierarchy.md) Pages in a hierarchy
 - [ ] [#112](backlog/112-locked-package-restore-for-release-builds.md) Locked package restore for release builds
 - [ ] [#51](backlog/051-people-pages.md) People pages
+- [ ] [#168](backlog/168-aliases-for-people.md) Aliases for people (after: #51)
+- [ ] [#169](backlog/169-todos-linked-to-people.md) Todos linked to people (after: #51; #168)
 - [ ] [#46](backlog/046-meeting-prep.md) Meeting prep
 - [ ] [#36](backlog/036-claude-md-tidy-ups.md) CLAUDE.md tidy-ups
 - [ ] [#35](backlog/035-strong-name-core.md) Strong-name Core
@@ -80,23 +82,21 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#69](backlog/069-board-view-for-a-tag.md) Board view for a tag
 - [ ] [#74](backlog/074-waiting-for-list.md) Waiting-for list
 - [ ] [#78](backlog/078-smart-paste.md) Smart paste
-- [ ] [#79](backlog/079-share-a-note.md) Share a note
 - [ ] [#80](backlog/080-agenda-carry-over.md) Agenda carry-over
+- [ ] [#79](backlog/079-share-a-note.md) Share a note
 - [ ] [#81](backlog/081-topics-for-the-next-1-1.md) Topics for the next 1:1
 - [ ] [#82](backlog/082-review-dates.md) Review dates
 - [ ] [#84](backlog/084-screenshot-to-inbox.md) Screenshot to inbox
-- [ ] [#85](backlog/085-similar-notes.md) Similar notes
 - [ ] [#86](backlog/086-mermaid-diagrams.md) Mermaid diagrams
 - [ ] [#87](backlog/087-standup-notes.md) Standup notes
+- [ ] [#122](backlog/122-update-links-when-a-note-is.md) Update [[links]] when a note is renamed in the desktop app
+- [ ] [#85](backlog/085-similar-notes.md) Similar notes
 - [ ] [#90](backlog/090-keep-mixed-line-endings.md) Keep mixed line endings
 - [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4; #108)
 - [ ] [#111](backlog/111-concurrency-and-timeout-for-the-release.md) Concurrency and timeout for the release workflow
 - [ ] [#113](backlog/113-refuse-removed-secret-options-after-a.md) Refuse removed secret options after a command
 - [ ] [#114](backlog/114-owner-only-file-mode-for-all.md) Owner-only file mode for all data files
 - [ ] [#115](backlog/115-bounded-reads-for-todos-calendar-link.md) Bounded reads for todos, calendar link and notes
-- [ ] [#122](backlog/122-update-links-when-a-note-is.md) Update [[links]] when a note is renamed in the desktop app
-- [ ] [#168](backlog/168-aliases-for-people.md) Aliases for people (after: #51)
-- [ ] [#169](backlog/169-todos-linked-to-people.md) Todos linked to people (after: #51; #168)
 - [ ] [#50](backlog/050-times-bookings-in-current.md) Times bookings in /current
 - [ ] [#52](backlog/052-recent-and-pinned-notes.md) Recent and pinned notes
 - [ ] [#63](backlog/063-project-page-per-work-item.md) Project page per work item
