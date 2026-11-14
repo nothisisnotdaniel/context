@@ -59,20 +59,14 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#46](backlog/046-meeting-prep.md) Meeting prep
 - [ ] [#36](backlog/036-claude-md-tidy-ups.md) CLAUDE.md tidy-ups
 - [ ] [#35](backlog/035-strong-name-core.md) Strong-name Core
-- [ ] [#23](backlog/023-voice-capture-spike.md) Voice capture spike
-- [ ] [#24](backlog/024-voice-notes.md) Voice notes (after: #23)
-- [ ] [#25](backlog/025-outlook-as-a-source.md) Outlook as a source
 - [ ] [#26](backlog/026-recurring-appointments.md) Recurring appointments
-- [ ] [#27](backlog/027-todo-dates-with-years.md) Todo dates with years
 - [ ] [#28](backlog/028-tag-and-link-parser-fixes.md) Tag and link parser fixes
-- [ ] [#29](backlog/029-index-limits.md) Index limits
-- [ ] [#37](backlog/037-note-store-cleanup.md) Note store cleanup
 - [ ] [#43](backlog/043-daily-note.md) Daily note
 - [ ] [#44](backlog/044-note-templates.md) Note templates
 - [ ] [#45](backlog/045-meeting-notes-from-appointments.md) Meeting notes from appointments
-- [ ] [#47](backlog/047-full-text-search.md) Full-text search
 - [ ] [#48](backlog/048-recurring-todos.md) Recurring todos
 - [ ] [#49](backlog/049-weekly-review.md) Weekly review
+- [ ] [#47](backlog/047-full-text-search.md) Full-text search
 - [ ] [#50](backlog/050-times-bookings-in-current.md) Times bookings in /current
 - [ ] [#52](backlog/052-recent-and-pinned-notes.md) Recent and pinned notes
 - [ ] [#53](backlog/053-note-history.md) Note history
@@ -110,6 +104,12 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#122](backlog/122-update-links-when-a-note-is.md) Update [[links]] when a note is renamed in the desktop app
 - [ ] [#168](backlog/168-aliases-for-people.md) Aliases for people (after: #51)
 - [ ] [#169](backlog/169-todos-linked-to-people.md) Todos linked to people (after: #51; #168)
+- [ ] [#23](backlog/023-voice-capture-spike.md) Voice capture spike
+- [ ] [#24](backlog/024-voice-notes.md) Voice notes (after: #23)
+- [ ] [#25](backlog/025-outlook-as-a-source.md) Outlook as a source
+- [ ] [#27](backlog/027-todo-dates-with-years.md) Todo dates with years
+- [ ] [#29](backlog/029-index-limits.md) Index limits
+- [ ] [#37](backlog/037-note-store-cleanup.md) Note store cleanup
 - [?] [#92](backlog/092-times-inside-the-context-desktop-app.md) Times inside the Context desktop app
 - [?] [#93](backlog/093-phone-companion-app.md) Phone companion app
 - [?] [#94](backlog/094-browser-extension.md) Browser extension
