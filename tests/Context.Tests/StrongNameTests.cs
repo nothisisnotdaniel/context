@@ -184,10 +184,10 @@ public sealed class StrongNameTests
         return string.Join("\n", lines[start..end]);
     }
 
-    /// <summary>The tracked <c>*.snk</c>, <c>*.pfx</c> and <c>*.p12</c> files, root-relative and sorted.</summary>
+    /// <summary>The tracked key files (<c>*.snk</c>, <c>*.pfx</c>, <c>*.p12</c>, <c>*.pem</c>, <c>*.pvk</c>, <c>*.key</c>), root-relative and sorted.</summary>
     private static List<string> KeyFiles(string root)
     {
-        string[] extensions = [".snk", ".pfx", ".p12"];
+        string[] extensions = [".snk", ".pfx", ".p12", ".pem", ".pvk", ".key"];
         List<string>? tracked = GitLsFiles(root);
         IEnumerable<string> candidates = tracked ?? WalkTree(root);
 
