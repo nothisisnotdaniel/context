@@ -51,9 +51,10 @@ internal sealed record LinkedNote
 
 /// <summary>
 /// The data of the <c>/current</c> view, with no rendering: today's appointments, every todo due today or
-/// earlier, the notes linked to them and the notes related to each appointment. Any front end builds it with <see cref="Build"/> and draws it its own
-/// way. All text in it (appointment titles and locations, file names, todo text, note names, tags) is raw
-/// outside text: every front end must clean it (<see cref="SafeText.Clean"/>) and escape it for its own output.
+/// earlier, the notes linked to them and the notes related to each appointment. Any front end builds it with
+/// <see cref="Build"/> and draws it its own way. All text in it (appointment titles and locations, file names,
+/// todo text, note names, tags) is raw outside text: every front end must clean it (<see cref="SafeText.Clean"/>)
+/// and escape it for its own output.
 /// </summary>
 internal sealed record CurrentView
 {
