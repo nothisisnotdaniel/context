@@ -54,7 +54,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#18](backlog/018-write-todo-ids-once.md) Write todo ids once → 149-write-todo-ids
 - [x] [#19](backlog/019-survive-a-bad-todo-id.md) Survive a bad todo id → 151-survive-bad-todo-id
 - [x] [#170](backlog/170-pages-in-a-hierarchy.md) Pages in a hierarchy → 152-pages-hierarchy
-- [ ] [#178](backlog/178-stop-the-tagspanel-loading-test-timing.md) Stop the TagsPanel loading test timing out on CI
+- [x] [#178](backlog/178-stop-the-tagspanel-loading-test-timing.md) Stop the TagsPanel loading test timing out on CI → 154-tagspanel-test-flake
 - [ ] [#112](backlog/112-locked-package-restore-for-release-builds.md) Locked package restore for release builds
 - [ ] [#51](backlog/051-people-pages.md) People pages
 - [ ] [#168](backlog/168-aliases-for-people.md) Aliases for people (after: #51)
