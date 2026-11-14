@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 
 namespace Context;
 
@@ -23,6 +24,7 @@ internal sealed class Cli
     private const string HelpHint = "Run 'context help'.";
     private const string TodosUnreadable = "Can't read todos.json.";
     private const string IndexUnreadable = "Can't read context.db.";
+    private const string JsonOnly = "--json works only with version, todos, notes, note show, tags, links and current.";
 
     // Every command with its usage and what it does, in the order help lists them.
     private static readonly (string Usage, string Description)[] Commands =
@@ -40,6 +42,7 @@ internal sealed class Cli
         ("current", "Today's appointments, due todos and linked notes."),
         ("import <path>", "Store a Markdown file as a note."),
         ("export <note> <path>", "Write a note to a new plain file."),
+        ("<command> --json", "Print one JSON object: version, todos, notes, note show, tags, links, current."),
     ];
 
     private readonly TextWriter stdout;
@@ -108,8 +111,11 @@ internal sealed class Cli
         }
     }
 
-    private int RunCommand(string[] args)
+    private int RunCommand(string[] given)
     {
+        // --json may stand anywhere and repeat; it is removed before the command and its arguments are parsed.
+        bool json = given.Any(CliJson.IsFlag);
+        string[] args = json ? [.. given.Where(a => !CliJson.IsFlag(a))] : given;
         if (args.Length == 0)
         {
             return Usage("No command given.");
@@ -117,6 +123,12 @@ internal sealed class Cli
 
         string name = args[0].ToLowerInvariant();
         string[] rest = args[1..];
+        if (json && (name is "help" or "--help" or "-h" or "capture" or "todo" or "import" or "export"))
+        {
+            // Checked before any argument: nothing is written and the folder is not created.
+            return Usage(JsonOnly);
+        }
+
         if (name is "help" or "--help" or "-h")
         {
             return Help();
@@ -125,6 +137,12 @@ internal sealed class Cli
         if (name is "version" or "--version")
         {
             // Like help: answered before the data folder is looked at.
+            if (json)
+            {
+                stdout.Write(CliJson.Document(w => w.WriteString("version", AppVersion.Current)));
+                return ExitOk;
+            }
+
             Out($"Context {AppVersion.Current}");
             return ExitOk;
         }
@@ -137,7 +155,7 @@ internal sealed class Cli
             return Usage(usage ?? $"Unknown command: {shown}.");
         }
 
-        return action(new Session(this));
+        return action(new Session(this, json));
     }
 
     // Checks the arguments of a data command and returns what to run, or null with a usage message (null when the
@@ -324,6 +342,23 @@ internal sealed class Cli
             return Error(TodosUnreadable);
         }
 
+        if (session.Json)
+        {
+            return Json(w =>
+            {
+                w.WriteStartArray("todos");
+                foreach (TodoItem todo in todos)
+                {
+                    w.WriteStartObject();
+                    w.WriteString("due", Date(todo.Due));
+                    w.WriteString("text", OneLine(todo.Text));
+                    w.WriteEndObject();
+                }
+
+                w.WriteEndArray();
+            });
+        }
+
         foreach (TodoItem todo in todos)
         {
             Out($"{Date(todo.Due)}\t{OneLine(todo.Text)}");
@@ -391,6 +426,23 @@ internal sealed class Cli
             .Concat(session.Notes.ListSensitive().Select(n => (n, true)))
             .OrderBy(r => r.Item1.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(r => r.Item1.Name, StringComparer.Ordinal);
+        if (session.Json)
+        {
+            return Json(w =>
+            {
+                w.WriteStartArray("notes");
+                foreach ((NoteInfo note, bool locked) in all)
+                {
+                    w.WriteStartObject();
+                    w.WriteString("name", OneLine(note.Name));
+                    w.WriteBoolean("locked", locked);
+                    w.WriteEndObject();
+                }
+
+                w.WriteEndArray();
+            });
+        }
+
         foreach ((NoteInfo note, bool locked) in all)
         {
             Out(locked ? $"{OneLine(note.Name)}\tlocked" : OneLine(note.Name));
@@ -424,6 +476,16 @@ internal sealed class Cli
         }
 
         string text = SafeText.Clean(note.Text);
+        if (session.Json)
+        {
+            string shown = OneLine(note.Name);
+            return Json(w =>
+            {
+                w.WriteString("name", shown);
+                w.WriteString("text", text);
+            });
+        }
+
         stdout.Write(text.Length == 0 || text.EndsWith('\n') ? text : text + "\n");
         return ExitOk;
     }
@@ -435,6 +497,20 @@ internal sealed class Cli
         {
             case TagsViewKind.IndexUnreadable:
                 return Error(IndexUnreadable);
+            case TagsViewKind.AllTags when session.Json:
+                return Json(w =>
+                {
+                    w.WriteStartArray("tags");
+                    foreach (TagCount tag in view.Tags)
+                    {
+                        w.WriteStartObject();
+                        w.WriteString("tag", OneLine(tag.Tag));
+                        w.WriteNumber("count", tag.Count);
+                        w.WriteEndObject();
+                    }
+
+                    w.WriteEndArray();
+                });
             case TagsViewKind.AllTags:
                 foreach (TagCount tag in view.Tags)
                 {
@@ -442,6 +518,12 @@ internal sealed class Cli
                 }
 
                 return ExitOk;
+            case TagsViewKind.NotesWithTag or TagsViewKind.NoSuchTag when session.Json:
+                return Json(w =>
+                {
+                    w.WriteString("tag", OneLine(view.Tag));
+                    CliJson.Strings(w, "notes", view.Notes.Select(OneLine));
+                });
             default:
                 // NoSuchTag lists nothing: an unknown tag simply has no notes.
                 foreach (string note in view.Notes)
@@ -463,6 +545,23 @@ internal sealed class Cli
             case LinksViewKind.NoSuchNote:
             case LinksViewKind.MissingArgument:
                 return Error(Sensitive(session, view.Typed) ?? $"No note named {OneLine(view.Typed)}.");
+            case LinksViewKind.Links or LinksViewKind.NoLinks when session.Json:
+                return Json(w =>
+                {
+                    w.WriteString("note", OneLine(view.Note ?? string.Empty));
+                    w.WriteStartArray("links");
+                    foreach (NoteLink link in view.Links)
+                    {
+                        w.WriteStartObject();
+                        w.WriteString("note", OneLine(link.Note));
+                        w.WriteString("direction", CliJson.Direction(link.Direction));
+                        w.WriteBoolean("missing", link.Missing);
+                        CliJson.Strings(w, "sharedTags", link.SharedTags.Select(OneLine));
+                        w.WriteEndObject();
+                    }
+
+                    w.WriteEndArray();
+                });
             default:
                 foreach (NoteLink link in view.Links)
                 {
@@ -495,6 +594,11 @@ internal sealed class Cli
     {
         CurrentView view = CurrentView.Build(
             session.Todos, session.Index, session.Notes, session.Calendar, session.Feed, today());
+        if (session.Json)
+        {
+            return CurrentJson(view);
+        }
+
         bool failed = false;
         Out($"Today, {Date(view.Today)}");
 
@@ -563,6 +667,118 @@ internal sealed class Cli
             Out($"{OneLine(note.Name)}\t{OneLine(string.Join(' ', note.Tags.Select(TagParser.Format)))}");
         }
 
+        return failed ? ExitError : ExitOk;
+    }
+
+    // current as one JSON document: the same stderr lines and exit code as plain, no hint texts.
+    private int CurrentJson(CurrentView view)
+    {
+        bool failed = false;
+        foreach (string file in view.UnreadableCalendarFiles)
+        {
+            failed = true;
+            Err($"Can't read {CalendarStore.FolderName}/{OneLine(file)}");
+        }
+
+        if (view.Status == CalendarFeedStatus.Failed)
+        {
+            failed = true;
+            Err($"Can't download the Exchange calendar ({OneLine(view.Reason ?? string.Empty)}).");
+        }
+
+        // As in plain: the index is only looked at when something is due.
+        bool indexFailed = !view.TodosUnreadable && view.Due.Count > 0 && view.IndexUnreadable;
+        if (view.TodosUnreadable)
+        {
+            failed = true;
+            Err(TodosUnreadable);
+        }
+        else if (indexFailed)
+        {
+            failed = true;
+            Err(IndexUnreadable);
+        }
+
+        TimeZoneInfo shownZone = view.Zone;
+        string? cachedAt = view.CachedAtUtc is null || view.Status is not (CalendarFeedStatus.Stale or CalendarFeedStatus.Fresh)
+            ? null
+            : CliJson.Time(
+                TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(view.CachedAtUtc.Value, DateTimeKind.Utc), shownZone),
+                shownZone);
+        stdout.Write(CliJson.Document(w =>
+        {
+            w.WriteString("today", Date(view.Today));
+            w.WriteStartArray("appointments");
+            foreach (Appointment appointment in view.Appointments)
+            {
+                w.WriteStartObject();
+                w.WriteString("start", CliJson.Time(appointment.Start, shownZone));
+                w.WriteString("end", CliJson.Time(appointment.End, shownZone));
+                w.WriteBoolean("allDay", appointment.AllDay);
+                w.WriteString("title", OneLine(appointment.Title));
+                if (appointment.Location is null)
+                {
+                    w.WriteNull("location");
+                }
+                else
+                {
+                    w.WriteString("location", OneLine(appointment.Location));
+                }
+
+                w.WriteEndObject();
+            }
+
+            w.WriteEndArray();
+            w.WriteStartObject("calendar");
+            w.WriteString("status", CliJson.Status(view.Status));
+            if (cachedAt is null)
+            {
+                w.WriteNull("cachedAt");
+            }
+            else
+            {
+                w.WriteString("cachedAt", cachedAt);
+            }
+
+            CliJson.Strings(w, "unreadableFiles", view.UnreadableCalendarFiles.Select(OneLine));
+            w.WriteEndObject();
+            if (view.TodosUnreadable)
+            {
+                w.WriteNull("due");
+            }
+            else
+            {
+                w.WriteStartArray("due");
+                foreach (DueTodo todo in view.Due)
+                {
+                    w.WriteStartObject();
+                    w.WriteString("due", Date(todo.Due));
+                    w.WriteString("text", OneLine(todo.Text));
+                    w.WriteBoolean("overdue", todo.Overdue);
+                    w.WriteEndObject();
+                }
+
+                w.WriteEndArray();
+            }
+
+            if (view.TodosUnreadable || indexFailed)
+            {
+                w.WriteNull("linkedNotes");
+            }
+            else
+            {
+                w.WriteStartArray("linkedNotes");
+                foreach (LinkedNote note in view.LinkedNotes)
+                {
+                    w.WriteStartObject();
+                    w.WriteString("name", OneLine(note.Name));
+                    CliJson.Strings(w, "tags", note.Tags.Select(OneLine));
+                    w.WriteEndObject();
+                }
+
+                w.WriteEndArray();
+            }
+        }));
         return failed ? ExitError : ExitOk;
     }
 
@@ -673,6 +889,12 @@ internal sealed class Cli
 
     private static string Date(DateOnly date) => date.ToString(DateFormat, CultureInfo.InvariantCulture);
 
+    private int Json(Action<Utf8JsonWriter> body)
+    {
+        stdout.Write(CliJson.Document(body));
+        return ExitOk;
+    }
+
     private void Out(string line)
     {
         stdout.Write(line);
@@ -706,8 +928,9 @@ internal sealed class Cli
     // The stores of one run, built as in Program.cs.
     private sealed class Session
     {
-        public Session(Cli cli)
+        public Session(Cli cli, bool json)
         {
+            Json = json;
             Notes = new NoteStore(cli.folder);
             Todos = new TodoStore(cli.folder, () => cli.now().ToUniversalTime());
             Index = new TagIndex(cli.folder);
@@ -715,6 +938,9 @@ internal sealed class Cli
             CalendarLink link = new CalendarLink(cli.folder);
             Feed = new CalendarFeed(cli.folder, link, cli.http, () => cli.now().ToUniversalTime());
         }
+
+        /// <summary>True when the command writes one JSON document instead of plain text.</summary>
+        public bool Json { get; }
 
         public NoteStore Notes { get; }
 
