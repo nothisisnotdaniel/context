@@ -176,4 +176,78 @@ public sealed class CalendarStoreTests : IDisposable
 
         Assert.Equal(["Café"], Titles(Day()));
     }
+
+    // 162 AC-7: an occurrence over midnight shows on both days; yesterday's and today's both touch today.
+    [Fact]
+    public void Day_RecurringOverMidnight_ShowsOnBothDays()
+    {
+        Write("late.ics", Event("Night shift", ":20261001T230000", ":20261002T010000", "RRULE:FREQ=DAILY\r\n"));
+
+        CalendarDay day = Day();
+
+        Assert.Equal(
+            [new DateTime(2026, 10, 28, 23, 0, 0), new DateTime(2026, 10, 29, 23, 0, 0)],
+            day.Appointments.Select(a => a.Start));
+        Assert.Equal(new DateTime(2026, 10, 29, 1, 0, 0), day.Appointments[0].End);
+        Assert.Empty(day.Unreadable);
+    }
+
+    // 162 AC-7: a daily series from 1990 without COUNT shows today.
+    [Fact]
+    public void Day_DailySeriesFrom1990_ShowsToday()
+    {
+        Write("old.ics", Event("Standup", ":19900101T090000", ":19900101T091500", "RRULE:FREQ=DAILY\r\n"));
+
+        Appointment a = Assert.Single(Day().Appointments);
+
+        Assert.Equal(new DateTime(2026, 10, 29, 9, 0, 0), a.Start);
+        Assert.Equal(new DateTime(2026, 10, 29, 9, 15, 0), a.End);
+    }
+
+    // 162 AC-10: All keeps one entry per VEVENT.
+    [Fact]
+    public void All_RecurringEvent_OneEntry()
+    {
+        Write("old.ics", Event("Standup", ":19900101T090000", ":19900101T091500", "RRULE:FREQ=DAILY\r\n"));
+
+        Appointment a = Assert.Single(new CalendarStore(root, IcsParserTests.Zone).All([]).Appointments);
+
+        Assert.Equal(new DateTime(1990, 1, 1, 9, 0, 0), a.Start);
+    }
+
+    // 162 AC-8, AC-9: a file just under 5 MB of rules that never match (and of bad rules) returns within 5 s
+    // and is not unreadable; the good event after them still shows.
+    [Fact]
+    public void Day_HostileRules_FastAndReadable()
+    {
+        string[] rules =
+        [
+            "RRULE:FREQ=DAILY;BYMONTH=2;BYMONTHDAY=31",
+            "RRULE:FREQ=YEARLY;COUNT=2000000000;BYMONTH=2;BYMONTHDAY=30",
+            "RRULE:FREQ=DAILY;COUNT=2000000000;BYMONTH=2;BYMONTHDAY=31",
+            "RRULE:FREQ=YEARLY;BYDAY=MO,TU,WE,TH,FR,SA,SU,-1MO,-2MO,-3MO,1SU,2SU,3SU;BYMONTH=2;BYMONTHDAY=31",
+            "RRULE:FREQ=HOURLY;BYSETPOS=1",
+        ];
+        System.Text.StringBuilder text = new System.Text.StringBuilder("BEGIN:VCALENDAR\r\n");
+        int i = 0;
+        while (text.Length < CalendarStore.MaxFileBytes - 4096)
+        {
+            text.Append(Event("x", ":00010101T090000", null, rules[i % rules.Length] + "\r\n"));
+            i++;
+        }
+
+        text.Append(Event("Real", ":20261029T100000"));
+        text.Append("END:VCALENDAR\r\n");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "hostile.ics"), text.ToString());
+        Assert.True(new FileInfo(Path.Combine(folder, "hostile.ics")).Length <= CalendarStore.MaxFileBytes);
+
+        System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+        CalendarDay day = Day();
+        watch.Stop();
+
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
+        Assert.Empty(day.Unreadable);
+        Assert.Equal(["Real"], Titles(day));
+    }
 }
