@@ -111,7 +111,7 @@
                 }
             </main>
             <aside class="todos-region">
-                <TodoPanel />
+                <TodoPanel OnPerson="OpenMention" />
             </aside>
         </div>
         @if (discarding)
@@ -249,7 +249,7 @@ else
         ShowNote(name);
     }
 
-    // A mention was clicked in the editor: opens the person's page, making it (and people) on this click only.
+    // A mention was clicked in the editor or in the todo list: opens the person's page, making it (and people) on this click only.
     // Asks first when the open note has unsaved changes, like RequestOpen.
     private async Task OpenMention(string person)
     {

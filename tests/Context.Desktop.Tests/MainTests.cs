@@ -1327,6 +1327,43 @@ public sealed class MainTests : IDisposable
         Assert.Equal("# Anna\n\naliases::\naffiliation::\nrole::\n", File.ReadAllText(Path.Combine(data.Root, "people", "Anna.md")));
     }
 
+    // 159 AC-8: a mention in the todo list opens the person page through OpenMention (creating it on this click).
+    [Fact]
+    public async Task TodoMention_OpensPersonPage()
+    {
+        data.AddTodo("Call @[Anna] now", DesktopFixture.Today);
+        _ = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await cut.Find(".todos-region button.mention").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("people/Anna", cut.Find(".note-title").TextContent), Wait);
+        Assert.Equal("# Anna\n\naliases::\naffiliation::\nrole::\n", File.ReadAllText(Path.Combine(data.Root, "people", "Anna.md")));
+        Assert.Empty(cut.FindAll(".todos-region input[type=checkbox][checked]"));
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Open todos"], cut.FindAll(".person-panel h2").Select(h => h.TextContent).ToArray()), Wait);
+    }
+
+    // 159 AC-8: with unsaved changes a todo mention asks to discard first, like an editor mention.
+    [Fact]
+    public async Task TodoMention_DirtyEditor_AsksFirst()
+    {
+        data.WriteNote("Plan", "x\n");
+        data.AddTodo("Call @[Anna]", DesktopFixture.Today);
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        js.Edit("x\n\nUnsaved\n");
+
+        await cut.Find(".todos-region button.mention").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent);
+        Assert.False(File.Exists(Path.Combine(data.Root, "people.md")));
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("people/Anna", cut.Find(".note-title").TextContent), Wait);
+    }
+
     // 156 AC-10: a sensitive people note gives the red refusal; the open note stays and nothing is written.
     [Fact]
     public async Task Mention_SensitivePeople_RefusedRedLine()

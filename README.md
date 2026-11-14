@@ -26,9 +26,11 @@ notes only; subpages are created, moved and deleted in the desktop app.
 Write `@[Anna Schmidt]` in a note to mention a person (at the start of a line or after a space; not in code).
 `context people` lists everyone mentioned, with the number of notes that mention them. `context person Anna Schmidt`
 (or `context person "@[Anna Schmidt]"`) lists those notes, then the appointments whose title or location mentions
-the person or that list them as an attendee, latest first. Appointments come from `calendar/*.ics` and the last
-downloaded copy of the Exchange calendar; nothing is downloaded. In the desktop app, clicking a mention opens the
-person's page `people/Anna Schmidt`, creating it (and `people`) on that click if needed.
+the person or that list them as an attendee, latest first, then the open todos that mention them and the done ones
+(latest done first). Appointments come from `calendar/*.ics` and the last
+downloaded copy of the Exchange calendar; nothing is downloaded. In the desktop app, clicking a mention (in a note or
+in the todo list) opens the person's page `people/Anna Schmidt`, creating it (and `people`) on that click if needed.
+A done todo stays in `todos.json` with a `done` field, so the person's page still lists it.
 
 Give a person shorthands with an `aliases::` line on their page, for example `aliases:: Anna, AS` on
 `people/Anna Schmidt`: then `@[Anna]` and `@[AS]` in any note count as mentions of Anna Schmidt, in

@@ -43,7 +43,7 @@ internal sealed class Cli
         ("tags [tag...]", "List tags with counts, or the notes with a tag."),
         ("links <note...>", "List the notes linked to a note."),
         ("people", "List the people mentioned with @[Name], with counts."),
-        ("person <name...>", "List the notes and appointments that mention a person."),
+        ("person <name...>", "List the notes, appointments and todos that mention a person."),
         ("find <attribute> <value...>", "List the notes with an attribute line, e.g. find role Bereichsleiter."),
         ("types", "List the page types with their attributes."),
         ("current", "Today's appointments, due todos and linked notes."),
@@ -737,7 +737,8 @@ internal sealed class Cli
 
     private int Person(Session session, string argument)
     {
-        PersonView view = PersonView.Build(session.Index, session.Notes, session.Calendar, session.Feed, argument);
+        PersonView view = PersonView.Build(
+            session.Index, session.Notes, session.Calendar, session.Feed, argument, session.Todos);
         if (view.Kind == PersonViewKind.MissingArgument)
         {
             return Usage(PersonForm);
@@ -759,7 +760,12 @@ internal sealed class Cli
             Err($"Can't read {CalendarStore.FolderName}/{OneLine(file)}");
         }
 
-        int exit = view.UnreadableCalendarFiles.Count > 0 ? ExitError : ExitOk;
+        if (view.TodosUnreadable)
+        {
+            Err($"Can't read {TodoStore.FileName}.");
+        }
+
+        int exit = view.UnreadableCalendarFiles.Count > 0 || view.TodosUnreadable ? ExitError : ExitOk;
         if (session.Json)
         {
             stdout.Write(CliJson.Document(w =>
@@ -773,13 +779,15 @@ internal sealed class Cli
                 }
 
                 w.WriteEndArray();
+                WritePersonTodos(w, "todos", view, view.OpenTodos, done: false);
+                WritePersonTodos(w, "doneTodos", view, view.DoneTodos, done: true);
             }));
             return exit;
         }
 
         if (view.Kind == PersonViewKind.NoMentions)
         {
-            Out($"No notes or appointments mention {OneLine(view.Person)}.");
+            Out($"No notes, appointments or todos mention {OneLine(view.Person)}.");
             return exit;
         }
 
@@ -797,7 +805,47 @@ internal sealed class Cli
             Out($"{date}\t{PersonView.TimeText(appointment)}\t{OneLine(title)}");
         }
 
+        Out("Todos");
+        foreach (TodoItem todo in view.OpenTodos)
+        {
+            Out($"{Date(todo.Due)}\t{OneLine(todo.Text)}");
+        }
+
+        Out("Done todos");
+        foreach (TodoItem todo in view.DoneTodos)
+        {
+            Out($"{Date(view.DoneDate(todo))}\t{OneLine(todo.Text)}");
+        }
+
         return exit;
+    }
+
+    // The person's open or done todos as a JSON array of {due,text} or {due,done,text}; null when todos.json can't be
+    // read.
+    private static void WritePersonTodos(
+        Utf8JsonWriter w, string name, PersonView view, IReadOnlyList<TodoItem> todos, bool done)
+    {
+        if (view.TodosUnreadable)
+        {
+            w.WriteNull(name);
+            return;
+        }
+
+        w.WriteStartArray(name);
+        foreach (TodoItem todo in todos)
+        {
+            w.WriteStartObject();
+            w.WriteString("due", Date(todo.Due));
+            if (done)
+            {
+                w.WriteString("done", Date(view.DoneDate(todo)));
+            }
+
+            w.WriteString("text", OneLine(todo.Text));
+            w.WriteEndObject();
+        }
+
+        w.WriteEndArray();
     }
 
     // One appointment as a JSON object: start, end, allDay, title, location (null when missing).

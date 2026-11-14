@@ -1,22 +1,24 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Context;
 
 /// <summary>
-/// A todo: its id, its text, the day it is due and when it was added (UTC). The id is never shown; it is how a
-/// todo is addressed for <see cref="TodoStore.Complete"/>, so a list that changed since it was shown can't make
-/// another todo go away.
+/// A todo: its id, its text, the day it is due, when it was added (UTC) and when it was done (UTC, <c>null</c> while
+/// it is open). The id is never shown; it is how a todo is addressed for <see cref="TodoStore.Complete"/>, so a list
+/// that changed since it was shown can't make another todo done.
 /// </summary>
 internal sealed record TodoItem
 {
-    public TodoItem(Guid id, string text, DateOnly due, DateTime created)
+    public TodoItem(Guid id, string text, DateOnly due, DateTime created, DateTime? done = null)
     {
         Id = id;
         Text = text;
         Due = due;
         Created = created;
+        Done = done;
     }
 
     /// <summary>Unique within the list, stable across reads; never shown to the user.</summary>
@@ -28,6 +30,9 @@ internal sealed record TodoItem
 
     /// <summary>When the todo was added, UTC. Breaks ties between todos due on the same day.</summary>
     public DateTime Created { get; }
+
+    /// <summary>When the todo was marked done, UTC; <c>null</c> for an open todo.</summary>
+    public DateTime? Done { get; }
 }
 
 /// <summary>Thrown when <c>todos.json</c> exists but can't be read or parsed. The file is never overwritten then.</summary>
@@ -46,7 +51,8 @@ internal sealed class TodoStoreException : IOException
 /// with a bad one (any value that is not a GUID string, such as <c>"nope"</c> or <c>42</c>), gets an id derived from
 /// its content and position among identical todos. <see cref="Migrate()"/>, called once when the desktop app or a
 /// todo-reading command starts, writes those derived ids into the file; reads never write, and derivation stays the
-/// fallback for a file changed while the app runs.
+/// fallback for a file changed while the app runs. A done todo stays in the file with a <c>done</c> field (a todo
+/// without one is open); <see cref="List"/> gives the open todos and <see cref="ListDone"/> the done ones.
 /// </summary>
 internal sealed class TodoStore
 {
@@ -66,7 +72,7 @@ internal sealed class TodoStore
     private readonly Func<Guid> newId;
 
     /// <param name="root">The folder <c>todos.json</c> lives in.</param>
-    /// <param name="utcNow">The clock for <see cref="TodoItem.Created"/>; <see cref="DateTime.UtcNow"/> if null.</param>
+    /// <param name="utcNow">The clock for <see cref="TodoItem.Created"/> and <see cref="TodoItem.Done"/>; <see cref="DateTime.UtcNow"/> if null.</param>
     /// <param name="newId">The ids of new todos; <see cref="Guid.NewGuid"/> if null (tests pass fixed ones).</param>
     public TodoStore(string root, Func<DateTime>? utcNow = null, Func<Guid>? newId = null)
     {
@@ -79,12 +85,19 @@ internal sealed class TodoStore
     public string FilePath => Path.Combine(root, FileName);
 
     /// <summary>
-    /// Every todo, sorted by <see cref="TodoItem.Due"/>, then <see cref="TodoItem.Created"/>, then file order.
+    /// Every open todo, sorted by <see cref="TodoItem.Due"/>, then <see cref="TodoItem.Created"/>, then file order.
     /// A missing file lists as empty and nothing is created. Throws <see cref="TodoStoreException"/>
     /// if the file can't be read or isn't a valid todo list.
     /// </summary>
     public IReadOnlyList<TodoItem> List() =>
-        Read().OrderBy(t => t.Due).ThenBy(t => t.Created).ToList();
+        Read().Where(t => t.Done is null).OrderBy(t => t.Due).ThenBy(t => t.Created).ToList();
+
+    /// <summary>
+    /// Every done todo, sorted by <see cref="TodoItem.Done"/>, latest first, then <see cref="TodoItem.Created"/>,
+    /// then file order. A missing file lists as empty. Throws <see cref="TodoStoreException"/> like <see cref="List"/>.
+    /// </summary>
+    public IReadOnlyList<TodoItem> ListDone() =>
+        Read().Where(t => t.Done is not null).OrderByDescending(t => t.Done).ThenBy(t => t.Created).ToList();
 
     /// <summary>
     /// Adds a todo, creating the root folder if needed, and returns it. Throws
@@ -107,28 +120,31 @@ internal sealed class TodoStore
     }
 
     /// <summary>
-    /// Removes the todo with <paramref name="id"/> in one read and write and returns it, or returns <c>null</c>
-    /// (and writes nothing) when no todo has that id. Throws <see cref="TodoStoreException"/> if the file can't be
+    /// Marks the open todo with <paramref name="id"/> done (<see cref="TodoItem.Done"/> from the clock) in one read
+    /// and write and returns it; it stays in the file. Returns <c>null</c> (and writes nothing) when no open todo has
+    /// that id, including one that is already done. Throws <see cref="TodoStoreException"/> if the file can't be
     /// read; nothing is written then.
     /// </summary>
     public TodoItem? Complete(Guid id)
     {
         List<TodoItem> todos = Read();
-        int index = todos.FindIndex(t => t.Id == id);
+        int index = todos.FindIndex(t => t.Id == id && t.Done is null);
         if (index < 0)
         {
             return null;
         }
 
-        TodoItem done = todos[index];
-        todos.RemoveAt(index);
+        TodoItem open = todos[index];
+        TodoItem done = new TodoItem(
+            open.Id, open.Text, open.Due, open.Created, DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc));
+        todos[index] = done;
         Write(todos);
         return done;
     }
 
     /// <summary>
     /// Stores the ids <see cref="List"/> would return when some todo has no stored, non-empty, unique id: writes
-    /// the list once, in file order with the same text, due and created, and returns <c>true</c>. Returns
+    /// the list once, in file order with the same text, due, created and done, and returns <c>true</c>. Returns
     /// <c>false</c> and writes nothing when every id is already stored, the file is missing, or it can't be read,
     /// parsed or written (an unreadable file is never touched; the next <see cref="List"/> reports it). Never throws
     /// for those.
@@ -265,7 +281,7 @@ internal sealed class TodoStore
                 while (id == Guid.Empty || used.Contains(id) || !taken.Add(id));
             }
 
-            todos.Add(new TodoItem(id, item.Text!, item.Due!.Value, created));
+            todos.Add(new TodoItem(id, item.Text!, item.Due!.Value, created, item.Done));
         }
 
         return todos;
@@ -295,7 +311,7 @@ internal sealed class TodoStore
     private void Write(List<TodoItem> todos)
     {
         List<TodoJson> items = todos
-            .Select(t => new TodoJson { Id = JsonSerializer.SerializeToElement(t.Id), Text = t.Text, Due = t.Due, Created = t.Created })
+            .Select(t => new TodoJson { Id = JsonSerializer.SerializeToElement(t.Id), Text = t.Text, Due = t.Due, Created = t.Created, Done = t.Done })
             .ToList();
         string json = JsonSerializer.Serialize(items, JsonOptions) + "\n";
         string temp = Path.Combine(root, $".{FileName}.{Guid.NewGuid():N}.tmp");
@@ -328,5 +344,12 @@ internal sealed class TodoStore
         public DateOnly? Due { get; set; }
 
         public DateTime? Created { get; set; }
+
+        /// <summary>
+        /// When the todo was done; left out of the file for an open todo, so a list with no done todo is written as
+        /// before. A value that is not null and not a date-time string makes the file unreadable.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public DateTime? Done { get; set; }
     }
 }

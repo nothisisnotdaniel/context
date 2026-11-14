@@ -48,7 +48,17 @@ Every factory agent reads this file before working on Context. Keep it short and
     page's title, else the ordinal-first spelling. `IcsParser` reads each `ATTENDEE`'s `CN` (normalized like a mention)
     into `Appointment.Attendees`; the address is never read out. `PersonView.Build` lists the mentioning notes and the
     appointments (calendar files and the cached Exchange copy, no download) whose title or location mentions the
-    person or whose attendee matches, latest first. The editor shows a mention as a `mention` chip; following it calls
+    person or whose attendee matches, latest first. **Todos** (job 159): `PersonView.Build(..., todos)` (optional
+    `TodoStore?`) adds `OpenTodos` (`List()` order) and `DoneTodos` (`ListDone()` order) whose text mentions the person
+    (`PersonParser.Parse` + `aliases.PersonKey` at query time, as for appointments; nothing stored in `context.db`, no
+    `ParserVersion` change), `TodosUnreadable` for a bad `todos.json` and `DoneDate(todo)` (the day in `Zone`); todo
+    mentions count for `Kind`. `PersonParser.Segments(line)` splits one-line text into `PersonSegment(Text, Name)`
+    (plain: `Name` null; every mention occurrence, same rules as `Parse`; joined texts give the input). The desktop
+    `TodoPanel` draws each mention as `<button class="mention">` (raw text, full text in `title`) inside the todo's
+    `<label>`, click stopped there; `OnPerson` (normalized name) goes to `Main.OpenMention`. `PersonPanel` adds
+    `Open todos` (due, text) and `Done todos` (done date, text), each only when non-empty, no checkboxes; the red
+    `Can't read the todos.` line for a bad `todos.json`; empty line `No notes, appointments or todos mention <name>.`
+    The editor shows a mention as a `mention` chip; following it calls
     `DesktopActions.OpenPerson`, which creates `people` (`# people\n`) and the page (`CreateChild`) only on that click,
     and refuses when the top-level `people` is sensitive. The new page gets the `person` type's template
     (`PageTypes.Template`: a blank line and one `<attr>::` line per attribute) through `CreateChild(parent, title, body)`.
@@ -268,7 +278,12 @@ Every factory agent reads this file before working on Context. Keep it short and
     descendant, then only the child folders that are now empty. `SaveIfUnchanged` writes its temp file in the
     note's own folder, named after `Title`. `Save` (import) and `Create` stay top-level only.
   - **Todos:** `TodoStore` keeps the list in `<root>/todos.json` (same root as notes; System.Text.Json,
-    camelCase, UTF-8 no BOM). `List()` sorts by `Due`, then `Created` (UTC), then file order. Writes go to
+    camelCase, UTF-8 no BOM). `List()` gives the **open** todos sorted by `Due`, then `Created` (UTC), then file
+    order. A done todo (job 159) stays in the file with `done` (UTC date-time; `TodoItem.Done`, written only when set,
+    so a list without done todos has the same bytes as before; absent or `null` = open; any other non-date-time value
+    makes the file unreadable like a bad `due`). `ListDone()` sorts the done ones by `Done` descending, then `Created`,
+    then file order. `Add`/`Migrate` keep done todos; ids and `DerivedId` cover both (`done` is not in the key). An
+    older build shows done todos as open again and drops the marker on its next write (the user's choice). Writes go to
     a temp file in the root, then `File.Move(..., overwrite: true)`; a file that can't be read or parsed
     throws `TodoStoreException` and is never overwritten. Each `TodoItem` has a `Guid Id` (stored as `id`, never
     shown to the user; new ones from `Guid.NewGuid` or the injected `newId`). A todo stored without an id (files from
@@ -283,11 +298,12 @@ Every factory agent reads this file before working on Context. Keep it short and
     (used by the CLI; `Migrate()` calls it) also gives the number of bad ids it replaced, 0 whenever nothing was
     written. Derivation on read stays the fallback for a file changed while the app runs, and an older build that
     drops the ids gets the same ids written again on the next start. `Complete(Guid id)`
-    removes that todo in one read and write and returns it, or returns `null` and writes nothing.
+    sets `Done` from the clock on that open todo in one read and write and returns it, or returns `null` and writes
+    nothing (unknown id or already done). Done todos are never shown, reopened or pruned anywhere but the person page.
     `context todo add <yyyy-MM-dd|today|tomorrow> <text>` and the desktop's entry row add (text at most 200 chars, past dates allowed); `context todo done <text>` picks the
-    todo by its text and removes it by its id; the desktop removes the ticked todo by its id.
+    todo by its text and marks it done by its id; the desktop marks the ticked todo done by its id.
     **No todo numbers anywhere** (command line and desktop alike): a todo is shown as date and text, picked
-    by its text and removed by its hidden id. `TodoPicker.Pick(todos, query)` (Core, used by `context
+    by its text and marked done by its hidden id. `TodoPicker.Pick(todos, query)` (Core, used by `context
     todo done`) compares the trimmed query, ignoring case (ordinal), with each todo's one-line text
     (`TodoPicker.OneLine`: `SafeText.Clean`, line breaks as spaces) in `List()` order and returns a `TodoPick`: the
     first todo whose text equals the query, else the only one containing it, else no todo and the count of todos
@@ -314,8 +330,9 @@ Every factory agent reads this file before working on Context. Keep it short and
   no text is a usage error), `notes`, `note show <name...>`,
   `tags [tag...]` (`<tag>\t<count>` or note names), `links <note...>` (`<name>\t<link>\t<tags>`), `people`
   (`<name>\t<count>`), `person <name...>` (`Anna Schmidt`, `@[Anna Schmidt]` or an alias; an ambiguous alias adds one stderr hint; `Notes` then `Appointments` with
-  `<yyyy-MM-dd>\t<time>\t<title>`, or `No notes or appointments mention <name>.`; unreadable calendar files on stderr,
-  exit 1), `current` (the
+  `<yyyy-MM-dd>\t<time>\t<title>`, then `Todos` (`<due>\t<text>`) and `Done todos` (`<done yyyy-MM-dd>\t<text>`), or
+  `No notes, appointments or todos mention <name>.`; unreadable calendar files on stderr, exit 1; an unreadable
+  `todos.json` adds `Can't read todos.json.` on stderr, exit 1, the rest still printed; no `Migrate`), `current` (the
   current view's sections as text: `Today, <date>`, `Appointments`, `Due`, `Linked notes`; no row caps, `Due` lines as
   `<date>\t<text>`; its error lines go to stderr and make the exit code 1),
   `import <path>`, `export <note> <path>` (paths relative to the current directory, no `~`). When `Migrate(out n)`
@@ -331,7 +348,8 @@ Every factory agent reads this file before working on Context. Keep it short and
   (`CliJson.cs`, `Utf8JsonWriter` with the default encoder, so `+ & ' <` and non-ASCII are `\uXXXX`): `{version}`,
   `{todos:[{due,text}]}`, `{notes:[{name,locked}]}`, `{name,text}`, `{tags:[{tag,count}]}` or `{tag,notes:[]}`,
   `{note,links:[{note,direction:none|to|from|both,missing,sharedTags}]}`, `{people:[{person,count}]}`,
-  `{person,notes:[],appointments:[{start,end,allDay,title,location}]}`, `{key,value,notes:[]}` (`find`), `{types:[{type,attributes:[]}]}` (`types`; text: `<type>\t<attr, attr>`), `{today,appointments:[{start,end,allDay,
+  `{person,notes:[],appointments:[{start,end,allDay,title,location}],todos:[{due,text}],doneTodos:[{due,done,text}]}`
+  (`done` as `yyyy-MM-dd`; `todos`/`doneTodos` `null` when `todos.json` is unreadable), `{key,value,notes:[]}` (`find`), `{types:[{type,attributes:[]}]}` (`types`; text: `<type>\t<attr, attr>`), `{today,appointments:[{start,end,allDay,
   title,location}],calendar:{status,cachedAt,unreadableFiles},due:[{due,text,overdue}],linkedNotes:[{name,tags}]}`
   (absent = `null`, tags raw without `#`, times `yyyy-MM-ddTHH:mm:sszzz` in the zone; `due`/`linkedNotes` `null` when
   unreadable). Names and order are a public contract (`CliJsonTests`, README). Errors stay text; with `help` or a
@@ -518,7 +536,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `role="dialog"` overlay, focus on `Cancel`, Esc cancels, `Busy` disables it) is the only creator of a
     `Confirmation` (public sealed, internal constructor), which destructive actions require. The desktop shows no todo
     numbers (not in `TodoPanel`, not in the `Due` table): `TodoPanel` shows each todo as a `<label>` line with a
-    checkbox, date and text; ticking it opens the dialog (the box stays ticked while it is open), and a
+    checkbox, date and text (a person mention in the text is a `mention` button, job 159); ticking it opens the dialog (the box stays ticked while it is open), and a
     `role="status"` result line shows `Done: <text>` (accent) or the fixed red text.
     **Editing:** clicking a note name (`NotesPanel` button), a link or `/open` in the palette shows `NoteEditor` in the
     main region (`Main` keeps the open name; a dirty editor asks `Discard changes to <name>?` first). `NoteEditor`
@@ -564,8 +582,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     rows meanwhile; a result for another note or an older request is dropped.
     `PersonPanel` (job 156) sits above `LinksPanel` on a person page (`People.PersonOf(name)`) and lists
     `DesktopState.Person(name)` (`PersonView.Build`): `Mentioned in` note buttons (through `RequestOpen`) and
-    `Appointments` (date, time text, one-line title and location); grey `No notes or appointments mention <name>.`,
-    red `Can't read the mentions.`; above all rows (once loaded, in every state) one red `p.alias-clash` (`role="status"`) line per
+    `Appointments` (date, time text, one-line title and location), then (job 159) `Open todos` and `Done todos`; grey
+    `No notes, appointments or todos mention <name>.`, red `Can't read the mentions.`, red `Can't read the todos.`; above all rows (once loaded, in every state) one red `p.alias-clash` (`role="status"`) line per
     `PersonView.AliasClashes` entry; it follows the same read-only, `indexGate`, reload and stale-result rules. A
     mention chip calls `OnPerson`; `Main` (asking first when dirty) calls `DesktopActions.OpenPerson` and opens the
     result, or shows its red refusal.

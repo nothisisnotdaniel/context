@@ -38,6 +38,17 @@ public sealed class PersonViewTests : IDisposable
     private PersonView Build(string argument, CalendarFeed? feed = null) =>
         PersonView.Build(new TagIndex(root), new NoteStore(root), new CalendarStore(root, Zone), feed, argument);
 
+    private PersonView BuildWithTodos(string argument) =>
+        PersonView.Build(
+            new TagIndex(root), new NoteStore(root), new CalendarStore(root, Zone), null, argument, new TodoStore(root));
+
+    // 159: adds a todo with a fixed created time; done ones are marked done at Now plus doneHours.
+    private TodoItem AddTodo(string text, int dueDay, int? doneHours = null)
+    {
+        TodoItem todo = new TodoStore(root, () => Now).Add(text, new DateOnly(2026, 11, dueDay));
+        return doneHours is { } hours ? new TodoStore(root, () => Now.AddHours(hours)).Complete(todo.Id)! : todo;
+    }
+
     private void WriteNote(string name, string text)
     {
         string path = Path.Combine([root, .. name.Split('/')]) + ".md";
@@ -276,5 +287,126 @@ public sealed class PersonViewTests : IDisposable
         Assert.True(unreadable.IndexUnreadable);
         Assert.Equal("Anna Schmidt", unreadable.Person);
         Assert.Equal(expected, unreadable.AliasClashes.Select(c => c.Text));
+    }
+
+    // 159 AC-5: open and done todos that mention the person by full name, alias or any case/space variant.
+    [Fact]
+    public void Build_Todos_ByNameAliasAndVariant_OpenThenDone()
+    {
+        WriteNote("people", "# people");
+        WriteNote("people/Anna Schmidt", "# Anna Schmidt\naliases:: Anna, AS");
+        WriteNote("people/Bob", "# Bob");
+        TodoItem late = AddTodo("Call @[Anna Schmidt]", 9);
+        TodoItem soon = AddTodo("Ask @[as] and @[Bob]", 3);
+        TodoItem spaced = AddTodo("Mail @[ anna   SCHMIDT ]", 5);
+        AddTodo("Nobody here, just Anna", 4);
+        AddTodo("Only @[Bob]", 6);
+        TodoItem doneFirst = AddTodo("Book room for @[Anna]", 1, doneHours: 1);
+        TodoItem doneLater = AddTodo("Lunch with @[Anna Schmidt]", 2, doneHours: 5);
+
+        PersonView view = BuildWithTodos("anna");
+
+        Assert.Equal(PersonViewKind.Mentions, view.Kind);
+        Assert.Equal("Anna Schmidt", view.Person);
+        Assert.Equal([soon.Id, spaced.Id, late.Id], view.OpenTodos.Select(t => t.Id));
+        Assert.Equal([doneLater.Id, doneFirst.Id], view.DoneTodos.Select(t => t.Id));
+        Assert.False(view.TodosUnreadable);
+        Assert.Equal(new DateOnly(2026, 10, 29), view.DoneDate(view.DoneTodos[0]));
+
+        // The same todo is on Bob's page too.
+        PersonView bob = BuildWithTodos("Bob");
+        Assert.Equal(["Ask @[as] and @[Bob]", "Only @[Bob]"], bob.OpenTodos.Select(t => t.Text));
+        Assert.Empty(bob.DoneTodos);
+    }
+
+    // 159 AC-5: an ambiguous alias links to no page; a todo without a mention is on no page.
+    [Fact]
+    public void Build_Todos_AmbiguousAlias_NoPage_AndNoMention_NoPage()
+    {
+        WriteNote("people", "# people");
+        WriteNote("people/Anna Schmidt", "# Anna Schmidt\naliases:: Anna");
+        WriteNote("people/Anna Berg", "# Anna Berg\naliases:: Anna");
+        AddTodo("Call @[Anna]", 3);
+        AddTodo("Call Anna Schmidt", 4);
+
+        Assert.Equal(PersonViewKind.NoMentions, BuildWithTodos("Anna Schmidt").Kind);
+        Assert.Empty(BuildWithTodos("Anna Berg").OpenTodos);
+        PersonView unresolved = BuildWithTodos("Anna");
+        Assert.Equal(["Call @[Anna]"], unresolved.OpenTodos.Select(t => t.Text));
+        Assert.Equal(["Anna Berg", "Anna Schmidt"], unresolved.AmbiguousWith);
+    }
+
+    // 159 AC-5: a person mentioned only in todos has kind Mentions; only a done todo counts too.
+    [Fact]
+    public void Build_OnlyTodoMentions_KindMentions()
+    {
+        AddTodo("Call @[Carl]", 3);
+        AddTodo("Thank @[Dora]", 3, doneHours: 1);
+
+        PersonView carl = BuildWithTodos("Carl");
+        PersonView dora = BuildWithTodos("@[dora]");
+
+        Assert.Equal(PersonViewKind.Mentions, carl.Kind);
+        Assert.Empty(carl.Notes);
+        Assert.Empty(carl.Appointments);
+        Assert.Single(carl.OpenTodos);
+        Assert.Equal(PersonViewKind.Mentions, dora.Kind);
+        Assert.Empty(dora.OpenTodos);
+        Assert.Single(dora.DoneTodos);
+    }
+
+    // 159 AC-6: an unreadable todos.json sets TodosUnreadable; notes and appointments are still listed.
+    [Fact]
+    public void Build_BadTodos_TodosUnreadable_NotesAndAppointmentsStill()
+    {
+        WriteNote("A", "@[Anna]");
+        WriteCalendar("a.ics", Calendar(Event("With @[Anna]", ":20261027T090000Z", ":20261027T100000Z")));
+        File.WriteAllText(Path.Combine(root, TodoStore.FileName), "[{\"text\":\"@[Anna]\",\"due\":\"2026-11-03\",\"done\":42}]");
+
+        PersonView view = BuildWithTodos("Anna");
+
+        Assert.True(view.TodosUnreadable);
+        Assert.Equal(PersonViewKind.Mentions, view.Kind);
+        Assert.Equal(["A"], view.Notes);
+        Assert.Single(view.Appointments);
+        Assert.Empty(view.OpenTodos);
+        Assert.Empty(view.DoneTodos);
+    }
+
+    // 159 AC-6: an unreadable context.db still lists the matching todos, with the aliases read from the person pages.
+    [Fact]
+    public void Build_BadDb_StillTodos_AliasesFromPages()
+    {
+        WriteNote("people", "# people");
+        WriteNote("people/Anna Schmidt", "# Anna Schmidt\naliases:: Anna");
+        AddTodo("Call @[Anna]", 3);
+        AddTodo("Thank @[anna schmidt]", 3, doneHours: 1);
+        File.WriteAllText(DbPath, "not a database at all, not at all, really not");
+
+        PersonView view = BuildWithTodos("Anna Schmidt");
+
+        Assert.True(view.IndexUnreadable);
+        Assert.False(view.TodosUnreadable);
+        Assert.Equal(PersonViewKind.Mentions, view.Kind);
+        Assert.Equal(["Call @[Anna]"], view.OpenTodos.Select(t => t.Text));
+        Assert.Equal(["Thank @[anna schmidt]"], view.DoneTodos.Select(t => t.Text));
+    }
+
+    // 159 AC-6: with no todo store passed, the view is the same as before this job.
+    [Fact]
+    public void Build_NoTodoStore_SameAsBefore()
+    {
+        WriteNote("A", "@[Anna]");
+        AddTodo("Call @[Anna]", 3);
+        AddTodo("Ask @[Carl]", 3);
+
+        PersonView view = Build("Anna");
+        PersonView carl = Build("Carl");
+
+        Assert.Equal(["A"], view.Notes);
+        Assert.Empty(view.OpenTodos);
+        Assert.Empty(view.DoneTodos);
+        Assert.False(view.TodosUnreadable);
+        Assert.Equal(PersonViewKind.NoMentions, carl.Kind);
     }
 }

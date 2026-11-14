@@ -7,21 +7,24 @@ internal enum PersonViewKind
     MissingArgument,
 
     /// <summary>
-    /// No note and no appointment mentions <see cref="PersonView.Person"/> (or the index can't be read and no
-    /// appointment does: check <see cref="PersonView.IndexUnreadable"/>).
+    /// No note, appointment or todo mentions <see cref="PersonView.Person"/> (or the index can't be read and no
+    /// appointment or todo does: check <see cref="PersonView.IndexUnreadable"/>).
     /// </summary>
     NoMentions,
 
-    /// <summary><see cref="PersonView.Notes"/> or <see cref="PersonView.Appointments"/> is non-empty.</summary>
+    /// <summary>
+    /// <see cref="PersonView.Notes"/>, <see cref="PersonView.Appointments"/>, <see cref="PersonView.OpenTodos"/> or
+    /// <see cref="PersonView.DoneTodos"/> is non-empty.
+    /// </summary>
     Mentions,
 }
 
 /// <summary>
 /// The data of a person page (<c>context person &lt;name&gt;</c> and the desktop person panel), with no rendering:
-/// the notes that mention the person with <c>@[...]</c> and the appointments that mention them or list them as an
-/// attendee. Everything is read from disk: the calendar files and the cached copy of the published calendar, never
+/// the notes that mention the person with <c>@[...]</c>, the appointments that mention them or list them as an
+/// attendee, and the open and done todos whose text mentions them. Everything is read from disk: the calendar files and the cached copy of the published calendar, never
 /// the network. All text in it (the name, note names, appointment titles and locations, file names) is raw outside
-/// text: every front end must clean it (<see cref="SafeText.Clean"/>) and escape it for its own output.
+/// text, and so is todo text: every front end must clean it (<see cref="SafeText.Clean"/>) and escape it for its own output.
 /// </summary>
 internal sealed record PersonView
 {
@@ -34,7 +37,10 @@ internal sealed record PersonView
         bool indexUnreadable,
         TimeZoneInfo zone,
         IReadOnlyList<AliasClash>? aliasClashes = null,
-        IReadOnlyList<string>? ambiguousWith = null)
+        IReadOnlyList<string>? ambiguousWith = null,
+        IReadOnlyList<TodoItem>? openTodos = null,
+        IReadOnlyList<TodoItem>? doneTodos = null,
+        bool todosUnreadable = false)
     {
         Kind = kind;
         Person = person;
@@ -45,6 +51,9 @@ internal sealed record PersonView
         Zone = zone;
         AliasClashes = aliasClashes ?? [];
         AmbiguousWith = ambiguousWith ?? [];
+        OpenTodos = openTodos ?? [];
+        DoneTodos = doneTodos ?? [];
+        TodosUnreadable = todosUnreadable;
     }
 
     /// <summary>
@@ -103,6 +112,24 @@ internal sealed record PersonView
     public IReadOnlyList<string> AmbiguousWith { get; }
 
     /// <summary>
+    /// The open todos whose text mentions the person with <c>@[...]</c> (resolved through the aliases, like
+    /// appointments), in <see cref="TodoStore.List"/> order. Empty when no todo store was given or it can't be read.
+    /// </summary>
+    public IReadOnlyList<TodoItem> OpenTodos { get; }
+
+    /// <summary>The matching done todos, in <see cref="TodoStore.ListDone"/> order (latest done first).</summary>
+    public IReadOnlyList<TodoItem> DoneTodos { get; }
+
+    /// <summary>True when <c>todos.json</c> can't be read; then both todo lists are empty.</summary>
+    public bool TodosUnreadable { get; }
+
+    /// <summary>The day a done todo was done, in <see cref="Zone"/>.</summary>
+    public DateOnly DoneDate(TodoItem todo) =>
+        todo.Done is { } done
+            ? DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(done, DateTimeKind.Utc), Zone))
+            : throw new ArgumentException("The todo is not done.", nameof(todo));
+
+    /// <summary>
     /// <c>all day</c>, or <c>HH:mm-HH:mm</c> on the appointment's start day, with <c>…</c> for an end on a later day.
     /// </summary>
     public static string TimeText(Appointment appointment)
@@ -116,9 +143,12 @@ internal sealed record PersonView
     /// <c>@[Anna Schmidt]</c>, matched ignoring case and whitespace runs, resolved through the aliases
     /// (<see cref="PersonAliases"/>; from the index, or read from the person pages when it can't be read). Appointment
     /// mentions and attendee names are resolved the same way. Reads <paramref name="feed"/>'s cached copy
-    /// only (<see cref="CalendarFeed.ReadCache"/>); no request is made. Only <c>context.db</c> may be written.
+    /// only (<see cref="CalendarFeed.ReadCache"/>); no request is made. With <paramref name="todos"/>, the todos whose
+    /// text mentions the person are matched the same way at query time (nothing is stored); an unreadable
+    /// <c>todos.json</c> sets <see cref="TodosUnreadable"/>. Only <c>context.db</c> may be written.
     /// </summary>
-    public static PersonView Build(TagIndex index, NoteStore store, CalendarStore calendar, CalendarFeed? feed, string argument)
+    public static PersonView Build(
+        TagIndex index, NoteStore store, CalendarStore calendar, CalendarFeed? feed, string argument, TodoStore? todos = null)
     {
         string typed = TagParser.CollapseWhitespace(argument);
         if (typed.Length >= 3 && typed.StartsWith("@[", StringComparison.Ordinal) && typed.EndsWith(']'))
@@ -174,9 +204,32 @@ internal sealed record PersonView
             .OrderByDescending(a => a.Start)
             .ThenBy(a => a.Title, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        PersonViewKind kind = notes.Count == 0 && appointments.Count == 0 ? PersonViewKind.NoMentions : PersonViewKind.Mentions;
+        List<TodoItem> openTodos = [];
+        List<TodoItem> doneTodos = [];
+        bool todosUnreadable = false;
+        if (todos is not null)
+        {
+            try
+            {
+                IReadOnlyList<TodoItem> open = todos.List();
+                IReadOnlyList<TodoItem> done = todos.ListDone();
+                openTodos = open.Where(t => Holds(t.Text, aliases, key)).ToList();
+                doneTodos = done.Where(t => Holds(t.Text, aliases, key)).ToList();
+            }
+            catch (TodoStoreException)
+            {
+                todosUnreadable = true;
+                openTodos = [];
+                doneTodos = [];
+            }
+        }
+
+        PersonViewKind kind = notes.Count == 0 && appointments.Count == 0 && openTodos.Count == 0 && doneTodos.Count == 0
+            ? PersonViewKind.NoMentions
+            : PersonViewKind.Mentions;
         return new PersonView(
-            kind, person, notes, appointments, all.Unreadable, indexUnreadable, calendar.Zone, clashes, resolved.Titles);
+            kind, person, notes, appointments, all.Unreadable, indexUnreadable, calendar.Zone, clashes, resolved.Titles,
+            openTodos, doneTodos, todosUnreadable);
     }
 
     private static bool Mentions(Appointment appointment, PersonAliases aliases, string key) =>

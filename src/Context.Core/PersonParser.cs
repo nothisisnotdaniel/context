@@ -1,6 +1,18 @@
 namespace Context;
 
 /// <summary>
+/// A piece of a one-line text (<see cref="PersonParser.Segments"/>): plain text, or a mention with its raw text (for
+/// example <c>@[Anna]</c>) and its normalized name in <see cref="Name"/>. Both are raw outside text.
+/// </summary>
+/// <param name="Text">The exact characters of the input this segment covers.</param>
+/// <param name="Name">The mention's normalized name (<see cref="PersonParser.Normalize"/>); <c>null</c> for plain text.</param>
+internal sealed record PersonSegment(string Text, string? Name)
+{
+    /// <summary>True when this segment is a mention.</summary>
+    public bool IsMention => Name is not null;
+}
+
+/// <summary>
 /// Finds <c>@[Person name]</c> mentions in Markdown text. A person's page is the note
 /// <see cref="People.PersonNote"/>, and the mention's name only ever becomes a file name through
 /// <see cref="NoteStore.ValidateTitle"/> and <see cref="NoteStore.CreateChild"/>.
@@ -30,6 +42,35 @@ internal static class PersonParser
         }
 
         return names;
+    }
+
+    /// <summary>
+    /// Splits the one-line text <paramref name="line"/> into plain and mention segments, in order, by the rules of
+    /// <see cref="Parse"/> for one line: every occurrence of a mention is its own segment (repeats too), everything else
+    /// (code spans, <c>#[..]</c>, <c>[[..]]</c>, invalid names, a mention followed by <c>(</c>) is plain. The segments'
+    /// texts, joined, give <paramref name="line"/> exactly; a text without mentions is one plain segment (none for an
+    /// empty text).
+    /// </summary>
+    public static IReadOnlyList<PersonSegment> Segments(string line)
+    {
+        List<PersonSegment> segments = [];
+        int plainFrom = 0;
+        ScanLine(line, (start, end, name) =>
+        {
+            if (start > plainFrom)
+            {
+                segments.Add(new PersonSegment(line[plainFrom..start], null));
+            }
+
+            segments.Add(new PersonSegment(line[start..end], name));
+            plainFrom = end;
+        });
+        if (plainFrom < line.Length)
+        {
+            segments.Add(new PersonSegment(line[plainFrom..], null));
+        }
+
+        return segments;
     }
 
     /// <summary>The key a person is stored and matched by: the name lower-cased (invariant).</summary>
@@ -90,7 +131,17 @@ internal static class PersonParser
         return name.Length == 0 || NoteStore.ValidateTitle(name) is not null ? null : name;
     }
 
-    private static void ParseLine(string line, List<string> names, HashSet<string> seen)
+    private static void ParseLine(string line, List<string> names, HashSet<string> seen) =>
+        ScanLine(line, (_, _, name) =>
+        {
+            if (seen.Add(Key(name)))
+            {
+                names.Add(name);
+            }
+        });
+
+    // Calls found(start, end, name) for every mention in the line, in order: line[start..end] is "@[...]".
+    private static void ScanLine(string line, Action<int, int, string> found)
     {
         int i = 0;
         int nextClose = -1;
@@ -125,11 +176,7 @@ internal static class PersonParser
                 string? name = Normalize(line.AsSpan(i + 2, nextClose - i - 2));
                 if (name is not null)
                 {
-                    if (seen.Add(Key(name)))
-                    {
-                        names.Add(name);
-                    }
-
+                    found(i, nextClose + 1, name);
                     i = nextClose + 1;
                     continue;
                 }

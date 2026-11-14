@@ -107,6 +107,43 @@ public sealed class PersonParserTests
         Assert.Equal(name, PersonParser.NormalizeTyped(typed));
     }
 
+    // 159 AC-4: each expected segment is "plain text" or "raw text=>Name" for a mention.
+    public static TheoryData<string, string[]> SegmentCases() => new()
+    {
+        { "", [] },
+        { "Buy milk", ["Buy milk"] },
+        { "@[Anna]", ["@[Anna]=>Anna"] },
+        { "Call @[Anna] about @[ Bob  Berg ].", ["Call ", "@[Anna]=>Anna", " about ", "@[ Bob  Berg ]=>Bob Berg", "."] },
+        { "@[Anna] and @[anna] again", ["@[Anna]=>Anna", " and ", "@[anna]=>anna", " again"] },
+        { "@[Anna]@[Bob]", ["@[Anna]=>Anna", "@[Bob]"] },
+        { "`@[Anna]` @[Bob]", ["`@[Anna]` ", "@[Bob]=>Bob"] },
+        { "#[Anna] [[Anna]] @[[Anna]]", ["#[Anna] [[Anna]] @[[Anna]]"] },
+        { "x @[a/b] y", ["x @[a/b] y"] },
+        { "@[Anna](u) x", ["@[Anna](u) x"] },
+        { "a@[Anna]", ["a@[Anna]"] },
+        { "@[a @[Anna]", ["@[a ", "@[Anna]=>Anna"] },
+        { "@[Anna]] (later)", ["@[Anna]=>Anna", "] (later)"] },
+        { "@[Anna", ["@[Anna"] },
+    };
+
+    // 159 AC-4: plain and mention segments by the rules of Parse; joined, they give the input exactly.
+    [Theory]
+    [MemberData(nameof(SegmentCases))]
+    public void Segments_SplitPlainAndMentions_RoundTrip(string line, string[] expected)
+    {
+        IReadOnlyList<PersonSegment> segments = PersonParser.Segments(line);
+
+        Assert.Equal(expected, segments.Select(s => s.Name is null ? s.Text : s.Text + "=>" + s.Name));
+        Assert.Equal(line, string.Concat(segments.Select(s => s.Text)));
+        Assert.All(segments, s => Assert.Equal(s.Name is not null, s.IsMention));
+        Assert.All(segments, s => Assert.NotEqual(string.Empty, s.Text));
+
+        // Every mention segment is one Parse finds in the line, and Parse finds no other.
+        Assert.Equal(
+            PersonParser.Parse(line).Select(PersonParser.Key),
+            segments.Where(s => s.IsMention).Select(s => PersonParser.Key(s.Name!)).Distinct());
+    }
+
     // 156 AC-2: a mention gives no tag and no link; tags and links give no mention.
     [Fact]
     public void Parse_TagsLinksAndMentions_NeverMatchEachOther()
