@@ -36,7 +36,7 @@ public sealed class PersonActionsTests : IDisposable
         Assert.Equal(ActionKind.Done, result.Kind);
         Assert.Equal("People/Bob Jones", result.Text);
         Assert.Equal("# People\n\nMy contacts.\n", Read("People.md"));
-        Assert.Equal(["People.md"], Directory.EnumerateFiles(data.Root, "*.md").Select(Path.GetFileName).ToArray());
+        Assert.Equal(["People.md"], Directory.EnumerateFiles(data.Root, "*.md").Select(f => Path.GetFileName(f)).ToArray());
         Assert.Equal("# Bob Jones\n", Read(Path.Combine("People", "Bob Jones.md")));
     }
 
