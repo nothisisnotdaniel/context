@@ -221,6 +221,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#187](backlog/187-match-mention-lowercasing-between-the-editor.md) Match mention lowercasing between the editor and the index
 - [ ] [#188](backlog/188-cap-the-size-of-note-reads.md) Cap the size of note reads
 - [?] [#189](backlog/189-resolve-person-aliases-without-an-allocation.md) Resolve person aliases without an allocation per mention row
+- [?] [#190](backlog/190-show-the-unreadable-todos-line-at.md) Show the unreadable-todos line at the top of the person page
 
 ## Dropped with the terminal UI
 
