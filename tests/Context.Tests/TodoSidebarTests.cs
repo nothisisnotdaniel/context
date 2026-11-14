@@ -85,16 +85,17 @@ public sealed class TodoSidebarTests : IDisposable
         return console.Output[..console.Output.IndexOf('X')];
     }
 
-    // AC-3
+    // AC-3, 144 AC-6
     [Fact]
-    public void Lines_AreNumberDateText_SortedByDue()
+    public void Lines_AreDateText_WithoutNumber_SortedByDue()
     {
         AddTodos(("Later", new DateOnly(2026, 12, 24)), ("Overdue", new DateOnly(2026, 10, 1)), ("Today", Today));
 
         string[] rows = SidebarRows();
 
-        Assert.Equal(["1 10-01 Overdue", "2 10-28 Today", "3 12-24 Later"], rows[..3]);
+        Assert.Equal(["10-01 Overdue", "10-28 Today", "12-24 Later"], rows[..3]);
         Assert.All(rows[3..], r => Assert.Equal(string.Empty, r));
+        Assert.All(rows[..3], r => Assert.Matches(@"^\d\d-\d\d \D", r));
     }
 
     // AC-3
@@ -118,9 +119,11 @@ public sealed class TodoSidebarTests : IDisposable
 
         string[] rows = SidebarRows();
 
-        // 28 inner columns: "1 11-03 " takes 8, so the text gets 19 cells plus the ellipsis.
-        Assert.Equal("1 11-03 word " + new string('a', 14) + "…", rows[0]);
-        Assert.Equal("2 11-04 Next", rows[1]);
+        // 144 AC-6: 28 inner columns, the date and its space take 6, so the text gets 21 cells plus the ellipsis
+        // (the two cells the number took now go to the text).
+        Assert.Equal("11-03 word " + new string('a', 16) + "…", rows[0]);
+        Assert.Equal(28, rows[0].Length);
+        Assert.Equal("11-04 Next", rows[1]);
     }
 
     // AC-3
@@ -143,7 +146,7 @@ public sealed class TodoSidebarTests : IDisposable
         string[] rows = SidebarRows(12);
 
         Assert.Equal(6, rows.Length);
-        Assert.Equal(["1 11-01 Task 1", "2 11-02 Task 2", "3 11-03 Task 3", "4 11-04 Task 4", "5 11-05 Task 5"], rows[..5]);
+        Assert.Equal(["11-01 Task 1", "11-02 Task 2", "11-03 Task 3", "11-04 Task 4", "11-05 Task 5"], rows[..5]);
         Assert.Equal("… 4 more", rows[5]);
         Assert.Contains(Style("[grey]X[/]") + "… 4 more", Run(12, ansi: true));
     }
@@ -156,7 +159,7 @@ public sealed class TodoSidebarTests : IDisposable
 
         string[] rows = SidebarRows(12);
 
-        Assert.Equal("6 11-06 Task 6", rows[5]);
+        Assert.Equal("11-06 Task 6", rows[5]);
     }
 
     // AC-4
@@ -183,7 +186,7 @@ public sealed class TodoSidebarTests : IDisposable
     {
         WriteJson("[{\"text\":\"[bold]x[/]\",\"due\":\"2026-11-03\",\"created\":\"2026-10-01T00:00:00Z\"}]");
 
-        Assert.Equal("1 11-03 [bold]x[/]", SidebarRows()[0]);
+        Assert.Equal("11-03 [bold]x[/]", SidebarRows()[0]);
     }
 
     // AC-7
@@ -196,8 +199,8 @@ public sealed class TodoSidebarTests : IDisposable
         string[] rows = SidebarRows();
         string output = Run(24, ansi: true);
 
-        Assert.Equal("1 11-03 a�[2Jb c�d�e", rows[0]);
-        Assert.Equal("2 11-04 next", rows[1]);
+        Assert.Equal("11-03 a�[2Jb c�d�e", rows[0]);
+        Assert.Equal("11-04 next", rows[1]);
         Assert.DoesNotContain('\u0007', output);
         Assert.DoesNotContain('\u009b', output);
         Assert.DoesNotContain("\u001b[2Jb", output, StringComparison.Ordinal);

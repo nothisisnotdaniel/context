@@ -94,7 +94,7 @@ public sealed class CliTests : IDisposable
         Assert.Equal(string.Empty, result.Err);
         foreach (string usage in new[]
         {
-            "capture <text...>", "todos", "todo add <yyyy-MM-dd|today|tomorrow> <text...>", "todo done <n>", "notes",
+            "capture <text...>", "todos", "todo add <yyyy-MM-dd|today|tomorrow> <text...>", "todo done <text...>", "notes",
             "note show <name...>", "tags [tag...]", "links <note...>", "current", "import <path>",
             "export <note> <path>", "version",
         })
@@ -303,7 +303,7 @@ public sealed class CliTests : IDisposable
         Assert.Equal((0, "Added: 2026-10-30 buy milk\n", string.Empty), (added.Code, added.Out, added.Err));
         Result list = Run("todos");
         Assert.Equal(0, list.Code);
-        Assert.Equal("1\t2026-10-01\told one\n2\t2026-10-29\tcall #work\n3\t2026-10-30\tbuy milk\n", list.Out);
+        Assert.Equal("2026-10-01\told one\n2026-10-29\tcall #work\n2026-10-30\tbuy milk\n", list.Out);
     }
 
     [Fact]
@@ -321,10 +321,8 @@ public sealed class CliTests : IDisposable
     [InlineData("todo", "add", "today")]
     [InlineData("todo", "add", "someday", "text")]
     [InlineData("todo", "done")]
-    [InlineData("todo", "done", "0")]
-    [InlineData("todo", "done", "-1")]
-    [InlineData("todo", "done", "x")]
-    [InlineData("todo", "done", "1", "2")]
+    [InlineData("todo", "done", "")]
+    [InlineData("todo", "done", " ", "  ")]
     [InlineData("todos", "extra")]
     public void Todo_BadArguments_AreUsageErrors(params string[] args)
     {
@@ -339,32 +337,117 @@ public sealed class CliTests : IDisposable
         Assert.Equal(0, Run("todo", "add", "today", new string('a', 200)).Code);
     }
 
-    [Fact]
-    public void TodoDone_RemovesTheNthTodo()
+    // 144 AC-8: the arguments, joined with one space, pick the todo by its text.
+    [Theory]
+    [InlineData("sooner")]
+    [InlineData("SOON")]
+    [InlineData(" sooner ")]
+    public void TodoDone_RemovesThePickedTodo(string text)
     {
         Run("todo", "add", "2026-11-02", "later");
         Run("todo", "add", "2026-11-01", "sooner");
 
-        Result result = Run("todo", "done", "1");
+        Result result = Run("todo", "DONE", text);
 
         Assert.Equal((0, "Done: sooner\n", string.Empty), (result.Code, result.Out, result.Err));
-        Assert.Equal("1\t2026-11-02\tlater\n", Run("todos").Out);
+        Assert.Equal("2026-11-02\tlater\n", Run("todos").Out);
     }
 
+    // 144 AC-8
     [Fact]
-    public void TodoDone_NoSuchNumber_IsErrorAndWritesNothing()
+    public void TodoDone_JoinsArgumentsWithOneSpace_ExactWinsOverContaining()
+    {
+        Run("todo", "add", "2026-11-01", "buy milk and bread");
+        Run("todo", "add", "2026-11-02", "Buy milk");
+        Run("todo", "add", "2026-11-03", "Buy milk");
+
+        Result result = Run("todo", "done", "buy", "MILK");
+
+        Assert.Equal((0, "Done: Buy milk\n", string.Empty), (result.Code, result.Out, result.Err));
+        Assert.Equal("2026-11-01\tbuy milk and bread\n2026-11-03\tBuy milk\n", Run("todos").Out);
+    }
+
+    // 144 AC-8: a digit is text, not a position.
+    [Fact]
+    public void TodoDone_Digit_IsText()
+    {
+        Run("todo", "add", "2026-11-01", "Buy milk");
+        Run("todo", "add", "2026-11-02", "Call Anna");
+        Dictionary<string, string> before = Snapshot();
+
+        AssertError(Run("todo", "done", "1"), 1, "No todo matches \"1\".");
+        Assert.Equal(before, Snapshot());
+
+        Run("todo", "add", "2026-11-03", "Read chapter 1");
+        Result result = Run("todo", "done", "1");
+
+        Assert.Equal((0, "Done: Read chapter 1\n", string.Empty), (result.Code, result.Out, result.Err));
+        Assert.Equal("2026-11-01\tBuy milk\n2026-11-02\tCall Anna\n", Run("todos").Out);
+    }
+
+    // 144 AC-8
+    [Fact]
+    public void TodoDone_NoMatch_IsErrorAndWritesNothing()
     {
         Run("todo", "add", "today", "one");
         Dictionary<string, string> before = Snapshot();
 
-        AssertError(Run("todo", "done", "2"), 1, "There is no todo 2.");
+        AssertError(Run("todo", "done", "two\u001b[31m", "three"), 1, "No todo matches \"two\uFFFD[31m three\".");
         Assert.Equal(before, Snapshot());
+    }
+
+    // 144 AC-8
+    [Fact]
+    public void TodoDone_SeveralMatches_IsErrorAndWritesNothing()
+    {
+        Run("todo", "add", "2026-11-01", "Call Anna");
+        Run("todo", "add", "2026-11-02", "Call Ben");
+        Run("todo", "add", "2026-11-03", "Buy milk");
+        Dictionary<string, string> before = Snapshot();
+
+        AssertError(Run("todo", "done", "call"), 1, "2 todos match \"call\". Type more of the todo's text.");
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 144 AC-8
+    [Fact]
+    public void TodoDone_NoTodos_IsErrorAndCreatesNothing()
+    {
+        AssertError(Run("todo", "done", "x"), 1, "There are no todos to mark done.");
+        Assert.False(File.Exists(Path.Combine(root, TodoStore.FileName)));
+    }
+
+    // 144 AC-8: no text is a usage error that names the new form and leaves the file alone.
+    [Fact]
+    public void TodoDone_NoText_IsUsageError_FileUnchanged()
+    {
+        Run("todo", "add", "today", "one");
+        Dictionary<string, string> before = Snapshot();
+
+        Result result = Run("todo", "done");
+
+        AssertUsage(result);
+        Assert.Contains("context todo done <text>", result.Err, StringComparison.Ordinal);
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 144 AC-9: no help line or usage message names a number for todos.
+    [Fact]
+    public void TodoTexts_NameNoNumber()
+    {
+        string text = Run("help").Out + Run("todo").Err + Run("todo", "done").Err;
+
+        Assert.Contains("todo done <text...>", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("<n>", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("<number>", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("number", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("n-th", text, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData("todos")]
     [InlineData("todo", "add", "today", "x")]
-    [InlineData("todo", "done", "1")]
+    [InlineData("todo", "done", "x")]
     public void TodoCommands_BadTodosJson_ErrorAndFileUnchanged(params string[] args)
     {
         Directory.CreateDirectory(root);
@@ -499,8 +582,8 @@ public sealed class CliTests : IDisposable
         Assert.Equal(string.Empty, result.Err);
         Assert.Equal(0, result.Code);
         Assert.Equal(
-            "Today, 2026-10-29\nAppointments\n10:00-11:00\tReview\tRoom 1\nDue\n1\t2026-10-28\tlate #work\n"
-                + "2\t2026-10-29\tnow\nLinked notes\nPlan\t#work\n",
+            "Today, 2026-10-29\nAppointments\n10:00-11:00\tReview\tRoom 1\nDue\n2026-10-28\tlate #work\n"
+                + "2026-10-29\tnow\nLinked notes\nPlan\t#work\n",
             result.Out);
     }
 
@@ -566,7 +649,7 @@ public sealed class CliTests : IDisposable
         Result result = Run("current");
 
         Assert.Equal(1, result.Code);
-        Assert.EndsWith("Due\n1\t2026-10-29\tx #work\nLinked notes\n", result.Out, StringComparison.Ordinal);
+        Assert.EndsWith("Due\n2026-10-29\tx #work\nLinked notes\n", result.Out, StringComparison.Ordinal);
         Assert.Equal(["Can't read context.db."], result.ErrLines);
     }
 
@@ -715,7 +798,7 @@ public sealed class CliTests : IDisposable
         Run("capture", "a");
         Run("capture", "b");
         Run("todo", "add", "today", "x");
-        Run("todo", "done", "1");
+        Assert.Equal(0, Run("todo", "done", "x").Code);
         Run("import", source);
         Run("import", source);
 

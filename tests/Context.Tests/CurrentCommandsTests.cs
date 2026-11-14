@@ -148,9 +148,9 @@ public sealed class CurrentCommandsTests : IDisposable
     private static bool HasLine(string[] main, string text) =>
         main.Any(l => l.Contains(text, StringComparison.Ordinal));
 
-    // AC-1
+    // AC-1, 144 AC-7: the Due table has the columns Date and Todo only.
     [Fact]
-    public void Current_ShowsTitle_AndDueTable_WithSidebarNumbers()
+    public void Current_ShowsTitle_AndDueTable_WithoutNumbers()
     {
         AddTodo("later", new DateOnly(2026, 11, 5));
         AddTodo("today one", Today);
@@ -160,8 +160,11 @@ public sealed class CurrentCommandsTests : IDisposable
 
         Assert.True(HasLine(main, "Today, 2026-10-29"));
         Assert.True(HasLine(main, "Due"));
-        Assert.True(RowIndex(main, "1", "2026-10-01", "old one") >= 0);
-        Assert.True(RowIndex(main, "2", "2026-10-29", "today one") >= 0);
+        Assert.True(RowIndex(main, "2026-10-01", "old one") >= 0);
+        Assert.True(RowIndex(main, "2026-10-29", "today one") >= 0);
+        Assert.True(RowIndex(main, "Date", "Todo") >= 0);
+        Assert.Equal(-1, RowIndex(main, "#", "Date", "Todo"));
+        Assert.DoesNotContain(main, l => Regex.IsMatch(l, @"│\s*(#|\d+)\s*│"));
         Assert.False(HasLine(main, "later"));
     }
 
@@ -200,10 +203,10 @@ public sealed class CurrentCommandsTests : IDisposable
 
         string[] main = Main("/current");
 
-        int a = RowIndex(main, "1", "2026-10-28", "a");
-        int b = RowIndex(main, "2", "2026-10-29", "b");
+        int a = RowIndex(main, "2026-10-28", "a");
+        int b = RowIndex(main, "2026-10-29", "b");
         Assert.True(a >= 0 && b > a);
-        Assert.Equal(-1, RowIndex(main, "3", "2026-10-30", "c"));
+        Assert.Equal(-1, RowIndex(main, "2026-10-30", "c"));
         Assert.DoesNotContain(main, l => l.Contains("2026-10-30", StringComparison.Ordinal));
         Assert.DoesNotContain(main, l => Regex.IsMatch(l, "│\\s*c\\s*│"));
     }
@@ -330,7 +333,7 @@ public sealed class CurrentCommandsTests : IDisposable
 
         string[] main = Main("/current");
 
-        Assert.True(RowIndex(main, "1", "2026-10-29", "a #work") >= 0);
+        Assert.True(RowIndex(main, "2026-10-29", "a #work") >= 0);
         Assert.True(HasLine(main, DbUnreadable));
         Assert.False(HasLine(main, "Linked notes"));
         (_, string output) = Run(true, "/current");
@@ -347,7 +350,7 @@ public sealed class CurrentCommandsTests : IDisposable
 
         string[] main = Main("/current");
 
-        Assert.True(RowIndex(main, "1", "2026-10-29", "[red]x[/] #a second�") >= 0);
+        Assert.True(RowIndex(main, "2026-10-29", "[red]x[/] #a second�") >= 0);
         Assert.True(RowIndex(main, "[b]", "#a") >= 0);
     }
 
@@ -362,7 +365,7 @@ public sealed class CurrentCommandsTests : IDisposable
         string[] main = Main(command);
 
         Assert.True(HasLine(main, "Today, 2026-10-29"));
-        Assert.True(RowIndex(main, "1", "2026-10-29", "a") >= 0);
+        Assert.True(RowIndex(main, "2026-10-29", "a") >= 0);
     }
 
     // 028 AC-3: title, then appointments, then Due, then linked notes.
@@ -390,7 +393,7 @@ public sealed class CurrentCommandsTests : IDisposable
         int noTitle = RowIndex(main, "12:00-13:00", "(no title)", "");
         int late = RowIndex(main, "22:00-…", "Late", "");
         int midnight = RowIndex(main, "23:00-00:00", "Midnight", "");
-        int due = RowIndex(main, "1", "2026-10-29", "call #work");
+        int due = RowIndex(main, "2026-10-29", "call #work");
         int linked = RowIndex(main, "Plan", "#work");
         Assert.True(title >= 0 && appointments > title && holiday > appointments);
         Assert.True(early > holiday && standup > early && noTitle > standup && late > noTitle && midnight > late);

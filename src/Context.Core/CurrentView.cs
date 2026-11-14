@@ -5,9 +5,8 @@ namespace Context;
 /// <summary>A todo due today or earlier, as shown in the <c>/current</c> view.</summary>
 internal sealed record DueTodo
 {
-    public DueTodo(int number, DateOnly due, string text, bool overdue)
+    public DueTodo(DateOnly due, string text, bool overdue)
     {
-        Number = number;
         Due = due;
         Text = text;
         Overdue = overdue;
@@ -18,9 +17,6 @@ internal sealed record DueTodo
     /// print them. Front ends draw it through their <c>Render</c> step.
     /// </summary>
     public override string ToString() => nameof(DueTodo);
-
-    /// <summary>The todo's number as shown in the sidebar (1-based, in <see cref="TodoStore.List"/> order).</summary>
-    public int Number { get; }
 
     public DateOnly Due { get; }
 
@@ -196,12 +192,11 @@ internal sealed record CurrentView
         }
 
         List<DueTodo> due = [];
-        for (int i = 0; i < items.Count; i++)
+        foreach (TodoItem todo in items)
         {
-            TodoItem todo = items[i];
             if (todo.Due <= today)
             {
-                due.Add(new DueTodo(i + 1, todo.Due, todo.Text, todo.Due < today));
+                due.Add(new DueTodo(todo.Due, todo.Text, todo.Due < today));
             }
         }
 

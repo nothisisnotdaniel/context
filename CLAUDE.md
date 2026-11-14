@@ -42,8 +42,8 @@ Every factory agent reads this file before working on Context. Keep it short and
   - The `/current` view shows all relevant information for now, such as today's appointments, due
     todos and linked notes. `/current` (`CurrentView.Build` in Core reads the data, including the untruncated
     appointments, the time text and the calendar's `Zone`, in which the renderer shows the cache time; `CurrentCommands.Render` draws it; argument ignored) shows a steelblue1
-    `Today, yyyy-MM-dd` title, a `Due` table of every todo with `Due <= today` (sidebar number, `yyyy-MM-dd`
-    red overdue / steelblue1 today, one-line text) and a `Linked notes` table. A todo links to notes
+    `Today, yyyy-MM-dd` title, a `Due` table of every todo with `Due <= today` (columns `Date` and `Todo` only, no number: `yyyy-MM-dd`
+    red overdue / steelblue1 today, one-line text; `DueTodo` has no number) and a `Linked notes` table. A todo links to notes
     through tags: `TagParser.Parse` on the text of each due todo (at run time, not stored), then
     `TagIndex.NotesWithTag` after `Sync`; each note once, sorted by name ignoring case, with its matching
     tags. Grey empty-state lines when nothing is due or nothing links; a red hint for a bad `todos.json`
@@ -222,8 +222,19 @@ Every factory agent reads this file before working on Context. Keep it short and
     rank among identical todos), so reads never write and the id stays the same until the next write stores it; an
     `id` that is not a GUID makes the file unreadable. `Complete(Guid id)` removes that todo in one read and write
     and returns it, or returns `null` and writes nothing. `/todo <yyyy-MM-dd|today|tomorrow> <text>` adds
-    (text at most 200 chars, past dates allowed); `/done <n>` picks the n-th todo as numbered in the console
-    sidebar and removes it by its id. `TodoSidebar.Render(rows, width)` draws `<n> <MM-dd> <text>` lines (date `red` overdue,
+    (text at most 200 chars, past dates allowed); `/done <text>` picks the todo by its text and removes it by its id.
+    **No todo numbers anywhere** (console, command line and desktop alike): a todo is shown as date and text, picked
+    by its text and removed by its hidden id. `TodoPicker.Pick(todos, query)` (Core, shared by `/done` and `context
+    todo done`) compares the trimmed query, ignoring case (ordinal), with each todo's one-line text
+    (`TodoPicker.OneLine`: `SafeText.Clean`, line breaks as spaces) in `List()` order and returns a `TodoPick`: the
+    first todo whose text equals the query, else the only one containing it, else no todo and the count of todos
+    containing it (0, or 2 and more); a digit is text like any other. `/done` checks in this order: no text (red
+    `Type /done <text> …`, `todos.json` not read), an empty list (`There are no todos to mark done.`), `No todo
+    matches "<query>".`, `<n> todos match "<query>". Type more of the todo's text.` (query cleaned and escaped;
+    nothing removed), then `Complete(id)`: `Done: <text>`, or red `The todo list changed. Nothing was done.` when
+    the todo went away in between. `TodoCommands.Register` has an optional last parameter `Action? beforeComplete`,
+    a test hook called once after the pick and just before `Complete`; `Program.cs` never passes it.
+    `TodoSidebar.Render(rows, width)` draws `<MM-dd> <text>` lines (date `red` overdue,
     `steelblue1` today, `grey` later; text cleaned, escaped and cut to one line with `…`), `… N more` in
     grey on the last row when they don't fit, `No todos yet` when empty and a red `Can't read todos.json`
     line when the file is bad. `App` takes an optional `TodoSidebar`; without one it shows `No todos yet`.
@@ -240,10 +251,12 @@ Every factory agent reads this file before working on Context. Keep it short and
   folder), `capture <text...>`
   (`Inbox.Capture`: controls to spaces, trimmed, 1-1000 chars, appends `- yyyy-MM-dd HH:mm <text>` to `inbox.md` via
   `ReadForEdit` + `SaveIfUnchanged`, retries 3 times on a change on disk; a missing inbox is created as `# inbox\n` +
-  the line through `NoteStore.CreateWithText`, temp file + no-overwrite move), `todos` (`<n>\t<date>\t<text>`),
-  `todo add <date> <text...>` (`TodoInput` rules, shared with `/todo`), `todo done <n>`, `notes`, `note show <name...>`,
+  the line through `NoteStore.CreateWithText`, temp file + no-overwrite move), `todos` (`<date>\t<text>`, no number),
+  `todo add <date> <text...>` (`TodoInput` rules, shared with `/todo`), `todo done <text...>` (arguments joined with one space, then
+  `TodoPicker.Pick` like `/done`: `Done: <text>`, or exit 1 with the same no-todos, no-match or several-matches line;
+  no text is a usage error), `notes`, `note show <name...>`,
   `tags [tag...]` (`<tag>\t<count>` or note names), `links <note...>` (`<name>\t<link>\t<tags>`), `current` (the
-  `/current` sections as text, no row caps; the console's red lines go to stderr and make the exit code 1),
+  `/current` sections as text, no row caps, `Due` lines as `<date>\t<text>`; the console's red lines go to stderr and make the exit code 1),
   `import <path>`, `export <note> <path>` (paths relative to the current directory, no `~`). Exit codes: 0 success,
   1 error (one stderr line, nothing on stdout; `current` may write both), 2 usage error (one stderr line ending in
   `Run 'context help'.`; unknown commands never touch the folder). All text from disk goes through `SafeText.Clean`
@@ -340,7 +353,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     reference `Spectre.Console`** (no file there mentions `Spectre`); its only package is `Microsoft.Data.Sqlite`.
     Types stay `internal` in `namespace Context;`; `InternalsVisibleTo` grants `Context`, `Context.Tests`,
     `Context.Desktop` and `Context.Desktop.Tests`.
-    It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, tag parsing in `TagParser.cs`,
+    It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, picking a todo by its text in `TodoPicker.cs`, tag parsing in `TagParser.cs`,
     `[[note link]]` parsing in `NoteLinkParser.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
