@@ -300,6 +300,12 @@ Every factory agent reads this file before working on Context. Keep it short and
   (Node from `brew install node`) and commit the rebuilt `wwwroot/editor/editor.js` and `editor.css`; `dotnet build`
   and `dotnet test` never need Node. `node_modules` is ignored and `editor/**` is excluded from the C# project.
 - **Build:** `dotnet build` (must stay at 0 warnings)
+- **Package lock files:** every project commits its `packages.lock.json` (`RestorePackagesWithLockFile` in
+  `Directory.Build.props`; direct and transitive packages with their `contentHash`; `Context.Core` and
+  `Context.Desktop` list `RuntimeIdentifiers` `osx-arm64;osx-x64;win-x64`, the RIDs `release.yml` publishes, so the
+  lock files hold those runtime sections too). On GitHub Actions (`CI=true`) every restore runs locked
+  (`RestoreLockedMode`), so a lock file that doesn't match fails CI and the release; locally restores update them.
+  A package change has to commit the updated lock files (run `dotnet restore`). `PackageLockTests.cs` checks them.
 - **Test command:** `dotnet test`
 - **CI:** `.github/workflows/ci.yml` (GitHub Actions, `ubuntu-latest`) runs on every push to `develop` and `main`
   and on every pull request: `dotnet restore`, `dotnet build --no-restore -warnaserror`, `dotnet test --no-build`, at the repo root.
@@ -405,7 +411,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     tests, and it runs the scripts with `bash` (also the Windows `Pack` and `Upload` steps and the publish step, against stub `vpk` and `gh` commands, and the macOS signing step and scripts against stub `codesign`, `security`, `xcrun`, `spctl` and `ditto` that log their calls and can fail or answer `Invalid`; never a real keychain, certificate or Apple account). `/factory release --project Context` opens the release PR.
 - **Run:** `dotnet run --project src/Context -- help` (command line; any `Cli` command after `--`), `dotnet run --project src/Context.Desktop` (desktop window)
 - **Layout:**
-  - `Context.slnx`: the solution. `Directory.Build.props` turns on `EnforceCodeStyleInBuild`.
+  - `Context.slnx`: the solution. `Directory.Build.props` turns on `EnforceCodeStyleInBuild`, lock files and locked restore on CI.
   - `src/Context.Core/`: class library with the data and storage code, no UI. Its only package is
     `Microsoft.Data.Sqlite`. **No project references a terminal UI library** (`CoreDependencyTests` and
     `DesktopDependencyTests` fail on the removed console's library: assembly, package, restored graph or a mention in `src/`).
