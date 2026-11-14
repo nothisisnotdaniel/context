@@ -37,7 +37,9 @@
 #   signature.
 #   - The switch is the repository variable MACOS_SIGNING (empty, off or on; anything else fails the macOS
 #     job). It reaches the release and desktop-macos jobs as the job-level environment variable MACOS_SIGNING,
-#     and every script and step if: reads it only from there.
+#     and every script and step if: reads it only from there. Each job reads the variable when it starts:
+#     changing it during a run, or before re-running a failed desktop-macos job, can leave release notes that
+#     name the other kind of build, so change it only between runs.
 #   - Not on (the default): the macOS apps get only an ad-hoc signature (codesign identity "-", which Apple
 #     silicon needs to run anything), and no secret is read.
 #   - On: the step "Bundle, sign, notarize and zip" builds each Context.app (.github/scripts/macos-app.sh),
@@ -320,6 +322,7 @@ jobs:
           NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
         run: |
           # Every secret must be there before any tool is called. Only the name is printed, never a value.
+          # ${!NAME-} is bash's indirect expansion: this step needs bash, the macOS runner's default shell.
           for NAME in MACOS_CERTIFICATE_P12 MACOS_CERTIFICATE_PASSWORD NOTARY_KEY_P8 NOTARY_KEY_ID NOTARY_ISSUER_ID; do
             if [ -z "${!NAME-}" ]; then
               echo "$NAME is not set; nothing was signed" >&2
@@ -327,6 +330,9 @@ jobs:
             fi
           done
           # Everything secret lives in one folder that only this user can read, and goes away on every exit.
+          # The tight umask covers only the key files and the keychain: it is put back before the first bundle
+          # is built, so the Context.app that ships keeps the modes of the ad-hoc build.
+          UMASK_BEFORE="$(umask)"
           umask 077
           WORK="$(mktemp -d "$RUNNER_TEMP/macos-signing.XXXXXX")"
           KEYCHAIN="$WORK/signing.keychain-db"
@@ -366,6 +372,7 @@ jobs:
             echo "The certificate must hold exactly one 'Developer ID Application:' identity" >&2
             fail import
           fi
+          umask "$UMASK_BEFORE"
           for RID in osx-arm64 osx-x64; do
             APP="app/$RID/Context.app"
             sh .github/scripts/macos-app.sh "publish/$RID" "$VERSION" "app/$RID" || fail bundle "$RID"

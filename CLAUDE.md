@@ -323,14 +323,16 @@ Every factory agent reads this file before working on Context. Keep it short and
     to the desktop jobs, the next develop run is the real check.
   - **Signing (macOS only):** the switch is the repository variable `MACOS_SIGNING` (empty, `off` or `on`, exact
     case). `vars.` appears only as `vars.MACOS_SIGNING` in the job-level `env:` of `release` and `desktop-macos`;
-    scripts and step `if:`s read `env.MACOS_SIGNING`. The macOS `Check version` step fails on any other value, and
+    scripts and step `if:`s read `env.MACOS_SIGNING`. Each job reads the variable when it starts, so change it only
+    between runs (else the notes can name the other kind of build). The macOS `Check version` step fails on any other value, and
     `release-notes.sh` refuses it too. Not `on` (the default): the step `Bundle, ad-hoc sign and zip`
     (`if: env.MACOS_SIGNING != 'on'`) runs as before and no secret is read. `on`: the step `Bundle, sign, notarize and
     zip` (`if: env.MACOS_SIGNING == 'on'`) runs instead; it is the only place a secret appears (its `env:`, no
     `GH_TOKEN`): `MACOS_CERTIFICATE_P12` (base64 of the Developer ID Application `.p12`),
     `MACOS_CERTIFICATE_PASSWORD`, `NOTARY_KEY_P8` (the text of the App Store Connect API key file), `NOTARY_KEY_ID`,
     `NOTARY_ISSUER_ID`. The step checks that all five are set (one stderr line with the name, never a value), then
-    under `umask 077` makes a folder in `$RUNNER_TEMP` with the decoded `.p12`, the `.p8` and a new keychain with a
+    under `umask 077` (put back before the first bundle is built, so the shipped app keeps the ad-hoc build's file
+    modes) makes a folder in `$RUNNER_TEMP` with the decoded `.p12`, the `.p8` and a new keychain with a
     random password (`security create-keychain`, `import -P` with the password in argv on the single-use runner,
     `set-key-partition-list`, `list-keychains -s`), requires exactly one `Developer ID Application:` identity and
     passes its SHA-1 hash on; a `trap` deletes the keychain and the folder on every exit. Per architecture:

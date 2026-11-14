@@ -1910,6 +1910,11 @@ public sealed class ReleaseWorkflowTests
         Assert.DoesNotContain("set -x", script, StringComparison.Ordinal);
         Assert.DoesNotContain("gh ", script, StringComparison.Ordinal);
         Assert.Contains("umask 077\n", script, StringComparison.Ordinal);
+        // The tight umask ends before the first bundle is built.
+        Assert.True(
+            script.IndexOf("umask \"$UMASK_BEFORE\"\n", StringComparison.Ordinal) > script.IndexOf("umask 077\n", StringComparison.Ordinal)
+            && script.IndexOf("umask \"$UMASK_BEFORE\"\n", StringComparison.Ordinal) < script.IndexOf("macos-app.sh", StringComparison.Ordinal),
+            "the umask is not put back before macos-app.sh");
         Assert.Contains("trap cleanup EXIT\n", script, StringComparison.Ordinal);
         Assert.Equal(
             ["gh release upload \"$TAG\" \"Context-$VERSION-osx-arm64.zip\" \"Context-$VERSION-osx-x64.zip\" --clobber"],
@@ -2331,6 +2336,65 @@ public sealed class ReleaseWorkflowTests
         }
     }
 
+    // 146 AC-6, AC-8 (round 1 security 1): the umask that keeps the key files private does not reach the bundle. Under
+    // the runner's usual umask the signed Context.app has the same modes as the ad-hoc one (everyone can read and
+    // run it), while the .p12 and the .p8 stay readable only by the user.
+    [Fact]
+    public async Task SigningStep_ShippedAppKeepsTheAdHocModes_AndTheKeyFilesStayPrivate()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string signed = NewTempFolder();
+        string adHoc = NewTempFolder();
+        try
+        {
+            Dictionary<string, List<string>> modes = [];
+            foreach ((string folder, string step) in new[] { (signed, SigningStep), (adHoc, AdHocStep) })
+            {
+                ScriptResult result = await RunSigningStep(folder, "1.2.3", step: step, prefix: "umask 022\n");
+
+                Assert.True(result.Code == 0, "exit " + result.Code + ": " + result.Err);
+                List<string> found = [];
+                foreach (string rid in new[] { "osx-arm64", "osx-x64" })
+                {
+                    string app = Path.Combine(folder, "app", rid, "Context.app");
+                    foreach (string path in new[]
+                    {
+                        app,
+                        Path.Combine(app, "Contents"),
+                        Path.Combine(app, "Contents", "MacOS"),
+                        Path.Combine(app, "Contents", "MacOS", "Context.Desktop"),
+                        Path.Combine(app, "Contents", "MacOS", "Context.Desktop.dll"),
+                        Path.Combine(app, "Contents", "MacOS", "wwwroot", "editor", "editor.js"),
+                        Path.Combine(app, "Contents", "Info.plist"),
+                    })
+                    {
+                        found.Add(Path.GetRelativePath(folder, path) + " " + Convert.ToString((int)File.GetUnixFileMode(path), 8));
+                    }
+                }
+
+                modes[step] = found;
+            }
+
+            Assert.Equal(modes[AdHocStep], modes[SigningStep]);
+            Assert.Contains("app/osx-arm64/Context.app 755", modes[SigningStep]);
+            Assert.Contains("app/osx-arm64/Context.app/Contents/MacOS/Context.Desktop 755", modes[SigningStep]);
+            Assert.Contains("app/osx-x64/Context.app/Contents/MacOS/Context.Desktop.dll 644", modes[SigningStep]);
+            Assert.Contains("app/osx-x64/Context.app/Contents/Info.plist 644", modes[SigningStep]);
+            List<string> log = MacLog(signed);
+            Assert.Contains("p12 -rw------- " + CertificateBytes, log);
+            Assert.Equal(2, log.Count(line => line == "p8 -rw------- " + NotaryKey));
+        }
+        finally
+        {
+            Directory.Delete(signed, recursive: true);
+            Directory.Delete(adHoc, recursive: true);
+        }
+    }
+
     // 146 AC-3: a missing or empty secret fails the step before any tool is called, with one stderr line that names
     // the variable; nothing is bundled, zipped or left under $RUNNER_TEMP.
     [Theory]
@@ -2607,7 +2671,8 @@ public sealed class ReleaseWorkflowTests
     /// in <paramref name="environment"/> removes a variable.
     /// </summary>
     private static async Task<ScriptResult> RunSigningStep(
-        string folder, string version, Dictionary<string, string?>? environment = null, string? identities = null)
+        string folder, string version, Dictionary<string, string?>? environment = null, string? identities = null,
+        string step = SigningStep, string prefix = "")
     {
         string scripts = Path.Combine(folder, ".github", "scripts");
         Directory.CreateDirectory(scripts);
@@ -2622,6 +2687,14 @@ public sealed class ReleaseWorkflowTests
             WritePublishFolder(scratch);
             Directory.CreateDirectory(Path.Combine(folder, "publish"));
             Directory.Move(Path.Combine(scratch, "publish"), Path.Combine(folder, "publish", rid));
+            // As dotnet publish leaves them on the runner: everyone can read and run the executable.
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(
+                    Path.Combine(folder, "publish", rid, "Context.Desktop"),
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead
+                        | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+            }
             Directory.Delete(scratch);
         }
 
@@ -2652,7 +2725,7 @@ public sealed class ReleaseWorkflowTests
             }
         }
 
-        return await RunMac(folder, JobScript("desktop-macos", SigningStep), set, identities);
+        return await RunMac(folder, prefix + JobScript("desktop-macos", step), set, identities);
     }
 
     /// <summary>Runs a step's script as the macOS runner does (<c>bash -e</c>) against the stub tools.</summary>
