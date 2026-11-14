@@ -197,6 +197,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#163](backlog/163-call-signing-tools-by-absolute-path.md) Call signing tools by absolute path
 - [h] [#164](backlog/164-set-up-apple-signing-and-check.md) Set up Apple signing and check the first signed build
 - [?] [#165](backlog/165-show-json-as-an-option-in.md) Show --json as an option in the CLI help
+- [?] [#166](backlog/166-harden-the-todos-json-read.md) Harden the todos.json read
 
 ## Dropped with the terminal UI
 
