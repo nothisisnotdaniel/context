@@ -200,6 +200,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#166](backlog/166-harden-the-todos-json-read.md) Harden the todos.json read
 - [h] [#167](backlog/167-check-the-first-todos-json-id.md) Check the first todos.json id migration
 - [ ] [#168](backlog/168-aliases-for-people.md) Aliases for people (after: #51)
+- [ ] [#169](backlog/169-todos-linked-to-people.md) Todos linked to people (after: #51; #168)
 
 ## Dropped with the terminal UI
 
