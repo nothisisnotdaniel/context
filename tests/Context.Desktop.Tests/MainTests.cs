@@ -1286,7 +1286,7 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal("people/Anna", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         Assert.Equal("# people\n", File.ReadAllText(Path.Combine(data.Root, "people.md")));
-        Assert.Equal("# Anna\n", File.ReadAllText(Path.Combine(data.Root, "people", "Anna.md")));
+        Assert.Equal("# Anna\n\naffiliation::\nrole::\n", File.ReadAllText(Path.Combine(data.Root, "people", "Anna.md")));
         cut.WaitForAssertion(() => Assert.Equal(
             ["Plan"], cut.FindAll(".person-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Equal("Mentioned in", cut.Find(".person-panel h2").TextContent);
@@ -1324,7 +1324,7 @@ public sealed class MainTests : IDisposable
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Equal("people/Anna", cut.Find(".note-title").TextContent), Wait);
-        Assert.Equal("# Anna\n", File.ReadAllText(Path.Combine(data.Root, "people", "Anna.md")));
+        Assert.Equal("# Anna\n\naffiliation::\nrole::\n", File.ReadAllText(Path.Combine(data.Root, "people", "Anna.md")));
     }
 
     // 156 AC-10: a sensitive people note gives the red refusal; the open note stays and nothing is written.
@@ -1345,5 +1345,57 @@ public sealed class MainTests : IDisposable
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         Assert.False(Directory.Exists(Path.Combine(data.Root, "people")));
         Assert.Equal(0, data.Keys.Agrees);
+    }
+
+    // 157 AC-10: the palette lists /find with its usage.
+    [Fact]
+    public void Palette_ListsFind()
+    {
+        PaletteCommand find = Assert.Single(CommandPalette.Commands, c => c.Name == "/find");
+        Assert.Equal("/find <attribute> <value>", find.Usage);
+    }
+
+    // 157 AC-10: /find shows FindPanel in the main region; its button opens the note, which hides the panel.
+    [Fact]
+    public async Task Find_ShowsFindPanel_OpenHidesIt()
+    {
+        data.WriteNote("Anna", "role:: Bereichsleiter\n");
+        data.WriteNote("Plan", "x\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, "/find Role   bereichsleiter");
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Anna"], cut.FindAll(".find-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
+        Assert.Equal("role:: bereichsleiter", cut.Find(".find-panel h2").TextContent);
+
+        await cut.Find(".find-panel .note-button").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Anna", cut.Find(".note-title").TextContent), Wait);
+        Assert.Empty(cut.FindAll(".find-panel"));
+
+        await RunPalette(cut, "/find role nobody");
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".find-panel")), Wait);
+        await RunPalette(cut, "/current");
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".find-panel")), Wait);
+    }
+
+    // 157 AC-10: /find with a missing value or a bad key is the red usage line, and no panel.
+    [Theory]
+    [InlineData("/find")]
+    [InlineData("/find role")]
+    [InlineData("/find role   ")]
+    [InlineData("/find 1role x")]
+    [InlineData("/find role:: x")]
+    public async Task Find_BadQuery_RedUsage(string line)
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, line);
+
+        cut.WaitForAssertion(() => Assert.Equal("Type /find <attribute> <value>.", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Empty(cut.FindAll(".find-panel"));
     }
 }

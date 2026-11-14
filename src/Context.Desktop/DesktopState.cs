@@ -271,6 +271,26 @@ internal sealed class DesktopState
     });
 
     /// <summary>
+    /// The notes with the attribute <paramref name="key"/><c>::</c> <paramref name="value"/> (<see cref="FindView.Build"/>)
+    /// after syncing the index, off the calling thread. Reads only and never throws: any failure gives the
+    /// <see cref="FindViewKind.IndexUnreadable"/> view.
+    /// </summary>
+    public Task<FindView> Find(string key, string value) => Task.Run(() =>
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                return FindView.Build(index, notes, key, value);
+            }
+        }
+        catch (Exception)
+        {
+            return new FindView(FindViewKind.IndexUnreadable, string.Empty, string.Empty, []);
+        }
+    });
+
+    /// <summary>
     /// The calendar link as the settings page shows it (<see cref="CalendarLinkView.Show"/>): the masked link and
     /// the time of the cached copy, <c>NotSet</c> or <c>Unreadable</c>, off the calling thread. The link itself never
     /// leaves Core. Reads only (no download) and never throws: any failure gives the <c>Unreadable</c> view.

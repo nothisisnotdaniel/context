@@ -95,7 +95,8 @@ public sealed class CliTests : IDisposable
         foreach (string usage in new[]
         {
             "capture <text...>", "todos", "todo add <yyyy-MM-dd|today|tomorrow> <text...>", "todo done <text...>", "notes",
-            "note show <name...>", "tags [tag...]", "links <note...>", "people", "person <name...>", "current", "import <path>",
+            "note show <name...>", "tags [tag...]", "links <note...>", "people", "person <name...>", "find <attribute> <value...>",
+            "types", "current", "import <path>",
             "export <note> <path>", "version",
         })
         {
@@ -1241,5 +1242,119 @@ public sealed class CliTests : IDisposable
         Assert.Equal(1, result.Code);
         Assert.Equal("Notes\nA\nAppointments\n", result.Out);
         Assert.Equal(["Can't read calendar/bad.ics"], result.ErrLines);
+    }
+
+    // 157 AC-7 -----------------------------------------------------------------------------------
+
+    [Fact]
+    public void Find_PrintsMatchingNotes_SortedOnce_WritesOnlyContextDb()
+    {
+        WriteNote("d", "role:: Bereichsleiter\nROLE:: bereichsleiter");
+        WriteNote("B", "Role:: BEREICHSLEITER");
+        WriteNote("a", "role::   Bereichsleiter  ");
+        WriteNote("c", "role:: Chef\n```\nrole:: Bereichsleiter\n```");
+        Dictionary<string, string> before = SnapshotWithoutDb();
+
+        Result result = Run("find", "Role", "bereichsleiter");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(string.Empty, result.Err);
+        Assert.Equal("a\nB\nd\n", result.Out);
+        Assert.Equal(before, SnapshotWithoutDb());
+    }
+
+    [Fact]
+    public void Find_ValueArgsJoinedWithOneSpace_LinkValueMatches()
+    {
+        WriteNote("Anna", "role:: Head of Sales\naffiliation:: [[ACME Corp]]");
+
+        Assert.Equal("Anna\n", Run("find", "role", "Head", "of", "Sales").Out);
+        Assert.Equal("Anna\n", Run("find", "role", "Head  of Sales").Out);
+        Assert.Equal("Anna\n", Run("find", "affiliation", "acme", "corp").Out);
+        Assert.Equal("Anna\n", Run("find", "affiliation", "[[ACME Corp]]").Out);
+    }
+
+    [Fact]
+    public void Find_NoMatch_NoOutput_ExitZero()
+    {
+        WriteNote("Anna", "role:: Chef\nrole::");
+
+        Result result = Run("find", "role", "nobody");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(string.Empty, result.Out);
+        Assert.Equal(string.Empty, result.Err);
+    }
+
+    [Fact]
+    public void Find_TypePerson_ListsUntypedPersonPages()
+    {
+        WriteNote("people", "# people");
+        Directory.CreateDirectory(Path.Combine(root, "people"));
+        File.WriteAllText(Path.Combine(root, "people", "Anna.md"), "# Anna\n");
+        File.WriteAllText(Path.Combine(root, "people", "ACME.md"), "type:: organization\n");
+        WriteNote("Bob", "type:: Person");
+
+        Assert.Equal("Bob\npeople/Anna\n", Run("find", "type", "person").Out);
+        Assert.Equal("people/ACME\n", Run("find", "type", "organization").Out);
+    }
+
+    [Fact]
+    public void Find_CleansNames()
+    {
+        WriteNote("A\u0007b", "k:: v");
+
+        Assert.Equal("A\uFFFDb\n", Run("find", "k", "v").Out);
+    }
+
+    [Theory]
+    [InlineData("find")]
+    [InlineData("find", "role")]
+    [InlineData("find", "1role", "x")]
+    [InlineData("find", "ro le", "x")]
+    [InlineData("find", "role::", "x")]
+    [InlineData("find", "role", " ")]
+    public void Find_BadArguments_UsageError_FolderNotRead(params string[] args)
+    {
+        Result result = Run(args);
+
+        AssertUsage(result);
+        Assert.Equal("Type: context find <attribute> <value>. Run 'context help'.", result.ErrLines[0]);
+        Assert.False(Directory.Exists(root));
+    }
+
+    [Fact]
+    public void Find_BadContextDb_IsError()
+    {
+        WriteNote("A", "role:: x");
+        File.WriteAllText(Path.Combine(root, TagIndex.FileName), "not a database at all, not at all, really not");
+        Dictionary<string, string> before = Snapshot();
+
+        AssertError(Run("find", "role", "x"), 1, "Can't read context.db.");
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 157 AC-8 -----------------------------------------------------------------------------------
+
+    [Fact]
+    public void Types_PrintsTypeAndAttributes_Sorted()
+    {
+        WriteNote("Types", "# Types");
+        Directory.CreateDirectory(Path.Combine(root, "Types"));
+        File.WriteAllText(Path.Combine(root, "Types", "Project.md"), "attribute:: owner\nattribute:: due\n");
+        File.WriteAllText(Path.Combine(root, "Types", "Person.md"), "# Person\n");
+
+        Result result = Run("types");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(string.Empty, result.Err);
+        Assert.Equal("organization\t\nperson\t\nproject\towner, due\n", result.Out);
+    }
+
+    [Fact]
+    public void Types_Default_BuiltIns_WithArgumentsIsUsageError()
+    {
+        Assert.Equal("organization\t\nperson\taffiliation, role\n", Run("types").Out);
+        AssertUsage(Run("types", "x"));
     }
 }

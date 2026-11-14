@@ -80,6 +80,22 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
         Assert.Contains(FixtureFiles("lossless"), file => Read(file).EndsWith('\n'));
     }
 
+    // 157 AC-11: the attributes fixture holds attribute lines, a [[link]] value, an empty placeholder and a fenced
+    // x:: y, and the C# parser finds exactly the attributes outside the fence.
+    [Fact]
+    public void Lossless_AttributesFixture()
+    {
+        string markdown = Read("lossless/attributes.md");
+
+        Assert.Contains("affiliation:: [[ACME]]\n", markdown, StringComparison.Ordinal);
+        Assert.Contains("\nrole::\n", markdown, StringComparison.Ordinal);
+        Assert.Contains("```\nx:: y\n```", markdown, StringComparison.Ordinal);
+        Assert.Equal(
+            ["affiliation", "role", "type", "start-date_2"],
+            AttributeParser.Parse(markdown).Select(a => a.Key).ToArray());
+        Assert.Equal(markdown, bundle.Call("roundTrip", markdown));
+    }
+
     // AC-1: a few small cases beyond the fixtures.
     [Theory]
     [InlineData("")]
