@@ -1,59 +1,67 @@
 @inherits StateComponent
 @* The person page of the open note (DesktopState.Person): the notes that mention the person with @[...] and the
    appointments from the calendar files and the cached published calendar that mention them or list them as an
-   attendee. It reads only (no download), and reloads whenever the state changes. *@
+   attendee, with one red line above them per alias on the page that links to no one or to another person. It reads
+   only (no download), and reloads whenever the state changes. *@
 
 <section class="person-panel" aria-label="Person">
     @if (view is null)
     {
         <p class="grey" role="status">Loading…</p>
     }
-    else if (view.IndexUnreadable && view.Appointments.Count == 0)
-    {
-        <p class="red" role="status">Can't read the mentions.</p>
-    }
-    else if (view.Kind != PersonViewKind.Mentions)
-    {
-        <p class="grey" role="status">No notes or appointments mention @DesktopText.OneLine(Person).</p>
-    }
     else
     {
-        @if (view.IndexUnreadable)
+        @foreach (AliasClash clash in view.AliasClashes)
+        {
+            <p class="red alias-clash">@DesktopText.OneLine(clash.Text)</p>
+        }
+        @if (view.IndexUnreadable && view.Appointments.Count == 0)
         {
             <p class="red" role="status">Can't read the mentions.</p>
         }
-        else if (view.Notes.Count > 0)
+        else if (view.Kind != PersonViewKind.Mentions)
         {
-            <h2>Mentioned in</h2>
-            <ul class="person-notes">
-                @foreach (string note in view.Notes)
-                {
-                    string shown = DesktopText.OneLine(note);
-                    <li>
-                        <button type="button" class="name note-button cut" title="@shown" @onclick="() => OnOpen.InvokeAsync(note)">@shown</button>
-                    </li>
-                }
-            </ul>
+            <p class="grey" role="status">No notes or appointments mention @DesktopText.OneLine(Person).</p>
         }
-        @if (view.Appointments.Count > 0)
+        else
         {
-            <h2>Appointments</h2>
-            <ul class="person-appointments">
-                @foreach (Appointment appointment in view.Appointments)
-                {
-                    string title = DesktopText.OneLine(appointment.Title.Length == 0 ? "(no title)" : appointment.Title);
-                    string location = DesktopText.OneLine(appointment.Location ?? string.Empty);
-                    <li class="person-appointment">
-                        <span class="date grey">@appointment.Start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</span>
-                        <span class="time grey">@PersonView.TimeText(appointment)</span>
-                        <span class="title cut" title="@title">@title</span>
-                        @if (location.Length > 0)
-                        {
-                            <span class="location grey cut" title="@location">@location</span>
-                        }
-                    </li>
-                }
-            </ul>
+            @if (view.IndexUnreadable)
+            {
+                <p class="red" role="status">Can't read the mentions.</p>
+            }
+            else if (view.Notes.Count > 0)
+            {
+                <h2>Mentioned in</h2>
+                <ul class="person-notes">
+                    @foreach (string note in view.Notes)
+                    {
+                        string shown = DesktopText.OneLine(note);
+                        <li>
+                            <button type="button" class="name note-button cut" title="@shown" @onclick="() => OnOpen.InvokeAsync(note)">@shown</button>
+                        </li>
+                    }
+                </ul>
+            }
+            @if (view.Appointments.Count > 0)
+            {
+                <h2>Appointments</h2>
+                <ul class="person-appointments">
+                    @foreach (Appointment appointment in view.Appointments)
+                    {
+                        string title = DesktopText.OneLine(appointment.Title.Length == 0 ? "(no title)" : appointment.Title);
+                        string location = DesktopText.OneLine(appointment.Location ?? string.Empty);
+                        <li class="person-appointment">
+                            <span class="date grey">@appointment.Start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</span>
+                            <span class="time grey">@PersonView.TimeText(appointment)</span>
+                            <span class="title cut" title="@title">@title</span>
+                            @if (location.Length > 0)
+                            {
+                                <span class="location grey cut" title="@location">@location</span>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
         }
     }
 </section>

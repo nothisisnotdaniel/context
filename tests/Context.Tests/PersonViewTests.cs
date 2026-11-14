@@ -199,4 +199,82 @@ public sealed class PersonViewTests : IDisposable
             before.Append(DbPath).Order(StringComparer.Ordinal),
             Directory.GetFiles(root, "*", SearchOption.AllDirectories).Where(f => !f.EndsWith("-journal", StringComparison.Ordinal)).Order(StringComparer.Ordinal));
     }
+    // 158 AC-5: the alias and the full name give the same person: every note, alias-only ones included, and every
+    // appointment whose title, location or attendee uses either.
+    [Theory]
+    [InlineData("Anna")]
+    [InlineData("@[as]")]
+    [InlineData("anna schmidt")]
+    public void Build_Alias_ResolvesToThePerson_NotesAndAppointments(string typed)
+    {
+        WriteNote("people", "# people");
+        WriteNote("people/Anna Schmidt", "# Anna Schmidt\naliases:: Anna, AS\n@[AS]");
+        WriteNote("A", "@[Anna]");
+        WriteNote("B", "@[Anna Schmidt]");
+        WriteNote("C", "@[as] @[Bob]");
+        WriteCalendar("work.ics", Calendar(
+            Event("Call @[AS]", ":20261027T090000Z", ":20261027T100000Z"),
+            Event("Lunch", ":20261028T110000Z", ":20261028T120000Z", "LOCATION:Cafe with @[anna]"),
+            Event("Review", ":20261026T080000Z", ":20261026T090000Z", "ATTENDEE;CN=AS:mailto:x@example.com"),
+            Event("Full", ":20261025T080000Z", ":20261025T090000Z", "ATTENDEE;CN=Anna Schmidt:mailto:y@example.com"),
+            Event("Bob only", ":20261029T080000Z", ":20261029T090000Z", "ATTENDEE;CN=Bob:mailto:z@example.com")));
+
+        PersonView view = Build(typed);
+
+        Assert.Equal(PersonViewKind.Mentions, view.Kind);
+        Assert.Equal("Anna Schmidt", view.Person);
+        Assert.Equal(["A", "B", "C"], view.Notes);
+        Assert.Equal(["Lunch", "Call @[AS]", "Review", "Full"], view.Appointments.Select(a => a.Title));
+        Assert.Empty(view.AmbiguousWith);
+        Assert.Empty(view.AliasClashes);
+    }
+
+    // 158 AC-6: an alias of two people stays unresolved: its own mentions only, with the sorted titles.
+    [Fact]
+    public void Build_AmbiguousAlias_Unresolved_WithTitles()
+    {
+        WriteNote("people", "# people");
+        WriteNote("people/Anna Schmidt", "# Anna Schmidt\naliases:: Anna");
+        WriteNote("people/anna Berg", "# anna Berg\naliases:: ANNA");
+        WriteNote("A", "@[Anna]");
+        WriteNote("B", "@[Anna Schmidt]");
+        WriteCalendar("work.ics", Calendar(
+            Event("With @[anna]", ":20261027T090000Z", ":20261027T100000Z"),
+            Event("With @[Anna Schmidt]", ":20261028T090000Z", ":20261028T100000Z")));
+
+        PersonView view = Build("anna");
+
+        Assert.Equal(PersonViewKind.Mentions, view.Kind);
+        Assert.Equal("Anna", view.Person);
+        Assert.Equal(["A"], view.Notes);
+        Assert.Equal("With @[anna]", Assert.Single(view.Appointments).Title);
+        Assert.Equal(["anna Berg", "Anna Schmidt"], view.AmbiguousWith);
+        Assert.Empty(view.AliasClashes);
+    }
+
+    // 158 AC-9: the person's clashes, even with no mentions, and also when the index can't be read.
+    [Fact]
+    public void Build_AliasClashes_NoMentions_AndBadDb()
+    {
+        WriteNote("people", "# people");
+        WriteNote("people/Anna Schmidt", "# Anna Schmidt\naliases:: Anna, AS, Anna Berg");
+        WriteNote("people/Anna Berg", "# Anna Berg\naliases:: Anna");
+        string[] expected =
+        [
+            "Alias Anna is also used by Anna Berg, so @[Anna] links to no one.",
+            "Alias Anna Berg is another person's name, so @[Anna Berg] links to them.",
+        ];
+
+        PersonView view = Build("Anna Schmidt");
+
+        Assert.Equal(PersonViewKind.NoMentions, view.Kind);
+        Assert.Equal(expected, view.AliasClashes.Select(c => c.Text));
+
+        File.WriteAllText(DbPath, "not a database at all, not at all, really not");
+        PersonView unreadable = Build("as");
+
+        Assert.True(unreadable.IndexUnreadable);
+        Assert.Equal("Anna Schmidt", unreadable.Person);
+        Assert.Equal(expected, unreadable.AliasClashes.Select(c => c.Text));
+    }
 }

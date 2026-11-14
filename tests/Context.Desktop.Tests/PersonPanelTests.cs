@@ -161,6 +161,56 @@ public sealed class PersonPanelTests : IDisposable
         Assert.DoesNotContain("\u0007", cut.Markup, StringComparison.Ordinal);
     }
 
+    // 158 AC-9: one red line per clash above the other rows, even when nothing mentions the person, cleaned to one line.
+    [Fact]
+    public async Task Render_AliasClashes_RedLinesAboveRows()
+    {
+        data.WriteNote("people", "# people\n");
+        data.WriteFile(Path.Combine("people", "Anna Schmidt.md"), "# Anna Schmidt\naliases:: Anna, AS, Anna Berg\n");
+        data.WriteFile(Path.Combine("people", "Anna Berg.md"), "# Anna Berg\naliases:: Anna\n");
+        await data.RefreshAsync();
+
+        IRenderedComponent<PersonPanel> cut = Render("Anna Schmidt");
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            [
+                "Alias Anna is also used by Anna Berg, so @[Anna] links to no one.",
+                "Alias Anna Berg is another person's name, so @[Anna Berg] links to them.",
+            ],
+            cut.FindAll("p.alias-clash").Select(p => p.TextContent).ToArray()), Wait);
+        Assert.All(cut.FindAll("p.alias-clash"), p => Assert.True(p.ClassList.Contains("red")));
+        IElement section = cut.Find("section.person-panel");
+        Assert.Equal(
+            ["alias-clash", "alias-clash", "status"],
+            section.Children.Select(c => c.ClassList.Contains("alias-clash") ? "alias-clash" : c.GetAttribute("role") ?? c.TagName).ToArray());
+        Assert.Equal("No notes or appointments mention Anna Schmidt.", cut.Find("p[role=status]").TextContent);
+
+        // With mentions the lines stay above the headings.
+        data.WriteNote("Plan", "@[AS]\n");
+        await data.RefreshAsync();
+        IRenderedComponent<PersonPanel> again = Render("Anna Schmidt");
+
+        again.WaitForAssertion(() => Assert.Equal(["Plan"], NoteNames(again)), Wait);
+        Assert.Equal(
+            ["P", "P", "H2", "UL"],
+            again.Find("section.person-panel").Children.Select(c => c.TagName).ToArray());
+    }
+
+    // 158 AC-9: no clashes, no line.
+    [Fact]
+    public async Task Render_NoClashes_NoLine()
+    {
+        data.WriteNote("people", "# people\n");
+        data.WriteFile(Path.Combine("people", "Anna Schmidt.md"), "# Anna Schmidt\naliases:: AS\n");
+        data.WriteNote("Plan", "@[AS]\n");
+        await data.RefreshAsync();
+
+        IRenderedComponent<PersonPanel> cut = Render("Anna Schmidt");
+
+        cut.WaitForAssertion(() => Assert.Equal(["Plan"], NoteNames(cut)), Wait);
+        Assert.Empty(cut.FindAll("p.alias-clash"));
+    }
+
     private IRenderedComponent<PersonPanel> Render(string person) =>
         data.Bunit.Render<PersonPanel>(p => p.Add(c => c.Person, person));
 

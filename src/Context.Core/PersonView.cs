@@ -32,7 +32,9 @@ internal sealed record PersonView
         IReadOnlyList<Appointment> appointments,
         IReadOnlyList<string> unreadableCalendarFiles,
         bool indexUnreadable,
-        TimeZoneInfo zone)
+        TimeZoneInfo zone,
+        IReadOnlyList<AliasClash>? aliasClashes = null,
+        IReadOnlyList<string>? ambiguousWith = null)
     {
         Kind = kind;
         Person = person;
@@ -41,6 +43,8 @@ internal sealed record PersonView
         UnreadableCalendarFiles = unreadableCalendarFiles;
         IndexUnreadable = indexUnreadable;
         Zone = zone;
+        AliasClashes = aliasClashes ?? [];
+        AmbiguousWith = ambiguousWith ?? [];
     }
 
     /// <summary>
@@ -87,6 +91,18 @@ internal sealed record PersonView
     public TimeZoneInfo Zone { get; }
 
     /// <summary>
+    /// When the name resolves to a person page: the aliases on it that link to no one or to another person
+    /// (<see cref="PersonAliases.Clashes"/>), in the page's order; else empty.
+    /// </summary>
+    public IReadOnlyList<AliasClash> AliasClashes { get; }
+
+    /// <summary>
+    /// When the name is an alias of more than one person page: their titles (raw), sorted ignoring case, then
+    /// ordinal; the name then stays unresolved. Else empty.
+    /// </summary>
+    public IReadOnlyList<string> AmbiguousWith { get; }
+
+    /// <summary>
     /// <c>all day</c>, or <c>HH:mm-HH:mm</c> on the appointment's start day, with <c>…</c> for an end on a later day.
     /// </summary>
     public static string TimeText(Appointment appointment)
@@ -97,7 +113,9 @@ internal sealed record PersonView
 
     /// <summary>
     /// Syncs the index and reads the person page of <paramref name="argument"/>: <c>Anna Schmidt</c> or
-    /// <c>@[Anna Schmidt]</c>, matched ignoring case and whitespace runs. Reads <paramref name="feed"/>'s cached copy
+    /// <c>@[Anna Schmidt]</c>, matched ignoring case and whitespace runs, resolved through the aliases
+    /// (<see cref="PersonAliases"/>; from the index, or read from the person pages when it can't be read). Appointment
+    /// mentions and attendee names are resolved the same way. Reads <paramref name="feed"/>'s cached copy
     /// only (<see cref="CalendarFeed.ReadCache"/>); no request is made. Only <c>context.db</c> may be written.
     /// </summary>
     public static PersonView Build(TagIndex index, NoteStore store, CalendarStore calendar, CalendarFeed? feed, string argument)
@@ -113,20 +131,28 @@ internal sealed record PersonView
             return new PersonView(PersonViewKind.MissingArgument, string.Empty, [], [], [], false, calendar.Zone);
         }
 
-        string key = PersonParser.Key(typed);
-        string person = typed;
+        PersonAliases? aliases = null;
+        string? person = null;
         IReadOnlyList<string> notes = [];
         bool indexUnreadable = false;
         try
         {
             index.Sync(store);
+            aliases = index.Aliases();
             notes = index.NotesMentioning(typed);
-            person = index.PersonName(typed) ?? typed;
+            person = index.PersonName(typed);
         }
         catch (TagIndexException)
         {
             indexUnreadable = true;
+            notes = [];
         }
+
+        aliases ??= PersonAliases.Load(store);
+        AliasResolution resolved = aliases.Resolve(typed);
+        person ??= resolved.Person ?? typed;
+        string key = aliases.PersonKey(typed);
+        IReadOnlyList<AliasClash> clashes = resolved.Person is { } title ? aliases.Clashes(title) : [];
 
         IReadOnlyList<Appointment> extra = [];
         string? cached = feed?.ReadCache();
@@ -144,19 +170,20 @@ internal sealed record PersonView
 
         CalendarDay all = calendar.All(extra);
         List<Appointment> appointments = all.Appointments
-            .Where(a => Mentions(a, key))
+            .Where(a => Mentions(a, aliases, key))
             .OrderByDescending(a => a.Start)
             .ThenBy(a => a.Title, StringComparer.OrdinalIgnoreCase)
             .ToList();
         PersonViewKind kind = notes.Count == 0 && appointments.Count == 0 ? PersonViewKind.NoMentions : PersonViewKind.Mentions;
-        return new PersonView(kind, person, notes, appointments, all.Unreadable, indexUnreadable, calendar.Zone);
+        return new PersonView(
+            kind, person, notes, appointments, all.Unreadable, indexUnreadable, calendar.Zone, clashes, resolved.Titles);
     }
 
-    private static bool Mentions(Appointment appointment, string key) =>
-        appointment.Attendees.Any(a => string.Equals(PersonParser.Key(a), key, StringComparison.Ordinal))
-        || Holds(appointment.Title, key)
-        || (appointment.Location is not null && Holds(appointment.Location, key));
+    private static bool Mentions(Appointment appointment, PersonAliases aliases, string key) =>
+        appointment.Attendees.Any(a => string.Equals(aliases.PersonKey(a), key, StringComparison.Ordinal))
+        || Holds(appointment.Title, aliases, key)
+        || (appointment.Location is not null && Holds(appointment.Location, aliases, key));
 
-    private static bool Holds(string text, string key) =>
-        PersonParser.Parse(text).Any(n => string.Equals(PersonParser.Key(n), key, StringComparison.Ordinal));
+    private static bool Holds(string text, PersonAliases aliases, string key) =>
+        PersonParser.Parse(text).Any(n => string.Equals(aliases.PersonKey(n), key, StringComparison.Ordinal));
 }

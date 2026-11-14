@@ -560,34 +560,46 @@ internal sealed class TagIndex
 
     /// <summary>
     /// Every person mentioned with <c>@[Name]</c> in a note other than their own page, once, with the number of such
-    /// notes, sorted by the shown name ignoring case, then ordinal. The shown name is the title of the person's page
-    /// (<see cref="Context.People.PersonOf"/>) when it exists, else the ordinal-first spelling among the mentions.
+    /// notes, sorted by the shown name ignoring case, then ordinal. A mention is resolved by <see cref="Aliases"/>, so a
+    /// note that mentions <c>@[Anna]</c> and <c>@[Anna Schmidt]</c> counts once under <c>Anna Schmidt</c>; an unresolved
+    /// name is its own entry. The shown name is the title of the person's page (<see cref="Context.People.PersonOf"/>)
+    /// when it exists, else the ordinal-first spelling among the mentions.
     /// </summary>
     public IReadOnlyList<PersonCount> People() => Run(connection =>
     {
         Dictionary<string, string> pages = PersonPages(connection);
-        Dictionary<string, (int Count, string Spelling)> people = new(StringComparer.Ordinal);
+        PersonAliases aliases = BuildAliases(connection);
+        Dictionary<string, (HashSet<string> Notes, string Spelling)> people = new(StringComparer.Ordinal);
         using (SqliteCommand command = Command(connection, null, "SELECT note, person, spelling FROM note_people"))
         using (SqliteDataReader reader = command.ExecuteReader())
         {
             while (reader.Read())
             {
                 string note = reader.GetString(0);
-                string person = reader.GetString(1);
                 string spelling = reader.GetString(2);
+                string person = aliases.PersonKey(reader.GetString(1));
                 if (IsOwnPage(note, person))
                 {
                     continue;
                 }
 
-                people[person] = people.TryGetValue(person, out (int Count, string Spelling) known)
-                    ? (known.Count + 1, string.CompareOrdinal(spelling, known.Spelling) < 0 ? spelling : known.Spelling)
-                    : (1, spelling);
+                if (people.TryGetValue(person, out (HashSet<string> Notes, string Spelling) known))
+                {
+                    known.Notes.Add(note);
+                    if (string.CompareOrdinal(spelling, known.Spelling) < 0)
+                    {
+                        people[person] = (known.Notes, spelling);
+                    }
+                }
+                else
+                {
+                    people[person] = (new HashSet<string>(StringComparer.Ordinal) { note }, spelling);
+                }
             }
         }
 
         return (IReadOnlyList<PersonCount>)people
-            .Select(p => new PersonCount(pages.GetValueOrDefault(p.Key, p.Value.Spelling), p.Value.Count))
+            .Select(p => new PersonCount(pages.GetValueOrDefault(p.Key, p.Value.Spelling), p.Value.Notes.Count))
             .OrderBy(p => p.Person, StringComparer.OrdinalIgnoreCase)
             .ThenBy(p => p.Person, StringComparer.Ordinal)
             .ToList();
@@ -595,60 +607,114 @@ internal sealed class TagIndex
 
     /// <summary>
     /// The notes that mention <paramref name="person"/> with <c>@[...]</c>, matched by <see cref="PersonParser.Key"/>
-    /// of the trimmed name with whitespace runs collapsed (so <c>anna schmidt</c> finds <c>@[ANNA  schmidt]</c>), sorted
-    /// by name ignoring case, then ordinal. Never the person's own page.
+    /// of the trimmed name with whitespace runs collapsed (so <c>anna schmidt</c> finds <c>@[ANNA  schmidt]</c>) after
+    /// resolving both the name and each mention through <see cref="Aliases"/> (so <c>AS</c> and <c>Anna Schmidt</c>
+    /// both find <c>@[AS]</c>), sorted by name ignoring case, then ordinal. Never the person's own page.
     /// </summary>
-    public IReadOnlyList<string> NotesMentioning(string person)
+    public IReadOnlyList<string> NotesMentioning(string person) => Run(connection =>
     {
-        string key = PersonParser.Key(TagParser.CollapseWhitespace(person));
-        return Run(connection =>
+        PersonAliases aliases = BuildAliases(connection);
+        string key = aliases.PersonKey(person);
+        HashSet<string> names = new(StringComparer.Ordinal);
+        foreach ((string note, string _) in MentionsOf(connection, aliases, key))
         {
-            List<string> names = [];
-            using SqliteCommand command = Command(connection, null, "SELECT note FROM note_people WHERE person = $person");
-            command.Parameters.AddWithValue("$person", key);
+            names.Add(note);
+        }
+
+        return (IReadOnlyList<string>)SortNames(names);
+    });
+
+    /// <summary>
+    /// The name shown for <paramref name="person"/> (resolved and matched like <see cref="NotesMentioning"/>): the
+    /// title of their page when it exists, else the ordinal-first spelling among the mentions in other notes, else
+    /// <c>null</c>.
+    /// </summary>
+    public string? PersonName(string person) => Run(connection =>
+    {
+        PersonAliases aliases = BuildAliases(connection);
+        string key = aliases.PersonKey(person);
+        if (PersonPages(connection).TryGetValue(key, out string? title))
+        {
+            return title;
+        }
+
+        string? first = null;
+        foreach ((string _, string spelling) in MentionsOf(connection, aliases, key))
+        {
+            if (first is null || string.CompareOrdinal(spelling, first) < 0)
+            {
+                first = spelling;
+            }
+        }
+
+        return first;
+    });
+
+    /// <summary>
+    /// The alias rule (<see cref="PersonAliases"/>) as indexed: the person pages among the indexed notes and the
+    /// <c>aliases::</c> values stored for them. Re-read on every call, so an alias change counts after the next
+    /// <see cref="Sync"/>.
+    /// </summary>
+    public PersonAliases Aliases() => Run(BuildAliases);
+
+    // The (note, spelling) of every mention whose resolved key is the person key, never on the person's own page.
+    private static List<(string Note, string Spelling)> MentionsOf(SqliteConnection connection, PersonAliases aliases, string key)
+    {
+        List<(string Note, string Spelling)> found = [];
+        using SqliteCommand command = Command(connection, null, "SELECT note, person, spelling FROM note_people");
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            string note = reader.GetString(0);
+            if (string.Equals(aliases.PersonKey(reader.GetString(1)), key, StringComparison.Ordinal) && !IsOwnPage(note, key))
+            {
+                found.Add((note, reader.GetString(2)));
+            }
+        }
+
+        return found;
+    }
+
+    // The alias rule from the indexed person pages, in full-name order (ordinal), with their stored aliases:: values
+    // in the order they were parsed.
+    private static PersonAliases BuildAliases(SqliteConnection connection)
+    {
+        Dictionary<string, List<PageAttribute>> values = new(StringComparer.Ordinal);
+        using (SqliteCommand command = Command(
+            connection,
+            null,
+            "SELECT note, value FROM note_attributes WHERE key = $key ORDER BY rowid"))
+        {
+            command.Parameters.AddWithValue("$key", PersonAliases.AttributeKey);
             using SqliteDataReader reader = command.ExecuteReader();
             while (reader.Read())
             {
                 string note = reader.GetString(0);
-                if (!IsOwnPage(note, key))
+                if (Context.People.PersonOf(note) is null)
                 {
-                    names.Add(note);
+                    continue;
                 }
+
+                if (!values.TryGetValue(note, out List<PageAttribute>? list))
+                {
+                    list = [];
+                    values[note] = list;
+                }
+
+                list.Add(new PageAttribute(PersonAliases.AttributeKey, reader.GetString(1)));
             }
+        }
 
-            return SortNames(names);
-        });
-    }
-
-    /// <summary>
-    /// The name shown for <paramref name="person"/> (matched like <see cref="NotesMentioning"/>): the title of their
-    /// page when it exists, else the ordinal-first spelling among the mentions in other notes, else <c>null</c>.
-    /// </summary>
-    public string? PersonName(string person)
-    {
-        string key = PersonParser.Key(TagParser.CollapseWhitespace(person));
-        return Run(connection =>
+        List<(string Title, IReadOnlyList<string> Aliases)> pages = [];
+        foreach (string name in NoteNames(connection).Order(StringComparer.Ordinal))
         {
-            if (PersonPages(connection).TryGetValue(key, out string? title))
+            if (Context.People.PersonOf(name) is { } title)
             {
-                return title;
+                pages.Add((title, values.TryGetValue(name, out List<PageAttribute>? found) ? PersonAliases.Parse(found, title) : []));
             }
+        }
 
-            string? first = null;
-            using SqliteCommand command = Command(connection, null, "SELECT note, spelling FROM note_people WHERE person = $person");
-            command.Parameters.AddWithValue("$person", key);
-            using SqliteDataReader reader = command.ExecuteReader();
-            while (reader.Read())
-            {
-                string spelling = reader.GetString(1);
-                if (!IsOwnPage(reader.GetString(0), key) && (first is null || string.CompareOrdinal(spelling, first) < 0))
-                {
-                    first = spelling;
-                }
-            }
-
-            return first;
-        });
+        return new PersonAliases(pages);
     }
 
     // The person pages in the index by key: the title of each note directly under the top-level people note. With two

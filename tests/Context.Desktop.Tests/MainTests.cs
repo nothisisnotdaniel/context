@@ -1286,7 +1286,7 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal("people/Anna", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         Assert.Equal("# people\n", File.ReadAllText(Path.Combine(data.Root, "people.md")));
-        Assert.Equal("# Anna\n\naffiliation::\nrole::\n", File.ReadAllText(Path.Combine(data.Root, "people", "Anna.md")));
+        Assert.Equal("# Anna\n\naliases::\naffiliation::\nrole::\n", File.ReadAllText(Path.Combine(data.Root, "people", "Anna.md")));
         cut.WaitForAssertion(() => Assert.Equal(
             ["Plan"], cut.FindAll(".person-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Equal("Mentioned in", cut.Find(".person-panel h2").TextContent);
@@ -1324,7 +1324,7 @@ public sealed class MainTests : IDisposable
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Equal("people/Anna", cut.Find(".note-title").TextContent), Wait);
-        Assert.Equal("# Anna\n\naffiliation::\nrole::\n", File.ReadAllText(Path.Combine(data.Root, "people", "Anna.md")));
+        Assert.Equal("# Anna\n\naliases::\naffiliation::\nrole::\n", File.ReadAllText(Path.Combine(data.Root, "people", "Anna.md")));
     }
 
     // 156 AC-10: a sensitive people note gives the red refusal; the open note stays and nothing is written.
@@ -1345,6 +1345,34 @@ public sealed class MainTests : IDisposable
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         Assert.False(Directory.Exists(Path.Combine(data.Root, "people")));
         Assert.Equal(0, data.Keys.Agrees);
+    }
+
+    // 158 AC-8: an alias chip opens the person's page; an ambiguous one shows the red hint and writes nothing.
+    [Fact]
+    public async Task Mention_Alias_OpensPerson_AmbiguousRedHint()
+    {
+        data.WriteNote("people", "# people\n");
+        Directory.CreateDirectory(Path.Combine(data.Root, "people"));
+        File.WriteAllText(Path.Combine(data.Root, "people", "Anna Schmidt.md"), "# Anna Schmidt\naliases:: AS, Anna\n");
+        File.WriteAllText(Path.Combine(data.Root, "people", "Anna Berg.md"), "# Anna Berg\naliases:: Anna\n");
+        data.WriteNote("Plan", "@[AS] @[Anna]\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+
+        await cut.InvokeAsync(() => js.Page().OnPerson("@[Anna]"));
+
+        cut.WaitForAssertion(() => Assert.Contains(
+            cut.FindAll(".red"),
+            e => e.TextContent == "@[Anna] is an alias of more than one person: Anna Berg, Anna Schmidt."), Wait);
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+
+        await cut.InvokeAsync(() => js.Page().OnPerson("@[AS]"));
+
+        cut.WaitForAssertion(() => Assert.Equal("people/Anna Schmidt", cut.Find(".note-title").TextContent), Wait);
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
     }
 
     // 157 AC-10: the palette lists /find with its usage.

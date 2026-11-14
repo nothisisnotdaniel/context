@@ -42,9 +42,9 @@ public sealed class PageTypesTests : IDisposable
     [Fact]
     public void Load_NoTypesNote_BuiltIns()
     {
-        Assert.Equal("organization: | person:affiliation,role", Describe(PageTypes.Load(store)));
+        Assert.Equal("organization: | person:aliases,affiliation,role", Describe(PageTypes.Load(store)));
         Write("Other", "# Other");
-        Assert.Equal("organization: | person:affiliation,role", Describe(PageTypes.Load(store)));
+        Assert.Equal("organization: | person:aliases,affiliation,role", Describe(PageTypes.Load(store)));
     }
 
     // AC-5: each direct subpage of a top-level types note (any case) is a type; it replaces a built-in of that name.
@@ -93,7 +93,7 @@ public sealed class PageTypesTests : IDisposable
             return;
         }
 
-        Assert.Equal("organization: | person:affiliation,role | project:owner", Describe(PageTypes.Load(store)));
+        Assert.Equal("organization: | person:aliases,affiliation,role | project:owner", Describe(PageTypes.Load(store)));
     }
 
     // AC-5: a sensitive top-level types note reads no type page.
@@ -104,7 +104,7 @@ public sealed class PageTypesTests : IDisposable
         File.WriteAllText(Path.Combine(root, "types.ctxs"), "sealed");
         Write("types/person", "attribute:: email\n");
 
-        Assert.Equal("organization: | person:affiliation,role", Describe(PageTypes.Load(store)));
+        Assert.Equal("organization: | person:aliases,affiliation,role", Describe(PageTypes.Load(store)));
     }
 
     // AC-6: a page's types are its type:: values (lower-cased); a person page without one is a person.
@@ -125,7 +125,7 @@ public sealed class PageTypesTests : IDisposable
     [Fact]
     public void Template_Lines()
     {
-        Assert.Equal("\naffiliation::\nrole::\n", PageTypes.Template(PageTypes.Find(PageTypes.BuiltIn, PageTypes.Person)));
+        Assert.Equal("\naliases::\naffiliation::\nrole::\n", PageTypes.Template(PageTypes.Find(PageTypes.BuiltIn, PageTypes.Person)));
         Assert.Equal(string.Empty, PageTypes.Template(new PageType("x", [])));
         Assert.Equal(string.Empty, PageTypes.Template(null));
         Assert.Equal(nameof(PageType), new PageType("x", []).ToString());
