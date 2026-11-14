@@ -214,9 +214,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     before the watcher and first refresh; the CLI commands `todos`, `todo add`, `todo done` and `current` before their
     first read) and writes the derived ids into the file when any is missing, empty or repeated (returns `true`), else
     writes nothing; a missing or unreadable file is never written and `Migrate` never throws. `Migrate(out int badIds)`
-    (used by the CLI; `Migrate()` calls it) also gives the number of bad ids it replaced, 0 whenever nothing was written. Derivation on read stays
-    the fallback for a file changed while the app runs, and an older build that drops the ids gets the same ids
-    written again on the next start. `Complete(Guid id)`
+    (used by the CLI; `Migrate()` calls it) also gives the number of bad ids it replaced, 0 whenever nothing was
+    written. Derivation on read stays the fallback for a file changed while the app runs, and an older build that
+    drops the ids gets the same ids written again on the next start. `Complete(Guid id)`
     removes that todo in one read and write and returns it, or returns `null` and writes nothing.
     `context todo add <yyyy-MM-dd|today|tomorrow> <text>` and the desktop's entry row add (text at most 200 chars, past dates allowed); `context todo done <text>` picks the
     todo by its text and removes it by its id; the desktop removes the ticked todo by its id.
