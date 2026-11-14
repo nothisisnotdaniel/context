@@ -53,9 +53,12 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#17](backlog/017-json-output-for-the-cli.md) JSON output for the CLI → 148-cli-json-output
 - [x] [#18](backlog/018-write-todo-ids-once.md) Write todo ids once → 149-write-todo-ids
 - [x] [#19](backlog/019-survive-a-bad-todo-id.md) Survive a bad todo id → 151-survive-bad-todo-id
-- [ ] [#20](backlog/020-complete-checks-the-whole-todo.md) Complete checks the whole todo
-- [ ] [#21](backlog/021-test-for-a-todo-removed-elsewhere.md) Test for a todo removed elsewhere
-- [ ] [#22](backlog/022-concurrent-todo-writes.md) Concurrent todo writes
+- [ ] [#170](backlog/170-pages-in-a-hierarchy.md) Pages in a hierarchy
+- [ ] [#112](backlog/112-locked-package-restore-for-release-builds.md) Locked package restore for release builds
+- [ ] [#51](backlog/051-people-pages.md) People pages
+- [ ] [#46](backlog/046-meeting-prep.md) Meeting prep
+- [ ] [#36](backlog/036-claude-md-tidy-ups.md) CLAUDE.md tidy-ups
+- [ ] [#35](backlog/035-strong-name-core.md) Strong-name Core
 - [ ] [#23](backlog/023-voice-capture-spike.md) Voice capture spike
 - [ ] [#24](backlog/024-voice-notes.md) Voice notes (after: #23)
 - [ ] [#25](backlog/025-outlook-as-a-source.md) Outlook as a source
@@ -63,44 +66,23 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#27](backlog/027-todo-dates-with-years.md) Todo dates with years
 - [ ] [#28](backlog/028-tag-and-link-parser-fixes.md) Tag and link parser fixes
 - [ ] [#29](backlog/029-index-limits.md) Index limits
-- [ ] [#30](backlog/030-tag-help-and-input.md) Tag help and input
-- [ ] [#31](backlog/031-limit-current-rows.md) Limit /current rows
-- [ ] [#32](backlog/032-regular-files-only.md) Regular files only
-- [ ] [#33](backlog/033-sturdier-calendar-parsing.md) Sturdier calendar parsing
-- [ ] [#34](backlog/034-clearer-calendar-display.md) Clearer calendar display
-- [ ] [#35](backlog/035-strong-name-core.md) Strong-name Core
-- [ ] [#36](backlog/036-claude-md-tidy-ups.md) CLAUDE.md tidy-ups
 - [ ] [#37](backlog/037-note-store-cleanup.md) Note store cleanup
-- [ ] [#38](backlog/038-core-dependency-test-tidy-ups.md) Core dependency test tidy-ups
-- [ ] [#39](backlog/039-safe-tostring-on-all-records.md) Safe ToString on all records
-- [ ] [#40](backlog/040-view-doc-tidy-ups.md) View doc tidy-ups
-- [ ] [#41](backlog/041-zone-in-calendarlinkview.md) Zone in CalendarLinkView
-- [ ] [#42](backlog/042-label-shared-tag-rows.md) Label shared-tag rows
 - [ ] [#43](backlog/043-daily-note.md) Daily note
 - [ ] [#44](backlog/044-note-templates.md) Note templates
 - [ ] [#45](backlog/045-meeting-notes-from-appointments.md) Meeting notes from appointments
-- [ ] [#46](backlog/046-meeting-prep.md) Meeting prep
 - [ ] [#47](backlog/047-full-text-search.md) Full-text search
 - [ ] [#48](backlog/048-recurring-todos.md) Recurring todos
 - [ ] [#49](backlog/049-weekly-review.md) Weekly review
 - [ ] [#50](backlog/050-times-bookings-in-current.md) Times bookings in /current
-- [ ] [#51](backlog/051-people-pages.md) People pages
 - [ ] [#52](backlog/052-recent-and-pinned-notes.md) Recent and pinned notes
 - [ ] [#53](backlog/053-note-history.md) Note history
 - [ ] [#54](backlog/054-attachments.md) Attachments
 - [ ] [#55](backlog/055-timed-reminders.md) Timed reminders
-- [ ] [#56](backlog/056-one-project-list.md) One project list
 - [ ] [#57](backlog/057-inbox-triage.md) Inbox triage
-- [ ] [#58](backlog/058-flagged-mail-to-the-inbox.md) Flagged mail to the inbox
-- [ ] [#59](backlog/059-ask-context.md) Ask Context
 - [ ] [#60](backlog/060-decision-log.md) Decision log
-- [ ] [#61](backlog/061-resurfacing.md) Resurfacing
 - [ ] [#62](backlog/062-links-to-headings.md) Links to headings
 - [ ] [#63](backlog/063-project-page-per-work-item.md) Project page per work item
-- [ ] [#64](backlog/064-search-across-context-and-times.md) Search across Context and Times
-- [ ] [#65](backlog/065-todos-inside-notes.md) Todos inside notes
 - [ ] [#66](backlog/066-rename-with-link-update.md) Rename with link update
-- [ ] [#67](backlog/067-email-to-note.md) Email to note
 - [ ] [#68](backlog/068-saved-searches.md) Saved searches
 - [ ] [#69](backlog/069-board-view-for-a-tag.md) Board view for a tag
 - [ ] [#70](backlog/070-day-s-end-in-the-daily.md) Day's end in the daily note
@@ -110,21 +92,24 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#74](backlog/074-waiting-for-list.md) Waiting-for list
 - [ ] [#75](backlog/075-todos-tied-to-meetings.md) Todos tied to meetings
 - [ ] [#76](backlog/076-done-log.md) Done log
-- [ ] [#77](backlog/077-quick-switcher.md) Quick switcher
 - [ ] [#78](backlog/078-smart-paste.md) Smart paste
 - [ ] [#79](backlog/079-share-a-note.md) Share a note
 - [ ] [#80](backlog/080-agenda-carry-over.md) Agenda carry-over
 - [ ] [#81](backlog/081-topics-for-the-next-1-1.md) Topics for the next 1:1
 - [ ] [#82](backlog/082-review-dates.md) Review dates
-- [ ] [#83](backlog/083-glossary.md) Glossary
 - [ ] [#84](backlog/084-screenshot-to-inbox.md) Screenshot to inbox
 - [ ] [#85](backlog/085-similar-notes.md) Similar notes
 - [ ] [#86](backlog/086-mermaid-diagrams.md) Mermaid diagrams
 - [ ] [#87](backlog/087-standup-notes.md) Standup notes
-- [ ] [#88](backlog/088-vacation-handover.md) Vacation handover
-- [ ] [#89](backlog/089-call-to-meeting-note.md) Call to meeting note
 - [ ] [#90](backlog/090-keep-mixed-line-endings.md) Keep mixed line endings
-- [ ] [#91](backlog/091-windows-device-check-at-open.md) Windows device check at open
+- [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4; #108)
+- [ ] [#111](backlog/111-concurrency-and-timeout-for-the-release.md) Concurrency and timeout for the release workflow
+- [ ] [#113](backlog/113-refuse-removed-secret-options-after-a.md) Refuse removed secret options after a command
+- [ ] [#114](backlog/114-owner-only-file-mode-for-all.md) Owner-only file mode for all data files
+- [ ] [#115](backlog/115-bounded-reads-for-todos-calendar-link.md) Bounded reads for todos, calendar link and notes
+- [ ] [#122](backlog/122-update-links-when-a-note-is.md) Update [[links]] when a note is renamed in the desktop app
+- [ ] [#168](backlog/168-aliases-for-people.md) Aliases for people (after: #51)
+- [ ] [#169](backlog/169-todos-linked-to-people.md) Todos linked to people (after: #51; #168)
 - [?] [#92](backlog/092-times-inside-the-context-desktop-app.md) Times inside the Context desktop app
 - [?] [#93](backlog/093-phone-companion-app.md) Phone companion app
 - [?] [#94](backlog/094-browser-extension.md) Browser extension
@@ -134,27 +119,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#98](backlog/098-sharing-notes-with-key-exchange.md) Sharing notes with key exchange
 - [?] [#99](backlog/099-refuse-odd-files-on-import.md) Refuse odd files on import
 - [?] [#100](backlog/100-revisit-ac-8-texts-with-json.md) Revisit AC-8 texts with --json
-- [ ] [#101](backlog/101-work-item-references.md) Work item references
-- [ ] [#102](backlog/102-work-item-dossier.md) Work item dossier (after: #101; #17; Times#37; #108)
-- [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4; #108)
-- [ ] [#104](backlog/104-decision-log.md) Decision log (after: #101)
-- [ ] [#105](backlog/105-handover-pack.md) Handover pack (after: #102; #104; #108)
-- [ ] [#106](backlog/106-claude-code-mcp-server.md) Claude Code MCP server (after: #101; #17; Times#37; #108)
-- [ ] [#107](backlog/107-own-cloud-sync-spike.md) Own-cloud sync spike
-- [ ] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39)
-- [ ] [#109](backlog/109-install-guide-for-the-unsigned-desktop.md) Install guide for the unsigned desktop app
-- [ ] [#110](backlog/110-narrow-the-node-check-in-the.md) Narrow the node check in the CI workflow test
-- [ ] [#111](backlog/111-concurrency-and-timeout-for-the-release.md) Concurrency and timeout for the release workflow
-- [ ] [#112](backlog/112-locked-package-restore-for-release-builds.md) Locked package restore for release builds
-- [ ] [#113](backlog/113-refuse-removed-secret-options-after-a.md) Refuse removed secret options after a command
-- [ ] [#114](backlog/114-owner-only-file-mode-for-all.md) Owner-only file mode for all data files
-- [ ] [#115](backlog/115-bounded-reads-for-todos-calendar-link.md) Bounded reads for todos, calendar link and notes
 - [x] [#117](backlog/117-make-the-github-repo-public.md) Make the GitHub repo public
-- [ ] [#118](backlog/118-refuse-a-newline-in-version-in.md) Refuse a newline in VERSION in the release scripts
-- [ ] [#119](backlog/119-fetch-the-earlier-desktop-package-with.md) Fetch the earlier desktop package with gh release download
-- [ ] [#120](backlog/120-pin-the-nuget-source-for-the.md) Pin the NuGet source for the desktop packages
-- [ ] [#121](backlog/121-open-empty-notes-in-the-default.md) Open empty notes in the default editor on macOS and Linux
-- [ ] [#122](backlog/122-update-links-when-a-note-is.md) Update [[links]] when a note is renamed in the desktop app
 - [?] [#124](backlog/124-check-the-tag-and-uploaded-assets.md) Check the tag and uploaded assets before publishing a release
 - [?] [#125](backlog/125-handle-a-leftover-draft-with-the.md) Handle a leftover draft with the same tag
 - [?] [#126](backlog/126-keep-stale-drafts-out-of-the.md) Keep stale drafts out of the Windows delta base
@@ -199,10 +164,45 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#165](backlog/165-show-json-as-an-option-in.md) Show --json as an option in the CLI help
 - [?] [#166](backlog/166-harden-the-todos-json-read.md) Harden the todos.json read
 - [h] [#167](backlog/167-check-the-first-todos-json-id.md) Check the first todos.json id migration
-- [ ] [#168](backlog/168-aliases-for-people.md) Aliases for people (after: #51)
-- [ ] [#169](backlog/169-todos-linked-to-people.md) Todos linked to people (after: #51; #168)
-- [ ] [#170](backlog/170-pages-in-a-hierarchy.md) Pages in a hierarchy
 - [?] [#171](backlog/171-name-the-bad-todo-id-in.md) Name the bad todo id in the CLI warning
+- [ ] [#121](backlog/121-open-empty-notes-in-the-default.md) Open empty notes in the default editor on macOS and Linux
+- [ ] [#120](backlog/120-pin-the-nuget-source-for-the.md) Pin the NuGet source for the desktop packages
+- [ ] [#119](backlog/119-fetch-the-earlier-desktop-package-with.md) Fetch the earlier desktop package with gh release download
+- [ ] [#118](backlog/118-refuse-a-newline-in-version-in.md) Refuse a newline in VERSION in the release scripts
+- [ ] [#110](backlog/110-narrow-the-node-check-in-the.md) Narrow the node check in the CI workflow test
+- [ ] [#105](backlog/105-handover-pack.md) Handover pack (after: #102; #104; #108)
+- [ ] [#104](backlog/104-decision-log.md) Decision log (after: #101)
+- [ ] [#101](backlog/101-work-item-references.md) Work item references
+- [ ] [#91](backlog/091-windows-device-check-at-open.md) Windows device check at open
+- [ ] [#89](backlog/089-call-to-meeting-note.md) Call to meeting note
+- [ ] [#88](backlog/088-vacation-handover.md) Vacation handover
+- [ ] [#83](backlog/083-glossary.md) Glossary
+- [ ] [#67](backlog/067-email-to-note.md) Email to note
+- [ ] [#64](backlog/064-search-across-context-and-times.md) Search across Context and Times
+- [ ] [#59](backlog/059-ask-context.md) Ask Context
+- [ ] [#58](backlog/058-flagged-mail-to-the-inbox.md) Flagged mail to the inbox
+- [ ] [#56](backlog/056-one-project-list.md) One project list
+- [ ] [#42](backlog/042-label-shared-tag-rows.md) Label shared-tag rows
+- [ ] [#41](backlog/041-zone-in-calendarlinkview.md) Zone in CalendarLinkView
+- [ ] [#40](backlog/040-view-doc-tidy-ups.md) View doc tidy-ups
+- [ ] [#39](backlog/039-safe-tostring-on-all-records.md) Safe ToString on all records
+- [ ] [#34](backlog/034-clearer-calendar-display.md) Clearer calendar display
+- [ ] [#32](backlog/032-regular-files-only.md) Regular files only
+- [ ] [#20](backlog/020-complete-checks-the-whole-todo.md) Complete checks the whole todo
+- [ ] [#21](backlog/021-test-for-a-todo-removed-elsewhere.md) Test for a todo removed elsewhere
+- [ ] [#22](backlog/022-concurrent-todo-writes.md) Concurrent todo writes
+- [ ] [#30](backlog/030-tag-help-and-input.md) Tag help and input
+- [ ] [#31](backlog/031-limit-current-rows.md) Limit /current rows
+- [ ] [#33](backlog/033-sturdier-calendar-parsing.md) Sturdier calendar parsing
+- [ ] [#38](backlog/038-core-dependency-test-tidy-ups.md) Core dependency test tidy-ups
+- [ ] [#61](backlog/061-resurfacing.md) Resurfacing
+- [ ] [#65](backlog/065-todos-inside-notes.md) Todos inside notes
+- [ ] [#77](backlog/077-quick-switcher.md) Quick switcher
+- [ ] [#102](backlog/102-work-item-dossier.md) Work item dossier (after: #101; #17; Times#37; #108)
+- [ ] [#106](backlog/106-claude-code-mcp-server.md) Claude Code MCP server (after: #101; #17; Times#37; #108)
+- [ ] [#107](backlog/107-own-cloud-sync-spike.md) Own-cloud sync spike
+- [ ] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39)
+- [ ] [#109](backlog/109-install-guide-for-the-unsigned-desktop.md) Install guide for the unsigned desktop app
 
 ## Dropped with the terminal UI
 
