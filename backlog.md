@@ -51,7 +51,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#14](backlog/014-remove-the-interactive-console.md) Remove the interactive console (after: #4; #7; #8; #6) → 145-remove-interactive-console
 - [x] [#15](backlog/015-signed-desktop-builds.md) Signed desktop builds (after: #116) → 146-signed-desktop-builds
 - [x] [#17](backlog/017-json-output-for-the-cli.md) JSON output for the CLI → 148-cli-json-output
-- [ ] [#18](backlog/018-write-todo-ids-once.md) Write todo ids once
+- [x] [#18](backlog/018-write-todo-ids-once.md) Write todo ids once → 149-write-todo-ids
 - [ ] [#19](backlog/019-survive-a-bad-todo-id.md) Survive a bad todo id
 - [ ] [#20](backlog/020-complete-checks-the-whole-todo.md) Complete checks the whole todo
 - [ ] [#21](backlog/021-test-for-a-todo-removed-elsewhere.md) Test for a todo removed elsewhere
