@@ -219,6 +219,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#185](backlog/185-reject-invalid-names-in-context-person.md) Reject invalid names in context person
 - [ ] [#186](backlog/186-leave-out-the-empty-notes-heading.md) Leave out the empty Notes heading in context person
 - [ ] [#187](backlog/187-match-mention-lowercasing-between-the-editor.md) Match mention lowercasing between the editor and the index
+- [ ] [#188](backlog/188-cap-the-size-of-note-reads.md) Cap the size of note reads
 
 ## Dropped with the terminal UI
 
