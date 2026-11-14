@@ -23,7 +23,12 @@ public sealed class WaitTimeoutSourceTests
     {
         string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), SensitiveFlowFile));
 
-        Match constant = Assert.Single(WaitConstant.Matches(source));
+        MatchCollection constants = WaitConstant.Matches(source);
+        Assert.True(
+            constants.Count == 1,
+            $"{SensitiveFlowFile} needs exactly one 'private static readonly TimeSpan Wait = TimeSpan.FromSeconds(<n>);', "
+            + $"found {constants.Count}");
+        Match constant = constants[0];
         int seconds = int.Parse(constant.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
         Assert.InRange(seconds, 10, 30);
 
