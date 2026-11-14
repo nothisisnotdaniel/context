@@ -140,7 +140,7 @@ public sealed class MainTests : IDisposable
 
         IReadOnlyList<IElement> buttons = cut.FindAll(".note-toolbar button");
         Assert.Equal(
-            ["Rename", "Delete", "Open in default editor", "Export", "Mark sensitive"], buttons.Select(b => b.TextContent).ToArray());
+            ["Rename", "Delete", "New subpage", "Move", "Open in default editor", "Export", "Mark sensitive"], buttons.Select(b => b.TextContent).ToArray());
         Assert.All(buttons, b => Assert.Equal("button", b.GetAttribute("type")));
     }
 
@@ -156,7 +156,7 @@ public sealed class MainTests : IDisposable
         await NameButton(cut, "Big").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Equal("Can't read Big.", cut.Find(".unreadable").TextContent), Wait);
-        Assert.Equal(5, cut.FindAll(".note-toolbar button").Count);
+        Assert.Equal(7, cut.FindAll(".note-toolbar button").Count);
     }
 
     // 134 AC-8: Rename swaps in a prefilled field; Enter or Save name renames and the editor shows the new name.
@@ -721,6 +721,330 @@ public sealed class MainTests : IDisposable
         Assert.Equal("new\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         cut.WaitForAssertion(() => Assert.StartsWith(
             "Replaced Plan.", Assert.Single(cut.FindAll(".import-result p")).TextContent, StringComparison.Ordinal), Wait);
+    }
+
+    // 152: writes Meetings with the subpage Meetings/Meeting 1 (and Plan, Archive at the top level).
+    private void WriteMeetings()
+    {
+        data.WriteNote("Meetings", "# Meetings\n");
+        data.WriteFile(Path.Combine("Meetings", "Meeting 1.md"), "# Meeting 1\n");
+        data.WriteNote("Archive", "# Archive\n");
+    }
+
+    // Opens a note by its full name: expands its ancestors in the tree, then clicks its row.
+    private static async Task OpenFull(IRenderedComponent<Main> cut, EditorJs js, string name)
+    {
+        int slash = name.IndexOf('/');
+        while (slash > 0)
+        {
+            string ancestor = name[..slash];
+            if (cut.FindAll($".notes-region button.toggle[aria-label='Expand {ancestor}']").Count > 0)
+            {
+                await cut.Find($".notes-region button.toggle[aria-label='Expand {ancestor}']").ClickAsync(new MouseEventArgs());
+            }
+
+            slash = name.IndexOf('/', slash + 1);
+        }
+
+        int mounts = js.Calls("ContextEditor.mount").Count;
+        await cut.FindAll(".notes-region button.name").Single(b => b.GetAttribute("title") == name).ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
+    }
+
+    // 152 AC-14: a subpage shows the breadcrumb above the toolbar; a top-level note shows none.
+    [Fact]
+    public async Task Breadcrumb_ChildOnly_AncestorsAsButtons_CurrentAsText()
+    {
+        WriteMeetings();
+        data.WriteFile(Path.Combine("Meetings", "Meeting 1", "Notes.md"), "# Notes\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Meetings");
+        Assert.Empty(cut.FindAll("nav.breadcrumb"));
+
+        await OpenFull(cut, js, "Meetings/Meeting 1/Notes");
+
+        cut.WaitForAssertion(() => Assert.Equal("Meetings/Meeting 1/Notes", cut.Find(".note-title").TextContent), Wait);
+        IElement nav = cut.Find("nav[aria-label=Breadcrumb]");
+        IReadOnlyList<IElement> crumbs = nav.QuerySelectorAll("button.crumb").ToList();
+        Assert.Equal(["Meetings", "Meeting 1"], crumbs.Select(c => c.TextContent).ToArray());
+        Assert.Equal(["Meetings", "Meetings/Meeting 1"], crumbs.Select(c => c.GetAttribute("title") ?? string.Empty).ToArray());
+        Assert.All(crumbs, c => Assert.Equal("button", c.GetAttribute("type")));
+        IElement current = nav.QuerySelector("[aria-current=page]")!;
+        Assert.Equal("Notes", current.TextContent);
+        Assert.Equal("SPAN", current.TagName);
+        Assert.Equal(nav, cut.Find(".note-toolbar").PreviousElementSibling);
+
+        await cut.Find("nav.breadcrumb button.crumb[title='Meetings/Meeting 1']").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Meetings/Meeting 1", cut.Find(".note-title").TextContent), Wait);
+    }
+
+    // 152 AC-14: an ancestor crumb opens through RequestOpen, so a dirty editor asks first.
+    [Fact]
+    public async Task Breadcrumb_DirtyEditor_AsksFirst()
+    {
+        WriteMeetings();
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await OpenFull(cut, js, "Meetings/Meeting 1");
+        js.Edit("# Meeting 1\n\nUnsaved\n");
+
+        await cut.Find("nav.breadcrumb button.crumb").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal("Discard changes to Meetings/Meeting 1?", cut.Find("[role=dialog] .question").TextContent);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("Meetings", cut.Find(".note-title").TextContent), Wait);
+    }
+
+    // 152 AC-15: New subpage swaps in the title field; Enter or Create subpage creates and opens it.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task NewSubpage_EnterOrButton_CreatesAndOpens(bool enter)
+    {
+        WriteMeetings();
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Meetings");
+
+        await cut.Find(".note-toolbar button.new-subpage").ClickAsync(new MouseEventArgs());
+        IElement field = cut.Find(".note-toolbar input.subpage-title");
+        Assert.Equal("Subpage title", field.GetAttribute("aria-label"));
+        Assert.Equal(string.Empty, field.GetAttribute("value"));
+        Assert.Equal(["Create subpage", "Cancel"], cut.FindAll(".note-toolbar button").Select(b => b.TextContent).ToArray());
+        await field.InputAsync(new ChangeEventArgs { Value = "Meeting 2" });
+        if (enter)
+        {
+            await cut.Find(".subpage-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        }
+        else
+        {
+            await cut.Find(".note-toolbar button.create-subpage").ClickAsync(new MouseEventArgs());
+        }
+
+        Assert.Equal("# Meeting 2\n", File.ReadAllText(Path.Combine(data.Root, "Meetings", "Meeting 2.md")));
+        cut.WaitForAssertion(() => Assert.Equal("Meetings/Meeting 2", cut.Find(".note-title").TextContent), Wait);
+        Assert.Equal("Created Meetings/Meeting 2", cut.Find(".main-status").TextContent);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
+        Assert.Empty(cut.FindAll(".subpage-title"));
+        cut.WaitForAssertion(() => Assert.Contains(cut.FindAll(".notes-region button.name"), b => b.GetAttribute("title") == "Meetings/Meeting 2"), Wait);
+    }
+
+    // 152 AC-15: Esc or Cancel restores the toolbar; a refusal shows red and keeps the field.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task NewSubpage_EscCancelOrRefused(bool esc)
+    {
+        WriteMeetings();
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Meetings");
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        await cut.Find(".note-toolbar button.new-subpage").ClickAsync(new MouseEventArgs());
+        await cut.Find(".subpage-title").InputAsync(new ChangeEventArgs { Value = "meeting 1" });
+
+        await cut.Find(".note-toolbar button.create-subpage").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal("Note Meetings/meeting 1 already exists.", cut.Find(".main-status").TextContent);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Equal("meeting 1", cut.Find(".subpage-title").GetAttribute("value"));
+
+        if (esc)
+        {
+            await cut.Find(".subpage-title").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        }
+        else
+        {
+            await cut.Find(".note-toolbar button.cancel-subpage").ClickAsync(new MouseEventArgs());
+        }
+
+        Assert.Empty(cut.FindAll(".subpage-title"));
+        Assert.Single(cut.FindAll(".note-toolbar button.new-subpage"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    // 152 AC-15 / AC-16: with unsaved changes New subpage and Move are refused before any field opens.
+    [Theory]
+    [InlineData("new-subpage")]
+    [InlineData("move")]
+    public async Task NewSubpageAndMove_DirtyEditor_SaveFirst(string button)
+    {
+        WriteMeetings();
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await OpenFull(cut, js, "Meetings/Meeting 1");
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        js.Edit("# Meeting 1\n\nUnsaved\n");
+
+        await cut.Find($".note-toolbar button.{button}").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal("Save Meetings/Meeting 1 first.", cut.Find(".main-status").TextContent);
+        Assert.Empty(cut.FindAll(".note-toolbar input"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    // 152 AC-16: Move is prefilled with the parent; Move here reopens the note under its new name.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Move_PrefilledWithParent_MovesAndReopens(bool enter)
+    {
+        WriteMeetings();
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await OpenFull(cut, js, "Meetings/Meeting 1");
+
+        await cut.Find(".note-toolbar button.move").ClickAsync(new MouseEventArgs());
+        IElement field = cut.Find(".note-toolbar input.move-parent");
+        Assert.Equal("New parent", field.GetAttribute("aria-label"));
+        Assert.Equal("Meetings", field.GetAttribute("value"));
+        Assert.Equal(["Move here", "Cancel"], cut.FindAll(".note-toolbar button").Select(b => b.TextContent).ToArray());
+        await field.InputAsync(new ChangeEventArgs { Value = "archive" });
+        if (enter)
+        {
+            await cut.Find(".move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        }
+        else
+        {
+            await cut.Find(".note-toolbar button.move-here").ClickAsync(new MouseEventArgs());
+        }
+
+        Assert.Equal("# Meeting 1\n", File.ReadAllText(Path.Combine(data.Root, "Archive", "Meeting 1.md")));
+        cut.WaitForAssertion(() => Assert.Equal("Archive/Meeting 1", cut.Find(".note-title").TextContent), Wait);
+        Assert.Equal("Moved to Archive/Meeting 1", cut.Find(".main-status").TextContent);
+        Assert.Empty(cut.FindAll(".move-parent"));
+    }
+
+    // 152 AC-16: an empty field moves to the top level; a top-level note's field starts empty.
+    [Fact]
+    public async Task Move_Empty_ToTopLevel()
+    {
+        WriteMeetings();
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await OpenFull(cut, js, "Meetings/Meeting 1");
+        await cut.Find(".note-toolbar button.move").ClickAsync(new MouseEventArgs());
+        await cut.Find(".move-parent").InputAsync(new ChangeEventArgs { Value = "" });
+
+        await cut.Find(".note-toolbar button.move-here").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Meeting 1", cut.Find(".note-title").TextContent), Wait);
+        Assert.True(File.Exists(Path.Combine(data.Root, "Meeting 1.md")));
+        Assert.Empty(cut.FindAll("nav.breadcrumb"));
+        await cut.Find(".note-toolbar button.move").ClickAsync(new MouseEventArgs());
+        Assert.Equal(string.Empty, cut.Find(".move-parent").GetAttribute("value"));
+    }
+
+    // 152 AC-16: an unknown parent is refused in red, nothing moves; Esc or Cancel restores the toolbar.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Move_UnknownParent_RedLine_ThenCancel(bool esc)
+    {
+        WriteMeetings();
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Archive");
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        await cut.Find(".note-toolbar button.move").ClickAsync(new MouseEventArgs());
+        await cut.Find(".move-parent").InputAsync(new ChangeEventArgs { Value = "Nowhere" });
+
+        await cut.Find(".note-toolbar button.move-here").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal("No note called Nowhere. Nothing was moved.", cut.Find(".main-status").TextContent);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        if (esc)
+        {
+            await cut.Find(".move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        }
+        else
+        {
+            await cut.Find(".note-toolbar button.cancel-move").ClickAsync(new MouseEventArgs());
+        }
+
+        Assert.Empty(cut.FindAll(".move-parent"));
+        Assert.Equal("Archive", cut.Find(".note-title").TextContent);
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    // 152 AC-16: Rename of a subpage prefills its title and reopens it under the new full name.
+    [Fact]
+    public async Task Rename_Subpage_PrefillsTitle_ReopensFullName()
+    {
+        WriteMeetings();
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await OpenFull(cut, js, "Meetings/Meeting 1");
+
+        await cut.Find(".note-toolbar button.rename").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("Meeting 1", cut.Find(".rename-title").GetAttribute("value")), Wait);
+        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Kickoff" });
+        await cut.Find(".note-toolbar button.save-name").ClickAsync(new MouseEventArgs());
+
+        Assert.True(File.Exists(Path.Combine(data.Root, "Meetings", "Kickoff.md")));
+        cut.WaitForAssertion(() => Assert.Equal("Meetings/Kickoff", cut.Find(".note-title").TextContent), Wait);
+    }
+
+    // 152 AC-17: a note with subpages asks with their count; on confirm the whole subtree is gone.
+    [Theory]
+    [InlineData(1, "Delete Meetings and its 1 subpage? This can't be undone.")]
+    [InlineData(2, "Delete Meetings and its 2 subpages? This can't be undone.")]
+    public async Task Delete_WithSubpages_AsksWithCount_DeletesSubtree(int count, string question)
+    {
+        WriteMeetings();
+        if (count == 2)
+        {
+            data.WriteFile(Path.Combine("Meetings", "Meeting 1", "Notes.md"), "# Notes\n");
+        }
+
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Meetings");
+
+        await cut.Find(".note-toolbar button.delete").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(question, cut.Find("[role=dialog] .question").TextContent);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+        Assert.False(File.Exists(Path.Combine(data.Root, "Meetings.md")));
+        Assert.False(Directory.Exists(Path.Combine(data.Root, "Meetings")));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".current-region .current")), Wait);
+        Assert.Equal(["Archive"], data.State!.Snapshot!.Notes.Select(n => n.Name).ToArray());
+    }
+
+    // 152 AC-12: a sensitive note's toolbar has no New subpage and no Move.
+    [Fact]
+    public async Task SensitiveNote_NoNewSubpageOrMove()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("Secret", "# Secret\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await NameButton(cut, "Secret").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".note-toolbar")), Wait);
+        Assert.Empty(cut.FindAll(".note-toolbar button.new-subpage"));
+        Assert.Empty(cut.FindAll(".note-toolbar button.move"));
+    }
+
+    // 152 AC-14 / AC-16: Export of a subpage suggests its title as the file name.
+    [Fact]
+    public async Task Export_Subpage_SuggestsTitle()
+    {
+        WriteMeetings();
+        data.Dialog.ExportPath = data.Outside("m1.md");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await OpenFull(cut, js, "Meetings/Meeting 1");
+
+        await cut.Find(".note-toolbar button.export").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal("Meeting 1.md", data.Dialog.SuggestedName);
+        Assert.Equal("# Meeting 1\n", File.ReadAllText(data.Outside("m1.md")));
     }
 
     private static async Task Open(IRenderedComponent<Main> cut, EditorJs js, string name)

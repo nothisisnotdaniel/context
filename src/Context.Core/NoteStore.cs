@@ -2,7 +2,10 @@ using System.Text;
 
 namespace Context;
 
-/// <summary>A note file in the store: its name (the file name without <c>.md</c>) and last-write time.</summary>
+/// <summary>
+/// A note file in the store: its name, last-write time and path. A top-level note's name is its file name without
+/// <c>.md</c>; a subpage's name is its parent's name, <c>/</c> and its own title (<c>Meetings/Meeting 1</c>).
+/// </summary>
 internal sealed record NoteInfo
 {
     public NoteInfo(string name, DateTime modified, string path)
@@ -10,15 +13,24 @@ internal sealed record NoteInfo
         Name = name;
         Modified = modified;
         Path = path;
+        int slash = name.LastIndexOf('/');
+        Title = slash < 0 ? name : name[(slash + 1)..];
+        Parent = slash < 0 ? null : name[..slash];
     }
 
-    /// <summary>The file name without the <c>.md</c> extension.</summary>
+    /// <summary>The full name: the titles from the top level down, joined with <c>/</c> on every OS.</summary>
     public string Name { get; }
+
+    /// <summary>The last segment of <see cref="Name"/>: the file name without <c>.md</c>.</summary>
+    public string Title { get; }
+
+    /// <summary>The parent's full name, or <c>null</c> for a top-level note.</summary>
+    public string? Parent { get; }
 
     /// <summary>The file's last-write time, local time.</summary>
     public DateTime Modified { get; }
 
-    /// <summary>The full path of the file, always directly inside the store's root.</summary>
+    /// <summary>The full path of the file: directly inside the store's root, or inside its parent's child folder.</summary>
     public string Path { get; }
 }
 
@@ -49,13 +61,17 @@ internal sealed class NoteExistsException : IOException
 }
 
 /// <summary>
-/// Markdown notes kept as top-level <c>*.md</c> files in one root folder. A note's title is its
-/// file name without <c>.md</c>. The files are the source of truth; nothing else is stored.
+/// Markdown notes kept as <c>*.md</c> files in one root folder. A note's title is its file name without
+/// <c>.md</c>. The subpages of <c>X.md</c> are the <c>*.md</c> files in the folder <c>X/</c> next to it, to any
+/// depth. The files are the source of truth; nothing else is stored.
 /// </summary>
 internal sealed class NoteStore
 {
     /// <summary>The longest title <see cref="Create"/> accepts.</summary>
     public const int MaxTitleLength = 100;
+
+    /// <summary>The longest full name (<c>Parent/Title</c>) a subpage can have; a longer one is not listed.</summary>
+    public const int MaxNameLength = 400;
 
     private const string Extension = ".md";
 
@@ -200,12 +216,65 @@ internal sealed class NoteStore
     }
 
     /// <summary>
-    /// Renames the note called <paramref name="name"/> (found like <see cref="TryFind"/>, never used as a path) to
-    /// <paramref name="newTitle"/>, normalized and validated like <see cref="Create"/> (throws
-    /// <see cref="ArgumentException"/> with the <see cref="ValidateTitle"/> text). Throws <see cref="NoteExistsException"/>
-    /// when another note has that title, ignoring case; a case-only rename of the same note is allowed. The file is
-    /// moved with <c>File.Move(..., overwrite: false)</c>, so its bytes (including the <c># Title</c> line) stay as they
-    /// were. Returns the renamed note, the note itself when the title is exactly its name (nothing is written), or
+    /// Creates the subpage <paramref name="title"/> of the note <paramref name="parent"/> (found like
+    /// <see cref="TryFind"/>, never used as a path): <c>&lt;parent folder&gt;/&lt;title&gt;.md</c> containing
+    /// <c># &lt;title&gt;\n</c> (UTF-8, no BOM, <see cref="FileMode.CreateNew"/>), creating the parent's child folder
+    /// if needed. The title is normalized and validated like <see cref="Create"/>, so a <c>/</c> is refused. Throws
+    /// <see cref="NoteExistsException"/> when a sibling has that title (ignoring case) and
+    /// <see cref="ArgumentException"/> for an invalid title, a full name over <see cref="MaxNameLength"/>, a parent
+    /// below the top-level <c>calendar</c> note, or a missing parent.
+    /// </summary>
+    public NoteInfo CreateChild(string parent, string title)
+    {
+        title = NormalizeTitle(title);
+        string? error = ValidateTitle(title);
+        if (error is not null)
+        {
+            throw new ArgumentException(error, nameof(title));
+        }
+
+        List<Entry> entries = ListEntries();
+        Entry owner = FindEntry(entries, parent) ?? throw new ArgumentException($"No note called {parent.Trim()}.", nameof(parent));
+        CheckCanHoldSubpages(owner);
+        string name = owner.Note.Name + "/" + title;
+        if (name.Length > MaxNameLength)
+        {
+            throw new ArgumentException(NameTooLongText, nameof(title));
+        }
+
+        if (HasSibling(entries, owner.Note.Name, title, except: null))
+        {
+            throw new NoteExistsException(name);
+        }
+
+        string folder = ChildFolderFor(owner);
+        Directory.CreateDirectory(folder);
+        string path = Path.Combine(folder, title + Extension);
+        byte[] content = Utf8NoBom.GetBytes($"# {title}\n");
+        try
+        {
+            using FileStream stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            stream.Write(content);
+        }
+        catch (IOException) when (File.Exists(path))
+        {
+            // Created by someone else between the check and CreateNew.
+            throw new NoteExistsException(name);
+        }
+
+        return new NoteInfo(name, File.GetLastWriteTime(path), path);
+    }
+
+    /// <summary>
+    /// Renames the note called <paramref name="name"/> (found like <see cref="TryFind"/>, never used as a path): only
+    /// its last segment changes to <paramref name="newTitle"/>, normalized and validated like <see cref="Create"/>
+    /// (throws <see cref="ArgumentException"/> with the <see cref="ValidateTitle"/> text); the parent stays. Throws
+    /// <see cref="NoteExistsException"/> when a sibling has that title, ignoring case (at the top level also a
+    /// sensitive note); a case-only rename of the same note is allowed. The file is moved with
+    /// <c>File.Move(..., overwrite: false)</c>, so its bytes (including the <c># Title</c> line) stay as they were, and
+    /// its child folder moves with it, never over another folder (when that fails the file is moved back). Throws
+    /// <see cref="ArgumentException"/> when a subpage's new full name would be over <see cref="MaxNameLength"/>.
+    /// Returns the renamed note, the note itself when the title is exactly its name (nothing is written), or
     /// <c>null</c> when <paramref name="name"/> names no note.
     /// </summary>
     public NoteInfo? Rename(string name, string newTitle)
@@ -217,70 +286,148 @@ internal sealed class NoteStore
             throw new ArgumentException(error, nameof(newTitle));
         }
 
-        if (!TryFind(name, out NoteInfo? source) || source is null)
+        List<Entry> entries = ListEntries();
+        Entry? source = FindEntry(entries, name);
+        if (source is null)
         {
             return null;
         }
 
-        if (string.Equals(source.Name, title, StringComparison.Ordinal))
+        if (string.Equals(source.Note.Title, title, StringComparison.Ordinal))
         {
-            return source;
+            return source.Note;
         }
 
-        if (List().Any(n => !string.Equals(n.Path, source.Path, StringComparison.Ordinal)
-            && string.Equals(n.Name, title, StringComparison.OrdinalIgnoreCase)) || IsSensitiveName(title))
+        string? parent = source.Note.Parent;
+        string newName = parent is null ? title : parent + "/" + title;
+        CheckSubtreeFits(entries, source, newName, parent);
+        if (HasSibling(entries, parent, title, except: source) || (parent is null && IsSensitiveName(title)))
         {
-            throw new NoteExistsException(title);
+            throw new NoteExistsException(newName);
         }
 
-        string target = Path.Combine(root, title + Extension);
-        bool caseOnly = string.Equals(source.Name, title, StringComparison.OrdinalIgnoreCase);
+        string folder = Path.GetDirectoryName(source.Note.Path) ?? root;
+        string target = Path.Combine(folder, title + Extension);
+        bool caseOnly = string.Equals(source.Note.Title, title, StringComparison.OrdinalIgnoreCase);
+        MoveTree(source, target, Path.Combine(folder, title), newName, caseOnly);
+        return new NoteInfo(newName, File.GetLastWriteTime(target), target);
+    }
+
+    /// <summary>
+    /// Moves the note called <paramref name="name"/> (found like <see cref="TryFind"/>) and its subpages under the note
+    /// <paramref name="newParent"/> (also found like <see cref="TryFind"/>, never used as a path), or to the top level
+    /// when that is null or blank. Neither the file nor the child folder overwrites anything; when moving the child
+    /// folder fails, the file is moved back and the exception propagates. Throws <see cref="ArgumentException"/> for a
+    /// missing parent, a move under the note itself or one of its subpages, a move below the top-level
+    /// <c>calendar</c> note and a full name over <see cref="MaxNameLength"/>, and <see cref="NoteExistsException"/>
+    /// when a note at the new place has the same title (ignoring case; at the top level also a sensitive note).
+    /// Returns the moved note, the note itself when it is already there (nothing is written), or <c>null</c> when
+    /// <paramref name="name"/> names no note.
+    /// </summary>
+    public NoteInfo? Move(string name, string? newParent)
+    {
+        List<Entry> entries = ListEntries();
+        Entry? source = FindEntry(entries, name);
+        if (source is null)
+        {
+            return null;
+        }
+
+        Entry? owner = null;
+        if (!string.IsNullOrWhiteSpace(newParent))
+        {
+            owner = FindEntry(entries, newParent)
+                ?? throw new ArgumentException($"No note called {newParent.Trim()}.", nameof(newParent));
+            if (ReferenceEquals(owner, source) || IsBelow(owner.Note.Name, source.Note.Name))
+            {
+                throw new ArgumentException("A note can't move under itself or one of its subpages.", nameof(newParent));
+            }
+
+            CheckCanHoldSubpages(owner);
+            string? error = ValidateTitle(source.Note.Title);
+            if (error is not null)
+            {
+                throw new ArgumentException(error, nameof(name));
+            }
+        }
+
+        string? parent = owner?.Note.Name;
+        if (string.Equals(parent, source.Note.Parent, StringComparison.Ordinal))
+        {
+            return source.Note;
+        }
+
+        string title = source.Note.Title;
+        string newName = parent is null ? title : parent + "/" + title;
+        CheckSubtreeFits(entries, source, newName, parent);
+        if (HasSibling(entries, parent, title, except: source) || (parent is null && IsSensitiveName(title)))
+        {
+            throw new NoteExistsException(newName);
+        }
+
+        string folder = owner is null ? root : ChildFolderFor(owner);
+        bool created = !Directory.Exists(folder);
+        Directory.CreateDirectory(folder);
+        string target = Path.Combine(folder, title + Extension);
         try
         {
-            File.Move(source.Path, target, overwrite: false);
+            MoveTree(source, target, Path.Combine(folder, title), newName, caseOnly: false);
         }
-        catch (IOException) when (!caseOnly && File.Exists(target))
+        catch (Exception) when (created)
         {
-            // Created by someone else between the check and the move.
-            throw new NoteExistsException(title);
+            RemoveIfEmpty(folder);
+            throw;
         }
 
-        return new NoteInfo(title, File.GetLastWriteTime(target), target);
+        return new NoteInfo(newName, File.GetLastWriteTime(target), target);
+    }
+
+    /// <summary>The number of notes below the note called <paramref name="name"/> (0 when it names no note).</summary>
+    public int Descendants(string name)
+    {
+        List<Entry> entries = ListEntries();
+        Entry? match = FindEntry(entries, name);
+        return match is null ? 0 : entries.Count(e => IsBelow(e.Note.Name, match.Note.Name));
     }
 
     /// <summary>
     /// Deletes the note called <paramref name="name"/> (found like <see cref="TryFind"/>, so only a file
-    /// <see cref="List"/> returns) and returns true, or returns false and deletes nothing when no note matches.
+    /// <see cref="List"/> returns) and every subpage below it that <see cref="List"/> reports, then removes the child
+    /// folders that are now empty (any other file keeps its folder), and returns true; or returns false and deletes
+    /// nothing when no note matches.
     /// </summary>
     public bool Delete(string name)
     {
-        if (!TryFind(name, out NoteInfo? match) || match is null)
+        List<Entry> entries = ListEntries();
+        Entry? match = FindEntry(entries, name);
+        if (match is null)
         {
             return false;
         }
 
-        File.Delete(match.Path);
+        List<Entry> subtree = entries.Where(e => ReferenceEquals(e, match) || IsBelow(e.Note.Name, match.Note.Name)).ToList();
+        foreach (Entry entry in subtree.OrderByDescending(e => e.Note.Name.Length))
+        {
+            File.Delete(entry.Note.Path);
+        }
+
+        foreach (string folder in subtree.Select(e => e.ChildFolder).OfType<string>().OrderByDescending(f => f.Length))
+        {
+            RemoveIfEmpty(folder);
+        }
+
         return true;
     }
 
     /// <summary>
-    /// Every top-level <c>*.md</c> file in the root, sorted by name ignoring case. Other files and
-    /// subfolders are left out. A missing root lists as empty and is not created.
+    /// Every note: the top-level <c>*.md</c> files in the root and, after each, its subpages, depth first. Siblings are
+    /// sorted by title ignoring case, then exactly. The subpages of a note are the <c>*.md</c> files in the folder next
+    /// to it whose name equals its title (exact case first, then ignoring case). A folder that is a link or reparse
+    /// point, starts with <c>.</c>, is the top-level <c>calendar</c> folder or has no matching note is never read; a
+    /// subpage whose title fails <see cref="ValidateTitle"/> or whose full name is over <see cref="MaxNameLength"/> is
+    /// left out. A missing root lists as empty and is not created.
     /// </summary>
-    public IReadOnlyList<NoteInfo> List()
-    {
-        if (!Directory.Exists(root))
-        {
-            return [];
-        }
-
-        return Directory.EnumerateFiles(root, "*" + Extension, SearchOption.TopDirectoryOnly)
-            .Where(p => string.Equals(Path.GetExtension(p), Extension, StringComparison.OrdinalIgnoreCase))
-            .Select(p => new NoteInfo(Path.GetFileNameWithoutExtension(p), File.GetLastWriteTime(p), p))
-            .OrderBy(n => n.Name, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(n => n.Name, StringComparer.Ordinal)
-            .ToList();
-    }
+    public IReadOnlyList<NoteInfo> List() => ListEntries().Select(e => e.Note).ToList();
 
     /// <summary>
     /// Every sensitive note: the top-level <c>*.ctxs</c> files in the root, sorted like <see cref="List"/>. The name is
@@ -356,24 +503,7 @@ internal sealed class NoteStore
     /// <summary>Finds the note called <paramref name="name"/> like <see cref="TryOpen"/>, without reading it.</summary>
     public bool TryFind(string name, out NoteInfo? match)
     {
-        match = null;
-        string wanted = name.Trim();
-        if (wanted.Length == 0)
-        {
-            return false;
-        }
-
-        IReadOnlyList<NoteInfo> notes = List();
-        match = Find(notes, wanted);
-        if (match is null && wanted.EndsWith(Extension, StringComparison.OrdinalIgnoreCase))
-        {
-            string stripped = wanted[..^Extension.Length];
-            if (stripped.Length > 0)
-            {
-                match = Find(notes, stripped);
-            }
-        }
-
+        match = FindEntry(ListEntries(), name)?.Note;
         return match is not null;
     }
 
@@ -432,7 +562,9 @@ internal sealed class NoteStore
         }
 
         string folder = Path.GetDirectoryName(opened.Path) ?? root;
-        string temp = Path.Combine(folder, $".{opened.Name}{Extension}.{Guid.NewGuid():N}.tmp");
+        // Named after the last segment: a subpage's name holds a '/', its file name doesn't.
+        string title = opened.Name[(opened.Name.LastIndexOf('/') + 1)..];
+        string temp = Path.Combine(folder, $".{title}{Extension}.{Guid.NewGuid():N}.tmp");
         try
         {
             using (FileStream stream = new FileStream(temp, PrivateTempOptions()))
@@ -711,6 +843,290 @@ internal sealed class NoteStore
     // True when a sensitive note has this name, ignoring case: the name is taken for plain notes.
     private bool IsSensitiveName(string title) =>
         ListSensitive().Any(n => string.Equals(n.Name, title, StringComparison.OrdinalIgnoreCase));
+
+    private const string NameTooLongText = "A note's full name can be at most 400 characters.";
+
+    /// <summary>Test hook: runs just before a child folder is moved, so a test can make that move fail.</summary>
+    internal Action? BeforeFolderMove { get; set; }
+
+    // Every listed note with the folder holding its subpages (null when there is none).
+    private List<Entry> ListEntries()
+    {
+        List<Entry> entries = [];
+        if (Directory.Exists(root))
+        {
+            AddLevel(root, null, entries);
+        }
+
+        return entries;
+    }
+
+    // Adds the notes in one folder, each followed by its subpages. Only the top level throws when it can't be read;
+    // a subfolder that can't be read lists as empty.
+    private static void AddLevel(string folder, string? parent, List<Entry> entries)
+    {
+        List<string> files;
+        if (parent is null)
+        {
+            files = Directory.EnumerateFiles(folder, "*" + Extension, SearchOption.TopDirectoryOnly).ToList();
+        }
+        else
+        {
+            try
+            {
+                files = Directory.EnumerateFiles(folder, "*" + Extension, SearchOption.TopDirectoryOnly).ToList();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return;
+            }
+        }
+
+        List<(string Title, string Path)> notes = files
+            .Where(p => string.Equals(Path.GetExtension(p), Extension, StringComparison.OrdinalIgnoreCase))
+            .Select(p => (Title: Path.GetFileNameWithoutExtension(p), Path: p))
+            .Where(n => parent is null
+                || (ValidateTitle(n.Title) is null && parent.Length + 1 + n.Title.Length <= MaxNameLength))
+            .OrderBy(n => n.Title, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(n => n.Title, StringComparer.Ordinal)
+            .ToList();
+        if (notes.Count == 0)
+        {
+            return;
+        }
+
+        List<DirectoryInfo> folders = SubFolders(folder, top: parent is null);
+        DirectoryInfo?[] childFolders = new DirectoryInfo?[notes.Count];
+        HashSet<string> claimed = new(StringComparer.Ordinal);
+        for (int i = 0; i < notes.Count; i++)
+        {
+            DirectoryInfo? exact = folders.FirstOrDefault(d => string.Equals(d.Name, notes[i].Title, StringComparison.Ordinal));
+            if (exact is not null)
+            {
+                childFolders[i] = exact;
+                claimed.Add(exact.Name);
+            }
+        }
+
+        for (int i = 0; i < notes.Count; i++)
+        {
+            if (childFolders[i] is null)
+            {
+                DirectoryInfo? other = folders.FirstOrDefault(d => !claimed.Contains(d.Name)
+                    && string.Equals(d.Name, notes[i].Title, StringComparison.OrdinalIgnoreCase));
+                if (other is not null)
+                {
+                    childFolders[i] = other;
+                    claimed.Add(other.Name);
+                }
+            }
+        }
+
+        for (int i = 0; i < notes.Count; i++)
+        {
+            string name = parent is null ? notes[i].Title : parent + "/" + notes[i].Title;
+            NoteInfo note = new NoteInfo(name, File.GetLastWriteTime(notes[i].Path), notes[i].Path);
+            entries.Add(new Entry(note, childFolders[i]?.FullName));
+            if (childFolders[i] is DirectoryInfo child)
+            {
+                AddLevel(child.FullName, name, entries);
+            }
+        }
+    }
+
+    // The folders in a folder that can hold subpages: no link or reparse point, no name starting with '.', and at the
+    // top level not the calendar folder. Sorted exactly by name so the case-insensitive match is the same every time.
+    private static List<DirectoryInfo> SubFolders(string folder, bool top)
+    {
+        try
+        {
+            return new DirectoryInfo(folder).EnumerateDirectories()
+                .Where(d => !d.Name.StartsWith('.') && !IsLink(d)
+                    && !(top && string.Equals(d.Name, CalendarStore.FolderName, StringComparison.OrdinalIgnoreCase)))
+                .OrderBy(d => d.Name, StringComparer.Ordinal)
+                .ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    // True for a symbolic link, a junction or any other reparse point; one that can't be checked counts as a link.
+    private static bool IsLink(FileSystemInfo info)
+    {
+        try
+        {
+            return (info.Attributes & FileAttributes.ReparsePoint) != 0 || info.LinkTarget is not null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
+    // Finds a typed name like TryFind: as typed, then without one trailing .md; exact case first, then ignoring case.
+    private static Entry? FindEntry(List<Entry> entries, string name)
+    {
+        string wanted = name.Trim();
+        if (wanted.Length == 0)
+        {
+            return null;
+        }
+
+        Entry? match = FindExact(entries, wanted);
+        if (match is null && wanted.EndsWith(Extension, StringComparison.OrdinalIgnoreCase))
+        {
+            string stripped = wanted[..^Extension.Length];
+            if (stripped.Length > 0)
+            {
+                match = FindExact(entries, stripped);
+            }
+        }
+
+        return match;
+    }
+
+    private static Entry? FindExact(List<Entry> entries, string name) =>
+        entries.FirstOrDefault(e => string.Equals(e.Note.Name, name, StringComparison.Ordinal))
+            ?? entries.FirstOrDefault(e => string.Equals(e.Note.Name, name, StringComparison.OrdinalIgnoreCase));
+
+    // True when name is a subpage of ancestor at any depth.
+    private static bool IsBelow(string name, string ancestor) =>
+        name.Length > ancestor.Length + 1 && name.StartsWith(ancestor + "/", StringComparison.Ordinal);
+
+    // True when another note with the same parent has this title, ignoring case.
+    private static bool HasSibling(List<Entry> entries, string? parent, string title, Entry? except) =>
+        entries.Any(e => !ReferenceEquals(e, except)
+            && string.Equals(e.Note.Parent, parent, StringComparison.Ordinal)
+            && string.Equals(e.Note.Title, title, StringComparison.OrdinalIgnoreCase));
+
+    // A note below the top-level calendar note, or whose title would make a hidden or invalid folder, can't hold subpages.
+    private static void CheckCanHoldSubpages(Entry owner)
+    {
+        string top = owner.Note.Parent is null ? owner.Note.Name : owner.Note.Name[..owner.Note.Name.IndexOf('/')];
+        if (string.Equals(top, CalendarStore.FolderName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Notes in calendar can't have subpages.");
+        }
+
+        if (ValidateTitle(owner.Note.Title) is not null)
+        {
+            throw new ArgumentException($"{owner.Note.Name} can't have subpages.");
+        }
+    }
+
+    // Refuses a new full name over MaxNameLength for the note or any of its subpages (they would no longer be listed),
+    // and a top-level calendar note with subpages (its folder would be the calendar folder).
+    private static void CheckSubtreeFits(List<Entry> entries, Entry source, string newName, string? parent)
+    {
+        int longest = entries.Where(e => IsBelow(e.Note.Name, source.Note.Name))
+            .Select(e => e.Note.Name.Length - source.Note.Name.Length)
+            .DefaultIfEmpty(0)
+            .Max();
+        if ((parent is not null || longest > 0) && newName.Length + longest > MaxNameLength)
+        {
+            throw new ArgumentException(NameTooLongText);
+        }
+
+        if (parent is null && source.ChildFolder is not null
+            && string.Equals(newName, CalendarStore.FolderName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("A note called calendar can't have subpages.");
+        }
+    }
+
+    // The folder that holds (or will hold) a note's subpages. Refuses a place that exists but can't be one (a file,
+    // a link), so nothing is ever written through a link.
+    private static string ChildFolderFor(Entry owner)
+    {
+        if (owner.ChildFolder is not null)
+        {
+            return owner.ChildFolder;
+        }
+
+        string folder = Path.Combine(Path.GetDirectoryName(owner.Note.Path) ?? string.Empty, owner.Note.Title);
+        if (File.Exists(folder) || Directory.Exists(folder) || new DirectoryInfo(folder).LinkTarget is not null)
+        {
+            throw new IOException($"{owner.Note.Name} can't have subpages.");
+        }
+
+        return folder;
+    }
+
+    // Moves a note's file, then its child folder, never over anything. When the folder move fails the file goes back.
+    private void MoveTree(Entry source, string target, string folderTarget, string newName, bool caseOnly)
+    {
+        try
+        {
+            File.Move(source.Note.Path, target, overwrite: false);
+        }
+        catch (IOException) when (!caseOnly && File.Exists(target))
+        {
+            // Created by someone else between the check and the move.
+            throw new NoteExistsException(newName);
+        }
+
+        if (source.ChildFolder is null)
+        {
+            return;
+        }
+
+        try
+        {
+            BeforeFolderMove?.Invoke();
+            if (!caseOnly && (Directory.Exists(folderTarget) || File.Exists(folderTarget)))
+            {
+                throw new IOException($"{newName} already has a folder.");
+            }
+
+            Directory.Move(source.ChildFolder, folderTarget);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            try
+            {
+                File.Move(target, source.Note.Path, overwrite: false);
+            }
+            catch (Exception back) when (back is IOException or UnauthorizedAccessException)
+            {
+                // The note stays under its new name; the original error is the one to report.
+            }
+
+            throw;
+        }
+    }
+
+    // Removes a folder only when it is empty; never follows a link and never throws.
+    private static void RemoveIfEmpty(string folder)
+    {
+        try
+        {
+            DirectoryInfo info = new DirectoryInfo(folder);
+            if (info.Exists && !IsLink(info) && !info.EnumerateFileSystemInfos().Any())
+            {
+                info.Delete(recursive: false);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Left in place.
+        }
+    }
+
+    // A listed note and the folder holding its subpages.
+    private sealed class Entry
+    {
+        public Entry(NoteInfo note, string? childFolder)
+        {
+            Note = note;
+            ChildFolder = childFolder;
+        }
+
+        public NoteInfo Note { get; }
+
+        public string? ChildFolder { get; }
+    }
 
     private static NoteInfo? Find(IReadOnlyList<NoteInfo> notes, string name) =>
         notes.FirstOrDefault(n => string.Equals(n.Name, name, StringComparison.Ordinal))

@@ -33,7 +33,6 @@ public sealed class DataWatcherTests : IDisposable
     [InlineData(".Note.md.0123456789abcdef.tmp")]
     [InlineData(".calendar-link.ics.0123456789abcdef.tmp")]
     [InlineData("calendar-link.txt")]
-    [InlineData("sub/Note.md")]
     [InlineData("calendar/sub/work.ics")]
     [InlineData("calendar/notes.md")]
     [InlineData("calendar")]
@@ -45,6 +44,32 @@ public sealed class DataWatcherTests : IDisposable
     [InlineData("../todos.json")]
     [InlineData("../Context2/todos.json")]
     public void IsRelevant_Others_False(string relative)
+    {
+        Assert.False(DataWatcher.IsRelevant(Root, Path.Combine(Root, relative)));
+    }
+
+    // 152 AC-11: a subpage at any depth is relevant.
+    [Theory]
+    [InlineData("Meetings/Meeting 1.md")]
+    [InlineData("Meetings/Meeting 1/Notes.MD")]
+    [InlineData("a/b/c/d/e.md")]
+    public void IsRelevant_Subpages_True(string relative)
+    {
+        Assert.True(DataWatcher.IsRelevant(Root, Path.Combine(Root, relative)));
+    }
+
+    // 152 AC-11: not below a hidden folder or the top-level calendar folder, and no temp files or other files below.
+    [Theory]
+    [InlineData(".hidden/Note.md")]
+    [InlineData("Meetings/.git/Note.md")]
+    [InlineData("calendar/notes.md")]
+    [InlineData("Calendar/sub/notes.md")]
+    [InlineData("Meetings/.Meeting 1.md.0123456789abcdef.tmp")]
+    [InlineData("Meetings/todos.json")]
+    [InlineData("Meetings/work.ics")]
+    [InlineData("Meetings/Meeting 1.ctxs")]
+    [InlineData("Meetings/.md")]
+    public void IsRelevant_Subfolders_False(string relative)
     {
         Assert.False(DataWatcher.IsRelevant(Root, Path.Combine(Root, relative)));
     }

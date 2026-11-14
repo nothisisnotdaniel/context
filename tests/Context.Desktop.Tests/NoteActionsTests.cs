@@ -440,6 +440,168 @@ public sealed class NoteActionsTests : IDisposable
         Assert.Equal(OperatingSystem.IsWindows() ? 1 : 0, data.Launcher.Launched.Count);
     }
 
+    private void WriteChild(string name, string text) =>
+        data.WriteFile(Path.Combine(name.Split('/')) + ".md", text);
+
+    // 152 AC-15: CreateSubpage writes the child, refreshes, and gives its full name.
+    [Fact]
+    public async Task CreateSubpage_Valid_CreatesAndRefreshes()
+    {
+        data.WriteNote("Meetings", "# Meetings\n");
+        await data.RefreshAsync();
+        int builds = data.State!.Builds;
+
+        ActionResult result = await data.Actions!.CreateSubpage("meetings", " Meeting 1.md ");
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Equal("Meetings/Meeting 1", result.Text);
+        Assert.Equal("# Meeting 1\n", File.ReadAllText(Path.Combine(data.Root, "Meetings", "Meeting 1.md")));
+        Assert.Equal(builds + 1, data.State.Builds);
+        Assert.Equal(["Meetings", "Meetings/Meeting 1"], data.State.Snapshot!.Notes.Select(n => n.Name).ToArray());
+    }
+
+    // 152 AC-15: the CreateNote-style refusals; nothing changes.
+    [Theory]
+    [InlineData("Meetings", "a/b", nameof(ActionReason.Invalid), "A note title can't contain / \\ : or control characters.")]
+    [InlineData("Meetings", "MEETING 1", nameof(ActionReason.Exists), "Note Meetings/MEETING 1 already exists.")]
+    [InlineData("Gone", "New", nameof(ActionReason.Missing), "Gone no longer exists. Nothing was done.")]
+    [InlineData("calendar", "New", nameof(ActionReason.Invalid), "calendar can't have subpages. Nothing was done.")]
+    public async Task CreateSubpage_Refusals_NothingChanged(string parent, string title, string reason, string text)
+    {
+        data.WriteNote("Meetings", "m");
+        WriteChild("Meetings/Meeting 1", "1");
+        data.WriteNote("calendar", "c");
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult result = await data.Actions!.CreateSubpage(parent, title);
+
+        Assert.Equal(ActionKind.Refused, result.Kind);
+        Assert.Equal(reason, result.Reason.ToString());
+        Assert.Equal(text, result.Text);
+        Assert.Equal(before, Files());
+    }
+
+    // 152 AC-15: a full name over the limit is refused.
+    [Fact]
+    public async Task CreateSubpage_TooLong_Refused()
+    {
+        string longTitle = new string('a', NoteStore.MaxTitleLength);
+        data.WriteNote(longTitle, "x");
+        WriteChild(longTitle + "/" + longTitle, "x");
+        WriteChild(longTitle + "/" + longTitle + "/" + longTitle, "x");
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult result = await data.Actions!.CreateSubpage(string.Join("/", Enumerable.Repeat(longTitle, 3)), longTitle);
+
+        Assert.Equal(ActionKind.Refused, result.Kind);
+        Assert.Equal(DesktopActions.NameTooLongText, result.Text);
+        Assert.Equal(before, Files());
+    }
+
+    // 152 AC-16: MoveNote moves the subtree under the typed parent and back to the top level.
+    [Fact]
+    public async Task MoveNote_Moves_AndBackToTop()
+    {
+        data.WriteNote("Meetings", "m");
+        WriteChild("Meetings/Meeting 1", "one");
+        data.WriteNote("Archive", "a");
+        await data.RefreshAsync();
+
+        ActionResult moved = await data.Actions!.MoveNote("Meetings", " archive ");
+
+        Assert.Equal(ActionKind.Done, moved.Kind);
+        Assert.Equal(ActionReason.None, moved.Reason);
+        Assert.Equal("Archive/Meetings", moved.Text);
+        Assert.Equal(["Archive", "Archive/Meetings", "Archive/Meetings/Meeting 1"], data.State!.Snapshot!.Notes.Select(n => n.Name).ToArray());
+        Assert.Equal("one", File.ReadAllText(Path.Combine(data.Root, "Archive", "Meetings", "Meeting 1.md")));
+
+        ActionResult back = await data.Actions.MoveNote("Archive/Meetings", "");
+
+        Assert.Equal("Meetings", back.Text);
+        Assert.Equal(["Archive", "Meetings", "Meetings/Meeting 1"], data.State.Snapshot!.Notes.Select(n => n.Name).ToArray());
+    }
+
+    // 152 AC-16: already there is Done/Unchanged with no write and no refresh.
+    [Fact]
+    public async Task MoveNote_SameParent_Unchanged()
+    {
+        data.WriteNote("Meetings", "m");
+        WriteChild("Meetings/Meeting 1", "one");
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+        int builds = data.State!.Builds;
+
+        ActionResult result = await data.Actions!.MoveNote("Meetings/Meeting 1", "MEETINGS");
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Equal(ActionReason.Unchanged, result.Reason);
+        Assert.Equal(before, Files());
+        Assert.Equal(builds, data.State.Builds);
+    }
+
+    // 152 AC-16: an unknown parent (also a path), a move under itself, calendar and clashes are refused.
+    [Theory]
+    [InlineData("Meetings", "Gone", nameof(ActionReason.Missing), "No note called Gone. Nothing was moved.")]
+    [InlineData("Meetings", "Archive.md/..", nameof(ActionReason.Missing), "No note called Archive.md/... Nothing was moved.")]
+    [InlineData("Meetings", "Meetings/Meeting 1", nameof(ActionReason.Invalid), DesktopActions.MoveUnderItselfText)]
+    [InlineData("Meetings", "meetings", nameof(ActionReason.Invalid), DesktopActions.MoveUnderItselfText)]
+    [InlineData("Meetings", "calendar", nameof(ActionReason.Invalid), "Can't move Meetings under calendar. Nothing was moved.")]
+    [InlineData("Archive/Meeting 1", "Meetings", nameof(ActionReason.Exists), "Note Meetings/Meeting 1 already exists.")]
+    [InlineData("Gone", "Archive", nameof(ActionReason.Missing), "Gone no longer exists. Nothing was done.")]
+    public async Task MoveNote_Refusals_NothingChanged(string name, string parent, string reason, string text)
+    {
+        data.WriteNote("Meetings", "m");
+        WriteChild("Meetings/Meeting 1", "one");
+        data.WriteNote("Archive", "a");
+        WriteChild("Archive/Meeting 1", "clash");
+        data.WriteNote("calendar", "c");
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult result = await data.Actions!.MoveNote(name, parent);
+
+        Assert.Equal(ActionKind.Refused, result.Kind);
+        Assert.Equal(reason, result.Reason.ToString());
+        Assert.Equal(text, result.Text);
+        Assert.Equal(before, Files());
+    }
+
+    // 152 AC-16: renaming a subpage keeps its parent and gives the new full name.
+    [Fact]
+    public async Task RenameNote_Child_KeepsParent()
+    {
+        data.WriteNote("Meetings", "m");
+        WriteChild("Meetings/Meeting 1", "one");
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.RenameNote("Meetings/Meeting 1", "Kickoff");
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Equal("Meetings/Kickoff", result.Text);
+        Assert.Equal("one", File.ReadAllText(Path.Combine(data.Root, "Meetings", "Kickoff.md")));
+        Assert.Equal(["Meetings", "Meetings/Kickoff"], data.State!.Snapshot!.Notes.Select(n => n.Name).ToArray());
+    }
+
+    // 152 AC-17: deleting a note with subpages removes the subtree and keeps any other file.
+    [Fact]
+    public async Task DeleteNote_WithSubpages_RemovesSubtree()
+    {
+        data.WriteNote("Meetings", "m");
+        WriteChild("Meetings/Meeting 1", "one");
+        WriteChild("Meetings/Meeting 1/Notes", "n");
+        data.WriteFile(Path.Combine("Meetings", "keep.txt"), "stray");
+        data.WriteNote("Other", "o");
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.DeleteNote("Meetings", new Confirmation());
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Equal(["Other"], data.State!.Snapshot!.Notes.Select(n => n.Name).ToArray());
+        Assert.Equal(["Meetings/keep.txt", "Other.md"], Files().Keys.Select(k => k.Replace('\\', '/')).ToArray());
+    }
+
     private async Task<EditableNote> Open(string name, byte[] bytes)
     {
         Directory.CreateDirectory(data.Root);

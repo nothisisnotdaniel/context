@@ -748,4 +748,379 @@ public sealed class NoteStoreTests : IDisposable
         Assert.Equal(["Other.md", "Plan.ctxs"], Directory.GetFiles(root).Select(f => Path.GetFileName(f)!).Order(StringComparer.Ordinal).ToArray());
         Assert.Equal("sealed", File.ReadAllText(Path.Combine(root, "Plan.ctxs")));
     }
+
+    // Writes a note file below the root; segments are joined as folders (Meetings/Meeting 1 -> Meetings/Meeting 1.md).
+    private string WriteAt(string name, string text)
+    {
+        string path = Path.Combine([root, .. name.Split('/')]) + ".md";
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, text);
+        return path;
+    }
+
+    // 152 AC-1: children are listed depth-first under Parent/Title, siblings by title ignoring case.
+    [Fact]
+    public void List_Subpages_DepthFirst_WithFullNames()
+    {
+        WriteAt("Meetings", "m");
+        WriteAt("Meetings/meeting 2", "2");
+        WriteAt("Meetings/Meeting 1", "1");
+        WriteAt("Meetings/Meeting 1/Notes", "n");
+        WriteAt("alpha", "a");
+        WriteAt("Zeta", "z");
+
+        IReadOnlyList<NoteInfo> notes = new NoteStore(root).List();
+
+        Assert.Equal(["alpha", "Meetings", "Meetings/Meeting 1", "Meetings/Meeting 1/Notes", "Meetings/meeting 2", "Zeta"],
+            notes.Select(n => n.Name).ToArray());
+        NoteInfo deep = notes[3];
+        Assert.Equal("Notes", deep.Title);
+        Assert.Equal("Meetings/Meeting 1", deep.Parent);
+        Assert.Equal(Path.Combine(root, "Meetings", "Meeting 1", "Notes.md"), deep.Path);
+        Assert.Null(notes[1].Parent);
+        Assert.Equal("Meetings", notes[1].Title);
+    }
+
+    // 152 AC-1: the child folder matches the stem exactly first, then ignoring case.
+    [Fact]
+    public void List_ChildFolder_MatchesIgnoringCase()
+    {
+        WriteAt("Plan", "p");
+        Directory.CreateDirectory(Path.Combine(root, "plan"));
+        File.WriteAllText(Path.Combine(root, "plan", "Step.md"), "s");
+
+        IReadOnlyList<NoteInfo> notes = new NoteStore(root).List();
+
+        Assert.Equal(["Plan", "Plan/Step"], notes.Select(n => n.Name).ToArray());
+    }
+
+    // 152 AC-1: orphan, hidden, calendar folders, bad or too-long titles and nested .ctxs are never listed.
+    [Fact]
+    public void List_SkipsOrphanHiddenCalendar_BadTitles_AndNestedSealed()
+    {
+        WriteAt("Orphan/Child", "o");
+        WriteAt(".hidden", "h");
+        WriteAt(".hidden/Inner", "i");
+        WriteAt("calendar", "c");
+        WriteAt("calendar/Event", "e");
+        WriteAt("Notes", "n");
+        WriteAt("Notes/.dot", "d");
+        WriteAt("Notes/.dot/Deep", "d");
+        WriteAt("Notes/Good", "g");
+        File.WriteAllText(Path.Combine(root, "Notes", "Secret.ctxs"), "sealed");
+        File.WriteAllText(Path.Combine(root, "Notes", "trail .md"), "bad");
+        File.WriteAllText(Path.Combine(root, "Notes", "CON.md"), "bad");
+        string longTitle = new string('a', NoteStore.MaxTitleLength);
+        string deep = "Notes";
+        for (int i = 0; i < 4; i++)
+        {
+            deep += "/" + longTitle;
+            WriteAt(deep, "x");
+        }
+
+        NoteStore store = new NoteStore(root);
+        IReadOnlyList<NoteInfo> notes = store.List();
+
+        string[] names = notes.Select(n => n.Name).ToArray();
+        Assert.Contains("calendar", names);
+        Assert.Contains("Notes/Good", names);
+        Assert.DoesNotContain(names, n => n.StartsWith("Orphan", StringComparison.Ordinal));
+        Assert.DoesNotContain(names, n => n.Contains(".hidden/", StringComparison.Ordinal) || n.Contains(".dot", StringComparison.Ordinal));
+        Assert.DoesNotContain("calendar/Event", names);
+        Assert.DoesNotContain(names, n => n.Contains("Secret", StringComparison.Ordinal) || n.Contains("trail", StringComparison.Ordinal) || n.Contains("CON", StringComparison.Ordinal));
+        Assert.All(names, n => Assert.True(n.Length <= NoteStore.MaxNameLength));
+        Assert.Equal(3, names.Count(n => n.StartsWith("Notes/a", StringComparison.Ordinal)));
+        Assert.Empty(store.ListSensitive());
+    }
+
+    // 152 AC-1: a symlinked child folder is never followed.
+    [Fact]
+    public void List_SymlinkedFolder_IsNotFollowed()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string outside = Path.Combine(parent, "outside");
+        Directory.CreateDirectory(outside);
+        File.WriteAllText(Path.Combine(outside, "Leak.md"), "leak");
+        WriteAt("Link", "l");
+        Directory.CreateSymbolicLink(Path.Combine(root, "Link"), outside);
+
+        IReadOnlyList<NoteInfo> notes = new NoteStore(root).List();
+
+        Assert.Equal(["Link"], notes.Select(n => n.Name).ToArray());
+    }
+
+    // 152 AC-2: a data folder of today lists the same names, paths and order, and listing changes nothing.
+    [Fact]
+    public void List_TodaysDataFolder_Unchanged()
+    {
+        WriteAt("Plan", "p");
+        WriteAt("beta", "b");
+        WriteAt("Alpha", "a");
+        Directory.CreateDirectory(Path.Combine(root, "calendar"));
+        File.WriteAllText(Path.Combine(root, "calendar", "work.ics"), "BEGIN:VCALENDAR");
+        File.WriteAllText(Path.Combine(root, "todos.json"), "[]");
+        File.WriteAllText(Path.Combine(root, "context.db"), "db");
+        string[] before = Snapshot();
+
+        IReadOnlyList<NoteInfo> notes = new NoteStore(root).List();
+
+        Assert.Equal(["Alpha", "beta", "Plan"], notes.Select(n => n.Name).ToArray());
+        Assert.Equal(["Alpha.md", "beta.md", "Plan.md"], notes.Select(n => Path.GetRelativePath(root, n.Path)).ToArray());
+        Assert.All(notes, n => Assert.Null(n.Parent));
+        Assert.Equal(before, Snapshot());
+    }
+
+    private string[] Snapshot() =>
+        Directory.GetFileSystemEntries(root, "*", SearchOption.AllDirectories)
+            .Select(f => Path.GetRelativePath(root, f) + ":" + (File.Exists(f) ? File.ReadAllText(f) : "dir"))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+    // 152 AC-3: a child is found by full name with the usual rules; paths never match.
+    [Fact]
+    public void TryFind_Child_ByFullName_NeverByPath()
+    {
+        string path = WriteAt("Meetings", "m");
+        WriteAt("Meetings/Meeting 1", "1");
+        WriteAt("Orphan/Child", "o");
+        NoteStore store = new NoteStore(root);
+
+        Assert.True(store.TryFind("Meetings/Meeting 1", out NoteInfo? exact));
+        Assert.Equal("Meetings/Meeting 1", exact!.Name);
+        Assert.True(store.TryFind(" meetings/MEETING 1.md ", out NoteInfo? loose));
+        Assert.Equal("Meetings/Meeting 1", loose!.Name);
+        Assert.False(store.TryFind("Meetings/../Meetings", out _));
+        Assert.False(store.TryFind("Meetings\\Meeting 1", out _));
+        Assert.False(store.TryFind(path, out _));
+        Assert.False(store.TryFind(Path.Combine(root, "Meetings", "Meeting 1"), out _));
+        Assert.False(store.TryFind("Orphan/Child", out _));
+        Assert.False(store.TryOpen("Orphan/Child", out _));
+    }
+
+    // 152 AC-4: CreateChild writes the heading into the parent's folder, creating it.
+    [Fact]
+    public void CreateChild_WritesHeading_InParentFolder()
+    {
+        WriteAt("Meetings", "m");
+        NoteStore store = new NoteStore(root);
+
+        NoteInfo made = store.CreateChild("meetings", "  Meeting 1 ");
+
+        Assert.Equal("Meetings/Meeting 1", made.Name);
+        Assert.Equal(Path.Combine(root, "Meetings", "Meeting 1.md"), made.Path);
+        Assert.Equal("# Meeting 1\n"u8.ToArray(), File.ReadAllBytes(made.Path));
+        NoteInfo deeper = store.CreateChild("Meetings/Meeting 1", "Notes");
+        Assert.Equal(Path.Combine(root, "Meetings", "Meeting 1", "Notes.md"), deeper.Path);
+        Assert.Equal(["Meetings", "Meetings/Meeting 1", "Meetings/Meeting 1/Notes"], store.List().Select(n => n.Name).ToArray());
+    }
+
+    // 152 AC-4: bad titles, clashes, missing or calendar parents and long names are refused.
+    [Fact]
+    public void CreateChild_Refusals()
+    {
+        WriteAt("Meetings", "m");
+        WriteAt("Meetings/Meeting 1", "1");
+        WriteAt("Calendar", "c");
+        WriteAt("Calendar/Sub", "s");
+        NoteStore store = new NoteStore(root);
+        string[] before = Snapshot();
+
+        Assert.Throws<ArgumentException>(() => store.CreateChild("Meetings", "a/b"));
+        Assert.Throws<ArgumentException>(() => store.CreateChild("Meetings", ""));
+        Assert.Throws<NoteExistsException>(() => store.CreateChild("Meetings", "MEETING 1"));
+        Assert.Throws<ArgumentException>(() => store.CreateChild("Gone", "Child"));
+        Assert.Throws<ArgumentException>(() => store.CreateChild("Calendar", "Child"));
+        Assert.Throws<ArgumentException>(() => store.CreateChild("../Meetings", "Child"));
+
+        string longTitle = new string('a', NoteStore.MaxTitleLength);
+        string name = "Meetings";
+        for (int i = 0; i < 3; i++)
+        {
+            name = store.CreateChild(name, longTitle).Name;
+        }
+
+        before = Snapshot();
+        Assert.Throws<ArgumentException>(() => store.CreateChild(name, longTitle));
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 152 AC-5: renaming a parent moves its children; bytes stay; old names are gone.
+    [Fact]
+    public void Rename_WithChildren_MovesSubtree()
+    {
+        WriteAt("Meetings", "m");
+        WriteAt("Meetings/Meeting 1", "one");
+        WriteAt("Meetings/Meeting 1/Notes", "notes");
+        NoteStore store = new NoteStore(root);
+
+        NoteInfo? renamed = store.Rename("Meetings", "Calls");
+
+        Assert.Equal("Calls", renamed!.Name);
+        Assert.Equal(["Calls", "Calls/Meeting 1", "Calls/Meeting 1/Notes"], store.List().Select(n => n.Name).ToArray());
+        Assert.Equal("one", File.ReadAllText(Path.Combine(root, "Calls", "Meeting 1.md")));
+        Assert.Equal("notes", File.ReadAllText(Path.Combine(root, "Calls", "Meeting 1", "Notes.md")));
+        Assert.False(Directory.Exists(Path.Combine(root, "Meetings")));
+        Assert.False(File.Exists(Path.Combine(root, "Meetings.md")));
+    }
+
+    // 152 AC-5: a child keeps its parent; a case-only rename with children keeps them; clashes are against siblings.
+    [Fact]
+    public void Rename_Child_CaseOnly_AndSiblingClash()
+    {
+        WriteAt("Meetings", "m");
+        WriteAt("Meetings/Meeting 1", "one");
+        WriteAt("Meetings/Meeting 1/Notes", "notes");
+        WriteAt("Meetings/Other", "o");
+        WriteAt("Other", "top");
+        File.WriteAllText(Path.Combine(root, "Secret.ctxs"), "sealed");
+        NoteStore store = new NoteStore(root);
+
+        Assert.Throws<NoteExistsException>(() => store.Rename("Meetings/Meeting 1", "other"));
+        NoteInfo? sensitiveTitle = store.Rename("Meetings/Other", "Secret");
+        Assert.Equal("Meetings/Secret", sensitiveTitle!.Name);
+        Assert.Throws<NoteExistsException>(() => store.Rename("Meetings", "secret"));
+        Assert.Throws<ArgumentException>(() => store.Rename("Meetings/Meeting 1", "a/b"));
+
+        NoteInfo? caseOnly = store.Rename("Meetings/Meeting 1", "MEETING 1");
+
+        Assert.Equal("Meetings/MEETING 1", caseOnly!.Name);
+        Assert.Equal(["Meetings", "Meetings/MEETING 1", "Meetings/MEETING 1/Notes", "Meetings/Secret", "Other"],
+            store.List().Select(n => n.Name).ToArray());
+        Assert.Equal("notes", File.ReadAllText(Path.Combine(root, "Meetings", "MEETING 1", "Notes.md")));
+
+        NoteInfo? top = store.Rename("meetings", "MEETINGS");
+        Assert.Equal("MEETINGS", top!.Name);
+        Assert.Contains("MEETINGS/MEETING 1/Notes", store.List().Select(n => n.Name));
+    }
+
+    // 152 AC-6: Move puts a note and its subtree under another note, and back to the top level.
+    [Fact]
+    public void Move_SubtreeUnderParent_AndBackToTop()
+    {
+        WriteAt("Meetings", "m");
+        WriteAt("Archive", "a");
+        WriteAt("Meetings/Meeting 1", "one");
+        NoteStore store = new NoteStore(root);
+
+        NoteInfo? moved = store.Move("Meetings", "archive");
+
+        Assert.Equal("Archive/Meetings", moved!.Name);
+        Assert.Equal(["Archive", "Archive/Meetings", "Archive/Meetings/Meeting 1"], store.List().Select(n => n.Name).ToArray());
+        Assert.Equal("one", File.ReadAllText(Path.Combine(root, "Archive", "Meetings", "Meeting 1.md")));
+        Assert.Null(store.Move("Gone", null));
+
+        NoteInfo? back = store.Move("Archive/Meetings", "  ");
+
+        Assert.Equal("Meetings", back!.Name);
+        Assert.Equal(["Archive", "Meetings", "Meetings/Meeting 1"], store.List().Select(n => n.Name).ToArray());
+        Assert.Equal(store.List()[1], store.Move("Meetings", null));
+    }
+
+    // 152 AC-6: under itself, a descendant, calendar, a missing parent, too long or a clash is refused; nothing changes.
+    [Fact]
+    public void Move_Refusals_ChangeNothing()
+    {
+        WriteAt("Meetings", "m");
+        WriteAt("Meetings/Meeting 1", "one");
+        WriteAt("calendar", "c");
+        WriteAt("Archive", "a");
+        WriteAt("Archive/Meeting 1", "clash");
+        WriteAt("Top", "t");
+        WriteAt("Meetings/Top", "child");
+        string longTitle = new string('a', NoteStore.MaxTitleLength);
+        WriteAt("Long", "l");
+        WriteAt("Long/" + longTitle, "x");
+        WriteAt("Long/" + longTitle + "/" + longTitle, "x");
+        WriteAt("Long/" + longTitle + "/" + longTitle + "/" + longTitle, "x");
+        WriteAt(longTitle, "deep");
+        WriteAt(longTitle + "/" + longTitle, "deep child");
+        NoteStore store = new NoteStore(root);
+        string[] before = Snapshot();
+
+        Assert.Throws<ArgumentException>(() => store.Move("Meetings", "Meetings"));
+        Assert.Throws<ArgumentException>(() => store.Move("Meetings", "Meetings/Meeting 1"));
+        Assert.Throws<ArgumentException>(() => store.Move("Meetings", "Calendar"));
+        Assert.Throws<ArgumentException>(() => store.Move("Meetings", "Gone"));
+        Assert.Throws<ArgumentException>(() => store.Move(longTitle, "Long/" + longTitle + "/" + longTitle));
+        Assert.Throws<NoteExistsException>(() => store.Move("Meetings/Meeting 1", "Archive"));
+        Assert.Throws<NoteExistsException>(() => store.Move("Meetings/top", null));
+
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 152 AC-6: when the folder move fails after the file move, the file goes back and the exception propagates.
+    [Fact]
+    public void Move_FolderMoveFails_RestoresFile()
+    {
+        WriteAt("Meetings", "m");
+        WriteAt("Meetings/Meeting 1", "one");
+        WriteAt("Archive", "a");
+        NoteStore store = new NoteStore(root);
+        string[] before = Snapshot();
+        store.BeforeFolderMove = () => throw new IOException("disk gone");
+
+        IOException error = Assert.Throws<IOException>(() => store.Move("Meetings", "Archive"));
+
+        Assert.Equal("disk gone", error.Message);
+        Assert.Equal(before, Snapshot());
+        Assert.Equal(["Archive", "Meetings", "Meetings/Meeting 1"], store.List().Select(n => n.Name).ToArray());
+    }
+
+    // 152 AC-5: the same restore holds for a rename.
+    [Fact]
+    public void Rename_FolderMoveFails_RestoresFile()
+    {
+        WriteAt("Meetings", "m");
+        WriteAt("Meetings/Meeting 1", "one");
+        NoteStore store = new NoteStore(root);
+        string[] before = Snapshot();
+        store.BeforeFolderMove = () => throw new UnauthorizedAccessException("no");
+
+        Assert.Throws<UnauthorizedAccessException>(() => store.Rename("Meetings", "Calls"));
+
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 152 AC-7: Descendants counts the notes below; Delete removes the subtree and only empty folders.
+    [Fact]
+    public void Delete_Subtree_KeepsStrayFiles()
+    {
+        WriteAt("Meetings", "m");
+        WriteAt("Meetings/Meeting 1", "one");
+        WriteAt("Meetings/Meeting 1/Notes", "notes");
+        WriteAt("Meetings/Meeting 2", "two");
+        File.WriteAllText(Path.Combine(root, "Meetings", "keep.txt"), "stray");
+        WriteAt("Other", "o");
+        NoteStore store = new NoteStore(root);
+
+        Assert.Equal(3, store.Descendants("Meetings"));
+        Assert.Equal(1, store.Descendants("meetings/meeting 1"));
+        Assert.Equal(0, store.Descendants("Other"));
+        Assert.Equal(0, store.Descendants("Gone"));
+
+        Assert.True(store.Delete("Meetings"));
+
+        Assert.Equal(["Other"], store.List().Select(n => n.Name).ToArray());
+        Assert.False(File.Exists(Path.Combine(root, "Meetings.md")));
+        Assert.False(Directory.Exists(Path.Combine(root, "Meetings", "Meeting 1")));
+        Assert.Equal("stray", File.ReadAllText(Path.Combine(root, "Meetings", "keep.txt")));
+    }
+
+    // 152 AC-7: deleting a child leaves its parent and siblings.
+    [Fact]
+    public void Delete_Child_RemovesEmptyFolder()
+    {
+        WriteAt("Meetings", "m");
+        WriteAt("Meetings/Meeting 1", "one");
+        NoteStore store = new NoteStore(root);
+
+        Assert.True(store.Delete("Meetings/Meeting 1"));
+
+        Assert.Equal(["Meetings"], store.List().Select(n => n.Name).ToArray());
+        Assert.True(File.Exists(Path.Combine(root, "Meetings.md")));
+    }
 }

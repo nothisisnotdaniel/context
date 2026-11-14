@@ -236,6 +236,38 @@ public sealed class NoteStoreEditTests : IDisposable
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(note.Path));
     }
 
+    // 152 AC-8: saving a subpage lands on its own file; the temp file lives in its folder and is gone afterwards.
+    [Fact]
+    public void SaveIfUnchanged_Child_LandsOnItsFile_NoStrayFile()
+    {
+        Write("Meetings", Encoding.UTF8.GetBytes("# Meetings\n"));
+        Directory.CreateDirectory(Path.Combine(root, "Meetings"));
+        File.WriteAllText(Path.Combine(root, "Meetings", "Meeting 1.md"), "# Meeting 1\n");
+        Assert.True(store.TryFind("Meetings/Meeting 1", out NoteInfo? child));
+        EditableNote opened = store.ReadForEdit(child!);
+
+        Assert.Equal("Meetings/Meeting 1", opened.Name);
+        Assert.Equal(NoteSaveResult.Saved, store.SaveIfUnchanged(opened, "# Meeting 1\n\nAgenda\n", out EditableNote? saved));
+
+        Assert.Equal("Meetings/Meeting 1", saved!.Name);
+        Assert.Equal("# Meeting 1\n\nAgenda\n", File.ReadAllText(Path.Combine(root, "Meetings", "Meeting 1.md")));
+        Assert.Equal("# Meetings\n", File.ReadAllText(Path.Combine(root, "Meetings.md")));
+        Assert.Equal(["Meetings.md"], Directory.GetFiles(root).Select(f => Path.GetFileName(f)).ToArray());
+        Assert.Equal(["Meeting 1.md"], Directory.GetFiles(Path.Combine(root, "Meetings")).Select(f => Path.GetFileName(f)).ToArray());
+        Assert.Equal([Path.Combine(root, "Meetings")], Directory.GetDirectories(root));
+    }
+
+    // 152 AC-8: Save (used by import) stays top-level only: a title with / is still refused.
+    [Fact]
+    public void Save_TitleWithSlash_StillRefused()
+    {
+        Write("Meetings", Encoding.UTF8.GetBytes("# Meetings\n"));
+
+        Assert.Throws<ArgumentException>(() => store.Save("Meetings/Meeting 1", Encoding.UTF8.GetBytes("x")));
+
+        Assert.Equal(["Meetings.md"], Directory.GetFileSystemEntries(root).Select(f => Path.GetFileName(f)).ToArray());
+    }
+
     private NoteInfo Write(string name, byte[] bytes)
     {
         string path = Path.Combine(root, name + ".md");

@@ -400,5 +400,93 @@ public sealed class NotesPanelTests : IDisposable
 
     private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName);
 
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(5);
+
+    private void WriteTree()
+    {
+        data.WriteNote("Meetings", "m");
+        data.WriteFile(Path.Combine("Meetings", "Meeting 1.md"), "1");
+        data.WriteFile(Path.Combine("Meetings", "Meeting 1", "Notes.md"), "n");
+        data.WriteNote("Plan", "p");
+    }
+
+    private static string[] Titles(IRenderedComponent<NotesPanel> cut) =>
+        cut.FindAll("li.note .name").Select(b => b.TextContent).ToArray();
+
+    // 152 AC-13: notes start collapsed; a note with subpages has a toggle button with aria-expanded and aria-label.
+    [Fact]
+    public async Task Tree_StartsCollapsed_ToggleButtons()
+    {
+        WriteTree();
+
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        Assert.Equal(["Meetings", "Plan"], Titles(cut));
+        IElement toggle = Assert.Single(cut.FindAll("button.toggle"));
+        Assert.Equal("button", toggle.GetAttribute("type"));
+        Assert.Equal("false", toggle.GetAttribute("aria-expanded"));
+        Assert.Equal("Expand Meetings", toggle.GetAttribute("aria-label"));
+        Assert.Empty(cut.FindAll("ul.note-children"));
+    }
+
+    // 152 AC-13: expanding shows nested lists with each row's title and the full name in title; collapsing hides them.
+    [Fact]
+    public async Task Tree_Toggle_ShowsNestedLists_TitleAndFullName()
+    {
+        WriteTree();
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        await cut.Find("button.toggle[aria-label='Expand Meetings']").ClickAsync(new MouseEventArgs());
+        await cut.Find("button.toggle[aria-label='Expand Meetings/Meeting 1']").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(["Meetings", "Meeting 1", "Notes", "Plan"], Titles(cut));
+        IElement deep = cut.Find("ul.note-children ul.note-children li.note .name");
+        Assert.Equal("Notes", deep.TextContent);
+        Assert.Equal("Meetings/Meeting 1/Notes", deep.GetAttribute("title"));
+        IElement top = cut.Find("button.toggle[aria-label='Collapse Meetings']");
+        Assert.Equal("true", top.GetAttribute("aria-expanded"));
+
+        await top.ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(["Meetings", "Plan"], Titles(cut));
+        Assert.Equal("false", cut.Find("button.toggle").GetAttribute("aria-expanded"));
+    }
+
+    // 152 AC-13: clicking a subpage opens it by full name.
+    [Fact]
+    public async Task Tree_ClickSubpage_OpensFullName()
+    {
+        WriteTree();
+        List<string> opened = [];
+        await data.RefreshAsync();
+        IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OnOpen, (string name) => opened.Add(name)));
+
+        await cut.Find("button.toggle").ClickAsync(new MouseEventArgs());
+        await cut.Find("button.name[title='Meetings/Meeting 1']").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(["Meetings/Meeting 1"], opened);
+    }
+
+    // 152 AC-13: opening a note expands its ancestors; the expanded state survives State.Changed.
+    [Fact]
+    public async Task Tree_OpenNameExpandsAncestors_SurvivesChanged()
+    {
+        WriteTree();
+        await data.RefreshAsync();
+        IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OpenName, "Meetings/Meeting 1/Notes"));
+
+        Assert.Equal(["Meetings", "Meeting 1", "Notes", "Plan"], Titles(cut));
+
+        data.WriteNote("Alpha", "a");
+        await data.State!.Refresh();
+
+        cut.WaitForAssertion(() => Assert.Equal(["Alpha", "Meetings", "Meeting 1", "Notes", "Plan"], Titles(cut)), Wait);
+
+        await cut.Find("button.toggle[aria-label='Collapse Meetings']").ClickAsync(new MouseEventArgs());
+        await data.State.Refresh();
+
+        cut.WaitForAssertion(() => Assert.Equal(["Alpha", "Meetings", "Plan"], Titles(cut)), Wait);
+    }
+
     private static string Time(DateTime local) => local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
 }

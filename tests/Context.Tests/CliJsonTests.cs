@@ -232,6 +232,21 @@ public sealed class CliJsonTests : IDisposable
             Run("notes", "--json").Out);
     }
 
+    // 152 AC-10: --json keeps {notes:[{name,locked}]} with each subpage's full name, in List() order.
+    [Fact]
+    public void Notes_Subpages_FullNames()
+    {
+        Fixture();
+        Directory.CreateDirectory(Path.Combine(root, "A"));
+        File.WriteAllText(Path.Combine(root, "A", "Child.md"), "c");
+
+        Assert.Equal(
+            "{\"notes\":[{\"name\":\"A\",\"locked\":false},{\"name\":\"A/Child\",\"locked\":false},{\"name\":\"B\",\"locked\":false},{\"name\":\"Secret\",\"locked\":true}]}\n",
+            Run("notes", "--json").Out);
+        Result shown = Run("note", "show", "a/child", "--json");
+        Assert.Equal("{\"name\":\"A/Child\",\"text\":\"c\"}\n", shown.Out);
+    }
+
     // AC-6 ---------------------------------------------------------------------------------------
 
     [Fact]

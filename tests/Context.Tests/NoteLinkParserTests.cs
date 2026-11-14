@@ -42,7 +42,7 @@ public sealed class NoteLinkParserTests
         string longest = new string('x', NoteLinkParser.MaxTargetLength);
         string tooLong = new string('y', NoteLinkParser.MaxTargetLength + 1);
 
-        Assert.Equal(103, NoteLinkParser.MaxTargetLength);
+        Assert.Equal(403, NoteLinkParser.MaxTargetLength);
         Assert.Equal([longest], NoteLinkParser.Parse($"[[{longest}]]"));
         Assert.Equal([longest], NoteLinkParser.Parse($"[[  {longest}  ]]"));
         Assert.Empty(NoteLinkParser.Parse($"[[{tooLong}]]"));

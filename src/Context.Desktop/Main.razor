@@ -10,7 +10,7 @@
     {
         <div class="layout" @onkeydown="OpenPalette">
             <aside class="notes-region">
-                <NotesPanel @ref="notesPanel" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" />
+                <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" />
             </aside>
             <main class="current-region">
                 <CaptureBox Guard="CaptureHeld" OnCaptured="Captured" />
@@ -29,8 +29,42 @@
                 <p class="main-status cut @statusClass" role="status" title="@statusText">@statusText</p>
                 @if (openName is { } name)
                 {
+                    @if (name.Contains('/'))
+                    {
+                        <nav class="breadcrumb" aria-label="Breadcrumb">
+                            <ol>
+                                @foreach ((string ancestor, string segment) in Ancestors(name))
+                                {
+                                    string ancestorShown = DesktopText.OneLine(ancestor);
+                                    string segmentShown = DesktopText.OneLine(segment);
+                                    <li>
+                                        <button type="button" class="crumb cut" title="@ancestorShown" @onclick="() => RequestOpen(ancestor)">@segmentShown</button>
+                                    </li>
+                                }
+                                @{
+                                    string currentShown = DesktopText.OneLine(name[(name.LastIndexOf('/') + 1)..]);
+                                    string fullShown = DesktopText.OneLine(name);
+                                }
+                                <li><span class="crumb-current cut" aria-current="page" title="@fullShown">@currentShown</span></li>
+                            </ol>
+                        </nav>
+                    }
                     <div class="note-toolbar">
-                        @if (renaming)
+                        @if (subpaging)
+                        {
+                            <input type="text" class="subpage-title" value="@subpageText" maxlength="200" disabled="@running"
+                                   aria-label="Subpage title" @ref="subpageField" @oninput="SubpageTyped" @onkeydown="e => CreateSubpage(e)" />
+                            <button type="button" class="create-subpage" disabled="@running" @onclick="() => CreateSubpage(null)">Create subpage</button>
+                            <button type="button" class="cancel-subpage" disabled="@running" @onclick="CancelSubpage">Cancel</button>
+                        }
+                        else if (moving)
+                        {
+                            <input type="text" class="move-parent" value="@moveText" maxlength="500" disabled="@running"
+                                   aria-label="New parent" placeholder="Empty: top level" @ref="moveField" @oninput="MoveTyped" @onkeydown="e => MoveHere(e)" />
+                            <button type="button" class="move-here" disabled="@running" @onclick="() => MoveHere(null)">Move here</button>
+                            <button type="button" class="cancel-move" disabled="@running" @onclick="CancelMove">Cancel</button>
+                        }
+                        else if (renaming)
                         {
                             <input type="text" class="rename-title" value="@renameText" maxlength="200" disabled="@running"
                                    aria-label="New name" @ref="renameField" @oninput="RenameTyped" @onkeydown="e => SaveName(e)" />
@@ -48,6 +82,8 @@
                             }
                             else
                             {
+                                <button type="button" class="new-subpage" disabled="@running" @onclick="StartSubpage">New subpage</button>
+                                <button type="button" class="move" disabled="@running" @onclick="StartMove">Move</button>
                                 <button type="button" class="open-external" disabled="@running" @onclick="OpenOutside">Open in default editor</button>
                                 <button type="button" class="export" disabled="@running" @onclick="Export">Export</button>
                                 @if (snapshot.SensitiveSupported)
@@ -77,7 +113,7 @@
         }
         @if (deleting && openName is { } doomed)
         {
-            <ConfirmDialog Question="@($"Delete {DesktopText.OneLine(doomed)}? This can't be undone.")" ConfirmLabel="Delete"
+            <ConfirmDialog Question="@DeleteQuestion(doomed)" ConfirmLabel="Delete"
                            Busy="running" OnConfirm="DeleteConfirmed" OnCancel="CancelDelete" />
         }
         @if (marking && openName is { } sealing)
@@ -122,6 +158,13 @@ else
     private bool marking;
     private bool unsealing;
     private NotesPanel? notesPanel;
+    private bool subpaging;
+    private string subpageText = string.Empty;
+    private ElementReference subpageField;
+    private bool moving;
+    private string moveText = string.Empty;
+    private ElementReference moveField;
+    private bool focusField;
 
     /// <summary>The OS file dialogs.</summary>
     [Inject]
@@ -133,6 +176,12 @@ else
         {
             focusRename = false;
             await renameField.FocusAsync();
+        }
+
+        if (focusField && (subpaging || moving))
+        {
+            focusField = false;
+            await (subpaging ? subpageField : moveField).FocusAsync();
         }
     }
 
@@ -210,6 +259,8 @@ else
         tagsShown = false;
         settingsShown = false;
         renaming = false;
+        subpaging = false;
+        moving = false;
         deleting = false;
         marking = false;
         unsealing = false;
@@ -441,7 +492,9 @@ else
             return;
         }
 
-        renameText = name;
+        renameText = name[(name.LastIndexOf('/') + 1)..];
+        subpaging = false;
+        moving = false;
         renaming = true;
         focusRename = true;
         ShowStatus(string.Empty, string.Empty);
@@ -514,8 +567,184 @@ else
         if (openName is not null && !running)
         {
             renaming = false;
+            subpaging = false;
+            moving = false;
             deleting = true;
         }
+    }
+
+    // Each ancestor of a subpage, from the top: its full name and its own title.
+    private static IEnumerable<(string Name, string Title)> Ancestors(string name)
+    {
+        int start = 0;
+        for (int slash = name.IndexOf('/'); slash > 0; slash = name.IndexOf('/', slash + 1))
+        {
+            yield return (name[..slash], name[start..slash]);
+            start = slash + 1;
+        }
+    }
+
+    // The delete question: a note with subpages names how many go with it.
+    private string DeleteQuestion(string name)
+    {
+        string prefix = name + "/";
+        int below = Snapshot?.Notes.Count(n => n.Name.StartsWith(prefix, StringComparison.Ordinal)) ?? 0;
+        string shown = DesktopText.OneLine(name);
+        return below switch
+        {
+            0 => $"Delete {shown}? This can't be undone.",
+            1 => $"Delete {shown} and its 1 subpage? This can't be undone.",
+            _ => $"Delete {shown} and its {below} subpages? This can't be undone.",
+        };
+    }
+
+    // New subpage and Move: like Rename, refused while the editor has unsaved changes, otherwise a field replaces
+    // the toolbar's buttons.
+    private async Task StartSubpage()
+    {
+        if (await CleanForField())
+        {
+            subpageText = string.Empty;
+            subpaging = true;
+            focusField = true;
+        }
+    }
+
+    private async Task StartMove()
+    {
+        if (await CleanForField() && openName is { } name)
+        {
+            int slash = name.LastIndexOf('/');
+            moveText = slash < 0 ? string.Empty : name[..slash];
+            moving = true;
+            focusField = true;
+        }
+    }
+
+    private async Task<bool> CleanForField()
+    {
+        if (openName is not { } name || running || openSensitive)
+        {
+            return false;
+        }
+
+        if (editor is not null && await editor.IsDirtyAsync())
+        {
+            ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
+            return false;
+        }
+
+        renaming = false;
+        subpaging = false;
+        moving = false;
+        ShowStatus(string.Empty, string.Empty);
+        return true;
+    }
+
+    private void SubpageTyped(ChangeEventArgs e) => subpageText = e.Value?.ToString() ?? string.Empty;
+
+    private void MoveTyped(ChangeEventArgs e) => moveText = e.Value?.ToString() ?? string.Empty;
+
+    private void CancelSubpage()
+    {
+        if (!running)
+        {
+            subpaging = false;
+        }
+    }
+
+    private void CancelMove()
+    {
+        if (!running)
+        {
+            moving = false;
+        }
+    }
+
+    // Enter in the title field or Create subpage; Esc cancels. The new page opens through RequestOpen, so a dirty
+    // editor asks first.
+    private async Task CreateSubpage(KeyboardEventArgs? key)
+    {
+        if (key is not null && key.Key == "Escape")
+        {
+            CancelSubpage();
+            return;
+        }
+
+        if ((key is not null && key.Key != "Enter") || running || openName is not { } name)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult made;
+        try
+        {
+            made = await Actions.CreateSubpage(name, subpageText);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        if (made.Kind != ActionKind.Done)
+        {
+            ShowStatus(DesktopText.OneLine(made.Text), "red");
+            return;
+        }
+
+        subpaging = false;
+        await RequestOpen(made.Text);
+        ShowStatus($"Created {DesktopText.OneLine(made.Text)}", "accent");
+    }
+
+    // Enter in the parent field or Move here; Esc cancels. The parent is matched against the note list only. After a
+    // move the editor opens the note under its new name.
+    private async Task MoveHere(KeyboardEventArgs? key)
+    {
+        if (key is not null && key.Key == "Escape")
+        {
+            CancelMove();
+            return;
+        }
+
+        if ((key is not null && key.Key != "Enter") || running || openName is not { } name)
+        {
+            return;
+        }
+
+        if (editor is not null && await editor.IsDirtyAsync())
+        {
+            ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
+            return;
+        }
+
+        running = true;
+        ActionResult moved;
+        try
+        {
+            moved = await Actions.MoveNote(name, moveText);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        if (moved.Kind != ActionKind.Done)
+        {
+            ShowStatus(DesktopText.OneLine(moved.Text), "red");
+            return;
+        }
+
+        moving = false;
+        if (moved.Reason == ActionReason.Unchanged)
+        {
+            ShowStatus(string.Empty, string.Empty);
+            return;
+        }
+
+        ShowNote(moved.Text);
+        ShowStatus($"Moved to {DesktopText.OneLine(moved.Text)}", "accent");
     }
 
     private void CancelDelete()
@@ -782,7 +1011,7 @@ else
             return null;
         }
 
-        string? target = Dialog.SaveExportFile(name + ".md");
+        string? target = Dialog.SaveExportFile(name[(name.LastIndexOf('/') + 1)..] + ".md");
         return target is null ? null : (name, target);
     }
 

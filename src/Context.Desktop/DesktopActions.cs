@@ -89,6 +89,10 @@ internal sealed class DesktopActions
     public const string FailedText = "Can't make that change.";
     public const string EmptyTodoText = "Write the todo first.";
     public const string CreateFailedText = "Can't create that note. Nothing was done.";
+    public const string ChildSensitiveText = "Only top-level notes can be sensitive.";
+    public const string ParentSensitiveText = "A note with subpages can't be sensitive.";
+    public const string NameTooLongText = "A note's full name can be at most 400 characters.";
+    public const string MoveUnderItselfText = "A note can't move under itself or one of its subpages. Nothing was moved.";
 
     public const string CapturedText = "Captured.";
     public const string CaptureEmptyText = "Type something to capture.";
@@ -173,6 +177,19 @@ internal sealed class DesktopActions
 
     /// <summary>The red line when a rename fails.</summary>
     public static string RenameFailedText(string name) => $"Can't rename {name}. Nothing was done.";
+
+    /// <summary>The red line when the parent typed for a move names no note.</summary>
+    public static string NoParentText(string parent) => $"No note called {parent}. Nothing was moved.";
+
+    /// <summary>The red line when a note can't go under that parent (or can't take a subpage).</summary>
+    public static string NoSubpagesText(string parent) => $"{parent} can't have subpages. Nothing was done.";
+
+    /// <summary>The red line when a note may not go under that parent (or to the top level, for an empty one).</summary>
+    public static string CantMoveText(string name, string parent) =>
+        parent.Length == 0 ? $"Can't move {name} to the top level. Nothing was moved." : $"Can't move {name} under {parent}. Nothing was moved.";
+
+    /// <summary>The red line when a move fails.</summary>
+    public static string MoveFailedText(string name) => $"Can't move {name}. Nothing was moved.";
 
     /// <summary>The red line when a delete fails.</summary>
     public static string DeleteFailedText(string name) => $"Can't delete {name}.";
@@ -307,8 +324,24 @@ internal sealed class DesktopActions
     public Task<ActionResult> RenameNote(string name, string newTitle) => Run(() => RenameNoteNow(name, newTitle));
 
     /// <summary>
-    /// Deletes the note <paramref name="name"/> through <see cref="NoteStore.Delete"/>, but only when the user
-    /// <paramref name="confirmed"/> it. There is no undo. The result's text is the name when done.
+    /// Creates the subpage <paramref name="title"/> of the note <paramref name="parent"/> through
+    /// <see cref="NoteStore.CreateChild"/>, with the <see cref="CreateNote"/> texts. The result's text is the new
+    /// note's full name when done.
+    /// </summary>
+    public Task<ActionResult> CreateSubpage(string parent, string title) => Run(() => CreateSubpageNow(parent, title));
+
+    /// <summary>
+    /// Moves the note <paramref name="name"/> and its subpages under the note <paramref name="newParent"/> (matched
+    /// through <see cref="NoteStore.TryFind"/> only, never a path; blank = the top level) through
+    /// <see cref="NoteStore.Move"/>. Already there gives <see cref="ActionReason.Unchanged"/> (done, nothing written,
+    /// no refresh). The result's text is the new full name when done.
+    /// </summary>
+    public Task<ActionResult> MoveNote(string name, string newParent) => Run(() => MoveNoteNow(name, newParent));
+
+    /// <summary>
+    /// Deletes the note <paramref name="name"/> and every subpage below it through <see cref="NoteStore.Delete"/>,
+    /// but only when the user <paramref name="confirmed"/> it. There is no undo. The result's text is the name when
+    /// done.
     /// </summary>
     public Task<ActionResult> DeleteNote(string name, Confirmation? confirmed) => Run(() => DeleteNoteNow(name, confirmed));
 
@@ -671,7 +704,7 @@ internal sealed class DesktopActions
                     : Refused(ActionReason.Missing, NoteMissingText(name));
             }
 
-            if (string.Equals(source.Name, title, StringComparison.Ordinal))
+            if (string.Equals(source.Title, title, StringComparison.Ordinal))
             {
                 return new ActionResult(ActionKind.Done, ActionReason.Unchanged, source.Name);
             }
@@ -685,9 +718,104 @@ internal sealed class DesktopActions
         {
             return Refused(ActionReason.Exists, ExistsText(e.Name));
         }
+        catch (ArgumentException)
+        {
+            // The title is valid (checked above), so the new full name of the note or a subpage is too long, or a
+            // top-level note with subpages would be called calendar.
+            return Refused(ActionReason.Invalid, RenameFailedText(name));
+        }
         catch (Exception)
         {
             return Failed(ActionReason.WriteFailed, RenameFailedText(name));
+        }
+    }
+
+    private ActionResult CreateSubpageNow(string parent, string title)
+    {
+        string normalized = NoteStore.NormalizeTitle(title);
+        string? invalid = NoteStore.ValidateTitle(normalized);
+        if (invalid is not null)
+        {
+            return Refused(ActionReason.Invalid, invalid);
+        }
+
+        try
+        {
+            if (!notes.TryFind(parent, out NoteInfo? owner) || owner is null)
+            {
+                return Refused(ActionReason.Missing, NoteMissingText(parent));
+            }
+
+            if (owner.Name.Length + 1 + normalized.Length > NoteStore.MaxNameLength)
+            {
+                return Refused(ActionReason.Invalid, NameTooLongText);
+            }
+
+            NoteInfo created = notes.CreateChild(owner.Name, normalized);
+            return new ActionResult(ActionKind.Done, ActionReason.None, created.Name);
+        }
+        catch (NoteExistsException e)
+        {
+            return Refused(ActionReason.Exists, ExistsText(e.Name));
+        }
+        catch (ArgumentException)
+        {
+            return Refused(ActionReason.Invalid, NoSubpagesText(parent));
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, CreateFailedText);
+        }
+    }
+
+    private ActionResult MoveNoteNow(string name, string newParent)
+    {
+        try
+        {
+            if (!notes.TryFind(name, out NoteInfo? source) || source is null)
+            {
+                return Refused(ActionReason.Missing, NoteMissingText(name));
+            }
+
+            NoteInfo? owner = null;
+            string typed = newParent.Trim();
+            if (typed.Length > 0)
+            {
+                // The typed parent is only ever matched against the note list, never turned into a path.
+                if (!notes.TryFind(typed, out owner) || owner is null)
+                {
+                    return Refused(ActionReason.Missing, NoParentText(typed));
+                }
+
+                if (string.Equals(owner.Name, source.Name, StringComparison.Ordinal)
+                    || owner.Name.StartsWith(source.Name + "/", StringComparison.Ordinal))
+                {
+                    return Refused(ActionReason.Invalid, MoveUnderItselfText);
+                }
+            }
+
+            if (string.Equals(owner?.Name, source.Parent, StringComparison.Ordinal))
+            {
+                return new ActionResult(ActionKind.Done, ActionReason.Unchanged, source.Name);
+            }
+
+            NoteInfo? moved = notes.Move(source.Name, owner?.Name);
+            return moved is null
+                ? Refused(ActionReason.Missing, NoteMissingText(name))
+                : new ActionResult(ActionKind.Done, ActionReason.None, moved.Name);
+        }
+        catch (NoteExistsException e)
+        {
+            return Refused(ActionReason.Exists, ExistsText(e.Name));
+        }
+        catch (ArgumentException)
+        {
+            // Below the calendar note, or a full name over NoteStore.MaxNameLength for the note or a subpage.
+            return Refused(ActionReason.Invalid, CantMoveText(name, newParent.Trim()));
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, MoveFailedText(name));
         }
     }
 
@@ -1051,6 +1179,17 @@ internal sealed class DesktopActions
             if (!notes.TryFind(name, out NoteInfo? source) || source is null)
             {
                 return Refused(ActionReason.Missing, NoteMissingText(name));
+            }
+
+            // Sensitive notes stay top-level: a sealed note's name is its file stem, and its file is never moved.
+            if (source.Parent is not null)
+            {
+                return Refused(ActionReason.Invalid, ChildSensitiveText);
+            }
+
+            if (notes.Descendants(source.Name) > 0)
+            {
+                return Refused(ActionReason.Invalid, ParentSensitiveText);
             }
 
             if (string.Equals(source.Name, Inbox.NoteName, StringComparison.OrdinalIgnoreCase))

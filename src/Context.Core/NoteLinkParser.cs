@@ -4,10 +4,10 @@ namespace Context;
 internal static class NoteLinkParser
 {
     /// <summary>
-    /// The longest link target: a note title (<see cref="NoteStore.MaxTitleLength"/>) plus <c>.md</c>. A longer
-    /// target is not a link at all.
+    /// The longest link target: a note's full name (<see cref="NoteStore.MaxNameLength"/>, so a subpage's
+    /// <c>Parent/Title</c> fits) plus <c>.md</c>. A longer target is not a link at all.
     /// </summary>
-    public const int MaxTargetLength = NoteStore.MaxTitleLength + 3;
+    public const int MaxTargetLength = NoteStore.MaxNameLength + 3;
 
     /// <summary>
     /// The distinct link targets in <paramref name="markdown"/>, in order of first appearance. A link is
