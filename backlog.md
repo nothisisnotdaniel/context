@@ -67,25 +67,18 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#48](backlog/048-recurring-todos.md) Recurring todos
 - [ ] [#49](backlog/049-weekly-review.md) Weekly review
 - [ ] [#47](backlog/047-full-text-search.md) Full-text search
-- [ ] [#50](backlog/050-times-bookings-in-current.md) Times bookings in /current
-- [ ] [#52](backlog/052-recent-and-pinned-notes.md) Recent and pinned notes
+- [ ] [#70](backlog/070-day-s-end-in-the-daily.md) Day's end in the daily note
+- [ ] [#71](backlog/071-morning-briefing.md) Morning briefing
 - [ ] [#53](backlog/053-note-history.md) Note history
 - [ ] [#54](backlog/054-attachments.md) Attachments
 - [ ] [#55](backlog/055-timed-reminders.md) Timed reminders
 - [ ] [#57](backlog/057-inbox-triage.md) Inbox triage
 - [ ] [#60](backlog/060-decision-log.md) Decision log
 - [ ] [#62](backlog/062-links-to-headings.md) Links to headings
-- [ ] [#63](backlog/063-project-page-per-work-item.md) Project page per work item
 - [ ] [#66](backlog/066-rename-with-link-update.md) Rename with link update
 - [ ] [#68](backlog/068-saved-searches.md) Saved searches
 - [ ] [#69](backlog/069-board-view-for-a-tag.md) Board view for a tag
-- [ ] [#70](backlog/070-day-s-end-in-the-daily.md) Day's end in the daily note
-- [ ] [#71](backlog/071-morning-briefing.md) Morning briefing
-- [ ] [#72](backlog/072-command-bar.md) Command bar (after: Times#4)
-- [ ] [#73](backlog/073-mail-digest.md) Mail digest
 - [ ] [#74](backlog/074-waiting-for-list.md) Waiting-for list
-- [ ] [#75](backlog/075-todos-tied-to-meetings.md) Todos tied to meetings
-- [ ] [#76](backlog/076-done-log.md) Done log
 - [ ] [#78](backlog/078-smart-paste.md) Smart paste
 - [ ] [#79](backlog/079-share-a-note.md) Share a note
 - [ ] [#80](backlog/080-agenda-carry-over.md) Agenda carry-over
@@ -104,6 +97,13 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#122](backlog/122-update-links-when-a-note-is.md) Update [[links]] when a note is renamed in the desktop app
 - [ ] [#168](backlog/168-aliases-for-people.md) Aliases for people (after: #51)
 - [ ] [#169](backlog/169-todos-linked-to-people.md) Todos linked to people (after: #51; #168)
+- [ ] [#50](backlog/050-times-bookings-in-current.md) Times bookings in /current
+- [ ] [#52](backlog/052-recent-and-pinned-notes.md) Recent and pinned notes
+- [ ] [#63](backlog/063-project-page-per-work-item.md) Project page per work item
+- [ ] [#72](backlog/072-command-bar.md) Command bar (after: Times#4)
+- [ ] [#73](backlog/073-mail-digest.md) Mail digest
+- [ ] [#75](backlog/075-todos-tied-to-meetings.md) Todos tied to meetings
+- [ ] [#76](backlog/076-done-log.md) Done log
 - [ ] [#23](backlog/023-voice-capture-spike.md) Voice capture spike
 - [ ] [#24](backlog/024-voice-notes.md) Voice notes (after: #23)
 - [ ] [#25](backlog/025-outlook-as-a-source.md) Outlook as a source
