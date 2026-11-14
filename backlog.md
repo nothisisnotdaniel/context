@@ -213,6 +213,12 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#177](backlog/177-keep-deep-note-trees-readable-in.md) Keep deep note trees readable in the sidebar
 - [?] [#179](backlog/179-stop-the-maintests-breadcrumb-test-flaking.md) Stop the MainTests breadcrumb test flaking
 - [?] [#180](backlog/180-force-a-fresh-locked-restore-on.md) Force a fresh locked restore on CI
+- [ ] [#182](backlog/182-refuse-invisible-characters-in-person-names.md) Refuse invisible characters in person names and note titles
+- [ ] [#183](backlog/183-turn-a-typed-name-into-a.md) Turn a typed @[Name] into a mention chip right away
+- [ ] [#184](backlog/184-skip-code-fences-when-reading-tags.md) Skip ~~~ code fences when reading tags and mentions
+- [ ] [#185](backlog/185-reject-invalid-names-in-context-person.md) Reject invalid names in context person
+- [ ] [#186](backlog/186-leave-out-the-empty-notes-heading.md) Leave out the empty Notes heading in context person
+- [ ] [#187](backlog/187-match-mention-lowercasing-between-the-editor.md) Match mention lowercasing between the editor and the index
 
 ## Dropped with the terminal UI
 
