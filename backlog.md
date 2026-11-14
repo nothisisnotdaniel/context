@@ -59,7 +59,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#168](backlog/168-aliases-for-people.md) Aliases for people (after: #51)
 - [ ] [#169](backlog/169-todos-linked-to-people.md) Todos linked to people (after: #51; #168)
 - [ ] [#46](backlog/046-meeting-prep.md) Meeting prep
-- [ ] [#36](backlog/036-claude-md-tidy-ups.md) CLAUDE.md tidy-ups
+- [x] [#36](backlog/036-claude-md-tidy-ups.md) CLAUDE.md tidy-ups → 153-claude-md-tidy
 - [ ] [#35](backlog/035-strong-name-core.md) Strong-name Core
 - [ ] [#26](backlog/026-recurring-appointments.md) Recurring appointments
 - [ ] [#28](backlog/028-tag-and-link-parser-fixes.md) Tag and link parser fixes
