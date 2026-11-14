@@ -1,5 +1,9 @@
 <Project>
   <PropertyGroup>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- Every project writes and commits a packages.lock.json (direct and transitive packages, pinned by content hash). -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- On GitHub Actions (CI=true) restore fails when a lock file doesn't match; local restores update the lock files. -->
+    <RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
   </PropertyGroup>
 </Project>
