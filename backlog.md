@@ -210,6 +210,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#175](backlog/175-remove-the-empty-child-folder-after.md) Remove the empty child folder after a subpage move
 - [?] [#176](backlog/176-merge-find-and-findexact-in-notestore.md) Merge Find and FindExact in NoteStore
 - [?] [#177](backlog/177-keep-deep-note-trees-readable-in.md) Keep deep note trees readable in the sidebar
+- [?] [#179](backlog/179-stop-the-maintests-breadcrumb-test-flaking.md) Stop the MainTests breadcrumb test flaking
 
 ## Dropped with the terminal UI
 
