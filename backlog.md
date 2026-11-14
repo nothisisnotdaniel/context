@@ -225,6 +225,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#191](backlog/191-archive-done-todos-a-month-after.md) Archive done todos a month after they are done
 - [?] [#192](backlog/192-keep-match-words-visible-next-to.md) Keep match words visible next to long related-note titles
 - [?] [#193](backlog/193-give-the-related-notes-row-a.md) Give the related-notes row a proper row header
+- [?] [#194](backlog/194-show-confirmed-overrides-of-a-cancelled.md) Show confirmed overrides of a cancelled recurring series
 
 ## Dropped with the terminal UI
 
