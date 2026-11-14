@@ -207,12 +207,16 @@ Every factory agent reads this file before working on Context. Keep it short and
     throws `TodoStoreException` and is never overwritten. Each `TodoItem` has a `Guid Id` (stored as `id`, never
     shown to the user; new ones from `Guid.NewGuid` or the injected `newId`). A todo stored without an id (files from
     before ids), or with an empty or repeated one, gets `TodoStore.DerivedId` (SHA-256 of created, due, text and its
-    rank among identical todos). Reads never write; instead `TodoStore.Migrate()` runs once at start (the desktop
+    rank among identical todos). A **bad id** (job 151: an `id` that is not null and not a string System.Text.Json reads
+    as a `Guid`, e.g. `"nope"`, `""`, `42`, `true`, `{}`, `[]`; read as a raw `JsonElement`) counts as missing and gets
+    the derived id too; it never makes the file unreadable (bad `text`, `due` or `created` still do).
+    Reads never write; instead `TodoStore.Migrate()` runs once at start (the desktop
     before the watcher and first refresh; the CLI commands `todos`, `todo add`, `todo done` and `current` before their
     first read) and writes the derived ids into the file when any is missing, empty or repeated (returns `true`), else
-    writes nothing; a missing or unreadable file is never written and `Migrate` never throws. Derivation on read stays
-    the fallback for a file changed while the app runs, and an older build that drops the ids gets the same ids
-    written again on the next start; an `id` that is not a GUID makes the file unreadable. `Complete(Guid id)`
+    writes nothing; a missing or unreadable file is never written and `Migrate` never throws. `Migrate(out int badIds)`
+    (used by the CLI; `Migrate()` calls it) also gives the number of bad ids it replaced, 0 whenever nothing was
+    written. Derivation on read stays the fallback for a file changed while the app runs, and an older build that
+    drops the ids gets the same ids written again on the next start. `Complete(Guid id)`
     removes that todo in one read and write and returns it, or returns `null` and writes nothing.
     `context todo add <yyyy-MM-dd|today|tomorrow> <text>` and the desktop's entry row add (text at most 200 chars, past dates allowed); `context todo done <text>` picks the
     todo by its text and removes it by its id; the desktop removes the ticked todo by its id.
@@ -244,7 +248,10 @@ Every factory agent reads this file before working on Context. Keep it short and
   no text is a usage error), `notes`, `note show <name...>`,
   `tags [tag...]` (`<tag>\t<count>` or note names), `links <note...>` (`<name>\t<link>\t<tags>`), `current` (the
   current view's sections as text: `Today, <date>`, `Appointments`, `Due`, `Linked notes`; no row caps, `Due` lines as `<date>\t<text>`; its error lines go to stderr and make the exit code 1),
-  `import <path>`, `export <note> <path>` (paths relative to the current directory, no `~`). Exit codes: 0 success,
+  `import <path>`, `export <note> <path>` (paths relative to the current directory, no `~`). When `Migrate(out n)`
+  replaced bad todo ids, `todos`, `todo add`, `todo done` and `current` first write one extra stderr line,
+  `Fixed a bad todo id in todos.json.` or `Fixed <n> bad todo ids in todos.json.` (fixed text, the bad value is never
+  echoed), and otherwise behave, print and exit as on a valid file; the next run writes no such line. Exit codes: 0 success,
   1 error (one stderr line, nothing on stdout; `current` may write both), 2 usage error (one stderr line ending in
   `Run 'context help'.`; unknown commands never touch the folder). All text from disk goes through `SafeText.Clean`
   (one-line fields also `\n` to space). Tests (`CliTests`) use the

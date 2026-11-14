@@ -498,6 +498,73 @@ public sealed class CliTests : IDisposable
         Assert.Equal(before, Snapshot());
     }
 
+    // 151: todos as JSON objects; the id is the raw value placed into the file.
+    private static string TodosFile(params string?[] ids)
+    {
+        string[] texts = ["a", "b", "c"];
+        return "[" + string.Join(",", ids.Select((id, i) =>
+            (id is null ? "{" : $"{{\"id\":{id},")
+            + $"\"text\":\"{texts[i]}\",\"due\":\"2026-11-0{i + 1}\",\"created\":\"2026-10-01T09:00:00Z\"}}")) + "]";
+    }
+
+    private static string Quoted(Guid id) => $"\"{id}\"";
+
+    // 151 AC-6: on a file with bad ids, each todo command behaves and exits as on a valid file; stderr adds one
+    // fix line with the count, and a second run adds none.
+    [Theory]
+    [InlineData(1, "todos")]
+    [InlineData(2, "todos")]
+    [InlineData(2, "todos", "--json")]
+    [InlineData(1, "todo", "add", "today", "x")]
+    [InlineData(2, "todo", "add", "today", "x")]
+    [InlineData(2, "todo", "done", "a")]
+    [InlineData(1, "todo", "done", "zzz")]
+    [InlineData(1, "current")]
+    [InlineData(2, "current")]
+    [InlineData(2, "current", "--json")]
+    public void TodoCommands_BadIds_SameOutput_OneFixLine(int bad, params string[] args)
+    {
+        string path = Path.Combine(root, TodoStore.FileName);
+        Directory.CreateDirectory(root);
+        File.WriteAllText(path, TodosFile(Quoted(Guid.NewGuid()), Quoted(Guid.NewGuid()), Quoted(Guid.NewGuid())));
+        Result valid = Run(args);
+
+        File.WriteAllText(path, bad == 1
+            ? TodosFile("\"nope\"", Quoted(Guid.NewGuid()), null)
+            : TodosFile("42", "{}", null));
+        Result fixedRun = Run(args);
+
+        string line = bad == 1 ? "Fixed a bad todo id in todos.json." : $"Fixed {bad} bad todo ids in todos.json.";
+        Assert.Equal(valid.Code, fixedRun.Code);
+        Assert.Equal(valid.Out, fixedRun.Out);
+        Assert.Equal([line, .. valid.ErrLines], fixedRun.ErrLines);
+
+        Result again = Run(args);
+        Assert.DoesNotContain(again.ErrLines, l => l.StartsWith("Fixed", StringComparison.Ordinal));
+    }
+
+    // 151 AC-7: missing, empty or repeated ids are written without a fix line.
+    [Theory]
+    [InlineData("todos")]
+    [InlineData("todos", "--json")]
+    [InlineData("todo", "add", "today", "x")]
+    [InlineData("todo", "done", "a")]
+    [InlineData("current")]
+    public void TodoCommands_MissingOrRepeatedIds_NoFixLine(params string[] args)
+    {
+        string path = Path.Combine(root, TodoStore.FileName);
+        Directory.CreateDirectory(root);
+        string repeated = Quoted(Guid.NewGuid());
+        string content = TodosFile(repeated, repeated, Quoted(Guid.Empty));
+        File.WriteAllText(path, content);
+
+        Result result = Run(args);
+
+        Assert.Equal(0, result.Code);
+        Assert.DoesNotContain(result.ErrLines, l => l.StartsWith("Fixed", StringComparison.Ordinal));
+        Assert.NotEqual(content, File.ReadAllText(path));
+    }
+
     [Theory]
     [InlineData("todos")]
     [InlineData("todo", "add", "today", "x")]

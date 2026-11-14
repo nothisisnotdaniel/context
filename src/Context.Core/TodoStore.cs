@@ -42,10 +42,11 @@ internal sealed class TodoStoreException : IOException
 /// <summary>
 /// The todo list, kept as JSON in <c>&lt;root&gt;/todos.json</c> (UTF-8, no BOM). Every write goes to a
 /// temp file in the root first and then replaces <c>todos.json</c>, so the file is never half-written.
-/// Each todo has an <c>id</c>. A todo stored without one (files from before ids), or with an empty or repeated one,
-/// gets an id derived from its content and position among identical todos. <see cref="Migrate"/>, called once when
-/// the desktop app or a todo-reading command starts, writes those derived ids into the file; reads never write, and
-/// derivation stays the fallback for a file changed while the app runs.
+/// Each todo has an <c>id</c>. A todo stored without one (files from before ids), with an empty or repeated one, or
+/// with a bad one (any value that is not a GUID string, such as <c>"nope"</c> or <c>42</c>), gets an id derived from
+/// its content and position among identical todos. <see cref="Migrate()"/>, called once when the desktop app or a
+/// todo-reading command starts, writes those derived ids into the file; reads never write, and derivation stays the
+/// fallback for a file changed while the app runs.
 /// </summary>
 internal sealed class TodoStore
 {
@@ -132,8 +133,15 @@ internal sealed class TodoStore
     /// parsed or written (an unreadable file is never touched; the next <see cref="List"/> reports it). Never throws
     /// for those.
     /// </summary>
-    public bool Migrate()
+    public bool Migrate() => Migrate(out _);
+
+    /// <summary>
+    /// <see cref="Migrate()"/>, also giving <paramref name="badIds"/>: the number of todos whose stored id was bad
+    /// (not a GUID string) and whose derived ids were written. It is 0 whenever nothing was written.
+    /// </summary>
+    public bool Migrate(out int badIds)
     {
+        badIds = 0;
         if (!File.Exists(FilePath))
         {
             return false;
@@ -141,9 +149,10 @@ internal sealed class TodoStore
 
         List<TodoItem> todos;
         bool stored;
+        int bad;
         try
         {
-            todos = Read(out stored);
+            todos = Read(out stored, out bad);
         }
         catch (TodoStoreException)
         {
@@ -164,6 +173,7 @@ internal sealed class TodoStore
             return false;
         }
 
+        badIds = bad;
         return true;
     }
 
@@ -183,12 +193,14 @@ internal sealed class TodoStore
         return new Guid(hash.AsSpan(0, 16));
     }
 
-    private List<TodoItem> Read() => Read(out _);
+    private List<TodoItem> Read() => Read(out _, out _);
 
     /// <param name="allStored"><c>true</c> when every todo has a stored, non-empty, unique id (or the file is missing).</param>
-    private List<TodoItem> Read(out bool allStored)
+    /// <param name="badIds">The number of todos whose <c>id</c> is present but not a GUID string.</param>
+    private List<TodoItem> Read(out bool allStored, out int badIds)
     {
         allStored = true;
+        badIds = 0;
         string path = FilePath;
         if (!File.Exists(path))
         {
@@ -213,6 +225,7 @@ internal sealed class TodoStore
         }
 
         List<TodoItem> todos = new List<TodoItem>(items.Count);
+        List<Guid> ids = new List<Guid>(items.Count);
         HashSet<Guid> used = [];
         foreach (TodoJson? item in items)
         {
@@ -221,7 +234,14 @@ internal sealed class TodoStore
                 throw new TodoStoreException($"Can't read {FileName}.");
             }
 
-            if (item.Id is { } stored && stored != Guid.Empty)
+            Guid stored = StoredId(item.Id, out bool bad);
+            if (bad)
+            {
+                badIds++;
+            }
+
+            ids.Add(stored);
+            if (stored != Guid.Empty)
             {
                 used.Add(stored);
             }
@@ -229,10 +249,11 @@ internal sealed class TodoStore
 
         // Stored ids first, so a todo without one can never take the id of a later one that has it.
         HashSet<Guid> taken = [];
-        foreach (TodoJson? item in items)
+        for (int i = 0; i < items.Count; i++)
         {
-            DateTime created = item!.Created ?? DateTime.MinValue;
-            Guid id = item.Id ?? Guid.Empty;
+            TodoJson item = items[i]!;
+            DateTime created = item.Created ?? DateTime.MinValue;
+            Guid id = ids[i];
             if (id == Guid.Empty || !taken.Add(id))
             {
                 allStored = false;
@@ -250,10 +271,31 @@ internal sealed class TodoStore
         return todos;
     }
 
+    /// <summary>
+    /// The stored id, or <see cref="Guid.Empty"/> when it is absent, null or bad. <paramref name="bad"/> is
+    /// <c>true</c> for any value other than null or a string System.Text.Json reads as a <see cref="Guid"/>.
+    /// </summary>
+    private static Guid StoredId(JsonElement? value, out bool bad)
+    {
+        bad = false;
+        if (value is not { } element || element.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return Guid.Empty;
+        }
+
+        if (element.ValueKind == JsonValueKind.String && element.TryGetGuid(out Guid id))
+        {
+            return id;
+        }
+
+        bad = true;
+        return Guid.Empty;
+    }
+
     private void Write(List<TodoItem> todos)
     {
         List<TodoJson> items = todos
-            .Select(t => new TodoJson { Id = t.Id, Text = t.Text, Due = t.Due, Created = t.Created })
+            .Select(t => new TodoJson { Id = JsonSerializer.SerializeToElement(t.Id), Text = t.Text, Due = t.Due, Created = t.Created })
             .ToList();
         string json = JsonSerializer.Serialize(items, JsonOptions) + "\n";
         string temp = Path.Combine(root, $".{FileName}.{Guid.NewGuid():N}.tmp");
@@ -278,7 +320,8 @@ internal sealed class TodoStore
     /// <summary>The JSON shape of one todo. Every field is nullable so a missing one is caught, not defaulted.</summary>
     private sealed class TodoJson
     {
-        public Guid? Id { get; set; }
+        /// <summary>Read as raw JSON so a value that is not a GUID is a bad id, not an unreadable file.</summary>
+        public JsonElement? Id { get; set; }
 
         public string? Text { get; set; }
 
