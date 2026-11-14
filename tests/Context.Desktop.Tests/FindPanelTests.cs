@@ -80,6 +80,21 @@ public sealed class FindPanelTests : IDisposable
         Assert.Equal(before, FileSnapshot.Take(data.Root));
     }
 
+    // AC-10: a query Main would refuse shows the same red usage line here, and nothing is read.
+    [Fact]
+    public async Task Render_InvalidQuery_RedUsage()
+    {
+        data.WriteNote("Plan", "role:: Chef\n");
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
+
+        IRenderedComponent<FindPanel> cut = Render("1bad", "Chef");
+
+        cut.WaitForAssertion(() => Assert.Equal("Type /find <attribute> <value>.", cut.Find("p[role=status]").TextContent), Wait);
+        Assert.True(cut.Find("p[role=status]").ClassList.Contains("red"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root));
+    }
+
     // AC-10: after the state changed the panel shows the new match without reopening.
     [Fact]
     public async Task StateChanged_ShowsNewMatches()

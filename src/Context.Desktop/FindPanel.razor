@@ -11,7 +11,11 @@
     {
         <p class="grey" role="status">Loading…</p>
     }
-    else if (view.Kind is FindViewKind.IndexUnreadable or FindViewKind.InvalidQuery)
+    else if (view.Kind is FindViewKind.InvalidQuery)
+    {
+        <p class="red" role="status">Type /find &lt;attribute&gt; &lt;value&gt;.</p>
+    }
+    else if (view.Kind is FindViewKind.IndexUnreadable)
     {
         <p class="red" role="status">Can't read the attributes.</p>
     }

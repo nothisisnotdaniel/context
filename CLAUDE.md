@@ -552,7 +552,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `FindPanel` (job 157, `/find <attribute> <value>`: split at the first space, `NormalizeKey`, value collapsed;
     a bad one shows red `Type /find <attribute> <value>.`) sits after `TagPanel` with the heading `<key>:: <value>`
     and a Close button, and lists `DesktopState.Find(key, value)` as note buttons (through `OnOpen`); grey
-    `Loading…`, grey `No notes have <key>:: <value>.`, red `Can't read the attributes.`; same read-only,
+    `Loading…`, grey `No notes have <key>:: <value>.`, red `Can't read the attributes.` (red usage line for an `InvalidQuery`); same read-only,
     `indexGate`, reload and stale-result rules. Opening a note closes it.
     **Import and export:** the only paths the desktop reads or writes outside the data folder come from the OS
     dialog (`IFileDialog.OpenMarkdownFiles()`: several `*.md`, empty when cancelled or failed;
