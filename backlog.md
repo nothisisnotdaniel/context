@@ -203,6 +203,12 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#107](backlog/107-own-cloud-sync-spike.md) Own-cloud sync spike
 - [ ] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39)
 - [ ] [#109](backlog/109-install-guide-for-the-unsigned-desktop.md) Install guide for the unsigned desktop app
+- [?] [#172](backlog/172-return-focus-to-the-toolbar-after.md) Return focus to the toolbar after Move or New subpage
+- [?] [#173](backlog/173-skip-symlinked-or-non-regular-note.md) Skip symlinked or non-regular note files
+- [?] [#174](backlog/174-close-the-check-to-act-gap.md) Close the check-to-act gap in note Move, Rename, Delete and New subpage
+- [?] [#175](backlog/175-remove-the-empty-child-folder-after.md) Remove the empty child folder after a subpage move
+- [?] [#176](backlog/176-merge-find-and-findexact-in-notestore.md) Merge Find and FindExact in NoteStore
+- [?] [#177](backlog/177-keep-deep-note-trees-readable-in.md) Keep deep note trees readable in the sidebar
 
 ## Dropped with the terminal UI
 
