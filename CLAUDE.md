@@ -129,8 +129,22 @@ Every factory agent reads this file before working on Context. Keep it short and
     each `VEVENT` (nested components like `VALARM` ignored). Times: `…Z` (UTC), `;TZID=` (unknown id = local),
     floating (local), `;VALUE=DATE` (all-day, `DTEND` exclusive). No `DTEND`: ends at start (all-day: one day).
     Skips `STATUS:CANCELLED`, missing/invalid `DTSTART`, end before start. No `BEGIN:VCALENDAR` throws
-    `FormatException`. **Recurring events are not supported:** `RRULE`, `RDATE`, `EXDATE` are ignored, so a
-    recurring event only shows on its first occurrence. The current view shows each appointment with its time
+    `FormatException`. **Recurring events** (job 162): `IcsParser.Parse(text, zone, day)` (used by `Day` and for the
+    feed in `CurrentView`) also reads `UID`, `RRULE`, `RDATE`, `EXDATE`, `RECURRENCE-ID` and returns every occurrence
+    touching `day` (the `Overlaps` rule); `Parse(text, zone)` (`All`, `PersonView`, the feed check) still gives one
+    entry per `VEVENT`, its `DTSTART`. `RecurrenceRule` (`Recurrence.cs`, day numbers only, so no `DateTime`
+    overflow) supports `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`, `INTERVAL`, `COUNT` (DTSTART counts, excluded dates too),
+    `UNTIL` (inclusive; date, floating or `…Z`), `BYDAY` (weekly list with `WKST`, monthly/yearly ordinals, daily
+    filter), `BYMONTHDAY` (negative too), `BYMONTH`; DTSTART is always the first occurrence. Any other part
+    (`BYSETPOS`, `BYWEEKNO`, `BYYEARDAY`, `BYHOUR`/`BYMINUTE`/`BYSECOND`, other `FREQ`), a bad value, `COUNT` with
+    `UNTIL` or several `RRULE`s drop only the rule's occurrences. Occurrences keep DTSTART's wall clock in its zone
+    and the event's duration, then are converted. `RDATE` adds (no duplicates; `PERIOD` ignored), `EXDATE` removes
+    (a date value, or any value on an all-day event, removes that local day); an event with `RECURRENCE-ID` and the
+    same `UID` replaces the occurrence starting then (cancelled: only removes); a cancelled series and its overrides
+    show nothing. Bounds: without `COUNT` the rule skips ahead to the day; at most `RecurrenceRule.MaxPeriodsPerEvent`
+    (50,000) periods per event and `RecurrenceBudget.StepsPerParse` (1,000,000) steps per `Parse`, after which events
+    show only DTSTART and `RDATE`s. Not supported: `VTIMEZONE`, `EXRULE`, `RANGE=THISANDFUTURE`, occurrences on
+    person pages. The current view shows each appointment with its time
     text (`CurrentView.TimeText`: `all day` or `HH:mm-HH:mm`, `…` for a side outside today, a midnight end shows
     as `00:00`), its one-line summary or `(no title)` and its one-line location; with none, `No appointments
     today. Put .ics files in <root>/calendar …`; then `Can't read calendar/<file>` per unreadable file
@@ -152,8 +166,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     `not a calendar`, `can't read calendar-link.txt`). The current view merges the feed's events through
     `CalendarStore.Day(d, extra)`; the front ends add `Exchange calendar offline, showing the copy
     from …` (Stale) or `Can't download the Exchange calendar (<reason>).` (Failed; stderr and exit code 1 on the
-    command line). Exchange
-    feeds use `RRULE` a lot, so recurring meetings only show on their first occurrence. Tests use
+    command line). Recurring
+    feed meetings show on every occurrence (see Recurring events). Tests use
     `FakeHttpHandler` and never touch the network; feed tests take their timeout from
     `CalendarFeedTests.TimeoutFor` (100 ms only with `FakeHttpHandler.Hang()`, 30 s for every handler that answers).
 - **Data is plain, except sensitive notes:** every file in the data folder is stored as plain bytes, except the notes
@@ -508,7 +522,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     assembly is public-signed with the committed `Context.snk`, see **Strong name**). `Context` grants only
     `Context.Tests` and `Context.Desktop` only `Context.Desktop.Tests`, the same way; no `InternalsVisibleTo` is name-only.
     It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, picking a todo by its text in `TodoPicker.cs`, tag parsing in `TagParser.cs`,
-    `[[note link]]` parsing in `NoteLinkParser.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, the calendar
+    `[[note link]]` parsing in `NoteLinkParser.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
     `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the inbox capture in `Inbox.cs`, the todo input rules (`TryParseDate`,

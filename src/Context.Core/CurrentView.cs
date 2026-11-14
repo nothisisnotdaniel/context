@@ -184,7 +184,7 @@ internal sealed record CurrentView
         {
             try
             {
-                extra = IcsParser.Parse(result.Text, calendar.Zone);
+                extra = IcsParser.Parse(result.Text, calendar.Zone, today);
             }
             catch (FormatException)
             {

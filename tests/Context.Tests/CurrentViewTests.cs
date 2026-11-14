@@ -571,4 +571,51 @@ public sealed class CurrentViewTests : IDisposable
             Assert.DoesNotContain("\u001b", text, StringComparison.Ordinal);
         }
     }
+
+    // 162 AC-10: a weekly series in a calendar file and one in the Exchange feed both show today.
+    [Fact]
+    public void Build_RecurringFileAndFeedEvents_ShowToday()
+    {
+        WriteCalendar("work.ics", Calendar(
+            "BEGIN:VEVENT\r\nSUMMARY:Weekly file\r\nDTSTART:20261001T090000\r\nDTEND:20261001T093000\r\n"
+            + "RRULE:FREQ=WEEKLY\r\nEND:VEVENT\r\n"));
+        CalendarLink link = new CalendarLink(root);
+        link.Set(FakeHttpHandler.Link);
+        string feedText = Calendar(
+            "BEGIN:VEVENT\r\nUID:feed-1\r\nSUMMARY:Weekly feed\r\nDTSTART;TZID=Europe/Berlin:20261008T140000\r\n"
+            + "DTEND;TZID=Europe/Berlin:20261008T150000\r\nRRULE:FREQ=WEEKLY;BYDAY=TH\r\nEND:VEVENT\r\n");
+        CalendarFeed feed = new CalendarFeed(root, link, FakeHttpHandler.Ok(feedText), () => Now);
+
+        CurrentView view = Build(feed);
+
+        Assert.Equal(CalendarFeedStatus.Fresh, view.Status);
+        Assert.Equal(
+            [
+                new Appointment("Weekly file", null, At(29, 9), At(29, 9, 30), false),
+                new Appointment("Weekly feed", null, At(29, 14), At(29, 15), false),
+            ],
+            view.Appointments);
+        Assert.Equal("14:00-15:00", view.TimeText(view.Appointments[1]));
+        Assert.Equal(2, view.Related.Count);
+    }
+
+    // 162 AC-10: a recurring event in the cached copy shows today too.
+    [Fact]
+    public void Build_RecurringCachedFeedEvent_ShowsToday()
+    {
+        CalendarLink link = new CalendarLink(root);
+        link.Set(FakeHttpHandler.Link);
+        string cache = Path.Combine(root, CalendarFeed.CacheFileName);
+        File.WriteAllText(cache, Calendar(
+            "BEGIN:VEVENT\r\nSUMMARY:Daily cached\r\nDTSTART:20260101T070000Z\r\nDTEND:20260101T073000Z\r\n"
+            + "RRULE:FREQ=DAILY\r\nEXDATE:20261028T070000Z\r\nEND:VEVENT\r\n"));
+        File.SetLastWriteTimeUtc(cache, new DateTime(2026, 10, 28, 17, 5, 0, DateTimeKind.Utc));
+        CalendarFeed feed = new CalendarFeed(
+            root, link, FakeHttpHandler.Status(HttpStatusCode.InternalServerError), () => Now);
+
+        CurrentView view = Build(feed);
+
+        Assert.Equal(CalendarFeedStatus.Stale, view.Status);
+        Assert.Equal([new Appointment("Daily cached", null, At(29, 8), At(29, 8, 30), false)], view.Appointments);
+    }
 }

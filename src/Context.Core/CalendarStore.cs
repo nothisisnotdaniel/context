@@ -68,16 +68,20 @@ internal sealed class CalendarStore
     {
         DateTime from = day.ToDateTime(TimeOnly.MinValue);
         DateTime to = from.AddDays(1);
-        return Read(extra, a => Overlaps(a, from, to));
+        return Read(extra, a => Overlaps(a, from, to), text => IcsParser.Parse(text, local, day));
     }
 
     /// <summary>
     /// Every event in the files plus <paramref name="extra"/>, sorted like <see cref="Day(DateOnly, IReadOnlyList{Appointment})"/>
     /// (all-day first, then by start, then by title), and the names of the files that couldn't be read.
     /// </summary>
-    public CalendarDay All(IReadOnlyList<Appointment> extra) => Read(extra, _ => true);
+    public CalendarDay All(IReadOnlyList<Appointment> extra) =>
+        Read(extra, _ => true, text => IcsParser.Parse(text, local));
 
-    private CalendarDay Read(IReadOnlyList<Appointment> extra, Func<Appointment, bool> keep)
+    private CalendarDay Read(
+        IReadOnlyList<Appointment> extra,
+        Func<Appointment, bool> keep,
+        Func<string, IReadOnlyList<Appointment>> parse)
     {
         List<Appointment> appointments = extra.Where(keep).ToList();
         List<string> unreadable = [];
@@ -93,7 +97,7 @@ internal sealed class CalendarStore
 
             try
             {
-                foreach (Appointment appointment in IcsParser.Parse(text, local))
+                foreach (Appointment appointment in parse(text))
                 {
                     if (keep(appointment))
                     {
@@ -116,7 +120,10 @@ internal sealed class CalendarStore
         return new CalendarDay(sorted, unreadable);
     }
 
-    private static bool Overlaps(Appointment appointment, DateTime from, DateTime to)
+    /// <summary>
+    /// True when the appointment's span overlaps <c>[from, to)</c>, or it has no length and starts in it.
+    /// </summary>
+    internal static bool Overlaps(Appointment appointment, DateTime from, DateTime to)
     {
         if (appointment.End < appointment.Start)
         {
