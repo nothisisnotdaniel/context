@@ -736,8 +736,30 @@ public sealed class CliJsonTests : IDisposable
         AssertDocument(result);
         Assert.Equal(
             "{\"types\":[{\"type\":\"organization\",\"attributes\":[]},"
-                + "{\"type\":\"person\",\"attributes\":[\"affiliation\",\"role\"]},"
+                + "{\"type\":\"person\",\"attributes\":[\"aliases\",\"affiliation\",\"role\"]},"
                 + "{\"type\":\"project\",\"attributes\":[\"owner\",\"due\"]}]}\n",
             result.Out);
+    }
+    // 158 AC-5 / AC-6: an alias gives the person's document in the usual shape; an ambiguous one only adds a stderr line.
+    [Fact]
+    public void Person_Alias_SameShape()
+    {
+        WriteNote("people", "# people");
+        Directory.CreateDirectory(Path.Combine(root, "people"));
+        File.WriteAllText(Path.Combine(root, "people", "Anna Schmidt.md"), "# Anna Schmidt\naliases:: AS, Anna\n");
+        WriteNote("A", "@[AS]");
+        WriteNote("B", "@[Anna]");
+
+        Result result = Run("person", "as", "--json");
+
+        AssertDocument(result);
+        Assert.Equal("{\"person\":\"Anna Schmidt\",\"notes\":[\"A\",\"B\"],\"appointments\":[]}\n", result.Out);
+
+        File.WriteAllText(Path.Combine(root, "people", "Anna Berg.md"), "# Anna Berg\naliases:: Anna\n");
+        Result ambiguous = Run("person", "Anna", "--json");
+
+        Assert.Equal(0, ambiguous.Code);
+        Assert.Equal("{\"person\":\"Anna\",\"notes\":[\"B\"],\"appointments\":[]}\n", ambiguous.Out);
+        Assert.Equal(["@[Anna] is an alias of more than one person: Anna Berg, Anna Schmidt."], ambiguous.ErrLines);
     }
 }

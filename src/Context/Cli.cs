@@ -748,6 +748,12 @@ internal sealed class Cli
             return Error(IndexUnreadable);
         }
 
+        if (view.AmbiguousWith.Count > 0)
+        {
+            // A hint only: the unresolved name is listed as usual and the exit code stays as it is.
+            Err(OneLine(PersonAliases.AmbiguousText(view.Person, view.AmbiguousWith)));
+        }
+
         foreach (string file in view.UnreadableCalendarFiles)
         {
             Err($"Can't read {CalendarStore.FolderName}/{OneLine(file)}");

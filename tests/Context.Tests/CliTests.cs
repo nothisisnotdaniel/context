@@ -1354,7 +1354,55 @@ public sealed class CliTests : IDisposable
     [Fact]
     public void Types_Default_BuiltIns_WithArgumentsIsUsageError()
     {
-        Assert.Equal("organization\t\nperson\taffiliation, role\n", Run("types").Out);
+        Assert.Equal("organization\t\nperson\taliases, affiliation, role\n", Run("types").Out);
         AssertUsage(Run("types", "x"));
+    }
+    // 158 AC-5 -----------------------------------------------------------------------------------
+
+    private void WriteAliasData(string aliases)
+    {
+        WriteNote("people", "# people");
+        Directory.CreateDirectory(Path.Combine(root, "people"));
+        File.WriteAllText(Path.Combine(root, "people", "Anna Schmidt.md"), "# Anna Schmidt\naliases:: " + aliases + "\n");
+        WriteNote("A", "@[Anna]");
+        WriteNote("B", "@[Anna Schmidt]");
+        WriteIcs("a.ics", "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Call\r\nDTSTART:20261027T090000Z\r\nDTEND:20261027T100000Z\r\n"
+            + "ATTENDEE;CN=Anna:mailto:anna@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+    }
+
+    [Theory]
+    [InlineData("Anna")]
+    [InlineData("Anna", "Schmidt")]
+    public void Person_AliasOrFullName_SameNotesAndAppointments(params string[] name)
+    {
+        WriteAliasData("Anna");
+
+        Result result = Run(["person", .. name]);
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(string.Empty, result.Err);
+        Assert.Equal("Notes\nA\nB\nAppointments\n2026-10-27\t09:00-10:00\tCall\n", result.Out);
+        Assert.Equal("Anna Schmidt\t2\n", Run("people").Out);
+    }
+
+    // 158 AC-6: an ambiguous alias prints the unresolved name's output and one stderr hint; the exit code is unchanged.
+    [Fact]
+    public void Person_AmbiguousAlias_HintOnStderr_ExitCodeUnchanged()
+    {
+        WriteAliasData("Anna");
+        File.WriteAllText(Path.Combine(root, "people", "Anna Berg.md"), "# Anna Berg\naliases:: anna\n");
+        string hint = "@[Anna] is an alias of more than one person: Anna Berg, Anna Schmidt.";
+
+        Result result = Run("person", "Anna");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal("Notes\nA\nAppointments\n2026-10-27\t09:00-10:00\tCall\n", result.Out);
+        Assert.Equal([hint], result.ErrLines);
+
+        WriteIcs("bad.ics", "not a calendar");
+        Result failing = Run("person", "Anna");
+
+        Assert.Equal(1, failing.Code);
+        Assert.Equal([hint, "Can't read calendar/bad.ics"], failing.ErrLines);
     }
 }

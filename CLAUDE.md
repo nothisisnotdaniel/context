@@ -52,12 +52,31 @@ Every factory agent reads this file before working on Context. Keep it short and
     `DesktopActions.OpenPerson`, which creates `people` (`# people\n`) and the page (`CreateChild`) only on that click,
     and refuses when the top-level `people` is sensitive. The new page gets the `person` type's template
     (`PageTypes.Template`: a blank line and one `<attr>::` line per attribute) through `CreateChild(parent, title, body)`.
+    **Aliases** (job 158, `PersonAliases.cs`): `PersonAliases.Parse(attributes, title)` splits every `aliases::` value
+    at `,`, normalizes each part with `PersonParser.Normalize` (empty/invalid skipped), distinct by `Key` (first
+    spelling kept), the page's own title dropped. Only direct person pages (`People.PersonOf`, any `type::`) supply
+    them; other notes, subpages, `types/` pages and sealed files don't. The one rule, `Resolve(name)`: a key equal to a
+    person page's title (ignoring case) is that person, else the alias of exactly one person page is that person
+    (`Person(title)`), else `Ambiguous(titles)` (sorted ignoring case, then ordinal) or `None`; an unresolved key is
+    its own person entry. `PersonKey(name)` is the key mentions group by; `Clashes(title)` gives the page's aliases
+    that are shared (`Alias <a> is also used by <titles>, so @[<a>] links to no one.`) or another person's title
+    (`Alias <a> is another person's name, so @[<a>] links to them.`); `AmbiguousText` is
+    `@[<name>] is an alias of more than one person: <titles>.` (all raw; front ends clean). `TagIndex.Aliases()` builds
+    the rule at query time from the person pages in `notes` and their `note_attributes` rows (`key = 'aliases'`);
+    `People()` (each note counted once per resolved person), `NotesMentioning` and `PersonName` resolve both the typed
+    name and every stored mention through it, so an alias edit counts on the next `Sync` with no rescan and no
+    `ParserVersion` change. `PersonAliases.Load(store)` reads the person pages directly (never throws), used by
+    `OpenPerson` and by `PersonView` when the index can't be read. `PersonView` resolves the typed name and
+    appointment title/location mentions and attendee names the same way, and has `AliasClashes` (when the name is a
+    person page) and `AmbiguousWith`. `context person` writes the `AmbiguousText` line to stderr for an ambiguous name
+    (exit code unchanged; JSON shape unchanged). `OpenPerson` opens the resolved person's page and refuses an
+    ambiguous name (`ActionReason.Ambiguous`, the hint as text, nothing written).
   - **Attributes and page types:** (job 157) `AttributeParser.Parse` finds `key:: value` lines outside fences (key at
     column 0: a letter, then letters, digits, `-`, `_`, at most 50, lower-cased invariant, directly followed by `::`;
     value trimmed, whitespace runs one space, 1 to 400 chars, so `role::` is no attribute); a key may repeat, pairs
     are distinct by key and `ValueKey` (exactly one `[[Target]]` gives the trimmed target; lower-cased), first
     spelling kept. `NormalizeKey` checks a typed key. `PageTypes.Load(store)` gives the built-ins `organization` (no
-    attributes) and `person` (`affiliation`, `role`), each replaced by a direct subpage of the top-level `types`
+    attributes) and `person` (`aliases`, `affiliation`, `role`), each replaced by a direct subpage of the top-level `types`
     (ignoring case) of that title; its `attribute::` lines (valid keys, distinct) are the attributes. A sensitive
     `types` reads no type page; an unreadable one is skipped; never throws. `TypesOf` reads `type::` values, a person
     page without one is `person`. `FindView.Build(index, store, key, value)` (`Found`, `NoMatches`, `InvalidQuery`
@@ -294,7 +313,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   `TodoPicker.Pick`, see Todos: `Done: <text>`, or exit 1 with the no-todos, no-match or several-matches line;
   no text is a usage error), `notes`, `note show <name...>`,
   `tags [tag...]` (`<tag>\t<count>` or note names), `links <note...>` (`<name>\t<link>\t<tags>`), `people`
-  (`<name>\t<count>`), `person <name...>` (`Anna Schmidt` or `@[Anna Schmidt]`; `Notes` then `Appointments` with
+  (`<name>\t<count>`), `person <name...>` (`Anna Schmidt`, `@[Anna Schmidt]` or an alias; an ambiguous alias adds one stderr hint; `Notes` then `Appointments` with
   `<yyyy-MM-dd>\t<time>\t<title>`, or `No notes or appointments mention <name>.`; unreadable calendar files on stderr,
   exit 1), `current` (the
   current view's sections as text: `Today, <date>`, `Appointments`, `Due`, `Linked notes`; no row caps, `Due` lines as
@@ -448,7 +467,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     Types stay `internal` in `namespace Context;`; `InternalsVisibleTo` grants `Context`, `Context.Tests`,
     `Context.Desktop` and `Context.Desktop.Tests`.
     It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, picking a todo by its text in `TodoPicker.cs`, tag parsing in `TagParser.cs`,
-    `[[note link]]` parsing in `NoteLinkParser.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, the calendar
+    `[[note link]]` parsing in `NoteLinkParser.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
     `CurrentView.cs` (the current view), the inbox capture in `Inbox.cs`, the todo input rules (`TryParseDate`,
@@ -546,7 +565,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     `PersonPanel` (job 156) sits above `LinksPanel` on a person page (`People.PersonOf(name)`) and lists
     `DesktopState.Person(name)` (`PersonView.Build`): `Mentioned in` note buttons (through `RequestOpen`) and
     `Appointments` (date, time text, one-line title and location); grey `No notes or appointments mention <name>.`,
-    red `Can't read the mentions.`; it follows the same read-only, `indexGate`, reload and stale-result rules. A
+    red `Can't read the mentions.`; above all rows (once loaded, in every state) one red `p.alias-clash` (`role="status"`) line per
+    `PersonView.AliasClashes` entry; it follows the same read-only, `indexGate`, reload and stale-result rules. A
     mention chip calls `OnPerson`; `Main` (asking first when dirty) calls `DesktopActions.OpenPerson` and opens the
     result, or shows its red refusal.
     `FindPanel` (job 157, `/find <attribute> <value>`: split at the first space, `NormalizeKey`, value collapsed;

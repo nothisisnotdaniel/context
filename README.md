@@ -30,6 +30,13 @@ the person or that list them as an attendee, latest first. Appointments come fro
 downloaded copy of the Exchange calendar; nothing is downloaded. In the desktop app, clicking a mention opens the
 person's page `people/Anna Schmidt`, creating it (and `people`) on that click if needed.
 
+Give a person shorthands with an `aliases::` line on their page, for example `aliases:: Anna, AS` on
+`people/Anna Schmidt`: then `@[Anna]` and `@[AS]` in any note count as mentions of Anna Schmidt, in
+`context people`, `context person` (`context person AS` works too) and the desktop app. A person's full name always
+wins over an alias. An alias that two people share links to no one: `context person Anna` then lists only the
+`@[Anna]` mentions and adds a hint on stderr, clicking such a mention in the desktop app shows the hint instead of
+making a page, and both person pages warn about it. Alias changes count from the next run.
+
 ### Attributes and page types
 
 Give any page attributes with plain lines that start with a key, then `::`, then the value:
@@ -49,7 +56,7 @@ values match ignoring case, and `[[ACME]]`, `ACME` and `acme` are the same value
 
 A page's types are its `type::` lines (`type:: organization`); a page under `people` without one is a `person`.
 `context find type person` lists them. `context types` prints each type with its attributes (`person` comes with
-`affiliation` and `role`, `organization` with none). Define your own type as a subpage of a top-level note `types`,
+`aliases`, `affiliation` and `role`, `organization` with none). Define your own type as a subpage of a top-level note `types`,
 for example `types/project` with the lines `attribute:: owner` and `attribute:: due`; a `types/person` page replaces
 the built-in one. A new person page made by clicking a mention starts with one empty line per `person` attribute.
 In the desktop app, `/find role Bereichsleiter` in the command palette (Ctrl/Cmd+K) lists the same notes.
@@ -76,7 +83,7 @@ plain ASCII; any JSON parser, `ConvertFrom-Json` included, reads them back.
 | `people` | `{"people":[{"person":"Anna Schmidt","count":2}]}` |
 | `person <name>` | `{"person":"Anna Schmidt","notes":["A"],"appointments":[{"start":"...","end":"...","allDay":false,"title":"...","location":null}]}` |
 | `find <key> <value>` | `{"key":"role","value":"Bereichsleiter","notes":["people/Anna Schmidt"]}` |
-| `types` | `{"types":[{"type":"organization","attributes":[]},{"type":"person","attributes":["affiliation","role"]}]}` |
+| `types` | `{"types":[{"type":"organization","attributes":[]},{"type":"person","attributes":["aliases","affiliation","role"]}]}` |
 | `current` | `{"today":"...","appointments":[...],"calendar":{...},"due":[...],"linkedNotes":[...]}` |
 
 PowerShell examples:

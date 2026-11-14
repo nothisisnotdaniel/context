@@ -1054,4 +1054,89 @@ public sealed class TagIndexTests : IDisposable
 
         Assert.Equal([("A", "role", "chef #work", "Chef #work")], AttributeRows());
     }
+    private void EditNested(string name, string text)
+    {
+        string path = Path.Combine([root, .. name.Split('/')]) + ".md";
+        DateTime before = File.GetLastWriteTimeUtc(path);
+        File.WriteAllText(path, text);
+        File.SetLastWriteTimeUtc(path, before.AddSeconds(5));
+    }
+
+    // 158 AC-4: a note with the alias and the full name counts once under the title; an ambiguous alias is its own
+    // entry; the person's own page never counts, alias mentions included.
+    [Fact]
+    public void People_Aliases_CountOnceUnderTheTitle_AmbiguousStaysOwnEntry()
+    {
+        WriteNote("people", "# people");
+        WriteNested("people/Anna Schmidt", "# Anna Schmidt\naliases:: Anna, AS\nI am @[AS] and @[Anna Schmidt]");
+        WriteNested("people/Bob", "# Bob\naliases:: Bobby");
+        WriteNote("A", "@[Anna] @[Anna Schmidt] @[as]");
+        WriteNote("B", "@[AS]");
+        WriteNote("C", "@[bobby] @[Carl]");
+        index.Sync(store);
+
+        Assert.Equal(["Anna Schmidt|2", "Bob|1", "Carl|1"], index.People().Select(Describe));
+        Assert.Equal(["A", "B"], index.NotesMentioning("Anna"));
+        Assert.Equal(["A", "B"], index.NotesMentioning("anna schmidt"));
+        Assert.Equal(["C"], index.NotesMentioning("Bob"));
+        Assert.Equal("Anna Schmidt", index.PersonName("as"));
+
+        // A second page with the alias Anna: @[Anna] links to no one and is listed as itself.
+        WriteNested("people/Anna Berg", "# Anna Berg\naliases:: anna");
+        index.Sync(store);
+
+        Assert.Equal(["Anna|1", "Anna Schmidt|2", "Bob|1", "Carl|1"], index.People().Select(Describe));
+        Assert.Equal(["A"], index.NotesMentioning("Anna"));
+        Assert.Equal(["A", "B"], index.NotesMentioning("AS"));
+        Assert.Equal("Anna", index.PersonName("anna"));
+    }
+
+    // 158 AC-4 / AC-2: an alias on a note that is no person page, or on a person page's subpage, has no effect.
+    [Fact]
+    public void People_AliasesOnOtherNotes_NoEffect()
+    {
+        WriteNote("people", "# people");
+        WriteNested("people/Anna", "# Anna");
+        WriteNested("people/Anna/Notes", "aliases:: AS");
+        WriteNote("Other", "aliases:: A2\n@[AS] @[A2]");
+        index.Sync(store);
+
+        Assert.Equal(["A2|1", "AS|1"], index.People().Select(Describe));
+        Assert.Empty(index.NotesMentioning("Anna"));
+    }
+
+    // 158 AC-7: adding, changing and removing an aliases:: line re-links on the next Sync, re-parsing only that page.
+    [Fact]
+    public void Sync_AliasChange_RelinksWithoutRescan()
+    {
+        WriteNote("people", "# people");
+        WriteNested("people/Anna Schmidt", "# Anna Schmidt");
+        WriteNote("A", "@[AS]");
+        WriteNote("B", "@[Anna]");
+        index.Sync(store);
+        Assert.Equal(["Anna|1", "AS|1"], index.People().Select(Describe));
+
+        // A note changed behind the index's back with the same time: only a rescan would see it.
+        string b = Path.Combine(root, "B.md");
+        DateTime time = File.GetLastWriteTimeUtc(b);
+        File.WriteAllText(b, "@[Carl]");
+        File.SetLastWriteTimeUtc(b, time);
+
+        EditNested("people/Anna Schmidt", "# Anna Schmidt\naliases:: AS");
+        index.Sync(store);
+        Assert.Equal(["Anna|1", "Anna Schmidt|1"], index.People().Select(Describe));
+        Assert.Equal(["A"], index.NotesMentioning("Anna Schmidt"));
+
+        EditNested("people/Anna Schmidt", "# Anna Schmidt\naliases:: Anna");
+        index.Sync(store);
+        Assert.Equal(["Anna Schmidt|1", "AS|1"], index.People().Select(Describe));
+        Assert.Equal(["B"], index.NotesMentioning("Anna Schmidt"));
+
+        EditNested("people/Anna Schmidt", "# Anna Schmidt");
+        index.Sync(store);
+        Assert.Equal(["Anna|1", "AS|1"], index.People().Select(Describe));
+        Assert.Empty(index.NotesMentioning("Anna Schmidt"));
+        Assert.Equal(5, UserVersion());
+        Assert.Equal(5, TagIndex.ParserVersion);
+    }
 }

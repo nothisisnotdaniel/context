@@ -43,6 +43,9 @@ internal enum ActionReason
 
     /// <summary>The key store has no recovery key yet, or this OS has no key store.</summary>
     NoKeys,
+
+    /// <summary>The name is an alias of more than one person, so it links to no one.</summary>
+    Ambiguous,
 }
 
 /// <summary>
@@ -340,7 +343,10 @@ internal sealed class DesktopActions
     /// case), and a missing person page through <see cref="NoteStore.CreateChild"/>; an existing page is reused, so a
     /// second call writes nothing (<see cref="ActionReason.Unchanged"/>, done, no refresh). An invalid name, or a
     /// sensitive top-level <c>people</c> note, is refused with <see cref="PersonRefusedText"/> and nothing written; no
-    /// key is asked for. A new page is <c># &lt;Name&gt;\n</c> plus, when the type <c>person</c>
+    /// key is asked for. The name is resolved through the person pages' aliases (<see cref="PersonAliases.Load"/>): a
+    /// person's full name or the alias of one person opens that person's page and creates no other; an alias of more than
+    /// one person is refused (<see cref="ActionReason.Ambiguous"/>) with <see cref="PersonAliases.AmbiguousText"/> and
+    /// nothing written. A new page is <c># &lt;Name&gt;\n</c> plus, when the type <c>person</c>
     /// (<see cref="PageTypes.Load"/>) has attributes, a blank line and one <c>&lt;attr&gt;::</c> line per attribute;
     /// an existing page is never changed. The result's text is the person page's full name when done.
     /// </summary>
@@ -800,6 +806,14 @@ internal sealed class DesktopActions
                 return Refused(ActionReason.Locked, PersonRefusedText(person));
             }
 
+            // A full name or the alias of one person opens that person's page; a shared alias links to no one.
+            AliasResolution resolved = PersonAliases.Load(notes).Resolve(person);
+            if (resolved.Kind == AliasResolutionKind.Ambiguous)
+            {
+                return Refused(ActionReason.Ambiguous, PersonAliases.AmbiguousText(person, resolved.Titles));
+            }
+
+            person = resolved.Person ?? person;
             bool created = false;
             if (!notes.TryFind(People.FolderName, out NoteInfo? folder) || folder is null)
             {

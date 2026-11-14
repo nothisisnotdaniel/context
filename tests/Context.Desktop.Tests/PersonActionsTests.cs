@@ -21,7 +21,7 @@ public sealed class PersonActionsTests : IDisposable
         Assert.Equal(ActionReason.None, result.Reason);
         Assert.Equal("people/Anna Schmidt", result.Text);
         Assert.Equal("# people\n", Read("people.md"));
-        Assert.Equal("# Anna Schmidt\n\naffiliation::\nrole::\n", Read(Path.Combine("people", "Anna Schmidt.md")));
+        Assert.Equal("# Anna Schmidt\n\naliases::\naffiliation::\nrole::\n", Read(Path.Combine("people", "Anna Schmidt.md")));
     }
 
     // AC-10: an existing People (any case) is reused, and the typed @[...] form and extra spaces are accepted.
@@ -37,7 +37,7 @@ public sealed class PersonActionsTests : IDisposable
         Assert.Equal("People/Bob Jones", result.Text);
         Assert.Equal("# People\n\nMy contacts.\n", Read("People.md"));
         Assert.Equal(["People.md"], Directory.EnumerateFiles(data.Root, "*.md").Select(f => Path.GetFileName(f)).ToArray());
-        Assert.Equal("# Bob Jones\n\naffiliation::\nrole::\n", Read(Path.Combine("People", "Bob Jones.md")));
+        Assert.Equal("# Bob Jones\n\naliases::\naffiliation::\nrole::\n", Read(Path.Combine("People", "Bob Jones.md")));
     }
 
     // AC-10: opening a person page a second time (in another case too) writes nothing.
@@ -140,6 +140,62 @@ public sealed class PersonActionsTests : IDisposable
 
         Assert.Equal(ActionReason.Unchanged, result.Reason);
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    private void WriteAliasPages()
+    {
+        data.WriteNote("people", "# people\n");
+        Directory.CreateDirectory(Path.Combine(data.Root, "people"));
+        File.WriteAllText(Path.Combine(data.Root, "people", "Anna Schmidt.md"), "# Anna Schmidt\naliases:: AS, Anna\n");
+        File.WriteAllText(Path.Combine(data.Root, "people", "Anna Berg.md"), "# Anna Berg\naliases:: anna\n");
+    }
+
+    // 158 AC-8: a resolved alias, or the full name in any case, opens that person's page and creates nothing.
+    [Theory]
+    [InlineData("@[AS]")]
+    [InlineData("as")]
+    [InlineData("@[anna  schmidt]")]
+    public async Task OpenPerson_ResolvedAlias_OpensThePerson_WritesNothing(string name)
+    {
+        WriteAliasPages();
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+
+        ActionResult result = await data.Actions!.OpenPerson(name);
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Equal(ActionReason.Unchanged, result.Reason);
+        Assert.Equal("people/Anna Schmidt", result.Text);
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.False(File.Exists(Path.Combine(data.Root, "people", "AS.md")));
+    }
+
+    // 158 AC-8: an alias of two people is refused with the hint, and nothing is written.
+    [Fact]
+    public async Task OpenPerson_AmbiguousAlias_RefusedWithHint_WritesNothing()
+    {
+        WriteAliasPages();
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+
+        ActionResult result = await data.Actions!.OpenPerson("@[Anna]");
+
+        Assert.Equal(ActionKind.Refused, result.Kind);
+        Assert.Equal(ActionReason.Ambiguous, result.Reason);
+        Assert.Equal("@[Anna] is an alias of more than one person: Anna Berg, Anna Schmidt.", result.Text);
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    // 158 AC-8: an alias on a note that is no person page is no alias: the mention gets its own page.
+    [Fact]
+    public async Task OpenPerson_AliasOnOtherNote_NoEffect()
+    {
+        data.WriteNote("Other", "aliases:: AS\n");
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.OpenPerson("AS");
+
+        Assert.Equal("people/AS", result.Text);
     }
 
     private string Read(string relative) =>

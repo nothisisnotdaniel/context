@@ -22,7 +22,7 @@ internal sealed record PageType
 }
 
 /// <summary>
-/// The page types: the built-in <c>person</c> (<c>affiliation</c>, <c>role</c>) and <c>organization</c> (none), and
+/// The page types: the built-in <c>person</c> (<c>aliases</c>, <c>affiliation</c>, <c>role</c>) and <c>organization</c> (none), and
 /// one type per direct subpage of the top-level note <c>types</c>, whose <c>attribute::</c> lines list its attributes.
 /// Type pages are found through <see cref="NoteStore.List"/> names only; a type name never becomes a path.
 /// </summary>
@@ -47,7 +47,7 @@ internal static class PageTypes
     public static IReadOnlyList<PageType> BuiltIn { get; } =
     [
         new PageType(Organization, []),
-        new PageType(Person, ["affiliation", "role"]),
+        new PageType(Person, [PersonAliases.AttributeKey, "affiliation", "role"]),
     ];
 
     /// <summary>
