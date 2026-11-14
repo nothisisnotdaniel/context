@@ -258,12 +258,97 @@ public sealed class TodoStoreTests : IDisposable
         Assert.Equal(todos, new TodoStore(root).List());
     }
 
-    // 080: an id that is not a GUID makes the file unreadable, like any other bad field.
-    [Fact]
-    public void StoredId_NotAGuid_Unreadable()
+    // 151: stored id values that are not a GUID string.
+    public static TheoryData<string> BadIds => new()
+    {
+        "\"nope\"",
+        "\"\"",
+        "42",
+        "true",
+        "{}",
+        "[]",
+    };
+
+    private static readonly DateTime Created = new(2026, 10, 1, 9, 0, 0, DateTimeKind.Utc);
+
+    // 151 AC-1: a bad id counts as missing; the todo keeps its fields and gets the derived id, ranked among twins.
+    [Theory]
+    [MemberData(nameof(BadIds))]
+    public void StoredId_Bad_GetsDerivedId_FieldsKept(string bad)
     {
         Directory.CreateDirectory(root);
-        File.WriteAllText(FilePath, "[{\"id\":\"nope\",\"text\":\"a\",\"due\":\"2026-11-03\"}]");
+        File.WriteAllText(FilePath,
+            $"[{{\"id\":{bad},\"text\":\"twin\",\"due\":\"2026-11-03\",\"created\":\"2026-10-01T09:00:00Z\"}},"
+            + "{\"text\":\"twin\",\"due\":\"2026-11-03\",\"created\":\"2026-10-01T09:00:00Z\"},"
+            + $"{{\"id\":{bad},\"text\":\"other\",\"due\":\"2026-11-04\"}}]");
+
+        IReadOnlyList<TodoItem> todos = new TodoStore(root).List();
+
+        DateOnly due = new DateOnly(2026, 11, 3);
+        Assert.Equal(
+            [
+                new TodoItem(TodoStore.DerivedId("twin", due, Created, 0), "twin", due, Created),
+                new TodoItem(TodoStore.DerivedId("twin", due, Created, 1), "twin", due, Created),
+                new TodoItem(
+                    TodoStore.DerivedId("other", new DateOnly(2026, 11, 4), DateTime.MinValue, 0),
+                    "other", new DateOnly(2026, 11, 4), DateTime.MinValue),
+            ],
+            todos);
+        Assert.Equal(todos, new TodoStore(root).List());
+    }
+
+    // 151 AC-2: valid ids stay; a bad-id todo never takes an id a later todo has stored; all distinct, none empty.
+    [Fact]
+    public void StoredIds_ValidMissingAndBad_ValidKept_NoClash()
+    {
+        Directory.CreateDirectory(root);
+        DateOnly due = new DateOnly(2026, 11, 3);
+        Guid kept = new Guid("aaaaaaaa-0000-0000-0000-000000000001");
+        Guid later = TodoStore.DerivedId("a", due, DateTime.MinValue, 0);
+        File.WriteAllText(FilePath,
+            $"[{{\"id\":\"nope\",\"text\":\"a\",\"due\":\"2026-11-03\"}},"
+            + $"{{\"id\":\"{kept}\",\"text\":\"b\",\"due\":\"2026-11-03\"}},"
+            + "{\"text\":\"c\",\"due\":\"2026-11-03\"},"
+            + $"{{\"id\":42,\"text\":\"d\",\"due\":\"2026-11-03\"}},"
+            + $"{{\"id\":\"{later}\",\"text\":\"e\",\"due\":\"2026-11-03\"}}]");
+
+        IReadOnlyList<TodoItem> todos = new TodoStore(root).List();
+
+        Assert.Equal(["a", "b", "c", "d", "e"], todos.Select(t => t.Text));
+        Assert.Equal(kept, todos[1].Id);
+        Assert.Equal(later, todos[4].Id);
+        Assert.Equal(TodoStore.DerivedId("a", due, DateTime.MinValue, 1), todos[0].Id);
+        Assert.Equal(5, todos.Select(t => t.Id).Distinct().Count());
+        Assert.DoesNotContain(Guid.Empty, todos.Select(t => t.Id));
+    }
+
+    // 151 AC-3: other bad fields still make the file unreadable when the id is bad too.
+    [Theory]
+    [InlineData("[{\"id\":\"nope\",\"due\":\"2026-11-03\"}]")]
+    [InlineData("[{\"id\":42}]")]
+    [InlineData("[{\"id\":{},\"text\":\"x\"}]")]
+    [InlineData("[{\"id\":true,\"text\":\"x\",\"due\":\"03.11.2026\"}]")]
+    [InlineData("[{\"id\":[],\"text\":5,\"due\":\"2026-11-03\"}]")]
+    [InlineData("[{\"id\":\"\",\"text\":\"x\",\"due\":\"2026-11-03\",\"created\":\"yesterday\"}]")]
+    [InlineData("[{\"id\":\"nope\",\"text\":\"x\",\"due\":\"2026-11-03\"},null]")]
+    public void StoredId_BadWithOtherBadField_Unreadable(string content)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, content);
+
+        Assert.Throws<TodoStoreException>(() => new TodoStore(root).List());
+        Assert.False(new TodoStore(root).Migrate(out int badIds));
+        Assert.Equal(0, badIds);
+        Assert.Equal(content, File.ReadAllText(FilePath));
+    }
+
+    // 151 AC-3: a todo with a bad id and no text is unreadable, for every bad id value.
+    [Theory]
+    [MemberData(nameof(BadIds))]
+    public void StoredId_BadAndNoText_Unreadable(string bad)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, $"[{{\"id\":{bad},\"due\":\"2026-11-03\"}}]");
 
         Assert.Throws<TodoStoreException>(() => new TodoStore(root).List());
     }
@@ -467,7 +552,6 @@ public sealed class TodoStoreTests : IDisposable
     // 149 AC-7
     [Theory]
     [MemberData(nameof(CorruptContents))]
-    [InlineData("[{\"id\":\"nope\",\"text\":\"a\",\"due\":\"2026-11-03\"}]")]
     public void Migrate_CorruptFile_ReturnsFalse_LeavesBytes(string content)
     {
         Directory.CreateDirectory(root);
@@ -482,9 +566,11 @@ public sealed class TodoStoreTests : IDisposable
         Assert.Throws<TodoStoreException>(() => store.List());
     }
 
-    // 149 AC-7: a file that can't be opened is not touched either.
-    [Fact]
-    public void Migrate_UnreadableFile_ReturnsFalse_LeavesIt()
+    // 149 AC-7: a file that can't be opened is not touched either. 151 AC-5: and reports no bad ids.
+    [Theory]
+    [InlineData(Legacy)]
+    [InlineData(TwoBadOneMissing)]
+    public void Migrate_UnreadableFile_ReturnsFalse_LeavesIt(string content)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -492,7 +578,7 @@ public sealed class TodoStoreTests : IDisposable
         }
 
         Directory.CreateDirectory(root);
-        File.WriteAllText(FilePath, Legacy);
+        File.WriteAllText(FilePath, content);
         File.SetUnixFileMode(FilePath, UnixFileMode.None);
         try
         {
@@ -502,7 +588,8 @@ public sealed class TodoStoreTests : IDisposable
                 return; // Running as a user that can read anything; there is nothing to check.
             }
 
-            Assert.False(store.Migrate());
+            Assert.False(store.Migrate(out int badIds));
+            Assert.Equal(0, badIds);
 
             Assert.Throws<TodoStoreException>(() => store.List());
             Assert.Single(Directory.GetFiles(root));
@@ -512,7 +599,127 @@ public sealed class TodoStoreTests : IDisposable
             File.SetUnixFileMode(FilePath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         }
 
-        Assert.Equal(Legacy, File.ReadAllText(FilePath));
+        Assert.Equal(content, File.ReadAllText(FilePath));
+    }
+
+    // 151: two todos with a bad id and one without an id.
+    private const string TwoBadOneMissing = "[\n  {\"id\": \"nope\", \"text\": \"a\", \"due\": \"2026-11-03\", \"created\": \"2026-10-01T09:00:00Z\"},\n"
+        + "  {\"text\": \"b\", \"due\": \"2026-11-01\"},\n"
+        + "  {\"id\": 42, \"text\": \"c\", \"due\": \"2026-11-02\", \"created\": \"2026-10-02T09:00:00Z\"}\n]\n";
+
+    // 151 AC-4: the bad ids are counted and the ids List returned are stored, in file order; a second run writes nothing.
+    [Fact]
+    public void Migrate_BadIds_CountsThem_StoresTheListedIds_SecondRunWritesNothing()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, TwoBadOneMissing);
+        TodoStore store = new TodoStore(root);
+        IReadOnlyList<TodoItem> before = store.List();
+
+        Assert.True(store.Migrate(out int badIds));
+        Assert.Equal(2, badIds);
+
+        string[] order = ["a", "b", "c"];
+        Assert.Equal(order.Select(t => before.Single(b => b.Text == t).Id), StoredIds());
+        IReadOnlyList<TodoItem> after = new TodoStore(root).List();
+        Assert.Equal(
+            before.Select(t => (t.Id, t.Text, t.Due, t.Created.Ticks)),
+            after.Select(t => (t.Id, t.Text, t.Due, t.Created.Ticks)));
+        Assert.Equal(order, System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(FilePath), "\"text\": \"(.)\"")
+            .Select(m => m.Groups[1].Value));
+        byte[] bytes = File.ReadAllBytes(FilePath);
+        DateTime written = File.GetLastWriteTimeUtc(FilePath);
+
+        Assert.False(new TodoStore(root).Migrate(out badIds));
+        Assert.Equal(0, badIds);
+        Assert.Equal(bytes, File.ReadAllBytes(FilePath));
+        Assert.Equal(written, File.GetLastWriteTimeUtc(FilePath));
+        AssertNoTempFile();
+    }
+
+    // 151 AC-5: missing or repeated ids are written but are not bad ids; a missing file writes nothing.
+    [Fact]
+    public void Migrate_NoBadIds_CountsZero()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, Legacy);
+        Assert.True(new TodoStore(root).Migrate(out int badIds));
+        Assert.Equal(0, badIds);
+
+        Guid kept = new Guid("aaaaaaaa-0000-0000-0000-000000000001");
+        File.WriteAllText(FilePath,
+            $"[{{\"id\":\"{kept}\",\"text\":\"a\",\"due\":\"2026-11-03\"}},"
+            + $"{{\"id\":\"{kept}\",\"text\":\"b\",\"due\":\"2026-11-03\"}},"
+            + $"{{\"id\":null,\"text\":\"c\",\"due\":\"2026-11-03\"}}]");
+        Assert.True(new TodoStore(root).Migrate(out badIds));
+        Assert.Equal(0, badIds);
+
+        File.Delete(FilePath);
+        Assert.False(new TodoStore(root).Migrate(out badIds));
+        Assert.Equal(0, badIds);
+        Assert.False(File.Exists(FilePath));
+    }
+
+    // 151 AC-5: the bad ids are read but can't be written: false, 0, the file is unchanged.
+    [Fact]
+    public void Migrate_BadIds_WriteFails_CountsZero_LeavesBytes()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, TwoBadOneMissing);
+        File.SetUnixFileMode(root, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            if (CanCreateFileInRoot())
+            {
+                return; // Running as a user that can write anything; there is nothing to check.
+            }
+
+            Assert.False(new TodoStore(root).Migrate(out int badIds));
+            Assert.Equal(0, badIds);
+        }
+        finally
+        {
+            File.SetUnixFileMode(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        Assert.Equal(TwoBadOneMissing, File.ReadAllText(FilePath));
+        Assert.Single(Directory.GetFiles(root));
+    }
+
+    // 151 AC-8: after the migration, the id List returned for a formerly bad todo completes exactly that todo.
+    [Fact]
+    public void Migrate_BadIds_CompleteByListedId_RemovesThatTodo()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, TwoBadOneMissing);
+        TodoStore store = new TodoStore(root);
+        IReadOnlyList<TodoItem> before = store.List();
+        Assert.True(store.Migrate(out _));
+        TodoItem c = before.Single(t => t.Text == "c");
+
+        Assert.Equal(c, store.Complete(c.Id));
+
+        Assert.Equal(before.Where(t => t.Text != "c"), store.List());
+    }
+
+    private bool CanCreateFileInRoot()
+    {
+        string probe = Path.Combine(root, "probe");
+        try
+        {
+            File.WriteAllText(probe, string.Empty);
+            File.Delete(probe);
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private bool TryOpen()

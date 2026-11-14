@@ -330,9 +330,26 @@ internal sealed class Cli
         };
     }
 
+    /// <summary>
+    /// Stores missing todo ids before the first read; when bad ids were replaced, says so in one stderr line
+    /// (a fixed text with the count, never the bad value).
+    /// </summary>
+    private void MigrateTodos(Session session)
+    {
+        session.Todos.Migrate(out int badIds);
+        if (badIds == 1)
+        {
+            Err($"Fixed a bad todo id in {TodoStore.FileName}.");
+        }
+        else if (badIds > 1)
+        {
+            Err($"Fixed {badIds.ToString(CultureInfo.InvariantCulture)} bad todo ids in {TodoStore.FileName}.");
+        }
+    }
+
     private int Todos(Session session)
     {
-        session.Todos.Migrate();
+        MigrateTodos(session);
         IReadOnlyList<TodoItem> todos;
         try
         {
@@ -370,7 +387,7 @@ internal sealed class Cli
 
     private int AddTodo(Session session, string text, DateOnly due)
     {
-        session.Todos.Migrate();
+        MigrateTodos(session);
         TodoItem todo;
         try
         {
@@ -386,7 +403,7 @@ internal sealed class Cli
 
     private int DoneTodo(Session session, string query)
     {
-        session.Todos.Migrate();
+        MigrateTodos(session);
         TodoItem? done;
         try
         {
@@ -595,7 +612,7 @@ internal sealed class Cli
 
     private int Current(Session session)
     {
-        session.Todos.Migrate();
+        MigrateTodos(session);
         CurrentView view = CurrentView.Build(
             session.Todos, session.Index, session.Notes, session.Calendar, session.Feed, today());
         if (session.Json)
