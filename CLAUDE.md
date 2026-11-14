@@ -268,7 +268,8 @@ Every factory agent reads this file before working on Context. Keep it short and
   `TodoPicker.Pick`, see Todos: `Done: <text>`, or exit 1 with the no-todos, no-match or several-matches line;
   no text is a usage error), `notes`, `note show <name...>`,
   `tags [tag...]` (`<tag>\t<count>` or note names), `links <note...>` (`<name>\t<link>\t<tags>`), `current` (the
-  current view's sections as text: `Today, <date>`, `Appointments`, `Due`, `Linked notes`; no row caps, `Due` lines as `<date>\t<text>`; its error lines go to stderr and make the exit code 1),
+  current view's sections as text: `Today, <date>`, `Appointments`, `Due`, `Linked notes`; no row caps, `Due` lines as
+  `<date>\t<text>`; its error lines go to stderr and make the exit code 1),
   `import <path>`, `export <note> <path>` (paths relative to the current directory, no `~`). When `Migrate(out n)`
   replaced bad todo ids, `todos`, `todo add`, `todo done` and `current` first write one extra stderr line,
   `Fixed a bad todo id in todos.json.` or `Fixed <n> bad todo ids in todos.json.` (fixed text, the bad value is never
@@ -422,8 +423,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     components through `DesktopState`) only map that view to their output. Cleaning (`SafeText.Clean`,
     `DesktopText.OneLine`), fixed message texts and row caps live in the front end, so each one draws the same
     data its own way.
-    View records (and `DueTodo`, `LinkedNote`) override `ToString()` to return only their type name, so their raw text never
-    leaks through formatting; nobody formats a view directly.
+    View records (and `DueTodo`, `LinkedNote`) override `ToString()` to return only their type name, so their raw text
+    never leaks through formatting; nobody formats a view directly.
   - `src/Context/`: the command-line tool (references `Context.Core` by `ProjectReference`, no package; packed as the
     .NET tool `context`). `Program.cs` only wires things up: whatever the arguments, it sets UTF-8 output and returns
     `new Cli(...).Run(args)` over `Console.Out`/`Error`, `NoteStore.DefaultFolder()`, the local clock and a
@@ -622,9 +623,11 @@ Every factory agent reads this file before working on Context. Keep it short and
     `DesktopActions.cs` and `DesktopState.cs` name no `ILogger`, `Console.`, `Debug.` or `Trace.`.
     Colours by CSS class (`accent`, `grey`, `red`, dates `overdue`/`today`/`later`); long lines
     cut by CSS with the full text in `title`.
-  - `tests/Context.Tests/`: references both projects; one test class per production class (Core and `Cli` alike),
-    `CiWorkflowTests.cs` and `ReleaseWorkflowTests.cs` (the workflows and their four jobs, the release scripts and the tool packaging; with `WorkflowYaml.cs` and its `WorkflowYamlTests.cs`), `CoreDependencyTests.cs` (architecture test: no P/Invoke
-    and no sealing code in Core, and no terminal UI assembly, package or source mention in any project), plus shared helpers such as
+  - `tests/Context.Tests/`: references both projects; test files use the file-scoped `namespace Context.Tests;`;
+    one test class per production class (Core and `Cli` alike), `CiWorkflowTests.cs`, `ReleaseWorkflowTests.cs` and
+    `CoreDependencyTests.cs` (the workflows and their four jobs, the release scripts and the tool packaging, with
+    `WorkflowYaml.cs` and its `WorkflowYamlTests.cs`; the architecture test: no P/Invoke and no sealing code in Core,
+    and no terminal UI assembly, package or source mention in any project), plus shared helpers such as
     `RemovedFeature.cs` and `RemovedConsole.cs` (the names of the removed whole-folder protection and of the removed
     terminal console, spelled in pieces; `RemovedFeatureSourceTests.cs` fails when `src/`, `tests/` or this file
     names either again) and `FakeHttpHandler.cs` (canned HTTP responses). The view tests (`CurrentViewTests`, `TagsViewTests`, `LinksViewTests`, `CalendarLinkViewTests`) check the view data field by field. Note, todo, tag and calendar tests use their
