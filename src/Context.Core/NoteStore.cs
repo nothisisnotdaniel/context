@@ -224,7 +224,13 @@ internal sealed class NoteStore
     /// <see cref="ArgumentException"/> for an invalid title, a full name over <see cref="MaxNameLength"/>, a parent
     /// below the top-level <c>calendar</c> note, or a missing parent.
     /// </summary>
-    public NoteInfo CreateChild(string parent, string title)
+    public NoteInfo CreateChild(string parent, string title) => CreateChild(parent, title, string.Empty);
+
+    /// <summary>
+    /// Like <see cref="CreateChild(string, string)"/>, with <paramref name="body"/> written right after the
+    /// <c># &lt;title&gt;\n</c> line (an empty body gives the plain heading).
+    /// </summary>
+    public NoteInfo CreateChild(string parent, string title, string body)
     {
         title = NormalizeTitle(title);
         string? error = ValidateTitle(title);
@@ -250,7 +256,7 @@ internal sealed class NoteStore
         string folder = ChildFolderFor(owner);
         Directory.CreateDirectory(folder);
         string path = Path.Combine(folder, title + Extension);
-        byte[] content = Utf8NoBom.GetBytes($"# {title}\n");
+        byte[] content = Utf8NoBom.GetBytes($"# {title}\n" + body);
         try
         {
             using FileStream stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);

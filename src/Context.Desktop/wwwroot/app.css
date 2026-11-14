@@ -324,9 +324,10 @@ input[type="password"]:disabled {
     opacity: 0.5;
 }
 
-/* Note names in the notes list and the tag panel: plain link-like text, not bordered buttons. */
+/* Note names in the notes list, the tag panel and the find panel: plain link-like text, not bordered buttons. */
 .note .name,
-.tag-notes .note-button {
+.tag-notes .note-button,
+.find-notes .note-button {
     background: none;
     border: none;
     border-radius: 3px;
@@ -336,16 +337,19 @@ input[type="password"]:disabled {
     text-align: left;
 }
 
-.tag-notes .note-button {
+.tag-notes .note-button,
+.find-notes .note-button {
     max-width: 100%;
 }
 
 .note .name:hover:not(:disabled),
-.tag-notes .note-button:hover:not(:disabled) {
+.tag-notes .note-button:hover:not(:disabled),
+.find-notes .note-button:hover:not(:disabled) {
     text-decoration: underline;
 }
 
-.tag-notes li {
+.tag-notes li,
+.find-notes li {
     padding: 3px 0;
 }
 
@@ -391,7 +395,8 @@ input[type="password"]:disabled {
     width: 8px;
 }
 
-.tag-panel {
+.tag-panel,
+.find-panel {
     border-bottom: 1px solid var(--line);
     margin-bottom: 16px;
     padding-bottom: 12px;

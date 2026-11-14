@@ -30,10 +30,34 @@ the person or that list them as an attendee, latest first. Appointments come fro
 downloaded copy of the Exchange calendar; nothing is downloaded. In the desktop app, clicking a mention opens the
 person's page `people/Anna Schmidt`, creating it (and `people`) on that click if needed.
 
+### Attributes and page types
+
+Give any page attributes with plain lines that start with a key, then `::`, then the value:
+
+```markdown
+# Anna Schmidt
+
+affiliation:: [[ACME]]
+role:: Bereichsleiter
+```
+
+A key starts with a letter (then letters, digits, `-`, `_`; at most 50) and is matched ignoring case; the line must
+start at the beginning (no indent, not in code). A line with no value, such as `role::`, is a placeholder and finds
+nothing. A value that is one `[[link]]` is also a note link, so `ACME` lists Anna under `linked from`.
+`context find role Bereichsleiter` prints the names of the notes with that attribute, one per line (none: no output);
+values match ignoring case, and `[[ACME]]`, `ACME` and `acme` are the same value.
+
+A page's types are its `type::` lines (`type:: organization`); a page under `people` without one is a `person`.
+`context find type person` lists them. `context types` prints each type with its attributes (`person` comes with
+`affiliation` and `role`, `organization` with none). Define your own type as a subpage of a top-level note `types`,
+for example `types/project` with the lines `attribute:: owner` and `attribute:: due`; a `types/person` page replaces
+the built-in one. A new person page made by clicking a mention starts with one empty line per `person` attribute.
+In the desktop app, `/find role Bereichsleiter` in the command palette (Ctrl/Cmd+K) lists the same notes.
+
 ### JSON output
 
 Add `--json` to a read command (`version`, `todos`, `notes`, `note show`, `tags`, `links`, `people`, `person`,
-`current`) to get one
+`find`, `types`, `current`) to get one
 JSON object on one line instead of text. Property names are fixed camelCase; missing values are `null`; dates are
 `yyyy-MM-dd` and times ISO 8601 with offset. Errors stay one text line on stderr with the same exit codes, and
 write commands and `help` refuse the flag.
@@ -51,6 +75,8 @@ plain ASCII; any JSON parser, `ConvertFrom-Json` included, reads them back.
 | `links <note>` | `{"note":"A","links":[{"note":"B","direction":"to","missing":false,"sharedTags":["work"]}]}` |
 | `people` | `{"people":[{"person":"Anna Schmidt","count":2}]}` |
 | `person <name>` | `{"person":"Anna Schmidt","notes":["A"],"appointments":[{"start":"...","end":"...","allDay":false,"title":"...","location":null}]}` |
+| `find <key> <value>` | `{"key":"role","value":"Bereichsleiter","notes":["people/Anna Schmidt"]}` |
+| `types` | `{"types":[{"type":"organization","attributes":[]},{"type":"person","attributes":["affiliation","role"]}]}` |
 | `current` | `{"today":"...","appointments":[...],"calendar":{...},"due":[...],"linkedNotes":[...]}` |
 
 PowerShell examples:
@@ -70,6 +96,9 @@ if ($null -eq $current.due) { Write-Warning 'todos.json could not be read' }
 
 # The text of one note
 (context note show Plan --json | ConvertFrom-Json).text
+
+# Everyone at ACME
+(context find affiliation ACME --json | ConvertFrom-Json).notes
 ```
 
 `current` writes its document even when part of the data can't be read: then it exits 1, its error lines are on

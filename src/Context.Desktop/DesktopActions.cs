@@ -340,7 +340,9 @@ internal sealed class DesktopActions
     /// case), and a missing person page through <see cref="NoteStore.CreateChild"/>; an existing page is reused, so a
     /// second call writes nothing (<see cref="ActionReason.Unchanged"/>, done, no refresh). An invalid name, or a
     /// sensitive top-level <c>people</c> note, is refused with <see cref="PersonRefusedText"/> and nothing written; no
-    /// key is asked for. The result's text is the person page's full name when done.
+    /// key is asked for. A new page is <c># &lt;Name&gt;\n</c> plus, when the type <c>person</c>
+    /// (<see cref="PageTypes.Load"/>) has attributes, a blank line and one <c>&lt;attr&gt;::</c> line per attribute;
+    /// an existing page is never changed. The result's text is the person page's full name when done.
     /// </summary>
     public Task<ActionResult> OpenPerson(string name) => Run(() => OpenPersonNow(name));
 
@@ -833,7 +835,9 @@ internal sealed class DesktopActions
 
             try
             {
-                NoteInfo child = notes.CreateChild(folder.Name, person);
+                // The new page comes with one empty line per attribute of the type person (types/person or the built-in).
+                string body = PageTypes.Template(PageTypes.Find(PageTypes.Load(notes), PageTypes.Person));
+                NoteInfo child = notes.CreateChild(folder.Name, person, body);
                 return new ActionResult(ActionKind.Done, ActionReason.None, child.Name);
             }
             catch (NoteExistsException)

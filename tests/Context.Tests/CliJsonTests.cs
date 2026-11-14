@@ -7,7 +7,7 @@ namespace Context.Tests;
 public sealed class CliJsonTests : IDisposable
 {
     private const string JsonOnly =
-        "--json works only with version, todos, notes, note show, tags, links, people, person and current. Run 'context help'.";
+        "--json works only with version, todos, notes, note show, tags, links, people, person, find, types and current. Run 'context help'.";
 
     private static readonly DateOnly Today = new(2026, 10, 29);
     private static readonly DateTime Now = new(2026, 10, 29, 9, 0, 0, DateTimeKind.Utc);
@@ -642,7 +642,7 @@ public sealed class CliJsonTests : IDisposable
             Assert.Contains($"context {command} --json | ConvertFrom-Json", readme, StringComparison.Ordinal);
         }
 
-        string[] reads = ["version", "todos", "notes", "note show", "tags", "links", "current"];
+        string[] reads = ["version", "todos", "notes", "note show", "tags", "links", "find", "types", "current"];
         string[] jsonLines = [.. readme.Split('\n').Where(l => l.Contains("--json", StringComparison.Ordinal) && l.Contains("context ", StringComparison.Ordinal))];
         Assert.NotEmpty(jsonLines);
         foreach (string line in jsonLines)
@@ -701,5 +701,43 @@ public sealed class CliJsonTests : IDisposable
         BreakIndex();
         AssertError(Run("person", "Carl", "--json"), 1, "Can't read context.db.");
         AssertError(Run("people", "--json"), 1, "Can't read context.db.");
+    }
+
+    // 157 AC-8: find pins its field names and order; no match gives an empty array; a bad index is the error line.
+    [Fact]
+    public void Find_FieldsInOrder()
+    {
+        WriteNote("b", "affiliation:: [[ACME]]");
+        WriteNote("A", "Affiliation:: acme");
+        WriteNote("C", "affiliation:: Other");
+
+        Result result = Run("find", "--json", "AFFILIATION", "ACME");
+
+        AssertDocument(result);
+        Assert.Equal("{\"key\":\"affiliation\",\"value\":\"ACME\",\"notes\":[\"A\",\"b\"]}\n", result.Out);
+        Assert.Equal(
+            "{\"key\":\"role\",\"value\":\"Head \\u002B Co\",\"notes\":[]}\n",
+            Run("find", "role", "Head", "+", "Co", "--json").Out);
+
+        BreakIndex();
+        AssertError(Run("find", "role", "x", "--json"), 1, "Can't read context.db.");
+    }
+
+    // 157 AC-8: types pins its field names and order, sorted by type.
+    [Fact]
+    public void Types_FieldsInOrder()
+    {
+        WriteNote("types", "# types");
+        Directory.CreateDirectory(Path.Combine(root, "types"));
+        File.WriteAllText(Path.Combine(root, "types", "Project.md"), "attribute:: owner\nattribute:: due\n");
+
+        Result result = Run("types", "--json");
+
+        AssertDocument(result);
+        Assert.Equal(
+            "{\"types\":[{\"type\":\"organization\",\"attributes\":[]},"
+                + "{\"type\":\"person\",\"attributes\":[\"affiliation\",\"role\"]},"
+                + "{\"type\":\"project\",\"attributes\":[\"owner\",\"due\"]}]}\n",
+            result.Out);
     }
 }

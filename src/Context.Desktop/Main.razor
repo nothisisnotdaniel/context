@@ -26,6 +26,10 @@
                 {
                     <TagPanel Tag="@tag" OnOpen="RequestOpen" OnClose="CloseTag" />
                 }
+                @if (findShown is { } find)
+                {
+                    <FindPanel Key="@find.Key" Value="@find.Value" OnOpen="RequestOpen" OnClose="CloseFind" />
+                }
                 <p class="main-status cut @statusClass" role="status" title="@statusText">@statusText</p>
                 @if (openName is { } name)
                 {
@@ -146,6 +150,7 @@ else
     private NoteEditor? editor;
     private string? tagShown;
     private bool tagsShown;
+    private (string Key, string Value)? findShown;
     private bool settingsShown;
     private bool discarding;
     private string? pendingName;
@@ -207,6 +212,8 @@ else
     }
 
     private void CloseTag() => tagShown = null;
+
+    private void CloseFind() => findShown = null;
 
     // The tags view: every tag with its note count; a click on one shows the tag panel below it.
     private void ShowTags() => tagsShown = true;
@@ -334,6 +341,7 @@ else
         pendingPerson = null;
         tagShown = null;
         tagsShown = false;
+        findShown = null;
         settingsShown = false;
         renaming = false;
         subpaging = false;
@@ -405,6 +413,22 @@ else
                 else
                 {
                     await RequestOpen(found);
+                }
+
+                break;
+            case "/find":
+                // The attribute key, then the value: /find role Bereichsleiter. Read only.
+                int keyEnd = rest.IndexOfAny([' ', '\t']);
+                string? findKey = keyEnd < 0 ? null : AttributeParser.NormalizeKey(rest[..keyEnd]);
+                string findValue = keyEnd < 0 ? string.Empty : TagParser.CollapseWhitespace(rest[(keyEnd + 1)..]);
+                if (findKey is null || findValue.Length == 0)
+                {
+                    ShowStatus("Type /find <attribute> <value>.", "red");
+                }
+                else
+                {
+                    findShown = (findKey, findValue);
+                    ShowStatus(string.Empty, string.Empty);
                 }
 
                 break;

@@ -17,11 +17,11 @@ Every factory agent reads this file before working on Context. Keep it short and
     `#[Work]` are one tag. `TagParser.Format` shows a tag as `#tag`, or `#[tag]` when it has a space; all tag
     output uses it. `TagIndex.NormalizeTag` (for a typed tag, as in `context tags <tag>`) accepts `work`, `#work`, `[a b]`, `#[a b]`. `TagIndex` keeps the index in SQLite at `<root>/context.db` (`Microsoft.Data.Sqlite`,
     `Pooling=False`, parameterized SQL only): `notes(name, modified)` (last-write UTC ticks, NULL for a
-    note that couldn't be read so it is retried), `note_tags(note, tag)`, `note_links(note, target)` and `note_people(note, person, spelling)`. `Sync(NoteStore)` updates it
+    note that couldn't be read so it is retried), `note_tags(note, tag)`, `note_links(note, target)`, `note_people(note, person, spelling)` and `note_attributes(note, key, value_key, value)` (job 157, primary key `(note, key, value_key)`, index on `(key, value_key)`). `Sync(NoteStore)` updates it
     in one transaction and only re-parses files whose time changed. `PRAGMA user_version` holds the parser
-    version (`TagIndex.ParserVersion`, now 4: `@[person]` mentions); when it is lower, `Sync` clears every stored time in the same
+    version (`TagIndex.ParserVersion`, now 5: `key:: value` attributes); when it is lower, `Sync` clears every stored time in the same
     transaction (so all notes are re-parsed once) and then sets it. Bump it whenever parsing changes. Queries: `Tags()`, `NotesWithTag`,
-    `FindNote`, `Links`, `People()`, `NotesMentioning`. A database that can't be opened or isn't valid throws `TagIndexException` (an
+    `FindNote`, `Links`, `People()`, `NotesMentioning`, `NotesWithAttribute(key, value)` (by `AttributeParser.ValueKey`), `NotesWithoutAttribute(key)`. A database that can't be opened or isn't valid throws `TagIndexException` (an
     `IOException`) and is never deleted or overwritten. The file database waits up to `TagIndex.BusyTimeout` (5 s; an
     internal constructor argument shortens it for tests) for another process's lock, and `Sync` starts with
     `BEGIN IMMEDIATE`, so the desktop app and a command-line run can share it. `TagsView.Build`, `LinksView.Build`
@@ -50,7 +50,20 @@ Every factory agent reads this file before working on Context. Keep it short and
     appointments (calendar files and the cached Exchange copy, no download) whose title or location mentions the
     person or whose attendee matches, latest first. The editor shows a mention as a `mention` chip; following it calls
     `DesktopActions.OpenPerson`, which creates `people` (`# people\n`) and the page (`CreateChild`) only on that click,
-    and refuses when the top-level `people` is sensitive.
+    and refuses when the top-level `people` is sensitive. The new page gets the `person` type's template
+    (`PageTypes.Template`: a blank line and one `<attr>::` line per attribute) through `CreateChild(parent, title, body)`.
+  - **Attributes and page types:** (job 157) `AttributeParser.Parse` finds `key:: value` lines outside fences (key at
+    column 0: a letter, then letters, digits, `-`, `_`, at most 50, lower-cased invariant, directly followed by `::`;
+    value trimmed, whitespace runs one space, 1 to 400 chars, so `role::` is no attribute); a key may repeat, pairs
+    are distinct by key and `ValueKey` (exactly one `[[Target]]` gives the trimmed target; lower-cased), first
+    spelling kept. `NormalizeKey` checks a typed key. `PageTypes.Load(store)` gives the built-ins `organization` (no
+    attributes) and `person` (`affiliation`, `role`), each replaced by a direct subpage of the top-level `types`
+    (ignoring case) of that title; its `attribute::` lines (valid keys, distinct) are the attributes. A sensitive
+    `types` reads no type page; an unreadable one is skipped; never throws. `TypesOf` reads `type::` values, a person
+    page without one is `person`. `FindView.Build(index, store, key, value)` (`Found`, `NoMatches`, `InvalidQuery`
+    without reading, `IndexUnreadable`) syncs and lists the matching notes sorted ignoring case then ordinal;
+    `type person` also lists untyped person pages. An attribute value `[[X]]` is a note link through the link parser.
+    The command line has `context find <attribute> <value...>` and `context types`; the desktop `/find`.
 - **Views:**
   - **Current view:** all relevant information for now: today's appointments, due todos and linked notes.
     `CurrentView.Build` in Core reads the data (including the untruncated appointments, the time text and the
@@ -225,7 +238,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     no loops and no way out of the root), starts with `.`, is the top-level `calendar/`, or has no matching `.md`;
     a child whose title fails `ValidateTitle` or whose full name is over `NoteStore.MaxNameLength` (400). Below the
     top level a folder that can't be read lists as empty. `TryFind` matches against `List()` names only (paths,
-    `..` and `\` find nothing). `CreateChild(parent, title)` writes `<parent folder>/<title>.md` with `# <title>\n`
+    `..` and `\` find nothing). `CreateChild(parent, title)` writes `<parent folder>/<title>.md` with `# <title>\n` (the overload `CreateChild(parent, title, body)` appends `body`)
     (`CreateNew`, creating the folder); `ArgumentException` for a bad title, a missing parent, a `calendar`
     top-level ancestor or a name over 400, `NoteExistsException` for a sibling with that title. `Rename` changes only
     the last segment and moves the child folder too; `Move(name, newParent?)` (null or blank: top level) moves the
@@ -295,11 +308,11 @@ Every factory agent reads this file before working on Context. Keep it short and
   (one-line fields also `\n` to space). Tests (`CliTests`) use the
   internal constructor with a fixed zone.
   **`--json`** (job 148; exact token ignoring case, any position, repeats allowed, removed before parsing) makes
-  `version`, `todos`, `notes`, `note show`, `tags`, `links`, `people`, `person` and `current` write one compact object + `\n`
+  `version`, `todos`, `notes`, `note show`, `tags`, `links`, `people`, `person`, `find`, `types` and `current` write one compact object + `\n`
   (`CliJson.cs`, `Utf8JsonWriter` with the default encoder, so `+ & ' <` and non-ASCII are `\uXXXX`): `{version}`,
   `{todos:[{due,text}]}`, `{notes:[{name,locked}]}`, `{name,text}`, `{tags:[{tag,count}]}` or `{tag,notes:[]}`,
   `{note,links:[{note,direction:none|to|from|both,missing,sharedTags}]}`, `{people:[{person,count}]}`,
-  `{person,notes:[],appointments:[{start,end,allDay,title,location}]}`, `{today,appointments:[{start,end,allDay,
+  `{person,notes:[],appointments:[{start,end,allDay,title,location}]}`, `{key,value,notes:[]}` (`find`), `{types:[{type,attributes:[]}]}` (`types`; text: `<type>\t<attr, attr>`), `{today,appointments:[{start,end,allDay,
   title,location}],calendar:{status,cachedAt,unreadableFiles},due:[{due,text,overdue}],linkedNotes:[{name,tags}]}`
   (absent = `null`, tags raw without `#`, times `yyyy-MM-ddTHH:mm:sszzz` in the zone; `due`/`linkedNotes` `null` when
   unreadable). Names and order are a public contract (`CliJsonTests`, README). Errors stay text; with `help` or a
@@ -435,11 +448,11 @@ Every factory agent reads this file before working on Context. Keep it short and
     Types stay `internal` in `namespace Context;`; `InternalsVisibleTo` grants `Context`, `Context.Tests`,
     `Context.Desktop` and `Context.Desktop.Tests`.
     It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, picking a todo by its text in `TodoPicker.cs`, tag parsing in `TagParser.cs`,
-    `[[note link]]` parsing in `NoteLinkParser.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, the calendar
+    `[[note link]]` parsing in `NoteLinkParser.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
     `CurrentView.cs` (the current view), the inbox capture in `Inbox.cs`, the todo input rules (`TryParseDate`,
-    `MaxTextLength`) in `TodoInput.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page) and `CalendarLinkView.cs`
+    `MaxTextLength`) in `TodoInput.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`) and `CalendarLinkView.cs`
     (the calendar link), and the command ranking for the desktop palette in `CommandMatcher.cs`; the notes list is `NoteStore.List()` itself.
   - **Data step in Core, drawing in the front end:** a view's Core data step returns plain types (a kind plus raw
     text, never markup, never cleaned or escaped, no exception messages). The front ends (`Cli`, and the desktop
@@ -504,7 +517,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     file bytes, read through `BoundedFile`): a bigger or non-seekable note can't be opened (`Can't read <name>.`), a save
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
-    `/capture`, `/current`, `/export`, `/import`, `/new`, `/open`, `/save`, `/settings`, `/tags`, `/todo` with `CommandMatcher` (in Core).
+    `/capture`, `/current`, `/export`, `/find`, `/import`, `/new`, `/open`, `/save`, `/settings`, `/tags`, `/todo` with `CommandMatcher` (in Core).
     **Settings:** `SettingsPanel` (the `Settings` button in `NotesPanel`, or `/settings`; `Main`'s `settingsShown`;
     at the top of the main region; `Close`, opening a note or the current view hides it) has two sections, both
     reloaded after every `State.Changed`. *Exchange calendar* shows `DesktopState.CalendarLinkSetting()`
@@ -536,6 +549,11 @@ Every factory agent reads this file before working on Context. Keep it short and
     red `Can't read the mentions.`; it follows the same read-only, `indexGate`, reload and stale-result rules. A
     mention chip calls `OnPerson`; `Main` (asking first when dirty) calls `DesktopActions.OpenPerson` and opens the
     result, or shows its red refusal.
+    `FindPanel` (job 157, `/find <attribute> <value>`: split at the first space, `NormalizeKey`, value collapsed;
+    a bad one shows red `Type /find <attribute> <value>.`) sits after `TagPanel` with the heading `<key>:: <value>`
+    and a Close button, and lists `DesktopState.Find(key, value)` as note buttons (through `OnOpen`); grey
+    `Loading…`, grey `No notes have <key>:: <value>.`, red `Can't read the attributes.`; same read-only,
+    `indexGate`, reload and stale-result rules. Opening a note closes it.
     **Import and export:** the only paths the desktop reads or writes outside the data folder come from the OS
     dialog (`IFileDialog.OpenMarkdownFiles()`: several `*.md`, empty when cancelled or failed;
     `SaveExportFile(suggestedName)`: `null` when cancelled, adds `.md` to a name without extension; Photino's save
@@ -659,7 +677,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     and no terminal UI assembly, package or source mention in any project), plus shared helpers such as
     `RemovedFeature.cs` and `RemovedConsole.cs` (the names of the removed whole-folder protection and of the removed
     terminal console, spelled in pieces; `RemovedFeatureSourceTests.cs` fails when `src/`, `tests/` or this file
-    names either again) and `FakeHttpHandler.cs` (canned HTTP responses). The view tests (`CurrentViewTests`, `TagsViewTests`, `LinksViewTests`, `CalendarLinkViewTests`) check the view data field by field. Note, todo, tag and calendar tests use their
+    names either again) and `FakeHttpHandler.cs` (canned HTTP responses). The view tests (`CurrentViewTests`, `TagsViewTests`, `LinksViewTests`, `FindViewTests`, `CalendarLinkViewTests`) check the view data field by field. Note, todo, tag and calendar tests use their
     own temp folder (deleted in `Dispose`), never the real app data folder.
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and

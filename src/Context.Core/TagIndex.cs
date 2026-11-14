@@ -176,15 +176,22 @@ internal sealed class TagIndex
             spelling TEXT NOT NULL,
             PRIMARY KEY(note, person));
         CREATE INDEX IF NOT EXISTS note_people_person ON note_people(person);
+        CREATE TABLE IF NOT EXISTS note_attributes(
+            note TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value_key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY(note, key, value_key));
+        CREATE INDEX IF NOT EXISTS note_attributes_key_value ON note_attributes(key, value_key);
         """;
 
     /// <summary>
     /// The parser version the stored tags were made with, kept in <c>PRAGMA user_version</c>. When the
     /// database has an older one, <see cref="Sync"/> re-parses every note once. 1: <c>#[bracket tags]</c>.
     /// 2: <c>[[note links]]</c>. 3: subpages (full names, link targets up to <see cref="NoteLinkParser.MaxTargetLength"/>).
-    /// 4: <c>@[person]</c> mentions (and <c>@[[x]]</c> is no link).
+    /// 4: <c>@[person]</c> mentions (and <c>@[[x]]</c> is no link). 5: <c>key:: value</c> attributes.
     /// </summary>
-    public const int ParserVersion = 4;
+    public const int ParserVersion = 5;
 
     /// <summary>
     /// How long opening <c>context.db</c> and starting <see cref="Sync"/>'s write transaction wait while another
@@ -265,6 +272,7 @@ internal sealed class TagIndex
                 IReadOnlyList<string> tags;
                 IReadOnlyList<string> targets;
                 IReadOnlyList<string> people;
+                IReadOnlyList<PageAttribute> attributes;
                 long? newModified = modified;
                 try
                 {
@@ -272,12 +280,14 @@ internal sealed class TagIndex
                     tags = TagParser.Parse(text);
                     targets = NoteLinkParser.Parse(text);
                     people = PersonParser.Parse(text);
+                    attributes = AttributeParser.Parse(text);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     tags = [];
                     targets = [];
                     people = [];
+                    attributes = [];
                     newModified = null;
                 }
 
@@ -315,6 +325,19 @@ internal sealed class TagIndex
                         ("$spelling", person));
                 }
 
+                Execute(connection, transaction, "DELETE FROM note_attributes WHERE note = $note", ("$note", note.Name));
+                foreach (PageAttribute attribute in attributes)
+                {
+                    Execute(
+                        connection,
+                        transaction,
+                        "INSERT INTO note_attributes(note, key, value_key, value) VALUES($note, $key, $valueKey, $value)",
+                        ("$note", note.Name),
+                        ("$key", attribute.Key),
+                        ("$valueKey", AttributeParser.ValueKey(attribute.Value)),
+                        ("$value", attribute.Value));
+                }
+
                 Execute(
                     connection,
                     transaction,
@@ -329,6 +352,7 @@ internal sealed class TagIndex
                 Execute(connection, transaction, "DELETE FROM note_tags WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_links WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_people WHERE note = $note", ("$note", gone));
+                Execute(connection, transaction, "DELETE FROM note_attributes WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM notes WHERE name = $note", ("$note", gone));
             }
 
@@ -336,6 +360,7 @@ internal sealed class TagIndex
             Execute(connection, transaction, "DELETE FROM note_tags WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_links WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_people WHERE note NOT IN (SELECT name FROM notes)");
+            Execute(connection, transaction, "DELETE FROM note_attributes WHERE note NOT IN (SELECT name FROM notes)");
             if (upgrade)
             {
                 // A constant, not user input: PRAGMA takes no parameters.
@@ -382,6 +407,55 @@ internal sealed class TagIndex
             return SortNames(names);
         });
     }
+
+    /// <summary>
+    /// The notes with the attribute <paramref name="key"/><c>::</c> <paramref name="value"/>, matched by the key as
+    /// given (already normalized with <see cref="AttributeParser.NormalizeKey"/>) and by
+    /// <see cref="AttributeParser.ValueKey"/> of the value, so <c>ACME</c> finds <c>[[ACME]]</c>. Each note once, sorted
+    /// by name ignoring case, then ordinal.
+    /// </summary>
+    public IReadOnlyList<string> NotesWithAttribute(string key, string value)
+    {
+        string valueKey = AttributeParser.ValueKey(value);
+        return Run(connection =>
+        {
+            List<string> names = [];
+            using SqliteCommand command = Command(
+                connection,
+                null,
+                "SELECT DISTINCT note FROM note_attributes WHERE key = $key AND value_key = $valueKey");
+            command.Parameters.AddWithValue("$key", key);
+            command.Parameters.AddWithValue("$valueKey", valueKey);
+            using SqliteDataReader reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                names.Add(reader.GetString(0));
+            }
+
+            return SortNames(names);
+        });
+    }
+
+    /// <summary>
+    /// The indexed notes that have no attribute with the key <paramref name="key"/> (normalized), sorted by name
+    /// ignoring case, then ordinal. A note that couldn't be read has no attributes, so it is among them.
+    /// </summary>
+    public IReadOnlyList<string> NotesWithoutAttribute(string key) => Run(connection =>
+    {
+        List<string> names = [];
+        using SqliteCommand command = Command(
+            connection,
+            null,
+            "SELECT name FROM notes WHERE name NOT IN (SELECT note FROM note_attributes WHERE key = $key)");
+        command.Parameters.AddWithValue("$key", key);
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            names.Add(reader.GetString(0));
+        }
+
+        return (IReadOnlyList<string>)SortNames(names);
+    });
 
     /// <summary>
     /// The indexed note called <paramref name="name"/> (trimmed): an exact match first, then one ignoring

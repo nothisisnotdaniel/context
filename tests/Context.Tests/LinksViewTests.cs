@@ -213,4 +213,22 @@ public sealed class LinksViewTests : IDisposable
         Assert.DoesNotContain("SECRET-042", text, StringComparison.Ordinal);
         Assert.DoesNotContain("\u001b", text, StringComparison.Ordinal);
     }
+
+    // 157 AC-4: an attribute value [[ACME]] is a note link both ways, with no change to NoteLinkParser.
+    [Fact]
+    public void Build_AttributeLinkValue_LinksToAndLinkedFrom()
+    {
+        WriteNote("people", "# people");
+        Directory.CreateDirectory(Path.Combine(root, "people"));
+        File.WriteAllText(Path.Combine(root, "people", "Anna.md"), "# Anna\n\naffiliation:: [[ACME]]\nrole:: Chef\n");
+        WriteNote("ACME", "# ACME\ntype:: organization\n");
+
+        LinksView person = Build("people/Anna");
+        LinksView acme = Build("ACME");
+
+        NoteLink to = Assert.Single(person.Links);
+        Assert.Equal(("ACME", NoteLinkDirection.To, false), (to.Note, to.Direction, to.Missing));
+        NoteLink from = Assert.Single(acme.Links);
+        Assert.Equal(("people/Anna", NoteLinkDirection.From), (from.Note, from.Direction));
+    }
 }

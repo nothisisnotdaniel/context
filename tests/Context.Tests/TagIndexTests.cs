@@ -356,7 +356,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(4, TagIndex.ParserVersion);
+        Assert.Equal(5, TagIndex.ParserVersion);
     }
 
     // 024 AC-6
@@ -814,8 +814,8 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(4, TagIndex.ParserVersion);
-        Assert.Equal(4, UserVersion());
+        Assert.Equal(5, TagIndex.ParserVersion);
+        Assert.Equal(5, UserVersion());
         Assert.Equal(["A", "Beta"], NoteRows());
         Assert.Equal([("A", "work"), ("Beta", "home")], Rows());
         Assert.Equal([("A", "Beta")], LinkRows());
@@ -924,7 +924,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(4, UserVersion());
+        Assert.Equal(5, UserVersion());
         Assert.Equal([("A", "anna", "Anna")], PeopleRows());
         Assert.Equal([("A", "work")], Rows());
 
@@ -934,5 +934,124 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal([("A", "anna", "Anna")], PeopleRows());
+    }
+
+    /// <summary>Every (note, key, value_key, value) row of <c>note_attributes</c>, read directly.</summary>
+    private List<(string Note, string Key, string ValueKey, string Value)> AttributeRows()
+    {
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT note, key, value_key, value FROM note_attributes ORDER BY note, key, value_key";
+        using SqliteDataReader reader = command.ExecuteReader();
+        List<(string, string, string, string)> rows = [];
+        while (reader.Read())
+        {
+            rows.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3)));
+        }
+
+        return rows;
+    }
+
+    // 157 AC-3: Sync stores each note's attributes with the value key, keeps them up to date and drops them with the note.
+    [Fact]
+    public void Sync_StoresAttributes_AndDropsThemWithTheNote()
+    {
+        WriteNote("Anna", "# Anna\nRole:: Bereichsleiter\naffiliation:: [[ACME]]\nrole::\n");
+        WriteNote("Bob", "role:: x'); DROP TABLE notes; --");
+        index.Sync(store);
+
+        Assert.Equal(
+            [
+                ("Anna", "affiliation", "acme", "[[ACME]]"),
+                ("Anna", "role", "bereichsleiter", "Bereichsleiter"),
+                ("Bob", "role", "x'); drop table notes; --", "x'); DROP TABLE notes; --"),
+            ],
+            AttributeRows());
+
+        EditNote("Anna", "role:: Chef");
+        index.Sync(store);
+        Assert.Equal(["Anna"], index.NotesWithAttribute("role", "chef"));
+        Assert.Empty(index.NotesWithAttribute("role", "Bereichsleiter"));
+
+        File.Delete(Path.Combine(root, "Anna.md"));
+        index.Sync(store);
+        Assert.Equal([("Bob", "role", "x'); drop table notes; --", "x'); DROP TABLE notes; --")], AttributeRows());
+    }
+
+    // 157 AC-2 / AC-3: a value matches by its value key (a [[link]] by its target, ignoring case), each note once, sorted.
+    [Fact]
+    public void NotesWithAttribute_MatchesLinkAndPlainValues_Sorted()
+    {
+        WriteNote("b", "affiliation:: [[ACME]]");
+        WriteNote("A", "affiliation:: ACME");
+        WriteNote("C", "affiliation:: acme\naffiliation:: [[ ACME ]]");
+        WriteNote("D", "employer:: ACME");
+        index.Sync(store);
+
+        Assert.Equal(["A", "b", "C"], index.NotesWithAttribute("affiliation", "[[acme]]"));
+        Assert.Equal(["A", "b", "C"], index.NotesWithAttribute("affiliation", "ACME"));
+        Assert.Empty(index.NotesWithAttribute("affiliation", "ACM"));
+        Assert.Equal(["A", "b", "C"], index.NotesWithoutAttribute("employer"));
+    }
+
+    // 157 AC-3: only re-parsed notes change: an attribute added to a file whose time didn't change is not seen.
+    [Fact]
+    public void Sync_Attributes_OnlyReparsedNotesChange()
+    {
+        WriteNote("A", "role:: one");
+        string a = Path.Combine(root, "A.md");
+        DateTime time = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(a, time);
+        index.Sync(store);
+
+        File.WriteAllText(a, "role:: two");
+        File.SetLastWriteTimeUtc(a, time);
+        index.Sync(store);
+
+        Assert.Equal([("A", "role", "one", "one")], AttributeRows());
+    }
+
+    // 157 AC-3: a sensitive note has no attribute rows.
+    [Fact]
+    public void Sync_SensitiveNote_HasNoAttributeRows()
+    {
+        WriteNote("Plan", "role:: secret");
+        index.Sync(store);
+        Assert.Single(AttributeRows());
+
+        File.Delete(Path.Combine(root, "Plan.md"));
+        File.WriteAllText(Path.Combine(root, "Plan.ctxs"), "role:: secret");
+        index.Sync(store);
+
+        Assert.Empty(AttributeRows());
+        Assert.Empty(index.NotesWithAttribute("role", "secret"));
+    }
+
+    // 157 AC-3: a version 4 database is re-parsed once and set to 5, so attributes written before the upgrade are found.
+    [Fact]
+    public void Sync_VersionFourDatabase_ReparsesOnce()
+    {
+        WriteNote("A", "role:: Chef #work");
+        string a = Path.Combine(root, "A.md");
+        DateTime time = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(a, time);
+        index.Sync(store);
+        using (SqliteConnection connection = Open())
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "DROP TABLE note_attributes; PRAGMA user_version = 4;";
+            command.ExecuteNonQuery();
+        }
+
+        index.Sync(store);
+
+        Assert.Equal(5, UserVersion());
+        Assert.Equal([("A", "role", "chef #work", "Chef #work")], AttributeRows());
+
+        File.WriteAllText(a, "role:: Other");
+        File.SetLastWriteTimeUtc(a, time);
+        index.Sync(store);
+
+        Assert.Equal([("A", "role", "chef #work", "Chef #work")], AttributeRows());
     }
 }

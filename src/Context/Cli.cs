@@ -25,7 +25,9 @@ internal sealed class Cli
     private const string TodosUnreadable = "Can't read todos.json.";
     private const string IndexUnreadable = "Can't read context.db.";
     private const string PersonForm = "Type: context person <name>.";
-    private const string JsonOnly = "--json works only with version, todos, notes, note show, tags, links, people, person and current.";
+    private const string FindForm = "Type: context find <attribute> <value>.";
+    private const string JsonOnly =
+        "--json works only with version, todos, notes, note show, tags, links, people, person, find, types and current.";
 
     // Every command with its usage and what it does, in the order help lists them.
     private static readonly (string Usage, string Description)[] Commands =
@@ -42,10 +44,12 @@ internal sealed class Cli
         ("links <note...>", "List the notes linked to a note."),
         ("people", "List the people mentioned with @[Name], with counts."),
         ("person <name...>", "List the notes and appointments that mention a person."),
+        ("find <attribute> <value...>", "List the notes with an attribute line, e.g. find role Bereichsleiter."),
+        ("types", "List the page types with their attributes."),
         ("current", "Today's appointments, due todos and linked notes."),
         ("import <path>", "Store a Markdown file as a note."),
         ("export <note> <path>", "Write a note to a new plain file."),
-        ("<command> --json", "Print one JSON object: version, todos, notes, note show, tags, links, people, person, current."),
+        ("<command> --json", "Print one JSON object: version, todos, notes, note show, tags, links, people, person, find, types, current."),
     ];
 
     private readonly TextWriter stdout;
@@ -208,6 +212,24 @@ internal sealed class Cli
                 }
 
                 return s => Person(s, person);
+            case "find":
+                if (args.Length < 2 || AttributeParser.NormalizeKey(args[0]) is null)
+                {
+                    usage = FindForm;
+                    return null;
+                }
+
+                string findKey = args[0];
+                string findValue = string.Join(' ', args[1..]);
+                if (TagParser.CollapseWhitespace(findValue).Length == 0)
+                {
+                    usage = FindForm;
+                    return null;
+                }
+
+                return s => Find(s, findKey, findValue);
+            case "types":
+                return NoArguments("types", args, out usage, Types);
             case "current":
                 return NoArguments("current", args, out usage, Current);
             case "import":
@@ -653,6 +675,61 @@ internal sealed class Cli
         foreach (PersonCount person in people)
         {
             Out($"{OneLine(person.Person)}\t{person.Count.ToString(CultureInfo.InvariantCulture)}");
+        }
+
+        return ExitOk;
+    }
+
+    private int Find(Session session, string key, string value)
+    {
+        FindView view = FindView.Build(session.Index, session.Notes, key, value);
+        switch (view.Kind)
+        {
+            case FindViewKind.InvalidQuery:
+                return Usage(FindForm);
+            case FindViewKind.IndexUnreadable:
+                return Error(IndexUnreadable);
+            case FindViewKind.Found or FindViewKind.NoMatches when session.Json:
+                return Json(w =>
+                {
+                    w.WriteString("key", OneLine(view.Key));
+                    w.WriteString("value", OneLine(view.Value));
+                    CliJson.Strings(w, "notes", view.Notes.Select(OneLine));
+                });
+            default:
+                // NoMatches lists nothing, like an unknown tag.
+                foreach (string note in view.Notes)
+                {
+                    Out(OneLine(note));
+                }
+
+                return ExitOk;
+        }
+    }
+
+    private int Types(Session session)
+    {
+        IReadOnlyList<PageType> types = PageTypes.Load(session.Notes);
+        if (session.Json)
+        {
+            return Json(w =>
+            {
+                w.WriteStartArray("types");
+                foreach (PageType type in types)
+                {
+                    w.WriteStartObject();
+                    w.WriteString("type", OneLine(type.Name));
+                    CliJson.Strings(w, "attributes", type.Attributes.Select(OneLine));
+                    w.WriteEndObject();
+                }
+
+                w.WriteEndArray();
+            });
+        }
+
+        foreach (PageType type in types)
+        {
+            Out($"{OneLine(type.Name)}\t{OneLine(string.Join(", ", type.Attributes))}");
         }
 
         return ExitOk;
