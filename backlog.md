@@ -222,6 +222,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#188](backlog/188-cap-the-size-of-note-reads.md) Cap the size of note reads
 - [?] [#189](backlog/189-resolve-person-aliases-without-an-allocation.md) Resolve person aliases without an allocation per mention row
 - [?] [#190](backlog/190-show-the-unreadable-todos-line-at.md) Show the unreadable-todos line at the top of the person page
+- [ ] [#191](backlog/191-archive-done-todos-a-month-after.md) Archive done todos a month after they are done
 
 ## Dropped with the terminal UI
 
