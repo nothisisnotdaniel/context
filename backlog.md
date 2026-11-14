@@ -192,6 +192,9 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#158](backlog/158-same-done-usage-hint-in-the.md) Same /done usage hint in the console and the CLI
 - [?] [#159](backlog/159-fix-the-todo-hint-in-context.md) Fix the /todo hint in context current
 - [?] [#160](backlog/160-replace-the-console-text-parity-rule.md) Replace the console text-parity rule in CLAUDE.md
+- [?] [#161](backlog/161-signed-windows-builds.md) Signed Windows builds
+- [?] [#162](backlog/162-move-the-signing-secrets-into-a.md) Move the signing secrets into a GitHub environment
+- [?] [#163](backlog/163-call-signing-tools-by-absolute-path.md) Call signing tools by absolute path
 
 ## Dropped with the terminal UI
 
