@@ -7,6 +7,10 @@ namespace Context.Tests;
 
 public sealed class MainTests : IDisposable
 {
+    // 150: opening a note runs DesktopState.ReadForEdit on Task.Run, which can take over bUnit's 1 s default on a busy
+    // runner. Every wait passes this bounded timeout; a real failure still fails within it.
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
+
     private readonly DesktopFixture data = new();
 
     public void Dispose() => data.Dispose();
@@ -50,7 +54,7 @@ public sealed class MainTests : IDisposable
         data.AddTodo("Fresh todo", DesktopFixture.Today);
         await data.State!.Refresh();
 
-        cut.WaitForAssertion(() => Assert.Contains("Fresh todo", cut.Find(".todos").TextContent));
+        cut.WaitForAssertion(() => Assert.Contains("Fresh todo", cut.Find(".todos").TextContent), Wait);
     }
 
     // 132 AC-5: a leftover key file of the removed feature still gives the normal three panels with the data.
@@ -64,7 +68,7 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await data.State!.Refresh();
 
-        cut.WaitForAssertion(() => Assert.Contains("Buy milk", cut.Find(".todos-region").TextContent));
+        cut.WaitForAssertion(() => Assert.Contains("Buy milk", cut.Find(".todos-region").TextContent), Wait);
         Assert.Equal(
             ["notes-region", "current-region", "todos-region"],
             cut.Find(".layout").Children.Select(c => c.ClassName ?? string.Empty).ToArray());
@@ -82,10 +86,10 @@ public sealed class MainTests : IDisposable
         await RunPalette(cut, "/new Plan");
 
         Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
-        cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-title").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-title").TextContent), Wait);
         Assert.Equal("Created Plan", cut.Find(".main-status").TextContent);
         Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
-        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")));
+        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
     }
 
     // 134 AC-7: /new without a title is a red usage line and writes nothing; a refusal shows its red text.
@@ -120,7 +124,7 @@ public sealed class MainTests : IDisposable
         Assert.True(File.Exists(Path.Combine(data.Root, "Fresh.md")));
         Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal("Fresh", cut.Find(".note-title").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Fresh", cut.Find(".note-title").TextContent), Wait);
     }
 
     // 134 AC-8: the toolbar shows only while a note is open, with its buttons (136: plus Mark sensitive).
@@ -151,7 +155,7 @@ public sealed class MainTests : IDisposable
 
         await NameButton(cut, "Big").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Can't read Big.", cut.Find(".unreadable").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Can't read Big.", cut.Find(".unreadable").TextContent), Wait);
         Assert.Equal(5, cut.FindAll(".note-toolbar button").Count);
     }
 
@@ -167,7 +171,7 @@ public sealed class MainTests : IDisposable
         await Open(cut, js, "Plan");
 
         await cut.Find(".note-toolbar button.rename").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-toolbar .rename-title").GetAttribute("value")));
+        cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-toolbar .rename-title").GetAttribute("value")), Wait);
         Assert.Equal("text", cut.Find(".rename-title").GetAttribute("type"));
         await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
         if (enter)
@@ -181,11 +185,11 @@ public sealed class MainTests : IDisposable
 
         Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Project.md")));
         Assert.False(File.Exists(Path.Combine(data.Root, "Plan.md")));
-        cut.WaitForAssertion(() => Assert.Equal("Project", cut.Find(".note-title").TextContent));
-        cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.mount").Count));
+        cut.WaitForAssertion(() => Assert.Equal("Project", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.mount").Count), Wait);
         Assert.Empty(cut.FindAll(".rename-title"));
         cut.WaitForAssertion(() => Assert.DoesNotContain(
-            cut.FindAll(".notes-region button.name"), b => b.TextContent == "Plan"));
+            cut.FindAll(".notes-region button.name"), b => b.TextContent == "Plan"), Wait);
     }
 
     // 134 AC-8: Esc or Cancel restores the toolbar and renames nothing.
@@ -308,7 +312,7 @@ public sealed class MainTests : IDisposable
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
         Assert.False(File.Exists(Path.Combine(data.Root, "Plan.md")));
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".current-region .current")));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".current-region .current")), Wait);
         Assert.Empty(cut.FindAll(".note-editor"));
         Assert.Empty(cut.FindAll(".note-toolbar"));
         Assert.Empty(cut.FindAll("[role=dialog]"));
@@ -348,7 +352,7 @@ public sealed class MainTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Equal(
             ["Ghost", "Other"],
-            cut.FindAll(".links-panel .link-row .name").Select(n => n.TextContent).Order(StringComparer.Ordinal).ToArray()));
+            cut.FindAll(".links-panel .link-row .name").Select(n => n.TextContent).Order(StringComparer.Ordinal).ToArray()), Wait);
         IElement region = cut.Find(".current-region");
         Assert.True(region.Children.Index().Single(c => c.Item.ClassList.Contains("note-editor")).Index
             < region.Children.Index().Single(c => c.Item.ClassList.Contains("links-panel")).Index);
@@ -356,16 +360,16 @@ public sealed class MainTests : IDisposable
 
         await cut.Find(".links-panel .link-tags button").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal(
-            ["Other", "Plan"], cut.FindAll(".tag-panel .note-button").Select(b => b.TextContent).ToArray()));
+            ["Other", "Plan"], cut.FindAll(".tag-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Equal("#work", cut.Find(".tag-panel h2 .accent").TextContent);
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         Assert.Single(js.Calls("ContextEditor.mount"));
 
         await cut.Find(".links-panel button.name").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal("Other", cut.Find(".note-title").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Other", cut.Find(".note-title").TextContent), Wait);
         Assert.Empty(cut.FindAll("[role=dialog]"));
         cut.WaitForAssertion(() => Assert.Equal(
-            ["Plan"], cut.FindAll(".links-panel .link-row .name").Select(n => n.TextContent).ToArray()));
+            ["Plan"], cut.FindAll(".links-panel .link-row .name").Select(n => n.TextContent).ToArray()), Wait);
         Assert.Equal("linked from", cut.Find(".links-panel .link-kind").TextContent);
     }
 
@@ -378,7 +382,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".links-panel button.name")));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".links-panel button.name")), Wait);
         js.Edit("[[Other]]\n\nUnsaved\n");
 
         await cut.Find(".links-panel button.name").ClickAsync(new MouseEventArgs());
@@ -386,7 +390,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent);
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal("Other", cut.Find(".note-title").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Other", cut.Find(".note-title").TextContent), Wait);
     }
 
     // 137 AC-8: the panel follows the data, and after a rename it shows the links of the new name.
@@ -398,21 +402,21 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        cut.WaitForAssertion(() => Assert.Equal("Plan has no linked notes.", cut.Find(".links-panel p[role=status]").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Plan has no linked notes.", cut.Find(".links-panel p[role=status]").TextContent), Wait);
 
         data.WriteNote("Third", "see [[Plan]] and [[Project]]\n");
         await data.State!.Refresh();
         cut.WaitForAssertion(() => Assert.Equal(
-            ["Third"], cut.FindAll(".links-panel .link-row .name").Select(n => n.TextContent).ToArray()));
+            ["Third"], cut.FindAll(".links-panel .link-row .name").Select(n => n.TextContent).ToArray()), Wait);
 
         await cut.Find(".note-toolbar button.rename").ClickAsync(new MouseEventArgs());
         await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
         await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
-        cut.WaitForAssertion(() => Assert.Equal("Project", cut.Find(".note-title").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Project", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Equal(
-            ["Third"], cut.FindAll(".links-panel .link-row .name").Select(n => n.TextContent).ToArray()));
-        cut.WaitForAssertion(() => Assert.Equal(1, js.Calls("ContextEditor.mount").Count - 1));
+            ["Third"], cut.FindAll(".links-panel .link-row .name").Select(n => n.TextContent).ToArray()), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(1, js.Calls("ContextEditor.mount").Count - 1), Wait);
         Assert.DoesNotContain("Plan has no linked notes.", cut.Find(".links-panel").TextContent);
     }
 
@@ -429,7 +433,7 @@ public sealed class MainTests : IDisposable
         await Open(cut, js, "Secret");
         await data.State!.Refresh();
 
-        cut.WaitForAssertion(() => Assert.Equal("Sensitive notes have no links.", cut.Find(".links-panel p[role=status]").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Sensitive notes have no links.", cut.Find(".links-panel p[role=status]").TextContent), Wait);
         Assert.True(cut.Find(".links-panel p[role=status]").ClassList.Contains("grey"));
         Assert.Empty(cut.FindAll(".links-panel .link-rows"));
         Assert.Equal(1, data.Keys.Agrees);
@@ -447,7 +451,7 @@ public sealed class MainTests : IDisposable
 
         await NameButton(cut, "Secret").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Can't unlock Secret.", cut.Find(".unreadable").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Can't unlock Secret.", cut.Find(".unreadable").TextContent), Wait);
         Assert.Equal("Sensitive notes have no links.", cut.Find(".links-panel p[role=status]").TextContent);
         Assert.Equal(1, data.Keys.Agrees);
         Assert.Empty(js.Calls("ContextEditor.mount"));
@@ -465,13 +469,13 @@ public sealed class MainTests : IDisposable
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
 
         await Open(cut, js, "Plan");
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".links-panel .link-row")));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".links-panel .link-row")), Wait);
         await RunPalette(cut, "/tags");
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tags-panel .tag-list button")));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tags-panel .tag-list button")), Wait);
         await cut.Find(".tags-panel .tag-list button").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll(".tag-panel .note-button").Count));
+        cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll(".tag-panel .note-button").Count), Wait);
         await data.State!.Refresh();
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".links-panel .link-row")));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".links-panel .link-row")), Wait);
 
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
@@ -527,12 +531,12 @@ public sealed class MainTests : IDisposable
         await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
         Assert.Single(cut.FindAll(".settings-panel"));
         await NameButton(cut, "Plan").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".settings-panel")));
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".settings-panel")), Wait);
 
         await RunPalette(cut, "/settings");
         Assert.Single(cut.FindAll(".settings-panel"));
         await RunPalette(cut, "/current");
-        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".settings-panel")));
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".settings-panel")), Wait);
     }
 
     // 138 AC-1: opening the settings changes no file and sends no request, with or without a link stored.
@@ -553,7 +557,7 @@ public sealed class MainTests : IDisposable
         int requests = data.Http.Requests;
 
         await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".settings-panel").TextContent, StringComparison.Ordinal));
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".settings-panel").TextContent, StringComparison.Ordinal), Wait);
         await cut.Find(".settings-panel button.close").ClickAsync(new MouseEventArgs());
 
         Assert.Equal(before, FileSnapshot.Take(data.Root));
@@ -688,8 +692,8 @@ public sealed class MainTests : IDisposable
         Assert.Equal(1, data.Dialog.ImportOpens);
         Assert.Equal(["Chosen.md"], FileSnapshot.Take(data.Root, TagIndex.FileName).Keys);
         cut.WaitForAssertion(() => Assert.StartsWith(
-            "Imported Chosen.", Assert.Single(cut.FindAll(".import-result p")).TextContent, StringComparison.Ordinal));
-        cut.WaitForAssertion(() => Assert.Contains("Chosen", cut.Find(".note-list").TextContent));
+            "Imported Chosen.", Assert.Single(cut.FindAll(".import-result p")).TextContent, StringComparison.Ordinal), Wait);
+        cut.WaitForAssertion(() => Assert.Contains("Chosen", cut.Find(".note-list").TextContent), Wait);
     }
 
     // 139 AC-9: /import with a cancelled dialog changes nothing; a replacing file asks in the same dialog as the button.
@@ -710,21 +714,21 @@ public sealed class MainTests : IDisposable
         data.Dialog.ImportPaths = [source];
         await RunPalette(cut, "/import");
 
-        cut.WaitForAssertion(() => Assert.Equal("Replace Plan?", cut.Find("[role=dialog] .question").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Replace Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
         Assert.Equal("old\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
         Assert.Equal("new\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         cut.WaitForAssertion(() => Assert.StartsWith(
-            "Replaced Plan.", Assert.Single(cut.FindAll(".import-result p")).TextContent, StringComparison.Ordinal));
+            "Replaced Plan.", Assert.Single(cut.FindAll(".import-result p")).TextContent, StringComparison.Ordinal), Wait);
     }
 
     private static async Task Open(IRenderedComponent<Main> cut, EditorJs js, string name)
     {
         int mounts = js.Calls("ContextEditor.mount").Count;
         await NameButton(cut, name).ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count));
-        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")));
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
     }
 
     // 140 AC-6: the capture box is the first thing in the main region, whatever else is shown there.
@@ -746,13 +750,13 @@ public sealed class MainTests : IDisposable
 
         AssertBox();
         await RunPalette(cut, "/settings");
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".settings-panel")));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".settings-panel")), Wait);
         AssertBox();
         await RunPalette(cut, "/tags");
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tags-panel")));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tags-panel")), Wait);
         AssertBox();
         await RunPalette(cut, "/tags work");
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-panel")));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-panel")), Wait);
         AssertBox();
         await Open(cut, js, "Plan");
         Assert.Single(cut.FindAll(".note-editor"));
@@ -783,7 +787,7 @@ public sealed class MainTests : IDisposable
 
         Assert.Equal("# inbox\n- 2026-10-29 10:05 call Anna\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
         Assert.Equal("Captured.", cut.Find(".capture-status").TextContent);
-        cut.WaitForAssertion(() => Assert.Equal(["inbox"], cut.FindAll(".note-list button.name").Select(b => b.TextContent).ToArray()));
+        cut.WaitForAssertion(() => Assert.Equal(["inbox"], cut.FindAll(".note-list button.name").Select(b => b.TextContent).ToArray()), Wait);
     }
 
     // 140 AC-8: with unsaved changes in the open inbox a capture (box or palette) writes nothing and says to save.
@@ -849,14 +853,14 @@ public sealed class MainTests : IDisposable
 
         string captured = "# inbox\n- 2026-10-29 10:05 call Anna\n";
         Assert.Equal(captured, File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
-        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count));
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         Assert.Equal(captured, js.MountedText());
         Assert.Equal(focuses, js.Calls("ContextEditor.focus").Count);
 
         js.Edit(captured + "\nMore\n");
         await cut.Find("button.save").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Saved inbox.", cut.Find(".note-editor .status").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Saved inbox.", cut.Find(".note-editor .status").TextContent), Wait);
         Assert.Equal(captured + "\nMore\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
     }
 
@@ -885,7 +889,7 @@ public sealed class MainTests : IDisposable
 
         await cut.Find("button.save").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".note-editor .status").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".note-editor .status").TextContent), Wait);
         Assert.Equal("# Plan\n\nUnsaved\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
     }
 
