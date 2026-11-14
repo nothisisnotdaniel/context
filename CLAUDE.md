@@ -623,11 +623,11 @@ Every factory agent reads this file before working on Context. Keep it short and
     `DesktopActions.cs` and `DesktopState.cs` name no `ILogger`, `Console.`, `Debug.` or `Trace.`.
     Colours by CSS class (`accent`, `grey`, `red`, dates `overdue`/`today`/`later`); long lines
     cut by CSS with the full text in `title`.
-  - `tests/Context.Tests/`: references both projects; test files use the file-scoped `namespace Context.Tests;`; one test
-    class per production class (Core and `Cli` alike), `CiWorkflowTests.cs` and `ReleaseWorkflowTests.cs` (the workflows
-    and their four jobs, the release scripts and the tool packaging, with `WorkflowYaml.cs` and its
-    `WorkflowYamlTests.cs`), `CoreDependencyTests.cs` (architecture test: no P/Invoke and no sealing code in Core, and no
-    terminal UI assembly, package or source mention in any project), plus shared helpers such as
+  - `tests/Context.Tests/`: references both projects; test files use the file-scoped `namespace Context.Tests;`;
+    one test class per production class (Core and `Cli` alike), `CiWorkflowTests.cs`, `ReleaseWorkflowTests.cs` and
+    `CoreDependencyTests.cs` (the workflows and their four jobs, the release scripts and the tool packaging, with
+    `WorkflowYaml.cs` and its `WorkflowYamlTests.cs`; the architecture test: no P/Invoke and no sealing code in Core,
+    and no terminal UI assembly, package or source mention in any project), plus shared helpers such as
     `RemovedFeature.cs` and `RemovedConsole.cs` (the names of the removed whole-folder protection and of the removed
     terminal console, spelled in pieces; `RemovedFeatureSourceTests.cs` fails when `src/`, `tests/` or this file
     names either again) and `FakeHttpHandler.cs` (canned HTTP responses). The view tests (`CurrentViewTests`, `TagsViewTests`, `LinksViewTests`, `CalendarLinkViewTests`) check the view data field by field. Note, todo, tag and calendar tests use their
