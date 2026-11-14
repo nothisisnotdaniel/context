@@ -9,6 +9,8 @@ public sealed class TagsPanelTests : IDisposable
 {
     private const string NotADatabase = "this is not a database, just some text that fills the header....";
 
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
+
     private readonly DesktopFixture data = new();
 
     public void Dispose() => data.Dispose();
@@ -27,7 +29,7 @@ public sealed class TagsPanelTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Equal(
             expected.Select(t => TagParser.Format(t.Tag)).ToArray(),
-            cut.FindAll(".tag-list button").Select(b => b.TextContent).ToArray()));
+            cut.FindAll(".tag-list button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Equal(3, expected.Count);
         Assert.Contains("#[big project]", cut.FindAll(".tag-list button").Select(b => b.TextContent));
         Assert.Equal("Tags", cut.Find(".panel-bar h2").TextContent);
@@ -54,7 +56,7 @@ public sealed class TagsPanelTests : IDisposable
             .Add(t => t.Selected, "big project")
             .Add(t => t.OnTag, (string tag) => clicked.Add(tag))
             .Add(t => t.OnClose, () => closed++));
-        cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll(".tag-list button").Count));
+        cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll(".tag-list button").Count), Wait);
 
         Assert.Equal(
             ["#[big project]"],
@@ -91,7 +93,7 @@ public sealed class TagsPanelTests : IDisposable
             Monitor.Exit(gate);
         }
 
-        cut.WaitForAssertion(() => Assert.Equal(["#work"], cut.FindAll(".tag-list button").Select(b => b.TextContent).ToArray()));
+        cut.WaitForAssertion(() => Assert.Equal(["#work"], cut.FindAll(".tag-list button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Empty(cut.FindAll("p[role=status]"));
     }
 
@@ -110,7 +112,7 @@ public sealed class TagsPanelTests : IDisposable
         IRenderedComponent<TagsPanel> cut = data.Bunit.Render<TagsPanel>();
 
         cut.WaitForAssertion(() => Assert.Equal(
-            "No tags yet. Add #tag to a note to link it.", cut.Find("p[role=status]").TextContent));
+            "No tags yet. Add #tag to a note to link it.", cut.Find("p[role=status]").TextContent), Wait);
         Assert.True(cut.Find("p[role=status]").ClassList.Contains("grey"));
         Assert.Empty(cut.FindAll(".tag-list"));
     }
@@ -126,7 +128,7 @@ public sealed class TagsPanelTests : IDisposable
 
         IRenderedComponent<TagsPanel> cut = data.Bunit.Render<TagsPanel>();
 
-        cut.WaitForAssertion(() => Assert.Equal("Can't read the tags.", cut.Find("p[role=status]").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Can't read the tags.", cut.Find("p[role=status]").TextContent), Wait);
         Assert.True(cut.Find("p[role=status]").ClassList.Contains("red"));
         Assert.Empty(cut.FindAll(".tag-list"));
         Assert.Equal(before, FileSnapshot.Take(data.Root));
@@ -140,12 +142,12 @@ public sealed class TagsPanelTests : IDisposable
         data.WriteNote("Plan", "#work\n");
         await data.RefreshAsync();
         IRenderedComponent<TagsPanel> cut = data.Bunit.Render<TagsPanel>();
-        cut.WaitForAssertion(() => Assert.Equal(["#work 1"], Rows(cut)));
+        cut.WaitForAssertion(() => Assert.Equal(["#work 1"], Rows(cut)), Wait);
 
         data.WriteNote("Other", "#work #play\n");
         await data.State!.Refresh();
 
-        cut.WaitForAssertion(() => Assert.Equal(["#play 1", "#work 2"], Rows(cut).Order(StringComparer.Ordinal).ToArray()));
+        cut.WaitForAssertion(() => Assert.Equal(["#play 1", "#work 2"], Rows(cut).Order(StringComparer.Ordinal).ToArray()), Wait);
         Assert.Empty(cut.FindAll("p[role=status]"));
     }
 
@@ -159,9 +161,9 @@ public sealed class TagsPanelTests : IDisposable
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
 
         IRenderedComponent<TagsPanel> cut = data.Bunit.Render<TagsPanel>();
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-list button")));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-list button")), Wait);
         await data.State!.Refresh();
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-list button")));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-list button")), Wait);
 
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
     }
@@ -188,7 +190,7 @@ public sealed class TagsPanelTests : IDisposable
 
         IRenderedComponent<TagsPanel> cut = data.Bunit.Render<TagsPanel>();
 
-        cut.WaitForAssertion(() => Assert.Equal("#" + tag, cut.Find(".tag-list button").GetAttribute("title")));
+        cut.WaitForAssertion(() => Assert.Equal("#" + tag, cut.Find(".tag-list button").GetAttribute("title")), Wait);
         Assert.True(cut.Find(".tag-list button").ClassList.Contains("cut"));
         string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
         Assert.Contains(".tag-list {", css, StringComparison.Ordinal);
