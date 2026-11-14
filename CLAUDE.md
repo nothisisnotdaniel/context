@@ -565,7 +565,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `PersonPanel` (job 156) sits above `LinksPanel` on a person page (`People.PersonOf(name)`) and lists
     `DesktopState.Person(name)` (`PersonView.Build`): `Mentioned in` note buttons (through `RequestOpen`) and
     `Appointments` (date, time text, one-line title and location); grey `No notes or appointments mention <name>.`,
-    red `Can't read the mentions.`; above all rows (once loaded, in every state) one red `p.alias-clash` line per
+    red `Can't read the mentions.`; above all rows (once loaded, in every state) one red `p.alias-clash` (`role="status"`) line per
     `PersonView.AliasClashes` entry; it follows the same read-only, `indexGate`, reload and stale-result rules. A
     mention chip calls `OnPerson`; `Main` (asking first when dirty) calls `DesktopActions.OpenPerson` and opens the
     result, or shows its red refusal.

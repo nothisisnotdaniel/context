@@ -119,18 +119,22 @@ internal sealed class PersonAliases
             all.Add((key, pageAliases));
         }
 
+        // The alias keys already kept per person, so merging stays linear in the number of aliases.
+        Dictionary<string, HashSet<string>> kept = new(StringComparer.Ordinal);
         foreach ((string key, IReadOnlyList<string> pageAliases) in all)
         {
             if (!aliases.TryGetValue(key, out List<string>? own))
             {
                 own = [];
                 aliases[key] = own;
+                kept[key] = new HashSet<string>(StringComparer.Ordinal);
             }
 
+            HashSet<string> ownKeys = kept[key];
             foreach (string alias in pageAliases)
             {
                 string aliasKey = PersonParser.Key(alias);
-                if (aliasKey == key || own.Any(a => PersonParser.Key(a) == aliasKey))
+                if (aliasKey == key || !ownKeys.Add(aliasKey))
                 {
                     continue;
                 }

@@ -13,7 +13,7 @@
     {
         @foreach (AliasClash clash in view.AliasClashes)
         {
-            <p class="red alias-clash">@DesktopText.OneLine(clash.Text)</p>
+            <p class="red alias-clash" role="status">@DesktopText.OneLine(clash.Text)</p>
         }
         @if (view.IndexUnreadable && view.Appointments.Count == 0)
         {

@@ -179,11 +179,12 @@ public sealed class PersonPanelTests : IDisposable
             ],
             cut.FindAll("p.alias-clash").Select(p => p.TextContent).ToArray()), Wait);
         Assert.All(cut.FindAll("p.alias-clash"), p => Assert.True(p.ClassList.Contains("red")));
+        Assert.All(cut.FindAll("p.alias-clash"), p => Assert.Equal("status", p.GetAttribute("role")));
         IElement section = cut.Find("section.person-panel");
         Assert.Equal(
-            ["alias-clash", "alias-clash", "status"],
-            section.Children.Select(c => c.ClassList.Contains("alias-clash") ? "alias-clash" : c.GetAttribute("role") ?? c.TagName).ToArray());
-        Assert.Equal("No notes or appointments mention Anna Schmidt.", cut.Find("p[role=status]").TextContent);
+            ["alias-clash", "alias-clash", "grey"],
+            section.Children.Select(c => c.ClassList.Contains("alias-clash") ? "alias-clash" : c.ClassName ?? c.TagName).ToArray());
+        Assert.Equal("No notes or appointments mention Anna Schmidt.", cut.Find("p.grey[role=status]").TextContent);
 
         // With mentions the lines stay above the headings.
         data.WriteNote("Plan", "@[AS]\n");
