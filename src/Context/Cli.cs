@@ -24,7 +24,8 @@ internal sealed class Cli
     private const string HelpHint = "Run 'context help'.";
     private const string TodosUnreadable = "Can't read todos.json.";
     private const string IndexUnreadable = "Can't read context.db.";
-    private const string JsonOnly = "--json works only with version, todos, notes, note show, tags, links and current.";
+    private const string PersonForm = "Type: context person <name>.";
+    private const string JsonOnly = "--json works only with version, todos, notes, note show, tags, links, people, person and current.";
 
     // Every command with its usage and what it does, in the order help lists them.
     private static readonly (string Usage, string Description)[] Commands =
@@ -39,10 +40,12 @@ internal sealed class Cli
         ("note show <name...>", "Print a note."),
         ("tags [tag...]", "List tags with counts, or the notes with a tag."),
         ("links <note...>", "List the notes linked to a note."),
+        ("people", "List the people mentioned with @[Name], with counts."),
+        ("person <name...>", "List the notes and appointments that mention a person."),
         ("current", "Today's appointments, due todos and linked notes."),
         ("import <path>", "Store a Markdown file as a note."),
         ("export <note> <path>", "Write a note to a new plain file."),
-        ("<command> --json", "Print one JSON object: version, todos, notes, note show, tags, links, current."),
+        ("<command> --json", "Print one JSON object: version, todos, notes, note show, tags, links, people, person, current."),
     ];
 
     private readonly TextWriter stdout;
@@ -194,6 +197,17 @@ internal sealed class Cli
 
                 string linked = string.Join(' ', args);
                 return s => Links(s, linked);
+            case "people":
+                return NoArguments("people", args, out usage, People);
+            case "person":
+                string person = string.Join(' ', args);
+                if (person.Trim().Length == 0)
+                {
+                    usage = PersonForm;
+                    return null;
+                }
+
+                return s => Person(s, person);
             case "current":
                 return NoArguments("current", args, out usage, Current);
             case "import":
@@ -606,6 +620,123 @@ internal sealed class Cli
         }
     }
 
+    private int People(Session session)
+    {
+        IReadOnlyList<PersonCount> people;
+        try
+        {
+            session.Index.Sync(session.Notes);
+            people = session.Index.People();
+        }
+        catch (TagIndexException)
+        {
+            return Error(IndexUnreadable);
+        }
+
+        if (session.Json)
+        {
+            return Json(w =>
+            {
+                w.WriteStartArray("people");
+                foreach (PersonCount person in people)
+                {
+                    w.WriteStartObject();
+                    w.WriteString("person", OneLine(person.Person));
+                    w.WriteNumber("count", person.Count);
+                    w.WriteEndObject();
+                }
+
+                w.WriteEndArray();
+            });
+        }
+
+        foreach (PersonCount person in people)
+        {
+            Out($"{OneLine(person.Person)}\t{person.Count.ToString(CultureInfo.InvariantCulture)}");
+        }
+
+        return ExitOk;
+    }
+
+    private int Person(Session session, string argument)
+    {
+        PersonView view = PersonView.Build(session.Index, session.Notes, session.Calendar, session.Feed, argument);
+        if (view.Kind == PersonViewKind.MissingArgument)
+        {
+            return Usage(PersonForm);
+        }
+
+        if (view.IndexUnreadable)
+        {
+            return Error(IndexUnreadable);
+        }
+
+        foreach (string file in view.UnreadableCalendarFiles)
+        {
+            Err($"Can't read {CalendarStore.FolderName}/{OneLine(file)}");
+        }
+
+        int exit = view.UnreadableCalendarFiles.Count > 0 ? ExitError : ExitOk;
+        if (session.Json)
+        {
+            stdout.Write(CliJson.Document(w =>
+            {
+                w.WriteString("person", OneLine(view.Person));
+                CliJson.Strings(w, "notes", view.Notes.Select(OneLine));
+                w.WriteStartArray("appointments");
+                foreach (Appointment appointment in view.Appointments)
+                {
+                    WriteAppointment(w, appointment, view.Zone);
+                }
+
+                w.WriteEndArray();
+            }));
+            return exit;
+        }
+
+        if (view.Kind == PersonViewKind.NoMentions)
+        {
+            Out($"No notes or appointments mention {OneLine(view.Person)}.");
+            return exit;
+        }
+
+        Out("Notes");
+        foreach (string note in view.Notes)
+        {
+            Out(OneLine(note));
+        }
+
+        Out("Appointments");
+        foreach (Appointment appointment in view.Appointments)
+        {
+            string title = appointment.Title.Length == 0 ? "(no title)" : appointment.Title;
+            string date = Date(DateOnly.FromDateTime(appointment.Start));
+            Out($"{date}\t{PersonView.TimeText(appointment)}\t{OneLine(title)}");
+        }
+
+        return exit;
+    }
+
+    // One appointment as a JSON object: start, end, allDay, title, location (null when missing).
+    private static void WriteAppointment(Utf8JsonWriter w, Appointment appointment, TimeZoneInfo zone)
+    {
+        w.WriteStartObject();
+        w.WriteString("start", CliJson.Time(appointment.Start, zone));
+        w.WriteString("end", CliJson.Time(appointment.End, zone));
+        w.WriteBoolean("allDay", appointment.AllDay);
+        w.WriteString("title", OneLine(appointment.Title));
+        if (appointment.Location is null)
+        {
+            w.WriteNull("location");
+        }
+        else
+        {
+            w.WriteString("location", OneLine(appointment.Location));
+        }
+
+        w.WriteEndObject();
+    }
+
     // The text of the link column; empty for a link by shared tags only.
     private static string LinkText(NoteLink link)
     {
@@ -745,21 +876,7 @@ internal sealed class Cli
             w.WriteStartArray("appointments");
             foreach (Appointment appointment in view.Appointments)
             {
-                w.WriteStartObject();
-                w.WriteString("start", CliJson.Time(appointment.Start, shownZone));
-                w.WriteString("end", CliJson.Time(appointment.End, shownZone));
-                w.WriteBoolean("allDay", appointment.AllDay);
-                w.WriteString("title", OneLine(appointment.Title));
-                if (appointment.Location is null)
-                {
-                    w.WriteNull("location");
-                }
-                else
-                {
-                    w.WriteString("location", OneLine(appointment.Location));
-                }
-
-                w.WriteEndObject();
+                WriteAppointment(w, appointment, shownZone);
             }
 
             w.WriteEndArray();

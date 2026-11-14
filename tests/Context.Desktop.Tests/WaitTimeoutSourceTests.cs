@@ -6,6 +6,7 @@ namespace Context.Tests;
 // class's bounded Wait constant; no test file changes bUnit's global default wait instead.
 // 150: MainTests and EditingFlowTests open notes through DesktopState.ReadForEdit on Task.Run and follow the same rule.
 // 154: TagsPanelTests waits on the tag load behind Task.Run and follows it too.
+// 156: PersonPanelTests waits on the person load behind Task.Run and follows it too.
 public sealed class WaitTimeoutSourceTests
 {
     private const string TestsFolder = "tests/Context.Desktop.Tests";
@@ -24,6 +25,7 @@ public sealed class WaitTimeoutSourceTests
     [InlineData("tests/Context.Desktop.Tests/MainTests.cs")]
     [InlineData("tests/Context.Desktop.Tests/EditingFlowTests.cs")]
     [InlineData("tests/Context.Desktop.Tests/TagsPanelTests.cs")]
+    [InlineData("tests/Context.Desktop.Tests/PersonPanelTests.cs")]
     public void EveryWaitForAssertion_PassesTheWaitConstant(string file)
     {
         string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), file));

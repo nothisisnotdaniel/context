@@ -68,7 +68,18 @@ internal sealed class CalendarStore
     {
         DateTime from = day.ToDateTime(TimeOnly.MinValue);
         DateTime to = from.AddDays(1);
-        List<Appointment> appointments = extra.Where(a => Overlaps(a, from, to)).ToList();
+        return Read(extra, a => Overlaps(a, from, to));
+    }
+
+    /// <summary>
+    /// Every event in the files plus <paramref name="extra"/>, sorted like <see cref="Day(DateOnly, IReadOnlyList{Appointment})"/>
+    /// (all-day first, then by start, then by title), and the names of the files that couldn't be read.
+    /// </summary>
+    public CalendarDay All(IReadOnlyList<Appointment> extra) => Read(extra, _ => true);
+
+    private CalendarDay Read(IReadOnlyList<Appointment> extra, Func<Appointment, bool> keep)
+    {
+        List<Appointment> appointments = extra.Where(keep).ToList();
         List<string> unreadable = [];
         foreach (string path in Files(unreadable))
         {
@@ -84,7 +95,7 @@ internal sealed class CalendarStore
             {
                 foreach (Appointment appointment in IcsParser.Parse(text, local))
                 {
-                    if (Overlaps(appointment, from, to))
+                    if (keep(appointment))
                     {
                         appointments.Add(appointment);
                     }

@@ -11,13 +11,21 @@ internal sealed record Appointment
     /// <param name="start">Start in the local zone (all-day events: midnight of the first day).</param>
     /// <param name="end">End in the local zone (all-day events: midnight after the last day, exclusive).</param>
     /// <param name="allDay">True for a <c>VALUE=DATE</c> start.</param>
-    public Appointment(string title, string? location, DateTime start, DateTime end, bool allDay)
+    /// <param name="attendees">The <c>CN</c> names of the <c>ATTENDEE</c>s; none when left out.</param>
+    public Appointment(
+        string title,
+        string? location,
+        DateTime start,
+        DateTime end,
+        bool allDay,
+        IReadOnlyList<string>? attendees = null)
     {
         Title = title;
         Location = location;
         Start = start;
         End = end;
         AllDay = allDay;
+        Attendees = attendees ?? [];
     }
 
     /// <summary><c>SUMMARY</c>, or an empty string when it is missing.</summary>
@@ -34,11 +42,30 @@ internal sealed record Appointment
 
     /// <summary>True for an all-day event.</summary>
     public bool AllDay { get; }
+
+    /// <summary>
+    /// The names (<c>CN</c> parameter) of the event's <c>ATTENDEE</c>s, unescaped and normalized like a mention
+    /// (<see cref="PersonParser.Normalize"/>), in file order. Attendees without a valid name are left out, and the
+    /// attendee's address (the property value) is never read.
+    /// </summary>
+    public IReadOnlyList<string> Attendees { get; }
+
+    /// <summary>Equal when every field is, with <see cref="Attendees"/> compared name by name (ordinal).</summary>
+    public bool Equals(Appointment? other) =>
+        other is not null
+        && string.Equals(Title, other.Title, StringComparison.Ordinal)
+        && string.Equals(Location, other.Location, StringComparison.Ordinal)
+        && Start == other.Start
+        && End == other.End
+        && AllDay == other.AllDay
+        && Attendees.SequenceEqual(other.Attendees, StringComparer.Ordinal);
+
+    public override int GetHashCode() => HashCode.Combine(Title, Location, Start, End, AllDay, Attendees.Count);
 }
 
 /// <summary>
-/// Reads the part of iCalendar (RFC 5545) that <c>/current</c> needs: the <c>SUMMARY</c>, <c>LOCATION</c>,
-/// <c>DTSTART</c>, <c>DTEND</c> and <c>STATUS</c> of each <c>VEVENT</c>. Everything else, including recurrence
+/// Reads the part of iCalendar (RFC 5545) that <c>/current</c> and the person pages need: the <c>SUMMARY</c>,
+/// <c>LOCATION</c>, <c>DTSTART</c>, <c>DTEND</c>, <c>STATUS</c> and <c>ATTENDEE</c> names of each <c>VEVENT</c>. Everything else, including recurrence
 /// (<c>RRULE</c>, <c>RDATE</c>, <c>EXDATE</c>) and nested components such as <c>VALARM</c>, is ignored.
 /// The input is untrusted: it is scanned once, line by line, with no regexes.
 /// </summary>
@@ -326,6 +353,7 @@ internal static class IcsParser
         private ContentLine? start;
         private ContentLine? end;
         private bool cancelled;
+        private readonly List<string> attendees = [];
 
         public void Add(ContentLine content)
         {
@@ -344,6 +372,16 @@ internal static class IcsParser
             else if (content.Is("DTEND"))
             {
                 end ??= content;
+            }
+            else if (content.Is("ATTENDEE"))
+            {
+                // Only the CN name; the value (the mailto: address) is never read.
+                string? common = content.Parameter("CN");
+                string? name = common is null ? null : PersonParser.Normalize(Unescape(common));
+                if (name is not null)
+                {
+                    attendees.Add(name);
+                }
             }
             else if (content.Is("STATUS"))
             {
@@ -391,7 +429,7 @@ internal static class IcsParser
                 return null;
             }
 
-            return new Appointment(summary ?? string.Empty, location, startTime, endTime, allDay);
+            return new Appointment(summary ?? string.Empty, location, startTime, endTime, allDay, attendees);
         }
     }
 

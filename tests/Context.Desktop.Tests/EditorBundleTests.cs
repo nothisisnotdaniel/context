@@ -104,6 +104,7 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
     }
 
     // AC-2: the editor's tag and link nodes are exactly what TagParser and NoteLinkParser find, fixture by fixture.
+    // 156 AC-9: so are its mention nodes and PersonParser.
     [Theory]
     [MemberData(nameof(All))]
     public void InlineNodes_MatchCoreParsers(string file)
@@ -117,6 +118,23 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
         Assert.Equal(
             NoteLinkParser.Parse(markdown).ToArray(),
             nodes.RootElement.GetProperty("links").EnumerateArray().Select(t => t.GetString()!).ToArray());
+        Assert.Equal(
+            PersonParser.Parse(markdown).ToArray(),
+            nodes.RootElement.GetProperty("mentions").EnumerateArray().Select(t => t.GetString()!).ToArray());
+    }
+
+    // 156 AC-9: the mentions fixture finds exactly the AC-1 mentions, and none of the cases that are no mention.
+    [Fact]
+    public void Mentions_Fixture_HasEveryCase()
+    {
+        string markdown = Read("lossless/mentions.md");
+
+        Assert.Equal(["Anna Schmidt", "Bob Jones", "Frida", "Greta"], PersonParser.Parse(markdown));
+        using JsonDocument nodes = JsonDocument.Parse(bundle.Call("inlineNodes", markdown));
+        Assert.Equal(
+            ["Anna Schmidt", "Bob Jones", "Frida", "Greta"],
+            nodes.RootElement.GetProperty("mentions").EnumerateArray().Select(t => t.GetString()!).ToArray());
+        Assert.Equal(markdown, bundle.Call("roundTrip", markdown));
     }
 
     // AC-2: nothing inside a fenced block or a code span becomes a tag or link node.
@@ -131,7 +149,9 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
         Assert.All(code, c => Assert.DoesNotContain(Nodes(c).Skip(1), n => Type(n) is "tag" or "noteLink"));
         Assert.DoesNotContain(Nodes(doc.RootElement), n => Type(n) is "tag" or "noteLink");
         Assert.Contains(Nodes(doc.RootElement), n => Type(n) == "text" && Text(n) == "#code" && HasMark(n, "code"));
-        Assert.Equal("{\"tags\":[],\"links\":[]}", bundle.Call("inlineNodes", "`#x [[y]]`\n\n```\n#z\n```\n"));
+        Assert.Equal(
+            "{\"tags\":[],\"links\":[],\"mentions\":[]}",
+            bundle.Call("inlineNodes", "`#x [[y]] @[w]`\n\n```\n#z @[v]\n```\n"));
     }
 
     // AC-3: raw HTML is parsed as literal text, never as an html node, and round-trips unchanged.
@@ -207,6 +227,7 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
     [Theory]
     [InlineData("tag", "#work", "chip tag accent", "button")]
     [InlineData("noteLink", "[[A|b]]", "chip note-link accent", "link")]
+    [InlineData("mention", "@[Anna]", "chip mention accent", "link")]
     public void ChipDom_IsAFocusableSpanWithARole(string kind, string raw, string cssClass, string role)
     {
         string call = $"ContextEditor.chipDom({JsonSerializer.Serialize(kind)}, {JsonSerializer.Serialize(raw)})";

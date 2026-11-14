@@ -117,6 +117,12 @@ internal sealed class CalendarFeed
         }
     }
 
+    /// <summary>
+    /// The text of the cached copy, however old, or <c>null</c> when there is none or it can't be read (or is over
+    /// <see cref="CalendarStore.MaxFileBytes"/>). Makes no request and never throws.
+    /// </summary>
+    public string? ReadCache() => CalendarStore.ReadText(CachePath);
+
     /// <summary>Deletes the cached copy, if there is one.</summary>
     public void ClearCache()
     {

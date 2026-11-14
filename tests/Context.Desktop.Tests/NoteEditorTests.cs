@@ -356,6 +356,27 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Equal([tag], tags);
     }
 
+    // 156 AC-10: a mention click passes the name as PersonParser finds it; raw text that is no mention passes nothing.
+    [Theory]
+    [InlineData("@[  Anna   Schmidt ]", "Anna Schmidt")]
+    [InlineData("@[a/b]", null)]
+    public async Task PersonClick_PassesName(string raw, string? person)
+    {
+        data.WriteNote("Plan", raw + "\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        List<string> people = [];
+        await data.RefreshAsync();
+        IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p
+            .Add(e => e.Name, "Plan")
+            .Add(e => e.OnPerson, (string name) => people.Add(name)));
+        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")));
+
+        await cut.InvokeAsync(() => js.Page().OnPerson(raw));
+
+        Assert.Equal(person is null ? [] : [person], people);
+        Assert.False(File.Exists(Path.Combine(data.Root, "people.md")));
+    }
+
     // 141 AC-1: a freshly opened note shows no dot, plain or sensitive.
     [Theory]
     [InlineData(false)]

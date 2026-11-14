@@ -1,13 +1,14 @@
-// The document schema: the CommonMark nodes, task list items, and the tag and noteLink atoms.
+// The document schema: the CommonMark nodes, task list items, and the tag, noteLink and mention atoms.
 // toDOM never builds <img>, <a href> or inline styles: images are a grey text placeholder and links are plain spans.
 import { Schema } from "prosemirror-model";
 
 const chips = {
   tag: { name: "tag", role: "button" },
   noteLink: { name: "note-link", role: "link" },
+  mention: { name: "mention", role: "link" },
 };
 
-/** The toDOM spec of a chip (kind "tag" or "noteLink"): a span the keyboard can reach, with raw as its text. */
+/** The toDOM spec of a chip (kind "tag", "noteLink" or "mention"): a span the keyboard can reach, with raw as its text. */
 export function chipDom(kind, raw) {
   const chip = chips[kind];
   return ["span", { class: "chip " + chip.name + " accent", title: raw, tabindex: "0", role: chip.role }, raw];
@@ -100,6 +101,15 @@ export const schema = new Schema({
       selectable: true,
       attrs: { raw: {}, target: {} },
       toDOM(node) { return chipDom("noteLink", node.attrs.raw); },
+    },
+    // @[Person name]; raw keeps the text exactly as written, name is the normalized person name.
+    mention: {
+      inline: true,
+      group: "inline",
+      atom: true,
+      selectable: true,
+      attrs: { raw: {}, name: {} },
+      toDOM(node) { return chipDom("mention", node.attrs.raw); },
     },
     image: {
       inline: true,

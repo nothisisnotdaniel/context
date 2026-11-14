@@ -181,6 +181,9 @@ internal sealed class DesktopActions
     /// <summary>The red line when the parent typed for a move names no note.</summary>
     public static string NoParentText(string parent) => $"No note called {parent}. Nothing was moved.";
 
+    /// <summary>The red line when a person's page can't be opened or made (invalid name, sensitive people note).</summary>
+    public static string PersonRefusedText(string name) => $"Can't make a page for {name}. Nothing was done.";
+
     /// <summary>The red line when a note can't go under that parent (or can't take a subpage).</summary>
     public static string NoSubpagesText(string parent) => $"{parent} can't have subpages. Nothing was done.";
 
@@ -329,6 +332,17 @@ internal sealed class DesktopActions
     /// note's full name when done.
     /// </summary>
     public Task<ActionResult> CreateSubpage(string parent, string title) => Run(() => CreateSubpageNow(parent, title));
+
+    /// <summary>
+    /// Opens the page of the person <paramref name="name"/> (<c>Anna Schmidt</c> or <c>@[Anna Schmidt]</c>, normalized
+    /// like a mention by <see cref="PersonParser.NormalizeTyped"/>): the note <c>people/&lt;Name&gt;</c>. A missing
+    /// top-level <c>people</c> note is created through <see cref="NoteStore.Create"/> (an existing one is reused, in any
+    /// case), and a missing person page through <see cref="NoteStore.CreateChild"/>; an existing page is reused, so a
+    /// second call writes nothing (<see cref="ActionReason.Unchanged"/>, done, no refresh). An invalid name, or a
+    /// sensitive top-level <c>people</c> note, is refused with <see cref="PersonRefusedText"/> and nothing written; no
+    /// key is asked for. The result's text is the person page's full name when done.
+    /// </summary>
+    public Task<ActionResult> OpenPerson(string name) => Run(() => OpenPersonNow(name));
 
     /// <summary>
     /// Moves the note <paramref name="name"/> and its subpages under the note <paramref name="newParent"/> (matched
@@ -761,6 +775,78 @@ internal sealed class DesktopActions
         catch (ArgumentException)
         {
             return Refused(ActionReason.Invalid, NoSubpagesText(parent));
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, CreateFailedText);
+        }
+    }
+
+    private ActionResult OpenPersonNow(string name)
+    {
+        string? person = PersonParser.NormalizeTyped(name);
+        if (person is null)
+        {
+            return Refused(ActionReason.Invalid, PersonRefusedText(TagParser.CollapseWhitespace(name)));
+        }
+
+        try
+        {
+            // A sealed people note is never opened or added to: no key is asked for and nothing is written.
+            if (notes.TryFindSensitive(People.FolderName, out _))
+            {
+                return Refused(ActionReason.Locked, PersonRefusedText(person));
+            }
+
+            bool created = false;
+            if (!notes.TryFind(People.FolderName, out NoteInfo? folder) || folder is null)
+            {
+                try
+                {
+                    folder = notes.Create(People.FolderName);
+                    created = true;
+                }
+                catch (NoteExistsException)
+                {
+                    // Created by someone else between the check and the write.
+                    if (!notes.TryFind(People.FolderName, out folder) || folder is null)
+                    {
+                        return Refused(ActionReason.Locked, PersonRefusedText(person));
+                    }
+                }
+            }
+
+            if (notes.TryFind(folder.Name + "/" + person, out NoteInfo? page) && page is not null)
+            {
+                return new ActionResult(ActionKind.Done, created ? ActionReason.None : ActionReason.Unchanged, page.Name);
+            }
+
+            if (notes.TryFindSensitive(folder.Name + "/" + person, out NoteInfo? sealedPage) && sealedPage is not null)
+            {
+                return new ActionResult(ActionKind.Done, created ? ActionReason.None : ActionReason.Unchanged, sealedPage.Name);
+            }
+
+            if (folder.Name.Length + 1 + person.Length > NoteStore.MaxNameLength)
+            {
+                return Refused(ActionReason.Invalid, PersonRefusedText(person));
+            }
+
+            try
+            {
+                NoteInfo child = notes.CreateChild(folder.Name, person);
+                return new ActionResult(ActionKind.Done, ActionReason.None, child.Name);
+            }
+            catch (NoteExistsException)
+            {
+                // Created by someone else between the check and the write.
+                return notes.TryFind(folder.Name + "/" + person, out page) && page is not null
+                    ? new ActionResult(ActionKind.Done, created ? ActionReason.None : ActionReason.Unchanged, page.Name)
+                    : Refused(ActionReason.Exists, PersonRefusedText(person));
+            }
+        }
+        catch (ArgumentException)
+        {
+            return Refused(ActionReason.Invalid, PersonRefusedText(person));
         }
         catch (Exception)
         {

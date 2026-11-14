@@ -94,7 +94,11 @@
                         }
                     </div>
                     <NoteEditor @key="(name, openSensitive)" @ref="editor" Name="@name" Sensitive="openSensitive"
-                                OnTag="ShowTag" OnOpenNote="RequestOpen" OnIdle="LockOpen" OnLocked="Locked" />
+                                OnTag="ShowTag" OnOpenNote="RequestOpen" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked" />
+                    @if (People.PersonOf(name) is { } person)
+                    {
+                        <PersonPanel Person="@person" OnOpen="RequestOpen" />
+                    }
                     <LinksPanel Name="@name" Sensitive="openSensitive" OnOpen="RequestOpen" OnTag="ShowTag" />
                 }
                 else
@@ -145,6 +149,7 @@ else
     private bool settingsShown;
     private bool discarding;
     private string? pendingName;
+    private string? pendingPerson;
     private bool paletteOpen;
     private bool running;
     private string statusText = string.Empty;
@@ -229,6 +234,7 @@ else
         if (editor is not null && openName is not null && await editor.IsDirtyAsync())
         {
             pendingName = name;
+            pendingPerson = null;
             discarding = true;
             return;
         }
@@ -236,16 +242,86 @@ else
         ShowNote(name);
     }
 
-    private void Discard(Confirmation confirmed)
+    // A mention was clicked in the editor: opens the person's page, making it (and people) on this click only.
+    // Asks first when the open note has unsaved changes, like RequestOpen.
+    private async Task OpenMention(string person)
+    {
+        if (editor is not null && openName is not null && await editor.IsDirtyAsync())
+        {
+            pendingName = null;
+            pendingPerson = person;
+            discarding = true;
+            return;
+        }
+
+        if (running)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult opened;
+        try
+        {
+            opened = await Actions.OpenPerson(person);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        ShowPerson(opened);
+    }
+
+    private async Task Discard(Confirmation confirmed)
     {
         discarding = false;
-        ShowNote(pendingName);
+        if (pendingPerson is not { } person)
+        {
+            ShowNote(pendingName);
+            return;
+        }
+
+        pendingPerson = null;
+        if (running)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult opened;
+        try
+        {
+            opened = await Actions.OpenPerson(person);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        ShowPerson(opened);
     }
 
     private void KeepEditing()
     {
         discarding = false;
         pendingName = null;
+        pendingPerson = null;
+    }
+
+    // Opens the person page Actions gave, or shows why there is none.
+    private void ShowPerson(ActionResult opened)
+    {
+        if (opened.Kind != ActionKind.Done)
+        {
+            ShowStatus(DesktopText.OneLine(opened.Text), "red");
+            return;
+        }
+
+        if (!string.Equals(opened.Text, openName, StringComparison.Ordinal))
+        {
+            ShowNote(opened.Text);
+        }
     }
 
     private void ShowNote(string? name)
@@ -255,6 +331,7 @@ else
             && Snapshot is { } snapshot
             && snapshot.Sensitive.Any(n => string.Equals(n.Name, name, StringComparison.Ordinal));
         pendingName = null;
+        pendingPerson = null;
         tagShown = null;
         tagsShown = false;
         settingsShown = false;

@@ -21,9 +21,19 @@ context note show "Meetings/Meeting 1"
 The name is only matched against the note list, never used as a file path. `import` and `capture` write top-level
 notes only; subpages are created, moved and deleted in the desktop app.
 
+### People
+
+Write `@[Anna Schmidt]` in a note to mention a person (at the start of a line or after a space; not in code).
+`context people` lists everyone mentioned, with the number of notes that mention them. `context person Anna Schmidt`
+(or `context person "@[Anna Schmidt]"`) lists those notes, then the appointments whose title or location mentions
+the person or that list them as an attendee, latest first. Appointments come from `calendar/*.ics` and the last
+downloaded copy of the Exchange calendar; nothing is downloaded. In the desktop app, clicking a mention opens the
+person's page `people/Anna Schmidt`, creating it (and `people`) on that click if needed.
+
 ### JSON output
 
-Add `--json` to a read command (`version`, `todos`, `notes`, `note show`, `tags`, `links`, `current`) to get one
+Add `--json` to a read command (`version`, `todos`, `notes`, `note show`, `tags`, `links`, `people`, `person`,
+`current`) to get one
 JSON object on one line instead of text. Property names are fixed camelCase; missing values are `null`; dates are
 `yyyy-MM-dd` and times ISO 8601 with offset. Errors stay one text line on stderr with the same exit codes, and
 write commands and `help` refuse the flag.
@@ -39,6 +49,8 @@ plain ASCII; any JSON parser, `ConvertFrom-Json` included, reads them back.
 | `tags` | `{"tags":[{"tag":"work","count":2}]}` |
 | `tags <tag>` | `{"tag":"work","notes":["A"]}` |
 | `links <note>` | `{"note":"A","links":[{"note":"B","direction":"to","missing":false,"sharedTags":["work"]}]}` |
+| `people` | `{"people":[{"person":"Anna Schmidt","count":2}]}` |
+| `person <name>` | `{"person":"Anna Schmidt","notes":["A"],"appointments":[{"start":"...","end":"...","allDay":false,"title":"...","location":null}]}` |
 | `current` | `{"today":"...","appointments":[...],"calendar":{...},"due":[...],"linkedNotes":[...]}` |
 
 PowerShell examples:

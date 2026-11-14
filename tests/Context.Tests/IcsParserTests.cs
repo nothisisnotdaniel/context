@@ -160,4 +160,34 @@ public sealed class IcsParserTests
 
         Assert.Single(all);
     }
+
+    // 156 AC-5: each ATTENDEE's CN, quotes removed, unescaped and normalized like a mention; no CN or a bad name is
+    // skipped, and the address is never read.
+    [Fact]
+    public void Parse_Attendees_CnOnly_Normalized()
+    {
+        Appointment a = Single(Event(
+            "SUMMARY:Review",
+            "DTSTART:20261029T080000Z",
+            "ATTENDEE;ROLE=REQ-PARTICIPANT;CN=\"Schmidt\\, Anna\":mailto:anna@example.com",
+            "ATTENDEE;CN=Bob:mailto:bob@example.com",
+            "ATTENDEE:mailto:nocn@example.com",
+            "ATTENDEE;CN=\"  Carl \t  Lee \";PARTSTAT=ACCEPTED:mailto:carl@example.com",
+            "ATTENDEE;CN=\"a/b\":mailto:ab@example.com",
+            "ATTENDEE;CN=\"\":mailto:empty@example.com",
+            "ATTENDEE;CN=\"Dora:Lee\":mailto:dora@example.com",
+            "ATTENDEE;CN=\"Long",
+            "  name\":mailto:long@example.com"));
+
+        Assert.Equal(["Schmidt, Anna", "Bob", "Carl Lee", "Long name"], a.Attendees);
+        Assert.DoesNotContain(a.Attendees, n => n.Contains('@') || n.Contains("mailto", StringComparison.OrdinalIgnoreCase));
+    }
+
+    // 156 AC-5: an event without attendees, and a hand-built appointment, have none.
+    [Fact]
+    public void Parse_NoAttendees_Empty()
+    {
+        Assert.Empty(Single(Event("DTSTART:20261029T080000Z")).Attendees);
+        Assert.Empty(new Appointment("x", null, DateTime.MinValue, DateTime.MinValue, false).Attendees);
+    }
 }

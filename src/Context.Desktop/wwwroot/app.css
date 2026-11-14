@@ -776,6 +776,63 @@ input[type="password"]:disabled {
     font-variant-numeric: tabular-nums;
 }
 
+/* The person page's panel above the linked notes: the notes that mention the person, then their appointments. */
+.person-panel {
+    border-top: 1px solid var(--line);
+    margin-top: 16px;
+    padding-top: 12px;
+}
+
+.person-panel h2 {
+    margin-top: 0;
+}
+
+.person-notes,
+.person-appointments {
+    list-style: none;
+    margin: 0 0 12px;
+    padding: 0;
+}
+
+.person-notes li,
+.person-appointment {
+    align-items: baseline;
+    display: flex;
+    gap: 10px;
+    min-width: 0;
+    padding: 3px 0;
+}
+
+.person-notes .note-button {
+    background: none;
+    border: none;
+    border-radius: 3px;
+    color: var(--accent-strong);
+    max-width: 100%;
+    padding: 0;
+    text-align: left;
+}
+
+.person-notes .note-button:hover:not(:disabled) {
+    text-decoration: underline;
+}
+
+.person-appointment .date,
+.person-appointment .time {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+}
+
+.person-appointment .title {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.person-appointment .location {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
 /* The linked notes under the open note: name, link text, shared tags. */
 .links-panel {
     border-top: 1px solid var(--line);

@@ -250,6 +250,27 @@ internal sealed class DesktopState
     });
 
     /// <summary>
+    /// The person page of <paramref name="name"/> (<see cref="PersonView.Build"/>): the notes that mention the person
+    /// and their appointments from the calendar files and the cached published calendar, after syncing the index, off
+    /// the calling thread. Reads only (no download) and never throws: any failure gives a <c>NoMentions</c> view with
+    /// <see cref="PersonView.IndexUnreadable"/> set.
+    /// </summary>
+    public Task<PersonView> Person(string name) => Task.Run(() =>
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                return PersonView.Build(index, notes, calendar, feed, name);
+            }
+        }
+        catch (Exception)
+        {
+            return new PersonView(PersonViewKind.NoMentions, name, [], [], [], true, calendar.Zone);
+        }
+    });
+
+    /// <summary>
     /// The calendar link as the settings page shows it (<see cref="CalendarLinkView.Show"/>): the masked link and
     /// the time of the cached copy, <c>NotSet</c> or <c>Unreadable</c>, off the calling thread. The link itself never
     /// leaves Core. Reads only (no download) and never throws: any failure gives the <c>Unreadable</c> view.

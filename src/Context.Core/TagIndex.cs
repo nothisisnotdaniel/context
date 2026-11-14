@@ -16,6 +16,30 @@ internal sealed record TagCount
     public int Count { get; }
 }
 
+/// <summary>A person mentioned with <c>@[Name]</c> and how many notes mention them.</summary>
+internal sealed record PersonCount
+{
+    public PersonCount(string person, int count)
+    {
+        Person = person;
+        Count = count;
+    }
+
+    /// <summary>
+    /// Returns only the type name: the name is raw outside text, so formatting this record must never print it.
+    /// </summary>
+    public override string ToString() => nameof(PersonCount);
+
+    /// <summary>
+    /// The name shown for the person (raw): the title of their page under <c>people</c> when it exists, else the
+    /// ordinal-first spelling among the mentions.
+    /// </summary>
+    public string Person { get; }
+
+    /// <summary>The number of notes that mention the person, not counting the person's own page.</summary>
+    public int Count { get; }
+}
+
 /// <summary>Which way the <c>[[note links]]</c> between two notes go, seen from the note asked about.</summary>
 internal enum NoteLinkDirection
 {
@@ -146,14 +170,21 @@ internal sealed class TagIndex
             note TEXT NOT NULL,
             target TEXT NOT NULL,
             PRIMARY KEY(note, target));
+        CREATE TABLE IF NOT EXISTS note_people(
+            note TEXT NOT NULL,
+            person TEXT NOT NULL,
+            spelling TEXT NOT NULL,
+            PRIMARY KEY(note, person));
+        CREATE INDEX IF NOT EXISTS note_people_person ON note_people(person);
         """;
 
     /// <summary>
     /// The parser version the stored tags were made with, kept in <c>PRAGMA user_version</c>. When the
     /// database has an older one, <see cref="Sync"/> re-parses every note once. 1: <c>#[bracket tags]</c>.
     /// 2: <c>[[note links]]</c>. 3: subpages (full names, link targets up to <see cref="NoteLinkParser.MaxTargetLength"/>).
+    /// 4: <c>@[person]</c> mentions (and <c>@[[x]]</c> is no link).
     /// </summary>
-    public const int ParserVersion = 3;
+    public const int ParserVersion = 4;
 
     /// <summary>
     /// How long opening <c>context.db</c> and starting <see cref="Sync"/>'s write transaction wait while another
@@ -233,17 +264,20 @@ internal sealed class TagIndex
 
                 IReadOnlyList<string> tags;
                 IReadOnlyList<string> targets;
+                IReadOnlyList<string> people;
                 long? newModified = modified;
                 try
                 {
                     string text = store.Read(note);
                     tags = TagParser.Parse(text);
                     targets = NoteLinkParser.Parse(text);
+                    people = PersonParser.Parse(text);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     tags = [];
                     targets = [];
+                    people = [];
                     newModified = null;
                 }
 
@@ -269,6 +303,18 @@ internal sealed class TagIndex
                         ("$target", target));
                 }
 
+                Execute(connection, transaction, "DELETE FROM note_people WHERE note = $note", ("$note", note.Name));
+                foreach (string person in people)
+                {
+                    Execute(
+                        connection,
+                        transaction,
+                        "INSERT INTO note_people(note, person, spelling) VALUES($note, $person, $spelling)",
+                        ("$note", note.Name),
+                        ("$person", PersonParser.Key(person)),
+                        ("$spelling", person));
+                }
+
                 Execute(
                     connection,
                     transaction,
@@ -282,12 +328,14 @@ internal sealed class TagIndex
             {
                 Execute(connection, transaction, "DELETE FROM note_tags WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_links WHERE note = $note", ("$note", gone));
+                Execute(connection, transaction, "DELETE FROM note_people WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM notes WHERE name = $note", ("$note", gone));
             }
 
             // Tag and link rows whose note row is missing (e.g. edited by hand) would otherwise never go away.
             Execute(connection, transaction, "DELETE FROM note_tags WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_links WHERE note NOT IN (SELECT name FROM notes)");
+            Execute(connection, transaction, "DELETE FROM note_people WHERE note NOT IN (SELECT name FROM notes)");
             if (upgrade)
             {
                 // A constant, not user input: PRAGMA takes no parameters.
@@ -435,6 +483,118 @@ internal sealed class TagIndex
 
         return SortNames(rows.Keys).Select(n => rows[n]).ToList();
     });
+
+    /// <summary>
+    /// Every person mentioned with <c>@[Name]</c> in a note other than their own page, once, with the number of such
+    /// notes, sorted by the shown name ignoring case, then ordinal. The shown name is the title of the person's page
+    /// (<see cref="Context.People.PersonOf"/>) when it exists, else the ordinal-first spelling among the mentions.
+    /// </summary>
+    public IReadOnlyList<PersonCount> People() => Run(connection =>
+    {
+        Dictionary<string, string> pages = PersonPages(connection);
+        Dictionary<string, (int Count, string Spelling)> people = new(StringComparer.Ordinal);
+        using (SqliteCommand command = Command(connection, null, "SELECT note, person, spelling FROM note_people"))
+        using (SqliteDataReader reader = command.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                string note = reader.GetString(0);
+                string person = reader.GetString(1);
+                string spelling = reader.GetString(2);
+                if (IsOwnPage(note, person))
+                {
+                    continue;
+                }
+
+                people[person] = people.TryGetValue(person, out (int Count, string Spelling) known)
+                    ? (known.Count + 1, string.CompareOrdinal(spelling, known.Spelling) < 0 ? spelling : known.Spelling)
+                    : (1, spelling);
+            }
+        }
+
+        return (IReadOnlyList<PersonCount>)people
+            .Select(p => new PersonCount(pages.GetValueOrDefault(p.Key, p.Value.Spelling), p.Value.Count))
+            .OrderBy(p => p.Person, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(p => p.Person, StringComparer.Ordinal)
+            .ToList();
+    });
+
+    /// <summary>
+    /// The notes that mention <paramref name="person"/> with <c>@[...]</c>, matched by <see cref="PersonParser.Key"/>
+    /// of the trimmed name with whitespace runs collapsed (so <c>anna schmidt</c> finds <c>@[ANNA  schmidt]</c>), sorted
+    /// by name ignoring case, then ordinal. Never the person's own page.
+    /// </summary>
+    public IReadOnlyList<string> NotesMentioning(string person)
+    {
+        string key = PersonParser.Key(TagParser.CollapseWhitespace(person));
+        return Run(connection =>
+        {
+            List<string> names = [];
+            using SqliteCommand command = Command(connection, null, "SELECT note FROM note_people WHERE person = $person");
+            command.Parameters.AddWithValue("$person", key);
+            using SqliteDataReader reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                string note = reader.GetString(0);
+                if (!IsOwnPage(note, key))
+                {
+                    names.Add(note);
+                }
+            }
+
+            return SortNames(names);
+        });
+    }
+
+    /// <summary>
+    /// The name shown for <paramref name="person"/> (matched like <see cref="NotesMentioning"/>): the title of their
+    /// page when it exists, else the ordinal-first spelling among the mentions in other notes, else <c>null</c>.
+    /// </summary>
+    public string? PersonName(string person)
+    {
+        string key = PersonParser.Key(TagParser.CollapseWhitespace(person));
+        return Run(connection =>
+        {
+            if (PersonPages(connection).TryGetValue(key, out string? title))
+            {
+                return title;
+            }
+
+            string? first = null;
+            using SqliteCommand command = Command(connection, null, "SELECT note, spelling FROM note_people WHERE person = $person");
+            command.Parameters.AddWithValue("$person", key);
+            using SqliteDataReader reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                string spelling = reader.GetString(1);
+                if (!IsOwnPage(reader.GetString(0), key) && (first is null || string.CompareOrdinal(spelling, first) < 0))
+                {
+                    first = spelling;
+                }
+            }
+
+            return first;
+        });
+    }
+
+    // The person pages in the index by key: the title of each note directly under the top-level people note. With two
+    // pages of one key (People/anna and people/Anna) the ordinal-first full name wins.
+    private static Dictionary<string, string> PersonPages(SqliteConnection connection)
+    {
+        Dictionary<string, string> pages = new(StringComparer.Ordinal);
+        foreach (string name in NoteNames(connection).Order(StringComparer.Ordinal))
+        {
+            if (Context.People.PersonOf(name) is { } title)
+            {
+                pages.TryAdd(PersonParser.Key(title), title);
+            }
+        }
+
+        return pages;
+    }
+
+    private static bool IsOwnPage(string note, string key) =>
+        Context.People.PersonOf(note) is { } title && string.Equals(PersonParser.Key(title), key, StringComparison.Ordinal);
 
     private static string StripMd(string target) =>
         target.EndsWith(".md", StringComparison.OrdinalIgnoreCase) && target.Length > 3 ? target[..^3] : target;

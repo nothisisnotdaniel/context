@@ -15,7 +15,8 @@ internal static class NoteLinkParser
     /// that <c>]</c> directly followed by a second <c>]</c>. The target is that text, trimmed (inner spaces kept
     /// as written); an empty target or one longer than <see cref="MaxTargetLength"/> is not a link. Targets are
     /// distinct ignoring case (ordinal); the first spelling is kept. Lines inside fenced code blocks and text
-    /// inside inline backtick spans are skipped, as in <see cref="TagParser"/>. <c>#[tag]</c> is never a link.
+    /// inside inline backtick spans are skipped, as in <see cref="TagParser"/>. <c>#[tag]</c> and <c>@[person]</c> are
+    /// never links.
     /// Targets are raw text: they are only compared with note names, never turned into a path.
     /// </summary>
     public static IReadOnlyList<string> Parse(string markdown)
@@ -52,8 +53,8 @@ internal static class NoteLinkParser
                 continue;
             }
 
-            // A "#[" bracket tag is never a link: skip its '[' so "#[[x]]" stays a tag matter only.
-            if (i > 0 && line[i - 1] == '#')
+            // A "#[" bracket tag or an "@[" mention is never a link: skip its '[' so "#[[x]]" and "@[[x]]" are no link.
+            if (i > 0 && line[i - 1] is '#' or '@')
             {
                 i++;
                 continue;

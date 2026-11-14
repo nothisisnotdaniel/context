@@ -196,4 +196,12 @@ public sealed class TagParserTests
     {
         Assert.Equal(shown, TagParser.Format(tag));
     }
+
+    // 156 AC-2: a mention is no tag, and a tag is no mention.
+    [Fact]
+    public void Parse_Mention_IsNoTag()
+    {
+        Assert.Empty(TagParser.Parse("@[Anna] @[anna schmidt]"));
+        Assert.Empty(PersonParser.Parse("#[anna] #anna"));
+    }
 }

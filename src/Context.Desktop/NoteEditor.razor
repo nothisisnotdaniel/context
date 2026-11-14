@@ -61,6 +61,10 @@
     [Parameter]
     public EventCallback<string> OnOpenNote { get; set; }
 
+    /// <summary>Called with the person's name (as found by PersonParser) when a mention in the text is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnPerson { get; set; }
+
     /// <summary>True when <see cref="Name"/> is a sensitive note: it is unlocked instead of read.</summary>
     [Parameter]
     public bool Sensitive { get; set; }
@@ -163,6 +167,7 @@
 
         Interop.TagClicked -= TagClicked;
         Interop.LinkClicked -= LinkClicked;
+        Interop.PersonClicked -= PersonClicked;
         Interop.DirtyChanged -= DirtyChanged;
         await Interop.DestroyAsync();
     }
@@ -193,6 +198,7 @@
             lossy = !await Interop.IsLosslessAsync(note.Text);
             Interop.TagClicked += TagClicked;
             Interop.LinkClicked += LinkClicked;
+            Interop.PersonClicked += PersonClicked;
             Interop.DirtyChanged += DirtyChanged;
             await Interop.MountAsync(host, note.Text);
             opened = note;
@@ -284,6 +290,15 @@
         }
 
         await OnOpenNote.InvokeAsync(name);
+    });
+
+    private Task PersonClicked(string raw) => InvokeAsync(async () =>
+    {
+        IReadOnlyList<string> people = PersonParser.Parse(raw);
+        if (people.Count > 0)
+        {
+            await OnPerson.InvokeAsync(people[0]);
+        }
     });
 
     // Display only: shows or hides the dot; nothing is read or written.

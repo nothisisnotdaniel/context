@@ -1,0 +1,106 @@
+@inherits StateComponent
+@* The person page of the open note (DesktopState.Person): the notes that mention the person with @[...] and the
+   appointments from the calendar files and the cached published calendar that mention them or list them as an
+   attendee. It reads only (no download), and reloads whenever the state changes. *@
+
+<section class="person-panel" aria-label="Person">
+    @if (view is null)
+    {
+        <p class="grey" role="status">Loading…</p>
+    }
+    else if (view.IndexUnreadable && view.Appointments.Count == 0)
+    {
+        <p class="red" role="status">Can't read the mentions.</p>
+    }
+    else if (view.Kind != PersonViewKind.Mentions)
+    {
+        <p class="grey" role="status">No notes or appointments mention @DesktopText.OneLine(Person).</p>
+    }
+    else
+    {
+        @if (view.IndexUnreadable)
+        {
+            <p class="red" role="status">Can't read the mentions.</p>
+        }
+        else if (view.Notes.Count > 0)
+        {
+            <h2>Mentioned in</h2>
+            <ul class="person-notes">
+                @foreach (string note in view.Notes)
+                {
+                    string shown = DesktopText.OneLine(note);
+                    <li>
+                        <button type="button" class="name note-button cut" title="@shown" @onclick="() => OnOpen.InvokeAsync(note)">@shown</button>
+                    </li>
+                }
+            </ul>
+        }
+        @if (view.Appointments.Count > 0)
+        {
+            <h2>Appointments</h2>
+            <ul class="person-appointments">
+                @foreach (Appointment appointment in view.Appointments)
+                {
+                    string title = DesktopText.OneLine(appointment.Title.Length == 0 ? "(no title)" : appointment.Title);
+                    string location = DesktopText.OneLine(appointment.Location ?? string.Empty);
+                    <li class="person-appointment">
+                        <span class="date grey">@appointment.Start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</span>
+                        <span class="time grey">@PersonView.TimeText(appointment)</span>
+                        <span class="title cut" title="@title">@title</span>
+                        @if (location.Length > 0)
+                        {
+                            <span class="location grey cut" title="@location">@location</span>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+    }
+</section>
+
+@code {
+    private PersonView? view;
+    private string? loaded;
+    private int request;
+
+    /// <summary>The person's name: the title of the open person page.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Person { get; set; } = string.Empty;
+
+    /// <summary>Called with a mentioning note's name when it is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    protected override Task OnParametersSetAsync()
+    {
+        if (string.Equals(loaded, Person, StringComparison.Ordinal))
+        {
+            return Task.CompletedTask;
+        }
+
+        // Another person: their rows are not known yet, so the old ones go.
+        loaded = Person;
+        view = null;
+        return Load();
+    }
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    // Keeps the shown rows while it reloads. A result for a person who is no longer the open one, or an older
+    // request's result, is dropped.
+    private async Task Load()
+    {
+        int mine = ++request;
+        string person = Person;
+        PersonView result = await State.Person(person);
+        if (mine == request && string.Equals(person, Person, StringComparison.Ordinal))
+        {
+            view = result;
+        }
+    }
+}
