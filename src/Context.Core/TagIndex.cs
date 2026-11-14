@@ -202,6 +202,7 @@ internal sealed class TagIndex
 
     private readonly string root;
     private readonly TimeSpan busyTimeout;
+    private int reads;
 
     /// <param name="root">The folder <c>context.db</c> lives in.</param>
     public TagIndex(string root)
@@ -215,6 +216,9 @@ internal sealed class TagIndex
         this.root = Path.GetFullPath(root);
         this.busyTimeout = busyTimeout;
     }
+
+    /// <summary>How many times this instance opened the database (one per sync or query); for tests.</summary>
+    internal int Reads => Volatile.Read(ref reads);
 
     /// <summary>The full path of <c>context.db</c>.</summary>
     public string FilePath => Path.Combine(root, FileName);
@@ -384,6 +388,26 @@ internal sealed class TagIndex
         }
 
         return tags.OrderBy(t => t.Tag, StringComparer.Ordinal).ToList();
+    });
+
+    /// <summary>
+    /// Every <c>(note, tag)</c> row of <c>note_tags</c> in one <c>SELECT</c> (tags normalized, no <c>#</c>), sorted by
+    /// note, then tag (ordinal). Used by the current view to match all appointments in memory.
+    /// </summary>
+    public IReadOnlyList<(string Note, string Tag)> NoteTags() => Run(connection =>
+    {
+        List<(string Note, string Tag)> rows = [];
+        using SqliteCommand command = Command(connection, null, "SELECT note, tag FROM note_tags");
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            rows.Add((reader.GetString(0), reader.GetString(1)));
+        }
+
+        return rows
+            .OrderBy(r => r.Note, StringComparer.Ordinal)
+            .ThenBy(r => r.Tag, StringComparer.Ordinal)
+            .ToList();
     });
 
     /// <summary>
@@ -789,6 +813,7 @@ internal sealed class TagIndex
     // TagIndexException. The file is never deleted or replaced.
     private T Run<T>(Func<SqliteConnection, T> work)
     {
+        Interlocked.Increment(ref reads);
         string connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = FilePath,

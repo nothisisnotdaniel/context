@@ -51,9 +51,10 @@ internal sealed record LinkedNote
 
 /// <summary>
 /// The data of the <c>/current</c> view, with no rendering: today's appointments, every todo due today or
-/// earlier and the notes linked to them. Any front end builds it with <see cref="Build"/> and draws it its own
-/// way. All text in it (appointment titles and locations, file names, todo text, note names, tags) is raw
-/// outside text: every front end must clean it (<see cref="SafeText.Clean"/>) and escape it for its own output.
+/// earlier, the notes linked to them and the notes related to each appointment. Any front end builds it with
+/// <see cref="Build"/> and draws it its own way. All text in it (appointment titles and locations, file names,
+/// todo text, note names, tags) is raw outside text: every front end must clean it (<see cref="SafeText.Clean"/>)
+/// and escape it for its own output.
 /// </summary>
 internal sealed record CurrentView
 {
@@ -74,7 +75,8 @@ internal sealed record CurrentView
         bool todosUnreadable,
         IReadOnlyList<DueTodo> due,
         IReadOnlyList<LinkedNote> linkedNotes,
-        bool indexUnreadable)
+        bool indexUnreadable,
+        IReadOnlyList<IReadOnlyList<RelatedNote>>? related = null)
     {
         Today = today;
         Zone = zone;
@@ -88,6 +90,7 @@ internal sealed record CurrentView
         Due = due;
         LinkedNotes = linkedNotes;
         IndexUnreadable = indexUnreadable;
+        Related = related ?? appointments.Select(_ => (IReadOnlyList<RelatedNote>)[]).ToList();
     }
 
     /// <summary>
@@ -153,12 +156,24 @@ internal sealed record CurrentView
     /// <summary>The linked notes, sorted by name ignoring case (then ordinally).</summary>
     public IReadOnlyList<LinkedNote> LinkedNotes { get; }
 
-    /// <summary>True when <c>context.db</c> can't be read; then <see cref="LinkedNotes"/> is empty.</summary>
+    /// <summary>
+    /// The notes related to each appointment (meeting prep, <see cref="MeetingPrep.Related"/>): runs parallel to
+    /// <see cref="Appointments"/>, same count and order, so <c>Related[i]</c> belongs to <c>Appointments[i]</c>. Each
+    /// list holds at most <see cref="MeetingPrep.MaxRelated"/> notes, ranked; empty when none match or when
+    /// <see cref="IndexUnreadable"/> is set. Names and tags are raw: clean them before showing them.
+    /// </summary>
+    public IReadOnlyList<IReadOnlyList<RelatedNote>> Related { get; }
+
+    /// <summary>
+    /// True when <c>context.db</c> can't be read; then <see cref="LinkedNotes"/> and every list in
+    /// <see cref="Related"/> are empty.
+    /// </summary>
     public bool IndexUnreadable { get; }
 
     /// <summary>
-    /// Reads everything the view needs. The feed (if any) is fetched once; when <c>todos.json</c> can't be read
-    /// there are no due todos and the index isn't touched, and when nothing is due the index isn't touched either.
+    /// Reads everything the view needs. The feed (if any) is fetched once. The index is synced once and read through
+    /// one <see cref="TagIndex.NoteTags"/> call when there is at least one appointment, and synced when something is
+    /// due; with no appointments and nothing due (also when <c>todos.json</c> can't be read) it isn't touched.
     /// </summary>
     public static CurrentView Build(
         TodoStore todos, TagIndex index, NoteStore notes, CalendarStore calendar, CalendarFeed? feed, DateOnly today)
@@ -201,15 +216,29 @@ internal sealed record CurrentView
         }
 
         IReadOnlyList<LinkedNote> linked = [];
+        IReadOnlyList<IReadOnlyList<RelatedNote>>? related = null;
         bool indexUnreadable = false;
-        if (due.Count > 0)
+        if (due.Count > 0 || day.Appointments.Count > 0)
         {
             try
             {
-                linked = Linked(index, notes, due);
+                index.Sync(notes);
+                if (due.Count > 0)
+                {
+                    linked = Linked(index, due);
+                }
+
+                if (day.Appointments.Count > 0)
+                {
+                    IReadOnlyList<(string Note, string Tag)> noteTags = index.NoteTags();
+                    IReadOnlyList<NoteInfo> listed = notes.List();
+                    related = day.Appointments.Select(a => MeetingPrep.Related(a, listed, noteTags)).ToList();
+                }
             }
             catch (TagIndexException)
             {
+                linked = [];
+                related = null;
                 indexUnreadable = true;
             }
         }
@@ -226,7 +255,8 @@ internal sealed record CurrentView
             todosUnreadable,
             due,
             linked,
-            indexUnreadable);
+            indexUnreadable,
+            related);
     }
 
     /// <summary>The time text of <paramref name="appointment"/> on <see cref="Today"/>.</summary>
@@ -253,9 +283,8 @@ internal sealed record CurrentView
         return $"{start}-{end}";
     }
 
-    private static List<LinkedNote> Linked(TagIndex index, NoteStore notes, IReadOnlyList<DueTodo> due)
+    private static List<LinkedNote> Linked(TagIndex index, IReadOnlyList<DueTodo> due)
     {
-        index.Sync(notes);
         Dictionary<string, SortedSet<string>> linked = new(StringComparer.Ordinal);
         IEnumerable<string> tags = due
             .SelectMany(t => TagParser.Parse(t.Text))

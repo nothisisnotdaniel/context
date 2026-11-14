@@ -64,6 +64,38 @@ public sealed class TagIndexTests : IDisposable
         File.WriteAllText(Path.Combine(root, name + ".md"), text);
     }
 
+    // 160 AC-5: NoteTags gives every (note, tag) row in one read, sorted by note then tag.
+    [Fact]
+    public void NoteTags_EveryRow_OneRead()
+    {
+        WriteNote("beta", "#work #[Big Plan]");
+        WriteNote("Alpha", "#work");
+        WriteNote("gamma", "no tags");
+        index.Sync(store);
+        int before = index.Reads;
+
+        IReadOnlyList<(string Note, string Tag)> rows = index.NoteTags();
+
+        Assert.Equal(before + 1, index.Reads);
+        Assert.Equal([("Alpha", "work"), ("beta", "big plan"), ("beta", "work")], rows);
+    }
+
+    // 160 AC-5: an empty index has no rows; a bad file throws TagIndexException and stays as it was.
+    [Fact]
+    public void NoteTags_EmptyAndBadFile()
+    {
+        index.Sync(store);
+        Assert.Empty(index.NoteTags());
+
+        File.Delete(DbPath);
+        byte[] garbage = new byte[2048];
+        new Random(4).NextBytes(garbage);
+        File.WriteAllBytes(DbPath, garbage);
+
+        Assert.Throws<TagIndexException>(() => index.NoteTags());
+        Assert.Equal(garbage, File.ReadAllBytes(DbPath));
+    }
+
     /// <summary>Every (note, target) row of <c>note_links</c>, read directly.</summary>
     private List<(string Note, string Target)> LinkRows()
     {

@@ -86,7 +86,7 @@ plain ASCII; any JSON parser, `ConvertFrom-Json` included, reads them back.
 | `person <name>` | `{"person":"Anna Schmidt","notes":["A"],"appointments":[{"start":"...","end":"...","allDay":false,"title":"...","location":null}]}` |
 | `find <key> <value>` | `{"key":"role","value":"Bereichsleiter","notes":["people/Anna Schmidt"]}` |
 | `types` | `{"types":[{"type":"organization","attributes":[]},{"type":"person","attributes":["aliases","affiliation","role"]}]}` |
-| `current` | `{"today":"...","appointments":[...],"calendar":{...},"due":[...],"linkedNotes":[...]}` |
+| `current` | `{"today":"...","appointments":[{"start":"...","end":"...","allDay":false,"title":"ACME kickoff","location":null,"related":[{"name":"projects/ACME Rollout","tags":["acme"],"words":["acme"]}]}],"calendar":{...},"due":[...],"linkedNotes":[...]}` |
 
 PowerShell examples:
 
@@ -103,6 +103,9 @@ $current = context current --json | ConvertFrom-Json
 $current.appointments | ForEach-Object { "$($_.start) $($_.title)" }
 if ($null -eq $current.due) { Write-Warning 'todos.json could not be read' }
 
+# Meeting prep: the notes related to each of today's appointments
+$current.appointments | ForEach-Object { "$($_.title): $(($_.related | ForEach-Object { $_.name }) -join ', ')" }
+
 # The text of one note
 (context note show Plan --json | ConvertFrom-Json).text
 
@@ -111,4 +114,9 @@ if ($null -eq $current.due) { Write-Warning 'todos.json could not be read' }
 ```
 
 `current` writes its document even when part of the data can't be read: then it exits 1, its error lines are on
-stderr, and `due` or `linkedNotes` is `null`.
+stderr, and `due` or `linkedNotes` is `null` (and each appointment's `related` when `context.db` can't be read).
+
+`related` lists up to three notes per appointment that share a tag or a title word with the appointment's title or
+attendee names (meeting prep): `tags` are the matching tags (raw, without `#`), `words` the shared title words. Only
+`current` has it; the appointments of `person` don't. In text mode `context current` prints each as
+`related<TAB><name><TAB><matches>` right after its appointment line.

@@ -17,7 +17,7 @@
                     <tr><th>Time</th><th>Appointment</th><th>Where</th></tr>
                 </thead>
                 <tbody>
-                    @foreach (Appointment appointment in ShownAppointments(view))
+                    @foreach ((Appointment appointment, IReadOnlyList<RelatedNote> related) in ShownAppointments(view))
                     {
                         string title = DesktopText.OneLine(appointment.Title.Length == 0 ? "(no title)" : appointment.Title);
                         string where = appointment.Location is null ? string.Empty : DesktopText.OneLine(appointment.Location);
@@ -26,6 +26,27 @@
                             <td class="cut" title="@title">@title</td>
                             <td class="where grey cut" title="@where">@where</td>
                         </tr>
+                        @if (related.Count > 0)
+                        {
+                            <tr class="related">
+                                <td></td>
+                                <td colspan="2">
+                                    <ul class="related-notes">
+                                        @foreach (RelatedNote note in related)
+                                        {
+                                            string name = note.Name;
+                                            string shownName = DesktopText.OneLine(name);
+                                            string noteTitle = DesktopText.OneLine(Title(name));
+                                            string matches = DesktopText.OneLine(Matches(note));
+                                            <li class="related-note">
+                                                <button type="button" class="note-button cut" title="@shownName" @onclick="() => OnOpen.InvokeAsync(name)">@noteTitle</button>
+                                                <span class="matches grey cut" title="@matches">@matches</span>
+                                            </li>
+                                        }
+                                    </ul>
+                                </td>
+                            </tr>
+                        }
                     }
                     @if (MoreAppointments(view) is { } more)
                     {
@@ -37,6 +58,11 @@
                     }
                 </tbody>
             </table>
+
+            @if (view.IndexUnreadable)
+            {
+                <p class="red related-failed">Can't read the related notes.</p>
+            }
         }
 
         @foreach (string name in view.UnreadableCalendarFiles)
@@ -111,10 +137,27 @@
     /// <summary>At most this many appointment rows; the last reads <c>… N more</c> when there are more.</summary>
     internal const int MaxAppointmentRows = 15;
 
-    private static IEnumerable<Appointment> ShownAppointments(CurrentView view) =>
-        view.Appointments.Take(view.Appointments.Count > MaxAppointmentRows
-            ? MaxAppointmentRows - 1
-            : view.Appointments.Count);
+    /// <summary>Opens a related note (through <c>Main.RequestOpen</c>, which asks first when the editor is dirty).</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    // The shown appointments with their related notes; the related rows don't count toward MaxAppointmentRows.
+    private static IEnumerable<(Appointment Appointment, IReadOnlyList<RelatedNote> Related)> ShownAppointments(CurrentView view) =>
+        view.Appointments
+            .Select((a, i) => (a, i < view.Related.Count ? view.Related[i] : (IReadOnlyList<RelatedNote>)[]))
+            .Take(view.Appointments.Count > MaxAppointmentRows
+                ? MaxAppointmentRows - 1
+                : view.Appointments.Count);
+
+    // The last segment of a full note name, as NoteInfo.Title.
+    private static string Title(string name)
+    {
+        int slash = name.LastIndexOf('/');
+        return slash < 0 ? name : name[(slash + 1)..];
+    }
+
+    private static string Matches(RelatedNote note) =>
+        string.Join(' ', note.Tags.Select(TagParser.Format).Concat(note.Words));
 
     private static string? MoreAppointments(CurrentView view)
     {

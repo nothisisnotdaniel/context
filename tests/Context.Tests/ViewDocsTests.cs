@@ -33,6 +33,9 @@ public sealed class ViewDocsTests
 
         // 046 AC-2
         { CurrentViewFile, "Zone", ["CalendarStore", "Appointments", "CachedAtUtc", "TimeZoneInfo.Local"] },
+
+        // 160 AC-9
+        { CurrentViewFile, "Related", ["Appointments", "same count and order", "IndexUnreadable", "raw"] },
     };
 
     public static TheoryData<string, string> AllProperties()
@@ -92,7 +95,7 @@ public sealed class ViewDocsTests
         Assert.Contains((CurrentViewFile, "Status"), rows);
         Assert.Contains((TagsViewFile, "Kind"), rows);
         Assert.Contains((LinksViewFile, "Kind"), rows);
-        Assert.Equal(12, rows.Count(r => r.File == CurrentViewFile));
+        Assert.Equal(13, rows.Count(r => r.File == CurrentViewFile));
     }
 
     // Control: the lookup stays inside the view record, so DueTodo.Due (same file) is not taken for CurrentView.Due.

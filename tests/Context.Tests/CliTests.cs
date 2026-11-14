@@ -775,6 +775,65 @@ public sealed class CliTests : IDisposable
         Assert.Equal(["Can't read context.db."], result.ErrLines);
     }
 
+    // 160 AC-6: related lines directly after each appointment line, tags formatted, then words, cleaned.
+    [Fact]
+    public void Current_RelatedLines_AfterEachAppointment()
+    {
+        WriteIcs("work.ics", "BEGIN:VCALENDAR\r\n"
+            + Event("ACME kickoff", "20261029T090000Z", "20261029T100000Z")
+            + Event("Lunch", "20261029T110000Z", "20261029T120000Z")
+            + "END:VCALENDAR\r\n");
+        WriteNote("Clients", "#acme #[acme kickoff]");
+        WriteNote("ACME\u001b[31m", "text");
+
+        Result result = Run("current");
+
+        Assert.Equal((0, string.Empty), (result.Code, result.Err));
+        Assert.Equal(
+            "Today, 2026-10-29\nAppointments\n09:00-10:00\tACME kickoff\t\n"
+                + "related\tClients\t#acme #[acme kickoff]\n"
+                + "related\tACME\uFFFD[31m\tacme\n"
+                + "11:00-12:00\tLunch\t\nDue\nNothing due today. Add one with /todo today <text>.\n",
+            result.Out);
+    }
+
+    // 160 AC-6: a bad context.db with appointments: one stderr line, exit 1, with or without due todos.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Current_BadContextDb_WithAppointments_OneErrorLine(bool due)
+    {
+        WriteIcs("work.ics", "BEGIN:VCALENDAR\r\n" + Event("Plan", "20261029T090000Z", "20261029T100000Z") + "END:VCALENDAR\r\n");
+        WriteNote("Plan", "#plan");
+        if (due)
+        {
+            Run("todo", "add", "today", "x #plan");
+        }
+
+        File.WriteAllText(Path.Combine(root, TagIndex.FileName), "not a database at all, not at all, really not");
+
+        Result result = Run("current");
+
+        Assert.Equal(1, result.Code);
+        Assert.Equal(["Can't read context.db."], result.ErrLines);
+        Assert.StartsWith("Today, 2026-10-29\nAppointments\n09:00-10:00\tPlan\t\nDue\n", result.Out, StringComparison.Ordinal);
+        Assert.DoesNotContain("related", result.Out, StringComparison.Ordinal);
+    }
+
+    // 160 AC-6: with a bad todos.json too, the index line still comes once, after the todos line.
+    [Fact]
+    public void Current_BadContextDbAndTodos_WithAppointments_BothLines()
+    {
+        WriteIcs("work.ics", "BEGIN:VCALENDAR\r\n" + Event("Plan", "20261029T090000Z", "20261029T100000Z") + "END:VCALENDAR\r\n");
+        File.WriteAllText(Path.Combine(root, TodoStore.FileName), "{ bad");
+        File.WriteAllText(Path.Combine(root, TagIndex.FileName), "not a database at all, not at all, really not");
+
+        Result result = Run("current");
+
+        Assert.Equal(1, result.Code);
+        Assert.Equal(["Can't read todos.json.", "Can't read context.db."], result.ErrLines);
+    }
+
     [Fact]
     public void Current_StaleExchangeCopy_IsGreyTextOnStdout()
     {
