@@ -105,9 +105,9 @@ public sealed class CurrentViewTests : IDisposable
         Assert.Equal("…-…", CurrentView.Time(new Appointment("x", null, At(28, 9), At(30, 9), false), from, to));
     }
 
-    // AC-4: numbers match the sidebar, which numbers TodoStore.List() in order.
+    // 144 AC-7: the due todos come in sidebar order (TodoStore.List()) and carry no number.
     [Fact]
-    public void Build_Due_NumbersMatchSidebarOrder()
+    public void Build_Due_InSidebarOrder_WithoutNumbers()
     {
         TodoStore todos = Todos();
         todos.Add("today", Today);
@@ -119,9 +119,16 @@ public sealed class CurrentViewTests : IDisposable
 
         Assert.False(view.TodosUnreadable);
         Assert.Equal(
-            [(1, "two days ago", true), (2, "yesterday", true), (3, "today", false)],
-            view.Due.Select(d => (d.Number, d.Text, d.Overdue)).ToArray());
+            [("two days ago", true), ("yesterday", true), ("today", false)],
+            view.Due.Select(d => (d.Text, d.Overdue)).ToArray());
         Assert.Equal(Today.AddDays(-2), view.Due[0].Due);
+        Assert.Equal(
+            ["Due", "Overdue", "Text"],
+            typeof(DueTodo).GetProperties(
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance
+                    | System.Reflection.BindingFlags.DeclaredOnly)
+                .Select(p => p.Name)
+                .Order(StringComparer.Ordinal));
     }
 
     // AC-4
@@ -311,8 +318,8 @@ public sealed class CurrentViewTests : IDisposable
             null,
             false,
             [
-                new DueTodo(1, Today.AddDays(-3), "Pay rent #home", true),
-                new DueTodo(2, Today, "Plan #Work and #[big plan]", false),
+                new DueTodo(Today.AddDays(-3), "Pay rent #home", true),
+                new DueTodo(Today, "Plan #Work and #[big plan]", false),
             ],
             [
                 new LinkedNote("Alpha [x]", ["big plan", "work"]),
@@ -334,7 +341,7 @@ public sealed class CurrentViewTests : IDisposable
             CalendarFeedStatus.NotConfigured, null, null, true, [], [], false);
         CurrentView badDb = new CurrentView(
             Today, Zone, [], "/n/calendar", [], CalendarFeedStatus.NotConfigured, null, null, false,
-            [new DueTodo(1, Today.AddDays(-1), "Due #work", true)], [], true);
+            [new DueTodo(Today.AddDays(-1), "Due #work", true)], [], true);
 
         Assert.Equal(
             ViewParityTests.Goldens["Current_BadTodos"], ViewParityTests.Render(CurrentCommands.Render(badTodos), "/n"));
@@ -349,7 +356,7 @@ public sealed class CurrentViewTests : IDisposable
         const string Marker = "SECRET-042\u001b[31m";
         DateTime start = Today.ToDateTime(new TimeOnly(9, 0));
         Appointment appointment = new Appointment(Marker, Marker, start, start.AddHours(1), false);
-        DueTodo todo = new DueTodo(1, Today, Marker + " #" + Marker, false);
+        DueTodo todo = new DueTodo(Today, Marker + " #" + Marker, false);
         LinkedNote note = new LinkedNote(Marker, [Marker]);
         CurrentView view = new CurrentView(
             Today,
@@ -378,7 +385,7 @@ public sealed class CurrentViewTests : IDisposable
     public void ToString_DueTodoAndLinkedNote_HideRawText()
     {
         const string Marker = "SECRET-042\u001b[31m";
-        DueTodo todo = new DueTodo(3, Today, Marker, true);
+        DueTodo todo = new DueTodo(Today, Marker, true);
         LinkedNote note = new LinkedNote(Marker, [Marker, "work"]);
 
         string todoText = todo.ToString();

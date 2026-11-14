@@ -6,7 +6,7 @@ using Spectre.Console.Rendering;
 namespace Context;
 
 /// <summary>
-/// Builds the body of the <c>Todos</c> sidebar: one line per todo, <c>&lt;n&gt; &lt;MM-dd&gt; &lt;text&gt;</c>,
+/// Builds the body of the <c>Todos</c> sidebar: one line per todo, <c>&lt;MM-dd&gt; &lt;text&gt;</c> (no number),
 /// in <see cref="TodoStore.List"/> order. The date is red when overdue, steelblue1 when due today and
 /// grey when later. Text is cleaned, escaped and cut to one line.
 /// </summary>
@@ -52,7 +52,7 @@ internal sealed class TodoSidebar
         List<IRenderable> lines = [];
         for (int i = 0; i < shown; i++)
         {
-            lines.Add(Line(i + 1, todos[i], now, width));
+            lines.Add(Line(todos[i], now, width));
         }
 
         if (shown < todos.Count)
@@ -65,7 +65,7 @@ internal sealed class TodoSidebar
     }
 
     /// <summary>Outside text made safe for one line: <see cref="SafeText.Clean"/>, then line breaks become spaces.</summary>
-    internal static string OneLine(string text) => SafeText.Clean(text).Replace('\n', ' ');
+    internal static string OneLine(string text) => TodoPicker.OneLine(text);
 
     /// <summary>Cuts <paramref name="text"/> to at most <paramref name="width"/> cells, ending in <c>…</c> if cut.</summary>
     internal static string Fit(string text, int width)
@@ -95,12 +95,12 @@ internal sealed class TodoSidebar
 
     private static int CellWidth(string text) => text.GetCellWidth();
 
-    private static Markup Line(int number, TodoItem todo, DateOnly now, int width)
+    private static Markup Line(TodoItem todo, DateOnly now, int width)
     {
         string colour = todo.Due < now ? "red" : todo.Due == now ? "steelblue1" : "grey";
         string date = todo.Due.ToString("MM-dd", CultureInfo.InvariantCulture);
-        string prefix = $"{number} {date} ";
+        string prefix = $"{date} ";
         string text = Fit(OneLine(todo.Text), Math.Max(width - CellWidth(prefix), 1));
-        return new Markup($"{number} [{colour}]{date}[/] {Markup.Escape(text)}");
+        return new Markup($"[{colour}]{date}[/] {Markup.Escape(text)}");
     }
 }

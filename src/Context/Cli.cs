@@ -30,9 +30,9 @@ internal sealed class Cli
         ("help", "Show this list."),
         ("version", "Show the version."),
         ("capture <text...>", "Append a dated line to the inbox note."),
-        ("todos", "List todos: number, date, text."),
+        ("todos", "List todos: date, text."),
         ("todo add <yyyy-MM-dd|today|tomorrow> <text...>", "Add a todo."),
-        ("todo done <n>", "Mark the n-th todo of 'todos' done."),
+        ("todo done <text...>", "Mark the todo with that text done."),
         ("notes", "List note names."),
         ("note show <name...>", "Print a note."),
         ("tags [tag...]", "List tags with counts, or the notes with a tag."),
@@ -262,18 +262,17 @@ internal sealed class Cli
 
         if (sub == "done")
         {
-            if (args.Length != 2
-                || !int.TryParse(args[1], NumberStyles.None, CultureInfo.InvariantCulture, out int number)
-                || number < 1)
+            string query = string.Join(' ', args[1..]).Trim();
+            if (query.Length == 0)
             {
-                usage = "Type: context todo done <n> with a number from 'context todos'.";
+                usage = "Type: context todo done <text> with the todo's text, or a part of it.";
                 return null;
             }
 
-            return s => DoneTodo(s, number);
+            return s => DoneTodo(s, query);
         }
 
-        usage = "Type: context todo add <date> <text> or context todo done <n>.";
+        usage = "Type: context todo add <date> <text> or context todo done <text>.";
         return null;
     }
 
@@ -325,9 +324,9 @@ internal sealed class Cli
             return Error(TodosUnreadable);
         }
 
-        for (int i = 0; i < todos.Count; i++)
+        foreach (TodoItem todo in todos)
         {
-            Out($"{(i + 1).ToString(CultureInfo.InvariantCulture)}\t{Date(todos[i].Due)}\t{OneLine(todos[i].Text)}");
+            Out($"{Date(todo.Due)}\t{OneLine(todo.Text)}");
         }
 
         return ExitOk;
@@ -348,20 +347,29 @@ internal sealed class Cli
         return Done($"Added: {Date(todo.Due)} {OneLine(todo.Text)}");
     }
 
-    private int DoneTodo(Session session, int number)
+    private int DoneTodo(Session session, string query)
     {
         TodoItem? done;
         try
         {
             IReadOnlyList<TodoItem> todos = session.Todos.List();
-            if (number > todos.Count)
+            if (todos.Count == 0)
             {
-                return Error($"There is no todo {number.ToString(CultureInfo.InvariantCulture)}.");
+                return Error("There are no todos to mark done.");
             }
 
-            // The number only picks the todo; it is removed by its id, so a list that changed in between can't
+            TodoPick pick = TodoPicker.Pick(todos, query);
+            if (pick.Todo is null)
+            {
+                string shown = OneLine(query);
+                return Error(pick.Matches == 0
+                    ? $"No todo matches \"{shown}\"."
+                    : $"{pick.Matches.ToString(CultureInfo.InvariantCulture)} todos match \"{shown}\". Type more of the todo's text.");
+            }
+
+            // The text only picks the todo; it is removed by its id, so a list that changed in between can't
             // make another todo go away.
-            done = session.Todos.Complete(todos[number - 1].Id);
+            done = session.Todos.Complete(pick.Todo.Id);
         }
         catch (TodoStoreException)
         {
@@ -535,7 +543,7 @@ internal sealed class Cli
 
         foreach (DueTodo todo in view.Due)
         {
-            Out($"{todo.Number.ToString(CultureInfo.InvariantCulture)}\t{Date(todo.Due)}\t{OneLine(todo.Text)}");
+            Out($"{Date(todo.Due)}\t{OneLine(todo.Text)}");
         }
 
         Out("Linked notes");

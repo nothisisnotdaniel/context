@@ -39,11 +39,13 @@ public sealed class TodoCommandsTests : IDisposable
 
     private TodoStore Store() => new(root, () => clock = clock.AddMinutes(1));
 
-    private (int ExitCode, string Output) Run(bool ansi, params string[] commands)
+    private (int ExitCode, string Output) Run(bool ansi, params string[] commands) => Run(ansi, null, commands);
+
+    private (int ExitCode, string Output) Run(bool ansi, Action? beforeComplete, params string[] commands)
     {
         CommandRegistry registry = CommandRegistry.CreateDefault();
         TodoStore store = Store();
-        TodoCommands.Register(registry, store, () => Today);
+        TodoCommands.Register(registry, store, () => Today, beforeComplete);
         TestConsole console = new TestConsole().Interactive();
         console.Profile.Width = Width;
         console.Profile.Height = Height;
@@ -211,12 +213,12 @@ public sealed class TodoCommandsTests : IDisposable
     [Fact]
     public void Sidebar_UpdatesRightAfterTodoAndDone()
     {
-        List<string[]> frames = AllFrames("/todo 2026-11-03 Buy milk", "/todo today Call Anna", "/done 1");
+        List<string[]> frames = AllFrames("/todo 2026-11-03 Buy milk", "/todo today Call Anna", "/done call anna");
 
         Assert.Contains("No todos yet", Sidebar(frames[0]));
-        Assert.Equal("1 11-03 Buy milk", Sidebar(frames[1])[0]);
-        Assert.Equal(["1 10-28 Call Anna", "2 11-03 Buy milk"], Sidebar(frames[2])[..2]);
-        Assert.Equal("1 11-03 Buy milk", Sidebar(frames[3])[0]);
+        Assert.Equal("11-03 Buy milk", Sidebar(frames[1])[0]);
+        Assert.Equal(["10-28 Call Anna", "11-03 Buy milk"], Sidebar(frames[2])[..2]);
+        Assert.Equal("11-03 Buy milk", Sidebar(frames[3])[0]);
         Assert.Equal(string.Empty, Sidebar(frames[3])[1]);
     }
 
@@ -228,58 +230,256 @@ public sealed class TodoCommandsTests : IDisposable
 
         string[] first = AllFrames()[0];
 
-        Assert.Equal(["1 10-30 Pay rent", "2 11-03 Buy milk"], Sidebar(first)[..2]);
+        Assert.Equal(["10-30 Pay rent", "11-03 Buy milk"], Sidebar(first)[..2]);
     }
 
-    // AC-6
-    [Fact]
-    public void Done_RemovesTheNumberShown_ShowsDone()
+    // 144 AC-2: the text picks the todo (ignoring case, a part is enough); only that one is removed.
+    [Theory]
+    [InlineData("/done Second")]
+    [InlineData("/done   sEcOnD  ")]
+    [InlineData("/done eco")]
+    public void Done_RemovesThePickedTodo_ShowsDone(string command)
     {
         Run(false, "/todo 2026-11-05 Third", "/todo 2026-11-03 First", "/todo 2026-11-04 Second");
 
-        string[] frame = LastFrame("/done 2");
+        string[] frame = LastFrame(command);
 
         Assert.Contains(MainView(frame), l => l.Contains("Done: Second", StringComparison.Ordinal));
+        Assert.True(string.IsNullOrWhiteSpace(frame[^4]));
         Assert.Equal(["First", "Third"], new TodoStore(root).List().Select(t => t.Text));
-        Assert.Equal(["1 11-03 First", "2 11-05 Third"], Sidebar(frame)[..2]);
+        Assert.Equal(["11-03 First", "11-05 Third"], Sidebar(frame)[..2]);
     }
 
-    // AC-6
+    // 144 AC-2: an exact text wins over todos that only contain it.
+    [Fact]
+    public void Done_ExactText_WinsOverContaining()
+    {
+        Run(false, "/todo 2026-11-03 Buy milk and bread", "/todo 2026-11-04 Buy milk", "/todo 2026-11-05 Buy milkshake");
+
+        string[] frame = LastFrame("/done buy MILK");
+
+        Assert.Contains(MainView(frame), l => l.Contains("Done: Buy milk", StringComparison.Ordinal));
+        Assert.Equal(["Buy milk and bread", "Buy milkshake"], new TodoStore(root).List().Select(t => t.Text));
+    }
+
+    // 144 AC-2: of two todos with the same text, the earlier due one goes and the later one stays.
+    [Fact]
+    public void Done_EqualTexts_RemovesTheEarliestDue_KeepsTheOther()
+    {
+        Run(false, "/todo 2026-11-09 Water plants", "/todo 2026-11-02 Water plants", "/todo 2026-11-05 Other");
+        TodoItem later = new TodoStore(root).List().Single(t => t.Due == new DateOnly(2026, 11, 9));
+
+        string[] frame = LastFrame("/done water plants");
+
+        Assert.Contains(MainView(frame), l => l.Contains("Done: Water plants", StringComparison.Ordinal));
+        IReadOnlyList<TodoItem> left = new TodoStore(root).List();
+        Assert.Equal(["Other", "Water plants"], left.Select(t => t.Text));
+        Assert.Equal(later.Id, left[1].Id);
+        Assert.Equal(new DateOnly(2026, 11, 9), left[1].Due);
+    }
+
+    // 144 AC-3: no text is a usage error naming /done <text>.
     [Theory]
     [InlineData("/done")]
-    [InlineData("/done x")]
-    [InlineData("/done 0")]
-    [InlineData("/done 3")]
-    [InlineData("/done -1")]
-    [InlineData("/done 1.5")]
-    [InlineData("/done 99999999999999")]
-    public void Done_BadNumber_ShowsRedHint_ChangesNothing(string command)
+    [InlineData("/done    ")]
+    public void Done_NoText_ShowsRedUsage_ChangesNothing(string command)
     {
         Run(false, "/todo 2026-11-03 First", "/todo 2026-11-04 Second");
         byte[] before = File.ReadAllBytes(FilePath);
 
-        AssertOnHintRow(LastFrame(command), "/done <number>");
-        AssertRedHint(command, command is "/done 0" or "/done 3" ? "There is no todo" : "Type ");
+        AssertOnHintRow(LastFrame(command), "Type /done <text> with the todo's text, or a part of it.");
+        AssertRedHint(command, "Type ");
         Assert.Equal(before, File.ReadAllBytes(FilePath));
     }
 
-    // AC-6
+    // 144 AC-3: the usage error comes first, so it wins over an empty list ...
+    [Fact]
+    public void Done_NoText_EmptyList_ShowsUsage_CreatesNothing()
+    {
+        string[] frame = LastFrame("/done");
+
+        AssertOnHintRow(frame, "/done <text>");
+        Assert.DoesNotContain("There are no todos", frame[^4]);
+        AssertRedHint("/done", "Type ");
+        Assert.Empty(Directory.GetFileSystemEntries(parent));
+    }
+
+    // 144 AC-3: ... and over an unreadable file, which /done alone never reads.
+    [Fact]
+    public void Done_NoText_UnreadableFile_ShowsUsage_FileUnchanged()
+    {
+        Directory.CreateDirectory(root);
+        byte[] original = Encoding.UTF8.GetBytes("{ this is [not] json");
+        File.WriteAllBytes(FilePath, original);
+
+        string[] frame = LastFrame("/done");
+
+        AssertOnHintRow(frame, "/done <text>");
+        Assert.DoesNotContain("so nothing was changed", frame[^4]);
+        AssertRedHint("/done", "Type ");
+        Assert.Equal(original, File.ReadAllBytes(FilePath));
+        Assert.Single(Directory.GetFiles(root));
+    }
+
+    // 144 AC-3
     [Fact]
     public void Done_NoTodos_ShowsRedHint_CreatesNothing()
     {
-        AssertOnHintRow(LastFrame("/done 1"), "There are no todos to mark done.");
-        AssertRedHint("/done 1", "There are no todos");
+        AssertOnHintRow(LastFrame("/done Buy milk"), "There are no todos to mark done.");
+        AssertRedHint("/done Buy milk", "There are no todos to mark done.");
         Assert.Empty(Directory.GetFileSystemEntries(parent));
+    }
+
+    // 144 AC-3
+    [Theory]
+    [InlineData("/done x", "No todo matches \"x\".")]
+    [InlineData("/done First thing", "No todo matches \"First thing\".")]
+    [InlineData("/done -1", "No todo matches \"-1\".")]
+    public void Done_NoMatch_ShowsRedHint_ChangesNothing(string command, string hint)
+    {
+        Run(false, "/todo 2026-11-03 First", "/todo 2026-11-04 Second");
+        byte[] before = File.ReadAllBytes(FilePath);
+
+        AssertOnHintRow(LastFrame(command), hint);
+        AssertRedHint(command, hint);
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+    }
+
+    // 144 AC-3: an ambiguous text never removes anything.
+    [Fact]
+    public void Done_SeveralMatches_ShowsRedHint_ChangesNothing()
+    {
+        Run(false, "/todo 2026-11-03 Call Anna", "/todo 2026-11-04 Call Ben", "/todo 2026-11-05 Recall the order", "/todo 2026-11-06 Buy milk");
+        byte[] before = File.ReadAllBytes(FilePath);
+        const string Hint = "3 todos match \"CALL\". Type more of the todo's text.";
+
+        AssertOnHintRow(LastFrame("/done CALL"), Hint);
+        AssertRedHint("/done CALL", Hint);
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+    }
+
+    // 144 AC-3: the query is shown escaped, not read as markup.
+    [Fact]
+    public void Done_NoMatch_QueryWithMarkup_ShownLiterally()
+    {
+        Run(false, "/todo 2026-11-03 First");
+        byte[] before = File.ReadAllBytes(FilePath);
+
+        string[] frame = LastFrame("/done [bold]x[/] [oops");
+
+        AssertOnHintRow(frame, "No todo matches \"[bold]x[/] [oops\".");
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+    }
+
+    // 144 AC-3: control characters in the query are cleaned before it is shown.
+    [Fact]
+    public void Done_NoMatch_QueryWithControlCharacter_ShowsPlaceholder()
+    {
+        Run(false, "/todo 2026-11-03 First");
+        byte[] before = File.ReadAllBytes(FilePath);
+        CommandRegistry registry = CommandRegistry.CreateDefault();
+        TodoCommands.Register(registry, Store(), () => Today);
+        Assert.True(registry.TryGet("/done", out Command done));
+        TestConsole console = new TestConsole { EmitAnsiSequences = false };
+
+        CommandResult result = done.Handler("a\u001b[2Jb\u0007");
+
+        Assert.NotNull(result.Hint);
+        console.Write(result.Hint!);
+        Assert.Contains("No todo matches \"a\uFFFD[2Jb\uFFFD\".", console.Output);
+        Assert.DoesNotContain('\u001b', console.Output);
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+    }
+
+    // 144 AC-4: a digit is text like any other, never a position.
+    [Fact]
+    public void Done_Digit_IsNotAPosition()
+    {
+        Run(false, "/todo 2026-11-03 Buy milk", "/todo 2026-11-04 Call Anna");
+        byte[] before = File.ReadAllBytes(FilePath);
+
+        AssertOnHintRow(LastFrame("/done 1"), "No todo matches \"1\".");
+        AssertRedHint("/done 1", "No todo matches \"1\".");
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+    }
+
+    // 144 AC-4
+    [Fact]
+    public void Done_Digit_PicksTheTodoWhoseTextHoldsIt()
+    {
+        Run(false, "/todo 2026-11-03 Buy milk", "/todo 2026-11-04 Call Anna", "/todo 2026-11-05 Read chapter 1");
+
+        string[] frame = LastFrame("/done 1");
+
+        Assert.Contains(MainView(frame), l => l.Contains("Done: Read chapter 1", StringComparison.Ordinal));
+        Assert.Equal(["Buy milk", "Call Anna"], new TodoStore(root).List().Select(t => t.Text));
+    }
+
+    // 144 AC-5: the picked todo went away between pick and removal; no other todo is removed.
+    [Fact]
+    public void Done_TodoGoneBeforeRemoval_ShowsListChanged_RemovesNoOther()
+    {
+        Run(false, "/todo 2026-11-03 Buy milk", "/todo 2026-11-04 Buy milk", "/todo 2026-11-05 Call Anna");
+        Guid picked = new TodoStore(root).List()[0].Id;
+        byte[]? afterHook = null;
+        Action hook = () =>
+        {
+            Assert.NotNull(new TodoStore(root).Complete(picked));
+            afterHook = File.ReadAllBytes(FilePath);
+        };
+        const string Hint = "The todo list changed. Nothing was done.";
+
+        (int exitCode, string output) = Run(true, hook, "/done buy milk");
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains(RedStart() + Hint, output);
+        Assert.NotNull(afterHook);
+        Assert.Equal(afterHook, File.ReadAllBytes(FilePath));
+        IReadOnlyList<TodoItem> left = new TodoStore(root).List();
+        Assert.Equal(["Buy milk", "Call Anna"], left.Select(t => t.Text));
+        Assert.Equal(new DateOnly(2026, 11, 4), left[0].Due);
+    }
+
+    // 144 AC-5: the hook runs exactly once, and only after a pick.
+    [Fact]
+    public void Done_BeforeComplete_RunsOnce_OnlyAfterAPick()
+    {
+        Run(false, "/todo 2026-11-03 Call Anna", "/todo 2026-11-04 Call Ben", "/todo 2026-11-05 Buy milk");
+        int calls = 0;
+        Action hook = () => calls++;
+
+        Run(false, hook, "/done", "/done nothing like it", "/done call");
+        Assert.Equal(0, calls);
+        Assert.Equal(3, new TodoStore(root).List().Count);
+
+        Run(false, hook, "/done milk");
+        Assert.Equal(1, calls);
+        Assert.Equal(["Call Anna", "Call Ben"], new TodoStore(root).List().Select(t => t.Text));
+    }
+
+    // 144 AC-5: nothing is picked on an empty list or an unreadable file, so the hook stays silent there too.
+    [Fact]
+    public void Done_BeforeComplete_NotRun_OnEmptyListOrUnreadableFile()
+    {
+        int calls = 0;
+        Action hook = () => calls++;
+
+        Run(false, hook, "/done milk");
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, "{ this is [not] json");
+        Run(false, hook, "/done milk");
+
+        Assert.Equal(0, calls);
     }
 
     // AC-7
     [Fact]
     public void MarkupInText_ShownLiterally_InMessagesAndSidebar()
     {
-        List<string[]> frames = AllFrames("/todo today [bold]x[/]", "/done 1");
+        List<string[]> frames = AllFrames("/todo today [bold]x[/]", "/done [bold]x[/]");
 
         Assert.Contains(MainView(frames[1]), l => l.Contains("Added [bold]x[/] (due 2026-10-28)", StringComparison.Ordinal));
-        Assert.Equal("1 10-28 [bold]x[/]", Sidebar(frames[1])[0]);
+        Assert.Equal("10-28 [bold]x[/]", Sidebar(frames[1])[0]);
         Assert.Contains(MainView(frames[2]), l => l.Contains("Done: [bold]x[/]", StringComparison.Ordinal));
     }
 
@@ -293,17 +493,17 @@ public sealed class TodoCommandsTests : IDisposable
             "[{\"text\":\"a\\u001b[2Jb\\nc\",\"due\":\"2026-11-03\",\"created\":\"2026-10-01T00:00:00Z\"}]",
             new UTF8Encoding(false));
 
-        (int exitCode, string output) = Run(false, "/done 1");
+        (int exitCode, string output) = Run(false, "/done [2Jb c");
 
         Assert.Equal(0, exitCode);
         Assert.Contains(MainView(Frames(output)[1]), l => l.Contains("Done: a�[2Jb c", StringComparison.Ordinal));
         Assert.DoesNotContain('\u001b', Ansi.Replace(output, string.Empty));
     }
 
-    // AC-8
+    // AC-8, 144 AC-5: an unreadable file keeps its message and its bytes.
     [Theory]
     [InlineData("/todo today Buy milk")]
-    [InlineData("/done 1")]
+    [InlineData("/done Buy milk")]
     public void CorruptFile_ShowsRedHint_FileUnchanged(string command)
     {
         Directory.CreateDirectory(root);
@@ -319,7 +519,7 @@ public sealed class TodoCommandsTests : IDisposable
         Assert.Single(Directory.GetFiles(root));
     }
 
-    // AC-9
+    // AC-9, 144 AC-9
     [Fact]
     public void Help_ListsTodoCommands()
     {
@@ -328,10 +528,12 @@ public sealed class TodoCommandsTests : IDisposable
         Assert.Contains(main, l => l.Contains("/todo", StringComparison.Ordinal)
             && l.Contains("Add a todo: /todo <date> <text>", StringComparison.Ordinal));
         Assert.Contains(main, l => l.Contains("/done", StringComparison.Ordinal)
-            && l.Contains("Mark a todo done: /done <number>", StringComparison.Ordinal));
+            && l.Contains("Mark a todo done: /done <text>", StringComparison.Ordinal));
+        Assert.DoesNotContain(main, l => l.Contains("<number>", StringComparison.Ordinal)
+            || l.Contains("<n>", StringComparison.Ordinal));
     }
 
-    // AC-9
+    // AC-9, 144 AC-9
     [Fact]
     public void Popup_ListsTodoCommands()
     {
@@ -352,7 +554,35 @@ public sealed class TodoCommandsTests : IDisposable
         Assert.Contains(rows, w => w.Text.StartsWith("/todo", StringComparison.Ordinal)
             && w.Text.Contains("Add a todo: /todo <date> <text>"));
         Assert.Contains(rows, w => w.Text.StartsWith("/done", StringComparison.Ordinal)
-            && w.Text.Contains("Mark a todo done: /done <number>"));
+            && w.Text.Contains("Mark a todo done: /done <text>"));
+        Assert.DoesNotContain(rows, w => w.Text.Contains("<number>"));
+    }
+
+    // 144 AC-9: no todo message of the console or the command line names a number any more.
+    [Fact]
+    public void Sources_NameNoTodoNumber()
+    {
+        string src = Path.Combine(RepoRoot(), "src", "Context");
+        foreach (string file in new[] { "TodoCommands.cs", "TodoSidebar.cs", "CurrentCommands.cs", "Cli.cs" })
+        {
+            string text = File.ReadAllText(Path.Combine(src, file));
+            Assert.DoesNotContain("<number>", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("<n>", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("number from the sidebar", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("There is no todo", text, StringComparison.Ordinal);
+        }
+    }
+
+    private static string RepoRoot()
+    {
+        DirectoryInfo? directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Context.slnx")))
+        {
+            directory = directory.Parent;
+        }
+
+        Assert.NotNull(directory);
+        return directory!.FullName;
     }
 
     // App without a sidebar keeps the old placeholder.

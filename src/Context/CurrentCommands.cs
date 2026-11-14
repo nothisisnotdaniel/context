@@ -63,14 +63,12 @@ internal static class CurrentCommands
             .Border(TableBorder.Rounded)
             .BorderColor(Color.Grey)
             .Title("[grey]Due[/]")
-            .AddColumn("[grey]#[/]")
             .AddColumn("[grey]Date[/]")
             .AddColumn("[grey]Todo[/]");
         foreach (DueTodo todo in view.Due)
         {
             string colour = todo.Overdue ? "red" : "steelblue1";
             dueTable.AddRow(
-                new Markup(todo.Number.ToString(CultureInfo.InvariantCulture)),
                 new Markup($"[{colour}]{todo.Due.ToString(DateFormat, CultureInfo.InvariantCulture)}[/]"),
                 new Markup(Markup.Escape(TodoSidebar.OneLine(todo.Text))));
         }

@@ -8,15 +8,20 @@ internal static class TodoCommands
 {
     private const string DateFormat = "yyyy-MM-dd";
     private const string TodoForm = "[bold]/todo <yyyy-MM-dd|today|tomorrow> <text>[/]";
-    private const string DoneForm = "[bold]/done <number>[/]";
+    private const string DoneForm = "[bold]/done <text>[/]";
     private const string Unreadable =
         "Can't read todos.json, so nothing was changed. Fix or move the file and try again.";
 
-    /// <summary>Adds <c>/todo</c> and <c>/done</c> to <paramref name="registry"/>.</summary>
-    public static void Register(CommandRegistry registry, TodoStore store, Func<DateOnly> today)
+    /// <summary>
+    /// Adds <c>/todo</c> and <c>/done</c> to <paramref name="registry"/>. <paramref name="beforeComplete"/> is a
+    /// test hook (like <c>DesktopActions.BeforeWrite</c>): <c>/done</c> calls it once after the pick and just
+    /// before <see cref="TodoStore.Complete"/>. Production code never passes it.
+    /// </summary>
+    public static void Register(
+        CommandRegistry registry, TodoStore store, Func<DateOnly> today, Action? beforeComplete = null)
     {
         registry.Register("/todo", "Add a todo: /todo <date> <text>", argument => Add(store, today, argument));
-        registry.Register("/done", "Mark a todo done: /done <number>", argument => Done(store, argument));
+        registry.Register("/done", "Mark a todo done: /done <text>", argument => Done(store, argument, beforeComplete));
     }
 
     private static CommandResult Add(TodoStore store, Func<DateOnly> today, string argument)
@@ -59,11 +64,12 @@ internal static class TodoCommands
             $"Added [steelblue1]{Shown(todo.Text)}[/] (due {todo.Due.ToString(DateFormat, CultureInfo.InvariantCulture)})"));
     }
 
-    private static CommandResult Done(TodoStore store, string argument)
+    private static CommandResult Done(TodoStore store, string argument, Action? beforeComplete)
     {
-        if (!int.TryParse(argument.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int number))
+        string query = argument.Trim();
+        if (query.Length == 0)
         {
-            return CommandResult.Error($"Type {DoneForm} with a number from the sidebar.");
+            return CommandResult.Error($"Type {DoneForm} with the todo's text, or a part of it.");
         }
 
         IReadOnlyList<TodoItem> todos;
@@ -81,17 +87,22 @@ internal static class TodoCommands
             return CommandResult.Error("There are no todos to mark done.");
         }
 
-        if (number < 1 || number > todos.Count)
+        TodoPick pick = TodoPicker.Pick(todos, query);
+        if (pick.Todo is null)
         {
-            return CommandResult.Error($"There is no todo {number}. Type {DoneForm} with a number from 1 to {todos.Count}.");
+            string shown = Shown(query);
+            return CommandResult.Error(pick.Matches == 0
+                ? $"No todo matches \"{shown}\"."
+                : $"{pick.Matches.ToString(CultureInfo.InvariantCulture)} todos match \"{shown}\". Type more of the todo's text.");
         }
 
-        // The sidebar number only picks the todo; it is removed by its id, so a list that changed in between can't
-        // make another todo go away.
+        // The text only picks the todo; it is removed by its id, so a list that changed in between can't make
+        // another todo go away.
+        beforeComplete?.Invoke();
         TodoItem? done;
         try
         {
-            done = store.Complete(todos[number - 1].Id);
+            done = store.Complete(pick.Todo.Id);
         }
         catch (TodoStoreException)
         {
@@ -100,7 +111,7 @@ internal static class TodoCommands
 
         if (done is null)
         {
-            return CommandResult.Error($"There is no todo {number}. Type {DoneForm} with a number from the sidebar.");
+            return CommandResult.Error("The todo list changed. Nothing was done.");
         }
 
         return new CommandResult(new Markup($"Done: [steelblue1]{Shown(done.Text)}[/]"));
