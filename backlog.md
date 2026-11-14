@@ -58,7 +58,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#112](backlog/112-locked-package-restore-for-release-builds.md) Locked package restore for release builds → 155-locked-package-restore
 - [x] [#51](backlog/051-people-pages.md) People pages → 156-people-pages
 - [x] [#181](backlog/181-page-types-and-attributes-searchable.md) Page types and attributes, searchable (after: #51) → 157-page-types-attributes
-- [ ] [#168](backlog/168-aliases-for-people.md) Aliases for people (after: #51)
+- [x] [#168](backlog/168-aliases-for-people.md) Aliases for people (after: #51) → 158-person-aliases
 - [ ] [#169](backlog/169-todos-linked-to-people.md) Todos linked to people (after: #51; #168)
 - [ ] [#46](backlog/046-meeting-prep.md) Meeting prep
 - [x] [#36](backlog/036-claude-md-tidy-ups.md) CLAUDE.md tidy-ups → 153-claude-md-tidy
