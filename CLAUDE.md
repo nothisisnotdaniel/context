@@ -2,7 +2,8 @@
 
 Every factory agent reads this file before working on Context. Keep it short and accurate.
 
-- **What it is:** a personal console app for keeping information in one place. The user stores
+- **What it is:** a personal app for keeping information in one place, with two front ends: a desktop app
+  (`Context.Desktop`) and a scriptable command-line tool (`context`). The user stores
   notes as Markdown files in a `Context` folder inside their app data folder
   (`Environment.SpecialFolder.ApplicationData`). It shows the day's appointments from `.ics`
   files in `<root>/calendar/`; later it will pull in information from email and other sources.
@@ -14,7 +15,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     after whitespace, up to the first `]` on the line, not followed by `(`; trimmed, whitespace runs become one
     space, then the same rules plus spaces) outside fenced code blocks and inline backtick spans. `#work` and
     `#[Work]` are one tag. `TagParser.Format` shows a tag as `#tag`, or `#[tag]` when it has a space; all tag
-    output uses it. `TagIndex.NormalizeTag` (for `/tags <tag>`) accepts `work`, `#work`, `[a b]`, `#[a b]`. `TagIndex` keeps the index in SQLite at `<root>/context.db` (`Microsoft.Data.Sqlite`,
+    output uses it. `TagIndex.NormalizeTag` (for a typed tag, as in `context tags <tag>`) accepts `work`, `#work`, `[a b]`, `#[a b]`. `TagIndex` keeps the index in SQLite at `<root>/context.db` (`Microsoft.Data.Sqlite`,
     `Pooling=False`, parameterized SQL only): `notes(name, modified)` (last-write UTC ticks, NULL for a
     note that couldn't be read so it is retried), `note_tags(note, tag)` and `note_links(note, target)`. `Sync(NoteStore)` updates it
     in one transaction and only re-parses files whose time changed. `PRAGMA user_version` holds the parser
@@ -23,32 +24,31 @@ Every factory agent reads this file before working on Context. Keep it short and
     `FindNote`, `Links`. A database that can't be opened or isn't valid throws `TagIndexException` (an
     `IOException`) and is never deleted or overwritten. The file database waits up to `TagIndex.BusyTimeout` (5 s; an
     internal constructor argument shortens it for tests) for another process's lock, and `Sync` starts with
-    `BEGIN IMMEDIATE`, so the desktop app and a CLI run can share it. `/tags`, `/tags <tag>` and `/links <note>`
-    (`TagCommands`) call `Sync` first and show a red `Can't read context.db` hint on that error.
+    `BEGIN IMMEDIATE`, so the desktop app and a command-line run can share it. `TagsView.Build`, `LinksView.Build`
+    and `CurrentView.Build` call `Sync` first and report that error as a view kind or flag (`IndexUnreadable`); the
+    command line then writes `Can't read context.db.` to stderr and exits 1.
   - **Note links:** `NoteLinkParser.Parse` finds `[[Note name]]` anywhere in a line (`[[`, text with no `[` up to the
     first `]` on the line, then `]]`; trimmed; empty or over 103 chars (`MaxTargetLength`) is no link; distinct ignoring
     case, first spelling kept), skipping fences and code spans through `TagParser.LinesOutsideFences` and
     `TagParser.SkipCodeSpan` (shared, not copied). It scans each line once (cached next `]` and `[`). `[[...]]` is never
     a tag and `#[...]` never a link; `|alias` and `#heading` are part of the target. Targets are stored as written and
-    resolved only at query time by `NameLookup.Resolve` (like `/open`: as written, then without one `.md`; exact, then
+    resolved only at query time by `NameLookup.Resolve` (like `context note show`: as written, then without one `.md`; exact, then
     ignoring case), never turned into a path, so a link to a missing note starts working once the note exists. `Links`
     merges tag links and note links into one `NoteLink` per other note (`Direction` `None`/`To`/`From`/`Both`,
-    `Missing` = a `To` target that names no note, shown as written); never the note itself. `/links` adds a `Link`
-    column (`links to`, `linked from`, `both ways`, `links to (missing)`, grey; missing names grey) only when some row
-    has a note link, so tag-only output is unchanged.
-- **UI:**
-  - An input box at the bottom of the screen is used for navigation.
-  - A todo list is always shown in a sidebar, sorted by due date. The user sets each todo's due date.
-  - The `/current` view shows all relevant information for now, such as today's appointments, due
-    todos and linked notes. `/current` (`CurrentView.Build` in Core reads the data, including the untruncated
-    appointments, the time text and the calendar's `Zone`, in which the renderer shows the cache time; `CurrentCommands.Render` draws it; argument ignored) shows a steelblue1
-    `Today, yyyy-MM-dd` title, a `Due` table of every todo with `Due <= today` (columns `Date` and `Todo` only, no number: `yyyy-MM-dd`
-    red overdue / steelblue1 today, one-line text; `DueTodo` has no number) and a `Linked notes` table. A todo links to notes
+    `Missing` = a `To` target that names no note, shown as written); never the note itself. Both front ends show
+    the direction as `links to`, `linked from`, `both ways` or `links to (missing)` (nothing for a link by shared
+    tags only): `context links` in its second column, the desktop in `LinksPanel`.
+- **Views:**
+  - **Current view:** all relevant information for now: today's appointments, due todos and linked notes.
+    `CurrentView.Build` in Core reads the data (including the untruncated appointments, the time text and the
+    calendar's `Zone`, in which a front end shows the cache time); `context current` prints it as text and the
+    desktop's `CurrentPanel` draws it. It holds the day (`Today`), the appointments, a `Due` list of every todo with
+    `Due <= today` (date, text and `Overdue`; `DueTodo` has no number) and the linked notes. A todo links to notes
     through tags: `TagParser.Parse` on the text of each due todo (at run time, not stored), then
     `TagIndex.NotesWithTag` after `Sync`; each note once, sorted by name ignoring case, with its matching
-    tags. Grey empty-state lines when nothing is due or nothing links; a red hint for a bad `todos.json`
-    (the title and appointments still show), and a red line in place of the linked notes for a bad `context.db`.
-    Order: title, `Appointments`, `Due` (or its empty line), `Linked notes`.
+    tags. Flags instead of exceptions: `TodosUnreadable` for a bad `todos.json` (the day and the appointments are
+    still there) and `IndexUnreadable` for a bad `context.db` (the due todos are still there). When nothing is due
+    the index is not synced. Order in both front ends: day, appointments, due todos, linked notes.
   - **Calendar:** the user puts iCalendar files in `<root>/calendar/`. `CalendarStore(root, TimeZoneInfo)`
     reads only the top-level `*.ics` files (case-insensitive, no subfolders, never writes anything); a file over
     5 MB (`MaxFileBytes`) is not read. `Day(d)` returns a `CalendarDay`: the events whose local span overlaps
@@ -60,15 +60,16 @@ Every factory agent reads this file before working on Context. Keep it short and
     floating (local), `;VALUE=DATE` (all-day, `DTEND` exclusive). No `DTEND`: ends at start (all-day: one day).
     Skips `STATUS:CANCELLED`, missing/invalid `DTSTART`, end before start. No `BEGIN:VCALENDAR` throws
     `FormatException`. **Recurring events are not supported:** `RRULE`, `RDATE`, `EXDATE` are ignored, so a
-    recurring event only shows on its first occurrence. `/current` shows an `Appointments` table (`Time`:
-    `all day` or `HH:mm-HH:mm` in steelblue1, `…` for a side outside today, a midnight end shows as `00:00`;
-    `Appointment`: one-line summary or `(no title)`; `Where`: grey one-line location), at most 15 rows (last
-    `… N more`), or a grey `No appointments today. Put .ics files in <root>/calendar …` line, then a red
-    `Can't read calendar/<file>` line per unreadable file (`calendar/` alone if the folder can't be listed).
-  - **Exchange link:** `/calendar-link <url>` (`CalendarLinkView.Run` in Core acts and returns a kind plus the
-    masked link only; `CalendarLinkCommands.Render` draws it) saves a published Outlook/Exchange ICS
-    link; `/calendar-link` shows it masked with the last download time; `/calendar-link off` deletes the link
-    and the cache. The link is a **bearer secret**: `CalendarLink(root)` keeps it in `<root>/calendar-link.txt`
+    recurring event only shows on its first occurrence. The current view shows each appointment with its time
+    text (`CurrentView.TimeText`: `all day` or `HH:mm-HH:mm`, `…` for a side outside today, a midnight end shows
+    as `00:00`), its one-line summary or `(no title)` and its one-line location; with none, `No appointments
+    today. Put .ics files in <root>/calendar …`; then `Can't read calendar/<file>` per unreadable file
+    (`calendar/` alone if the folder can't be listed; on the command line these lines go to stderr).
+  - **Exchange link:** the desktop's settings page (see Settings) saves a published Outlook/Exchange ICS link,
+    shows it masked with the last download time and removes it together with the cache; the command line has no
+    command for it. `CalendarLinkView.Run(link, feed, argument)` in Core acts (a link saves it, a blank argument
+    shows it, `off` removes the link and the cache) and returns a kind plus the masked link only.
+    The link is a **bearer secret**: `CalendarLink(root)` keeps it in `<root>/calendar-link.txt`
     (one line, temp file + move, mode `0600` off Windows) and it is only ever shown as `CalendarLink.Mask`
     (`https://<host>/…`); never echo it, put it in another file or render an exception message that could hold
     it. `CalendarLink.Validate`: absolute `https` or `webcal` (stored as `https`), a host, no user-info (not even
@@ -78,9 +79,10 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Content-Length` and streamed bytes, must parse with `IcsParser`) that replaces the cache atomically and
     stamps its last-write time with `utcNow` (`Fresh`). Failures keep the cache untouched: `Stale` with it, or
     `Failed`; the reason is a fixed text (`timed out`, `network error`, `HTTP <code>`, `not HTTPS`, `over 5 MB`,
-    `not a calendar`, `can't read calendar-link.txt`). `/current` merges the feed's events through
-    `CalendarStore.Day(d, extra)` and adds, under the table, a grey `Exchange calendar offline, showing the copy
-    from …` line (Stale) or a red `Can't download the Exchange calendar (<reason>).` line (Failed). Exchange
+    `not a calendar`, `can't read calendar-link.txt`). The current view merges the feed's events through
+    `CalendarStore.Day(d, extra)`; the front ends add `Exchange calendar offline, showing the copy
+    from …` (Stale) or `Can't download the Exchange calendar (<reason>).` (Failed; stderr and exit code 1 on the
+    command line). Exchange
     feeds use `RRULE` a lot, so recurring meetings only show on their first occurrence. Tests use
     `FakeHttpHandler` and never touch the network; feed tests take their timeout from
     `CalendarFeedTests.TimeoutFor` (100 ms only with `FakeHttpHandler.Hang()`, 30 s for every handler that answers).
@@ -88,7 +90,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   the desktop user marked sensitive (`<Title>.ctxs`, see Sensitive notes). Todos, the inbox, calendar files and
   `context.db` are never sealed.
 - **Sensitive notes:** (job 136, desktop only) a single note can be marked sensitive; it is then a sealed top-level
-  `<Title>.ctxs` file instead of `<Title>.md`. The console, the command line, `context.db` and search see only its
+  `<Title>.ctxs` file instead of `<Title>.md`. The command line, `context.db` and search see only its
   name, marked `locked`.
   - **Core (managed, no crypto):** `NoteStore.SensitiveExtension` (`.ctxs`), `ListSensitive()` (top-level `*.ctxs` as
     `NoteInfo`), `TryFindSensitive(name, out NoteInfo?)` (matched against `ListSensitive()` only, exact then ignoring
@@ -96,10 +98,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Create`, `CreateWithText`, `Save` and `Rename` treat a sensitive name as taken (ignoring case). A `.ctxs` is never
     moved (its name is sealed in). `TagIndex` never reads one, so its tags and links are in no table and a `[[link]]`
     to it shows as missing.
-  - **Console / command line:** `notes` prints `<name>\tlocked`, `/notes` a grey `locked`; `note show`, `export`,
-    `links`, `/open` and `/export` on one answer `<name> is sensitive. Open it in the desktop app.`
-    (`Cli.SensitiveText`, exit 1, red in the console); `import` and `capture` onto a sensitive name exit 1 and write
-    nothing.
+  - **Command line:** `notes` prints `<name>\tlocked`; `note show`, `export` and `links` on one answer
+    `<name> is sensitive. Open it in the desktop app.` (`Cli.SensitiveText`, exit 1); `import` and `capture` onto a
+    sensitive name exit 1 and write nothing.
   - **File format (`SealedNote.cs`, v1):** UTF-8 JSON, at most 8 MB, read through `BoundedFile`:
     `{"v":1,"nonce":b64(12),"tag":b64(16),"text":b64,"keys":[{"id","kind":"machine"|"recovery","epk":b64(65),"nonce","tag","key":b64(32)}]}`
     with 1 to 8 keys. The text is sealed with AES-256-GCM under a fresh random note key on every save; AAD is UTF-8
@@ -174,45 +175,31 @@ Every factory agent reads this file before working on Context. Keep it short and
     on the first machine.
   - **Manual checks (no test can cover them):** on macOS and on Windows run setup, mark, open (the OS prompt
     appears), lock, restart, restore from the `.pfx`.
-- **How it runs:** an interactive session that stays open until `/quit` (exit code 0). A Spectre
-  `Layout` fills the terminal: the main view on the left, the `Todos` sidebar on the right (fixed
-  32 columns), one hint row, then a 3-line bordered input panel at the bottom. After each command
-  the screen is cleared and the whole layout redrawn. Input is read by our own `LineEditor`
-  (`console.Input.ReadKey(intercept: true)` + `Cursor.SetPosition`); no `Live` display.
-  - Commands start with `/`. Each feature registers its commands (name, description, handler) in the
-    single `CommandRegistry` (lookup ignores case), and `/help` lists whatever is registered.
-  - **Command popup:** typing `/` into an empty input opens a popup that lists
-    `CommandRegistry.Match(line)` (Levenshtein-ranked, so typos still match): name in `steelblue1`,
-    description in `grey`, one row each, escaped. It sits just above the input panel, ends on the hint
-    row and grows upwards, full terminal width, at most 8 rows (`… N more` on the last one) and never
-    over row 1. `LineEditor` redraws it in place after every key (`Cursor.SetPosition`, no clear and no
-    layout redraw); rows it stops covering are restored from the last frame, which `App.Draw` keeps
-    as `Segment.SplitLines` (`App.RestoreRow`). Enter, Esc, or a line that no longer starts with `/`
-    closes it. Esc means two things: with the popup open it closes it and keeps the text (it stays
-    closed until the line stops starting with `/`); with no popup it clears the line.
-  - Unknown commands and other errors show a short `[red]` hint on the row just above the input
-    panel, never a stack trace, and never end the loop. The next command clears the hint.
+- **How it runs:** two front ends over the same Core stores and the same data folder: the desktop app (a Photino
+  window, see the desktop layout) and the command line (one command per process, see Command line). There is no
+  terminal UI: `context` without arguments is a usage error.
+- **Storage (Core):**
   - **Notes:** `NoteStore` keeps each note as a top-level `<Title>.md` file in its root folder
     (`NoteStore.DefaultFolder()` = `<ApplicationData>/Context`; the folder is created on the first
-    `/new`). A new note's content is `# <Title>\n` (UTF-8, no BOM), written with `FileMode.CreateNew`.
+    write, never by a read). A new note's content is `# <Title>\n` (UTF-8, no BOM), written with `FileMode.CreateNew`.
     Titles are validated (`NoteStore.ValidateTitle`: no `/ \ :`, invalid file-name or control chars,
     no leading `.`, at most 100 chars, no Windows reserved name (CON, PRN, AUX, NUL, COM1-9, LPT1-9, also before a dot), no trailing `.` or space) after `NoteStore.NormalizeTitle` trims them and strips any trailing
-    `.md` (ignoring case), so `/new x.md` creates `x.md`; names in `/open` are only matched against `List()` (as typed first, then with
-    one `.md` stripped), never turned into a path. Note text is shown as plain `Text`, never parsed as markup.
-    `/open` on an unreadable note shows a red `Can't read <name>.` hint.
-    `/export <note> <path>` (note = the longest leading part that names a note; `~` = home) writes the note's plain
+    `.md` (ignoring case), so the title `x.md` creates `x.md`; typed note names (`note show`, `links`, `export`) are only matched against `List()` (as typed first, then with
+    one `.md` stripped), never turned into a path. Note text is plain text to both front ends, never parsed as markup.
+    `context note show` on an unreadable note answers `Can't read <name>.`
+    `context export <note> <path>` writes the note's plain
     text (UTF-8, no BOM, `FileMode.CreateNew`) outside the root (`NoteStore.Contains` resolves links and ignores
-    case). `/import <path>` reads a
+    case). `context import <path>` reads a
     file outside the root (at most 5 MB, never changed) and stores it as the note
     `NormalizeTitle(file name)` via `NoteStore.Save` (create, or replace an existing note through temp + move);
-    the hint says to delete the source.
+    the answer says to delete the source. The desktop does both through `DesktopActions` (see Import and export).
     `Rename(name, newTitle)` finds `name` through `TryFind` (never a path), normalizes and validates `newTitle` like
     `Create` (`ArgumentException` with the `ValidateTitle` text), throws `NoteExistsException` when another note has
     that title ignoring case (a case-only rename of the same note is allowed), moves the file with
     `File.Move(..., overwrite: false)` (bytes and `# Title` line unchanged; `[[links]]` elsewhere are not rewritten) and
     returns the new `NoteInfo`, the note itself when the title is exactly its name (nothing written), or `null` when no
     note matches. `Delete(name)` deletes the file `TryFind(name)` found and returns true, else false (nothing deleted,
-    never anything outside `List()`). There is no trash; only the desktop uses them (no console or CLI command).
+    never anything outside `List()`). There is no trash; only the desktop uses them (no command-line command).
   - **Todos:** `TodoStore` keeps the list in `<root>/todos.json` (same root as notes; System.Text.Json,
     camelCase, UTF-8 no BOM). `List()` sorts by `Due`, then `Created` (UTC), then file order. Writes go to
     a temp file in the root, then `File.Move(..., overwrite: true)`; a file that can't be read or parsed
@@ -221,50 +208,45 @@ Every factory agent reads this file before working on Context. Keep it short and
     before ids), or with an empty or repeated one, gets `TodoStore.DerivedId` (SHA-256 of created, due, text and its
     rank among identical todos), so reads never write and the id stays the same until the next write stores it; an
     `id` that is not a GUID makes the file unreadable. `Complete(Guid id)` removes that todo in one read and write
-    and returns it, or returns `null` and writes nothing. `/todo <yyyy-MM-dd|today|tomorrow> <text>` adds
-    (text at most 200 chars, past dates allowed); `/done <text>` picks the todo by its text and removes it by its id.
-    **No todo numbers anywhere** (console, command line and desktop alike): a todo is shown as date and text, picked
-    by its text and removed by its hidden id. `TodoPicker.Pick(todos, query)` (Core, shared by `/done` and `context
+    and returns it, or returns `null` and writes nothing. `context todo add <yyyy-MM-dd|today|tomorrow> <text>` and
+    the desktop's entry row add (text at most 200 chars, past dates allowed); `context todo done <text>` picks the
+    todo by its text and removes it by its id; the desktop removes the ticked todo by its id.
+    **No todo numbers anywhere** (command line and desktop alike): a todo is shown as date and text, picked
+    by its text and removed by its hidden id. `TodoPicker.Pick(todos, query)` (Core, used by `context
     todo done`) compares the trimmed query, ignoring case (ordinal), with each todo's one-line text
     (`TodoPicker.OneLine`: `SafeText.Clean`, line breaks as spaces) in `List()` order and returns a `TodoPick`: the
     first todo whose text equals the query, else the only one containing it, else no todo and the count of todos
-    containing it (0, or 2 and more); a digit is text like any other. `/done` checks in this order: no text (red
-    `Type /done <text> …`, `todos.json` not read), an empty list (`There are no todos to mark done.`), `No todo
-    matches "<query>".`, `<n> todos match "<query>". Type more of the todo's text.` (query cleaned and escaped;
-    nothing removed), then `Complete(id)`: `Done: <text>`, or red `The todo list changed. Nothing was done.` when
-    the todo went away in between. `TodoCommands.Register` has an optional last parameter `Action? beforeComplete`,
-    a test hook called once after the pick and just before `Complete`; `Program.cs` never passes it.
-    `TodoSidebar.Render(rows, width)` draws `<MM-dd> <text>` lines (date `red` overdue,
-    `steelblue1` today, `grey` later; text cleaned, escaped and cut to one line with `…`), `… N more` in
-    grey on the last row when they don't fit, `No todos yet` when empty and a red `Can't read todos.json`
-    line when the file is bad. `App` takes an optional `TodoSidebar`; without one it shows `No todos yet`.
+    containing it (0, or 2 and more); a digit is text like any other. `todo done` checks in this order: no text (a
+    usage error, `todos.json` not read), an empty list (`There are no todos to mark done.`), `No todo
+    matches "<query>".`, `<n> todos match "<query>". Type more of the todo's text.` (query cleaned;
+    nothing removed), then `Complete(id)`: `Done: <text>`, or `The todo list changed. Nothing was done.` when
+    the todo went away in between.
     `today` is injected as `Func<DateOnly>` (and `TodoStore` takes an optional UTC clock), so tests never
     use the real clock.
-  - Tests drive the loop by queuing input on `TestConsole.Input` (`PushTextWithEnter`, `PushKey`)
-    and always end with `/quit`, so they can't hang.
-- **Command line (scriptable):** `Context <command> [args]` (any arguments) runs one command through `Cli`
-  (`src/Context/Cli.cs`) and exits; no arguments starts the interactive console as before. `Cli(stdout, stderr,
+- **Command line (scriptable):** `context <command> [args]` runs one command through `Cli`
+  (`src/Context/Cli.cs`) and exits; no arguments is the usage error `No command given. Run 'context help'.`
+  (exit code 2, the data folder is not created). `Cli(stdout, stderr,
   folder, today, now, HttpMessageHandler)` (it takes no stdin and no environment, so no command can read either) writes plain text only (results on stdout with `\n` line ends, tab-separated
-  columns; errors on stderr), no markup, no layout, popup, line editor or prompt; `int Run(args)` never throws.
+  columns; errors on stderr), no markup and no prompt; `int Run(args)` never throws.
   Commands (matched ignoring case): `help`/`--help`/`-h` (never reads the folder), `version`/`--version` (prints
   `Context <version>` from `AppVersion.Current`: the assembly's informational version without `+...`; never reads the
   folder), `capture <text...>`
   (`Inbox.Capture`: controls to spaces, trimmed, 1-1000 chars, appends `- yyyy-MM-dd HH:mm <text>` to `inbox.md` via
   `ReadForEdit` + `SaveIfUnchanged`, retries 3 times on a change on disk; a missing inbox is created as `# inbox\n` +
   the line through `NoteStore.CreateWithText`, temp file + no-overwrite move), `todos` (`<date>\t<text>`, no number),
-  `todo add <date> <text...>` (`TodoInput` rules, shared with `/todo`), `todo done <text...>` (arguments joined with one space, then
-  `TodoPicker.Pick` like `/done`: `Done: <text>`, or exit 1 with the same no-todos, no-match or several-matches line;
+  `todo add <date> <text...>` (`TodoInput` rules), `todo done <text...>` (arguments joined with one space, then
+  `TodoPicker.Pick`, see Todos: `Done: <text>`, or exit 1 with the no-todos, no-match or several-matches line;
   no text is a usage error), `notes`, `note show <name...>`,
   `tags [tag...]` (`<tag>\t<count>` or note names), `links <note...>` (`<name>\t<link>\t<tags>`), `current` (the
-  `/current` sections as text, no row caps, `Due` lines as `<date>\t<text>`; the console's red lines go to stderr and make the exit code 1),
+  current view's sections as text: `Today, <date>`, `Appointments`, `Due`, `Linked notes`; no row caps, `Due` lines as `<date>\t<text>`; its error lines go to stderr and make the exit code 1),
   `import <path>`, `export <note> <path>` (paths relative to the current directory, no `~`). Exit codes: 0 success,
   1 error (one stderr line, nothing on stdout; `current` may write both), 2 usage error (one stderr line ending in
   `Run 'context help'.`; unknown commands never touch the folder). All text from disk goes through `SafeText.Clean`
   (one-line fields also `\n` to space). Tests (`CliTests`) use the
   internal constructor with a fixed zone.
 - **Stack:** .NET 10 (`net10.0`), C# with nullable reference types and implicit usings on.
-  `Spectre.Console` 0.57.2 handles all terminal output (app only). `Microsoft.Data.Sqlite` 10.0.14 for `context.db`
-  (referenced by `Context.Core` only; it reaches the app through the project reference). Tests: xUnit + `Spectre.Console.Testing` 0.57.2.
+  `Microsoft.Data.Sqlite` 10.0.14 for `context.db`
+  (referenced by `Context.Core` only; it reaches the command-line tool and the desktop through the project reference). The command-line tool has no package of its own. Tests: xUnit.
   Desktop: `Photino.Blazor` 4.0.13 (Apache-2.0; Blazor in the OS web view: WebView2 / WKWebView), `Context.Desktop` only; its tests
   use `bunit` 2.13.3 and `Jint` 4.17.0 (BSD-2, test project only; runs the editor bundle).
   `Velopack` 1.2.161 (MIT; the Windows installer and updater), `Context.Desktop` only; its version must equal the
@@ -310,7 +292,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     tag gives its own version, must be on `main`, and a `-develop` tag is refused. The version is checked against SemVer
     in the Version step and again by the `ValidateVersion` target in `Context.csproj` (`<Version>0.1.0</Version>` there
     is only the local default).
-  - **What ships:** on every release, three things. (1) The console app as the .NET tool package
+  - **What ships:** on every release, three things. (1) The command-line tool as the .NET tool package
     `Context.<version>.nupkg` (`PackAsTool`, command `context`, written to the ignored `nupkg/` folder). The smoke
     check installs it from a throwaway nuget.config that knows only the local folder, requires
     `context --version` to print `Context <version>`, and runs `context tags` on a fresh data folder so a missing
@@ -346,39 +328,36 @@ Every factory agent reads this file before working on Context. Keep it short and
     only through the small YAML reader `tests/Context.Tests/WorkflowYaml.cs` (block mappings and sequences, plain and
     quoted scalars, `|` and `>` blocks, comments; anything else throws), so reformatting the YAML does not break the
     tests, and it runs the scripts with `bash` (also the Windows `Pack` and `Upload` steps and the publish step, against stub `vpk` and `gh` commands). `/factory release --project Context` opens the release PR.
-- **Run:** `dotnet run --project src/Context` (console), `dotnet run --project src/Context.Desktop` (desktop window)
+- **Run:** `dotnet run --project src/Context -- help` (command line; any `Cli` command after `--`), `dotnet run --project src/Context.Desktop` (desktop window)
 - **Layout:**
   - `Context.slnx`: the solution. `Directory.Build.props` turns on `EnforceCodeStyleInBuild`.
-  - `src/Context.Core/`: class library with the data and storage code, no terminal UI. **It must never
-    reference `Spectre.Console`** (no file there mentions `Spectre`); its only package is `Microsoft.Data.Sqlite`.
+  - `src/Context.Core/`: class library with the data and storage code, no UI. Its only package is
+    `Microsoft.Data.Sqlite`. **No project references a terminal UI library** (`CoreDependencyTests` and
+    `DesktopDependencyTests` fail on the removed console's library: assembly, package, restored graph or a mention in `src/`).
     Types stay `internal` in `namespace Context;`; `InternalsVisibleTo` grants `Context`, `Context.Tests`,
     `Context.Desktop` and `Context.Desktop.Tests`.
     It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, picking a todo by its text in `TodoPicker.cs`, tag parsing in `TagParser.cs`,
     `[[note link]]` parsing in `NoteLinkParser.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
-    `CurrentView.cs` (`/current`), the inbox capture in `Inbox.cs`, the todo input rules (`TryParseDate`,
-    `MaxTextLength`) in `TodoInput.cs`, `TagsView.cs` (`/tags`), `LinksView.cs` (`/links`) and `CalendarLinkView.cs`
-    (`/calendar-link`); `/notes` uses `NoteStore.List()` directly.
-  - **Data step in Core, Spectre renderer in the app:** a view command's handler calls a Core data step that
-    returns plain types (a kind plus raw text, never markup, never cleaned or escaped, no exception messages), then
-    an `internal static Render(...)` in its `*Commands` class that only maps that view to a `CommandResult` (no
-    store, index, feed or file access). Markup, colours, `SafeText.Clean` + `Markup.Escape`, fixed message texts
-    and row caps live in the renderer, so any other front end can draw the same data its own way.
+    `CurrentView.cs` (the current view), the inbox capture in `Inbox.cs`, the todo input rules (`TryParseDate`,
+    `MaxTextLength`) in `TodoInput.cs`, `TagsView.cs` (tags), `LinksView.cs` (links) and `CalendarLinkView.cs`
+    (the calendar link), and the command ranking for the desktop palette in `CommandMatcher.cs`; the notes list is `NoteStore.List()` itself.
+  - **Data step in Core, drawing in the front end:** a view's Core data step returns plain types (a kind plus raw
+    text, never markup, never cleaned or escaped, no exception messages). The front ends (`Cli`, and the desktop
+    components through `DesktopState`) only map that view to their output. Cleaning (`SafeText.Clean`,
+    `DesktopText.OneLine`), fixed message texts and row caps live in the front end, so each one draws the same
+    data its own way.
     View records (and `DueTodo`, `LinkedNote`) override `ToString()` to return only their type name, so their raw text never
     leaks through formatting; nobody formats a view directly.
-  - `src/Context/`: the console app (references `Context.Core` by `ProjectReference`, plus `Spectre.Console`).
-    `Program.cs` only wires things up (with arguments it sets UTF-8 output and returns `new Cli(...).Run(args)` over
-    `Console.Out`/`Error`; with none it builds the registry with
-    `CreateDefault()` + `NoteCommands.Register` + `TagCommands.Register` + `TodoCommands.Register` + `CalendarLinkCommands.Register` + `CurrentCommands.Register` (with a `CalendarStore(folder, TimeZoneInfo.Local)` and a `CalendarFeed` over a `SocketsHttpHandler` with `MaxAutomaticRedirections = 5`); passes the registry, a `TodoSidebar`
-    and `AnsiConsole.Console` to `App`, returns `App.Run()`); the loop, layout and dispatch live in `App.cs`, commands in `CommandRegistry.cs`,
-    input in `LineEditor.cs`, the command popup's rows and `PopupArea` in `CommandPopup.cs`,
-    `/new`, `/notes`, `/open`, `/export`, `/import` in `NoteCommands.cs`, `/todo` and `/done` in `TodoCommands.cs`, the sidebar body
-    in `TodoSidebar.cs`, `/tags`, `/links` in `TagCommands.cs`, `/current` in `CurrentCommands.cs`, and
-    `/calendar-link` in `CalendarLinkCommands.cs`, the scriptable command line in `Cli.cs`, and the version text in `AppVersion.cs`. Code that needs Spectre stays here; data and storage go to Core.
+  - `src/Context/`: the command-line tool (references `Context.Core` by `ProjectReference`, no package; packed as the
+    .NET tool `context`). `Program.cs` only wires things up: whatever the arguments, it sets UTF-8 output and returns
+    `new Cli(...).Run(args)` over `Console.Out`/`Error`, `NoteStore.DefaultFolder()`, the local clock and a
+    `SocketsHttpHandler` with `MaxAutomaticRedirections = 5`. The commands are in `Cli.cs` and the version text in
+    `AppVersion.cs`. Data and storage go to Core.
   - `src/Context.Desktop/`: the desktop app (`Microsoft.NET.Sdk.Razor`, `WinExe`, references `Context.Core`
-    only, never Spectre or the console app; components and classes in `namespace Context`). `Program.cs` only wires
-    things up (stores built like the console's, Photino window `Context` 1100x750, dev tools
+    only, never the command-line project; components and classes in `namespace Context`). `Program.cs` only wires
+    things up (stores built like `Cli`'s, Photino window `Context` 1100x750, dev tools
     only in Debug). `DesktopState` builds a `DesktopSnapshot` (`Failed`, `Today`, `CurrentView? Current`,
     `Todos`, `Notes`, unreadable flags, `Folder`) off the UI thread with `Refresh()` (one at a time; requests during a run
     coalesce into one more run) and raises `Changed`; `Tick()` refreshes when the day changed or 5 min passed.
@@ -420,7 +399,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     file bytes, read through `BoundedFile`): a bigger or non-seekable note can't be opened (`Can't read <name>.`), a save
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
-    `/capture`, `/current`, `/export`, `/import`, `/new`, `/open`, `/save`, `/settings`, `/tags`, `/todo` with `CommandMatcher` (shared with `CommandRegistry.Match`).
+    `/capture`, `/current`, `/export`, `/import`, `/new`, `/open`, `/save`, `/settings`, `/tags`, `/todo` with `CommandMatcher` (in Core).
     **Settings:** `SettingsPanel` (the `Settings` button in `NotesPanel`, or `/settings`; `Main`'s `settingsShown`;
     at the top of the main region; `Close`, opening a note or the current view hides it) has two sections, both
     reloaded after every `State.Changed`. *Exchange calendar* shows `DesktopState.CalendarLinkSetting()`
@@ -441,7 +420,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     shows `TagPanel` for it below the list (`aria-pressed` on that button); its `Close` hides both, `TagPanel`'s only
     itself, and opening a note or the current view hides both. `/tags <tag>` opens `TagPanel` directly. `LinksPanel`
     sits under `NoteEditor` and lists `DesktopState.Links(name)` (`LinksView.Build`): per `NoteLink` the name (a button
-    through `RequestOpen`; a missing target is grey text), the console's link text and the shared tags as buttons
+    through `RequestOpen`; a missing target is grey text), the link text (see Note links) and the shared tags as buttons
     (`TagPanel`); grey `<name> has no linked notes.`, red `Can't read the links.`, and for a sensitive note only grey
     `Sensitive notes have no links.` with no lookup. Both read only (no `Actions.`), run under `indexGate`, never
     throw, and reload in `StateComponent.OnStateChangedAsync` (called after every `State.Changed`) keeping the shown
@@ -520,7 +499,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `StoreRecoveryPublicKey`) appear only in `DesktopActions.cs` (exemptions: `DotNetObjectReference.Create(` once in
     `EditorInterop.cs`, `ECDiffieHellman.Create(` in `SealedNote.cs`, and `WindowsKeyStore.cs`, whose .NET calls change
     the certificate store and which names no Core store, `File.`, `Directory.` or `Path.`; the reads still write
-    only through `TagIndex.Sync` and `CalendarFeed.Fetch`, as in the console). `DesktopActions` is named only by
+    only through `TagIndex.Sync` and `CalendarFeed.Fetch`, as on the command line). `DesktopActions` is named only by
     `.razor` files, `Program.cs` and `StateComponent`, never by `DesktopState`, `DataWatcher` or `DesktopSnapshot`, so
     nothing writes on render, refresh, the watcher or the tick. In `.razor` files every `@code` method that calls
     `Actions.` is bound by an event attribute in the same file (`@on<event>=` on an element or an `On<Event>=`
@@ -548,41 +527,36 @@ Every factory agent reads this file before working on Context. Keep it short and
     `DesktopActions.cs`, and components name only `CalendarLinkView`/`CalendarLinkViewKind`, so the page sees the
     mask alone. No `.razor`, `.cs`, `index.html` or editor source names `localStorage`, `sessionStorage`,
     `indexedDB`, `document.cookie`, `NavigationManager` or `NavigateTo`, and `SettingsPanel.razor`,
-    `DesktopActions.cs` and `DesktopState.cs` name no `ILogger`, `Console.`, `Debug.` or `Trace.`. Texts match the
-    console renderer's. Colours by CSS class (`accent`, `grey`, `red`, dates `overdue`/`today`/`later`); long lines
+    `DesktopActions.cs` and `DesktopState.cs` name no `ILogger`, `Console.`, `Debug.` or `Trace.`.
+    Colours by CSS class (`accent`, `grey`, `red`, dates `overdue`/`today`/`later`); long lines
     cut by CSS with the full text in `title`.
-  - `tests/Context.Tests/`: references both projects; one test class per production class (Core and app alike) (`AppTests.cs` tests `App.cs`),
-    `CiWorkflowTests.cs` and `ReleaseWorkflowTests.cs` (the workflows and their four jobs, the release scripts and the tool packaging; with `WorkflowYaml.cs` and its `WorkflowYamlTests.cs`), `ViewParityTests.cs` (golden ANSI output of `/current`, `/notes`, `/tags`, `/links`, `/calendar-link`; change
-    its expected strings only when a spec changes that output), `CoreDependencyTests.cs` (architecture test: fails on any
-    Spectre assembly, package, project reference or source mention in `Context.Core`), plus shared helpers such as `AnsiWrites.cs` (splits ANSI output on cursor moves),
-    `ConsoleSession.cs` (everything wired like `Program.cs`), `RemovedFeature.cs` (the names of the removed
-    whole-folder protection, spelled in pieces; `RemovedFeatureSourceTests.cs` fails when `src/`, `tests/` or this file
-    names that feature again) and `FakeHttpHandler.cs` (canned HTTP responses). Note, todo, tag and calendar tests use their
+  - `tests/Context.Tests/`: references both projects; one test class per production class (Core and `Cli` alike),
+    `CiWorkflowTests.cs` and `ReleaseWorkflowTests.cs` (the workflows and their four jobs, the release scripts and the tool packaging; with `WorkflowYaml.cs` and its `WorkflowYamlTests.cs`), `CoreDependencyTests.cs` (architecture test: no P/Invoke
+    and no sealing code in Core, and no terminal UI assembly, package or source mention in any project), plus shared helpers such as
+    `RemovedFeature.cs` and `RemovedConsole.cs` (the names of the removed whole-folder protection and of the removed
+    terminal console, spelled in pieces; `RemovedFeatureSourceTests.cs` fails when `src/`, `tests/` or this file
+    names either again) and `FakeHttpHandler.cs` (canned HTTP responses). The view tests (`CurrentViewTests`, `TagsViewTests`, `LinksViewTests`, `CalendarLinkViewTests`) check the view data field by field. Note, todo, tag and calendar tests use their
     own temp folder (deleted in `Dispose`), never the real app data folder.
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `CaptureActionsTests` (`CaptureText`) and `CaptureBoxTests`, `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `CalendarLinkActionsTests`, `KeyDetailsTests`, `DesktopDependencyTests` (no Spectre, no Jint
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `CaptureActionsTests` (`CaptureText`) and `CaptureBoxTests`, `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `CalendarLinkActionsTests`, `KeyDetailsTests`, `DesktopDependencyTests` (no terminal UI library, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
     CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules, the transfer calls and no file system class in `.razor`), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),
     `FileSnapshot` (bytes and last-write times of a folder, to prove nothing changed) and `RepoFiles`.
 - **Style:**
-  - Write all output through an injected `IAnsiConsole`, never `Console.*` or the static
-    `AnsiConsole.*` methods (except in `Program.cs`). Tests use `TestConsole` and assert on `.Output`.
-    The one exception is `Cli`, which writes plain text through injected `TextWriter`s (stdout, stderr) and mentions
-    no `Spectre` and no `Console.` (checked by `CliTests`).
+  - `Cli` writes plain text through injected `TextWriter`s (stdout, stderr) and mentions no `Console.` (checked
+    by `CliTests`); only `Program.cs` names `Console`. The desktop shows text through Blazor components only.
   - Text from disk or other outside sources (note text and names, OS exception messages, later email
-    and calendar data) goes through `SafeText.Clean` before rendering: it keeps `\n`, turns `\r\n`
+    and calendar data) goes through `SafeText.Clean` before it is shown: it keeps `\n`, turns `\r\n`
     into `\n` and `\t` into 4 spaces, and replaces every other C0/DEL/C1 control with `�` (U+FFFD).
-    Then wrap it in `Markup.Escape` if it goes into markup. Never pass such text to the terminal raw.
-  - Wrap any user or external text in `Markup.Escape` before it goes into markup.
-  - Use Spectre widgets (`Table`, `Panel`, `Rule`, `Layout`) instead of hand-drawn ASCII.
-    Colours: `SteelBlue1` accents, `grey` secondary text, `red` errors.
+    One-line fields also turn `\n` into a space (`Cli`'s `OneLine`, `DesktopText.OneLine`). Never write such
+    text to the terminal or the page raw.
   - File-scoped namespaces, `internal sealed` unless a type must be public.
   - No primary constructors anywhere (classes, structs or positional records). Write a
     conventional constructor that assigns to fields or properties.
-  - Private fields are camelCase **without** a leading underscore (`console`, not `_console`).
+  - Private fields are camelCase **without** a leading underscore (`stdout`, not `_stdout`).
     `this.` only where a field and a constructor parameter share a name.
   - No `var`: always write the explicit type. Braces on every `if`/`else`/`for`/`foreach`/`while`
     body, even single lines.

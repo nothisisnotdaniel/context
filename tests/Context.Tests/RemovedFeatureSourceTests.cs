@@ -3,8 +3,8 @@ using System.Text.RegularExpressions;
 namespace Context.Tests;
 
 /// <summary>
-/// Job 132: the whole-folder protection is gone from the code, the tests and the conventions file. These tests read
-/// the repository as text.
+/// Job 132: the whole-folder protection is gone from the code, the tests and the conventions file. Job 145: so is
+/// the interactive console. These tests read the repository as text.
 /// </summary>
 public sealed class RemovedFeatureSourceTests
 {
@@ -128,17 +128,93 @@ public sealed class RemovedFeatureSourceTests
         Assert.Single(text.Split('\n'), line => line.StartsWith("- **Sensitive notes:**", StringComparison.Ordinal));
     }
 
-    // AC-2: Program.cs registers exactly the command classes ConsoleSession does, so the tests on that session hold
-    // for the real console.
+    // 145 AC-1: the interactive console's ten source files and thirteen test files are gone.
     [Fact]
-    public void ProgramCs_RegistersExactlyTheCommandsOfConsoleSession()
+    public void TheInteractiveConsolesFiles_AreGone()
+    {
+        string root = RepoRoot();
+
+        Assert.Equal(23, RemovedConsole.Files.Distinct().Count());
+        Assert.DoesNotContain(RemovedConsole.Files, f => File.Exists(Path.Combine(root, f)));
+        Assert.True(File.Exists(Path.Combine(root, "src/Context/Cli.cs")));
+    }
+
+    // 145 AC-1: no .cs or .razor file under src/ or tests/ uses one of the console's type names as a whole word.
+    // An identifier that only contains one (a kept test method's name) does not count.
+    [Fact]
+    public void NoSourceFile_UsesAnInteractiveConsoleType()
+    {
+        string root = RepoRoot();
+        List<string> files = [.. Files(Path.Combine(root, "src")), .. Files(Path.Combine(root, "tests"))];
+        files = files.Where(f => f.EndsWith(".cs", StringComparison.Ordinal) || f.EndsWith(".razor", StringComparison.Ordinal)).ToList();
+
+        Assert.True(files.Count > 100, "The scan found too few files to be looking at the repository.");
+        Assert.Contains(files, f => f.EndsWith(nameof(RemovedConsole) + ".cs", StringComparison.Ordinal));
+        Assert.Empty(TypeHits(root, files));
+    }
+
+    // 145 AC-1: the whole-word scan finds a use and leaves a longer identifier alone.
+    [Fact]
+    public void TheTypeScan_FindsWholeWordsOnly()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "context-removed-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            string name = RemovedConsole.TypeNames[0];
+            File.WriteAllText(Path.Combine(folder, "used.cs"), $"x = {name}.Rows(1);");
+            File.WriteAllText(Path.Combine(folder, "contained.cs"), $"void {name}_Case() {{ }} // Red{name}Kept");
+
+            Assert.Equal([$"used.cs: {name}"], TypeHits(folder, Files(folder)));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 145 AC-4: Program.cs has one path only, the command line.
+    [Fact]
+    public void ProgramCs_OnlyRunsTheCommandLine()
     {
         string source = File.ReadAllText(Path.Combine(RepoRoot(), "src", "Context", "Program.cs"));
 
-        List<string> registered = Regex.Matches(source, @"\b(\w+)\.Register\(")
-            .Select(m => m.Groups[1].Value)
-            .ToList();
+        foreach (string word in RemovedConsole.ProgramWords)
+        {
+            Assert.DoesNotContain(word, source, StringComparison.Ordinal);
+        }
 
-        Assert.Equal(ConsoleSession.Registrations, registered);
+        Assert.Single(Regex.Matches(source, Regex.Escape("new Cli(")));
+        Assert.Contains("return new Cli(", source, StringComparison.Ordinal);
+    }
+
+    // 145 AC-7: the conventions file describes the desktop app and the command line only.
+    [Fact]
+    public void ClaudeMd_DoesNotMentionTheInteractiveConsole()
+    {
+        string text = File.ReadAllText(Path.Combine(RepoRoot(), "CLAUDE.md"));
+
+        foreach (string word in RemovedConsole.ConventionWords)
+        {
+            Assert.DoesNotContain(word, text, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private static List<string> TypeHits(string root, IEnumerable<string> files)
+    {
+        List<string> hits = [];
+        foreach (string file in files)
+        {
+            string text = File.ReadAllText(file);
+            foreach (string name in RemovedConsole.TypeNames)
+            {
+                if (Regex.IsMatch(text, $@"\b{Regex.Escape(name)}\b"))
+                {
+                    hits.Add($"{Path.GetRelativePath(root, file).Replace('\\', '/')}: {name}");
+                }
+            }
+        }
+
+        return hits;
     }
 }

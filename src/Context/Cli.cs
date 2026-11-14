@@ -474,7 +474,7 @@ internal sealed class Cli
         }
     }
 
-    // The console's Link column text; empty for a link by shared tags only.
+    // The text of the link column; empty for a link by shared tags only.
     private static string LinkText(NoteLink link)
     {
         if (link.Missing)

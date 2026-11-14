@@ -140,43 +140,62 @@ public sealed class LinksViewTests : IDisposable
         Assert.Equal(garbage, File.ReadAllBytes(DbPath));
     }
 
-    // AC-7: the renderer only maps the view.
+    // AC-6 (145): every kind with every field, as raw data (no escaping, no markup).
     [Fact]
-    public void Render_HandBuiltViews_MatchGolden()
+    public void Build_EveryKind_EveryField()
     {
-        (string Golden, LinksView View)[] cases =
-        [
-            ("Links_NoArgument", new LinksView(LinksViewKind.MissingArgument, string.Empty, null, [])),
-            ("Links_Unknown", new LinksView(LinksViewKind.NoSuchNote, "Nope [x]", null, [])),
-            ("Links_NoLinks", new LinksView(LinksViewKind.NoLinks, "Lonely", "Lonely", [])),
-            ("Links_BadDb", new LinksView(LinksViewKind.IndexUnreadable, "A", null, [])),
-            (
-                "Links_Links",
-                new LinksView(
-                    LinksViewKind.Links,
-                    "A",
-                    "A",
-                    [new NoteLink("B [b]", ["big plan", "work"]), new NoteLink("c", ["work"])])
-            ),
-            (
-                "Links_NoteLinks",
-                new LinksView(
-                    LinksViewKind.Links,
-                    "A",
-                    "A",
-                    [
-                        new NoteLink("Beta", ["work"], NoteLinkDirection.Both, missing: false),
-                        new NoteLink("c", ["work"]),
-                        new NoteLink("Delta", [], NoteLinkDirection.To, missing: false),
-                        new NoteLink("Epsilon", [], NoteLinkDirection.From, missing: false),
-                        new NoteLink("Gamma", [], NoteLinkDirection.To, missing: true),
-                    ])
-            ),
-        ];
+        AssertView(Build(string.Empty), LinksViewKind.MissingArgument, string.Empty, null, []);
+        AssertView(Build("Nope [x]"), LinksViewKind.NoSuchNote, "Nope [x]", null, []);
+        AssertView(Build("Lonely"), LinksViewKind.NoLinks, "Lonely", "Lonely", []);
+        AssertView(
+            Build("A"),
+            LinksViewKind.Links,
+            "A",
+            "A",
+            [new NoteLink("B [b]", ["big plan", "work"]), new NoteLink("c", ["work"])]);
 
-        foreach ((string golden, LinksView view) in cases)
+        byte[] garbage = new byte[2048];
+        new Random(9).NextBytes(garbage);
+        File.WriteAllBytes(DbPath, garbage);
+        AssertView(Build("A"), LinksViewKind.IndexUnreadable, "A", null, []);
+    }
+
+    // AC-6 (145), 048 AC-8: both ways (with a shared tag), a tag-only row, to, from and a missing note.
+    [Fact]
+    public void Build_NoteLinks_EveryField()
+    {
+        File.Delete(Path.Combine(root, "B [b].md"));
+        File.Delete(Path.Combine(root, "Lonely.md"));
+        WriteNote("A", "#work [[Beta]] [[Gamma]] [[delta.md]]");
+        WriteNote("Beta", "#work [[A]]");
+        WriteNote("Delta", "plain");
+        WriteNote("Epsilon", "see [[a]]");
+
+        AssertView(
+            Build("A"),
+            LinksViewKind.Links,
+            "A",
+            "A",
+            [
+                new NoteLink("Beta", ["work"], NoteLinkDirection.Both, missing: false),
+                new NoteLink("c", ["work"]),
+                new NoteLink("Delta", [], NoteLinkDirection.To, missing: false),
+                new NoteLink("Epsilon", [], NoteLinkDirection.From, missing: false),
+                new NoteLink("Gamma", [], NoteLinkDirection.To, missing: true),
+            ]);
+    }
+
+    private static void AssertView(LinksView view, LinksViewKind kind, string typed, string? note, NoteLink[] links)
+    {
+        Assert.Equal(kind, view.Kind);
+        Assert.Equal(typed, view.Typed);
+        Assert.Equal(note, view.Note);
+        Assert.Equal(links.Select(l => l.Note), view.Links.Select(l => l.Note));
+        for (int i = 0; i < links.Length; i++)
         {
-            Assert.Equal(ViewParityTests.Goldens[golden], ViewParityTests.Render(TagCommands.Render(view), "/r"));
+            Assert.Equal(links[i].SharedTags, view.Links[i].SharedTags);
+            Assert.Equal(links[i].Direction, view.Links[i].Direction);
+            Assert.Equal(links[i].Missing, view.Links[i].Missing);
         }
     }
 

@@ -1,6 +1,6 @@
 namespace Context.Tests;
 
-// 094 AC-11: the console's command ranking, now in Core for the desktop palette too.
+// 094 AC-11: the command ranking, in Core for the desktop palette.
 public sealed class CommandMatcherTests
 {
     private static readonly string[] Palette = ["/current", "/open", "/save", "/tags", "/todo"];
@@ -28,24 +28,18 @@ public sealed class CommandMatcherTests
         Assert.Equal(expected, CommandMatcher.Match(Palette, n => n, line));
     }
 
-    // The console's registry gives the same order as the matcher over its commands.
+    // 145: the lines the removed console's registry was checked with, now on the matcher itself.
     [Theory]
-    [InlineData("/")]
-    [InlineData("/n")]
-    [InlineData("/nwe")]
-    [InlineData("/tod")]
-    [InlineData("/q")]
-    public void Registry_DelegatesToMatcher(string line)
+    [InlineData("/", new[] { "/help", "/new", "/notes", "/quit", "/todo", "/todos" })]
+    [InlineData("/n", new[] { "/new", "/notes" })]
+    [InlineData("/nwe", new string[0])]
+    [InlineData("/tod", new[] { "/todo", "/todos" })]
+    [InlineData("/q", new[] { "/quit" })]
+    public void Match_OverSimilarNames(string line, string[] expected)
     {
-        CommandRegistry registry = CommandRegistry.CreateDefault();
-        registry.Register("/new", "x", _ => new CommandResult());
-        registry.Register("/notes", "x", _ => new CommandResult());
-        registry.Register("/todo", "x", _ => new CommandResult());
-        registry.Register("/todos", "x", _ => new CommandResult());
+        string[] names = ["/help", "/quit", "/new", "/notes", "/todo", "/todos"];
 
-        Assert.Equal(
-            CommandMatcher.Match(registry.Commands, c => c.Name, line).Select(c => c.Name).ToArray(),
-            registry.Match(line).Select(c => c.Name).ToArray());
+        Assert.Equal(expected, CommandMatcher.Match(names, n => n, line));
     }
 
     [Theory]

@@ -247,6 +247,18 @@ public sealed class CliTests : IDisposable
         Assert.False(Directory.Exists(root));
     }
 
+    // 145 AC-2: without arguments there is nothing to start; it is the usage error and the folder is not created.
+    [Fact]
+    public void NoArguments_IsUsageError_AndNeverTouchesTheFolder()
+    {
+        Result result = Run();
+
+        Assert.Equal(2, result.Code);
+        Assert.Equal(string.Empty, result.Out);
+        Assert.Equal("No command given. Run 'context help'.\n", result.Err);
+        Assert.False(Directory.Exists(root));
+    }
+
     [Fact]
     public void Commands_AreMatchedIgnoringCase()
     {

@@ -53,6 +53,13 @@ public sealed class CurrentViewTests : IDisposable
     private static string Event(string title, string start, string end) =>
         $"BEGIN:VEVENT\r\nSUMMARY:{title}\r\nDTSTART{start}\r\nDTEND{end}\r\nEND:VEVENT\r\n";
 
+    private static string EventAt(string? title, string start, string end, string? location = null)
+    {
+        string titleLine = title is null ? string.Empty : $"SUMMARY:{title}\r\n";
+        string whereLine = location is null ? string.Empty : $"LOCATION:{location}\r\n";
+        return $"BEGIN:VEVENT\r\n{titleLine}DTSTART{start}\r\nDTEND{end}\r\n{whereLine}END:VEVENT\r\n";
+    }
+
     private static DateTime At(int day, int hour, int minute = 0) => new(2026, 10, day, hour, minute, 0);
 
     // AC-4: every appointment comes back; the 15-row cap is the renderer's.
@@ -90,7 +97,7 @@ public sealed class CurrentViewTests : IDisposable
         Assert.Equal(["bad [x].ics"], view.UnreadableCalendarFiles);
     }
 
-    // AC-4: the time text moved here from CurrentCommands.Time, with the same results.
+    // AC-4: the time text of an appointment within a day.
     [Fact]
     public void Time_AllDay_OutsideSides_MidnightEnd()
     {
@@ -263,90 +270,141 @@ public sealed class CurrentViewTests : IDisposable
         Assert.Empty(view.Appointments);
     }
 
-    // AC-7: the renderer only maps the view; a hand-built view renders to the recorded output.
+    // AC-6 (145): the stale day that the console's golden output covered, now checked field by field.
     [Fact]
-    public void Render_HandBuiltStaleView_MatchesGolden()
+    public void Build_StaleFeedNothingDue_EveryField()
     {
-        CurrentView view = new CurrentView(
-            Today,
-            Zone,
-            [new Appointment("Cached [meeting]", null, At(29, 15), At(29, 16), false)],
-            "/nowhere/calendar",
-            [],
-            CalendarFeedStatus.Stale,
-            new DateTime(2026, 10, 28, 17, 5, 0, DateTimeKind.Utc),
-            "HTTP 500",
-            false,
-            [],
-            [],
-            false);
+        CalendarLink link = new CalendarLink(root);
+        link.Set(FakeHttpHandler.Link);
+        string cache = Path.Combine(root, CalendarFeed.CacheFileName);
+        File.WriteAllText(cache, Calendar(Event("Cached [meeting]", ":20261029T140000Z", ":20261029T150000Z")));
+        DateTime cachedAt = new(2026, 10, 28, 17, 5, 0, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(cache, cachedAt);
+        Todos().Add("Later", Today.AddDays(1));
+        CalendarFeed feed = new CalendarFeed(
+            root, link, FakeHttpHandler.Status(HttpStatusCode.InternalServerError), () => Now);
 
-        Assert.Equal(
-            ViewParityTests.Goldens["Current_Stale_NothingDue"],
-            ViewParityTests.Render(CurrentCommands.Render(view), "/nowhere"));
+        CurrentView view = Build(feed);
+
+        Assert.Equal(Today, view.Today);
+        Assert.Same(Zone, view.Zone);
+        Assert.Equal([new Appointment("Cached [meeting]", null, At(29, 15), At(29, 16), false)], view.Appointments);
+        Assert.Equal("15:00-16:00", view.TimeText(view.Appointments[0]));
+        Assert.Equal(Path.Combine(root, CalendarStore.FolderName), view.Folder);
+        Assert.Empty(view.UnreadableCalendarFiles);
+        Assert.Equal(CalendarFeedStatus.Stale, view.Status);
+        Assert.Equal(cachedAt, view.CachedAtUtc);
+        Assert.Equal("HTTP 500", view.Reason);
+        Assert.False(view.TodosUnreadable);
+        Assert.Empty(view.Due);
+        Assert.Empty(view.LinkedNotes);
+        Assert.False(view.IndexUnreadable);
     }
 
-    // AC-7
+    // AC-6 (145): a full day (all-day, spans over midnight, no title, line breaks and markup-like text, more
+    // than 15 appointments, an unreadable file, due todos and linked notes) as raw view data.
     [Fact]
-    public void Render_HandBuiltFullView_MatchesGolden()
+    public void Build_FullDay_EveryField()
     {
-        List<Appointment> appointments =
+        List<string> events =
+        [
+            EventAt("Holiday", ";VALUE=DATE:20261029", ";VALUE=DATE:20261030"),
+            EventAt("Night shift", ":20261028T220000", ":20261029T060000", "Ward [3]"),
+            EventAt("Late call", ":20261029T230000", ":20261030T010000"),
+            EventAt(null, ":20261029T073000", ":20261029T080000"),
+            EventAt("Ends at midnight", ":20261029T220000", ":20261030T000000"),
+            EventAt("Multi\\nline [b]x[/b]", ":20261029T081500", ":20261029T090000", "Room 1\\nfloor 2"),
+        ];
+        for (int i = 0; i < 16; i++)
+        {
+            events.Add(
+                EventAt($"Meeting {i:00}", $":20261029T1{i % 10}{i / 10}000", $":20261029T1{i % 10}{i / 10}500"));
+        }
+
+        WriteCalendar("work.ics", Calendar([.. events]));
+        WriteCalendar("broken [x].ics", "not a calendar");
+        Todos().Add("Pay rent #home", Today.AddDays(-3));
+        Todos().Add("Plan #Work and #[big plan]", Today);
+        Todos().Add("Later #home", Today.AddDays(2));
+        WriteNote("beta", "#work #home");
+        WriteNote("Alpha [x]", "#[big plan] #work");
+        WriteNote("gamma", "#other");
+
+        CurrentView view = Build();
+
+        List<Appointment> expected =
         [
             new Appointment("Holiday", null, At(29, 0), At(30, 0), true),
             new Appointment("Night shift", "Ward [3]", At(28, 22), At(29, 6), false),
             new Appointment(string.Empty, null, At(29, 7, 30), At(29, 8), false),
             new Appointment("Multi\nline [b]x[/b]", "Room 1\nfloor 2", At(29, 8, 15), At(29, 9), false),
         ];
-        for (int i = 0; i < 16; i++)
-        {
-            int hour = 10 + (i / 2);
-            int minute = i % 2 * 10;
-            appointments.Add(new Appointment(
-                $"Meeting {minute + (i / 2):00}", null, At(29, hour, minute), At(29, hour, minute + 5), false));
-        }
-
-        appointments.Add(new Appointment("Ends at midnight", null, At(29, 22), At(30, 0), false));
-        appointments.Add(new Appointment("Late call", null, At(29, 23), At(30, 1), false));
-        CurrentView view = new CurrentView(
-            Today,
-            Zone,
-            appointments,
-            "/nowhere/calendar",
-            ["broken [x].ics"],
-            CalendarFeedStatus.NotConfigured,
-            null,
-            null,
-            false,
+        expected.AddRange(Enumerable.Range(0, 16)
+            .Select(i => new Appointment(
+                $"Meeting {i:00}", null, At(29, 10 + (i % 10), i / 10 * 10), At(29, 10 + (i % 10), (i / 10 * 10) + 5), false))
+            .OrderBy(a => a.Start));
+        expected.Add(new Appointment("Ends at midnight", null, At(29, 22), At(30, 0), false));
+        expected.Add(new Appointment("Late call", null, At(29, 23), At(30, 1), false));
+        Assert.Equal(Today, view.Today);
+        Assert.Same(Zone, view.Zone);
+        Assert.Equal(expected, view.Appointments);
+        Assert.Equal(
+            ["all day", "…-06:00", "07:30-08:00", "08:15-09:00"],
+            view.Appointments.Take(4).Select(view.TimeText));
+        Assert.Equal(["22:00-00:00", "23:00-…"], view.Appointments.Skip(20).Select(view.TimeText));
+        Assert.Equal(Path.Combine(root, CalendarStore.FolderName), view.Folder);
+        Assert.Equal(["broken [x].ics"], view.UnreadableCalendarFiles);
+        Assert.Equal(CalendarFeedStatus.NotConfigured, view.Status);
+        Assert.Null(view.CachedAtUtc);
+        Assert.Null(view.Reason);
+        Assert.False(view.TodosUnreadable);
+        Assert.Equal(
             [
                 new DueTodo(Today.AddDays(-3), "Pay rent #home", true),
                 new DueTodo(Today, "Plan #Work and #[big plan]", false),
             ],
-            [
-                new LinkedNote("Alpha [x]", ["big plan", "work"]),
-                new LinkedNote("beta", ["home", "work"]),
-            ],
-            false);
-
-        Assert.Equal(
-            ViewParityTests.Goldens["Current_Full"],
-            ViewParityTests.Render(CurrentCommands.Render(view), "/nowhere"));
+            view.Due);
+        Assert.Equal(["Alpha [x]", "beta"], view.LinkedNotes.Select(n => n.Name));
+        Assert.Equal(["big plan", "work"], view.LinkedNotes[0].Tags);
+        Assert.Equal(["home", "work"], view.LinkedNotes[1].Tags);
+        Assert.False(view.IndexUnreadable);
     }
 
-    // AC-7
+    // AC-6 (145): a bad context.db and a bad todos.json each leave every other field as it would be.
     [Fact]
-    public void Render_HandBuiltBadTodosAndBadDb_MatchGolden()
+    public void Build_BadDbThenBadTodos_EveryField()
     {
-        CurrentView badTodos = new CurrentView(
-            Today, Zone, [new Appointment("Standup", null, At(29, 9), At(29, 9, 15), false)], "/n/calendar", [],
-            CalendarFeedStatus.NotConfigured, null, null, true, [], [], false);
-        CurrentView badDb = new CurrentView(
-            Today, Zone, [], "/n/calendar", [], CalendarFeedStatus.NotConfigured, null, null, false,
-            [new DueTodo(Today.AddDays(-1), "Due #work", true)], [], true);
+        Todos().Add("Due #work", Today.AddDays(-1));
+        byte[] garbage = new byte[2048];
+        new Random(9).NextBytes(garbage);
+        File.WriteAllBytes(DbPath, garbage);
 
-        Assert.Equal(
-            ViewParityTests.Goldens["Current_BadTodos"], ViewParityTests.Render(CurrentCommands.Render(badTodos), "/n"));
-        Assert.Equal(
-            ViewParityTests.Goldens["Current_BadDb"], ViewParityTests.Render(CurrentCommands.Render(badDb), "/n"));
+        CurrentView badDb = Build();
+
+        Assert.Empty(badDb.Appointments);
+        Assert.Equal(Path.Combine(root, CalendarStore.FolderName), badDb.Folder);
+        Assert.Empty(badDb.UnreadableCalendarFiles);
+        Assert.Equal(CalendarFeedStatus.NotConfigured, badDb.Status);
+        Assert.Null(badDb.CachedAtUtc);
+        Assert.Null(badDb.Reason);
+        Assert.False(badDb.TodosUnreadable);
+        Assert.Equal([new DueTodo(Today.AddDays(-1), "Due #work", true)], badDb.Due);
+        Assert.Empty(badDb.LinkedNotes);
+        Assert.True(badDb.IndexUnreadable);
+
+        WriteCalendar("a.ics", Calendar(Event("Standup", ":20261029T090000", ":20261029T091500")));
+        File.WriteAllText(Path.Combine(root, TodoStore.FileName), "{ not json");
+
+        CurrentView badTodos = Build();
+
+        Assert.Equal([new Appointment("Standup", null, At(29, 9), At(29, 9, 15), false)], badTodos.Appointments);
+        Assert.Empty(badTodos.UnreadableCalendarFiles);
+        Assert.Equal(CalendarFeedStatus.NotConfigured, badTodos.Status);
+        Assert.True(badTodos.TodosUnreadable);
+        Assert.Empty(badTodos.Due);
+        Assert.Empty(badTodos.LinkedNotes);
+        Assert.False(badTodos.IndexUnreadable);
+        Assert.Equal(garbage, File.ReadAllBytes(DbPath));
     }
 
     // AC-1 (042)
