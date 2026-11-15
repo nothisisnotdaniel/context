@@ -1633,6 +1633,57 @@ public sealed class MainTests : IDisposable
         Assert.Empty(cut.FindAll(".find-panel"));
     }
 
+    // 170 AC-10: the palette lists /search with its usage.
+    [Fact]
+    public void Palette_ListsSearch()
+    {
+        PaletteCommand search = Assert.Single(CommandPalette.Commands, c => c.Name == "/search");
+        Assert.Equal("/search <text>", search.Usage);
+    }
+
+    // 170 AC-10: /search shows SearchPanel; its button opens the note, which hides the panel; /current hides it too.
+    [Fact]
+    public async Task Search_ShowsSearchPanel_OpenHidesIt()
+    {
+        data.WriteNote("Anna", "# Anna\nBudget 2027\n");
+        data.WriteNote("Plan", "x\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, "/search budget");
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Anna"], cut.FindAll(".search-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
+        Assert.Equal("Search: budget", cut.Find(".search-panel h2").TextContent);
+        Assert.Equal("Budget 2027", cut.Find(".search-panel .line").TextContent);
+
+        await cut.Find(".search-panel .note-button").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Anna", cut.Find(".note-title").TextContent), Wait);
+        Assert.Empty(cut.FindAll(".search-panel"));
+
+        await RunPalette(cut, "/search nobody");
+        cut.WaitForAssertion(() => Assert.Equal(
+            "No notes contain nobody.", cut.Find(".search-panel p[role=status]").TextContent), Wait);
+        await RunPalette(cut, "/current");
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".search-panel")), Wait);
+    }
+
+    // 170 AC-10: /search alone shows the panel with the red usage line.
+    [Theory]
+    [InlineData("/search")]
+    [InlineData("/search    ")]
+    public async Task Search_Blank_RedUsage(string line)
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, line);
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            "Type /search <text>.", cut.Find(".search-panel p[role=status]").TextContent), Wait);
+        Assert.True(cut.Find(".search-panel p[role=status]").ClassList.Contains("red"));
+    }
+
     // 169 AC-7: the palette lists /review with its description.
     [Fact]
     public void Palette_ListsReview()

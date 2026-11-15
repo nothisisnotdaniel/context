@@ -323,6 +323,26 @@ internal sealed class DesktopState
     });
 
     /// <summary>
+    /// The notes whose text contains <paramref name="text"/> (<see cref="SearchView.Build"/>) after syncing the index,
+    /// off the calling thread. Reads only and never throws: any failure gives the
+    /// <see cref="SearchViewKind.IndexUnreadable"/> view.
+    /// </summary>
+    public Task<SearchView> Search(string text) => Task.Run(() =>
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                return SearchView.Build(index, notes, text);
+            }
+        }
+        catch (Exception)
+        {
+            return new SearchView(SearchViewKind.IndexUnreadable, string.Empty, []);
+        }
+    });
+
+    /// <summary>
     /// The calendar link as the settings page shows it (<see cref="CalendarLinkView.Show"/>): the masked link and
     /// the time of the cached copy, <c>NotSet</c> or <c>Unreadable</c>, off the calling thread. The link itself never
     /// leaves Core. Reads only (no download) and never throws: any failure gives the <c>Unreadable</c> view.

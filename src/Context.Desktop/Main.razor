@@ -34,6 +34,10 @@
                 {
                     <FindPanel Key="@find.Key" Value="@find.Value" OnOpen="RequestOpen" OnClose="CloseFind" />
                 }
+                @if (searchShown is { } search)
+                {
+                    <SearchPanel Text="@search" OnOpen="RequestOpen" OnClose="CloseSearch" />
+                }
                 <p class="main-status cut @statusClass" role="status" title="@statusText">@statusText</p>
                 @if (openName is { } name)
                 {
@@ -156,6 +160,7 @@ else
     private bool tagsShown;
     private bool reviewShown;
     private (string Key, string Value)? findShown;
+    private string? searchShown;
     private bool settingsShown;
     private bool discarding;
     private string? pendingName;
@@ -222,6 +227,8 @@ else
     private void CloseTag() => tagShown = null;
 
     private void CloseFind() => findShown = null;
+
+    private void CloseSearch() => searchShown = null;
 
     // The tags view: every tag with its note count; a click on one shows the tag panel below it.
     private void ShowTags() => tagsShown = true;
@@ -431,6 +438,7 @@ else
         tagsShown = false;
         reviewShown = false;
         findShown = null;
+        searchShown = null;
         settingsShown = false;
         renaming = false;
         subpaging = false;
@@ -520,6 +528,12 @@ else
                     ShowStatus(string.Empty, string.Empty);
                 }
 
+                break;
+            case "/search":
+                // The text to look for in every plain note: /search budget 2027. Read only; SearchPanel shows the
+                // usage line for a blank or bad text.
+                searchShown = rest;
+                ShowStatus(string.Empty, string.Empty);
                 break;
             case "/import":
                 // What was typed after the command is ignored: the files come from the OS dialog only.

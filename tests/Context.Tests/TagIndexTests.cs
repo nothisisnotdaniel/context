@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.Data.Sqlite;
 
 namespace Context.Tests;
@@ -388,7 +389,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(6, TagIndex.ParserVersion);
+        Assert.Equal(7, TagIndex.ParserVersion);
     }
 
     // 024 AC-6
@@ -437,13 +438,13 @@ public sealed class TagIndexTests : IDisposable
         using (SqliteConnection connection = Open())
         {
             using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 7";
+            command.CommandText = "PRAGMA user_version = 8";
             command.ExecuteNonQuery();
         }
 
         index.Sync(store);
 
-        Assert.Equal(7, UserVersion());
+        Assert.Equal(8, UserVersion());
     }
 
     // 048 AC-4: the old constructor means a tag link only.
@@ -846,8 +847,8 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(6, TagIndex.ParserVersion);
-        Assert.Equal(6, UserVersion());
+        Assert.Equal(7, TagIndex.ParserVersion);
+        Assert.Equal(7, UserVersion());
         Assert.Equal(["A", "Beta"], NoteRows());
         Assert.Equal([("A", "work"), ("Beta", "home")], Rows());
         Assert.Equal([("A", "Beta")], LinkRows());
@@ -956,7 +957,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(6, UserVersion());
+        Assert.Equal(7, UserVersion());
         Assert.Equal([("A", "anna", "Anna")], PeopleRows());
         Assert.Equal([("A", "work")], Rows());
 
@@ -1077,7 +1078,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(6, UserVersion());
+        Assert.Equal(7, UserVersion());
         Assert.Equal([("A", "role", "chef #work", "Chef #work")], AttributeRows());
 
         File.WriteAllText(a, "role:: Other");
@@ -1111,7 +1112,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Empty(LinkRows());
-        Assert.Equal(6, UserVersion());
+        Assert.Equal(7, UserVersion());
     }
 
     private void EditNested(string name, string text)
@@ -1196,7 +1197,135 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
         Assert.Equal(["Anna|1", "AS|1"], index.People().Select(Describe));
         Assert.Empty(index.NotesMentioning("Anna Schmidt"));
-        Assert.Equal(6, UserVersion());
-        Assert.Equal(6, TagIndex.ParserVersion);
+        Assert.Equal(7, UserVersion());
+        Assert.Equal(7, TagIndex.ParserVersion);
+    }
+
+    // 170 ----------------------------------------------------------------------------------------
+
+    private List<(string Note, string Body)> TextRows()
+    {
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT note, body FROM note_text ORDER BY note";
+        using SqliteDataReader reader = command.ExecuteReader();
+        List<(string Note, string Body)> rows = [];
+        while (reader.Read())
+        {
+            rows.Add((reader.GetString(0), reader.GetString(1)));
+        }
+
+        return rows;
+    }
+
+    // 170 AC-1: Sync writes one note_text row per note with its whole text; Search finds rows ignoring case.
+    [Fact]
+    public void Sync_WritesNoteText_SearchMatchesIgnoringCase()
+    {
+        WriteNote("Plan", "# Plan\nBudget 2027");
+        WriteNote("Other", "nothing");
+        Directory.CreateDirectory(Path.Combine(root, "Plan"));
+        File.WriteAllText(Path.Combine(root, "Plan", "Child.md"), "child budget");
+
+        index.Sync(store);
+
+        Assert.Equal([("Other", "nothing"), ("Plan", "# Plan\nBudget 2027"), ("Plan/Child", "child budget")], TextRows());
+        Assert.Equal(
+            ["Plan", "Plan/Child"],
+            index.Search("BUDGET").Select(r => r.Note).Order(StringComparer.Ordinal));
+        Assert.Equal("# Plan\nBudget 2027", Assert.Single(index.Search("et 20")).Body);
+    }
+
+    // 170 AC-2: the query is one quoted phrase passed as a parameter: quotes and FTS operators are text.
+    [Theory]
+    [InlineData("a\" OR \"b")]
+    [InlineData("NEAR(x y)")]
+    [InlineData("x*y")]
+    [InlineData("^abc")]
+    [InlineData("\"\"\"")]
+    public void Search_FtsSyntax_IsLiteral(string query)
+    {
+        WriteNote("Literal", "[" + query + "]");
+        WriteNote("Words", "a b x y abc OR NEAR");
+        index.Sync(store);
+
+        Assert.Equal(["Literal"], index.Search(query).Select(r => r.Note));
+    }
+
+    // 170 AC-4: an edited, renamed or deleted note's row is replaced or removed; an orphan row is removed.
+    [Fact]
+    public void Sync_NoteText_FollowsEditsAndRemovesOrphans()
+    {
+        WriteNote("A", "one");
+        WriteNote("B", "two");
+        index.Sync(store);
+        using (SqliteConnection connection = Open())
+        using (SqliteCommand command = connection.CreateCommand())
+        {
+            command.CommandText = "INSERT INTO note_text(note, body) VALUES('Ghost', 'boo')";
+            command.ExecuteNonQuery();
+        }
+
+        WriteNote("A", "uno");
+        File.SetLastWriteTimeUtc(Path.Combine(root, "A.md"), DateTime.UtcNow.AddMinutes(1));
+        File.Move(Path.Combine(root, "B.md"), Path.Combine(root, "C.md"));
+        index.Sync(store);
+
+        Assert.Equal([("A", "uno"), ("C", "two")], TextRows());
+    }
+
+    // 170: a note that can't be read, or is over MaxEditBytes, has no note_text row (a big note keeps its tags).
+    [Fact]
+    public void Sync_UnreadableOrTooBigNote_HasNoTextRow()
+    {
+        WriteNote("Small", "small");
+        string big = Path.Combine(root, "Big.md");
+        using (FileStream stream = new FileStream(big, FileMode.Create))
+        {
+            byte[] start = Encoding.UTF8.GetBytes("#work\n");
+            stream.Write(start);
+            stream.SetLength(NoteStore.MaxEditBytes + 1);
+        }
+
+        index.Sync(store);
+
+        Assert.Equal([("Small", "small")], TextRows());
+        Assert.Equal(["Big"], index.NotesWithTag("work"));
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string small = Path.Combine(root, "Small.md");
+        File.WriteAllText(small, "changed");
+        File.SetLastWriteTimeUtc(small, DateTime.UtcNow.AddMinutes(1));
+        File.SetUnixFileMode(small, UnixFileMode.None);
+        if (CanRead(small))
+        {
+            return;
+        }
+
+        index.Sync(store);
+
+        Assert.Empty(TextRows());
+    }
+
+    // 170: FTS5 secure-delete is on for note_text, and a sync with nothing to do leaves the file's bytes alone.
+    [Fact]
+    public void Sync_SecureDeleteOn_NoOpSyncWritesNothing()
+    {
+        WriteNote("A", "text");
+        index.Sync(store);
+        using (SqliteConnection connection = Open())
+        using (SqliteCommand command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT v FROM note_text_config WHERE k = 'secure-delete'";
+            Assert.Equal(1L, command.ExecuteScalar());
+        }
+
+        byte[] before = File.ReadAllBytes(DbPath);
+        index.Sync(store);
+
+        Assert.Equal(before, File.ReadAllBytes(DbPath));
     }
 }

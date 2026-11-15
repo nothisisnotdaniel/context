@@ -57,6 +57,23 @@ public sealed class CommandMatcherTests
         Assert.Equal(expected, CommandMatcher.Match(names, n => n, line));
     }
 
+    // 170 AC-10: with the desktop palette's names (now with /search), /search is found by its prefix and a typo.
+    [Theory]
+    [InlineData("/sea", new[] { "/search", "/settings" })]
+    [InlineData("/search budget 2027", new[] { "/search" })]
+    [InlineData("/serach", new[] { "/search" })]
+    [InlineData("/sa", new[] { "/save", "/capture", "/search", "/settings", "/tags" })]
+    public void Match_Search(string line, string[] expected)
+    {
+        string[] names =
+        [
+            "/capture", "/current", "/done", "/export", "/find", "/import", "/meeting", "/new", "/open", "/review", "/save",
+            "/search", "/settings", "/tags", "/today", "/todo",
+        ];
+
+        Assert.Equal(expected, CommandMatcher.Match(names, n => n, line));
+    }
+
     [Theory]
     [InlineData("", "", 0)]
     [InlineData("open", "opne", 2)]

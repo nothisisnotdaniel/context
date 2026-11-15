@@ -63,6 +63,14 @@ for example `types/project` with the lines `attribute:: owner` and `attribute:: 
 the built-in one. A new person page made by clicking a mention starts with one empty line per `person` attribute.
 In the desktop app, `/find role Bereichsleiter` in the command palette (Ctrl/Cmd+K) lists the same notes.
 
+### Full-text search
+
+`context search budget 2027` prints every note whose text contains `budget 2027` (ignoring case, anywhere in a word),
+one line per note: its name, the number of the first line that contains the text and that line, separated by tabs
+(none: no output). The words are joined with one space and matched as one run of text, not as separate words; the
+text needs at least 3 and at most 200 characters. Sensitive notes are never searched. In the desktop app,
+`/search budget 2027` in the command palette lists the same notes; click one to open it.
+
 ### Daily note
 
 `context today` prints today's note, named after the date (for example `2026-10-29`). When it doesn't exist yet it
@@ -98,7 +106,7 @@ desktop app, `/new Weekly sync --template meeting` in the command palette does t
 ### JSON output
 
 Add `--json` to a read command (`version`, `todos`, `notes`, `note show`, `tags`, `links`, `people`, `person`,
-`find`, `types`, `current`, `review`) to get one
+`find`, `search`, `types`, `current`, `review`) to get one
 JSON object on one line instead of text. Property names are fixed camelCase; missing values are `null`; dates are
 `yyyy-MM-dd` and times ISO 8601 with offset. Errors stay one text line on stderr with the same exit codes, and
 write commands and `help` refuse the flag.
@@ -117,6 +125,7 @@ plain ASCII; any JSON parser, `ConvertFrom-Json` included, reads them back.
 | `people` | `{"people":[{"person":"Anna Schmidt","count":2}]}` |
 | `person <name>` | `{"person":"Anna Schmidt","notes":["A"],"appointments":[{"start":"...","end":"...","allDay":false,"title":"...","location":null}]}` |
 | `find <key> <value>` | `{"key":"role","value":"Bereichsleiter","notes":["people/Anna Schmidt"]}` |
+| `search <text>` | `{"query":"budget","results":[{"note":"A","line":3,"text":"Budget 2027"}]}` |
 | `types` | `{"types":[{"type":"organization","attributes":[]},{"type":"person","attributes":["aliases","affiliation","role"]}]}` |
 | `current` | `{"today":"...","appointments":[{"start":"...","end":"...","allDay":false,"title":"ACME kickoff","location":null,"related":[{"name":"projects/ACME Rollout","tags":["acme"],"words":["acme"]}]}],"calendar":{...},"due":[...],"linkedNotes":[...]}` |
 | `review` | `{"from":"...","to":"...","changedNotes":[{"name":"A","modified":"..."}],"doneTodos":[{"due":"...","done":"...","text":"..."}],"overdue":[{"due":"...","text":"..."}],"appointments":[...],"calendar":{...}}` |
