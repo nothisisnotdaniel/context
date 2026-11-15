@@ -14,14 +14,15 @@
             <h2>Appointments</h2>
             <table class="appointments">
                 <thead>
-                    <tr><th>Time</th><th>Appointment</th><th>Where</th></tr>
+                    <tr><th>#</th><th>Time</th><th>Appointment</th><th>Where</th></tr>
                 </thead>
                 <tbody>
-                    @foreach ((Appointment appointment, IReadOnlyList<RelatedNote> related) in ShownAppointments(view))
+                    @foreach ((Appointment appointment, IReadOnlyList<RelatedNote> related, int number) in ShownAppointments(view))
                     {
                         string title = DesktopText.OneLine(appointment.Title.Length == 0 ? "(no title)" : appointment.Title);
                         string where = appointment.Location is null ? string.Empty : DesktopText.OneLine(appointment.Location);
                         <tr class="appointment">
+                            <td class="number grey">@number.ToString(CultureInfo.InvariantCulture)</td>
                             <td class="time accent">@view.TimeText(appointment)</td>
                             <td class="cut" title="@title">@title</td>
                             <td class="where grey cut" title="@where">@where</td>
@@ -29,6 +30,7 @@
                         @if (related.Count > 0)
                         {
                             <tr class="related">
+                                <td></td>
                                 <td></td>
                                 <td colspan="2">
                                     <ul class="related-notes">
@@ -51,6 +53,7 @@
                     @if (MoreAppointments(view) is { } more)
                     {
                         <tr class="more">
+                            <td></td>
                             <td></td>
                             <td class="grey">@more</td>
                             <td></td>
@@ -141,10 +144,11 @@
     [Parameter]
     public EventCallback<string> OnOpen { get; set; }
 
-    // The shown appointments with their related notes; the related rows don't count toward MaxAppointmentRows.
-    private static IEnumerable<(Appointment Appointment, IReadOnlyList<RelatedNote> Related)> ShownAppointments(CurrentView view) =>
+    // The shown appointments with their related notes and their 1-based number (the one /meeting takes); the related
+    // rows don't count toward MaxAppointmentRows.
+    private static IEnumerable<(Appointment Appointment, IReadOnlyList<RelatedNote> Related, int Number)> ShownAppointments(CurrentView view) =>
         view.Appointments
-            .Select((a, i) => (a, i < view.Related.Count ? view.Related[i] : (IReadOnlyList<RelatedNote>)[]))
+            .Select((a, i) => (a, i < view.Related.Count ? view.Related[i] : (IReadOnlyList<RelatedNote>)[], i + 1))
             .Take(view.Appointments.Count > MaxAppointmentRows
                 ? MaxAppointmentRows - 1
                 : view.Appointments.Count);

@@ -156,7 +156,7 @@ public sealed class EditingFlowTests : IDisposable
             cut.Find(".palette-input").GetAttribute("blazor:elementReference"),
             ((Microsoft.AspNetCore.Components.ElementReference)focus.Arguments[0]!).Id);
         Assert.Equal(
-            ["/capture <text>", "/current", "/export", "/find <attribute> <value>", "/import", "/new <title> [--template <name>]", "/open <note>", "/save", "/settings", "/tags [tag]", "/today", "/todo <yyyy-MM-dd|today|tomorrow> <text>"],
+            ["/capture <text>", "/current", "/export", "/find <attribute> <value>", "/import", "/meeting <number>", "/new <title> [--template <name>]", "/open <note>", "/save", "/settings", "/tags [tag]", "/today", "/todo <yyyy-MM-dd|today|tomorrow> <text>"],
             cut.FindAll(".palette-row .usage").Select(u => u.TextContent).ToArray());
 
         await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
@@ -180,6 +180,12 @@ public sealed class EditingFlowTests : IDisposable
         Assert.Equal("true", cut.FindAll(".palette-row")[1].GetAttribute("aria-selected"));
         await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "ArrowUp" });
         Assert.Equal("true", cut.FindAll(".palette-row")[0].GetAttribute("aria-selected"));
+
+        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/me" });
+        Assert.Equal("/meeting <number>", cut.FindAll(".palette-row .usage")[0].TextContent);
+        Assert.Equal(
+            "Open the note for today's appointment with that number",
+            cut.FindAll(".palette-row .description")[0].TextContent);
 
         await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/xyzzy" });
         Assert.Equal("No matching command.", cut.Find(".palette .none").TextContent);
