@@ -9,3 +9,7 @@ A line starting with `Decision:` in any note is collected (in the index, like ta
 ## Why
 
 Decisions are scattered across meeting notes and hard to find later. Collecting them like tags costs nothing extra to write.
+
+## Notes
+
+Duplicate #104 (Decision log) was merged into this item on 2026-11-15. #104 also had a decision template (context, decision, consequences) created by `context decision new`, a `--item <number>` filter once work item references (#101) exist, and `--export <file>` for a shareable Markdown decision register (escaped, no scripts). These are optional extras for a later item, not part of this one.

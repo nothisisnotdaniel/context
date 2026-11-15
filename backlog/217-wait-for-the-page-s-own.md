@@ -15,3 +15,5 @@ Job 175 fixed the breadcrumb flake in OpenFull only; Open still returns before t
 Proposed by job 175-flaky-desktop-tests (review-code round 1, nit 1).
 
 Proposed by job 175-flaky-desktop-tests (`factory/jobs/175-flaky-desktop-tests/`).
+
+Merged on 2026-11-15: #179 (MainTests.Breadcrumb_ChildOnly_AncestorsAsButtons_CurrentAsText fails now and then in a full run). It opens its page through MainTests.Open, so this fix should cover it. Check that test in the repeated runs.

@@ -9,3 +9,7 @@ Renaming a note in the desktop app also rewrites every `[[link]]` to it (keeping
 ## Why
 
 Without it, renaming a note leaves dead links behind, which makes me avoid renaming at all. A history snapshot of each changed note makes it safe.
+
+## Notes
+
+Duplicate #122 (Update [[links]] when a note is renamed in the desktop app, proposed by job 134-desktop-notes) was merged into this item on 2026-11-15.

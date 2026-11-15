@@ -93,7 +93,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#84](backlog/084-screenshot-to-inbox.md) Screenshot to inbox
 - [ ] [#86](backlog/086-mermaid-diagrams.md) Mermaid diagrams
 - [ ] [#87](backlog/087-standup-notes.md) Standup notes
-- [ ] [#122](backlog/122-update-links-when-a-note-is.md) Update [[links]] when a note is renamed in the desktop app
 - [ ] [#85](backlog/085-similar-notes.md) Similar notes
 - [ ] [#90](backlog/090-keep-mixed-line-endings.md) Keep mixed line endings
 - [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4; #108)
@@ -139,7 +138,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#136](backlog/136-links-panel-no-has-no-linked.md) Links panel: no 'has no linked notes' flash during rename
 - [?] [#137](backlog/137-tags-and-links-panels-announce-loaded.md) Tags and links panels: announce loaded rows
 - [?] [#138](backlog/138-look-at-the-tags-and-links.md) Look at the tags and links panels in a running window
-- [?] [#139](backlog/139-bounded-read-of-calendar-link-txt.md) Bounded read of calendar-link.txt
 - [?] [#140](backlog/140-calendar-link-field-autocomplete-new-password.md) Calendar link field: autocomplete new-password
 - [?] [#141](backlog/141-clear-the-typed-calendar-link-when.md) Clear the typed calendar link when the settings panel closes
 - [?] [#142](backlog/142-lock-the-calendar-link-field-while.md) Lock the calendar link field while the replace dialog is open
@@ -148,7 +146,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#145](backlog/145-look-at-the-notes-bar-buttons.md) Look at the notes bar buttons in a narrow sidebar
 - [h] [#146](backlog/146-check-desktop-settings-key-details-on.md) Check desktop settings key details on Windows and macOS
 - [?] [#147](backlog/147-create-only-save-for-unconfirmed-import.md) Create-only save for unconfirmed import
-- [?] [#148](backlog/148-replace-bidi-and-format-characters-in.md) Replace bidi and format characters in shown text
 - [?] [#149](backlog/149-clear-earlier-import-lines-on-a.md) Clear earlier import lines on a cancelled import
 - [?] [#150](backlog/150-require-a-md-source-for-desktop.md) Require a .md source for desktop import
 - [?] [#151](backlog/151-clear-the-capture-status-line-on.md) Clear the capture status line on new input
@@ -166,7 +163,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#163](backlog/163-call-signing-tools-by-absolute-path.md) Call signing tools by absolute path
 - [h] [#164](backlog/164-set-up-apple-signing-and-check.md) Set up Apple signing and check the first signed build
 - [?] [#165](backlog/165-show-json-as-an-option-in.md) Show --json as an option in the CLI help
-- [?] [#166](backlog/166-harden-the-todos-json-read.md) Harden the todos.json read
 - [h] [#167](backlog/167-check-the-first-todos-json-id.md) Check the first todos.json id migration
 - [?] [#171](backlog/171-name-the-bad-todo-id-in.md) Name the bad todo id in the CLI warning
 - [ ] [#121](backlog/121-open-empty-notes-in-the-default.md) Open empty notes in the default editor on macOS and Linux
@@ -174,8 +170,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#119](backlog/119-fetch-the-earlier-desktop-package-with.md) Fetch the earlier desktop package with gh release download
 - [ ] [#118](backlog/118-refuse-a-newline-in-version-in.md) Refuse a newline in VERSION in the release scripts
 - [ ] [#110](backlog/110-narrow-the-node-check-in-the.md) Narrow the node check in the CI workflow test
-- [ ] [#105](backlog/105-handover-pack.md) Handover pack (after: #102; #104; #108)
-- [ ] [#104](backlog/104-decision-log.md) Decision log (after: #101)
 - [ ] [#101](backlog/101-work-item-references.md) Work item references
 - [ ] [#91](backlog/091-windows-device-check-at-open.md) Windows device check at open
 - [ ] [#89](backlog/089-call-to-meeting-note.md) Call to meeting note
@@ -202,7 +196,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#61](backlog/061-resurfacing.md) Resurfacing
 - [ ] [#65](backlog/065-todos-inside-notes.md) Todos inside notes
 - [ ] [#77](backlog/077-quick-switcher.md) Quick switcher
-- [ ] [#102](backlog/102-work-item-dossier.md) Work item dossier (after: #101; #17; Times#37; #108)
 - [ ] [#106](backlog/106-claude-code-mcp-server.md) Claude Code MCP server (after: #101; #17; Times#37; #108)
 - [ ] [#107](backlog/107-own-cloud-sync-spike.md) Own-cloud sync spike
 - [ ] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39)
@@ -213,7 +206,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#175](backlog/175-remove-the-empty-child-folder-after.md) Remove the empty child folder after a subpage move
 - [?] [#176](backlog/176-merge-find-and-findexact-in-notestore.md) Merge Find and FindExact in NoteStore
 - [?] [#177](backlog/177-keep-deep-note-trees-readable-in.md) Keep deep note trees readable in the sidebar
-- [?] [#179](backlog/179-stop-the-maintests-breadcrumb-test-flaking.md) Stop the MainTests breadcrumb test flaking
 - [?] [#180](backlog/180-force-a-fresh-locked-restore-on.md) Force a fresh locked restore on CI
 - [ ] [#182](backlog/182-refuse-invisible-characters-in-person-names.md) Refuse invisible characters in person names and note titles
 - [ ] [#183](backlog/183-turn-a-typed-name-into-a.md) Turn a typed @[Name] into a mention chip right away
@@ -235,7 +227,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#201](backlog/201-mention-template-in-the-empty-new.md) Mention --template in the empty /new hint
 - [?] [#202](backlog/202-match-note-and-sensitive-file-extensions.md) Match note and sensitive-file extensions ignoring case on Linux
 - [?] [#203](backlog/203-replace-lone-surrogates-in-meeting-note.md) Replace lone surrogates in meeting note names
-- [?] [#204](backlog/204-cap-todos-json-size-and-refuse.md) Cap todos.json size and refuse non-regular files
 - [?] [#205](backlog/205-say-why-done-did-nothing-while.md) Say why /done did nothing while a dialog is open
 - [?] [#206](backlog/206-base-the-search-index-size-cap.md) Base the search index size cap on the text actually read
 - [?] [#207](backlog/207-limit-memory-used-by-a-broad.md) Limit memory used by a broad full-text search
