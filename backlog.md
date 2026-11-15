@@ -72,7 +72,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#49](backlog/049-weekly-review.md) Weekly review → 169-weekly-review
 - [x] [#47](backlog/047-full-text-search.md) Full-text search → 170-full-text-search
 - [x] [#70](backlog/070-day-s-end-in-the-daily.md) Day's end in the daily note → 171-days-end-daily-note
-- [ ] [#71](backlog/071-morning-briefing.md) Morning briefing
+- [x] [#71](backlog/071-morning-briefing.md) Morning briefing → 172-morning-briefing
 - [ ] [#211](backlog/211-remove-cli-commands-that-only-mirror.md) Remove CLI commands that only mirror desktop views
 - [ ] [#53](backlog/053-note-history.md) Note history
 - [ ] [#54](backlog/054-attachments.md) Attachments
