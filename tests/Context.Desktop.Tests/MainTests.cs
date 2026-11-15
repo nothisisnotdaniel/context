@@ -1261,6 +1261,101 @@ public sealed class MainTests : IDisposable
         Assert.Equal("Append a dated line to the inbox", row.QuerySelector(".description")!.TextContent);
     }
 
+    // 164 AC-8: /today creates today's note, opens it in the editor and shows the accent status; an argument is ignored.
+    [Theory]
+    [InlineData("/today")]
+    [InlineData("/today extra words")]
+    public async Task PaletteToday_CreatesOpensAndShowsCreated(string line)
+    {
+        data.AddTodo("call Anna", DesktopFixture.Today);
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, line);
+
+        cut.WaitForAssertion(() => Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent), Wait);
+        Assert.Equal(
+            "# 2026-10-29\n\n## Appointments\n- No appointments.\n\n## Todos\n- call Anna\n",
+            File.ReadAllText(Path.Combine(data.Root, "2026-10-29.md")));
+        Assert.Equal("Created 2026-10-29", cut.Find(".main-status").TextContent);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
+        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
+        Assert.False(File.Exists(Path.Combine(data.Root, "2026-10-29 extra words.md")));
+    }
+
+    // 164 AC-8: an existing daily note opens as it is, with no "Created" line.
+    [Fact]
+    public async Task PaletteToday_Existing_OpensUnchanged()
+    {
+        data.WriteNote("2026-10-29", "# mine\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, "/today");
+
+        cut.WaitForAssertion(() => Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
+        Assert.Equal("# mine\n", File.ReadAllText(Path.Combine(data.Root, "2026-10-29.md")));
+        Assert.DoesNotContain("Created", cut.Find(".main-status").TextContent, StringComparison.Ordinal);
+    }
+
+    // 164 AC-8: with unsaved changes it asks first and writes nothing until the user discards them.
+    [Fact]
+    public async Task PaletteToday_DirtyEditor_AsksFirst()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        js.Edit("# Plan\n\nUnsaved\n");
+
+        await RunPalette(cut, "/today");
+
+        cut.WaitForAssertion(
+            () => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
+        Assert.False(File.Exists(Path.Combine(data.Root, "2026-10-29.md")));
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent), Wait);
+        Assert.True(File.Exists(Path.Combine(data.Root, "2026-10-29.md")));
+        Assert.Equal("Created 2026-10-29", cut.Find(".main-status").TextContent);
+    }
+
+    // 164 AC-8: a write failure shows the fixed red line and opens nothing.
+    [Fact]
+    public async Task PaletteToday_WriteFails_RedLine()
+    {
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        string path = Path.Combine(data.Root, "2026-10-29.md");
+        data.Actions!.BeforeWrite = () => Directory.CreateDirectory(path);
+
+        await RunPalette(cut, "/today");
+
+        cut.WaitForAssertion(
+            () => Assert.Equal("Can't write 2026-10-29. Nothing was done.", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Empty(js.Calls("ContextEditor.mount"));
+        Assert.False(File.Exists(path));
+    }
+
+    // 164 AC-8: a sensitive daily note opens through the unlock flow, never rewritten.
+    [Fact]
+    public async Task PaletteToday_SensitiveNote_OpensThroughUnlock()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("2026-10-29", "# secret day\n");
+        data.Keys.AgreeThrows = true;
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        byte[] before = File.ReadAllBytes(Path.Combine(data.Root, "2026-10-29.ctxs"));
+
+        await RunPalette(cut, "/today");
+
+        cut.WaitForAssertion(() => Assert.Equal("Can't unlock 2026-10-29.", cut.Find(".unreadable").TextContent), Wait);
+        Assert.Equal(1, data.Keys.Agrees);
+        Assert.Equal(before, File.ReadAllBytes(Path.Combine(data.Root, "2026-10-29.ctxs")));
+        Assert.False(File.Exists(Path.Combine(data.Root, "2026-10-29.md")));
+    }
+
     private static async Task RunPalette(IRenderedComponent<Main> cut, string line)
     {
         await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });

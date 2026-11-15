@@ -51,7 +51,7 @@ internal static class Program
         DesktopState state = new DesktopState(
             notes, todos, index, calendar, feed, Today, () => DateTime.UtcNow, KeyStore(), session, calendarLink);
         DesktopActions actions = new DesktopActions(
-            notes, todos, state, new ShellNoteLauncher(), calendarLink, feed, () => DateTime.Now);
+            notes, todos, state, new ShellNoteLauncher(), calendarLink, feed, () => DateTime.Now, calendar);
 
         PhotinoBlazorAppBuilder builder = PhotinoBlazorAppBuilder.CreateDefault(args);
         builder.Services.AddSingleton(state);

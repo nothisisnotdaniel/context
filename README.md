@@ -63,6 +63,12 @@ for example `types/project` with the lines `attribute:: owner` and `attribute:: 
 the built-in one. A new person page made by clicking a mention starts with one empty line per `person` attribute.
 In the desktop app, `/find role Bereichsleiter` in the command palette (Ctrl/Cmd+K) lists the same notes.
 
+### Daily note
+
+`context today` prints today's note, named after the date (for example `2026-10-29`). When it doesn't exist yet it
+is created first with the day's appointments and the todos due today or earlier; an existing note is printed as it
+is and never changed. In the desktop app, `/today` in the command palette opens the same note.
+
 ### JSON output
 
 Add `--json` to a read command (`version`, `todos`, `notes`, `note show`, `tags`, `links`, `people`, `person`,

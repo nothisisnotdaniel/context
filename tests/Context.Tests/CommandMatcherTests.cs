@@ -42,6 +42,21 @@ public sealed class CommandMatcherTests
         Assert.Equal(expected, CommandMatcher.Match(names, n => n, line));
     }
 
+    // 164 AC-8: with the desktop palette's names, /today and /todo both stay for /tod, /to and /t.
+    [Theory]
+    [InlineData("/tod", new[] { "/today", "/todo" })]
+    [InlineData("/toda", new[] { "/today", "/todo" })]
+    [InlineData("/to", new[] { "/today", "/todo", "/tags" })]
+    [InlineData("/t", new[] { "/tags", "/today", "/todo" })]
+    [InlineData("/today", new[] { "/today", "/todo" })]
+    public void Match_TodayNextToTodo(string line, string[] expected)
+    {
+        string[] names =
+            ["/capture", "/current", "/export", "/find", "/import", "/new", "/open", "/save", "/settings", "/tags", "/today", "/todo"];
+
+        Assert.Equal(expected, CommandMatcher.Match(names, n => n, line));
+    }
+
     [Theory]
     [InlineData("", "", 0)]
     [InlineData("open", "opne", 2)]

@@ -156,7 +156,7 @@ public sealed class EditingFlowTests : IDisposable
             cut.Find(".palette-input").GetAttribute("blazor:elementReference"),
             ((Microsoft.AspNetCore.Components.ElementReference)focus.Arguments[0]!).Id);
         Assert.Equal(
-            ["/capture <text>", "/current", "/export", "/find <attribute> <value>", "/import", "/new <title>", "/open <note>", "/save", "/settings", "/tags [tag]", "/todo <yyyy-MM-dd|today|tomorrow> <text>"],
+            ["/capture <text>", "/current", "/export", "/find <attribute> <value>", "/import", "/new <title>", "/open <note>", "/save", "/settings", "/tags [tag]", "/today", "/todo <yyyy-MM-dd|today|tomorrow> <text>"],
             cut.FindAll(".palette-row .usage").Select(u => u.TextContent).ToArray());
 
         await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
@@ -174,7 +174,7 @@ public sealed class EditingFlowTests : IDisposable
         Assert.Equal(["/open <note>"], cut.FindAll(".palette-row .usage").Select(u => u.TextContent).ToArray());
 
         await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/t" });
-        Assert.Equal(["/tags [tag]", "/todo <yyyy-MM-dd|today|tomorrow> <text>"], cut.FindAll(".palette-row .usage").Select(u => u.TextContent).ToArray());
+        Assert.Equal(["/tags [tag]", "/today", "/todo <yyyy-MM-dd|today|tomorrow> <text>"], cut.FindAll(".palette-row .usage").Select(u => u.TextContent).ToArray());
         Assert.Equal("true", cut.FindAll(".palette-row")[0].GetAttribute("aria-selected"));
         await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "ArrowDown" });
         Assert.Equal("true", cut.FindAll(".palette-row")[1].GetAttribute("aria-selected"));
