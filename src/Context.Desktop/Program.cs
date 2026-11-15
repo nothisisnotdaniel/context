@@ -7,7 +7,8 @@ namespace Context;
 /// <summary>
 /// Wires up the desktop window; reads live in <see cref="DesktopState"/>, changes in <see cref="DesktopActions"/>, the
 /// page's editor is reached only through <see cref="EditorInterop"/>, a newer build through <see cref="StartupUpdate"/>,
-/// the OS default editor through <see cref="ShellNoteLauncher"/>, the OS key store for sensitive notes through
+/// the OS default editor through <see cref="ShellNoteLauncher"/>, system notifications through
+/// <see cref="SystemNotifier"/>, the OS key store for sensitive notes through
 /// <see cref="IKeyStore"/>.
 /// </summary>
 internal static class Program
@@ -52,7 +53,7 @@ internal static class Program
             notes, todos, index, calendar, feed, Today, () => DateTime.UtcNow, KeyStore(), session, calendarLink);
         DesktopActions actions = new DesktopActions(
             notes, todos, state, new ShellNoteLauncher(), calendarLink, feed, () => DateTime.Now, calendar,
-            TimesFolder.Resolve(Environment.GetEnvironmentVariable(TimesFolder.VariableName)));
+            TimesFolder.Resolve(Environment.GetEnvironmentVariable(TimesFolder.VariableName)), new SystemNotifier());
 
         PhotinoBlazorAppBuilder builder = PhotinoBlazorAppBuilder.CreateDefault(args);
         builder.Services.AddSingleton(state);
@@ -94,9 +95,14 @@ internal static class Program
         static Task AutoWrites(DesktopActions actions) =>
             actions.AutoDayEnd().ContinueWith(_ => actions.AutoBriefing(), TaskScheduler.Default).Unwrap();
 
-        _ = AutoWrites(actions);
+        // The timed-todo reminders, also through DesktopActions: once now, before the automatic writes (so a todo whose
+        // time passed while the app was closed shows at start), then on their own timer, half an interval after the
+        // day-end timer so the two rarely meet (a call refused as busy is retried on the next tick).
+        _ = actions.AutoReminders().ContinueWith(_ => AutoWrites(actions), TaskScheduler.Default).Unwrap();
         using Timer dayEnd = new Timer(
             _ => _ = AutoWrites(actions), null, DesktopActions.DayEndInterval, DesktopActions.DayEndInterval);
+        using Timer reminders = new Timer(
+            _ => _ = actions.AutoReminders(), null, DesktopActions.ReminderInterval / 2, DesktopActions.ReminderInterval);
 
         using DataWatcher watcher = new DataWatcher(folder, state);
         watcher.Start();

@@ -51,6 +51,9 @@ internal sealed class DesktopFixture : IDisposable
     /// <summary>The launcher the actions use for "Open in default editor"; it only records paths.</summary>
     public FakeNoteLauncher Launcher { get; } = new();
 
+    /// <summary>The notifier the actions show reminders through; it only records them.</summary>
+    public FakeNotifier Notifier { get; } = new();
+
     /// <summary>The key store the state uses: in memory, supported, without keys. Set another before <see cref="CreateState"/>.</summary>
     public FakeKeyStore Keys { get; set; } = new();
 
@@ -123,7 +126,8 @@ internal sealed class DesktopFixture : IDisposable
             Keys,
             Session,
             link);
-        Actions = new DesktopActions(Notes, Todos, State, Launcher, link, feed, () => LocalNow, new CalendarStore(Root, Zone), TimesFolder);
+        Actions = new DesktopActions(
+            Notes, Todos, State, Launcher, link, feed, () => LocalNow, new CalendarStore(Root, Zone), TimesFolder, Notifier);
         Bunit.Services.AddSingleton(State);
         Bunit.Services.AddSingleton(Actions);
         Bunit.Services.AddTransient<EditorInterop>();
@@ -160,10 +164,10 @@ internal sealed class DesktopFixture : IDisposable
         File.WriteAllBytes(Path.Combine(Root, name + NoteStore.SensitiveExtension), SealedNote.Seal(name, text, recipients));
     }
 
-    public void AddTodo(string text, DateOnly due, TodoRepeat? repeat = null)
+    public void AddTodo(string text, DateOnly due, TodoRepeat? repeat = null, TimeOnly? time = null)
     {
         TodoStore store = new TodoStore(Root, () => created = created.AddMinutes(1));
-        store.Add(text, due, repeat);
+        store.Add(text, due, repeat, time);
     }
 
     public void WriteFile(string relative, string text)

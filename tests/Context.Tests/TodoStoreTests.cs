@@ -1234,4 +1234,235 @@ public sealed class TodoStoreTests : IDisposable
         Assert.Throws<TodoStoreException>(() => store.MoveDue(new DateOnly(2026, 11, 30), new DateOnly(2026, 12, 1)));
         Assert.Equal("not json", File.ReadAllText(FilePath));
     }
+
+    // 178: the clock the reminder tests mark todos notified with.
+    private static readonly DateTime NotifiedAt = new(2026, 11, 16, 13, 0, 30, DateTimeKind.Utc);
+
+    // 178 AC-1: a timed todo is written with "time":"HH:mm" after the other fields and reads back with its time.
+    [Fact]
+    public void Add_WithTime_WritesTimeAndReadsItBack()
+    {
+        TodoStore store = new TodoStore(root, () => Start, () => IdA);
+
+        TodoItem added = store.Add("Call Anna", new DateOnly(2026, 11, 16), null, new TimeOnly(14, 0));
+
+        Assert.Equal(new TodoItem(IdA, "Call Anna", new DateOnly(2026, 11, 16), Start, time: new TimeOnly(14, 0)), added);
+        string json = File.ReadAllText(FilePath);
+        Assert.Equal(
+            "[\n  {\n    \"id\": \"" + IdA + "\",\n    \"text\": \"Call Anna\",\n    \"due\": \"2026-11-16\",\n"
+            + "    \"created\": \"2026-10-28T09:00:00Z\",\n    \"time\": \"14:00\"\n  }\n]\n",
+            json);
+        TodoItem read = Assert.Single(new TodoStore(root).List());
+        Assert.Equal(new TimeOnly(14, 0), read.Time);
+        Assert.Null(read.Notified);
+    }
+
+    // 178 AC-1: a file without time or notified reads, and rewrites through Add, to the same bytes as before.
+    [Fact]
+    public void FileWithoutTime_RewritesSameBytes()
+    {
+        Directory.CreateDirectory(root);
+        string a = JsonTodo(IdA, "a", "2026-11-03", "2026-10-28T09:00:00Z");
+        File.WriteAllText(FilePath, JsonList(a));
+
+        new TodoStore(root, () => Start, () => IdB).Add("b", new DateOnly(2026, 11, 4));
+
+        Assert.Equal(JsonList(a, JsonTodo(IdB, "b", "2026-11-04", "2026-10-28T09:00:00Z")), File.ReadAllText(FilePath));
+        Assert.All(new TodoStore(root).List(), t => Assert.Null(t.Time));
+    }
+
+    // 178 AC-1: notified reads like done (UTC, an offset converted), and Migrate keeps time and notified.
+    [Fact]
+    public void Notified_ReadsAsUtc_MigrateKeepsTimeAndNotified()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath,
+            "[{\"text\":\"a\",\"due\":\"2026-11-16\",\"created\":\"2026-10-01T09:00:00Z\",\"time\":\"09:30\","
+            + "\"notified\":\"2026-11-16T09:30:00+01:00\"}]");
+
+        TodoItem read = Assert.Single(new TodoStore(root).List());
+        Assert.Equal(new TimeOnly(9, 30), read.Time);
+        Assert.Equal(new DateTime(2026, 11, 16, 8, 30, 0, DateTimeKind.Utc), read.Notified);
+        Assert.Equal(DateTimeKind.Utc, read.Notified!.Value.Kind);
+
+        Assert.True(new TodoStore(root).Migrate());
+        string json = File.ReadAllText(FilePath);
+        Assert.Contains("\"time\": \"09:30\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"notified\": \"2026-11-16T08:30:00Z\"", json, StringComparison.Ordinal);
+        Assert.Equal(read, Assert.Single(new TodoStore(root).List()));
+    }
+
+    public static TheoryData<string> BadTimes => new()
+    {
+        "\"time\":\"14:60\"",
+        "\"time\":\"24:00\"",
+        "\"time\":\"2pm\"",
+        "\"time\":\"9:00\"",
+        "\"time\":\"14:00:00\"",
+        "\"time\":\"\"",
+        "\"time\":42",
+        "\"time\":{}",
+        "\"notified\":\"soon\"",
+        "\"notified\":42",
+        "\"notified\":true",
+    };
+
+    // 178 AC-1: a bad time or notified value makes the file unreadable; it is never overwritten.
+    [Theory]
+    [MemberData(nameof(BadTimes))]
+    public void BadTimeOrNotified_IsUnreadable(string field)
+    {
+        Directory.CreateDirectory(root);
+        string text = "[{\"text\":\"a\",\"due\":\"2026-11-16\",\"created\":\"2026-10-01T09:00:00Z\"," + field + "}]";
+        File.WriteAllText(FilePath, text);
+        TodoStore store = new TodoStore(root, () => Start, () => IdB);
+
+        Assert.Throws<TodoStoreException>(() => store.List());
+        Assert.Throws<TodoStoreException>(() => store.Add("b", new DateOnly(2026, 11, 16)));
+        Assert.Throws<TodoStoreException>(() => store.MarkNotified([IdA]));
+        Assert.False(store.Migrate());
+        Assert.Equal(text, File.ReadAllText(FilePath));
+    }
+
+    // 178 AC-2: within one date the untimed todos come first, then timed ones by time, then by created.
+    [Fact]
+    public void List_WithinADate_UntimedFirst_ThenByTime_ThenByCreated()
+    {
+        TodoStore store = Store();
+        DateOnly day = new DateOnly(2026, 11, 16);
+        store.Add("at 14", day, null, new TimeOnly(14, 0));
+        store.Add("untimed late", day);
+        store.Add("at 9", day, null, new TimeOnly(9, 0));
+        store.Add("next day at 8", day.AddDays(1), null, new TimeOnly(8, 0));
+        store.Add("at 14 again", day, null, new TimeOnly(14, 0));
+        store.Add("day before", day.AddDays(-1));
+
+        Assert.Equal(
+            ["day before", "untimed late", "at 9", "at 14", "at 14 again", "next day at 8"],
+            store.List().Select(t => t.Text));
+    }
+
+    // 178 AC-2: time and notified are not part of the derived id.
+    [Fact]
+    public void DerivedId_IgnoresTimeAndNotified()
+    {
+        Directory.CreateDirectory(root);
+        DateTime created = new(2026, 10, 1, 9, 0, 0, DateTimeKind.Utc);
+        File.WriteAllText(FilePath,
+            "[{\"text\":\"a\",\"due\":\"2026-11-16\",\"created\":\"2026-10-01T09:00:00Z\",\"time\":\"14:00\","
+            + "\"notified\":\"2026-11-16T13:00:00Z\"}]");
+
+        Assert.Equal(
+            TodoStore.DerivedId("a", new DateOnly(2026, 11, 16), created, 0),
+            Assert.Single(new TodoStore(root).List()).Id);
+    }
+
+    // 178 AC-5: only open, timed, not yet notified todos whose date and time have come, in List order.
+    [Fact]
+    public void DueReminders_ReturnsOnlyDueTimedOpenUnnotified()
+    {
+        DateOnly day = new DateOnly(2026, 11, 16);
+        Guid[] ids =
+        [
+            new("00000000-0000-0000-0000-000000000001"), new("00000000-0000-0000-0000-000000000002"),
+            new("00000000-0000-0000-0000-000000000003"), new("00000000-0000-0000-0000-000000000004"),
+            new("00000000-0000-0000-0000-000000000005"), new("00000000-0000-0000-0000-000000000006"),
+            new("00000000-0000-0000-0000-000000000007"),
+        ];
+        int next = 0;
+        TodoStore store = new TodoStore(root, () => now = now.AddMinutes(1), () => ids[next++]);
+        store.Add("exactly now", day, null, new TimeOnly(14, 0));
+        store.Add("untimed", day.AddDays(-1));
+        store.Add("future", day, null, new TimeOnly(14, 1));
+        store.Add("yesterday", day.AddDays(-1), null, new TimeOnly(23, 0));
+        store.Add("done", day, null, new TimeOnly(8, 0));
+        store.Add("notified", day, null, new TimeOnly(9, 0));
+        store.Add("tomorrow", day.AddDays(1), null, new TimeOnly(0, 0));
+        store.Complete(ids[4]);
+        store.MarkNotified([ids[5]]);
+        byte[] before = File.ReadAllBytes(FilePath);
+
+        IReadOnlyList<TodoItem> due = store.DueReminders(new DateTime(2026, 11, 16, 14, 0, 0, DateTimeKind.Local));
+
+        Assert.Equal(["yesterday", "exactly now"], due.Select(t => t.Text));
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+        Assert.Empty(store.DueReminders(new DateTime(2026, 11, 15, 22, 59, 0, DateTimeKind.Local)));
+    }
+
+    // 178 AC-5: a missing file has no reminders and creates nothing; a bad one throws.
+    [Fact]
+    public void DueReminders_MissingFileEmpty_BadFileThrows()
+    {
+        Assert.Empty(Store().DueReminders(new DateTime(2026, 11, 16, 14, 0, 0)));
+        Assert.False(Directory.Exists(root));
+
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, "not json");
+        Assert.Throws<TodoStoreException>(() => Store().DueReminders(new DateTime(2026, 11, 16, 14, 0, 0)));
+    }
+
+    // 178 AC-6: MarkNotified sets notified from the UTC clock for all the ids in one write and returns them.
+    [Fact]
+    public void MarkNotified_MarksAllInOneWrite_SkipsGoneDoneAndNotified()
+    {
+        new TodoStore(root, () => Start, () => IdA).Add("a", new DateOnly(2026, 11, 16), null, new TimeOnly(14, 0));
+        new TodoStore(root, () => Start, () => IdB).Add("b", new DateOnly(2026, 11, 16), null, new TimeOnly(9, 0));
+        new TodoStore(root, () => Start, () => IdC).Add("c", new DateOnly(2026, 11, 16), null, new TimeOnly(10, 0));
+        new TodoStore(root, () => DoneAt).Complete(IdC);
+        TodoStore store = new TodoStore(root, () => NotifiedAt);
+
+        IReadOnlyList<TodoItem> marked = store.MarkNotified([IdA, IdB, IdC, Guid.NewGuid()]);
+
+        Assert.Equal([IdB, IdA], marked.Select(t => t.Id));
+        Assert.All(marked, t => Assert.Equal(NotifiedAt, t.Notified));
+        Assert.Contains("\"notified\": \"2026-11-16T13:00:30Z\"", File.ReadAllText(FilePath), StringComparison.Ordinal);
+        Assert.Null(Assert.Single(store.ListDone()).Notified);
+        Assert.Equal(marked, store.List());
+
+        byte[] before = File.ReadAllBytes(FilePath);
+        DateTime written = File.GetLastWriteTimeUtc(FilePath).AddHours(-1);
+        File.SetLastWriteTimeUtc(FilePath, written);
+        Assert.Empty(store.MarkNotified([IdA, IdB, IdC]));
+        Assert.Empty(store.MarkNotified([]));
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+        Assert.Equal(written, File.GetLastWriteTimeUtc(FilePath));
+    }
+
+    // 178 AC-8: a moved timed todo keeps its time and loses notified, so it reminds again on its new date.
+    [Fact]
+    public void MoveDue_KeepsTime_ClearsNotified()
+    {
+        new TodoStore(root, () => Start, () => IdA).Add("Call Anna", new DateOnly(2026, 11, 16), null, new TimeOnly(14, 0));
+        new TodoStore(root, () => NotifiedAt).MarkNotified([IdA]);
+        TodoStore store = new TodoStore(root, () => NotifiedAt);
+
+        TodoItem moved = Assert.Single(store.MoveDue(new DateOnly(2026, 11, 16), new DateOnly(2026, 11, 17)));
+
+        Assert.Equal(new TodoItem(IdA, "Call Anna", new DateOnly(2026, 11, 17), Start, time: new TimeOnly(14, 0)), moved);
+        Assert.Equal(moved, Assert.Single(store.List()));
+        Assert.DoesNotContain("notified", File.ReadAllText(FilePath), StringComparison.Ordinal);
+        Assert.Empty(store.DueReminders(new DateTime(2026, 11, 17, 13, 59, 0)));
+        Assert.Equal([IdA], store.DueReminders(new DateTime(2026, 11, 17, 14, 0, 0)).Select(t => t.Id));
+    }
+
+    // 178 AC-8: Complete keeps time and notified on the done todo; the next recurring todo has the time, no notified.
+    [Fact]
+    public void Complete_RecurringTimed_NextKeepsTime_NotNotified()
+    {
+        new TodoStore(root, () => Start, () => IdA).Add(
+            "Standup", new DateOnly(2026, 11, 16), TodoRepeat.Daily, new TimeOnly(9, 30));
+        new TodoStore(root, () => NotifiedAt).MarkNotified([IdA]);
+        TodoStore store = new TodoStore(root, () => DoneAt, () => IdB);
+
+        TodoItem done = store.Complete(IdA, new DateOnly(2026, 11, 16), out TodoItem? next)!;
+
+        Assert.Equal(
+            new TodoItem(IdA, "Standup", new DateOnly(2026, 11, 16), Start, DoneAt, TodoRepeat.Daily, new TimeOnly(9, 30), NotifiedAt),
+            done);
+        Assert.Equal(
+            new TodoItem(IdB, "Standup", new DateOnly(2026, 11, 17), DoneAt, null, TodoRepeat.Daily, new TimeOnly(9, 30)), next);
+        Assert.Equal([done], store.ListDone());
+        Assert.Equal([next!], store.List());
+        Assert.Equal([IdB], store.DueReminders(new DateTime(2026, 11, 17, 9, 30, 0)).Select(t => t.Id));
+    }
 }

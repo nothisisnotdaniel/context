@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Context;
 
 /// <summary>How a <see cref="DesktopActions"/> call ended.</summary>
@@ -212,6 +214,7 @@ internal sealed class DesktopActions
     private readonly CalendarStore calendar;
     private readonly DayEnd dayEnd;
     private readonly string? timesFolder;
+    private readonly INotifier? notifier;
     private int running;
 
     // Plain fields: only AutoBriefingNow touches them, and Run lets one action run at a time.
@@ -230,8 +233,10 @@ internal sealed class DesktopActions
         CalendarFeed? calendarFeed = null,
         Func<DateTime>? localNow = null,
         CalendarStore? calendar = null,
-        string? timesFolder = null)
+        string? timesFolder = null,
+        INotifier? notifier = null)
     {
+        this.notifier = notifier;
         this.localNow = localNow ?? (() => DateTime.Now);
         this.calendar = calendar ?? new CalendarStore(notes.Root, TimeZoneInfo.Local);
         dayEnd = new DayEnd(notes, todos, this.calendar, calendarFeed, timesFolder, new SettingsStore(notes.Root));
@@ -250,6 +255,23 @@ internal sealed class DesktopActions
 
     /// <summary>How often <c>Program.cs</c>'s day-end timer calls <see cref="AutoDayEnd"/>.</summary>
     public static readonly TimeSpan DayEndInterval = TimeSpan.FromSeconds(30);
+
+    /// <summary>How often <c>Program.cs</c>'s reminder timer calls <see cref="AutoReminders"/>.</summary>
+    public static readonly TimeSpan ReminderInterval = TimeSpan.FromSeconds(30);
+
+    /// <summary>The title of every reminder notification.</summary>
+    public const string ReminderTitle = "Context";
+
+    /// <summary>The most reminders <see cref="AutoReminders"/> shows one by one; more are one <see cref="RemindersDueText"/>.</summary>
+    public const int MaxSingleReminders = 3;
+
+    /// <summary>The body of a reminder: the todo's time and its one-line text.</summary>
+    public static string ReminderText(TodoItem todo) =>
+        $"{(todo.Time ?? TimeOnly.MinValue).ToString(TodoStore.StoredTimeFormat, CultureInfo.InvariantCulture)} {DesktopText.OneLine(todo.Text)}";
+
+    /// <summary>The one notification's body when more than <see cref="MaxSingleReminders"/> todos are due at once.</summary>
+    public static string RemindersDueText(int count) =>
+        $"{count.ToString(CultureInfo.InvariantCulture)} todos are due.";
 
     /// <summary>The grey line after a successful <see cref="EndDay"/>.</summary>
     public static string DayClosedText(int moved, DateOnly to) =>
@@ -480,8 +502,8 @@ internal sealed class DesktopActions
     /// <see cref="EmptyTodoText"/> and text over <see cref="MaxTodoLength"/> characters is refused; both
     /// write nothing. The result's text is the todo's text when done.
     /// </summary>
-    public Task<ActionResult> AddTodo(string text, DateOnly due, TodoRepeat? repeat = null) =>
-        Run(() => AddTodoNow(text, due, repeat));
+    public Task<ActionResult> AddTodo(string text, DateOnly due, TodoRepeat? repeat = null, TimeOnly? time = null) =>
+        Run(() => AddTodoNow(text, due, repeat, time));
 
     /// <summary>
     /// Creates the note <paramref name="title"/> through <see cref="NoteStore.Create"/>. An invalid title is refused
@@ -587,6 +609,18 @@ internal sealed class DesktopActions
     /// action runs (the next call tries again). Never throws and never asks anything.
     /// </summary>
     public Task<ActionResult> AutoBriefing() => Run(AutoBriefingNow);
+
+    /// <summary>
+    /// The timed-todo reminders, called only by <c>Program.cs</c> (once at start, before the automatic writes, then
+    /// every <see cref="ReminderInterval"/>): reads <see cref="TodoStore.DueReminders"/> with the injected local clock,
+    /// marks them all notified through <see cref="TodoStore.MarkNotified"/> in one write, and then shows one
+    /// notification per todo (<see cref="ReminderTitle"/>, <see cref="ReminderText"/>), or one
+    /// <see cref="RemindersDueText"/> when more than <see cref="MaxSingleReminders"/> are due. Marked before shown, so
+    /// a todo reminds at most once, also when a notification fails (that failure is swallowed). Nothing due, or an
+    /// unreadable <c>todos.json</c>, writes and shows nothing. Refused while another action runs (the next call tries
+    /// again). Never refreshes, never throws and never asks anything.
+    /// </summary>
+    public Task<ActionResult> AutoReminders() => Run(AutoRemindersNow, refresh: false);
 
     /// <summary>
     /// Moves the note <paramref name="name"/> and its subpages under the note <paramref name="newParent"/> (matched
@@ -902,7 +936,7 @@ internal sealed class DesktopActions
         return SaveNoteNow(opened, text);
     }
 
-    private ActionResult AddTodoNow(string text, DateOnly due, TodoRepeat? repeat)
+    private ActionResult AddTodoNow(string text, DateOnly due, TodoRepeat? repeat, TimeOnly? time)
     {
         string trimmed = text.Trim();
         if (trimmed.Length == 0)
@@ -917,7 +951,7 @@ internal sealed class DesktopActions
 
         try
         {
-            TodoItem added = todos.Add(trimmed, due, repeat);
+            TodoItem added = todos.Add(trimmed, due, repeat, time);
             return new ActionResult(ActionKind.Done, ActionReason.None, added.Text);
         }
         catch (TodoStoreException)
@@ -1029,6 +1063,61 @@ internal sealed class DesktopActions
         catch (Exception)
         {
             return Failed(ActionReason.WriteFailed, BriefingFailedText(Briefing.NameFor(day)));
+        }
+    }
+
+    private ActionResult AutoRemindersNow()
+    {
+        IReadOnlyList<TodoItem> marked;
+        try
+        {
+            IReadOnlyList<TodoItem> due = todos.DueReminders(localNow());
+            if (due.Count == 0)
+            {
+                return new ActionResult(ActionKind.Done, ActionReason.Unchanged, string.Empty);
+            }
+
+            marked = todos.MarkNotified(due.Select(t => t.Id).ToList());
+        }
+        catch (TodoStoreException)
+        {
+            return Failed(ActionReason.Unreadable, TodosUnreadableText);
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, TodosWriteFailedText);
+        }
+
+        if (marked.Count == 0)
+        {
+            return new ActionResult(ActionKind.Done, ActionReason.Unchanged, string.Empty);
+        }
+
+        if (marked.Count > MaxSingleReminders)
+        {
+            Notify(RemindersDueText(marked.Count));
+        }
+        else
+        {
+            foreach (TodoItem todo in marked)
+            {
+                Notify(ReminderText(todo));
+            }
+        }
+
+        return new ActionResult(ActionKind.Done, ActionReason.None, marked.Count.ToString(CultureInfo.InvariantCulture));
+    }
+
+    // One notification; a notifier that fails is skipped (the todo stays notified).
+    private void Notify(string body)
+    {
+        try
+        {
+            notifier?.Show(ReminderTitle, body);
+        }
+        catch (Exception)
+        {
+            // Shown at most once: the todo is already marked notified.
         }
     }
 

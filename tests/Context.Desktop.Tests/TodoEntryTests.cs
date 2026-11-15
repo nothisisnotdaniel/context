@@ -103,7 +103,7 @@ public sealed class TodoEntryTests : IDisposable
         cut.WaitForAssertion(() => Assert.All(
             cut.FindAll(".todo-entry input, .todo-entry button, .todo-list input"),
             e => Assert.True(e.HasAttribute("disabled"), e.OuterHtml)), Wait);
-        Assert.Equal(6, cut.FindAll(".todo-entry input, .todo-entry button, .todo-list input").Count);
+        Assert.Equal(7, cut.FindAll(".todo-entry input, .todo-entry button, .todo-list input").Count);
         release.Set();
         await add;
         cut.WaitForAssertion(() => Assert.All(
@@ -123,5 +123,83 @@ public sealed class TodoEntryTests : IDisposable
         Assert.Equal("Write the todo first.", cut.Find(".add-result").TextContent);
         Assert.True(cut.Find(".add-result").ClassList.Contains("red"));
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    // 178 AC-9: the entry row has an empty time field between the date and Today.
+    [Fact]
+    public async Task Render_TimeFieldStartsEmpty()
+    {
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+
+        IElement time = cut.Find(".todo-entry input.todo-time");
+        Assert.Equal("time", time.GetAttribute("type"));
+        Assert.Equal("Due time", time.GetAttribute("aria-label"));
+        Assert.Equal(string.Empty, time.GetAttribute("value"));
+        Assert.Equal(
+            ["todo-text", "todo-due", "todo-time"],
+            cut.FindAll(".todo-entry input").Select(i => i.ClassName ?? string.Empty).ToArray());
+    }
+
+    // 178 AC-9: adding with a time stores it (seconds from the web view dropped); the field clears after the add.
+    [Theory]
+    [InlineData("14:00")]
+    [InlineData("14:00:00")]
+    public async Task Add_WithTime_StoresTimeAndClears(string value)
+    {
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+        await cut.Find("input.todo-time").ChangeAsync(new ChangeEventArgs { Value = value });
+        Assert.Equal("14:00", cut.Find("input.todo-time").GetAttribute("value"));
+        await cut.Find("input.todo-text").InputAsync(new ChangeEventArgs { Value = "Call Anna" });
+
+        await cut.Find(".todo-entry button.add").ClickAsync(new MouseEventArgs());
+
+        TodoItem added = Assert.Single(data.Todos!.List());
+        Assert.Equal(new TimeOnly(14, 0), added.Time);
+        Assert.Null(added.Notified);
+        Assert.Equal("Added: Call Anna", cut.Find(".add-result").TextContent);
+        Assert.Equal(string.Empty, cut.Find("input.todo-time").GetAttribute("value"));
+        cut.WaitForAssertion(() => Assert.Equal("14:00", cut.Find("li.todo .time").TextContent), Wait);
+    }
+
+    // 178 AC-9: adding with the time field empty (or cleared) stores no time.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task Add_WithoutTime_StoresNone(string? cleared)
+    {
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+        if (cleared is not null)
+        {
+            await cut.Find("input.todo-time").ChangeAsync(new ChangeEventArgs { Value = "09:15" });
+            await cut.Find("input.todo-time").ChangeAsync(new ChangeEventArgs { Value = cleared });
+        }
+
+        await cut.Find("input.todo-text").InputAsync(new ChangeEventArgs { Value = "Buy milk" });
+        await cut.Find(".todo-entry button.add").ClickAsync(new MouseEventArgs());
+
+        TodoItem added = Assert.Single(data.Todos!.List());
+        Assert.Null(added.Time);
+        cut.WaitForAssertion(() => Assert.Equal(["Buy milk"], cut.FindAll("li.todo .text").Select(t => t.TextContent).ToArray()), Wait);
+        Assert.Empty(cut.FindAll("li.todo .time"));
+    }
+
+    // 178 AC-9: a timed row shows span.time right after the date; an untimed row has none.
+    [Fact]
+    public async Task Rows_TimedShowsTimeAfterDate_UntimedHasNone()
+    {
+        data.AddTodo("Call Anna", DesktopFixture.Today, null, new TimeOnly(14, 0));
+        data.AddTodo("Buy milk", DesktopFixture.Today);
+
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+        cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll("li.todo").Count), Wait);
+
+        IElement untimed = cut.FindAll("li.todo")[0];
+        IElement timed = cut.FindAll("li.todo")[1];
+        Assert.Equal("Buy milk", untimed.QuerySelector(".text")!.TextContent);
+        Assert.Null(untimed.QuerySelector(".time"));
+        IElement time = timed.QuerySelector(".time")!;
+        Assert.Equal("14:00", time.TextContent);
+        Assert.Equal("SPAN", time.TagName);
+        Assert.True(time.PreviousElementSibling!.ClassList.Contains("date"));
     }
 }

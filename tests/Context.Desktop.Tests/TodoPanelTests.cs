@@ -150,7 +150,7 @@ public sealed class TodoPanelTests : IDisposable
         {
             Assert.Equal(5, cut.FindAll(".todo-list input, [role=dialog] button").Count);
             Assert.All(cut.FindAll(".todo-list input, [role=dialog] button"), b => Assert.True(b.HasAttribute("disabled"), b.OuterHtml));
-            Assert.Equal(5, cut.FindAll(".todo-entry input, .todo-entry button").Count);
+            Assert.Equal(6, cut.FindAll(".todo-entry input, .todo-entry button").Count);
             Assert.All(cut.FindAll(".todo-entry input, .todo-entry button"), b => Assert.True(b.HasAttribute("disabled"), b.OuterHtml));
         }, Wait);
         release.Set();

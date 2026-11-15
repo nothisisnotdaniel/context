@@ -851,12 +851,30 @@ else
                     break;
                 }
 
+                // /todo <date> [HH:mm] <text>: a time-shaped word after the date is the time, never text (not after every).
+                string todoText = rest[(split + 1)..].TrimStart();
+                TimeOnly? todoTime = null;
+                int timeEnd = todoText.IndexOfAny([' ', '\t']);
+                string timeWord = timeEnd < 0 ? todoText : todoText[..timeEnd];
+                if (repeat is null && TodoInput.LooksLikeTime(timeWord))
+                {
+                    if (timeEnd < 0 || todoText[(timeEnd + 1)..].Trim().Length == 0
+                        || !TodoInput.TryParseTime(timeWord, out TimeOnly parsedTime))
+                    {
+                        ShowStatus("Type /todo <yyyy-MM-dd|today|tomorrow> [HH:mm] <text>.", "red");
+                        break;
+                    }
+
+                    todoTime = parsedTime;
+                    todoText = todoText[(timeEnd + 1)..];
+                }
+
                 if (!running)
                 {
                     running = true;
                     try
                     {
-                        ActionResult added = await Actions.AddTodo(rest[(split + 1)..], due, repeat);
+                        ActionResult added = await Actions.AddTodo(todoText, due, repeat, todoTime);
                         ShowStatus(
                             added.Kind == ActionKind.Done ? $"Added: {DesktopText.OneLine(added.Text)}" : DesktopText.OneLine(added.Text),
                             added.Kind == ActionKind.Done ? "accent" : "red");

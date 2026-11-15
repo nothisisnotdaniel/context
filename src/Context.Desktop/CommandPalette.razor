@@ -47,7 +47,7 @@
         new PaletteCommand("/settings", "/settings", "Open the settings"),
         new PaletteCommand("/tags", "/tags [tag]", "List all tags, or the notes with a tag"),
         new PaletteCommand("/today", "/today", "Open today's note"),
-        new PaletteCommand("/todo", "/todo <yyyy-MM-dd|today|tomorrow|every <weekday|day|month>> <text>", "Add a todo"),
+        new PaletteCommand("/todo", "/todo <<yyyy-MM-dd|today|tomorrow> [HH:mm]|every <weekday|day|month>> <text>", "Add a todo"),
     ];
 
     private ElementReference input;

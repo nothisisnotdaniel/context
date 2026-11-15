@@ -25,6 +25,12 @@
                             <input type="checkbox" class="done" checked="@(asking?.Id == todo.Id)"
                                    disabled="@(asking is not null || running || adding)" @onchange="() => Ask(todo)" />
                             <span class="date @when">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                            @if (todo.Time is { } time)
+                            {
+                                @(" ")<span class="time">@time.ToString(TodoStore.StoredTimeFormat, CultureInfo.InvariantCulture)</span>
+                            }
+                            @* A code block drops the whitespace around it, so the space before the text is written out. *@
+                            @(" ")
                             @* A mention opens the person's page; its click stops there, so the checkbox never ticks. *@
                             <span class="text cut" title="@text">@if (segments.Any(s => s.IsMention))
                                 {
@@ -87,6 +93,8 @@
                    disabled="@entryOff" aria-label="New todo" placeholder="New todo" @ref="textField" @oninput="TextTyped" @onkeydown="e => Add(e)" />
             <input type="date" class="todo-due" value="@shownDue.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)"
                    disabled="@entryOff" aria-label="Due date" @onchange="DueChosen" />
+            <input type="time" class="todo-time" value="@(dueTime?.ToString(TodoStore.StoredTimeFormat, CultureInfo.InvariantCulture) ?? string.Empty)"
+                   disabled="@entryOff" aria-label="Due time" @onchange="TimeChosen" />
             <button type="button" class="due-today" disabled="@entryOff" @onclick="() => due = open.Today">Today</button>
             <button type="button" class="due-tomorrow" disabled="@entryOff" @onclick="() => due = open.Today.AddDays(1)">Tomorrow</button>
             <button type="button" class="add" disabled="@entryOff" @onclick="() => Add(null)">Add</button>
@@ -121,6 +129,7 @@
     private ActionResult? result;
     private string newText = string.Empty;
     private DateOnly? due;
+    private TimeOnly? dueTime;
     private bool adding;
     private ActionResult? added;
     private ElementReference textField;
@@ -147,6 +156,18 @@
         }
     }
 
+    // An empty or unreadable value means no time; a browser's HH:mm:ss (with a seconds step) keeps HH:mm.
+    private void TimeChosen(ChangeEventArgs e)
+    {
+        string value = e.Value?.ToString() ?? string.Empty;
+        if (value.Length == 8 && value[5] == ':')
+        {
+            value = value[..5];
+        }
+
+        dueTime = TodoInput.TryParseTime(value, out TimeOnly chosen) ? chosen : null;
+    }
+
     private async Task Add(KeyboardEventArgs? key)
     {
         if ((key is not null && key.Key != "Enter") || adding || running || Snapshot is not { } snapshot)
@@ -157,11 +178,12 @@
         adding = true;
         try
         {
-            added = await Actions.AddTodo(newText, due ?? snapshot.Today);
+            added = await Actions.AddTodo(newText, due ?? snapshot.Today, null, dueTime);
             if (added.Kind == ActionKind.Done)
             {
                 newText = string.Empty;
                 due = null;
+                dueTime = null;
             }
         }
         finally

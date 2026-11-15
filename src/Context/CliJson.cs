@@ -41,6 +41,19 @@ internal static class CliJson
         return withOffset.ToString(TimeFormat, CultureInfo.InvariantCulture);
     }
 
+    /// <summary>Writes a todo's time of day as <c>HH:mm</c>, or <c>null</c> for an untimed todo.</summary>
+    public static void WriteTime(Utf8JsonWriter writer, string name, TimeOnly? time)
+    {
+        if (time is { } value)
+        {
+            writer.WriteString(name, value.ToString(TodoStore.StoredTimeFormat, CultureInfo.InvariantCulture));
+        }
+        else
+        {
+            writer.WriteNull(name);
+        }
+    }
+
     /// <summary>The camelCase name of a feed status.</summary>
     public static string Status(CalendarFeedStatus status) => status switch
     {
