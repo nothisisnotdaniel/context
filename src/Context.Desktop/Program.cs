@@ -51,7 +51,8 @@ internal static class Program
         DesktopState state = new DesktopState(
             notes, todos, index, calendar, feed, Today, () => DateTime.UtcNow, KeyStore(), session, calendarLink);
         DesktopActions actions = new DesktopActions(
-            notes, todos, state, new ShellNoteLauncher(), calendarLink, feed, () => DateTime.Now, calendar);
+            notes, todos, state, new ShellNoteLauncher(), calendarLink, feed, () => DateTime.Now, calendar,
+            TimesFolder.Resolve(Environment.GetEnvironmentVariable(TimesFolder.VariableName)));
 
         PhotinoBlazorAppBuilder builder = PhotinoBlazorAppBuilder.CreateDefault(args);
         builder.Services.AddSingleton(state);
@@ -85,6 +86,13 @@ internal static class Program
         // Todos stored without a usable id get their derived ids written once, before the watcher and the first
         // refresh; an unreadable file is left alone and shows as unreadable.
         todos.Migrate();
+
+        // The day's end: the one automatic write, always through DesktopActions. Once now, then on its own timer
+        // (never from DesktopState, the watcher or Tick): Times' worked hours into the daily note at a leaving, and
+        // the due todos moved once a day (see DayEnd.AutoClose).
+        _ = actions.AutoDayEnd();
+        using Timer dayEnd = new Timer(
+            _ => _ = actions.AutoDayEnd(), null, DesktopActions.DayEndInterval, DesktopActions.DayEndInterval);
 
         using DataWatcher watcher = new DataWatcher(folder, state);
         watcher.Start();

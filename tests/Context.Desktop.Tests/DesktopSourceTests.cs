@@ -15,7 +15,8 @@ public sealed class DesktopSourceTests
     // 152: NoteStore.CreateChild and NoteStore.Move. 164: DailyNote.Ensure. 165: NoteStore.CreateWithText.
     private static readonly Regex Writes = new(
         @"\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
-        + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture|CreateChild|Move|Ensure|CreateWithText)\s*\(",
+        + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture|CreateChild|Move|Ensure|CreateWithText"
+        + @"|CloseDay|RefreshWorked|MoveTodos|AutoClose|MoveDue|SaveDayEnd)\s*\(",
         RegexOptions.CultureInvariant);
 
     // 136: the real key stores and the real file dialog, spelled in pieces: no test file may hold their names (see
@@ -825,6 +826,12 @@ public sealed class DesktopSourceTests
     [InlineData("Inbox . Capture (store, text, now)")]
     [InlineData("DailyNote.Ensure(notes, day, compose)")]
     [InlineData("notes.CreateWithText(prepared.Title, prepared.Text)")]
+    [InlineData("dayEnd.CloseDay(day)")]
+    [InlineData("dayEnd.RefreshWorked(day)")]
+    [InlineData("dayEnd.MoveTodos(day)")]
+    [InlineData("dayEnd.AutoClose(today, now)")]
+    [InlineData("todos.MoveDue(day, day.AddDays(1))")]
+    [InlineData("settings.SaveDayEnd(values)")]
     public void Writes_Pattern_CatchesCalls(string call)
     {
         Assert.Matches(Writes, call);
@@ -1006,9 +1013,37 @@ public sealed class DesktopSourceTests
 
         Assert.Equal([ProgramFile, RealLauncherFile], found);
         Assert.Contains(
-            "notes, todos, state, new " + RealLauncher + "(), calendarLink, feed, () => DateTime.Now, calendar)",
+            "notes, todos, state, new " + RealLauncher + "(), calendarLink, feed, () => DateTime.Now, calendar,",
             File.ReadAllText(Path.Combine(root, ProgramFile)),
             StringComparison.Ordinal);
+    }
+
+    // 171 AC-10: the day-end timer is the one automatic write: Program.cs calls only AutoDayEnd as a method on the
+    // actions (once at start, once in the timer; the constructor and DesktopActions.DayEndInterval are allowed), and no
+    // other .cs or .razor file calls AutoDayEnd.
+    [Fact]
+    public void Program_CallsOnlyAutoDayEndOnTheActions()
+    {
+        string root = RepoFiles.Root();
+        string program = File.ReadAllText(Path.Combine(root, ProgramFile));
+
+        string[] calls = Regex.Matches(program, @"\bactions\s*\.\s*(\w+)\s*\(")
+            .Select(m => m.Groups[1].Value)
+            .ToArray();
+        Assert.Equal(["AutoDayEnd", "AutoDayEnd"], calls);
+        Assert.Contains(
+            "using Timer dayEnd = new Timer(\n            _ => _ = actions.AutoDayEnd(), null, DesktopActions.DayEndInterval, DesktopActions.DayEndInterval);",
+            program.ReplaceLineEndings("\n"),
+            StringComparison.Ordinal);
+        Assert.Equal(
+            2, Regex.Matches(program, @"\bDesktopActions\s*\.\s*DayEndInterval\b").Count);
+        Assert.DoesNotMatch(@"\bDesktopActions\s*\.\s*(AutoDayEnd|EndDay)\b", program);
+
+        List<string> others = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
+            .Where(f => f != ProgramFile && f != ActionsFile)
+            .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains("AutoDayEnd", StringComparison.Ordinal))
+            .ToList();
+        Assert.Empty(others);
     }
 
     // 134 AC-9: the launcher passes the path as FileName through the shell, with no arguments.

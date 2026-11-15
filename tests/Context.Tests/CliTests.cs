@@ -12,6 +12,7 @@ public sealed class CliTests : IDisposable
     private readonly string parent;
     private readonly string root;
     private readonly string outside;
+    private readonly string times;
     private FakeHttpHandler http = FakeHttpHandler.Ok(CalendarFeedTests.Ics);
 
     public CliTests()
@@ -19,6 +20,7 @@ public sealed class CliTests : IDisposable
         parent = Path.Combine(Path.GetTempPath(), "context-cli-" + Guid.NewGuid().ToString("N"));
         root = Path.Combine(parent, "Context");
         outside = Path.Combine(parent, "outside");
+        times = Path.Combine(parent, "Times");
         Directory.CreateDirectory(outside);
     }
 
@@ -39,7 +41,7 @@ public sealed class CliTests : IDisposable
     {
         StringWriter stdout = new StringWriter();
         StringWriter stderr = new StringWriter();
-        Cli cli = new Cli(stdout, stderr, root, () => Today, () => Now, http, TimeZoneInfo.Utc);
+        Cli cli = new Cli(stdout, stderr, root, () => Today, () => Now, http, TimeZoneInfo.Utc, times);
         int code = cli.Run(args);
         return new Result(code, stdout.ToString(), stderr.ToString());
     }
@@ -98,7 +100,7 @@ public sealed class CliTests : IDisposable
             "todo add every <weekday|day|month> <text...>", "todo done <text...>", "notes",
             "note show <name...>", "tags [tag...]", "links <note...>", "people", "person <name...>", "find <attribute> <value...>",
             "search <text...>", "types", "current", "review", "new <title...> [--template <name>]", "import <path>",
-            "export <note> <path>", "version",
+            "export <note> <path>", "version", "dayend [today|yyyy-MM-dd]",
         })
         {
             Assert.Contains($"context {usage} ", result.Out, StringComparison.Ordinal);
@@ -2149,5 +2151,87 @@ public sealed class CliTests : IDisposable
 
         AssertUsage(result);
         Assert.False(Directory.Exists(root));
+    }
+
+    // 171 AC-9: dayend closes today: Worked from Times, then the due todos moved; settings.json is never touched.
+    [Theory]
+    [InlineData]
+    [InlineData("today")]
+    [InlineData("TODAY")]
+    public void DayEnd_ClosesToday(params string[] args)
+    {
+        Directory.CreateDirectory(times);
+        File.WriteAllText(Path.Combine(times, "2026-10-29.json"), TimesDayTests.Example);
+        Run("todo", "add", "today", "call Anna");
+        Run("todo", "add", "2026-10-30", "later");
+        File.WriteAllText(Path.Combine(root, SettingsStore.FileName), "broken");
+        SortedDictionary<string, string> timesBefore = FileSnapshot.Take(times);
+
+        Result result = Run(["dayend", .. args]);
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(string.Empty, result.Err);
+        Assert.Equal("Updated 2026-10-29.\nMoved 1 todo(s) to 2026-10-30.\n", result.Out);
+        Assert.Contains(
+            "## Worked\n- Arrived 08:00, left 17:00, worked 8:30\n- #12 A: 4:00\n- B: 4:30\n\n## Moved to tomorrow\n- call Anna\n",
+            Read("2026-10-29.md"),
+            StringComparison.Ordinal);
+        Assert.EndsWith("## Moved from 2026-10-29\n- call Anna\n", Read("2026-10-30.md"), StringComparison.Ordinal);
+        Assert.Equal("broken", Read(SettingsStore.FileName));
+        Assert.Equal(timesBefore, FileSnapshot.Take(times));
+
+        Result again = Run(["dayend", .. args]);
+        Assert.Equal("Updated 2026-10-29.\nMoved 0 todo(s) to 2026-10-30.\n", again.Out);
+    }
+
+    // 171 AC-9: a given day; no Times file says so in the note.
+    [Fact]
+    public void DayEnd_GivenDay()
+    {
+        Run("todo", "add", "2026-11-10", "old");
+
+        Result result = Run("dayend", "2026-11-14");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal("Updated 2026-11-14.\nMoved 1 todo(s) to 2026-11-15.\n", result.Out);
+        Assert.Contains("## Worked\n- No Times bookings for this day.\n", Read("2026-11-14.md"), StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(root, SettingsStore.FileName)));
+    }
+
+    // 171 AC-9: any other argument, or more than one, is a usage error and the folder is not read or created.
+    [Theory]
+    [InlineData("dayend", "tomorrow")]
+    [InlineData("dayend", "2026-11-31")]
+    [InlineData("dayend", "14.11.2026")]
+    [InlineData("dayend", "today", "today")]
+    [InlineData("dayend", "2026-11-14", "x")]
+    [InlineData("dayend", "--json")]
+    [InlineData("DAYEND", "today", "--json")]
+    public void DayEnd_BadArguments_AreUsageErrors(params string[] args)
+    {
+        AssertUsage(Run(args));
+        Assert.False(Directory.Exists(root));
+    }
+
+    // 171 AC-7: a sensitive note, an unreadable todos.json and a failed write.
+    [Fact]
+    public void DayEnd_Errors()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "2026-10-29.ctxs"), "{\"v\":1,\"text\":\"c2VhbGVk\"}");
+        AssertError(Run("dayend"), Cli.ExitError, Cli.SensitiveText("2026-10-29"));
+        File.Delete(Path.Combine(root, "2026-10-29.ctxs"));
+
+        File.WriteAllText(Path.Combine(root, "2026-10-30.ctxs"), "{\"v\":1,\"text\":\"c2VhbGVk\"}");
+        AssertError(Run("dayend"), Cli.ExitError, Cli.SensitiveText("2026-10-30"));
+        Assert.Contains("## Worked", Read("2026-10-29.md"), StringComparison.Ordinal);
+        File.Delete(Path.Combine(root, "2026-10-30.ctxs"));
+
+        File.WriteAllText(Path.Combine(root, TodoStore.FileName), "not json");
+        AssertError(Run("dayend"), Cli.ExitError, "Can't read todos.json.");
+        Assert.Equal("not json", Read(TodoStore.FileName));
+
+        WriteNote("2026-10-28", "# 2026-10-28\n" + new string('x', (int)NoteStore.MaxEditBytes - 20));
+        AssertError(Run("dayend", "2026-10-28"), Cli.ExitError, "Can't write 2026-10-28.");
     }
 }

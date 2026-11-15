@@ -160,6 +160,37 @@ internal sealed class TodoStore
     }
 
     /// <summary>
+    /// Moves every open todo due on or before <paramref name="through"/> to <paramref name="to"/> in one read and
+    /// one write, keeping its id, text, <see cref="TodoItem.Created"/> and <see cref="TodoItem.Repeat"/>, and returns
+    /// the moved todos (with their new due date) in <see cref="List"/> order. Done todos and todos due later are not
+    /// changed. When nothing is due, nothing is written. Throws <see cref="TodoStoreException"/> (and writes nothing)
+    /// if the file can't be read.
+    /// </summary>
+    public IReadOnlyList<TodoItem> MoveDue(DateOnly through, DateOnly to)
+    {
+        List<TodoItem> todos = Read();
+        List<TodoItem> due = todos.Where(t => t.Done is null && t.Due <= through)
+            .OrderBy(t => t.Due).ThenBy(t => t.Created).ToList();
+        if (due.Count == 0)
+        {
+            return [];
+        }
+
+        HashSet<Guid> ids = due.Select(t => t.Id).ToHashSet();
+        for (int i = 0; i < todos.Count; i++)
+        {
+            TodoItem todo = todos[i];
+            if (todo.Done is null && ids.Contains(todo.Id))
+            {
+                todos[i] = new TodoItem(todo.Id, todo.Text, to, todo.Created, null, todo.Repeat);
+            }
+        }
+
+        Write(todos);
+        return due.Select(t => new TodoItem(t.Id, t.Text, to, t.Created, null, t.Repeat)).ToList();
+    }
+
+    /// <summary>
     /// Stores the ids <see cref="List"/> would return when some todo has no stored, non-empty, unique id: writes
     /// the list once, in file order with the same text, due, created and done, and returns <c>true</c>. Returns
     /// <c>false</c> and writes nothing when every id is already stored, the file is missing, or it can't be read,

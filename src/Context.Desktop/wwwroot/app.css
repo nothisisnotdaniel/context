@@ -559,6 +559,24 @@ input[type="password"]:disabled {
     display: none;
 }
 
+/* Day's end: the End the day button under the current view's title, with its result line beside it. */
+.day-end {
+    align-items: baseline;
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.day-end .end-day {
+    flex: none;
+}
+
+.day-end-status {
+    flex: 1 1 0;
+    margin: 0;
+    min-width: 0;
+}
+
 /* Import: the button under the new-note row and one result line per chosen file. */
 .note-import {
     display: flex;

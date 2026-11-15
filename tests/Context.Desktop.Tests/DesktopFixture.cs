@@ -66,6 +66,9 @@ internal sealed class DesktopFixture : IDisposable
     /// <summary>A path next to the data folder (outside it) for import sources and export targets; nothing is there yet.</summary>
     public string Outside(string name) => Path.Combine(parent, name);
 
+    /// <summary>Times' data folder for the day's end, outside the data folder; nothing is there yet.</summary>
+    public string TimesFolder => Path.Combine(parent, "Times");
+
     public DesktopState? State { get; private set; }
 
     public DesktopActions? Actions { get; private set; }
@@ -120,7 +123,7 @@ internal sealed class DesktopFixture : IDisposable
             Keys,
             Session,
             link);
-        Actions = new DesktopActions(Notes, Todos, State, Launcher, link, feed, () => LocalNow, new CalendarStore(Root, Zone));
+        Actions = new DesktopActions(Notes, Todos, State, Launcher, link, feed, () => LocalNow, new CalendarStore(Root, Zone), TimesFolder);
         Bunit.Services.AddSingleton(State);
         Bunit.Services.AddSingleton(Actions);
         Bunit.Services.AddTransient<EditorInterop>();

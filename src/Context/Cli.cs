@@ -52,6 +52,7 @@ internal sealed class Cli
         ("current", "Today's appointments, due todos and linked notes."),
         ("review", "The last 7 days' changed notes and done todos, overdue todos and the next 7 days' appointments."),
         ("today", "Print today's note, creating it with the day's appointments and due todos."),
+        ("dayend [today|yyyy-MM-dd]", "Write Times' worked hours into the day's note and move its due todos to the next day."),
         ("meeting <n>", "Print the note for today's appointment n (as listed by current), creating it first."),
         ("new <title...> [--template <name>]", "Create a note, from templates/<name>.md if given."),
         ("import <path>", "Store a Markdown file as a note."),
@@ -66,6 +67,7 @@ internal sealed class Cli
     private readonly Func<DateTime> now;
     private readonly HttpMessageHandler http;
     private readonly TimeZoneInfo zone;
+    private readonly string? timesFolder;
 
     /// <param name="stdout">Where results go.</param>
     /// <param name="stderr">Where error and warning lines go.</param>
@@ -73,14 +75,16 @@ internal sealed class Cli
     /// <param name="today">The local date.</param>
     /// <param name="now">The local time, for capture lines and the calendar download.</param>
     /// <param name="http">The handler the Exchange calendar download goes through.</param>
+    /// <param name="timesFolder">Times' data folder (<see cref="TimesFolder.Resolve(string?)"/>), only ever read; <c>null</c> for none.</param>
     public Cli(
         TextWriter stdout,
         TextWriter stderr,
         string folder,
         Func<DateOnly> today,
         Func<DateTime> now,
-        HttpMessageHandler http)
-        : this(stdout, stderr, folder, today, now, http, TimeZoneInfo.Local)
+        HttpMessageHandler http,
+        string? timesFolder)
+        : this(stdout, stderr, folder, today, now, http, TimeZoneInfo.Local, timesFolder)
     {
     }
 
@@ -92,7 +96,8 @@ internal sealed class Cli
         Func<DateOnly> today,
         Func<DateTime> now,
         HttpMessageHandler http,
-        TimeZoneInfo zone)
+        TimeZoneInfo zone,
+        string? timesFolder = null)
     {
         this.stdout = stdout;
         this.stderr = stderr;
@@ -101,6 +106,7 @@ internal sealed class Cli
         this.now = now;
         this.http = http;
         this.zone = zone;
+        this.timesFolder = timesFolder;
     }
 
     /// <summary>Runs one command and returns its exit code. Never throws.</summary>
@@ -137,7 +143,7 @@ internal sealed class Cli
 
         string name = args[0].ToLowerInvariant();
         string[] rest = args[1..];
-        if (json && (name is "help" or "--help" or "-h" or "capture" or "todo" or "today" or "meeting" or "new" or "import" or "export"))
+        if (json && (name is "help" or "--help" or "-h" or "capture" or "todo" or "today" or "dayend" or "meeting" or "new" or "import" or "export"))
         {
             // Checked before any argument: nothing is written and the folder is not created.
             return Usage(JsonOnly);
@@ -252,6 +258,8 @@ internal sealed class Cli
                 return NoArguments("review", args, out usage, Review);
             case "today":
                 return NoArguments("today", args, out usage, Today);
+            case "dayend":
+                return ParseDayEnd(args, out usage);
             case "meeting":
                 if (args.Length != 1 || !MeetingNote.TryParseNumber(args[0], out int number))
                 {
@@ -281,6 +289,25 @@ internal sealed class Cli
             default:
                 return null;
         }
+    }
+
+    // dayend takes nothing, "today" (any case) or one yyyy-MM-dd date.
+    private Func<Session, int>? ParseDayEnd(string[] args, out string? usage)
+    {
+        usage = null;
+        if (args.Length == 0 || (args.Length == 1 && args[0].Equals("today", StringComparison.OrdinalIgnoreCase)))
+        {
+            return session => DayEndCommand(session, today());
+        }
+
+        if (args.Length == 1 && DateOnly.TryParseExact(
+            args[0], DateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly day))
+        {
+            return session => DayEndCommand(session, day);
+        }
+
+        usage = "Type: context dayend [today|yyyy-MM-dd].";
+        return null;
     }
 
     private static Func<Session, int>? NoArguments(
@@ -618,6 +645,27 @@ internal sealed class Cli
         }
 
         return ShowNote(session, result.Name);
+    }
+
+    // Closes the day: Times' worked hours into its daily note, then its due todos moved to the next day. Never reads
+    // or writes settings.json.
+    private int DayEndCommand(Session session, DateOnly day)
+    {
+        DayEnd dayEnd = new DayEnd(session.Notes, session.Todos, session.Calendar, session.Feed, timesFolder, null);
+        DayEndResult result = dayEnd.CloseDay(day);
+        switch (result.Kind)
+        {
+            case DayEndKind.Sensitive:
+                return Error(SensitiveText(OneLine(result.Name)));
+            case DayEndKind.TodosUnreadable:
+                return Error("Can't read todos.json.");
+            case DayEndKind.Done:
+                Out($"Updated {Date(day)}.");
+                Out($"Moved {result.Moved.Count} todo(s) to {Date(result.To)}.");
+                return ExitOk;
+            default:
+                return Error($"Can't write {OneLine(result.Name)}.");
+        }
     }
 
     // Prints the note for today's appointment number (1-based, current view order) like note show, creating it first

@@ -73,6 +73,33 @@ public sealed class DesktopStateTests : IDisposable
         Assert.Equal(CalendarFeedStatus.Stale, snapshot.Current!.Status);
     }
 
+    // 171 AC-10: with a Times day that has left after 17:00 and todos due, refresh and tick write nothing: no
+    // settings.json, no daily note, no moved todo; only the day-end timer (through DesktopActions) closes the day.
+    [Fact]
+    public async Task RefreshAndTick_AfterLeaving_WriteNothing()
+    {
+        Directory.CreateDirectory(data.TimesFolder);
+        File.WriteAllText(
+            Path.Combine(data.TimesFolder, "2026-10-29.json"),
+            "{\"entries\":[{\"kind\":\"arrival\",\"time\":\"08:00\"},{\"kind\":\"leaving\",\"time\":\"17:30\"}]}");
+        data.LocalNow = new DateTime(2026, 10, 29, 18, 0, 0, DateTimeKind.Local);
+        data.AddTodo("call Anna", DesktopFixture.Today);
+        DesktopState state = data.CreateState();
+        await state.Refresh();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
+        SortedDictionary<string, string> times = FileSnapshot.Take(data.TimesFolder);
+
+        await state.Refresh();
+        data.UtcNow = data.UtcNow.AddMinutes(10);
+        Assert.True(state.Tick());
+        await WaitForBuilds(state, 3);
+
+        Assert.Equal(before, FileSnapshot.Take(data.Root));
+        Assert.Equal(times, FileSnapshot.Take(data.TimesFolder));
+        Assert.False(File.Exists(Path.Combine(data.Root, SettingsStore.FileName)));
+        Assert.False(File.Exists(Path.Combine(data.Root, "2026-10-29.md")));
+    }
+
     // AC-10: Tick refreshes only when the day changed or 5 minutes passed.
     [Fact]
     public async Task Tick_RefreshesOnDayChangeOrAge()
