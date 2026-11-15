@@ -211,6 +211,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#176](backlog/176-merge-find-and-findexact-in-notestore.md) Merge Find and FindExact in NoteStore
 - [?] [#177](backlog/177-keep-deep-note-trees-readable-in.md) Keep deep note trees readable in the sidebar
 - [?] [#180](backlog/180-force-a-fresh-locked-restore-on.md) Force a fresh locked restore on CI
+- [ ] [#230](backlog/230-clean-invisible-and-control-characters-in.md) Clean invisible and control characters in text
 - [ ] [#182](backlog/182-refuse-invisible-characters-in-person-names.md) Refuse invisible characters in person names and note titles
 - [ ] [#183](backlog/183-turn-a-typed-name-into-a.md) Turn a typed @[Name] into a mention chip right away
 - [ ] [#184](backlog/184-skip-code-fences-when-reading-tags.md) Skip ~~~ code fences when reading tags and mentions
