@@ -74,7 +74,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#70](backlog/070-day-s-end-in-the-daily.md) Day's end in the daily note → 171-days-end-daily-note
 - [x] [#71](backlog/071-morning-briefing.md) Morning briefing → 172-morning-briefing
 - [x] [#211](backlog/211-remove-cli-commands-that-only-mirror.md) Remove CLI commands that only mirror desktop views → 173-remove-mirror-cli-commands
-- [ ] [#53](backlog/053-note-history.md) Note history
+- [x] [#53](backlog/053-note-history.md) Note history → 174-note-history
 - [ ] [#54](backlog/054-attachments.md) Attachments
 - [ ] [#55](backlog/055-timed-reminders.md) Timed reminders
 - [ ] [#57](backlog/057-inbox-triage.md) Inbox triage
