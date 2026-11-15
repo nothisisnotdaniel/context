@@ -36,7 +36,7 @@ internal sealed class Cli
         ("version", "Show the version."),
         ("capture <text...>", "Append a dated line to the inbox note."),
         ("todos", "List todos: date, text."),
-        ("todo add <yyyy-MM-dd|today|tomorrow> <text...>", "Add a todo."),
+        ("todo add <yyyy-MM-dd|today|tomorrow> [HH:mm] <text...>", "Add a todo, with a time to be reminded at."),
         ("todo add every <weekday|day|month> <text...>", "Add a todo that comes back when it is done."),
         ("todo done <text...>", "Mark the todo with that text done."),
         ("notes", "List note names."),
@@ -361,13 +361,17 @@ internal sealed class Cli
                 return null;
             }
 
-            return s => AddTodo(s, text, firstDue, repeat);
+            return s => AddTodo(s, text, firstDue, repeat, null);
         }
 
         if (sub == "add")
         {
-            const string AddForm = "Type: context todo add <yyyy-MM-dd|today|tomorrow> <text>.";
-            string text = args.Length > 2 ? string.Join(' ', args[2..]).Trim() : string.Empty;
+            const string AddForm = "Type: context todo add <yyyy-MM-dd|today|tomorrow> [HH:mm] <text>.";
+
+            // A time-shaped word right after the date is the time, never the start of the text.
+            bool timed = args.Length > 2 && TodoInput.LooksLikeTime(args[2]);
+            int textStart = timed ? 3 : 2;
+            string text = args.Length > textStart ? string.Join(' ', args[textStart..]).Trim() : string.Empty;
             if (text.Length == 0)
             {
                 usage = $"A todo needs a date and text. {AddForm}";
@@ -380,13 +384,25 @@ internal sealed class Cli
                 return null;
             }
 
+            TimeOnly? time = null;
+            if (timed)
+            {
+                if (!TodoInput.TryParseTime(args[2], out TimeOnly parsedTime))
+                {
+                    usage = $"That time isn't valid. {AddForm}";
+                    return null;
+                }
+
+                time = parsedTime;
+            }
+
             if (text.Length > TodoInput.MaxTextLength)
             {
                 usage = $"A todo can be at most {TodoInput.MaxTextLength} characters.";
                 return null;
             }
 
-            return s => AddTodo(s, text, due, null);
+            return s => AddTodo(s, text, due, null, time);
         }
 
         if (sub == "done")
@@ -480,6 +496,7 @@ internal sealed class Cli
                 {
                     w.WriteStartObject();
                     w.WriteString("due", Date(todo.Due));
+                    CliJson.WriteTime(w, "time", todo.Time);
                     w.WriteString("text", OneLine(todo.Text));
                     w.WriteEndObject();
                 }
@@ -490,26 +507,26 @@ internal sealed class Cli
 
         foreach (TodoItem todo in todos)
         {
-            Out($"{Date(todo.Due)}\t{OneLine(todo.Text)}");
+            Out($"{When(todo)}\t{OneLine(todo.Text)}");
         }
 
         return ExitOk;
     }
 
-    private int AddTodo(Session session, string text, DateOnly due, TodoRepeat? repeat)
+    private int AddTodo(Session session, string text, DateOnly due, TodoRepeat? repeat, TimeOnly? time)
     {
         MigrateTodos(session);
         TodoItem todo;
         try
         {
-            todo = session.Todos.Add(text, due, repeat);
+            todo = session.Todos.Add(text, due, repeat, time);
         }
         catch (TodoStoreException)
         {
             return Error(TodosUnreadable);
         }
 
-        return Done($"Added: {Date(todo.Due)} {OneLine(todo.Text)}");
+        return Done($"Added: {When(todo)} {OneLine(todo.Text)}");
     }
 
     private int DoneTodo(Session session, string query)
@@ -1392,6 +1409,11 @@ internal sealed class Cli
     private static string OneLine(string text) => SafeText.Clean(text).Replace('\n', ' ');
 
     private static string Date(DateOnly date) => date.ToString(DateFormat, CultureInfo.InvariantCulture);
+
+    // A todo's due date, and its time after one space when it has one.
+    private static string When(TodoItem todo) => todo.Time is { } time
+        ? $"{Date(todo.Due)} {time.ToString(TodoStore.StoredTimeFormat, CultureInfo.InvariantCulture)}"
+        : Date(todo.Due);
 
     private int Json(Action<Utf8JsonWriter> body)
     {

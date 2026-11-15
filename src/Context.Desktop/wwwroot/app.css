@@ -184,6 +184,11 @@ ol {
     margin: 0;
 }
 
+/* A timed todo's time right after its date, in the date's grey. */
+.todo .time {
+    color: var(--grey);
+}
+
 /* A recurring todo's marker after its text: the words (every day, every Monday), not a colour or an icon. */
 .todo .repeat {
     color: var(--grey);
@@ -331,9 +336,10 @@ input[type="checkbox"]:disabled {
     color: #ffffff;
 }
 
-/* Text and date fields (todo entry, command palette), themed for light and dark. */
+/* Text, date and time fields (todo entry, command palette), themed for light and dark. */
 input[type="text"],
 input[type="date"],
+input[type="time"],
 input[type="search"],
 input[type="password"] {
     background: var(--background);
@@ -348,6 +354,7 @@ input[type="password"] {
 
 input[type="text"]:focus-visible,
 input[type="date"]:focus-visible,
+input[type="time"]:focus-visible,
 input[type="search"]:focus-visible,
 input[type="password"]:focus-visible {
     border-color: var(--accent-strong);
@@ -357,6 +364,7 @@ input[type="password"]:focus-visible {
 
 input[type="text"]:disabled,
 input[type="date"]:disabled,
+input[type="time"]:disabled,
 input[type="search"]:disabled,
 input[type="password"]:disabled {
     opacity: 0.5;
@@ -495,6 +503,10 @@ input[type="password"]:disabled {
 
 .todo-entry .todo-due {
     flex: 1 1 auto;
+}
+
+.todo-entry .todo-time {
+    flex: 0 1 auto;
 }
 
 .todo-entry .add {

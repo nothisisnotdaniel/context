@@ -129,6 +129,19 @@ removes the attachments that only it links in its level; ones another note links
 - An older kept version of a moved note still holds the old attachment names, so restoring it can link a missing or
   different file.
 
+### Timed reminders
+
+Give a todo a time to be reminded at: `context todo add 2026-11-16 14:00 Call Anna` (the time is `HH:mm`, or `H:mm`,
+from `00:00` to `23:59`, right after the date). `context todos` then prints `2026-11-16 14:00` before the text, and
+within one date the todos without a time come first, then the timed ones by time. In the desktop app the todo entry
+row has a time field next to the date, and `/todo 2026-11-16 14:00 Call Anna` in the command palette does the same.
+While the desktop app runs it checks every 30 seconds and shows a system notification (title `Context`, body
+`14:00 Call Anna`) once for each open todo whose time has come; more than 3 at once are one `<n> todos are due.`
+notification. A todo whose time passed while the app was closed is shown at the next start. The command line never
+notifies. Each todo reminds once (`todos.json` notes that with a `notified` field); moving it with the day's end or
+the next todo of a recurring one reminds again. On macOS the notification comes through `osascript`, on Windows
+through PowerShell, so it may show `Windows PowerShell` as its source.
+
 ### Weekly review
 
 `context review` prints one page for a weekly review: `Review, <from> to <to>` (the last 7 days, today included), then
@@ -160,7 +173,7 @@ plain ASCII; any JSON parser, `ConvertFrom-Json` included, reads them back.
 | Command | Shape |
 |---------|-------|
 | `version` | `{"version":"1.2.3"}` |
-| `todos` | `{"todos":[{"due":"2026-11-14","text":"..."}]}` |
+| `todos` | `{"todos":[{"due":"2026-11-14","time":"14:00","text":"..."}]}` (`time` is `null` for a todo without one) |
 | `notes` | `{"notes":[{"name":"A","locked":false}]}` |
 | `note show <name>` | `{"name":"A","text":"..."}` |
 | `tags` | `{"tags":[{"tag":"work","count":2}]}` |

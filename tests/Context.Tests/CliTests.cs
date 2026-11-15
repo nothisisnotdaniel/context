@@ -96,7 +96,7 @@ public sealed class CliTests : IDisposable
         Assert.Equal(string.Empty, result.Err);
         foreach (string usage in new[]
         {
-            "capture <text...>", "todos", "todo add <yyyy-MM-dd|today|tomorrow> <text...>",
+            "capture <text...>", "todos", "todo add <yyyy-MM-dd|today|tomorrow> [HH:mm] <text...>",
             "todo add every <weekday|day|month> <text...>", "todo done <text...>", "notes",
             "note show <name...>", "tags [tag...]", "find <attribute> <value...>",
             "search <text...>", "current", "review", "new <title...> [--template <name>]", "import <path>",
@@ -507,8 +507,8 @@ public sealed class CliTests : IDisposable
             new TodoStore(root).List().Select(t => t.Repeat));
         Assert.Equal("2026-10-29\tstretch\n2026-10-29\tpay rent\n2026-11-02\twater plants\n", Run("todos").Out);
         Assert.Equal(
-            "{\"todos\":[{\"due\":\"2026-10-29\",\"text\":\"stretch\"},{\"due\":\"2026-10-29\",\"text\":\"pay rent\"},"
-            + "{\"due\":\"2026-11-02\",\"text\":\"water plants\"}]}\n",
+            "{\"todos\":[{\"due\":\"2026-10-29\",\"time\":null,\"text\":\"stretch\"},{\"due\":\"2026-10-29\",\"time\":null,\"text\":\"pay rent\"},"
+            + "{\"due\":\"2026-11-02\",\"time\":null,\"text\":\"water plants\"}]}\n",
             Run("todos", "--json").Out);
     }
 
@@ -554,6 +554,59 @@ public sealed class CliTests : IDisposable
         Assert.Equal("2026-10-29\tcall Anna\n2026-11-05\twater plants\n", Run("todos").Out);
         Result plain = Run("todo", "done", "call");
         Assert.Equal((0, "Done: call Anna\n", string.Empty), (plain.Code, plain.Out, plain.Err));
+    }
+
+    // 178 AC-3, AC-4: a time after the date makes a timed todo; it shows in Added:, todos and --json.
+    [Fact]
+    public void TodoAdd_WithTime_AddsTimedTodo_ListsTime()
+    {
+        Result added = Run("todo", "add", "2026-11-16", "14:00", "Call", "Anna");
+        Result untimed = Run("todo", "add", "today", "Call", "Bob");
+        Result short_ = Run("todo", "add", "2026-11-16", "9:30", "standup");
+
+        Assert.Equal((0, "Added: 2026-11-16 14:00 Call Anna\n", string.Empty), (added.Code, added.Out, added.Err));
+        Assert.Equal((0, "Added: 2026-10-29 Call Bob\n", string.Empty), (untimed.Code, untimed.Out, untimed.Err));
+        Assert.Equal((0, "Added: 2026-11-16 09:30 standup\n", string.Empty), (short_.Code, short_.Out, short_.Err));
+        Assert.Equal(
+            [null, new TimeOnly(9, 30), new TimeOnly(14, 0)],
+            new TodoStore(root).List().Select(t => t.Time));
+        Assert.Equal("2026-10-29\tCall Bob\n2026-11-16 09:30\tstandup\n2026-11-16 14:00\tCall Anna\n", Run("todos").Out);
+        Assert.Equal(
+            "{\"todos\":[{\"due\":\"2026-10-29\",\"time\":null,\"text\":\"Call Bob\"},"
+            + "{\"due\":\"2026-11-16\",\"time\":\"09:30\",\"text\":\"standup\"},"
+            + "{\"due\":\"2026-11-16\",\"time\":\"14:00\",\"text\":\"Call Anna\"}]}\n",
+            Run("todos", "--json").Out);
+    }
+
+    // 178 AC-3: a bad time, a time with no text and a bad date are usage errors naming the [HH:mm] form.
+    [Theory]
+    [InlineData("That time isn't valid.", "todo", "add", "today", "25:00", "x")]
+    [InlineData("That time isn't valid.", "todo", "add", "today", "14:60", "x")]
+    [InlineData("A todo needs a date and text.", "todo", "add", "today", "14:00")]
+    [InlineData("A todo needs a date and text.", "todo", "add", "today", "14:00", " ")]
+    [InlineData("A todo needs a date and text.", "todo", "add", "today")]
+    [InlineData("That date isn't valid.", "todo", "add", "someday", "x")]
+    public void TodoAdd_BadTimeNoTextBadDate_IsUsageError(string first, params string[] args)
+    {
+        Result result = Run(args);
+
+        Assert.Equal(2, result.Code);
+        Assert.Equal(string.Empty, result.Out);
+        Assert.Equal(
+            [first + " Type: context todo add <yyyy-MM-dd|today|tomorrow> [HH:mm] <text>. Run 'context help'."],
+            result.ErrLines);
+        Assert.False(Directory.Exists(root));
+    }
+
+    // 178 AC-3: todo add every keeps a time-like word as text (times on every todos are out of scope).
+    [Fact]
+    public void TodoAddEvery_KeepsTimeAsText()
+    {
+        Result result = Run("todo", "add", "every", "monday", "14:00", "x");
+
+        Assert.Equal((0, "Added: 2026-11-02 14:00 x\n", string.Empty), (result.Code, result.Out, result.Err));
+        TodoItem todo = Assert.Single(new TodoStore(root).List());
+        Assert.Equal(("14:00 x", (TimeOnly?)null), (todo.Text, todo.Time));
     }
 
     // 144 AC-8: no text is a usage error that names the new form and leaves the file alone.

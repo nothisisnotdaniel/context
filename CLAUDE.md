@@ -402,8 +402,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     `blob:` URLs built from the bytes `NoteEditor` passes to `mount` (none for a sensitive note); the bundle blocks
     window `dragover`/`drop` at load.
   - **Todos:** `TodoStore` keeps the list in `<root>/todos.json` (same root as notes; System.Text.Json,
-    camelCase, UTF-8 no BOM). `List()` gives the **open** todos sorted by `Due`, then `Created` (UTC), then file
-    order. A done todo (job 159) stays in the file with `done` (UTC date-time, an offset converted and no zone taken as UTC on read; `TodoItem.Done`, written only when set,
+    camelCase, UTF-8 no BOM). `List()` gives the **open** todos sorted by `Due`, then untimed before timed, then `Time`, then `Created`
+    (UTC), then file order. A done todo (job 159) stays in the file with `done` (UTC date-time, an offset converted and no zone taken as UTC on read; `TodoItem.Done`, written only when set,
     so a list without done todos has the same bytes as before; absent or `null` = open; any other non-date-time value
     makes the file unreadable like a bad `due`). `ListDone()` sorts the done ones by `Done` descending, then `Created`,
     then file order. `Add`/`Migrate` keep done todos; ids and `DerivedId` cover both (`done` is not in the key). An
@@ -437,7 +437,19 @@ Every factory agent reads this file before working on Context. Keep it short and
     and repeat, new id, `created` from the clock, `NextDue` as due) in the same write; `Complete(id)` delegates with
     `DateOnly.MinValue`. An older build ignores `repeat` and drops it on its next write. `TodoPicker.NoTodosText` and
     `NoPickText(pick, shown)` are the picker's red lines for `context todo done` and `/done`.
-    `context todo add <yyyy-MM-dd|today|tomorrow> <text>`, `context todo add every <weekday|day|month> <text>` and the desktop's entry row add (text at most 200 chars, past dates allowed); `context todo done <text>` picks the
+    **Timed reminders** (job 178): `TodoItem.Time` (`TimeOnly?`, stored as the optional `time` string, exactly
+    `HH:mm` (`TodoStore.StoredTimeFormat`), ASCII, at most `23:59`) and `TodoItem.Notified` (`DateTime?`, UTC, stored as
+    `notified` like `done`); both written after `repeat` only when set, so a file without them keeps its bytes; not
+    part of `DerivedId`; any other `time` value or a non-date-time `notified` makes the file unreadable.
+    `TodoInput.LooksLikeTime(token)` (1-2 ASCII digits, `:`, 2 ASCII digits) and `TryParseTime(token, out time)`
+    (`0:00`-`23:59`). `DueReminders(localNow)` gives the open todos with a time, no `notified` and `Due` + `Time` <=
+    `localNow`, in `List()` order (a missing file is empty, a bad one throws). `MarkNotified(ids)` stamps `notified`
+    (UTC clock) on those still open and unnotified in one write and returns them in list order (none: no write, `[]`).
+    `Complete` keeps both on the done todo; the next todo of a recurring one keeps `Time` without `Notified`.
+    `MoveDue` keeps `Time` and clears `Notified`, so a moved todo reminds again. An older build drops both on its next
+    write.
+    `context todo add <yyyy-MM-dd|today|tomorrow> [HH:mm] <text>` (a time-shaped word after the date is the time; a bad
+    one is the usage error `That time isn't valid. ...`), `context todo add every <weekday|day|month> <text>` and the desktop's entry row add (text at most 200 chars, past dates allowed); `context todo done <text>` picks the
     todo by its text and marks it done by its id; the desktop marks the ticked todo done by its id.
     **No todo numbers anywhere** (command line and desktop alike): a todo is shown as date and text, picked
     by its text and marked done by its hidden id. `TodoPicker.Pick(todos, query)` (Core, used by `context
@@ -465,8 +477,8 @@ Every factory agent reads this file before working on Context. Keep it short and
   folder), `capture <text...>`
   (`Inbox.Capture`: controls to spaces, trimmed, 1-1000 chars, appends `- yyyy-MM-dd HH:mm <text>` to `inbox.md` via
   `ReadForEdit` + `SaveIfUnchanged`, retries 3 times on a change on disk; a missing inbox is created as `# inbox\n` +
-  the line through `NoteStore.CreateWithText`, temp file + no-overwrite move), `todos` (`<date>\t<text>`, no number),
-  `todo add <date> <text...>` (`TodoInput` rules), `todo add every <weekday|day|month> <text...>` (job 168,
+  the line through `NoteStore.CreateWithText`, temp file + no-overwrite move), `todos` (`<date>\t<text>` or `<date> <HH:mm>\t<text>`, no number),
+  `todo add <date> [HH:mm] <text...>` (`TodoInput` rules; prints `Added: <date>[ <HH:mm>] <text>`), `todo add every <weekday|day|month> <text...>` (job 168,
   `TryParseRepeat`; prints `Added: <due> <text>`; a bad unit is the usage error `That repeat isn't valid. Type: context
   todo add every <weekday|day|month> <text>.`, no text `A repeating todo needs a repeat and text. ...`),
   `todo done <text...>` (arguments joined with one space, then
@@ -511,7 +523,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   **`--json`** (job 148; exact token ignoring case, any position, repeats allowed, removed before parsing) makes
   `version`, `todos`, `notes`, `note show`, `tags`, `find`, `search`, `current` and `review` write one compact object + `\n`
   (`CliJson.cs`, `Utf8JsonWriter` with the default encoder, so `+ & ' <` and non-ASCII are `\uXXXX`): `{version}`,
-  `{todos:[{due,text}]}`, `{notes:[{name,locked}]}`, `{name,text}`, `{tags:[{tag,count}]}` or `{tag,notes:[]}`,
+  `{todos:[{due,time,text}]}` (`time` `HH:mm` or `null`), `{notes:[{name,locked}]}`, `{name,text}`, `{tags:[{tag,count}]}` or `{tag,notes:[]}`,
   `{key,value,notes:[]}` (`find`), `{query,results:[{note,line,text}]}` (`search`; `line` an int), `{today,appointments:[{start,end,allDay,
   title,location,related:[{name,tags,words}]}],calendar:{status,cachedAt,unreadableFiles},due:[{due,text,overdue}],linkedNotes:[{name,tags}]}`
   (absent = `null`, tags raw without `#`, times `yyyy-MM-ddTHH:mm:sszzz` in the zone; `due`/`linkedNotes` `null` when
@@ -692,7 +704,18 @@ Every factory agent reads this file before working on Context. Keep it short and
     hook `BeforeWrite`. `CompleteTodo(todo, confirmation)` removes the todo with `todo.Id` through
     `TodoStore.Complete(id, today, out next)` (today from the local clock; `ActionResult.NextDue` holds the next todo's
     due date for a recurring one; a todo no longer stored: `The todo list changed. Nothing was done.`).
-    `AddTodo(text, due, repeat?)`.
+    `AddTodo(text, due, repeat?, time?)`. **Reminders** (job 178): `AutoReminders()` (through `Run`, no refresh) reads
+    `DueReminders` with the injected local clock, calls `MarkNotified` once, then `INotifier.Show("Context",
+    "<HH:mm> <one-line text>")` per marked todo, or one `Show("Context", "<n> todos are due.")` for more than
+    `MaxSingleReminders` (3); a throwing `Show` is swallowed (the todo stays notified), a bad `todos.json` is Failed
+    with no write and no `Show`, nothing due writes nothing. `DesktopActions` takes the notifier as its last
+    constructor argument; `Program.cs` passes `SystemNotifier` (macOS: `/usr/bin/osascript` with a fixed `on run argv`
+    script, title and body as argv; Windows: `powershell.exe` under `Environment.SystemDirectory`, `-NoProfile
+    -NonInteractive -EncodedCommand` of a fixed script that reads the text from `CONTEXT_NOTIFY_TITLE`/`BODY` and builds
+    the toast through XML text nodes; no shell, no window; text one line, at most 200 chars, never starting with `-`;
+    every failure swallowed). `TodoPanel`'s entry row has `<input type="time" class="todo-time" aria-label="Due
+    time">` (empty, cleared after a Done add) and a timed row a grey `span.time` after the date; `/todo <date> [HH:mm]
+    <text>` in the palette (a bad time or no text: red `Type /todo <yyyy-MM-dd|today|tomorrow> [HH:mm] <text>.`).
     Note actions: `CreateNote(title)` (`NoteStore.Create`; invalid: Refused/`Invalid` with the `ValidateTitle` text;
     existing: Refused/`Exists` `Note <name> already exists.`; else Failed `Can't create that note. Nothing was done.`),
     `RenameNote(name, newTitle)` (`NoteStore.Rename`; same name: Done/`Unchanged`, no refresh; same invalid/exists texts;
@@ -953,7 +976,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `wwwroot/index.html` (CSP meta tag, `img-src 'self' blob:` for attachment images, only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
     and `wwwroot/editor/editor.css`.
   - **Desktop rules:** the Core writing calls (`Create`, `Save`, `SaveIfUnchanged`, `Add`, `Complete`, `Set`, `Clear`, `Delete`,
-    `Rename`, `CreateChild`, `Move`, `MoveWithNote`, `RemoveUnlinked` (`NoteAttachments`), `ClearCache`, `Capture` (`Inbox.Capture`), `Ensure` (`DailyNote.Ensure`, `MeetingNote.Ensure`, `Briefing.Ensure`), the note history (`Keep`, `RemoveHistory`, `RestoreVersion`; only the call `Actions.RestoreVersion(` in a `.razor` file is allowed), `CreateWithText` (`CreateNoteFromTemplate`), the day's end (`CloseDay`, `RefreshWorked`, `MoveTodos`, `AutoClose`, `MoveDue`, `SaveDayEnd`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
+    `Rename`, `CreateChild`, `Move`, `MoveWithNote`, `RemoveUnlinked` (`NoteAttachments`), `ClearCache`, `Capture` (`Inbox.Capture`), `MarkNotified` (named only in `TodoStore.cs` and `DesktopActions.cs`), `Ensure` (`DailyNote.Ensure`, `MeetingNote.Ensure`, `Briefing.Ensure`), the note history (`Keep`, `RemoveHistory`, `RestoreVersion`; only the call `Actions.RestoreVersion(` in a `.razor` file is allowed), `CreateWithText` (`CreateNoteFromTemplate`), the day's end (`CloseDay`, `RefreshWorked`, `MoveTodos`, `AutoClose`, `MoveDue`, `SaveDayEnd`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
     `StoreRecoveryPublicKey`) appear only in `DesktopActions.cs` (exemptions: `DotNetObjectReference.Create(` once in
     `EditorInterop.cs`, `ECDiffieHellman.Create(` in `SealedNote.cs`, and `WindowsKeyStore.cs`, whose .NET calls change
     the certificate store and which names no Core store, `File.`, `Directory.` or `Path.`; the reads still write
@@ -961,7 +984,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     `.razor` files, `Program.cs` and `StateComponent`, never by `DesktopState`, `DataWatcher` or `DesktopSnapshot`, so
     nothing writes on render, refresh, the watcher or the tick. The named exception (jobs 171 and 172): `Program.cs`'s
     `AutoWrites` (once at start and in the day-end timer) calls `DesktopActions.AutoDayEnd()` and then
-    `DesktopActions.AutoBriefing()`, the only methods `Program.cs` calls on the actions and named by no other `.cs` or
+    `DesktopActions.AutoBriefing()`, and (job 178) `DesktopActions.AutoReminders()` runs once at start before
+    `AutoWrites` and on its own timer every `ReminderInterval` (30 s, first after half of it, so it doesn't collide
+    with the day-end timer), the only methods `Program.cs` calls on the actions and named by no other `.cs` or
     `.razor` file, so both automatic writes (the day's end and the morning briefing) still write only through
     `DesktopActions.cs`; `Briefing.Ensure` and `DesktopState.OfferBriefing` are called only there. In `.razor` files every `@code` method that calls
     `Actions.` is bound by an event attribute in the same file (`@on<event>=` on an element or an `On<Event>=`
@@ -973,15 +998,17 @@ Every factory agent reads this file before working on Context. Keep it short and
     `StartupUpdate.cs`, `VelopackUpdateSource.cs`) never mention `NoteStore`, `DefaultFolder`, `DesktopActions`,
     `Environment.GetEnvironmentVariable`, `args` or `Console.`, so an update never touches the data folder; no test
     references `VelopackUpdateSource` (tests use `FakeUpdateSource`, never the network).
-    **Launcher rule:** `Process` / `System.Diagnostics` appear only in `ShellNoteLauncher.cs`, which is named only there and
-    in `Program.cs`; the only path it ever gets is a checked note or attachment path (a note from `List()`, or an
+    **Launcher rule:** `Process` / `System.Diagnostics` appear only in `ShellNoteLauncher.cs` and (job 178)
+    `SystemNotifier.cs`, each named only in itself and in `Program.cs`; no test names `SystemNotifier` (tests use
+    `FakeNotifier`, which records `(title, body)` and can throw), and the notifier passes the text only as arguments or
+    environment values. The only path `ShellNoteLauncher` ever gets is a checked note or attachment path (a note from `List()`, or an
     attachment PDF `NoteAttachments.TryResolve` accepted; no user text becomes a path or an argument); no test references `ShellNoteLauncher` (tests use `FakeNoteLauncher`, which records paths and can throw).
     Outside text goes through `DesktopText.OneLine` and Blazor's default encoding: never `MarkupString`,
     `AddMarkupContent` or `@((` raw markup; no `style=`, `<a `, `<form` or `<script` in `.razor` files; every
     `<button` has `type="button"`; no plain HTML event attributes (`on<event>=` without `@`); only `EditorInterop.cs`
     mentions `IJSRuntime`/`JSRuntime`/`JSInvokable`, and its `[JSInvokable]` methods only raise events (never `Actions.`).
     The editor sources (`editor/src/*.js`) use no `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`,
-    `eval` or `new Function`. Every `<input>` is `type="checkbox"`, `"text"`, `"date"`, `"search"` or `"password"`, without `@bind`,
+    `eval` or `new Function`. Every `<input>` is `type="checkbox"`, `"text"`, `"date"`, `"time"`, `"search"` or `"password"`, without `@bind`,
     and there is no `<textarea>`. No CDN or external fonts; error
     lines are fixed texts, never exception messages. The calendar link is a bearer secret: in `Context.Desktop` the type `CalendarLink` is
     named only in `Program.cs`, `DesktopState.cs` and `DesktopActions.cs`; no file calls `.Get()` on it or reads
@@ -1006,7 +1033,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `CaptureActionsTests` (`CaptureText`) and `CaptureBoxTests`, `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `ReviewPanelTests`, `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `CaptureActionsTests` (`CaptureText`) and `CaptureBoxTests`, `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `ReviewPanelTests`, `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
     CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules, the transfer calls and no file system class in `.razor`), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),

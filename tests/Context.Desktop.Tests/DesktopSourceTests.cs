@@ -15,11 +15,11 @@ public sealed class DesktopSourceTests
     // 152: NoteStore.CreateChild and NoteStore.Move. 164: DailyNote.Ensure. 165: NoteStore.CreateWithText.
     // 172: Briefing.Ensure (caught by Ensure). 174: NoteHistory.Keep and RemoveHistory, and DesktopActions.RestoreVersion,
     // which components reach only through the injected Actions (only Actions.RestoreVersion( itself is let through).
-    // 177: NoteAttachments.Add (caught by Add), MoveWithNote and RemoveUnlinked.
+    // 177: NoteAttachments.Add (caught by Add), MoveWithNote and RemoveUnlinked. 178: TodoStore.MarkNotified.
     private static readonly Regex Writes = new(
         @"(?:(?<!\bActions)|(?!\.\s*RestoreVersion\s*\())\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
         + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture|CreateChild|Move|Ensure|CreateWithText"
-        + @"|CloseDay|RefreshWorked|MoveTodos|AutoClose|MoveDue|SaveDayEnd|Keep|RemoveHistory|RestoreVersion|MoveWithNote|RemoveUnlinked)\s*\(",
+        + @"|CloseDay|RefreshWorked|MoveTodos|AutoClose|MoveDue|SaveDayEnd|Keep|RemoveHistory|RestoreVersion|MoveWithNote|RemoveUnlinked|MarkNotified)\s*\(",
         RegexOptions.CultureInvariant);
 
     // 136: the real key stores and the real file dialog, spelled in pieces: no test file may hold their names (see
@@ -85,6 +85,11 @@ public sealed class DesktopSourceTests
     // 134: spelled in pieces too: no test file may hold the real launcher's name.
     private const string RealLauncher = "Shell" + "NoteLauncher";
     private const string RealLauncherFile = "src/Context.Desktop/" + RealLauncher + ".cs";
+
+    // 178: the real notifier, spelled in pieces too: no test file may hold its name (it would run osascript or PowerShell).
+    private const string RealNotifier = "System" + "Notifier";
+    private const string NotifierFolder = "src/Context.Desktop/";
+    private const string RealNotifierFile = NotifierFolder + RealNotifier + ".cs";
 
     // 139: System.IO's file system classes as whole words (RecoveryFile. is none).
     private static readonly Regex FileSystemClass = new(@"\b(File|Directory|Path)\.", RegexOptions.CultureInvariant);
@@ -295,6 +300,13 @@ public sealed class DesktopSourceTests
                 continue;
             }
 
+            // 178: the notifier's Add calls fill a ProcessStartInfo's own argument list, never a Core store.
+            if (file == RealNotifierFile)
+            {
+                Assert.Contains(".ArgumentList.Add(", text, StringComparison.Ordinal);
+                text = text.Replace(".ArgumentList.Add(", string.Empty, StringComparison.Ordinal);
+            }
+
             found.AddRange(Writes.Matches(text).Select(m => $"{file}: {m.Value}"));
         }
 
@@ -429,7 +441,7 @@ public sealed class DesktopSourceTests
         Assert.Equal(untyped, UntypedButtons(razor).Count);
     }
 
-    // 080 round 2 / 094 AC-12 / 136: every <input> is a checkbox, text, date, search or password field (the recovery
+    // 080 round 2 / 094 AC-12 / 136 / 178: every <input> is a checkbox, text, date, time, search or password field (the recovery
     // password in SensitiveSetup), nothing binds a value with
     // @bind and there is no <textarea> (the note editor is the bundled editor, not a form field).
     [Fact]
@@ -446,7 +458,7 @@ public sealed class DesktopSourceTests
         }
 
         Assert.True(inputs >= 1, "Expected the todo checkboxes, found " + inputs);
-        Assert.True(found.Count == 0, "Inputs other than checkbox, text, date, search or password: " + string.Join(", ", found));
+        Assert.True(found.Count == 0, "Inputs other than checkbox, text, date, time, search or password: " + string.Join(", ", found));
     }
 
     // 080 round 2 / 094 (control): the input check.
@@ -1014,7 +1026,8 @@ public sealed class DesktopSourceTests
             RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs"));
     }
 
-    // 134 AC-9: only the real launcher starts a process; Process and System.Diagnostics appear nowhere else in the app.
+    // 134 AC-9, 178: only the real launcher and the real notifier start a process; Process and System.Diagnostics appear
+    // nowhere else in the app.
     [Fact]
     public void Sources_UseProcessOnlyInTheLauncher()
     {
@@ -1024,7 +1037,7 @@ public sealed class DesktopSourceTests
             .Where(f => process.IsMatch(File.ReadAllText(Path.Combine(root, f))))
             .ToList();
 
-        Assert.Equal([RealLauncherFile], found);
+        Assert.Equal([RealLauncherFile, RealNotifierFile], found.Order(StringComparer.Ordinal));
     }
 
     // 134 AC-9: the real launcher is named only by itself and Program.cs, which wires it into the actions.
@@ -1055,12 +1068,25 @@ public sealed class DesktopSourceTests
         string[] calls = Regex.Matches(program, @"\bactions\s*\.\s*(\w+)\s*\(")
             .Select(m => m.Groups[1].Value)
             .ToArray();
-        Assert.Equal(["AutoDayEnd", "AutoBriefing"], calls);
+        Assert.Equal(["AutoDayEnd", "AutoBriefing", "AutoReminders", "AutoReminders"], calls);
         Assert.Contains(
             "static Task AutoWrites(DesktopActions actions) =>\n            actions.AutoDayEnd().ContinueWith("
-            + "_ => actions.AutoBriefing(), TaskScheduler.Default).Unwrap();\n\n        _ = AutoWrites(actions);\n",
+            + "_ => actions.AutoBriefing(), TaskScheduler.Default).Unwrap();\n",
             program,
             StringComparison.Ordinal);
+
+        // 178 AC-6, AC-7: the reminders run once at start before the automatic writes, then on their own timer.
+        Assert.Contains(
+            "        _ = actions.AutoReminders().ContinueWith(_ => AutoWrites(actions), TaskScheduler.Default).Unwrap();\n",
+            program,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "using Timer reminders = new Timer(\n            _ => _ = actions.AutoReminders(), null, "
+            + "DesktopActions.ReminderInterval / 2, DesktopActions.ReminderInterval);",
+            program,
+            StringComparison.Ordinal);
+        Assert.Equal(
+            2, Regex.Matches(program, @"\bDesktopActions\s*\.\s*ReminderInterval\b").Count);
         Assert.Contains(
             "using Timer dayEnd = new Timer(\n            _ => _ = AutoWrites(actions), null, DesktopActions.DayEndInterval, DesktopActions.DayEndInterval);",
             program,
@@ -1068,9 +1094,9 @@ public sealed class DesktopSourceTests
         Assert.Equal(3, Regex.Matches(program, @"\bAutoWrites\s*\(").Count);
         Assert.Equal(
             2, Regex.Matches(program, @"\bDesktopActions\s*\.\s*DayEndInterval\b").Count);
-        Assert.DoesNotMatch(@"\bDesktopActions\s*\.\s*(AutoDayEnd|EndDay|AutoBriefing|OpenBriefing)\b", program);
+        Assert.DoesNotMatch(@"\bDesktopActions\s*\.\s*(AutoDayEnd|EndDay|AutoBriefing|OpenBriefing|AutoReminders)\b", program);
 
-        foreach (string name in new[] { "AutoDayEnd", "AutoBriefing" })
+        foreach (string name in new[] { "AutoDayEnd", "AutoBriefing", "AutoReminders" })
         {
             List<string> others = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
                 .Where(f => f != ProgramFile && f != ActionsFile)
@@ -1093,6 +1119,91 @@ public sealed class DesktopSourceTests
             .ToList();
 
         Assert.Equal([ActionsFile], found);
+    }
+
+    // 178 AC-11: MarkNotified is defined in TodoStore.cs and called only in DesktopActions.cs (tests are not checked).
+    [Fact]
+    public void Sources_NameMarkNotifiedOnlyInTodoStoreAndDesktopActions()
+    {
+        string root = RepoFiles.Root();
+        List<string> found = RepoFiles.Sources(root, "src", ".cs", ".razor")
+            .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains("MarkNotified", StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Equal(["src/Context.Core/TodoStore.cs", ActionsFile], found);
+    }
+
+    // 178 AC-11: the real notifier is named only by itself and Program.cs, which hands it to the actions.
+    [Fact]
+    public void Sources_NameTheNotifierOnlyInItselfAndProgram()
+    {
+        string root = RepoFiles.Root();
+        List<string> found = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
+            .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains(RealNotifier, StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Equal([ProgramFile, RealNotifierFile], found);
+        Assert.Contains(
+            "TimesFolder.Resolve(Environment.GetEnvironmentVariable(TimesFolder.VariableName)), new " + RealNotifier + "());",
+            File.ReadAllText(Path.Combine(root, ProgramFile)),
+            StringComparison.Ordinal);
+    }
+
+    // 178 AC-11: the title and body reach the fixed scripts only as separate arguments or environment values, the
+    // programs are absolute paths started without a shell, and no script text is built from them.
+    [Fact]
+    public void Notifier_PassesTextOnlyAsArgumentsOrEnvironment()
+    {
+        string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), RealNotifierFile)).ReplaceLineEndings("\n");
+
+        Assert.Contains("mac.ArgumentList.Add(title);\n", source, StringComparison.Ordinal);
+        Assert.Contains("mac.ArgumentList.Add(body);\n", source, StringComparison.Ordinal);
+        Assert.Contains("windows.Environment[TitleVariable] = title;\n", source, StringComparison.Ordinal);
+        Assert.Contains("windows.Environment[BodyVariable] = body;\n", source, StringComparison.Ordinal);
+        Assert.Contains("\"/usr/bin/osascript\"", source, StringComparison.Ordinal);
+        Assert.Contains(
+            "Path.Combine(Environment.SystemDirectory, \"WindowsPowerShell\", \"v1.0\", \"powershell.exe\")",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains("UseShellExecute = false,", source, StringComparison.Ordinal);
+        Assert.Contains("\"on run argv\",", source, StringComparison.Ordinal);
+        Assert.Contains("$env:\" + TitleVariable + \"", source, StringComparison.Ordinal);
+        Assert.Contains("$env:\" + BodyVariable + \"", source, StringComparison.Ordinal);
+        Assert.Contains("CreateTextNode(", source, StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(source, @"Process\.Start\("));
+
+        // title and body appear only in Show, Start's parameters and the two arguments or environment values.
+        string code = Regex.Replace(
+            string.Join("\n", source.Split('\n').Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal))),
+            @"""[^""\n]*""",
+            "\"\"");
+        Assert.Equal(5, Regex.Matches(code, @"\btitle\b").Count);
+        Assert.Equal(5, Regex.Matches(code, @"\bbody\b").Count);
+        Assert.DoesNotContain("Arguments =", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("$\"", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("string.Format", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("string.Concat", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("string.Join", source, StringComparison.Ordinal);
+    }
+
+    // 178 AC-11: no test touches the real notifier (it would show notifications); tests use FakeNotifier.
+    [Fact]
+    public void Tests_NeverReferenceTheRealNotifier()
+    {
+        string root = RepoFiles.Root();
+        List<string> found = [];
+        foreach (string folder in new[] { "tests/Context.Tests", "tests/Context.Desktop.Tests" })
+        {
+            found.AddRange(RepoFiles.Sources(root, folder, ".cs", ".csproj")
+                .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains(RealNotifier, StringComparison.Ordinal)));
+        }
+
+        Assert.True(found.Count == 0, "Tests name the real notifier: " + string.Join(", ", found));
+        Assert.Contains(
+            "tests/Context.Desktop.Tests/FakeNotifier.cs",
+            RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs"));
     }
 
     // 134 AC-9: the launcher passes the path as FileName through the shell, with no arguments.
@@ -1334,12 +1445,12 @@ public sealed class DesktopSourceTests
             .Select(f => Path.GetFileNameWithoutExtension(f))
             .ToHashSet(StringComparer.Ordinal);
 
-    // Every <input> that is not type="checkbox", "text", "date", "search" or "password" or that uses @bind, and every
+    // Every <input> that is not type="checkbox", "text", "date", "time", "search" or "password" or that uses @bind, and every
     // <textarea>.
     private static List<string> BadInputs(string razor) =>
         Tag.Matches(MarkupOf(razor))
             .Where(m => m.Groups[1].Value.Equals("input", StringComparison.OrdinalIgnoreCase)
-                ? !Regex.IsMatch(m.Groups[2].Value, @"(?<![\w-])type\s*=\s*""(checkbox|text|date|search|password)""")
+                ? !Regex.IsMatch(m.Groups[2].Value, @"(?<![\w-])type\s*=\s*""(checkbox|text|date|time|search|password)""")
                     || m.Groups[2].Value.Contains("@bind", StringComparison.Ordinal)
                 : m.Groups[1].Value.Equals("textarea", StringComparison.OrdinalIgnoreCase))
             .Select(m => m.Value)

@@ -7,13 +7,22 @@ namespace Context;
 
 /// <summary>
 /// A todo: its id, its text, the day it is due, when it was added (UTC), when it was done (UTC, <c>null</c> while
-/// it is open) and how it repeats (<c>null</c> for a todo that doesn't). The id is never shown; it is how a todo is
+/// it is open), how it repeats (<c>null</c> for a todo that doesn't), its time of day (<c>null</c> for an untimed
+/// todo) and when its reminder was shown (UTC, <c>null</c> until then). The id is never shown; it is how a todo is
 /// addressed for <see cref="TodoStore.Complete(Guid)"/>, so a list that changed since it was shown can't make another
 /// todo done.
 /// </summary>
 internal sealed record TodoItem
 {
-    public TodoItem(Guid id, string text, DateOnly due, DateTime created, DateTime? done = null, TodoRepeat? repeat = null)
+    public TodoItem(
+        Guid id,
+        string text,
+        DateOnly due,
+        DateTime created,
+        DateTime? done = null,
+        TodoRepeat? repeat = null,
+        TimeOnly? time = null,
+        DateTime? notified = null)
     {
         Id = id;
         Text = text;
@@ -21,6 +30,8 @@ internal sealed record TodoItem
         Created = created;
         Done = done;
         Repeat = repeat;
+        Time = time;
+        Notified = notified;
     }
 
     /// <summary>Unique within the list, stable across reads; never shown to the user.</summary>
@@ -38,6 +49,12 @@ internal sealed record TodoItem
 
     /// <summary>How the todo repeats; <c>null</c> for a todo that doesn't. Not part of the id.</summary>
     public TodoRepeat? Repeat { get; }
+
+    /// <summary>The local time of day the todo is due at (whole minutes); <c>null</c> for an untimed todo. Not part of the id.</summary>
+    public TimeOnly? Time { get; }
+
+    /// <summary>When the todo's reminder was shown, UTC; <c>null</c> until then. Not part of the id.</summary>
+    public DateTime? Notified { get; }
 }
 
 /// <summary>Thrown when <c>todos.json</c> exists but can't be read or parsed. The file is never overwritten then.</summary>
@@ -63,6 +80,9 @@ internal sealed class TodoStore
 {
     /// <summary>The file name of the list inside the root.</summary>
     public const string FileName = "todos.json";
+
+    /// <summary>How <see cref="TodoItem.Time"/> is stored and shown.</summary>
+    public const string StoredTimeFormat = "HH:mm";
 
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
@@ -90,12 +110,53 @@ internal sealed class TodoStore
     public string FilePath => Path.Combine(root, FileName);
 
     /// <summary>
-    /// Every open todo, sorted by <see cref="TodoItem.Due"/>, then <see cref="TodoItem.Created"/>, then file order.
+    /// Every open todo, sorted by <see cref="TodoItem.Due"/>; within one date the untimed todos first, then the timed
+    /// ones by <see cref="TodoItem.Time"/>; then <see cref="TodoItem.Created"/>, then file order.
     /// A missing file lists as empty and nothing is created. Throws <see cref="TodoStoreException"/>
     /// if the file can't be read or isn't a valid todo list.
     /// </summary>
-    public IReadOnlyList<TodoItem> List() =>
-        Read().Where(t => t.Done is null).OrderBy(t => t.Due).ThenBy(t => t.Created).ToList();
+    public IReadOnlyList<TodoItem> List() => InListOrder(Read().Where(t => t.Done is null));
+
+    /// <summary>
+    /// The open todos whose reminder is due: they have a <see cref="TodoItem.Time"/>, no
+    /// <see cref="TodoItem.Notified"/>, and their due date at that time is at or before <paramref name="localNow"/>
+    /// (local time), in <see cref="List"/> order. Reads only. Throws <see cref="TodoStoreException"/> like
+    /// <see cref="List"/>.
+    /// </summary>
+    public IReadOnlyList<TodoItem> DueReminders(DateTime localNow) =>
+        List().Where(t => t.Time is { } time && t.Notified is null && t.Due.ToDateTime(time) <= localNow).ToList();
+
+    /// <summary>
+    /// Marks the open, not yet notified todos with one of <paramref name="ids"/> as notified
+    /// (<see cref="TodoItem.Notified"/> from the UTC clock) in one read and one write, and returns them (marked) in
+    /// <see cref="List"/> order. Ids of todos that are gone, done or already notified are skipped; when none is
+    /// left, nothing is written. Throws <see cref="TodoStoreException"/> (and writes nothing) if the file can't be
+    /// read.
+    /// </summary>
+    public IReadOnlyList<TodoItem> MarkNotified(IReadOnlyList<Guid> ids)
+    {
+        HashSet<Guid> wanted = ids.ToHashSet();
+        List<TodoItem> todos = Read();
+        DateTime now = DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc);
+        List<TodoItem> marked = [];
+        for (int i = 0; i < todos.Count; i++)
+        {
+            TodoItem todo = todos[i];
+            if (todo.Done is null && todo.Notified is null && wanted.Contains(todo.Id))
+            {
+                todos[i] = new TodoItem(todo.Id, todo.Text, todo.Due, todo.Created, null, todo.Repeat, todo.Time, now);
+                marked.Add(todos[i]);
+            }
+        }
+
+        if (marked.Count == 0)
+        {
+            return [];
+        }
+
+        Write(todos);
+        return InListOrder(marked);
+    }
 
     /// <summary>
     /// Every done todo, sorted by <see cref="TodoItem.Done"/>, latest first, then <see cref="TodoItem.Created"/>,
@@ -108,10 +169,16 @@ internal sealed class TodoStore
     /// Adds a todo (recurring when <paramref name="repeat"/> is set), creating the root folder if needed, and returns
     /// it. Throws <see cref="TodoStoreException"/> (and writes nothing) if the existing file can't be read.
     /// </summary>
-    public TodoItem Add(string text, DateOnly due, TodoRepeat? repeat = null)
+    public TodoItem Add(string text, DateOnly due, TodoRepeat? repeat = null) => Add(text, due, repeat, null);
+
+    /// <summary>
+    /// <see cref="Add(string, DateOnly, TodoRepeat?)"/> with a time of day (<c>null</c> for an untimed todo); the
+    /// todo has no <see cref="TodoItem.Notified"/> yet.
+    /// </summary>
+    public TodoItem Add(string text, DateOnly due, TodoRepeat? repeat, TimeOnly? time)
     {
         List<TodoItem> todos = Read();
-        TodoItem todo = NewTodo(todos, text, due, repeat);
+        TodoItem todo = NewTodo(todos, text, due, repeat, time);
         todos.Add(todo);
         Directory.CreateDirectory(root);
         Write(todos);
@@ -129,7 +196,7 @@ internal sealed class TodoStore
 
     /// <summary>
     /// <see cref="Complete(Guid)"/>; when the todo repeats, the same write also appends one new open todo with the
-    /// same text and repeat, a new id, <see cref="TodoItem.Created"/> from the clock and the due date
+    /// same text, repeat and time (not notified), a new id, <see cref="TodoItem.Created"/> from the clock and the due date
     /// <see cref="TodoInput.NextDue"/> gives for <paramref name="today"/>, and returns it in <paramref name="next"/>
     /// (<c>null</c> for a todo that doesn't repeat, and whenever <c>null</c> is returned).
     /// </summary>
@@ -145,12 +212,19 @@ internal sealed class TodoStore
 
         TodoItem open = todos[index];
         TodoItem done = new TodoItem(
-            open.Id, open.Text, open.Due, open.Created, DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc), open.Repeat);
+            open.Id,
+            open.Text,
+            open.Due,
+            open.Created,
+            DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc),
+            open.Repeat,
+            open.Time,
+            open.Notified);
         todos[index] = done;
         TodoItem? again = null;
         if (open.Repeat is { } repeat && TryNextDue(repeat, open.Due, today, out DateOnly nextDue))
         {
-            again = NewTodo(todos, open.Text, nextDue, repeat);
+            again = NewTodo(todos, open.Text, nextDue, repeat, open.Time);
             todos.Add(again);
         }
 
@@ -161,7 +235,8 @@ internal sealed class TodoStore
 
     /// <summary>
     /// Moves every open todo due on or before <paramref name="through"/> to <paramref name="to"/> in one read and
-    /// one write, keeping its id, text, <see cref="TodoItem.Created"/> and <see cref="TodoItem.Repeat"/>, and returns
+    /// one write, keeping its id, text, <see cref="TodoItem.Created"/>, <see cref="TodoItem.Repeat"/> and
+    /// <see cref="TodoItem.Time"/> and clearing <see cref="TodoItem.Notified"/> (so it reminds again), and returns
     /// the moved todos (with their new due date) in <see cref="List"/> order. Done todos and todos due later are not
     /// changed. When nothing is due, nothing is written. Throws <see cref="TodoStoreException"/> (and writes nothing)
     /// if the file can't be read.
@@ -169,8 +244,7 @@ internal sealed class TodoStore
     public IReadOnlyList<TodoItem> MoveDue(DateOnly through, DateOnly to)
     {
         List<TodoItem> todos = Read();
-        List<TodoItem> due = todos.Where(t => t.Done is null && t.Due <= through)
-            .OrderBy(t => t.Due).ThenBy(t => t.Created).ToList();
+        List<TodoItem> due = InListOrder(todos.Where(t => t.Done is null && t.Due <= through));
         if (due.Count == 0)
         {
             return [];
@@ -182,17 +256,17 @@ internal sealed class TodoStore
             TodoItem todo = todos[i];
             if (todo.Done is null && ids.Contains(todo.Id))
             {
-                todos[i] = new TodoItem(todo.Id, todo.Text, to, todo.Created, null, todo.Repeat);
+                todos[i] = new TodoItem(todo.Id, todo.Text, to, todo.Created, null, todo.Repeat, todo.Time);
             }
         }
 
         Write(todos);
-        return due.Select(t => new TodoItem(t.Id, t.Text, to, t.Created, null, t.Repeat)).ToList();
+        return due.Select(t => new TodoItem(t.Id, t.Text, to, t.Created, null, t.Repeat, t.Time)).ToList();
     }
 
     /// <summary>
     /// Stores the ids <see cref="List"/> would return when some todo has no stored, non-empty, unique id: writes
-    /// the list once, in file order with the same text, due, created and done, and returns <c>true</c>. Returns
+    /// the list once, in file order with the same text, due, created, done, repeat, time and notified, and returns <c>true</c>. Returns
     /// <c>false</c> and writes nothing when every id is already stored, the file is missing, or it can't be read,
     /// parsed or written (an unreadable file is never touched; the next <see cref="List"/> reports it). Never throws
     /// for those.
@@ -241,8 +315,13 @@ internal sealed class TodoStore
         return true;
     }
 
+    /// <summary>The order of <see cref="List"/>: due date, untimed before timed, time, created, then the given order.</summary>
+    private static List<TodoItem> InListOrder(IEnumerable<TodoItem> todos) =>
+        todos.OrderBy(t => t.Due).ThenBy(t => t.Time.HasValue).ThenBy(t => t.Time ?? TimeOnly.MinValue)
+            .ThenBy(t => t.Created).ToList();
+
     /// <summary>A new open todo with an id no todo in <paramref name="todos"/> has and the clock's time.</summary>
-    private TodoItem NewTodo(List<TodoItem> todos, string text, DateOnly due, TodoRepeat? repeat)
+    private TodoItem NewTodo(List<TodoItem> todos, string text, DateOnly due, TodoRepeat? repeat, TimeOnly? time)
     {
         Guid id = newId();
         while (id == Guid.Empty || todos.Any(t => t.Id == id))
@@ -250,7 +329,7 @@ internal sealed class TodoStore
             id = Guid.NewGuid();
         }
 
-        return new TodoItem(id, text, due, DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc), repeat: repeat);
+        return new TodoItem(id, text, due, DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc), repeat: repeat, time: time);
     }
 
     /// <summary><see cref="TodoInput.NextDue"/>, or <c>false</c> at the end of the calendar (no next todo then).</summary>
@@ -367,14 +446,47 @@ internal sealed class TodoStore
                 repeat = parsed;
             }
 
-            todos.Add(new TodoItem(id, item.Text!, item.Due!.Value, created, AsUtc(item.Done), repeat));
+            TimeOnly? time = null;
+            if (item.Time is { } storedTime)
+            {
+                if (!TryParseStoredTime(storedTime, out TimeOnly parsedTime))
+                {
+                    throw new TodoStoreException($"Can't read {FileName}.");
+                }
+
+                time = parsedTime;
+            }
+
+            todos.Add(new TodoItem(
+                id, item.Text!, item.Due!.Value, created, AsUtc(item.Done), repeat, time, AsUtc(item.Notified)));
         }
 
         return todos;
     }
 
+    /// <summary>A stored time of day: exactly <c>HH:mm</c>, two ASCII digits each, 00:00 to 23:59.</summary>
+    private static bool TryParseStoredTime(string stored, out TimeOnly time)
+    {
+        time = default;
+        if (stored.Length != 5 || stored[2] != ':' || !char.IsAsciiDigit(stored[0]) || !char.IsAsciiDigit(stored[1])
+            || !char.IsAsciiDigit(stored[3]) || !char.IsAsciiDigit(stored[4]))
+        {
+            return false;
+        }
+
+        int hour = ((stored[0] - '0') * 10) + (stored[1] - '0');
+        int minute = ((stored[3] - '0') * 10) + (stored[4] - '0');
+        if (hour > 23 || minute > 59)
+        {
+            return false;
+        }
+
+        time = new TimeOnly(hour, minute);
+        return true;
+    }
+
     /// <summary>
-    /// A stored done time as UTC: a value with an offset (read as local time) is converted, one with no zone is taken
+    /// A stored done or notified time as UTC: a value with an offset (read as local time) is converted, one with no zone is taken
     /// as UTC, so <see cref="TodoItem.Done"/> is always UTC and is written back with <c>Z</c>.
     /// </summary>
     private static DateTime? AsUtc(DateTime? value) => value switch
@@ -409,7 +521,17 @@ internal sealed class TodoStore
     private void Write(List<TodoItem> todos)
     {
         List<TodoJson> items = todos
-            .Select(t => new TodoJson { Id = JsonSerializer.SerializeToElement(t.Id), Text = t.Text, Due = t.Due, Created = t.Created, Done = t.Done, Repeat = t.Repeat?.Stored })
+            .Select(t => new TodoJson
+            {
+                Id = JsonSerializer.SerializeToElement(t.Id),
+                Text = t.Text,
+                Due = t.Due,
+                Created = t.Created,
+                Done = t.Done,
+                Repeat = t.Repeat?.Stored,
+                Time = t.Time?.ToString(StoredTimeFormat, System.Globalization.CultureInfo.InvariantCulture),
+                Notified = t.Notified,
+            })
             .ToList();
         string json = JsonSerializer.Serialize(items, JsonOptions) + "\n";
         string temp = Path.Combine(root, $".{FileName}.{Guid.NewGuid():N}.tmp");
@@ -457,5 +579,19 @@ internal sealed class TodoStore
         /// </summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Repeat { get; set; }
+
+        /// <summary>
+        /// The time of day, exactly <c>HH:mm</c>; left out for an untimed todo, so a list without timed todos is
+        /// written as before. Any other value (<c>"9:00"</c>, <c>"14:60"</c>, a number) makes the file unreadable.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Time { get; set; }
+
+        /// <summary>
+        /// When the reminder was shown (UTC); left out until then. Read like <see cref="Done"/>: a value that is not
+        /// null and not a date-time string makes the file unreadable.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public DateTime? Notified { get; set; }
     }
 }

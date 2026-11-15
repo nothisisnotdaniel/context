@@ -2,7 +2,7 @@ using System.Globalization;
 
 namespace Context;
 
-/// <summary>The input rules for a new todo, shared by <c>/todo</c> and the <c>todo add</c> command line.</summary>
+/// <summary>The input rules for a new todo, shared by <c>/todo</c>, the todo entry row and the <c>todo add</c> command line.</summary>
 internal static class TodoInput
 {
     /// <summary>The longest todo text that is accepted.</summary>
@@ -29,6 +29,41 @@ internal static class TodoInput
         }
 
         return DateOnly.TryParseExact(token, DateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
+    }
+
+    /// <summary>
+    /// True for a token shaped like a time of day: one or two ASCII digits, <c>:</c>, two ASCII digits (as
+    /// <c>^\d{1,2}:\d{2}$</c>). Such a token after the date is always read as the time, so <c>25:00</c> is a bad time
+    /// and never the start of the text.
+    /// </summary>
+    public static bool LooksLikeTime(string token)
+    {
+        int colon = token.IndexOf(':', StringComparison.Ordinal);
+        return colon is 1 or 2 && token.Length == colon + 3 && token.Remove(colon, 1).All(char.IsAsciiDigit);
+    }
+
+    /// <summary>
+    /// Parses a time of day typed as <c>H:mm</c> or <c>HH:mm</c> (see <see cref="LooksLikeTime"/>), 0:00 to 23:59.
+    /// Returns false for anything else, including <c>24:00</c>, <c>14:60</c>, <c>2pm</c> and <c>14:00:00</c>.
+    /// </summary>
+    public static bool TryParseTime(string token, out TimeOnly time)
+    {
+        time = default;
+        if (!LooksLikeTime(token))
+        {
+            return false;
+        }
+
+        int colon = token.IndexOf(':', StringComparison.Ordinal);
+        int hour = int.Parse(token.AsSpan(0, colon), NumberStyles.None, CultureInfo.InvariantCulture);
+        int minute = int.Parse(token.AsSpan(colon + 1), NumberStyles.None, CultureInfo.InvariantCulture);
+        if (hour > 23 || minute > 59)
+        {
+            return false;
+        }
+
+        time = new TimeOnly(hour, minute);
+        return true;
     }
 
     /// <summary>

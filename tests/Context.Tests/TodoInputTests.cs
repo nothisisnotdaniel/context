@@ -175,4 +175,48 @@ public sealed class TodoInputTests
             CultureInfo.CurrentCulture = before;
         }
     }
+
+    // 178: H:mm or HH:mm, 0:00 to 23:59, is a time.
+    [Theory]
+    [InlineData("14:00", 14, 0)]
+    [InlineData("9:30", 9, 30)]
+    [InlineData("09:05", 9, 5)]
+    [InlineData("0:00", 0, 0)]
+    [InlineData("23:59", 23, 59)]
+    public void TryParseTime_Valid(string token, int hour, int minute)
+    {
+        Assert.True(TodoInput.LooksLikeTime(token));
+        Assert.True(TodoInput.TryParseTime(token, out TimeOnly time));
+        Assert.Equal(new TimeOnly(hour, minute), time);
+    }
+
+    // 178: time-shaped but out of range is a bad time, not text.
+    [Theory]
+    [InlineData("25:00")]
+    [InlineData("24:00")]
+    [InlineData("14:60")]
+    [InlineData("99:99")]
+    public void TryParseTime_OutOfRange_LooksLikeTimeButFails(string token)
+    {
+        Assert.True(TodoInput.LooksLikeTime(token));
+        Assert.False(TodoInput.TryParseTime(token, out _));
+    }
+
+    // 178: anything else is neither a time nor time-shaped, so it stays text.
+    [Theory]
+    [InlineData("2pm")]
+    [InlineData("14:00:00")]
+    [InlineData("140:00")]
+    [InlineData("14:0")]
+    [InlineData(":00")]
+    [InlineData("14h00")]
+    [InlineData("1:2:")]
+    [InlineData("\u0661\u0664:00")]
+    [InlineData("")]
+    [InlineData("Call")]
+    public void TryParseTime_NotTimeShaped(string token)
+    {
+        Assert.False(TodoInput.LooksLikeTime(token));
+        Assert.False(TodoInput.TryParseTime(token, out _));
+    }
 }
