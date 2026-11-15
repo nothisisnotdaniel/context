@@ -96,6 +96,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#85](backlog/085-similar-notes.md) Similar notes
 - [ ] [#90](backlog/090-keep-mixed-line-endings.md) Keep mixed line endings
 - [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4; #108)
+- [ ] [#234](backlog/234-release-and-ci-workflow-hardening.md) Release and CI workflow hardening
 - [ ] [#111](backlog/111-concurrency-and-timeout-for-the-release.md) Concurrency and timeout for the release workflow
 - [ ] [#113](backlog/113-refuse-removed-secret-options-after-a.md) Refuse removed secret options after a command
 - [ ] [#114](backlog/114-owner-only-file-mode-for-all.md) Owner-only file mode for all data files
