@@ -30,7 +30,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     internal constructor argument shortens it for tests) for another process's lock, and `Sync` starts with
     `BEGIN IMMEDIATE`, so the desktop app and a command-line run can share it. `TagsView.Build`, `LinksView.Build`
     and `CurrentView.Build` call `Sync` first and report that error as a view kind or flag (`IndexUnreadable`); the
-    command line then writes `Can't read context.db.` to stderr and exits 1.
+    command line (`tags`, `current`) then writes `Can't read context.db.` to stderr and exits 1, the desktop shows it.
   - **Note links:** `NoteLinkParser.Parse` finds `[[Note name]]` anywhere in a line (`[[`, text with no `[` up to the
     first `]` on the line, then `]]`; trimmed; empty or over 403 chars (`MaxTargetLength` = `NoteStore.MaxNameLength + 3`) is no link; distinct ignoring
     case, first spelling kept), skipping fences and code spans through `TagParser.LinesOutsideFences` and
@@ -41,9 +41,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     resolved only at query time by `NameLookup.Resolve` (like `context note show`: as written, then without one `.md`; exact, then
     ignoring case), never turned into a path, so a link to a missing note starts working once the note exists. `Links`
     merges tag links and note links into one `NoteLink` per other note (`Direction` `None`/`To`/`From`/`Both`,
-    `Missing` = a `To` target that names no note, shown as written); never the note itself. Both front ends show
+    `Missing` = a `To` target that names no note, shown as written); never the note itself. The desktop shows
     the direction as `links to`, `linked from`, `both ways` or `links to (missing)` (nothing for a link by shared
-    tags only): `context links` in its second column, the desktop in `LinksPanel`.
+    tags only) in `LinksPanel`; the command line has no links command (removed in job 173).
   - **People:** (job 156) `PersonParser.Parse` finds `@[Name]` (`@[` at line start or after whitespace, up to the first
     `]` on the line, not followed by `(`; trimmed, whitespace runs become one space; must pass `NoteStore.ValidateTitle`,
     so `/ \ : ..` and the like are no mention; distinct ignoring case, first spelling kept), skipping fences and code
@@ -84,8 +84,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `ParserVersion` change. `PersonAliases.Load(store)` reads the person pages directly (never throws), used by
     `OpenPerson` and by `PersonView` when the index can't be read. `PersonView` resolves the typed name and
     appointment title/location mentions and attendee names the same way, and has `AliasClashes` (when the name is a
-    person page) and `AmbiguousWith`. `context person` writes the `AmbiguousText` line to stderr for an ambiguous name
-    (exit code unchanged; JSON shape unchanged). `OpenPerson` opens the resolved person's page and refuses an
+    person page) and `AmbiguousWith`. `OpenPerson` opens the resolved person's page and refuses an
     ambiguous name (`ActionReason.Ambiguous`, the hint as text, nothing written).
   - **Attributes and page types:** (job 157) `AttributeParser.Parse` finds `key:: value` lines outside fences (key at
     column 0: a letter, then letters, digits, `-`, `_`, at most 50, lower-cased invariant, directly followed by `::`;
@@ -98,7 +97,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     page without one is `person`. `FindView.Build(index, store, key, value)` (`Found`, `NoMatches`, `InvalidQuery`
     without reading, `IndexUnreadable`) syncs and lists the matching notes sorted ignoring case then ordinal;
     `type person` also lists untyped person pages. An attribute value `[[X]]` is a note link through the link parser.
-    The command line has `context find <attribute> <value...>` and `context types`; the desktop `/find`.
+    The command line has `context find <attribute> <value...>`; the desktop `/find` and the type pages.
   - **Full-text search** (job 170, `SearchView.cs`): `SearchView.Build(index, store, text)` trims the text; under
     `MinQueryLength` (3) is `TooShort`, over `MaxQueryLength` (200) `TooLong`, both without opening the index; else
     `Sync`, `TagIndex.Search` (the trigram match is only a pre-filter), and per row the first line (split at `\n`, a
@@ -209,7 +208,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Create`, `CreateWithText`, `Save` and `Rename` treat a sensitive name as taken (ignoring case). A `.ctxs` is never
     moved (its name is sealed in). `TagIndex` never reads one, so its tags and links are in no table and a `[[link]]`
     to it shows as missing.
-  - **Command line:** `notes` prints `<name>\tlocked`; `note show`, `export` and `links` on one answer
+  - **Command line:** `notes` prints `<name>\tlocked`; `note show` and `export` on one answer
     `<name> is sensitive. Open it in the desktop app.` (`Cli.SensitiveText`, exit 1); `import` and `capture` onto a
     sensitive name exit 1 and write nothing.
   - **File format (`SealedNote.cs`, v1):** UTF-8 JSON, at most 8 MB, read through `BoundedFile`:
@@ -296,7 +295,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     write, never by a read). A new note's content is `# <Title>\n` (UTF-8, no BOM), written with `FileMode.CreateNew`.
     Titles are validated (`NoteStore.ValidateTitle`: no `/ \ :`, invalid file-name or control chars,
     no leading `.`, at most 100 chars, no Windows reserved name (CON, PRN, AUX, NUL, COM1-9, LPT1-9, also before a dot), no trailing `.` or space) after `NoteStore.NormalizeTitle` trims them and strips any trailing
-    `.md` (ignoring case), so the title `x.md` creates `x.md`; typed note names (`note show`, `links`, `export`) are only matched against `List()` (as typed first, then with
+    `.md` (ignoring case), so the title `x.md` creates `x.md`; typed note names (`note show`, `export`) are only matched against `List()` (as typed first, then with
     one `.md` stripped), never turned into a path. Note text is plain text to both front ends, never parsed as markup.
     `context note show` on an unreadable note answers `Can't read <name>.`
     `context export <note> <path>` writes the note's plain
@@ -417,11 +416,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   `todo done <text...>` (arguments joined with one space, then
   `TodoPicker.Pick`, see Todos: `Done: <text>`, plus `Next: <yyyy-MM-dd>` for a recurring todo, or exit 1 with the no-todos, no-match or several-matches line;
   no text is a usage error), `notes`, `note show <name...>`,
-  `tags [tag...]` (`<tag>\t<count>` or note names), `links <note...>` (`<name>\t<link>\t<tags>`), `people`
-  (`<name>\t<count>`), `person <name...>` (`Anna Schmidt`, `@[Anna Schmidt]` or an alias; an ambiguous alias adds one stderr hint; `Notes` then `Appointments` with
-  `<yyyy-MM-dd>\t<time>\t<title>`, then `Todos` (`<due>\t<text>`) and `Done todos` (`<done yyyy-MM-dd>\t<text>`), or
-  `No notes, appointments or todos mention <name>.`; unreadable calendar files on stderr, exit 1; an unreadable
-  `todos.json` adds `Can't read todos.json.` on stderr, exit 1, the rest still printed; no `Migrate`), `current` (the
+  `tags [tag...]` (`<tag>\t<count>` or note names), `current` (the
   current view's sections as text: `Today, <date>`, `Appointments`, `Due`, `Linked notes`; no row caps, `Due` lines as
   `<date>\t<text>`; its error lines go to stderr and make the exit code 1), `review` (job 169, see Review view:
   `Review, <from> to <to>` (`yyyy-MM-dd`), then `Changed notes` (`<yyyy-MM-dd HH:mm>\t<name>`), `Done todos`
@@ -458,15 +453,13 @@ Every factory agent reads this file before working on Context. Keep it short and
   (one-line fields also `\n` to space). Tests (`CliTests`) use the
   internal constructor with a fixed zone.
   **`--json`** (job 148; exact token ignoring case, any position, repeats allowed, removed before parsing) makes
-  `version`, `todos`, `notes`, `note show`, `tags`, `links`, `people`, `person`, `find`, `search`, `types`, `current` and `review` write one compact object + `\n`
+  `version`, `todos`, `notes`, `note show`, `tags`, `find`, `search`, `current` and `review` write one compact object + `\n`
   (`CliJson.cs`, `Utf8JsonWriter` with the default encoder, so `+ & ' <` and non-ASCII are `\uXXXX`): `{version}`,
   `{todos:[{due,text}]}`, `{notes:[{name,locked}]}`, `{name,text}`, `{tags:[{tag,count}]}` or `{tag,notes:[]}`,
-  `{note,links:[{note,direction:none|to|from|both,missing,sharedTags}]}`, `{people:[{person,count}]}`,
-  `{person,notes:[],appointments:[{start,end,allDay,title,location}],todos:[{due,text}],doneTodos:[{due,done,text}]}`
-  (`done` as `yyyy-MM-dd`; `todos`/`doneTodos` `null` when `todos.json` is unreadable), `{key,value,notes:[]}` (`find`), `{query,results:[{note,line,text}]}` (`search`; `line` an int), `{types:[{type,attributes:[]}]}` (`types`; text: `<type>\t<attr, attr>`), `{today,appointments:[{start,end,allDay,
+  `{key,value,notes:[]}` (`find`), `{query,results:[{note,line,text}]}` (`search`; `line` an int), `{today,appointments:[{start,end,allDay,
   title,location,related:[{name,tags,words}]}],calendar:{status,cachedAt,unreadableFiles},due:[{due,text,overdue}],linkedNotes:[{name,tags}]}`
   (absent = `null`, tags raw without `#`, times `yyyy-MM-ddTHH:mm:sszzz` in the zone; `due`/`linkedNotes` `null` when
-  unreadable, `related` `null` when `context.db` can't be read; `person`'s appointments have no `related`),
+  unreadable, `related` `null` when `context.db` can't be read),
   `{from,to,changedNotes:[{name,modified}],doneTodos:[{due,done,text}],overdue:[{due,text}],appointments:[{start,end,
   allDay,title,location}],calendar:{status,cachedAt,unreadableFiles}}` (`review`; `doneTodos`/`overdue` `null` when
   `todos.json` is unreadable). Names and order are a public contract (`CliJsonTests`, README). Errors stay text; with `help` or a

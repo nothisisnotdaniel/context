@@ -50,15 +50,6 @@ internal static class CliJson
         _ => "notConfigured",
     };
 
-    /// <summary>The lower-case name of a link direction.</summary>
-    public static string Direction(NoteLinkDirection direction) => direction switch
-    {
-        NoteLinkDirection.To => "to",
-        NoteLinkDirection.From => "from",
-        NoteLinkDirection.Both => "both",
-        _ => "none",
-    };
-
     /// <summary>Writes <paramref name="name"/> as an array of strings.</summary>
     public static void Strings(Utf8JsonWriter writer, string name, IEnumerable<string> values)
     {

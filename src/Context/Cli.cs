@@ -24,11 +24,10 @@ internal sealed class Cli
     private const string HelpHint = "Run 'context help'.";
     private const string TodosUnreadable = "Can't read todos.json.";
     private const string IndexUnreadable = "Can't read context.db.";
-    private const string PersonForm = "Type: context person <name>.";
     private const string FindForm = "Type: context find <attribute> <value>.";
     private const string SearchForm = "Type: context search <text>.";
     private const string JsonOnly =
-        "--json works only with version, todos, notes, note show, tags, links, people, person, find, search, types, current and review.";
+        "--json works only with version, todos, notes, note show, tags, find, search, current and review.";
 
     // Every command with its usage and what it does, in the order help lists them.
     private static readonly (string Usage, string Description)[] Commands =
@@ -43,12 +42,8 @@ internal sealed class Cli
         ("notes", "List note names."),
         ("note show <name...>", "Print a note."),
         ("tags [tag...]", "List tags with counts, or the notes with a tag."),
-        ("links <note...>", "List the notes linked to a note."),
-        ("people", "List the people mentioned with @[Name], with counts."),
-        ("person <name...>", "List the notes, appointments and todos that mention a person."),
         ("find <attribute> <value...>", "List the notes with an attribute line, e.g. find role Bereichsleiter."),
         ("search <text...>", "List the notes whose text contains the text, with the first matching line."),
-        ("types", "List the page types with their attributes."),
         ("current", "Today's appointments, due todos and linked notes."),
         ("review", "The last 7 days' changed notes and done todos, overdue todos and the next 7 days' appointments."),
         ("today", "Print today's note, creating it with the day's appointments and due todos."),
@@ -57,7 +52,7 @@ internal sealed class Cli
         ("new <title...> [--template <name>]", "Create a note, from templates/<name>.md if given."),
         ("import <path>", "Store a Markdown file as a note."),
         ("export <note> <path>", "Write a note to a new plain file."),
-        ("<command> --json", "Print one JSON object: version, todos, notes, note show, tags, links, people, person, find, search, types, current, review."),
+        ("<command> --json", "Print one JSON object: version, todos, notes, note show, tags, find, search, current, review."),
     ];
 
     private readonly TextWriter stdout;
@@ -205,26 +200,6 @@ internal sealed class Cli
             case "tags":
                 string tag = string.Join(' ', args);
                 return s => Tags(s, tag);
-            case "links":
-                if (args.Length == 0)
-                {
-                    usage = "Type: context links <note>.";
-                    return null;
-                }
-
-                string linked = string.Join(' ', args);
-                return s => Links(s, linked);
-            case "people":
-                return NoArguments("people", args, out usage, People);
-            case "person":
-                string person = string.Join(' ', args);
-                if (person.Trim().Length == 0)
-                {
-                    usage = PersonForm;
-                    return null;
-                }
-
-                return s => Person(s, person);
             case "find":
                 if (args.Length < 2 || AttributeParser.NormalizeKey(args[0]) is null)
                 {
@@ -250,8 +225,6 @@ internal sealed class Cli
                 }
 
                 return s => Search(s, query);
-            case "types":
-                return NoArguments("types", args, out usage, Types);
             case "current":
                 return NoArguments("current", args, out usage, Current);
             case "review":
@@ -782,82 +755,6 @@ internal sealed class Cli
         }
     }
 
-    private int Links(Session session, string argument)
-    {
-        LinksView view = LinksView.Build(session.Index, session.Notes, argument);
-        switch (view.Kind)
-        {
-            case LinksViewKind.IndexUnreadable:
-                return Error(IndexUnreadable);
-            case LinksViewKind.NoSuchNote:
-            case LinksViewKind.MissingArgument:
-                return Error(Sensitive(session, view.Typed) ?? $"No note named {OneLine(view.Typed)}.");
-            case LinksViewKind.Links or LinksViewKind.NoLinks when session.Json:
-                return Json(w =>
-                {
-                    w.WriteString("note", OneLine(view.Note ?? string.Empty));
-                    w.WriteStartArray("links");
-                    foreach (NoteLink link in view.Links)
-                    {
-                        w.WriteStartObject();
-                        w.WriteString("note", OneLine(link.Note));
-                        w.WriteString("direction", CliJson.Direction(link.Direction));
-                        w.WriteBoolean("missing", link.Missing);
-                        CliJson.Strings(w, "sharedTags", link.SharedTags.Select(OneLine));
-                        w.WriteEndObject();
-                    }
-
-                    w.WriteEndArray();
-                });
-            default:
-                foreach (NoteLink link in view.Links)
-                {
-                    string tags = string.Join(' ', link.SharedTags.Select(TagParser.Format));
-                    Out($"{OneLine(link.Note)}\t{LinkText(link)}\t{OneLine(tags)}");
-                }
-
-                return ExitOk;
-        }
-    }
-
-    private int People(Session session)
-    {
-        IReadOnlyList<PersonCount> people;
-        try
-        {
-            session.Index.Sync(session.Notes);
-            people = session.Index.People();
-        }
-        catch (TagIndexException)
-        {
-            return Error(IndexUnreadable);
-        }
-
-        if (session.Json)
-        {
-            return Json(w =>
-            {
-                w.WriteStartArray("people");
-                foreach (PersonCount person in people)
-                {
-                    w.WriteStartObject();
-                    w.WriteString("person", OneLine(person.Person));
-                    w.WriteNumber("count", person.Count);
-                    w.WriteEndObject();
-                }
-
-                w.WriteEndArray();
-            });
-        }
-
-        foreach (PersonCount person in people)
-        {
-            Out($"{OneLine(person.Person)}\t{person.Count.ToString(CultureInfo.InvariantCulture)}");
-        }
-
-        return ExitOk;
-    }
-
     private int Find(Session session, string key, string value)
     {
         FindView view = FindView.Build(session.Index, session.Notes, key, value);
@@ -923,147 +820,6 @@ internal sealed class Cli
         }
     }
 
-    private int Types(Session session)
-    {
-        IReadOnlyList<PageType> types = PageTypes.Load(session.Notes);
-        if (session.Json)
-        {
-            return Json(w =>
-            {
-                w.WriteStartArray("types");
-                foreach (PageType type in types)
-                {
-                    w.WriteStartObject();
-                    w.WriteString("type", OneLine(type.Name));
-                    CliJson.Strings(w, "attributes", type.Attributes.Select(OneLine));
-                    w.WriteEndObject();
-                }
-
-                w.WriteEndArray();
-            });
-        }
-
-        foreach (PageType type in types)
-        {
-            Out($"{OneLine(type.Name)}\t{OneLine(string.Join(", ", type.Attributes))}");
-        }
-
-        return ExitOk;
-    }
-
-    private int Person(Session session, string argument)
-    {
-        PersonView view = PersonView.Build(
-            session.Index, session.Notes, session.Calendar, session.Feed, argument, session.Todos);
-        if (view.Kind == PersonViewKind.MissingArgument)
-        {
-            return Usage(PersonForm);
-        }
-
-        if (view.IndexUnreadable)
-        {
-            return Error(IndexUnreadable);
-        }
-
-        if (view.AmbiguousWith.Count > 0)
-        {
-            // A hint only: the unresolved name is listed as usual and the exit code stays as it is.
-            Err(OneLine(PersonAliases.AmbiguousText(view.Person, view.AmbiguousWith)));
-        }
-
-        foreach (string file in view.UnreadableCalendarFiles)
-        {
-            Err($"Can't read {CalendarStore.FolderName}/{OneLine(file)}");
-        }
-
-        if (view.TodosUnreadable)
-        {
-            Err($"Can't read {TodoStore.FileName}.");
-        }
-
-        int exit = view.UnreadableCalendarFiles.Count > 0 || view.TodosUnreadable ? ExitError : ExitOk;
-        if (session.Json)
-        {
-            stdout.Write(CliJson.Document(w =>
-            {
-                w.WriteString("person", OneLine(view.Person));
-                CliJson.Strings(w, "notes", view.Notes.Select(OneLine));
-                w.WriteStartArray("appointments");
-                foreach (Appointment appointment in view.Appointments)
-                {
-                    WriteAppointment(w, appointment, view.Zone);
-                }
-
-                w.WriteEndArray();
-                WritePersonTodos(w, "todos", view, view.OpenTodos, done: false);
-                WritePersonTodos(w, "doneTodos", view, view.DoneTodos, done: true);
-            }));
-            return exit;
-        }
-
-        if (view.Kind == PersonViewKind.NoMentions)
-        {
-            Out($"No notes, appointments or todos mention {OneLine(view.Person)}.");
-            return exit;
-        }
-
-        Out("Notes");
-        foreach (string note in view.Notes)
-        {
-            Out(OneLine(note));
-        }
-
-        Out("Appointments");
-        foreach (Appointment appointment in view.Appointments)
-        {
-            string title = appointment.Title.Length == 0 ? "(no title)" : appointment.Title;
-            string date = Date(DateOnly.FromDateTime(appointment.Start));
-            Out($"{date}\t{PersonView.TimeText(appointment)}\t{OneLine(title)}");
-        }
-
-        Out("Todos");
-        foreach (TodoItem todo in view.OpenTodos)
-        {
-            Out($"{Date(todo.Due)}\t{OneLine(todo.Text)}");
-        }
-
-        Out("Done todos");
-        foreach (TodoItem todo in view.DoneTodos)
-        {
-            Out($"{Date(view.DoneDate(todo))}\t{OneLine(todo.Text)}");
-        }
-
-        return exit;
-    }
-
-    // The person's open or done todos as a JSON array of {due,text} or {due,done,text}; null when todos.json can't be
-    // read.
-    private static void WritePersonTodos(
-        Utf8JsonWriter w, string name, PersonView view, IReadOnlyList<TodoItem> todos, bool done)
-    {
-        if (view.TodosUnreadable)
-        {
-            w.WriteNull(name);
-            return;
-        }
-
-        w.WriteStartArray(name);
-        foreach (TodoItem todo in todos)
-        {
-            w.WriteStartObject();
-            w.WriteString("due", Date(todo.Due));
-            if (done)
-            {
-                w.WriteString("done", Date(view.DoneDate(todo)));
-            }
-
-            w.WriteString("text", OneLine(todo.Text));
-            w.WriteEndObject();
-        }
-
-        w.WriteEndArray();
-    }
-
     // One appointment as a JSON object: start, end, allDay, title, location (null when missing).
     private static void WriteAppointment(
         Utf8JsonWriter w, Appointment appointment, TimeZoneInfo zone, Action<Utf8JsonWriter>? extra = null)
@@ -1111,23 +867,6 @@ internal sealed class Cli
     // The third column of a related line: the tags as #tag or #[a b], then the shared title words.
     private static string RelatedMatches(RelatedNote note) =>
         OneLine(string.Join(' ', note.Tags.Select(TagParser.Format).Concat(note.Words)));
-
-    // The text of the link column; empty for a link by shared tags only.
-    private static string LinkText(NoteLink link)
-    {
-        if (link.Missing)
-        {
-            return "links to (missing)";
-        }
-
-        return link.Direction switch
-        {
-            NoteLinkDirection.To => "links to",
-            NoteLinkDirection.From => "linked from",
-            NoteLinkDirection.Both => "both ways",
-            _ => string.Empty,
-        };
-    }
 
     private int Current(Session session)
     {

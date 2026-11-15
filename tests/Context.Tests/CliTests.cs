@@ -98,8 +98,8 @@ public sealed class CliTests : IDisposable
         {
             "capture <text...>", "todos", "todo add <yyyy-MM-dd|today|tomorrow> <text...>",
             "todo add every <weekday|day|month> <text...>", "todo done <text...>", "notes",
-            "note show <name...>", "tags [tag...]", "links <note...>", "people", "person <name...>", "find <attribute> <value...>",
-            "search <text...>", "types", "current", "review", "new <title...> [--template <name>]", "import <path>",
+            "note show <name...>", "tags [tag...]", "find <attribute> <value...>",
+            "search <text...>", "current", "review", "new <title...> [--template <name>]", "import <path>",
             "export <note> <path>", "version", "dayend [today|yyyy-MM-dd]",
         })
         {
@@ -137,7 +137,7 @@ public sealed class CliTests : IDisposable
         Result[] others =
         [
             Run("note", "show", "Plan"), Run("todo", "add", "today", "x"), Run("todos"), Run("tags"),
-            Run("links", "Plan"), Run("capture", "hello"), Run("export", "Plan", target), Run("version"), Run("help"),
+            Run("capture", "hello"), Run("export", "Plan", target), Run("version"), Run("help"),
         ];
 
         Assert.Equal((0, "Plan\n", string.Empty), (notes.Code, notes.Out, notes.Err));
@@ -249,6 +249,53 @@ public sealed class CliTests : IDisposable
 
         AssertUsage(result);
         Assert.False(Directory.Exists(root));
+    }
+
+    // 173 AC-1, AC-2: links, people, person and types are gone: each is the usual unknown command, with or without
+    // --json anywhere, nothing on stdout, and the data folder is not created.
+    [Theory]
+    [InlineData("links", "A")]
+    [InlineData("people")]
+    [InlineData("person", "Anna")]
+    [InlineData("types")]
+    [InlineData("PEOPLE")]
+    [InlineData("Links", "A", "B")]
+    [InlineData("--json", "people")]
+    [InlineData("people", "--json")]
+    [InlineData("--json", "links", "A")]
+    [InlineData("links", "A", "--json")]
+    [InlineData("--json", "person", "Anna")]
+    [InlineData("person", "Anna", "--json")]
+    [InlineData("--json", "types")]
+    [InlineData("TYPES", "--JSON")]
+    public void RemovedMirrorCommands_AreUnknownCommands_FolderNotCreated(params string[] args)
+    {
+        string shown = args.First(a => !a.Equals("--json", StringComparison.OrdinalIgnoreCase));
+
+        Result result = Run(args);
+
+        Assert.Equal(Cli.ExitUsage, result.Code);
+        Assert.Equal(string.Empty, result.Out);
+        Assert.Equal([$"Unknown command: {shown}. Run 'context help'."], result.ErrLines);
+        Assert.False(Directory.Exists(root));
+    }
+
+    // 173 AC-3: help lists none of the removed commands, and its --json row names exactly the JSON commands.
+    [Fact]
+    public void Help_ListsNoRemovedMirrorCommand_JsonRowIsExact()
+    {
+        string[] lines = Run("help").Out.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (string removed in new[] { "links", "people", "person", "types" })
+        {
+            Assert.DoesNotContain(lines, l => l.StartsWith($"context {removed}", StringComparison.Ordinal));
+        }
+
+        string json = Assert.Single(lines, l => l.StartsWith("context <command> --json", StringComparison.Ordinal));
+        Assert.EndsWith(
+            "Print one JSON object: version, todos, notes, note show, tags, find, search, current, review.",
+            json,
+            StringComparison.Ordinal);
     }
 
     // 145 AC-2: without arguments there is nothing to start; it is the usage error and the folder is not created.
@@ -686,7 +733,6 @@ public sealed class CliTests : IDisposable
     [InlineData("note")]
     [InlineData("note", "show")]
     [InlineData("note", "open", "x")]
-    [InlineData("links")]
     [InlineData("import")]
     [InlineData("import", "a", "b")]
     [InlineData("export", "a")]
@@ -715,30 +761,8 @@ public sealed class CliTests : IDisposable
         Assert.Equal((0, string.Empty, string.Empty), (unknown.Code, unknown.Out, unknown.Err));
     }
 
-    [Fact]
-    public void Links_PrintsNameLinkAndTags()
-    {
-        WriteNote("A", "#work #home [[B]] [[Ghost]]");
-        WriteNote("B", "#work #home [[A]]");
-        WriteNote("C", "#work");
-
-        Result result = Run("links", "a");
-
-        Assert.Equal(0, result.Code);
-        Assert.Equal("B\tboth ways\t#home #work\nC\t\t#work\nGhost\tlinks to (missing)\t\n", result.Out);
-    }
-
-    [Fact]
-    public void Links_NoSuchNote_IsError()
-    {
-        WriteNote("A", "x");
-
-        AssertError(Run("links", "Nope"), 1, "No note named Nope.");
-    }
-
     [Theory]
     [InlineData("tags")]
-    [InlineData("links", "A")]
     public void TagCommands_BadContextDb_IsError(params string[] args)
     {
         WriteNote("A", "#work");
@@ -1137,7 +1161,6 @@ public sealed class CliTests : IDisposable
     [Theory]
     [InlineData("note", "show", "Plan")]
     [InlineData("note", "show", "plan")]
-    [InlineData("links", "Plan")]
     [InlineData("export", "Plan", "out.md")]
     public void SensitiveNote_IsNeverReadByTheConsoleCommands(params string[] args)
     {
@@ -1209,22 +1232,20 @@ public sealed class CliTests : IDisposable
             result.Out.Split('\n', StringSplitOptions.RemoveEmptyEntries));
     }
 
-    // 152 AC-10: note show, links, export and tags take and print a subpage's full name.
+    // 152 AC-10: note show, export and tags take and print a subpage's full name.
     [Fact]
-    public void SubpageByFullName_ShowLinksExportTags()
+    public void SubpageByFullName_ShowExportTags()
     {
         WriteNested("Meetings", "#work [[Meetings/Meeting 1]]");
         WriteNested("Meetings/Meeting 1", "# Meeting 1\n#work");
         string target = Path.Combine(outside, "m1.md");
 
         Result show = Run("note", "show", "Meetings/Meeting", "1");
-        Result links = Run("links", "meetings/meeting 1");
         Result tags = Run("tags", "work");
         Result export = Run("export", "Meetings/Meeting 1", target);
         Result path = Run("note", "show", Path.Combine(root, "Meetings", "Meeting 1"));
 
         Assert.Equal((0, "# Meeting 1\n#work\n"), (show.Code, show.Out));
-        Assert.Equal((0, "Meetings\tlinked from\t#work\n"), (links.Code, links.Out));
         Assert.Equal((0, "Meetings\nMeetings/Meeting 1\n"), (tags.Code, tags.Out));
         Assert.Equal((0, "Exported Meetings/Meeting 1.\n"), (export.Code, export.Out));
         Assert.Equal("# Meeting 1\n#work", File.ReadAllText(target));
@@ -1256,124 +1277,6 @@ public sealed class CliTests : IDisposable
         Snapshot()
             .Where(f => !f.Key.StartsWith(TagIndex.FileName, StringComparison.Ordinal))
             .ToDictionary(f => f.Key, f => f.Value);
-
-    private void WritePersonData()
-    {
-        WriteNote("people", "# people");
-        Directory.CreateDirectory(Path.Combine(root, "people"));
-        File.WriteAllText(Path.Combine(root, "people", "Anna Schmidt.md"), "# Anna Schmidt\n@[Anna Schmidt]\n");
-        WriteNote("b notes", "met @[anna  SCHMIDT] and @[Bob]");
-        WriteNote("A plan", "ask @[Anna Schmidt]\n`@[Carl]`");
-        WriteIcs("work.ics", CalendarFeedTests.Ics.Replace(
-            "SUMMARY:", "SUMMARY:@[Anna Schmidt] ", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void People_PrintsNameAndCount_WritesOnlyContextDb()
-    {
-        WritePersonData();
-        Dictionary<string, string> before = SnapshotWithoutDb();
-
-        Result result = Run("people");
-
-        Assert.Equal(0, result.Code);
-        Assert.Equal(string.Empty, result.Err);
-        Assert.Equal("Anna Schmidt\t2\nBob\t1\n", result.Out);
-        Assert.Equal(before, SnapshotWithoutDb());
-        Assert.True(File.Exists(Path.Combine(root, TagIndex.FileName)));
-        Assert.Equal(0, http.Requests);
-    }
-
-    [Theory]
-    [InlineData("anna", "schmidt")]
-    [InlineData("@[Anna", "Schmidt]")]
-    [InlineData("ANNA  SCHMIDT")]
-    public void Person_PrintsNotesThenAppointments_WritesOnlyContextDb(params string[] name)
-    {
-        WritePersonData();
-        Dictionary<string, string> before = SnapshotWithoutDb();
-
-        Result result = Run(["person", .. name]);
-
-        Assert.Equal(0, result.Code);
-        Assert.Equal(string.Empty, result.Err);
-        string[] lines = result.Out.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        Assert.Equal(["Notes", "A plan", "b notes", "Appointments"], lines[..4]);
-        Assert.NotEmpty(lines[4..^2]);
-        Assert.Equal(["Todos", "Done todos"], lines[^2..]);
-        Assert.All(lines[4..^2], l => Assert.Matches(@"^\d{4}-\d{2}-\d{2}\t(all day|\d{2}:\d{2}-(\d{2}:\d{2}|…))\t@\[Anna Schmidt\] ", l));
-        Assert.Equal(before, SnapshotWithoutDb());
-        Assert.Equal(0, http.Requests);
-    }
-
-    [Fact]
-    public void Person_AppointmentLine_DateTimeTitle()
-    {
-        WriteIcs("a.ics", "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Call @[Bob]\r\nDTSTART:20261027T090000Z\r\nDTEND:20261027T100000Z\r\n"
-            + "END:VEVENT\r\nBEGIN:VEVENT\r\nDTSTART:20261028T090000Z\r\nATTENDEE;CN=bob:mailto:bob@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
-
-        Result result = Run("person", "Bob");
-
-        Assert.Equal(0, result.Code);
-        Assert.Equal("Notes\nAppointments\n2026-10-28\t09:00-09:00\t(no title)\n2026-10-27\t09:00-10:00\tCall @[Bob]\nTodos\nDone todos\n", result.Out);
-        Assert.DoesNotContain("example.com", result.Out, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Person_NoMentions_SaysSo_ExitZero()
-    {
-        WriteNote("A", "@[Bob]");
-
-        Result result = Run("person", "Carl", "Lee");
-
-        Assert.Equal(0, result.Code);
-        Assert.Equal(string.Empty, result.Err);
-        Assert.Equal("No notes, appointments or todos mention Carl Lee.\n", result.Out);
-    }
-
-    [Theory]
-    [InlineData("person")]
-    [InlineData("person", " ")]
-    [InlineData("person", "@[]")]
-    public void Person_NoName_IsUsageError(params string[] args)
-    {
-        Result result = Run(args);
-
-        AssertUsage(result);
-        Assert.Equal("Type: context person <name>. Run 'context help'.", result.ErrLines[0]);
-    }
-
-    [Fact]
-    public void People_WithArguments_IsUsageError()
-    {
-        AssertUsage(Run("people", "x"));
-    }
-
-    [Theory]
-    [InlineData("people")]
-    [InlineData("person", "Anna")]
-    public void PeopleCommands_BadContextDb_IsError(params string[] args)
-    {
-        WriteNote("A", "@[Anna]");
-        File.WriteAllText(Path.Combine(root, TagIndex.FileName), "not a database at all, not at all, really not");
-        Dictionary<string, string> before = Snapshot();
-
-        AssertError(Run(args), 1, "Can't read context.db.");
-        Assert.Equal(before, Snapshot());
-    }
-
-    [Fact]
-    public void Person_UnreadableCalendarFile_NamedOnStderr_ExitOne()
-    {
-        WriteNote("A", "@[Anna]");
-        WriteIcs("bad.ics", "not a calendar");
-
-        Result result = Run("person", "Anna");
-
-        Assert.Equal(1, result.Code);
-        Assert.Equal("Notes\nA\nAppointments\nTodos\nDone todos\n", result.Out);
-        Assert.Equal(["Can't read calendar/bad.ics"], result.ErrLines);
-    }
 
     // 157 AC-7 -----------------------------------------------------------------------------------
 
@@ -1541,149 +1444,6 @@ public sealed class CliTests : IDisposable
 
         AssertError(Run("search", "abc"), 1, "Can't read context.db.");
         Assert.Equal(before, Snapshot());
-    }
-
-    // 157 AC-8 -----------------------------------------------------------------------------------
-
-    [Fact]
-    public void Types_PrintsTypeAndAttributes_Sorted()
-    {
-        WriteNote("Types", "# Types");
-        Directory.CreateDirectory(Path.Combine(root, "Types"));
-        File.WriteAllText(Path.Combine(root, "Types", "Project.md"), "attribute:: owner\nattribute:: due\n");
-        File.WriteAllText(Path.Combine(root, "Types", "Person.md"), "# Person\n");
-
-        Result result = Run("types");
-
-        Assert.Equal(0, result.Code);
-        Assert.Equal(string.Empty, result.Err);
-        Assert.Equal("organization\t\nperson\t\nproject\towner, due\n", result.Out);
-    }
-
-    [Fact]
-    public void Types_Default_BuiltIns_WithArgumentsIsUsageError()
-    {
-        Assert.Equal("organization\t\nperson\taliases, affiliation, role\n", Run("types").Out);
-        AssertUsage(Run("types", "x"));
-    }
-    // 158 AC-5 -----------------------------------------------------------------------------------
-
-    private void WriteAliasData(string aliases)
-    {
-        WriteNote("people", "# people");
-        Directory.CreateDirectory(Path.Combine(root, "people"));
-        File.WriteAllText(Path.Combine(root, "people", "Anna Schmidt.md"), "# Anna Schmidt\naliases:: " + aliases + "\n");
-        WriteNote("A", "@[Anna]");
-        WriteNote("B", "@[Anna Schmidt]");
-        WriteIcs("a.ics", "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Call\r\nDTSTART:20261027T090000Z\r\nDTEND:20261027T100000Z\r\n"
-            + "ATTENDEE;CN=Anna:mailto:anna@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
-    }
-
-    [Theory]
-    [InlineData("Anna")]
-    [InlineData("Anna", "Schmidt")]
-    public void Person_AliasOrFullName_SameNotesAndAppointments(params string[] name)
-    {
-        WriteAliasData("Anna");
-
-        Result result = Run(["person", .. name]);
-
-        Assert.Equal(0, result.Code);
-        Assert.Equal(string.Empty, result.Err);
-        Assert.Equal("Notes\nA\nB\nAppointments\n2026-10-27\t09:00-10:00\tCall\nTodos\nDone todos\n", result.Out);
-        Assert.Equal("Anna Schmidt\t2\n", Run("people").Out);
-    }
-
-    // 158 AC-6: an ambiguous alias prints the unresolved name's output and one stderr hint; the exit code is unchanged.
-    [Fact]
-    public void Person_AmbiguousAlias_HintOnStderr_ExitCodeUnchanged()
-    {
-        WriteAliasData("Anna");
-        File.WriteAllText(Path.Combine(root, "people", "Anna Berg.md"), "# Anna Berg\naliases:: anna\n");
-        string hint = "@[Anna] is an alias of more than one person: Anna Berg, Anna Schmidt.";
-
-        Result result = Run("person", "Anna");
-
-        Assert.Equal(0, result.Code);
-        Assert.Equal("Notes\nA\nAppointments\n2026-10-27\t09:00-10:00\tCall\nTodos\nDone todos\n", result.Out);
-        Assert.Equal([hint], result.ErrLines);
-
-        WriteIcs("bad.ics", "not a calendar");
-        Result failing = Run("person", "Anna");
-
-        Assert.Equal(1, failing.Code);
-        Assert.Equal([hint, "Can't read calendar/bad.ics"], failing.ErrLines);
-    }
-
-    // 159 AC-7 -----------------------------------------------------------------------------------
-
-    // Writes todos straight into todos.json: an open one per (text, due) and the done ones done at the given times.
-    private void WriteTodos(params (string Text, string Due, DateTime? Done)[] todos)
-    {
-        foreach ((string text, string due, DateTime? done) in todos)
-        {
-            TodoItem todo = new TodoStore(root, () => Now).Add(text, DateOnly.Parse(due, System.Globalization.CultureInfo.InvariantCulture));
-            if (done is { } at)
-            {
-                new TodoStore(root, () => at).Complete(todo.Id);
-            }
-        }
-    }
-
-    [Fact]
-    public void Person_PrintsTodosThenDoneTodos_OneLine_InOrder()
-    {
-        WriteNote("A", "@[Anna]");
-        WriteTodos(
-            ("Call @[Anna]\nabout\u0007 it", "2026-11-05", null),
-            ("Ask @[anna] first", "2026-11-01", null),
-            ("Only @[Bob]", "2026-11-01", null),
-            ("Booked room for @[Anna]", "2026-10-20", new DateTime(2026, 10, 21, 8, 0, 0, DateTimeKind.Utc)),
-            ("Sent @[ANNA] the plan", "2026-10-25", new DateTime(2026, 10, 27, 23, 30, 0, DateTimeKind.Utc)));
-        Dictionary<string, string> before = SnapshotWithoutDb();
-
-        Result result = Run("person", "Anna");
-
-        Assert.Equal(0, result.Code);
-        Assert.Equal(string.Empty, result.Err);
-        Assert.Equal(
-            "Notes\nA\nAppointments\nTodos\n2026-11-01\tAsk @[anna] first\n2026-11-05\tCall @[Anna] about\uFFFD it\n"
-                + "Done todos\n2026-10-27\tSent @[ANNA] the plan\n2026-10-21\tBooked room for @[Anna]\n",
-            result.Out);
-        Assert.Equal(before, SnapshotWithoutDb());
-    }
-
-    [Fact]
-    public void Person_OnlyTodos_IsFound_NothingAtAll_NewEmptyLine()
-    {
-        WriteTodos(("Call @[Carl]", "2026-11-05", null));
-
-        Assert.Equal("Notes\nAppointments\nTodos\n2026-11-05\tCall @[Carl]\nDone todos\n", Run("person", "Carl").Out);
-
-        Result none = Run("person", "Dora");
-        Assert.Equal(0, none.Code);
-        Assert.Equal(string.Empty, none.Err);
-        Assert.Equal("No notes, appointments or todos mention Dora.\n", none.Out);
-    }
-
-    [Fact]
-    public void Person_UnreadableTodos_ErrorOnStderr_ExitOne_OtherSectionsPrinted()
-    {
-        WriteNote("A", "@[Anna]");
-        File.WriteAllText(Path.Combine(root, TodoStore.FileName), "[{\"text\":\"@[Anna]\",\"due\":\"2026-11-03\",\"done\":\"nope\"}]");
-        Dictionary<string, string> before = SnapshotWithoutDb();
-
-        Result result = Run("person", "Anna");
-
-        Assert.Equal(1, result.Code);
-        Assert.Equal("Notes\nA\nAppointments\nTodos\nDone todos\n", result.Out);
-        Assert.Equal(["Can't read todos.json."], result.ErrLines);
-
-        Result none = Run("person", "Dora");
-        Assert.Equal(1, none.Code);
-        Assert.Equal("No notes, appointments or todos mention Dora.\n", none.Out);
-        Assert.Equal(["Can't read todos.json."], none.ErrLines);
-        Assert.Equal(before, SnapshotWithoutDb());
     }
 
     // 164 ------------------------------------------------------------------------------------------
