@@ -220,6 +220,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#230](backlog/230-clean-invisible-and-control-characters-in.md) Clean invisible and control characters in text
 - [ ] [#182](backlog/182-refuse-invisible-characters-in-person-names.md) Refuse invisible characters in person names and note titles
 - [ ] [#183](backlog/183-turn-a-typed-name-into-a.md) Turn a typed @[Name] into a mention chip right away
+- [ ] [#237](backlog/237-code-spans-and-fences-in-tags.md) Code spans and fences in tags, links and mentions
 - [ ] [#184](backlog/184-skip-code-fences-when-reading-tags.md) Skip ~~~ code fences when reading tags and mentions
 - [ ] [#187](backlog/187-match-mention-lowercasing-between-the-editor.md) Match mention lowercasing between the editor and the index
 - [ ] [#188](backlog/188-cap-the-size-of-note-reads.md) Cap the size of note reads
