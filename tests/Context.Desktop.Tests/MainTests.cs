@@ -120,8 +120,8 @@ public sealed class MainTests : IDisposable
 
         await RunPalette(cut, line);
 
-        Assert.Equal("# Weekly sync\n2026-10-29\n", File.ReadAllText(Path.Combine(data.Root, "Weekly sync.md")));
         cut.WaitForAssertion(() => Assert.Equal("Weekly sync", cut.Find(".note-title").TextContent), Wait);
+        Assert.Equal("# Weekly sync\n2026-10-29\n", File.ReadAllText(Path.Combine(data.Root, "Weekly sync.md")));
         Assert.Equal("Created Weekly sync", cut.Find(".main-status").TextContent);
         Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
         cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
@@ -153,12 +153,14 @@ public sealed class MainTests : IDisposable
     [Fact]
     public async Task PaletteNew_WithoutTemplateToken_PlainNote()
     {
+        EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
         await RunPalette(cut, "/new Plan--template");
 
-        Assert.Equal("# Plan--template\n", File.ReadAllText(Path.Combine(data.Root, "Plan--template.md")));
         cut.WaitForAssertion(() => Assert.Equal("Created Plan--template", cut.Find(".main-status").TextContent), Wait);
+        Assert.Equal("# Plan--template\n", File.ReadAllText(Path.Combine(data.Root, "Plan--template.md")));
+        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
     }
 
     // 165 AC-8: with unsaved changes in the open note, the new note from a template asks to discard first.
@@ -174,8 +176,8 @@ public sealed class MainTests : IDisposable
 
         await RunPalette(cut, "/new Fresh --template meeting");
 
-        Assert.True(File.Exists(Path.Combine(data.Root, "Fresh.md")));
         cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
+        Assert.True(File.Exists(Path.Combine(data.Root, "Fresh.md")));
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal("Fresh", cut.Find(".note-title").TextContent), Wait);
     }

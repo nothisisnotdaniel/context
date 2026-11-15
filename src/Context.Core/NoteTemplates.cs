@@ -153,6 +153,13 @@ internal sealed class NoteTemplates
         found = chosen.Name;
         try
         {
+            // Checked again right before the read, so a file swapped for a link after the listing is not followed.
+            if (NoteStore.IsLink(new FileInfo(chosen.Path)))
+            {
+                found = null;
+                return TemplateReadKind.Missing;
+            }
+
             text = Decode(BoundedFile.Read(chosen.Path, NoteStore.MaxEditBytes));
             return TemplateReadKind.Found;
         }
@@ -168,12 +175,16 @@ internal sealed class NoteTemplates
     /// <c>{{title}}</c> the normalized <paramref name="title"/>, inserted literally (never expanded again). Any other
     /// <c>{{...}}</c> stays as written, line endings are kept and a leading byte order mark is dropped.
     /// </summary>
-    public static string Fill(string text, string title, DateTime localNow)
+    public static string Fill(string text, string title, DateTime localNow) =>
+        Fill(text, title, localNow, int.MaxValue)!;
+
+    // Fill that stops and returns null once the result is longer than maxLength characters.
+    private static string? Fill(string text, string title, DateTime localNow, int maxLength)
     {
         string date = localNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         string time = localNow.ToString("HH:mm", CultureInfo.InvariantCulture);
         string normalized = NoteStore.NormalizeTitle(title);
-        int start = text.Length > 0 && text[0] == '﻿' ? 1 : 0;
+        int start = text.Length > 0 && text[0] == '\uFEFF' ? 1 : 0;
         (string Token, string Value)[] tokens = [("{{date}}", date), ("{{time}}", time), ("{{title}}", normalized)];
         StringBuilder filled = new StringBuilder(text.Length);
         int i = start;
@@ -190,6 +201,11 @@ internal sealed class NoteTemplates
                         break;
                     }
                 }
+            }
+
+            if (filled.Length > maxLength)
+            {
+                return null;
             }
 
             if (matched >= 0)
@@ -240,8 +256,9 @@ internal sealed class NoteTemplates
                 return new TemplateNote(TemplateNoteKind.Unreadable, normalized, found ?? name, string.Empty, []);
         }
 
-        string filled = Fill(text, normalized, localNow);
-        if (Encoding.UTF8.GetByteCount(filled) > NoteStore.MaxEditBytes)
+        // A UTF-8 byte per character at least, so a text longer than MaxEditBytes characters is too big: filling stops there.
+        string? filled = Fill(text, normalized, localNow, (int)NoteStore.MaxEditBytes);
+        if (filled is null || Encoding.UTF8.GetByteCount(filled) > NoteStore.MaxEditBytes)
         {
             return new TemplateNote(TemplateNoteKind.TooBig, normalized, found ?? name, string.Empty, []);
         }
