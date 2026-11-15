@@ -28,7 +28,19 @@
     {
         <p class="grey lossy">Saving will reformat parts of this note.</p>
     }
-    <p class="status @statusClass" role="status">@statusText</p>
+    <p class="status @statusClass" role="status">
+        @if (statusLines.Count > 0)
+        {
+            @foreach ((string text, string css) in statusLines)
+            {
+                <span class="line cut @css" title="@text">@text</span>
+            }
+        }
+        else
+        {
+            @statusText
+        }
+    </p>
     <div class="editor-host" @ref="host"></div>
 </section>
 
@@ -43,6 +55,7 @@
     private bool dirty;
     private string statusText = string.Empty;
     private string statusClass = string.Empty;
+    private List<(string Text, string Css)> statusLines = [];
 
     /// <summary>The bridge to the page's editor; one per editor.</summary>
     [Inject]
@@ -64,6 +77,14 @@
     /// <summary>Called with the person's name (as found by PersonParser) when a mention in the text is clicked.</summary>
     [Parameter]
     public EventCallback<string> OnPerson { get; set; }
+
+    /// <summary>Called once per drop of files onto the editor; the parent stores them and calls <see cref="ShowAttachedAsync"/>.</summary>
+    [Parameter]
+    public EventCallback<DroppedFiles> OnAttach { get; set; }
+
+    /// <summary>Called with the href of a clicked attachment PDF link; the parent opens it.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpenAttachment { get; set; }
 
     /// <summary>True when <see cref="Name"/> is a sensitive note: it is unlocked instead of read.</summary>
     [Parameter]
@@ -122,6 +143,44 @@
     }
 
     /// <summary>
+    /// Shows how a drop ended: inserts the link of every stored file at the drop position, in drop order (the editor
+    /// becomes dirty), and one status line per file (accent when stored, red otherwise), or the one red refusal.
+    /// </summary>
+    internal async Task ShowAttachedAsync(ActionResult result)
+    {
+        if (result.Attached is not { } lines)
+        {
+            ShowStatus(DesktopText.OneLine(result.Text), "red");
+            StateHasChanged();
+            return;
+        }
+
+        List<(string Text, string Css)> shown = [];
+        foreach (AttachmentLine line in lines)
+        {
+            string css = line.Kind == ActionKind.Done ? "accent" : "red";
+            if (line.Kind == ActionKind.Done && line.Src is { } src && line.Name is { } stored && mounted)
+            {
+                try
+                {
+                    await Interop.InsertAttachmentAsync(host, src, stored, line.IsImage, line.Mime ?? string.Empty, line.Base64);
+                }
+                catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+                {
+                    // The page is gone; the file is stored, only its link wasn't inserted.
+                }
+            }
+
+            shown.Insert(shown.Count, (DesktopText.OneLine(line.Text), css));
+        }
+
+        statusText = string.Empty;
+        statusClass = string.Empty;
+        statusLines = shown;
+        StateHasChanged();
+    }
+
+    /// <summary>
     /// Reads the plain note again and mounts the editor with that text, without taking the focus: after something
     /// else (a capture) wrote the note while it was open without unsaved changes. A sensitive note, an editor that
     /// isn't mounted or a running save is left alone; a note that can't be read any more keeps what is shown.
@@ -142,7 +201,7 @@
         try
         {
             lossy = !await Interop.IsLosslessAsync(note.Text);
-            await Interop.MountAsync(host, note.Text);
+            await Interop.MountAsync(host, note.Text, await State.InlineImages(Name, note.Text));
             opened = note;
             dirty = false;
         }
@@ -168,7 +227,7 @@
         try
         {
             lossy = !await Interop.IsLosslessAsync(saved.Text);
-            await Interop.MountAsync(host, saved.Text);
+            await Interop.MountAsync(host, saved.Text, Sensitive ? [] : await State.InlineImages(Name, saved.Text));
             opened = saved;
             dirty = false;
             ShowStatus(string.Empty, string.Empty);
@@ -196,6 +255,8 @@
         Interop.LinkClicked -= LinkClicked;
         Interop.PersonClicked -= PersonClicked;
         Interop.DirtyChanged -= DirtyChanged;
+        Interop.FilesDropped -= FilesDropped;
+        Interop.AttachmentClicked -= AttachmentClicked;
         await Interop.DestroyAsync();
     }
 
@@ -227,7 +288,12 @@
             Interop.LinkClicked += LinkClicked;
             Interop.PersonClicked += PersonClicked;
             Interop.DirtyChanged += DirtyChanged;
-            await Interop.MountAsync(host, note.Text);
+            Interop.FilesDropped += FilesDropped;
+            Interop.AttachmentClicked += AttachmentClicked;
+
+            // A sensitive note shows no images: nothing next to it is read.
+            IReadOnlyList<InlineImage> images = Sensitive ? [] : await State.InlineImages(Name, note.Text);
+            await Interop.MountAsync(host, note.Text, images);
             opened = note;
             mounted = true;
         }
@@ -338,9 +404,15 @@
         }
     });
 
+    // A drop goes to the parent, which stores the files (the action refuses a sensitive note).
+    private Task FilesDropped(DroppedFiles dropped) => InvokeAsync(() => OnAttach.InvokeAsync(dropped));
+
+    private Task AttachmentClicked(string href) => InvokeAsync(() => OnOpenAttachment.InvokeAsync(href));
+
     private void ShowStatus(string text, string cssClass)
     {
         statusText = text;
         statusClass = cssClass;
+        statusLines = [];
     }
 }

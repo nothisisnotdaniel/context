@@ -107,7 +107,8 @@
                         }
                     </div>
                     <NoteEditor @key="(name, openSensitive)" @ref="editor" Name="@name" Sensitive="openSensitive"
-                                OnTag="ShowTag" OnOpenNote="RequestOpen" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked" />
+                                OnTag="ShowTag" OnOpenNote="RequestOpen" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked"
+                                OnAttach="AttachDropped" OnOpenAttachment="OpenAttachment" />
                     @if (historyShown)
                     {
                         <HistoryPanel Name="@name" Sensitive="openSensitive" OnRestore="AskRestore" OnClose="CloseHistory" />
@@ -1481,6 +1482,45 @@ else
         finally
         {
             running = false;
+        }
+
+        if (opened.Kind == ActionKind.Done)
+        {
+            ShowStatus(string.Empty, string.Empty);
+        }
+        else
+        {
+            ShowStatus(DesktopText.OneLine(opened.Text), "red");
+        }
+    }
+
+    // The editor's drop: stores the dropped files next to the open note, then the editor inserts the links (unsaved).
+    private async Task AttachDropped(DroppedFiles dropped)
+    {
+        if (openName is not { } name)
+        {
+            return;
+        }
+
+        ActionResult attached = await Actions.AttachFiles(name, dropped.Count, dropped.Files);
+        if (editor is not null && string.Equals(openName, name, StringComparison.Ordinal))
+        {
+            await editor.ShowAttachedAsync(attached);
+        }
+    }
+
+    // A click on an attachment PDF link in the editor: opens it in the system viewer (a dirty editor is fine).
+    private async Task OpenAttachment(string href)
+    {
+        if (openName is not { } name)
+        {
+            return;
+        }
+
+        ActionResult opened = await Actions.OpenAttachment(name, href);
+        if (!string.Equals(openName, name, StringComparison.Ordinal))
+        {
+            return;
         }
 
         if (opened.Kind == ActionKind.Done)

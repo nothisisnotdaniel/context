@@ -159,6 +159,34 @@ internal sealed class DesktopState
     });
 
     /// <summary>
+    /// The images the plain note <paramref name="name"/> shows inline, off the calling thread: each source of
+    /// <see cref="NoteAttachments.ImageSources"/> in <paramref name="text"/> that <see cref="NoteAttachments.TryResolve"/>
+    /// accepts as an image, with its MIME type and base64 bytes. Empty on any error. Reads only.
+    /// </summary>
+    public Task<IReadOnlyList<InlineImage>> InlineImages(string name, string text) => Task.Run(() =>
+    {
+        List<InlineImage> images = [];
+        try
+        {
+            NoteAttachments attachments = new NoteAttachments(notes);
+            foreach (string src in NoteAttachments.ImageSources(text))
+            {
+                ResolvedAttachment? resolved = attachments.TryResolve(name, src);
+                if (resolved is not null && resolved.IsImage)
+                {
+                    images.Insert(images.Count, new InlineImage(src, resolved.Mime, Convert.ToBase64String(resolved.Bytes)));
+                }
+            }
+        }
+        catch (Exception)
+        {
+            return (IReadOnlyList<InlineImage>)[];
+        }
+
+        return images;
+    });
+
+    /// <summary>
     /// Opens the sensitive note called <paramref name="name"/> for editing, off the calling thread: reads its sealed
     /// file (found in <see cref="NoteStore.ListSensitive"/>, at most <see cref="SealedNote.MaxFileBytes"/>) and
     /// unwraps it with one <see cref="IKeyStore.Agree"/> call, which may make the OS ask the user. The opened note

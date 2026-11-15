@@ -4,10 +4,74 @@ using Microsoft.JSInterop;
 namespace Context;
 
 /// <summary>
+/// One file dropped onto the page's editor: its name as the OS gives it (raw, untrusted), its size and its bytes
+/// (<c>null</c> for a file over <see cref="NoteAttachments.MaxBytes"/>, which the page never reads).
+/// </summary>
+public sealed record DroppedFile
+{
+    public DroppedFile(string name, long size, byte[]? bytes)
+    {
+        Name = name;
+        Size = size;
+        Bytes = bytes;
+    }
+
+    public string Name { get; }
+
+    public long Size { get; }
+
+    public byte[]? Bytes { get; }
+
+    /// <summary>Only the type name, so the raw name and bytes never leak through formatting.</summary>
+    public override string ToString() => nameof(DroppedFile);
+}
+
+/// <summary>
+/// One drop: how many files were dropped and the files themselves (empty when <see cref="Count"/> is over
+/// <see cref="NoteAttachments.MaxFilesPerDrop"/>).
+/// </summary>
+public sealed record DroppedFiles
+{
+    public DroppedFiles(int count, IReadOnlyList<DroppedFile> files)
+    {
+        Count = count;
+        Files = files;
+    }
+
+    public int Count { get; }
+
+    public IReadOnlyList<DroppedFile> Files { get; }
+
+    /// <summary>Only the type name, so the raw names never leak through formatting.</summary>
+    public override string ToString() => nameof(DroppedFiles);
+}
+
+/// <summary>An image the page's editor shows inline: its link source, MIME type and base64 bytes (checked by .NET).</summary>
+public sealed record InlineImage
+{
+    public InlineImage(string src, string mime, string base64)
+    {
+        Src = src;
+        Mime = mime;
+        Base64 = base64;
+    }
+
+    public string Src { get; }
+
+    public string Mime { get; }
+
+    public string Base64 { get; }
+
+    /// <summary>Only the type name, so the bytes never leak through formatting.</summary>
+    public override string ToString() => nameof(InlineImage);
+}
+
+/// <summary>
 /// The only bridge to JavaScript: calls the bundled editor (<c>wwwroot/editor/editor.js</c>, global
 /// <c>ContextEditor</c>) for one host element and passes its tag, link and mention clicks and its dirty flips back as
 /// events. It never changes data: its <see cref="JSInvokableAttribute"/> methods only raise <see cref="TagClicked"/>,
-/// <see cref="LinkClicked"/>, <see cref="PersonClicked"/> and <see cref="DirtyChanged"/>, and the component decides what to open or show.
+/// <see cref="LinkClicked"/>, <see cref="PersonClicked"/>, <see cref="DirtyChanged"/>, <see cref="FilesDropped"/> and
+/// <see cref="AttachmentClicked"/>, and the component decides what to open, show or store.
 /// </summary>
 internal sealed class EditorInterop
 {
@@ -35,13 +99,30 @@ internal sealed class EditorInterop
     /// </summary>
     public event Func<bool, Task>? DirtyChanged;
 
-    /// <summary>Opens <paramref name="markdown"/> in a new editor inside <paramref name="element"/>.</summary>
-    public async Task MountAsync(ElementReference element, string markdown)
+    /// <summary>Raised once per drop of files onto the editor.</summary>
+    public event Func<DroppedFiles, Task>? FilesDropped;
+
+    /// <summary>Raised with the href of a clicked attachment PDF link, as written (<c>.attachments/x.pdf</c>).</summary>
+    public event Func<string, Task>? AttachmentClicked;
+
+    /// <summary>
+    /// Opens <paramref name="markdown"/> in a new editor inside <paramref name="element"/>, showing the
+    /// <paramref name="images"/> (already checked by <see cref="NoteAttachments.TryResolve"/>) inline.
+    /// </summary>
+    public async Task MountAsync(ElementReference element, string markdown, IReadOnlyList<InlineImage>? images = null)
     {
         self ??= DotNetObjectReference.Create(this);
         host = element;
-        await js.InvokeVoidAsync("ContextEditor.mount", element, markdown, self);
+        await js.InvokeVoidAsync("ContextEditor.mount", element, markdown, self, images ?? []);
     }
+
+    /// <summary>
+    /// Inserts the link to a stored attachment at the editor's drop position (which then moves past it):
+    /// an image node (alt = <paramref name="name"/>, shown from <paramref name="base64"/>) or a PDF link.
+    /// </summary>
+    public ValueTask InsertAttachmentAsync(
+        ElementReference element, string src, string name, bool isImage, string mime, string? base64) =>
+        js.InvokeVoidAsync("ContextEditor.insertAttachment", element, src, name, isImage, mime, base64);
 
     /// <summary>True when the editor's Markdown round-trips <paramref name="markdown"/> byte for byte.</summary>
     public ValueTask<bool> IsLosslessAsync(string markdown) => js.InvokeAsync<bool>("ContextEditor.isLossless", markdown);
@@ -74,6 +155,15 @@ internal sealed class EditorInterop
     /// <summary>Called by the editor when its text became changed or unchanged against the saved text.</summary>
     [JSInvokable]
     public Task OnDirty(bool dirty) => DirtyChanged?.Invoke(dirty) ?? Task.CompletedTask;
+
+    /// <summary>Called by the editor once per drop of files: the number dropped and the files (none over the limit).</summary>
+    [JSInvokable]
+    public Task OnDrop(int count, DroppedFile[] files) =>
+        FilesDropped?.Invoke(new DroppedFiles(count, files)) ?? Task.CompletedTask;
+
+    /// <summary>Called by the editor when an attachment PDF link is clicked.</summary>
+    [JSInvokable]
+    public Task OnAttachment(string href) => AttachmentClicked?.Invoke(href) ?? Task.CompletedTask;
 
     /// <summary>Removes the editor from the page and drops the reference the page holds.</summary>
     public async Task DestroyAsync()

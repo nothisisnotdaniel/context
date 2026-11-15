@@ -1,7 +1,7 @@
 // The editor in the page: one ProseMirror view per host element. DOM is built only through ProseMirror's
-// renderer and document.createElement; tag, link and mention clicks (and Enter on a focused chip) are reported to .NET,
-// which decides what to open.
-import { EditorState } from "prosemirror-state";
+// renderer and document.createElement; tag, link, mention and attachment PDF clicks (and Enter on a focused chip) and
+// dropped files are reported to .NET, which decides what to open or store.
+import { EditorState, Selection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { keymap } from "prosemirror-keymap";
 import { history, undo, redo } from "prosemirror-history";
@@ -12,6 +12,75 @@ import { schema } from "./schema.js";
 import { parse, serialize } from "./markdown.js";
 
 const editors = new WeakMap();
+
+// The limits .NET checks again: NoteAttachments.MaxBytes and MaxFilesPerDrop.
+const maxAttachmentBytes = 10 * 1024 * 1024;
+const maxFilesPerDrop = 10;
+
+// An attachment PDF link: the only href a click opens (through .NET, in the system viewer).
+const attachmentPdf = /^\.attachments\/[^/\\]+\.pdf$/;
+
+// A blob: URL for base64 bytes .NET checked (magic bytes and extension); never a URL from the note text.
+function blobUrl(mime, base64) {
+  const text = atob(base64);
+  const bytes = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i++) {
+    bytes[i] = text.charCodeAt(i);
+  }
+  return URL.createObjectURL(new Blob([bytes], { type: mime }));
+}
+
+// An image whose src .NET gave bytes for is an <img> with a blob: URL; any other stays the grey placeholder.
+function imageView(editor) {
+  return node => {
+    const alt = node.attrs.alt || "";
+    const url = editor.images.get(node.attrs.src);
+    if (url) {
+      const img = document.createElement("img");
+      img.src = url;
+      img.alt = alt;
+      img.title = alt;
+      return { dom: img };
+    }
+    const span = document.createElement("span");
+    span.className = "image-placeholder grey";
+    span.title = node.attrs.src;
+    span.textContent = alt ? "[image: " + alt + "]" : "[image]";
+    return { dom: span };
+  };
+}
+
+// Reads the dropped files (each at most maxAttachmentBytes; a bigger one is not read) and makes one .NET call.
+async function sendDrop(dotnet, files) {
+  const count = files.length;
+  const sent = [];
+  if (count <= maxFilesPerDrop) {
+    for (const file of files) {
+      let bytes = null;
+      if (file.size <= maxAttachmentBytes) {
+        try {
+          bytes = new Uint8Array(await file.arrayBuffer());
+        } catch {
+          bytes = null;
+        }
+      }
+      sent.push({ name: file.name, size: file.size, bytes });
+    }
+  }
+  await dotnet.invokeMethodAsync("OnDrop", count, sent).catch(() => {});
+}
+
+// The href of an attachment PDF link at pos, or null.
+function attachmentAt(view, pos) {
+  const node = view.state.doc.nodeAt(pos);
+  const marks = (node ? node.marks : []).concat(view.state.doc.resolve(pos).marks());
+  for (const mark of marks) {
+    if (mark.type === schema.marks.link && attachmentPdf.test(mark.attrs.href || "")) {
+      return mark.attrs.href;
+    }
+  }
+  return null;
+}
 
 // Keys the page handles (Ctrl/Cmd+S saves, Ctrl/Cmd+K opens the palette): the editor does nothing with them and
 // the keydown bubbles on to the page.
@@ -155,11 +224,19 @@ function chipNode(view, target) {
   }
 }
 
-/** Opens markdown in a new editor inside element; tag, link and mention clicks and dirty flips call back into dotnet. */
-export function mount(element, markdown, dotnet) {
+/**
+ * Opens markdown in a new editor inside element; tag, link, mention and attachment clicks, drops and dirty flips call
+ * back into dotnet. images ([{ src, mime, base64 }], checked by .NET) are shown inline through blob: URLs.
+ */
+export function mount(element, markdown, dotnet, images) {
   destroy(element);
   const doc = parse(markdown);
-  const editor = { view: null, clean: doc, dirty: false, dotnet };
+  const editor = { view: null, clean: doc, dirty: false, dotnet, images: new Map(), dropPos: null };
+  for (const image of images || []) {
+    if (image && typeof image.src === "string" && !editor.images.has(image.src)) {
+      editor.images.set(image.src, blobUrl(image.mime, image.base64));
+    }
+  }
   const state = EditorState.create({
     doc,
     plugins: [
@@ -191,16 +268,27 @@ export function mount(element, markdown, dotnet) {
   });
   const view = new EditorView(element, {
     state,
-    nodeViews: { list_item: listItemView },
+    nodeViews: { list_item: listItemView, image: imageView(editor) },
     attributes: { class: "note-editor-body", spellcheck: "true" },
     dispatchTransaction(tr) {
       view.updateState(view.state.apply(tr));
       if (tr.docChanged) {
+        if (editor.dropPos !== null) {
+          editor.dropPos = tr.mapping.map(editor.dropPos);
+        }
         reportDirty(editor);
       }
     },
     handleClickOn(view, pos, node) {
       return openChip(node, dotnet);
+    },
+    handleClick(view, pos) {
+      const href = attachmentAt(view, pos);
+      if (href === null) {
+        return false;
+      }
+      dotnet.invokeMethodAsync("OnAttachment", href).catch(() => {});
+      return true;
     },
     handleDOMEvents: {
       // A keydown on a focused chip never reaches the keymaps: Enter opens the chip like a click, every other key
@@ -216,10 +304,49 @@ export function mount(element, markdown, dotnet) {
         }
         return true;
       },
+      // Dropped files: remember where they landed (the cursor when that can't be told) and hand them to .NET.
+      drop(view, event) {
+        const files = event.dataTransfer ? event.dataTransfer.files : null;
+        if (!files || files.length === 0) {
+          return false;
+        }
+        event.preventDefault();
+        const at = view.posAtCoords({ left: event.clientX, top: event.clientY });
+        editor.dropPos = at ? at.pos : view.state.selection.from;
+        sendDrop(dotnet, Array.from(files));
+        return true;
+      },
     },
   });
   editor.view = view;
   editors.set(element, editor);
+}
+
+/**
+ * Inserts the link to a stored attachment at the drop position, which then moves past it: an image node (alt name,
+ * shown from base64 through a blob: URL) or the text name with a link to src.
+ */
+export function insertAttachment(element, src, name, isImage, mime, base64) {
+  const editor = editors.get(element);
+  if (!editor) {
+    return;
+  }
+  const state = editor.view.state;
+  let pos = editor.dropPos === null ? state.selection.from : Math.min(Math.max(editor.dropPos, 0), state.doc.content.size);
+  const $pos = state.doc.resolve(pos);
+  if (!$pos.parent.inlineContent) {
+    pos = Selection.near($pos).from;
+  }
+  if (isImage && base64 && !editor.images.has(src)) {
+    editor.images.set(src, blobUrl(mime, base64));
+  }
+  const node = isImage
+    ? schema.nodes.image.create({ src, alt: name })
+    : schema.text(name, [schema.marks.link.create({ href: src })]);
+  const tr = state.tr.insert(pos, node);
+  editor.dropPos = null;
+  editor.view.dispatch(tr);
+  editor.dropPos = pos + node.nodeSize;
 }
 
 /** The editor's text as Markdown. */
@@ -248,6 +375,10 @@ export function destroy(element) {
   const editor = editors.get(element);
   if (editor) {
     editor.view.destroy();
+    for (const url of editor.images.values()) {
+      URL.revokeObjectURL(url);
+    }
+    editor.images.clear();
     editors.delete(element);
   }
 }

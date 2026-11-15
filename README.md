@@ -109,6 +109,26 @@ no versions. A sensitive note's versions stay sealed; making it plain removes th
 - When `.history` in a folder is broken (for example a file or a link called `.history`), every save of the notes in
   that folder fails with the same message. Remove that `.history` entry from the data folder to fix it.
 
+### Attachments
+
+Drop images (PNG, JPEG, GIF, WebP) or PDF files onto an open note in the desktop app to attach them, at most 10
+files of up to 10 MB each per drop. The app checks each file's type from its bytes, never from its name, and stores it
+in the `.attachments` folder of the note's level (next to the note file), under a cleaned name (`My Shot (1).PNG`
+becomes `My-Shot-1.png`; a name already taken gets `-2`, `-3` and so on). It inserts a link at the drop position:
+`![shot.png](.attachments/shot.png)` for an image, which shows in the note, and `[plan.pdf](.attachments/plan.pdf)`
+for a PDF, which opens in the system's PDF viewer when you click it. The note is not saved by the drop; save it to
+keep the link. Sensitive notes can't have attachments.
+
+Moving a note to another level takes the attachments it links along into the new level's `.attachments` folder
+(renamed with `-2` and its links updated when the name is taken there). An attachment that another note in the old
+level still links is copied, so both notes keep working. If anything goes wrong, nothing is moved. Deleting a note
+removes the attachments that only it links in its level; ones another note links stay.
+
+- A note that links more than 100 different attachments isn't moved to another level (`Can't move the attachments
+  of <name>. Nothing was moved.`), and deleting it removes none of its attachments.
+- An older kept version of a moved note still holds the old attachment names, so restoring it can link a missing or
+  different file.
+
 ### Weekly review
 
 `context review` prints one page for a weekly review: `Review, <from> to <to>` (the last 7 days, today included), then

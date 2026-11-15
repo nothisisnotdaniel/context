@@ -797,6 +797,84 @@ public sealed class MainTests : IDisposable
             "Replaced Plan.", Assert.Single(cut.FindAll(".import-result p")).TextContent, StringComparison.Ordinal), Wait);
     }
 
+    // 177 AC-6: one OnDrop stores the file, inserts its link once and shows the accent line.
+    [Fact]
+    public async Task Drop_AttachesInsertsAndShowsLine()
+    {
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await OpenFull(cut, js, "Plan");
+
+        await cut.InvokeAsync(() => js.Page().OnDrop(1, [new DroppedFile("shot.png", png.Length, png)]));
+
+        cut.WaitForAssertion(() => Assert.Equal("Attached shot.png.", cut.Find(".note-editor .status .line").TextContent), Wait);
+        Assert.True(cut.Find(".note-editor .status .line").ClassList.Contains("accent"));
+        JSRuntimeInvocation insert = Assert.Single(js.Calls("ContextEditor.insertAttachment"));
+        Assert.Equal(
+            [".attachments/shot.png", "shot.png", true, "image/png", Convert.ToBase64String(png)],
+            insert.Arguments.Skip(1));
+        Assert.Equal(png, File.ReadAllBytes(Path.Combine(data.Root, ".attachments", "shot.png")));
+        Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+    }
+
+    // 177 AC-6: a drop of more than 10 files shows one red line and inserts nothing.
+    [Fact]
+    public async Task Drop_OverTheLimit_RedLine()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await OpenFull(cut, js, "Plan");
+
+        await cut.InvokeAsync(() => js.Page().OnDrop(11, []));
+
+        cut.WaitForAssertion(() => Assert.Equal("Drop at most 10 files.", cut.Find(".note-editor .status").TextContent.Trim()), Wait);
+        Assert.True(cut.Find(".note-editor .status").ClassList.Contains("red"));
+        Assert.Empty(js.Calls("ContextEditor.insertAttachment"));
+        Assert.False(Directory.Exists(Path.Combine(data.Root, ".attachments")));
+    }
+
+    // 177 AC-8: opening a note mounts it with its resolved images only.
+    [Fact]
+    public async Task Open_MountsResolvedImages()
+    {
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
+        data.WriteNote("Plan", "# Plan\n\n![shot.png](.attachments/shot.png) ![x](.attachments/fake.png) ![y](other.png)\n");
+        Directory.CreateDirectory(Path.Combine(data.Root, ".attachments"));
+        File.WriteAllBytes(Path.Combine(data.Root, ".attachments", "shot.png"), png);
+        File.WriteAllText(Path.Combine(data.Root, ".attachments", "fake.png"), "<html></html>");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await OpenFull(cut, js, "Plan");
+
+        InlineImage image = Assert.Single(js.MountedImages());
+        Assert.Equal((".attachments/shot.png", "image/png", Convert.ToBase64String(png)), (image.Src, image.Mime, image.Base64));
+    }
+
+    // 177 AC-9: a click on a PDF link launches it; anything else shows the red text in the main status.
+    [Fact]
+    public async Task AttachmentClick_LaunchesPdf_OrRedLine()
+    {
+        data.WriteNote("Plan", "# Plan\n\n[plan.pdf](.attachments/plan.pdf)\n");
+        Directory.CreateDirectory(Path.Combine(data.Root, ".attachments"));
+        File.WriteAllText(Path.Combine(data.Root, ".attachments", "plan.pdf"), "%PDF-1.7\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await OpenFull(cut, js, "Plan");
+
+        await cut.InvokeAsync(() => js.Page().OnAttachment(".attachments/plan.pdf"));
+        cut.WaitForAssertion(() => Assert.Single(data.Launcher.Launched), Wait);
+        Assert.Equal(Path.Combine(data.Root, ".attachments", "plan.pdf"), data.Launcher.Launched[0]);
+
+        await cut.InvokeAsync(() => js.Page().OnAttachment(".attachments/missing.pdf"));
+        cut.WaitForAssertion(() => Assert.Equal("Can't open missing.pdf.", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Single(data.Launcher.Launched);
+    }
+
     // 152: writes Meetings with the subpage Meetings/Meeting 1 (and Plan, Archive at the top level).
     private void WriteMeetings()
     {

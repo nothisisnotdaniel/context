@@ -197,8 +197,46 @@ function noteLinkRule(state, silent) {
   return true;
 }
 
+// An alt text of file-name characters only, written without escapes (no markup can start in it).
+const PlainAlt = /^[A-Za-z0-9_.-]+$/;
+
+// [label](.attachments/name) with a file-name label and a stored name: the label is plain text, so a name such as
+// "_a_.pdf" or "a__b.pdf" stays as written (no emphasis, no escapes) and round-trips byte for byte.
+const AttachmentLink = /^\[([A-Za-z0-9_.-]+)\]\((\.attachments\/[A-Za-z0-9_][A-Za-z0-9_.-]*)\)/;
+
+function attachmentLinkRule(state, silent) {
+  if (state.src[state.pos] !== "[") {
+    return false;
+  }
+  const match = AttachmentLink.exec(state.src.slice(state.pos, state.posMax));
+  if (!match) {
+    return false;
+  }
+  if (!silent) {
+    const open = state.push("link_open", "a", 1);
+    open.attrs = [["href", match[2]]];
+    const text = state.push("text", "", 0);
+    text.content = match[1];
+    state.push("link_close", "a", -1);
+  }
+  state.pos += match[0].length;
+  return true;
+}
+
+// Whether a text node is the whole label of an attachment link written by attachmentLinkRule.
+function isAttachmentLabel(node, parent, index) {
+  const link = node.marks.find(m => m.type.name === "link");
+  if (!link || node.marks.length !== 1 || link.attrs.title || !PlainAlt.test(node.text)
+      || !AttachmentLink.test("[" + node.text + "](" + link.attrs.href + ")")) {
+    return false;
+  }
+  const sameLink = i => i >= 0 && i < parent.childCount && link.isInSet(parent.child(i).marks);
+  return !sameLink(index - 1) && !sameLink(index + 1);
+}
+
 const md = MarkdownIt("commonmark", { html: false, linkify: false, typographer: false });
 md.inline.ruler.before("link", "note_link", noteLinkRule);
+md.inline.ruler.before("link", "attachment_link", attachmentLinkRule);
 md.inline.ruler.before("link", "tag", tagRule);
 md.inline.ruler.before("link", "mention", mentionRule);
 
@@ -255,7 +293,12 @@ const parser = new MarkdownParser(schema, tokenizer, {
   hr: { node: "horizontal_rule" },
   image: {
     node: "image",
-    getAttrs: tok => ({ src: tok.attrGet("src"), title: tok.attrGet("title") || null, alt: (tok.children[0] && tok.children[0].content) || null }),
+    // A plain file-name alt (an attachment's stored name) is kept exactly as written, so it round-trips byte for byte.
+    getAttrs: tok => ({
+      src: tok.attrGet("src"),
+      title: tok.attrGet("title") || null,
+      alt: PlainAlt.test(tok.content || "") ? tok.content : (tok.children[0] && tok.children[0].content) || null,
+    }),
   },
   hardbreak: { node: "hard_break" },
   em: { mark: "em" },
@@ -386,7 +429,14 @@ const serializer = new MarkdownSerializer({
   },
   list_item: base.list_item,
   paragraph: base.paragraph,
-  image: base.image,
+  image(state, node) {
+    const alt = node.attrs.alt || "";
+    if (PlainAlt.test(alt) && !/[()]/.test(node.attrs.src) && !node.attrs.title) {
+      state.write("![" + alt + "](" + node.attrs.src + ")");
+      return;
+    }
+    base.image(state, node);
+  },
   hard_break: base.hard_break,
   tag(state, node) {
     state.write(node.attrs.raw);
@@ -398,7 +448,7 @@ const serializer = new MarkdownSerializer({
     state.write(node.attrs.raw);
   },
   text(state, node, parent, index) {
-    if (state.inAutolink) {
+    if (state.inAutolink || isAttachmentLabel(node, parent, index)) {
       state.text(node.text, false);
       return;
     }

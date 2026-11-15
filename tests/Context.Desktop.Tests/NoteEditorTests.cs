@@ -197,6 +197,17 @@ public sealed class NoteEditorTests : IDisposable
         Assert.DoesNotContain("boom-143", cut.Markup, StringComparison.Ordinal);
     }
 
+    // 177 review nit: an empty status line has no child nodes at all, so `.status:empty` hides it.
+    [Fact]
+    public async Task EmptyStatus_HasNoChildNodes()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+
+        Assert.Equal(0, cut.Find(".status").ChildNodes.Length);
+    }
+
     // AC-8: the Save button saves the editor's Markdown and says so.
     [Fact]
     public async Task SaveButton_SavesMarkdown()
@@ -549,6 +560,47 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Single(cut.FindAll(".dirty-dot"));
         Assert.False(await cut.InvokeAsync(() => cut.Instance.IsDirtyAsync()));
         Assert.Single(js.Calls("ContextEditor.isDirty"));
+    }
+
+    // 177 AC-7/AC-8: a sensitive note mounts with no images, even when a plain file of that name exists.
+    [Fact]
+    public async Task Sensitive_MountsWithNoImages()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("Plan", "# Plan\n\n![shot.png](.attachments/shot.png)\n");
+        data.WriteFile(Path.Combine(".attachments", "shot.png"), "x");
+        File.WriteAllBytes(Path.Combine(data.Root, ".attachments", "shot.png"), [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1]);
+        EditorJs js = new EditorJs(data.Bunit);
+        await data.RefreshAsync();
+        IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p
+            .Add(e => e.Name, "Plan")
+            .Add(e => e.Sensitive, true));
+
+        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
+
+        Assert.Empty(js.MountedImages());
+    }
+
+    // 177 AC-6: the page's OnDrop only raises OnAttach once with the count and files, and writes nothing.
+    [Fact]
+    public async Task OnDrop_RaisesOnAttachOnce()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        await data.RefreshAsync();
+        List<DroppedFiles> raised = [];
+        IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p
+            .Add(e => e.Name, "Plan")
+            .Add(e => e.OnAttach, (DroppedFiles d) => raised.Insert(raised.Count, d)));
+        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
+        DroppedFile file = new DroppedFile("big.png", NoteAttachments.MaxBytes + 1, null);
+
+        await cut.InvokeAsync(() => js.Page().OnDrop(3, [file]));
+
+        DroppedFiles drop = Assert.Single(raised);
+        Assert.Equal(3, drop.Count);
+        Assert.Equal([file], drop.Files);
+        Assert.False(Directory.Exists(Path.Combine(data.Root, ".attachments")));
     }
 
     private EditorInterop PageOf(IRenderedComponent<NoteEditor> cut) =>

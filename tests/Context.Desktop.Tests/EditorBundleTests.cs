@@ -230,6 +230,77 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
         Assert.Equal("pic.png", image.GetProperty("attrs").GetProperty("src").GetString());
     }
 
+    // 177 AC-8: an attachment image keeps its stored name as alt and its source exactly, a PDF link its href, and the
+    // fixture round-trips byte for byte (checked by Lossless_RoundTripsByteForByte too).
+    [Fact]
+    public void Attachments_FixtureKeepsNamesAndSources()
+    {
+        string markdown = Read("lossless/attachments.md");
+        using JsonDocument doc = JsonDocument.Parse(bundle.Call("docJson", markdown));
+
+        List<JsonElement> images = Nodes(doc.RootElement).Where(n => Type(n) == "image").ToList();
+        Assert.Equal(
+            ["shot.png", "a_b-2.png", "_lead.jpg", "two.webp", "x.gif"],
+            images.Select(i => i.GetProperty("attrs").GetProperty("alt").GetString()));
+        Assert.All(images, i => Assert.Equal(
+            ".attachments/" + i.GetProperty("attrs").GetProperty("alt").GetString(),
+            i.GetProperty("attrs").GetProperty("src").GetString()));
+        Assert.Equal(
+            NoteAttachments.ImageSources(markdown),
+            images.Select(i => i.GetProperty("attrs").GetProperty("src").GetString()!).ToArray());
+        string[] hrefs = Nodes(doc.RootElement)
+            .Where(n => n.TryGetProperty("marks", out _))
+            .SelectMany(n => n.GetProperty("marks").EnumerateArray())
+            .Where(m => m.GetProperty("type").GetString() == "link")
+            .Select(m => m.GetProperty("attrs").GetProperty("href").GetString()!)
+            .ToArray();
+        Assert.Equal([".attachments/plan.pdf", ".attachments/a_b-3.pdf"], hrefs);
+        Assert.Equal(markdown, bundle.Call("roundTrip", markdown));
+        Assert.Equal("true", bundle.Call("isLossless", markdown));
+    }
+
+    // 177 AC-8: every name Add can store round-trips as an image and as a PDF link.
+    [Theory]
+    [InlineData("shot.png")]
+    [InlineData("_a_.png")]
+    [InlineData("a__b.jpeg")]
+    [InlineData("A-2.gif")]
+    [InlineData("x_y_z-99.pdf")]
+    public void Attachments_StoredNamesRoundTrip(string name)
+    {
+        Assert.True(NoteAttachments.IsStoredName(name));
+        string image = $"![{name}](.attachments/{name})\n";
+        string link = $"[{name}](.attachments/{name})\n";
+
+        Assert.Equal(image, bundle.Call("roundTrip", image));
+        Assert.Equal(link, bundle.Call("roundTrip", link));
+    }
+
+    // 177 AC-8/AC-12: a link whose name a move rewrote keeps its old label as written.
+    [Theory]
+    [InlineData("[a_b.pdf](.attachments/a_b-2.pdf)\n")]
+    [InlineData("![_x_.png](.attachments/_x_-2.png) and [b_.pdf](.attachments/b_.pdf)\n")]
+    public void Attachments_LabelsRoundTrip(string markdown)
+    {
+        Assert.Equal(markdown, bundle.Call("roundTrip", markdown));
+    }
+
+    // 177 AC-10: at load the bundle blocks dragover and drop for the whole window, so a dropped file never navigates.
+    [Fact]
+    public void Bundle_BlocksWindowDragAndDrop()
+    {
+        string path = Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "editor", "editor.js");
+        Engine engine = new Engine(options => options.TimeoutInterval(TimeSpan.FromSeconds(30)));
+        engine.Execute("var added = []; globalThis.addEventListener = function (type, handler) { added.push([type, handler]); };");
+        engine.Execute(File.ReadAllText(path));
+
+        string result = engine.Evaluate(
+            "JSON.stringify(added.map(function (a) { var e = { prevented: 0, preventDefault: function () { this.prevented++; } };"
+            + " a[1](e); return [a[0], e.prevented]; }))").AsString();
+
+        Assert.Equal("[[\"dragover\",1],[\"drop\",1]]", result);
+    }
+
     private static List<string> FixtureFiles(string kind)
     {
         string folder = Path.Combine(RepoFiles.Root(), "tests", "Context.Desktop.Tests", "RoundTrip", kind);

@@ -372,6 +372,35 @@ Every factory agent reads this file before working on Context. Keep it short and
     ends): `No template called <name>. Templates: <a>, <b>.` / `No template called <name>. Add one as templates/<name>.md.`,
     `Can't read template <name>.`, `Template <name> is too big.`, `templates is sensitive, so its templates can't be used.`,
     plus the `CreateNote` title texts.
+  - **Attachments** (job 177, `NoteAttachments.cs`, desktop only): images (PNG, JPEG, GIF, WebP) and PDFs live in
+    `<level folder>/.attachments/<name>` (the folder of the note file; `List()` never lists it, it starts with `.`).
+    `CleanName` is the one stored-name rule (last segment, lower-case `[a-z0-9]` extension, stem `[A-Za-z0-9_-]` with
+    `-` runs collapsed, leading `-` trimmed, cut to 100, trailing `-` trimmed, `attachment` for an empty or
+    `ValidateTitle`-refused stem); `IsStoredName` checks that shape on a name itself; `ClashName(stem, n)` makes
+    `-2`..`-99` within 100. `Sniff` takes the type from magic bytes and requires the matching extension (no SVG/HTML).
+    `Add(note, fileName, bytes)` (at most `MaxBytes` 10 MB; a note in `List()`; `.attachments` no link) writes a
+    `0600` temp file in the folder, then a no-overwrite move, never touching the note or `context.db`.
+    `TryResolve(note, src)` accepts only `.attachments/<stored name>`, a regular file inside the root, no link, at
+    most `MaxBytes`, passing `Sniff`. `ImageSources(text)` (at most 20) and `LinkedNames(text)` (ordinal, followed
+    by `)` or a space, code included) never read files; both look only `MaxScannedName` (105) characters past each
+    marker and keep distinct names in a `HashSet`, so a crafted note is scanned in linear time. A note linking more
+    than `MaxLinkedNames` (100) names keeps every attachment: a `MoveWithNote` to another level changes nothing and
+    throws `AttachmentMoveException` (the Failed text; a note never moves without its attachments) and `RemoveUnlinked`
+    removes nothing (so `KeptBySiblings` never runs names x sibling bytes unbounded). `MoveWithNote(name, newParent)` (only `DesktopActions.MoveNote`)
+    copies each resolved linked file into the target level (Add rules, clash `-N`), moves the note with `Move`,
+    rewrites only renamed `](.attachments/<old>` byte for byte (CRLF/BOM kept, no history version), then deletes the
+    sources no remaining sibling links; any failure before that undoes everything (`NoteExistsException` and
+    `ArgumentException` rethrown unchanged, else `AttachmentMoveException`; `BeforeMoveStep` `copy`/`move`/`rewrite`/
+    `cleanup` is the test hook); a failed cleanup only leaves sources. `KeptBySiblings`: a sibling (same `Parent`)
+    keeps a name its file text contains ignoring case; an unreadable or oversized sibling, or any sensitive note at
+    the top level (never read), keeps all. `DeleteNote` reads `LinkedNamesOf` first, passes `removeAttachments: true`
+    to `Delete` (each deleted child folder's `.attachments`, never through a link) and then calls `RemoveUnlinked`
+    (never throws). `DesktopActions.AttachFiles(name, count, files)` (one line per file in `ActionResult.Attached`,
+    more than 10: `Drop at most 10 files.`; sensitive: `Attachments can't be added to a sensitive note.`, no key-store
+    call) and `OpenAttachment(name, src)` (a `TryResolve` PDF to the launcher, else `Can't open <name>.`). The page
+    makes one `OnDrop(count, files)` call per drop, gets `insertAttachment` per stored file and shows images from
+    `blob:` URLs built from the bytes `NoteEditor` passes to `mount` (none for a sensitive note); the bundle blocks
+    window `dragover`/`drop` at load.
   - **Todos:** `TodoStore` keeps the list in `<root>/todos.json` (same root as notes; System.Text.Json,
     camelCase, UTF-8 no BOM). `List()` gives the **open** todos sorted by `Due`, then `Created` (UTC), then file
     order. A done todo (job 159) stays in the file with `done` (UTC date-time, an offset converted and no zone taken as UTC on read; `TodoItem.Done`, written only when set,
@@ -691,7 +720,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     main region (`Main` keeps the open name; a dirty editor asks `Discard changes to <name>?` first). `NoteEditor`
     reads through `DesktopState.ReadForEdit` (`NoteStore.ReadForEdit` -> `EditableNote`: text with `\n`, raw-byte
     SHA-256 `Version`, CRLF and BOM flags), mounts the page editor through `EditorInterop` (the only class that touches
-    `IJSRuntime`; `[JSInvokable]` `OnTag`/`OnLink`/`OnPerson` only navigate) and saves on the Save button or Ctrl/Cmd+S through
+    `IJSRuntime`; `[JSInvokable]` `OnTag`/`OnLink`/`OnPerson`/`OnAttachment` only navigate, `OnDrop` only raises `FilesDropped`) and saves on the Save button or Ctrl/Cmd+S through
     `DesktopActions.SaveNote` -> `NoteStore.SaveIfUnchanged` (unchanged text writes nothing; version re-checked before
     the move; CRLF and BOM kept; temp file mode `0600`). While the page's editor differs from the saved text, a
     `span.dirty-dot` (`role="img"`, `Unsaved changes`) shows right after the note title: the page calls
@@ -921,10 +950,10 @@ Every factory agent reads this file before working on Context. Keep it short and
     informational version). `VelopackUpdateSource` is the one real source: Velopack's `UpdateManager` over
     `GithubSource` with the fixed repository URL, no access token (so it can never list a draft release), no explicit channel and no downgrade; installed
     means Windows, installed by `Setup.exe` and not the portable copy. There is no update UI.
-    `wwwroot/index.html` (CSP meta tag, only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
+    `wwwroot/index.html` (CSP meta tag, `img-src 'self' blob:` for attachment images, only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
     and `wwwroot/editor/editor.css`.
   - **Desktop rules:** the Core writing calls (`Create`, `Save`, `SaveIfUnchanged`, `Add`, `Complete`, `Set`, `Clear`, `Delete`,
-    `Rename`, `CreateChild`, `Move`, `ClearCache`, `Capture` (`Inbox.Capture`), `Ensure` (`DailyNote.Ensure`, `MeetingNote.Ensure`, `Briefing.Ensure`), the note history (`Keep`, `RemoveHistory`, `RestoreVersion`; only the call `Actions.RestoreVersion(` in a `.razor` file is allowed), `CreateWithText` (`CreateNoteFromTemplate`), the day's end (`CloseDay`, `RefreshWorked`, `MoveTodos`, `AutoClose`, `MoveDue`, `SaveDayEnd`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
+    `Rename`, `CreateChild`, `Move`, `MoveWithNote`, `RemoveUnlinked` (`NoteAttachments`), `ClearCache`, `Capture` (`Inbox.Capture`), `Ensure` (`DailyNote.Ensure`, `MeetingNote.Ensure`, `Briefing.Ensure`), the note history (`Keep`, `RemoveHistory`, `RestoreVersion`; only the call `Actions.RestoreVersion(` in a `.razor` file is allowed), `CreateWithText` (`CreateNoteFromTemplate`), the day's end (`CloseDay`, `RefreshWorked`, `MoveTodos`, `AutoClose`, `MoveDue`, `SaveDayEnd`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
     `StoreRecoveryPublicKey`) appear only in `DesktopActions.cs` (exemptions: `DotNetObjectReference.Create(` once in
     `EditorInterop.cs`, `ECDiffieHellman.Create(` in `SealedNote.cs`, and `WindowsKeyStore.cs`, whose .NET calls change
     the certificate store and which names no Core store, `File.`, `Directory.` or `Path.`; the reads still write
@@ -945,8 +974,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Environment.GetEnvironmentVariable`, `args` or `Console.`, so an update never touches the data folder; no test
     references `VelopackUpdateSource` (tests use `FakeUpdateSource`, never the network).
     **Launcher rule:** `Process` / `System.Diagnostics` appear only in `ShellNoteLauncher.cs`, which is named only there and
-    in `Program.cs`; the only path it ever gets is a checked note path from `List()` (no user text becomes a path or an
-    argument); no test references `ShellNoteLauncher` (tests use `FakeNoteLauncher`, which records paths and can throw).
+    in `Program.cs`; the only path it ever gets is a checked note or attachment path (a note from `List()`, or an
+    attachment PDF `NoteAttachments.TryResolve` accepted; no user text becomes a path or an argument); no test references `ShellNoteLauncher` (tests use `FakeNoteLauncher`, which records paths and can throw).
     Outside text goes through `DesktopText.OneLine` and Blazor's default encoding: never `MarkupString`,
     `AddMarkupContent` or `@((` raw markup; no `style=`, `<a `, `<form` or `<script` in `.razor` files; every
     `<button` has `type="button"`; no plain HTML event attributes (`on<event>=` without `@`); only `EditorInterop.cs`
