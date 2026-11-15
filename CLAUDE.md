@@ -613,7 +613,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `[[note link]]` parsing in `NoteLinkParser.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
-    `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs`, note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs`, the day's end in `DayEnd.cs` (Times' day file in `TimesDay.cs`, `settings.json` in `SettingsStore.cs`), the todo input rules (`TryParseDate`,
+    `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs`, note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs`, the day's end in `DayEnd.cs` (Times' day file in `TimesDay.cs`, `settings.json` in `SettingsStore.cs`), the morning briefing in `Briefing.cs` (Times' flexitime balance in `TimesBalance.cs`), the todo input rules (`TryParseDate`,
     `MaxTextLength`, `TryParseRepeat`, `NextDue`) in `TodoInput.cs`, the todo repeat in `TodoRepeat.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`), `SearchView.cs` (`search`), `ReviewView.cs` (the weekly review) and `CalendarLinkView.cs`
     (the calendar link), and the command ranking for the desktop palette in `CommandMatcher.cs`; the notes list is `NoteStore.List()` itself.
   - **Data step in Core, drawing in the front end:** a view's Core data step returns plain types (a kind plus raw
@@ -683,7 +683,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     file bytes, read through `BoundedFile`): a bigger or non-seekable note can't be opened (`Can't read <name>.`), a save
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
-    `/capture`, `/current`, `/done`, `/export`, `/find`, `/import`, `/meeting`, `/new`, `/open`, `/review`, `/save`, `/search`, `/settings`, `/tags`, `/today`, `/todo` with `CommandMatcher` (in Core; ties
+    `/briefing`, `/capture`, `/current`, `/done`, `/export`, `/find`, `/import`, `/meeting`, `/new`, `/open`, `/review`, `/save`, `/search`, `/settings`, `/tags`, `/today`, `/todo` with `CommandMatcher` (in Core; ties
     in Levenshtein score are ordered by `SwapDistance`, which counts an adjacent swap as one edit, so `/opne` runs `/open`).
     `/todo every <weekday|day|month> <text>` (job 168) adds a recurring todo (`TryParseRepeat`, then `AddTodo`), accent
     `Added: <text>`; a missing or bad unit or missing text is red `Type /todo every <weekday|day|month> <text>.`; a bad
@@ -703,6 +703,10 @@ Every factory agent reads this file before working on Context. Keep it short and
     `CurrentPanel`, which counts the rows hidden behind `… N more` too) and works like `/today` through
     `DesktopActions.OpenMeetingNote(appointment)`; a blank or invalid number is red `Type /meeting <number>.`, no
     appointments or a number beyond them the CLI's texts in red, a failed write red `Can't write <name>.`.
+    `/briefing` (job 172, hint `Open today's briefing`, argument ignored) works like `/today` through
+    `DesktopActions.OpenBriefing()` (`BriefingName()` for the unsaved-changes check): accent `Created <name>` after a
+    create, red `briefings is sensitive, so no briefing can be written.` (`BriefingSensitiveText`) or
+    `Can't write <name>.` (`BriefingFailedText`).
     **Meeting note:** `MeetingNote` (Core) names the note `yyyy-MM-dd <title>` (local start date, invariant; the
     one-line title with `/ \ : * ? " < > |` and control characters as spaces, collapsed, trimmed, cut to
     `MaxTitlePart` without splitting a surrogate pair, trailing `.md`, dots and spaces stripped, `Meeting` when empty;
@@ -739,7 +743,34 @@ Every factory agent reads this file before working on Context. Keep it short and
     after `EveningCutoff` (17:00) when tomorrow is not sensitive. Manual runs (`CloseDay`, the CLI, the button) never
     touch `settings.json`. `CurrentPanel` has `End the day` (`DesktopActions.EndDay(view.Today)`, one `role="status"`
     line: grey `Day closed. Moved <n> todo(s) to <D+1>.`, else red); `Program.cs` calls `DesktopActions.AutoDayEnd()`
-    at start and every `DayEndInterval` (30 s) from its own timer: the one automatic write (Busy: Refused, skipped).
+    at start and every `DayEndInterval` (30 s) from its own timer (Busy: Refused, skipped), followed by `AutoBriefing()`.
+    **Corrections and balance** (job 172): `TimesDay.Corrections` reads Times' `"corrections":[{"minutes":<int>,
+    "reason":<string>}]` (exactly those two properties; minutes never 0, at most `MaxCorrectionMinutes` 59999 either
+    way) for entries and absence files; any other shape makes the file `Unreadable`. `TimesBalance.Compute(folder,
+    through)` lists only the folder's top-level files named exactly `yyyy-MM-dd.json` (a real date) on or before
+    `through` and reads each through `TimesDay.Read`: an arrival day adds `WorkTime - target`, an absence day 0, every
+    readable day its corrections; `Counted` is the days with an arrival, an absence or a correction, `Skipped` the
+    unreadable files; `NoFolder` (null or missing) and `Unlistable` (listing threw). The target is
+    `{"settings":{"daily-target":N}}` from `<folder>/settings.json` (`ReadTarget`, `BoundedFile` 64 KiB, 0 to 1440,
+    duplicates refused), else 480. Nothing ever writes into the Times folder.
+    **Morning briefing** (job 172, Core `Briefing.cs`): the stored page `briefings/yyyy-MM-dd`, a subpage of the
+    top-level `briefings` note (`# briefings\n`, created when missing). `Compose(todos, calendar, feed, timesFolder,
+    today)` writes `# yyyy-MM-dd`, the daily note's `## Appointments` and `## Todos` byte for byte
+    (`DailyNote.AppendSections`), `## Open checkpoint` (one `- <date>: #<n> <names>` / `- <date>: <name>` line per
+    open group of the latest day from today-1 back to today-7 with at least one entry; else `- None open on <date>.`,
+    `- No Times bookings in the last 7 days.` or `- Can't read Times' day file for <date>.` for the first unreadable
+    file met) and `## Flexitime balance` (`- <+|->H:mm through <today-1>.`, `+0:00` for zero, plus `- Skipped <n>
+    Times day file(s) that can't be read.`; else `- No Times bookings.` or `- Can't read Times' folder.`); every Times
+    name is one line through `SafeText.Clean`. `Ensure(notes, day, compose)`: a sensitive `briefings` is `Sensitive`
+    (nothing read or written), an existing page `Existing` without calling `compose`, else `CreateChild` (a race counts
+    as existing); an existing page or `briefings` note is never changed. `ShouldCreate(today, timesToday, atStart)`:
+    today's Times file has an arrival, or `atStart` on Monday to Friday and today is no absence day.
+    `DesktopActions.AutoBriefing()` (the first call that runs is the start) creates the page once per day when
+    `ShouldCreate` holds and then offers it through `DesktopState.OfferBriefing(name)`; an existing page is only
+    remembered, never offered. `Main` takes the offer (`State.TakeBriefing()`, in `OnInitialized` and after every
+    state change) and opens the page when no note has unsaved changes and no dialog or edit field is open; otherwise the
+    editor is left alone and the accent status reads `Today's briefing is ready: briefings/<day>. Type /briefing to open
+    it.`. The page is a snapshot, never refreshed.
     **Settings:** `SettingsPanel` (the `Settings` button in `NotesPanel`, or `/settings`; `Main`'s `settingsShown`;
     at the top of the main region; `Close`, opening a note or the current view hides it) has two sections, both
     reloaded after every `State.Changed`. *Exchange calendar* shows `DesktopState.CalendarLinkSetting()`
@@ -873,15 +904,17 @@ Every factory agent reads this file before working on Context. Keep it short and
     `wwwroot/index.html` (CSP meta tag, only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
     and `wwwroot/editor/editor.css`.
   - **Desktop rules:** the Core writing calls (`Create`, `Save`, `SaveIfUnchanged`, `Add`, `Complete`, `Set`, `Clear`, `Delete`,
-    `Rename`, `CreateChild`, `Move`, `ClearCache`, `Capture` (`Inbox.Capture`), `Ensure` (`DailyNote.Ensure`, `MeetingNote.Ensure`), `CreateWithText` (`CreateNoteFromTemplate`), the day's end (`CloseDay`, `RefreshWorked`, `MoveTodos`, `AutoClose`, `MoveDue`, `SaveDayEnd`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
+    `Rename`, `CreateChild`, `Move`, `ClearCache`, `Capture` (`Inbox.Capture`), `Ensure` (`DailyNote.Ensure`, `MeetingNote.Ensure`, `Briefing.Ensure`), `CreateWithText` (`CreateNoteFromTemplate`), the day's end (`CloseDay`, `RefreshWorked`, `MoveTodos`, `AutoClose`, `MoveDue`, `SaveDayEnd`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
     `StoreRecoveryPublicKey`) appear only in `DesktopActions.cs` (exemptions: `DotNetObjectReference.Create(` once in
     `EditorInterop.cs`, `ECDiffieHellman.Create(` in `SealedNote.cs`, and `WindowsKeyStore.cs`, whose .NET calls change
     the certificate store and which names no Core store, `File.`, `Directory.` or `Path.`; the reads still write
     only through `TagIndex.Sync` and `CalendarFeed.Fetch`, as on the command line). `DesktopActions` is named only by
     `.razor` files, `Program.cs` and `StateComponent`, never by `DesktopState`, `DataWatcher` or `DesktopSnapshot`, so
-    nothing writes on render, refresh, the watcher or the tick. The one named exception (job 171): `Program.cs`'s
-    day-end timer calls `DesktopActions.AutoDayEnd()`, the only method `Program.cs` calls on the actions, so the
-    automatic day's end still writes only through `DesktopActions.cs`. In `.razor` files every `@code` method that calls
+    nothing writes on render, refresh, the watcher or the tick. The named exception (jobs 171 and 172): `Program.cs`'s
+    `AutoWrites` (once at start and in the day-end timer) calls `DesktopActions.AutoDayEnd()` and then
+    `DesktopActions.AutoBriefing()`, the only methods `Program.cs` calls on the actions and named by no other `.cs` or
+    `.razor` file, so both automatic writes (the day's end and the morning briefing) still write only through
+    `DesktopActions.cs`; `Briefing.Ensure` and `DesktopState.OfferBriefing` are called only there. In `.razor` files every `@code` method that calls
     `Actions.` is bound by an event attribute in the same file (`@on<event>=` on an element or an `On<Event>=`
     callback parameter on a component), is no lifecycle method (`OnInitialized*`, `OnParametersSet*`,
     `OnAfterRender*`, `SetParametersAsync`, `BuildRenderTree`) and is called by no other method; no `.cs` file calls
@@ -924,7 +957,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `CaptureActionsTests` (`CaptureText`) and `CaptureBoxTests`, `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `ReviewPanelTests`, `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `CaptureActionsTests` (`CaptureText`) and `CaptureBoxTests`, `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `ReviewPanelTests`, `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
     CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules, the transfer calls and no file system class in `.razor`), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),

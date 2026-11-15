@@ -13,6 +13,7 @@ public sealed class DesktopSourceTests
     // 134: NoteStore.Rename and NoteStore.Delete. 136: sealing (SealedNote.Seal, AddRecipient), NoteStore.DeleteSensitive
     // and the key store's two changing calls; RecoveryFile.Create is caught by Create. 140: Inbox.Capture.
     // 152: NoteStore.CreateChild and NoteStore.Move. 164: DailyNote.Ensure. 165: NoteStore.CreateWithText.
+    // 172: Briefing.Ensure (caught by Ensure).
     private static readonly Regex Writes = new(
         @"\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
         + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture|CreateChild|Move|Ensure|CreateWithText"
@@ -825,6 +826,7 @@ public sealed class DesktopSourceTests
     [InlineData("Inbox.Capture(notes, cleaned, localNow(), BeforeCaptureSave)")]
     [InlineData("Inbox . Capture (store, text, now)")]
     [InlineData("DailyNote.Ensure(notes, day, compose)")]
+    [InlineData("Briefing.Ensure(notes, day, compose)")]
     [InlineData("notes.CreateWithText(prepared.Title, prepared.Text)")]
     [InlineData("dayEnd.CloseDay(day)")]
     [InlineData("dayEnd.RefreshWorked(day)")]
@@ -1018,32 +1020,56 @@ public sealed class DesktopSourceTests
             StringComparison.Ordinal);
     }
 
-    // 171 AC-10: the day-end timer is the one automatic write: Program.cs calls only AutoDayEnd as a method on the
-    // actions (once at start, once in the timer; the constructor and DesktopActions.DayEndInterval are allowed), and no
-    // other .cs or .razor file calls AutoDayEnd.
+    // 171 AC-10, 172 AC-10: the day-end timer runs the two automatic writes: Program.cs calls exactly AutoDayEnd and
+    // AutoBriefing as methods on the actions (in AutoWrites, which runs once at start and in the timer; the
+    // constructor and DesktopActions.DayEndInterval are allowed), and no other .cs or .razor file calls either.
     [Fact]
-    public void Program_CallsOnlyAutoDayEndOnTheActions()
+    public void Program_CallsOnlyTheAutomaticWritesOnTheActions()
     {
         string root = RepoFiles.Root();
-        string program = File.ReadAllText(Path.Combine(root, ProgramFile));
+        string program = File.ReadAllText(Path.Combine(root, ProgramFile)).ReplaceLineEndings("\n");
 
         string[] calls = Regex.Matches(program, @"\bactions\s*\.\s*(\w+)\s*\(")
             .Select(m => m.Groups[1].Value)
             .ToArray();
-        Assert.Equal(["AutoDayEnd", "AutoDayEnd"], calls);
+        Assert.Equal(["AutoDayEnd", "AutoBriefing"], calls);
         Assert.Contains(
-            "using Timer dayEnd = new Timer(\n            _ => _ = actions.AutoDayEnd(), null, DesktopActions.DayEndInterval, DesktopActions.DayEndInterval);",
-            program.ReplaceLineEndings("\n"),
+            "static Task AutoWrites(DesktopActions actions) =>\n            actions.AutoDayEnd().ContinueWith("
+            + "_ => actions.AutoBriefing(), TaskScheduler.Default).Unwrap();\n\n        _ = AutoWrites(actions);\n",
+            program,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "using Timer dayEnd = new Timer(\n            _ => _ = AutoWrites(actions), null, DesktopActions.DayEndInterval, DesktopActions.DayEndInterval);",
+            program,
+            StringComparison.Ordinal);
+        Assert.Equal(3, Regex.Matches(program, @"\bAutoWrites\s*\(").Count);
         Assert.Equal(
             2, Regex.Matches(program, @"\bDesktopActions\s*\.\s*DayEndInterval\b").Count);
-        Assert.DoesNotMatch(@"\bDesktopActions\s*\.\s*(AutoDayEnd|EndDay)\b", program);
+        Assert.DoesNotMatch(@"\bDesktopActions\s*\.\s*(AutoDayEnd|EndDay|AutoBriefing|OpenBriefing)\b", program);
 
-        List<string> others = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
-            .Where(f => f != ProgramFile && f != ActionsFile)
-            .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains("AutoDayEnd", StringComparison.Ordinal))
+        foreach (string name in new[] { "AutoDayEnd", "AutoBriefing" })
+        {
+            List<string> others = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
+                .Where(f => f != ProgramFile && f != ActionsFile)
+                .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains(name, StringComparison.Ordinal))
+                .ToList();
+            Assert.Empty(others);
+        }
+    }
+
+    // 172 AC-10: Briefing.Ensure and the offer (DesktopState.OfferBriefing) are called only in DesktopActions.cs.
+    [Theory]
+    [InlineData(@"\bBriefing\s*\.\s*Ensure\s*\(")]
+    [InlineData(@"\.\s*OfferBriefing\s*\(")]
+    public void Sources_CallBriefingWritesOnlyInDesktopActions(string pattern)
+    {
+        string root = RepoFiles.Root();
+        Regex call = new Regex(pattern, RegexOptions.CultureInvariant);
+        List<string> found = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
+            .Where(f => call.IsMatch(File.ReadAllText(Path.Combine(root, f))))
             .ToList();
-        Assert.Empty(others);
+
+        Assert.Equal([ActionsFile], found);
     }
 
     // 134 AC-9: the launcher passes the path as FileName through the shell, with no arguments.

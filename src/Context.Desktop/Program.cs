@@ -87,12 +87,16 @@ internal static class Program
         // refresh; an unreadable file is left alone and shows as unreadable.
         todos.Migrate();
 
-        // The day's end: the one automatic write, always through DesktopActions. Once now, then on its own timer
-        // (never from DesktopState, the watcher or Tick): Times' worked hours into the daily note at a leaving, and
-        // the due todos moved once a day (see DayEnd.AutoClose).
-        _ = actions.AutoDayEnd();
+        // The two automatic writes, always through DesktopActions. Once now, then on their own timer (never from
+        // DesktopState, the watcher or Tick): the day's end (Times' worked hours into the daily note at a leaving, and
+        // the due todos moved once a day, see DayEnd.AutoClose), and once it has finished, the morning briefing
+        // (written once a day at the first Times arrival or a weekday start, see Briefing.ShouldCreate).
+        static Task AutoWrites(DesktopActions actions) =>
+            actions.AutoDayEnd().ContinueWith(_ => actions.AutoBriefing(), TaskScheduler.Default).Unwrap();
+
+        _ = AutoWrites(actions);
         using Timer dayEnd = new Timer(
-            _ => _ = actions.AutoDayEnd(), null, DesktopActions.DayEndInterval, DesktopActions.DayEndInterval);
+            _ => _ = AutoWrites(actions), null, DesktopActions.DayEndInterval, DesktopActions.DayEndInterval);
 
         using DataWatcher watcher = new DataWatcher(folder, state);
         watcher.Start();

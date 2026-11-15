@@ -135,11 +135,16 @@ internal sealed class TimesDay
 
     private const string TimeFormat = "HH:mm";
 
-    private TimesDay(TimesDayKind kind, TimesAbsence? absence, IReadOnlyList<TimesEntry> entries)
+    /// <summary>The largest correction either way, in minutes, as in Times.</summary>
+    public const int MaxCorrectionMinutes = 59999;
+
+    private TimesDay(
+        TimesDayKind kind, TimesAbsence? absence, IReadOnlyList<TimesEntry> entries, IReadOnlyList<int>? corrections = null)
     {
         Kind = kind;
         Absence = absence;
         Entries = entries;
+        Corrections = corrections ?? [];
     }
 
     public TimesDayKind Kind { get; }
@@ -149,6 +154,12 @@ internal sealed class TimesDay
 
     /// <summary>The entries, stable-sorted by time; empty unless <see cref="Kind"/> is <see cref="TimesDayKind.Entries"/>.</summary>
     public IReadOnlyList<TimesEntry> Entries { get; }
+
+    /// <summary>
+    /// The balance corrections in minutes (never 0, at most <see cref="MaxCorrectionMinutes"/> either way), in file
+    /// order; empty for a missing or unreadable file. Their reasons are only checked to be strings, never kept.
+    /// </summary>
+    public IReadOnlyList<int> Corrections { get; }
 
     /// <summary>The first arrival, or <c>null</c>.</summary>
     public TimeOnly? Arrival => Entries.FirstOrDefault(e => e.Kind == TimesEntryKind.Arrival)?.Time;
@@ -312,6 +323,7 @@ internal sealed class TimesDay
         TimesAbsence? absence = null;
         TimeOnly? arrival = null;
         TimeOnly? leaving = null;
+        List<int> corrections = [];
         bool hasLegacy = false;
         HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (JsonProperty property in root.EnumerateObject())
@@ -337,8 +349,11 @@ internal sealed class TimesDay
                     hasLegacy = true;
                     leaving = ReadOptionalTime(property.Value);
                     break;
+                case "corrections":
+                    corrections = ReadCorrections(property.Value);
+                    break;
                 default:
-                    // Unknown properties (corrections and later ones) are ignored, as Times does.
+                    // Unknown properties (later ones) are ignored, as Times does.
                     break;
             }
         }
@@ -373,11 +388,74 @@ internal sealed class TimesDay
                 throw new JsonException();
             }
 
-            return new TimesDay(TimesDayKind.Absence, kind, []);
+            return new TimesDay(TimesDayKind.Absence, kind, [], corrections);
         }
 
         // OrderBy is stable, so entries at the same time keep their file order.
-        return new TimesDay(TimesDayKind.Entries, null, entries.OrderBy(e => e.Time).ToList());
+        return new TimesDay(TimesDayKind.Entries, null, entries.OrderBy(e => e.Time).ToList(), corrections);
+    }
+
+    // Times' "corrections":[{"minutes":<int>,"reason":<string>}]: anything else makes the file unreadable. Times also
+    // checks the reason's text; Context only checks that it is a string, since it never shows it.
+    private static List<int> ReadCorrections(JsonElement list)
+    {
+        if (list.ValueKind != JsonValueKind.Array)
+        {
+            throw new JsonException();
+        }
+
+        List<int> corrections = [];
+        foreach (JsonElement item in list.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                throw new JsonException();
+            }
+
+            int? minutes = null;
+            bool hasReason = false;
+            HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (JsonProperty property in item.EnumerateObject())
+            {
+                if (!seen.Add(property.Name))
+                {
+                    throw new JsonException();
+                }
+
+                switch (property.Name)
+                {
+                    case "minutes":
+                        if (property.Value.ValueKind != JsonValueKind.Number
+                            || !property.Value.TryGetInt32(out int value)
+                            || value == 0 || value > MaxCorrectionMinutes || value < -MaxCorrectionMinutes)
+                        {
+                            throw new JsonException();
+                        }
+
+                        minutes = value;
+                        break;
+                    case "reason":
+                        if (property.Value.ValueKind != JsonValueKind.String)
+                        {
+                            throw new JsonException();
+                        }
+
+                        hasReason = true;
+                        break;
+                    default:
+                        throw new JsonException();
+                }
+            }
+
+            if (minutes is not { } m || !hasReason)
+            {
+                throw new JsonException();
+            }
+
+            corrections.Add(m);
+        }
+
+        return corrections;
     }
 
     private static List<TimesEntry> ReadEntries(JsonElement list)

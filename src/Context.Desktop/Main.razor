@@ -166,6 +166,7 @@ else
     private string? pendingName;
     private string? pendingPerson;
     private bool pendingToday;
+    private bool pendingBriefing;
     private Appointment? pendingMeeting;
     private bool paletteOpen;
     private bool running;
@@ -189,9 +190,45 @@ else
     private ElementReference moveField;
     private bool focusField;
 
+    /// <summary>The status line when the automatic briefing was written while a note had unsaved changes.</summary>
+    internal static string BriefingReadyText(string name) =>
+        $"Today's briefing is ready: {DesktopText.OneLine(name)}. Type /briefing to open it.";
+
     /// <summary>The OS file dialogs.</summary>
     [Inject]
     internal IFileDialog Dialog { get; set; } = null!;
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        if (State.TakeBriefing() is { } offered)
+        {
+            ShowNote(offered);
+        }
+    }
+
+    // A briefing the automatic write offered opens when no note has unsaved changes and nothing is being asked or
+    // typed; otherwise the editor is left alone and the status line points to /briefing.
+    protected override async Task OnStateChangedAsync()
+    {
+        if (State.TakeBriefing() is not { } offered || string.Equals(offered, openName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        bool busy = discarding || renaming || subpaging || moving || deleting || marking || unsealing || running
+            || (editor is not null && openName is not null && await editor.IsDirtyAsync());
+        if (busy)
+        {
+            ShowStatus(BriefingReadyText(offered), "accent");
+        }
+        else
+        {
+            ShowNote(offered);
+        }
+
+        StateHasChanged();
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -304,6 +341,29 @@ else
     private async Task Discard(Confirmation confirmed)
     {
         discarding = false;
+        if (pendingBriefing)
+        {
+            pendingBriefing = false;
+            if (running)
+            {
+                return;
+            }
+
+            running = true;
+            ActionResult briefing;
+            try
+            {
+                briefing = await Actions.OpenBriefing();
+            }
+            finally
+            {
+                running = false;
+            }
+
+            ShowDaily(briefing);
+            return;
+        }
+
         if (pendingToday)
         {
             pendingToday = false;
@@ -382,6 +442,7 @@ else
         pendingName = null;
         pendingPerson = null;
         pendingToday = false;
+        pendingBriefing = false;
         pendingMeeting = null;
     }
 
@@ -433,6 +494,7 @@ else
         pendingName = null;
         pendingPerson = null;
         pendingToday = false;
+        pendingBriefing = false;
         pendingMeeting = null;
         tagShown = null;
         tagsShown = false;
@@ -634,6 +696,38 @@ else
                 }
 
                 break;
+            case "/briefing":
+                // The argument is ignored. A dirty editor asks first, unless it already shows today's briefing.
+                if (editor is not null && openName is not null
+                    && !string.Equals(openName, Actions.BriefingName(), StringComparison.Ordinal)
+                    && await editor.IsDirtyAsync())
+                {
+                    pendingName = null;
+                    pendingPerson = null;
+                    pendingToday = false;
+                    pendingMeeting = null;
+                    pendingBriefing = true;
+                    discarding = true;
+                    break;
+                }
+
+                if (!running)
+                {
+                    running = true;
+                    ActionResult briefing;
+                    try
+                    {
+                        briefing = await Actions.OpenBriefing();
+                    }
+                    finally
+                    {
+                        running = false;
+                    }
+
+                    ShowDaily(briefing);
+                }
+
+                break;
             case "/today":
                 // The argument is ignored. A dirty editor asks first, unless it already shows today's note.
                 if (editor is not null && openName is not null
@@ -643,6 +737,8 @@ else
                     pendingName = null;
                     pendingPerson = null;
                     pendingToday = true;
+                    pendingBriefing = false;
+                    pendingMeeting = null;
                     discarding = true;
                     break;
                 }
@@ -688,6 +784,7 @@ else
                     pendingName = null;
                     pendingPerson = null;
                     pendingToday = false;
+                    pendingBriefing = false;
                     pendingMeeting = appointment;
                     discarding = true;
                     break;

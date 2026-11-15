@@ -62,58 +62,8 @@ internal static class DailyNote
     {
         StringBuilder text = new StringBuilder();
         text.Append("# ").Append(NameFor(day)).Append('\n');
-        text.Append("\n## Appointments\n");
-        if (appointments.Count == 0)
-        {
-            text.Append("- No appointments.\n");
-        }
-
-        DateTime from = day.ToDateTime(TimeOnly.MinValue);
-        foreach (Appointment appointment in appointments)
-        {
-            string title = appointment.Title.Length == 0 ? "(no title)" : OneLine(appointment.Title);
-            text.Append("- ").Append(CurrentView.Time(appointment, from, from.AddDays(1))).Append(' ').Append(title);
-            if (!string.IsNullOrEmpty(appointment.Location))
-            {
-                text.Append(" (").Append(OneLine(appointment.Location)).Append(')');
-            }
-
-            text.Append('\n');
-        }
-
-        foreach (string file in unreadableCalendarFiles)
-        {
-            text.Append("- Can't read ").Append(CalendarStore.FolderName).Append('/').Append(OneLine(file)).Append(".\n");
-        }
-
-        if (status == CalendarFeedStatus.Failed)
-        {
-            text.Append("- Can't download the Exchange calendar (").Append(OneLine(reason ?? string.Empty)).Append(").\n");
-        }
-
-        text.Append("\n## Todos\n");
-        if (todosUnreadable)
-        {
-            text.Append("- Can't read todos.json.\n");
-        }
-        else if (due.Count == 0)
-        {
-            text.Append("- Nothing due.\n");
-        }
-        else
-        {
-            foreach (DueTodo todo in due)
-            {
-                text.Append("- ").Append(OneLine(todo.Text));
-                if (todo.Overdue)
-                {
-                    text.Append(" (due ").Append(NameFor(todo.Due)).Append(')');
-                }
-
-                text.Append('\n');
-            }
-        }
-
+        AppendAppointments(text, day, appointments, unreadableCalendarFiles, status, reason);
+        AppendTodos(text, todosUnreadable, due);
         return text.ToString();
     }
 
@@ -123,6 +73,20 @@ internal static class DailyNote
     /// once, like <see cref="CurrentView.Build"/>) and their problems. Never touches <c>context.db</c>.
     /// </summary>
     public static string Compose(TodoStore todos, CalendarStore calendar, CalendarFeed? feed, DateOnly today)
+    {
+        StringBuilder text = new StringBuilder();
+        text.Append("# ").Append(NameFor(today)).Append('\n');
+        AppendSections(text, todos, calendar, feed, today);
+        return text.ToString();
+    }
+
+    /// <summary>
+    /// Appends the daily note's <c>## Appointments</c> and <c>## Todos</c> sections for <paramref name="today"/>
+    /// (each after a blank line), read like <see cref="Compose"/>: the feed is fetched once and <c>context.db</c> is
+    /// never opened. Shared with the morning briefing, so both hold the same bytes for the same data.
+    /// </summary>
+    internal static void AppendSections(
+        StringBuilder text, TodoStore todos, CalendarStore calendar, CalendarFeed? feed, DateOnly today)
     {
         CalendarFeedResult result = CurrentView.Fetch(feed);
         CalendarDay day = calendar.Day(today, CurrentView.FeedEvents(result, calendar.Zone, today));
@@ -138,7 +102,8 @@ internal static class DailyNote
             todosUnreadable = true;
         }
 
-        return Format(today, day.Appointments, day.Unreadable, result.Status, result.Reason, todosUnreadable, due);
+        AppendAppointments(text, today, day.Appointments, day.Unreadable, result.Status, result.Reason);
+        AppendTodos(text, todosUnreadable, due);
     }
 
     /// <summary>
@@ -182,6 +147,73 @@ internal static class DailyNote
         }
 
         return null;
+    }
+
+    // The blank line and the ## Appointments section: one line per appointment (or "- No appointments."), then one per
+    // unreadable calendar file and one for a failed feed.
+    private static void AppendAppointments(
+        StringBuilder text,
+        DateOnly day,
+        IReadOnlyList<Appointment> appointments,
+        IReadOnlyList<string> unreadableCalendarFiles,
+        CalendarFeedStatus status,
+        string? reason)
+    {
+        text.Append("\n## Appointments\n");
+        if (appointments.Count == 0)
+        {
+            text.Append("- No appointments.\n");
+        }
+
+        DateTime from = day.ToDateTime(TimeOnly.MinValue);
+        foreach (Appointment appointment in appointments)
+        {
+            string title = appointment.Title.Length == 0 ? "(no title)" : OneLine(appointment.Title);
+            text.Append("- ").Append(CurrentView.Time(appointment, from, from.AddDays(1))).Append(' ').Append(title);
+            if (!string.IsNullOrEmpty(appointment.Location))
+            {
+                text.Append(" (").Append(OneLine(appointment.Location)).Append(')');
+            }
+
+            text.Append('\n');
+        }
+
+        foreach (string file in unreadableCalendarFiles)
+        {
+            text.Append("- Can't read ").Append(CalendarStore.FolderName).Append('/').Append(OneLine(file)).Append(".\n");
+        }
+
+        if (status == CalendarFeedStatus.Failed)
+        {
+            text.Append("- Can't download the Exchange calendar (").Append(OneLine(reason ?? string.Empty)).Append(").\n");
+        }
+    }
+
+    // The blank line and the ## Todos section: one line per due todo, "- Nothing due." or "- Can't read todos.json.".
+    private static void AppendTodos(StringBuilder text, bool todosUnreadable, IReadOnlyList<DueTodo> due)
+    {
+        text.Append("\n## Todos\n");
+        if (todosUnreadable)
+        {
+            text.Append("- Can't read todos.json.\n");
+        }
+        else if (due.Count == 0)
+        {
+            text.Append("- Nothing due.\n");
+        }
+        else
+        {
+            foreach (DueTodo todo in due)
+            {
+                text.Append("- ").Append(OneLine(todo.Text));
+                if (todo.Overdue)
+                {
+                    text.Append(" (due ").Append(NameFor(todo.Due)).Append(')');
+                }
+
+                text.Append('\n');
+            }
+        }
     }
 
     private static string OneLine(string text) => SafeText.Clean(text).Replace('\n', ' ');

@@ -29,6 +29,7 @@ internal sealed class DesktopState
     private DateTime lastRefreshUtc;
     private int builds;
     private volatile DesktopSnapshot? snapshot;
+    private string? offeredBriefing;
 
     public DesktopState(
         NoteStore notes,
@@ -68,6 +69,15 @@ internal sealed class DesktopState
 
     /// <summary>The latest snapshot, or <c>null</c> before the first refresh finished.</summary>
     public DesktopSnapshot? Snapshot => snapshot;
+
+    /// <summary>
+    /// Offers the briefing <paramref name="name"/> that was just created, for <c>Main</c> to open or announce. An
+    /// in-memory value only: nothing is written. Called only by the automatic briefing of the actions.
+    /// </summary>
+    public void OfferBriefing(string name) => Interlocked.Exchange(ref offeredBriefing, name);
+
+    /// <summary>The offered briefing's name once, then <c>null</c> until the next offer.</summary>
+    public string? TakeBriefing() => Interlocked.Exchange(ref offeredBriefing, null);
 
     /// <summary>How many snapshots have been built so far.</summary>
     public int Builds => Volatile.Read(ref builds);
