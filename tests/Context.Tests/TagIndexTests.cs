@@ -1328,4 +1328,20 @@ public sealed class TagIndexTests : IDisposable
 
         Assert.Equal(before, File.ReadAllBytes(DbPath));
     }
+
+    // 174 AC-14: a top-level dot-file and a version under .history are not indexed.
+    [Fact]
+    public void Sync_LeavesOutDotFilesAndHistory()
+    {
+        WriteNote("Plan", "#work");
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, ".x.md"), "#work");
+        Directory.CreateDirectory(Path.Combine(root, ".history", "Plan"));
+        File.WriteAllText(Path.Combine(root, ".history", "Plan", "20261029T090000000Z.md"), "#work #old");
+
+        index.Sync(store);
+
+        Assert.Equal(["Plan"], index.NotesWithTag("work"));
+        Assert.Empty(index.NotesWithTag("old"));
+    }
 }

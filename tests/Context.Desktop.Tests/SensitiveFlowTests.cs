@@ -64,12 +64,12 @@ public sealed class SensitiveFlowTests : IDisposable
 
         await Open(cut, js, "Plan");
 
-        Assert.Equal(["Rename", "Delete", "Make plain", "Lock"], ToolbarButtons(cut));
+        Assert.Equal(["Rename", "Delete", "History", "Make plain", "Lock"], ToolbarButtons(cut));
         Assert.Empty(cut.FindAll("button.open-external"));
         Assert.All(cut.FindAll(".note-toolbar button"), b => Assert.Equal("button", b.GetAttribute("type")));
 
         await Open(cut, js, "Other");
-        Assert.Equal(["Rename", "Delete", "New subpage", "Move", "Open in default editor", "Export", "Mark sensitive"], ToolbarButtons(cut));
+        Assert.Equal(["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export", "Mark sensitive"], ToolbarButtons(cut));
     }
 
     // AC-5: a refused OS prompt, a lost key or a changed file shows one red line and no editor.
@@ -122,6 +122,37 @@ public sealed class SensitiveFlowTests : IDisposable
         Assert.True(cut.Find("button.save").HasAttribute("disabled"));
     }
 
+    // 174 AC-8/AC-13: a sealed version opens with one more Agree, shows its diff and is restored sealed again.
+    [Fact]
+    public async Task History_Sensitive_DiffAndRestore()
+    {
+        data.WriteSensitive("Plan", "first\n");
+        string folder = Path.Combine(data.Root, NoteHistory.FolderName, "Plan");
+        Directory.CreateDirectory(folder);
+        File.Copy(Path.Combine(data.Root, "Plan.ctxs"), Path.Combine(folder, "20261029T080000000Z~Plan.ctxs"));
+        data.WriteSensitive("Plan", "second\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+
+        await cut.Find("button.history").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal(["2026-10-29 09:00:00"], cut.FindAll(".history-row button").Select(b => b.TextContent)), Wait);
+        Assert.Equal(1, data.Keys.Agrees);
+        await cut.Find(".history-row button").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal(["- first", "+ second", "  "], cut.FindAll(".diff-line").Select(l => l.TextContent)), Wait);
+        Assert.Equal(2, data.Keys.Agrees);
+
+        await cut.Find("button.restore-version").ClickAsync(new MouseEventArgs());
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Restored Plan to 2026-10-29 09:00:00.", cut.Find(".main-status").TextContent), Wait);
+        Assert.Equal(3, data.Keys.Agrees);
+        Assert.Equal("first\n", Unsealed("Plan"));
+        Assert.Equal("first\n", js.MountedText());
+        Assert.Equal(
+            [".history/Plan/20261029T080000000Z~Plan.ctxs", ".history/Plan/20261029T090000000Z~Plan.ctxs", "Plan.ctxs"], RootFiles());
+    }
+
     // AC-5: saving in the editor seals again without a private-key call.
     [Fact]
     public async Task Save_Sensitive_ReSeals_WithoutAgree()
@@ -137,7 +168,7 @@ public sealed class SensitiveFlowTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".note-editor .status").TextContent), Wait);
         Assert.Equal(1, data.Keys.Agrees);
         Assert.Equal("new text\n", Unsealed("Plan"));
-        Assert.Equal(["Plan.ctxs"], RootFiles());
+        Assert.Equal([".history/Plan/20261029T090000000Z~Plan.ctxs", "Plan.ctxs"], RootFiles());
     }
 
     // AC-6: the Lock button unmounts the editor; opening again asks for the private key again.
@@ -223,7 +254,7 @@ public sealed class SensitiveFlowTests : IDisposable
         Assert.Null(data.Session.Note);
         Assert.Equal(1, data.Keys.Agrees);
         Assert.Equal("typed before idle\n", Unsealed("Plan"));
-        Assert.Equal(["Plan.ctxs"], RootFiles());
+        Assert.Equal([".history/Plan/20261029T090500000Z~Plan.ctxs", "Plan.ctxs"], RootFiles());
     }
 
     // AC-6: when that save is refused, the note stays open with the refusal in red and nothing is overwritten.
@@ -281,6 +312,48 @@ public sealed class SensitiveFlowTests : IDisposable
         Assert.Null(data.Session!.Note);
         await Open(cut, js, "Plan");
         Assert.Equal(2, data.Keys.Agrees);
+    }
+
+    // 174 AC-9 (nit): plain versions that can't be removed after the mark are reported in red.
+    [Fact]
+    public async Task MarkSensitive_PlainVersionsLeft_RedStatus()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        data.WriteNote("Plan", "# Plan\n");
+        string folder = Path.Combine(data.Root, NoteHistory.FolderName, "Plan");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "20261029T080000000Z.md"), "old\n");
+        UnixFileMode mode = File.GetUnixFileMode(folder);
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        data.Actions!.AfterHistorySealed = () =>
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+            }
+        };
+        await Open(cut, js, "Plan");
+        try
+        {
+            await cut.Find("button.mark-sensitive").ClickAsync(new MouseEventArgs());
+            await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+            cut.WaitForAssertion(() => Assert.Equal(
+                "Marked Plan sensitive, but its old readable versions couldn't be removed. Delete .history/Plan in the data folder.",
+                cut.Find(".main-status").TextContent), Wait);
+        }
+        finally
+        {
+            File.SetUnixFileMode(folder, mode);
+        }
+
+        Assert.Contains("red", cut.Find(".main-status").GetAttribute("class"), StringComparison.Ordinal);
+        Assert.Contains("Plan.ctxs", RootFiles());
     }
 
     // AC-3: Mark sensitive asks first; Cancel changes nothing, the confirm button seals the note and closes it.
@@ -374,7 +447,7 @@ public sealed class SensitiveFlowTests : IDisposable
         await cut.Find("button.make-plain").ClickAsync(new MouseEventArgs());
 
         Assert.Equal(
-            "Make Plan plain? It will be stored as readable text again.", cut.Find("[role=dialog] .question").TextContent);
+            "Make Plan plain? It will be stored as readable text again. Its history will be removed.", cut.Find("[role=dialog] .question").TextContent);
         Assert.Equal("Make plain", cut.Find("[role=dialog] button.confirm").TextContent);
         Assert.Equal(["Plan.ctxs"], RootFiles());
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
@@ -383,7 +456,7 @@ public sealed class SensitiveFlowTests : IDisposable
         Assert.Equal(["Plan.md"], RootFiles());
         Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         Assert.Empty(cut.FindAll("li.note .locked"));
-        cut.WaitForAssertion(() => Assert.Equal(["Rename", "Delete", "New subpage", "Move", "Open in default editor", "Export", "Mark sensitive"], ToolbarButtons(cut)), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export", "Mark sensitive"], ToolbarButtons(cut)), Wait);
         Assert.Equal(1, data.Keys.Agrees);
     }
 
@@ -402,7 +475,7 @@ public sealed class SensitiveFlowTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Equal("Project", cut.Find(".note-title").TextContent), Wait);
         Assert.Equal(["Project.ctxs"], RootFiles());
-        Assert.Equal(["Rename", "Delete", "Make plain", "Lock"], ToolbarButtons(cut));
+        Assert.Equal(["Rename", "Delete", "History", "Make plain", "Lock"], ToolbarButtons(cut));
         cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.mount").Count), Wait);
         Assert.Equal("Secret\n", js.MountedText());
         Assert.Equal(1, data.Keys.Agrees);
@@ -439,7 +512,7 @@ public sealed class SensitiveFlowTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
 
-        Assert.Equal(["Rename", "Delete", "New subpage", "Move", "Open in default editor", "Export"], ToolbarButtons(cut));
+        Assert.Equal(["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export"], ToolbarButtons(cut));
         Assert.Empty(cut.FindAll(".sensitive-entry"));
         Assert.Empty(cut.FindAll("button.sensitive-setup-open"));
         Assert.Empty(cut.FindAll("button.sensitive-restore-open"));

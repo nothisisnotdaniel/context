@@ -69,6 +69,9 @@ public sealed class DataWatcherTests : IDisposable
     [InlineData("Meetings/work.ics")]
     [InlineData("Meetings/Meeting 1.ctxs")]
     [InlineData("Meetings/.md")]
+    [InlineData(".history/Plan/20261029T090000000Z.md")]
+    [InlineData("Work/Projects/.history/N/20261029T090000000Z.md")]
+    [InlineData(".history/Plan/20261029T090000000Z~Plan.ctxs")]
     public void IsRelevant_Subfolders_False(string relative)
     {
         Assert.False(DataWatcher.IsRelevant(Root, Path.Combine(Root, relative)));

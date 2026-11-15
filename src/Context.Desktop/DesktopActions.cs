@@ -46,6 +46,9 @@ internal enum ActionReason
 
     /// <summary>The name is an alias of more than one person, so it links to no one.</summary>
     Ambiguous,
+
+    /// <summary>The note was marked sensitive, but its old plain versions could not be removed.</summary>
+    PlainHistoryLeft,
 }
 
 /// <summary>
@@ -260,6 +263,19 @@ internal sealed class DesktopActions
     /// <summary>The red line when a note's text is over <see cref="MaxNoteBytes"/>.</summary>
     public static string TooLargeText(string name) => $"{name} is larger than 5 MB. Nothing was saved.";
 
+    /// <summary>The red line when the old version of a note can't be kept, so the save writes nothing.</summary>
+    public static string KeepFailedText(string name) => $"Can't keep the old version of {name}. Nothing was saved.";
+
+    /// <summary>The red line when a kept version can't be read for a restore.</summary>
+    public static string VersionUnreadableText => "Can't read this version.";
+
+    /// <summary>The red line when the history of a note can't be sealed while marking it sensitive.</summary>
+    public static string SealHistoryFailedText(string name) => $"Can't seal the history of {name}. Nothing was changed.";
+
+    /// <summary>The red line when a note was marked sensitive but its old plain versions are still on disk.</summary>
+    public static string PlainHistoryLeftText(string name) =>
+        $"Marked {name} sensitive, but its old readable versions couldn't be removed. Delete .history/{name} in the data folder.";
+
     /// <summary>The red line when a sensitive note must be open for the action.</summary>
     public static string UnlockFirstText(string name) => $"Unlock {name} first.";
 
@@ -346,6 +362,9 @@ internal sealed class DesktopActions
     /// <summary>Test hook: runs before every save attempt of <see cref="CaptureText"/>, after the inbox was read.</summary>
     internal Action? BeforeCaptureSave { get; set; }
 
+    /// <summary>Test hook: runs in <see cref="MarkSensitive"/> after the plain versions were sealed, before the note is.</summary>
+    internal Action? AfterHistorySealed { get; set; }
+
     /// <summary>
     /// Appends <paramref name="text"/> as one dated line (<c>- yyyy-MM-dd HH:mm &lt;text&gt;</c>, local time) to the
     /// <c>inbox</c> note through <see cref="Inbox.Capture(NoteStore, string, DateTime)"/>, creating the note when it
@@ -372,6 +391,16 @@ internal sealed class DesktopActions
     /// or when the text is over <see cref="MaxNoteBytes"/>. The result's text is the note's name when done.
     /// </summary>
     public Task<ActionResult> SaveNote(EditableNote opened, string text) => Run(() => SaveNoteNow(opened, text));
+
+    /// <summary>
+    /// Restores the note <paramref name="name"/> to its kept version <paramref name="id"/>, only when the user
+    /// <paramref name="confirmed"/> it: reads the version (<see cref="DesktopState.ReadVersionText"/>, one
+    /// <see cref="IKeyStore.Agree"/> for a sealed one) and saves its text over <paramref name="opened"/> through the
+    /// same path as <see cref="SaveNote"/>, so the current text is kept as a version first. A version that can't be
+    /// read is <see cref="VersionUnreadableText"/>; without a confirmation nothing is read or written.
+    /// </summary>
+    public Task<ActionResult> RestoreVersion(string name, string id, EditableNote opened, Confirmation? confirmed) =>
+        Run(() => RestoreVersionNow(name, id, opened, confirmed));
 
     /// <summary>
     /// Adds a todo due <paramref name="due"/> (recurring when <paramref name="repeat"/> is set) through
@@ -729,6 +758,10 @@ internal sealed class DesktopActions
             {
                 return SaveSensitiveNow(opened, text);
             }
+            catch (NoteHistoryException)
+            {
+                return Failed(ActionReason.WriteFailed, KeepFailedText(opened.Name));
+            }
             catch (Exception)
             {
                 return Failed(ActionReason.WriteFailed, NoteWriteFailedText(opened.Name));
@@ -742,7 +775,7 @@ internal sealed class DesktopActions
 
         try
         {
-            NoteSaveResult saved = notes.SaveIfUnchanged(opened, text, out EditableNote? savedNote);
+            NoteSaveResult saved = notes.SaveIfUnchanged(opened, text, out EditableNote? savedNote, state.HistoryStore);
             return saved switch
             {
                 NoteSaveResult.Saved => new ActionResult(ActionKind.Done, ActionReason.None, opened.Name, savedNote),
@@ -752,10 +785,30 @@ internal sealed class DesktopActions
                 _ => Refused(ActionReason.Missing, MissingText(opened.Name)),
             };
         }
+        catch (NoteHistoryException)
+        {
+            return Failed(ActionReason.WriteFailed, KeepFailedText(opened.Name));
+        }
         catch (Exception)
         {
             return Failed(ActionReason.WriteFailed, NoteWriteFailedText(opened.Name));
         }
+    }
+
+    private ActionResult RestoreVersionNow(string name, string id, EditableNote opened, Confirmation? confirmed)
+    {
+        if (confirmed is null)
+        {
+            return Refused(ActionReason.NotConfirmed, NotConfirmedText);
+        }
+
+        string? text = state.ReadVersionText(name, id);
+        if (text is null)
+        {
+            return Failed(ActionReason.Unreadable, VersionUnreadableText);
+        }
+
+        return SaveNoteNow(opened, text);
     }
 
     private ActionResult AddTodoNow(string text, DateOnly due, TodoRepeat? repeat)
@@ -1228,13 +1281,13 @@ internal sealed class DesktopActions
 
         try
         {
-            if (notes.Delete(name))
+            if (notes.Delete(name, removeHistory: true))
             {
                 return new ActionResult(ActionKind.Done, ActionReason.None, name);
             }
 
             // A sensitive note is deleted without being opened: no private-key call.
-            if (notes.TryFindSensitive(name, out NoteInfo? locked) && locked is not null && notes.DeleteSensitive(locked.Name))
+            if (notes.TryFindSensitive(name, out NoteInfo? locked) && locked is not null && notes.DeleteSensitive(locked.Name, removeHistory: true))
             {
                 state.Session.Close(locked.Name);
                 return new ActionResult(ActionKind.Done, ActionReason.None, name);
@@ -1627,14 +1680,35 @@ internal sealed class DesktopActions
 
             byte[] file = SealedNote.Seal(source.Name, text, recipients);
             string target = Path.Combine(notes.Root, source.Name + NoteStore.SensitiveExtension);
-            bool written = WriteThroughTemp(
-                target,
-                TempName(source.Name, NoteStore.SensitiveExtension),
-                file,
-                overwrite: false,
-                () => IsVersion(source.Path, MaxNoteBytes, version));
+
+            // The plain versions are sealed first, each under the id it has, so the history never stays readable.
+            List<string> sealedVersions = [];
+            if (!SealHistory(source, recipients, sealedVersions))
+            {
+                RemoveAll(sealedVersions);
+                return Failed(ActionReason.WriteFailed, SealHistoryFailedText(source.Name));
+            }
+
+            bool written;
+            try
+            {
+                AfterHistorySealed?.Invoke();
+                written = WriteThroughTemp(
+                    target,
+                    TempName(source.Name, NoteStore.SensitiveExtension),
+                    file,
+                    overwrite: false,
+                    () => IsVersion(source.Path, MaxNoteBytes, version));
+            }
+            catch (Exception)
+            {
+                RemoveAll(sealedVersions);
+                throw;
+            }
+
             if (!written)
             {
+                RemoveAll(sealedVersions);
                 return Refused(ActionReason.ChangedOnDisk, ChangedText(source.Name));
             }
 
@@ -1643,14 +1717,23 @@ internal sealed class DesktopActions
                 if (!IsVersion(source.Path, MaxNoteBytes, version) || !notes.Delete(source.Name))
                 {
                     notes.DeleteSensitive(source.Name);
+                    RemoveAll(sealedVersions);
                     return Refused(ActionReason.ChangedOnDisk, ChangedText(source.Name));
                 }
             }
             catch (Exception)
             {
-                // The plain file could not be removed: take the sealed copy away again, so there is one note.
+                // The plain file could not be removed: take the sealed copies away again, so there is one note.
                 notes.DeleteSensitive(source.Name);
+                RemoveAll(sealedVersions);
                 throw;
+            }
+
+            // Only now the plain versions go; when that fails the sealed ones and the rest stay, and the user is told,
+            // since readable copies of a note now sealed are still on disk.
+            if (!RemoveHistoryQuietly(source.Path, ".md"))
+            {
+                return new ActionResult(ActionKind.Done, ActionReason.PlainHistoryLeft, source.Name);
             }
 
             return new ActionResult(ActionKind.Done, ActionReason.None, source.Name);
@@ -1704,7 +1787,7 @@ internal sealed class DesktopActions
             TempName(found.Name, NoteStore.SensitiveExtension),
             file,
             overwrite: true,
-            () => IsVersion(found.Path, SealedNote.MaxFileBytes, opened.Version));
+            () => KeepSealed(found, opened.Version));
         if (!written)
         {
             return Refused(ActionReason.ChangedOnDisk, ChangedOnDiskText(opened.Name));
@@ -1714,6 +1797,29 @@ internal sealed class DesktopActions
             found.Name, found.Path, plainText, EditableNote.Hash(file), opened.HadCrlf, opened.HadBom);
         state.Session.Open(saved);
         return new ActionResult(ActionKind.Done, ActionReason.None, opened.Name, saved);
+    }
+
+    // True when the sealed file still has the version it was opened with; then its bytes are kept as a version, sealed
+    // under its current title (no key call). Throws NoteHistoryException when they can't be kept.
+    private bool KeepSealed(NoteInfo found, string version)
+    {
+        byte[] current;
+        try
+        {
+            current = BoundedFile.Read(found.Path, SealedNote.MaxFileBytes);
+        }
+        catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        if (!string.Equals(EditableNote.Hash(current), version, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        state.HistoryStore.Keep(found.Path, current, found.Name);
+        return true;
     }
 
     // A sealed file is never moved (its name is part of what is sealed): the open text is sealed again under the new
@@ -1756,9 +1862,77 @@ internal sealed class DesktopActions
             return Refused(ActionReason.Exists, ExistsText(title));
         }
 
+        // The history moves with the note (its versions stay sealed under the titles they had); a history already
+        // under the new title, or a move that fails, takes the new file away again.
+        bool moved;
+        try
+        {
+            moved = NoteHistory.MoveHistory(source.Path, target, caseOnly: false);
+        }
+        catch (Exception)
+        {
+            Remove(target);
+            throw;
+        }
+
+        if (!moved)
+        {
+            Remove(target);
+            return Refused(ActionReason.Exists, ExistsText(title));
+        }
+
         notes.DeleteSensitive(source.Name);
         state.Session.Open(new EditableNote(title, target, open.Text, EditableNote.Hash(file), open.HadCrlf, open.HadBom));
         return new ActionResult(ActionKind.Done, ActionReason.None, title);
+    }
+
+    // Seals every plain version of source (the newest MaxVersionsPerNote, no key call) as <id>~<title>.ctxs next to
+    // it, adding each written path to written. False when a version can't be read, isn't UTF-8 or can't be written.
+    private bool SealHistory(NoteInfo source, SealedRecipient[] recipients, List<string> written)
+    {
+        NoteHistory history = state.HistoryStore;
+        try
+        {
+            foreach (NoteVersion kept in history.Versions(source).Take(NoteHistory.MaxVersionsPerNote))
+            {
+                if (!history.TryRead(source, kept.Id, out byte[]? bytes) || bytes is null)
+                {
+                    return false;
+                }
+
+                string text = new System.Text.UTF8Encoding(false, throwOnInvalidBytes: true).GetString(bytes);
+                written.Add(history.KeepSealedCopy(source.Path, kept.Id, source.Name, SealedNote.Seal(source.Name, text, recipients)));
+            }
+
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private static void RemoveAll(List<string> paths)
+    {
+        foreach (string path in paths)
+        {
+            Remove(path);
+        }
+    }
+
+    // Removes the versions of one kind; a failure leaves them (the note itself is already done) and gives false.
+    private bool RemoveHistoryQuietly(string notePath, string extension)
+    {
+        try
+        {
+            state.HistoryStore.RemoveHistory(notePath, extension);
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Left in place.
+            return false;
+        }
     }
 
     private ActionResult MakePlainNow(string name, Confirmation? confirmed)
@@ -1812,6 +1986,7 @@ internal sealed class DesktopActions
                 throw;
             }
 
+            RemoveHistoryQuietly(source.Path, NoteStore.SensitiveExtension);
             state.Session.Close(source.Name);
             return new ActionResult(ActionKind.Done, ActionReason.None, source.Name);
         }

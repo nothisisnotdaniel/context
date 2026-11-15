@@ -286,6 +286,33 @@ Every factory agent reads this file before working on Context. Keep it short and
     on the first machine.
   - **Manual checks (no test can cover them):** on macOS and on Windows run setup, mark, open (the OS prompt
     appears), lock, restart, restore from the `.pfx`.
+- **Note history** (job 174, `NoteHistory.cs`, `TextDiff.cs`, desktop only): `NoteHistory(NoteStore, utcNow)` keeps a
+  note `<folder>/<Title>.md`'s versions in `<folder>/.history/<Title>/<id>.md` and a sensitive `<Title>.ctxs`'s in
+  `<root>/.history/<Title>/<id>~<sealed title>.ctxs` (`<id>` = `yyyyMMdd'T'HHmmssfff'Z'[-n]` from the clock;
+  `CreateNew`, `0600`; split at the first `~`, last `.ctxs` stripped). `Keep(notePath, bytes, sealedTitle?)` writes
+  nothing when the bytes equal the newest version, then prunes the oldest to at most `MaxVersionsPerNote` (50) and
+  `MaxBytesPerNote` (25 MB), never the new one; any failure is `NoteHistoryException`. `Versions`/`TryRead` never
+  follow a link or reparse point and list only regular files with a valid name (newest first, `NoteVersion`).
+  `NoteStore.SaveIfUnchanged(..., history)` keeps the previous bytes after the version check, before the move; only
+  `DesktopActions.SaveNote` passes one (capture, day's end, briefing, import and the CLI keep none). `Rename`/`Move`
+  move `.history/<Title>/` along (never over an existing one; moved back when the note move fails); only `DeleteNote`
+  passes `removeHistory: true` to `Delete`/`DeleteSensitive`. `List()` drops top-level dot-files. Sensitive: a save
+  copies the old sealed file byte for byte (zero `Agree`); a rename seals the new file, moves the history (a clash
+  removes the new file: Refused `Exists`), then `DeleteSensitive`; `MarkSensitive` seals each plain version (at most
+  50, public keys only) before the note, removes the sealed ones on any failure or rollback (`Can't seal the history of
+  <name>. Nothing was changed.`) and the `.md` ones on success (when that fails: Done/`PlainHistoryLeft`, red
+  `Marked <name> sensitive, but its old readable versions couldn't be removed. Delete .history/<name> in the data
+  folder.`); `MakePlain` (question ends `Its history will be
+  removed.`) removes the sealed ones. `DesktopState.History(name)` (`HistoryView`) and `ReadVersion(name, id)` (a
+  sealed version only while the note is open, one `Agree` with its `<sealed title>` as AAD) read only.
+  `TextDiff.Lines(old, current)` is a Myers line diff (`\n` split, trailing `\r` dropped) bounded at
+  `MaxChangedLines` (1000, else `TooDifferent`). `HistoryPanel` (the `History` toolbar button, under `NoteEditor`)
+  lists versions in local `yyyy-MM-dd HH:mm:ss` and the chosen one's diff (`-` red, `+` accent, unchanged grey);
+  `Restore this version` asks in `ConfirmDialog` (`Restore <name> to the version from <time>? The current text is kept
+  as a version.`, dirty editor `Save <name> first.`) and `DesktopActions.RestoreVersion` saves through `SaveNote`, then
+  the editor reloads (`NoteEditor.ShowSavedAsync`) with accent `Restored <name> to <time>.` Known limits (README): the
+  old title of a renamed sensitive note stays in its version file names; ~130-character file names can hit the Windows
+  path limit; a broken `.history` blocks saves at that level until the user removes it.
 - **How it runs:** two front ends over the same Core stores and the same data folder: the desktop app (a Photino
   window, see the desktop layout) and the command line (one command per process, see Command line). There is no
   terminal UI: `context` without arguments is a usage error.
@@ -897,7 +924,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `wwwroot/index.html` (CSP meta tag, only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
     and `wwwroot/editor/editor.css`.
   - **Desktop rules:** the Core writing calls (`Create`, `Save`, `SaveIfUnchanged`, `Add`, `Complete`, `Set`, `Clear`, `Delete`,
-    `Rename`, `CreateChild`, `Move`, `ClearCache`, `Capture` (`Inbox.Capture`), `Ensure` (`DailyNote.Ensure`, `MeetingNote.Ensure`, `Briefing.Ensure`), `CreateWithText` (`CreateNoteFromTemplate`), the day's end (`CloseDay`, `RefreshWorked`, `MoveTodos`, `AutoClose`, `MoveDue`, `SaveDayEnd`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
+    `Rename`, `CreateChild`, `Move`, `ClearCache`, `Capture` (`Inbox.Capture`), `Ensure` (`DailyNote.Ensure`, `MeetingNote.Ensure`, `Briefing.Ensure`), the note history (`Keep`, `RemoveHistory`, `RestoreVersion`; only the call `Actions.RestoreVersion(` in a `.razor` file is allowed), `CreateWithText` (`CreateNoteFromTemplate`), the day's end (`CloseDay`, `RefreshWorked`, `MoveTodos`, `AutoClose`, `MoveDue`, `SaveDayEnd`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
     `StoreRecoveryPublicKey`) appear only in `DesktopActions.cs` (exemptions: `DotNetObjectReference.Create(` once in
     `EditorInterop.cs`, `ECDiffieHellman.Create(` in `SealedNote.cs`, and `WindowsKeyStore.cs`, whose .NET calls change
     the certificate store and which names no Core store, `File.`, `Directory.` or `Path.`; the reads still write
@@ -957,7 +984,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `FileSnapshot` (bytes and last-write times of a folder, to prove nothing changed), `RepoFiles` and `WaitTimeoutSourceTests` (the wait rule). A `WaitForAssertion` that waits for work behind `Task.Run` (such as
     every wait in `SensitiveFlowTests`, which runs real ECDH and AES-GCM) passes an explicit, bounded timeout from a named
     constant in its class, and no test ever changes `BunitContext.DefaultWaitTimeout`. The guard checks `SensitiveFlowTests.cs`,
-    `MainTests.cs`, `EditingFlowTests.cs` and `TagsPanelTests.cs`: each has exactly one `Wait` constant (10-30 s) and every `WaitForAssertion`
+    `MainTests.cs`, `EditingFlowTests.cs`, `TagsPanelTests.cs` and `HistoryPanelTests.cs`: each has exactly one `Wait` constant (10-30 s) and every `WaitForAssertion`
     in them passes it as the last argument.
 - **Style:**
   - `Cli` writes plain text through injected `TextWriter`s (stdout, stderr) and mentions no `Console.` (checked

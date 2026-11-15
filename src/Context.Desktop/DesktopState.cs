@@ -53,7 +53,11 @@ internal sealed class DesktopState
         this.utcNow = utcNow;
         KeyStore = keyStore ?? new UnsupportedKeyStore();
         Session = session ?? new SensitiveSession(utcNow);
+        HistoryStore = new NoteHistory(notes, utcNow);
     }
+
+    /// <summary>The kept versions of the notes, with the same clock as this state.</summary>
+    public NoteHistory HistoryStore { get; }
 
     /// <summary>Raised (on a background thread) after every refresh, once <see cref="Snapshot"/> is set.</summary>
     public event Action? Changed;
@@ -196,6 +200,91 @@ internal sealed class DesktopState
             return (EditableNote?)null;
         }
     });
+
+    /// <summary>
+    /// The kept versions of the note called <paramref name="name"/> (plain, or the sensitive note the
+    /// <see cref="Session"/> holds open), newest first, and its saved text, off the calling thread. Never asks the key
+    /// store. <see cref="HistoryKind.Unreadable"/> when the note is gone, locked, or it or its history can't be read.
+    /// </summary>
+    public Task<HistoryView> History(string name) => Task.Run(() =>
+    {
+        try
+        {
+            if (notes.TryFind(name, out NoteInfo? plain) && plain is not null)
+            {
+                string text = notes.ReadForEdit(plain).Text;
+                return new HistoryView(HistoryKind.Shown, HistoryStore.Versions(plain), text);
+            }
+
+            if (notes.TryFindSensitive(name, out NoteInfo? found) && found is not null
+                && OpenNote(found) is { } open)
+            {
+                return new HistoryView(HistoryKind.Shown, HistoryStore.Versions(found), open.Text);
+            }
+
+            return HistoryView.Unreadable;
+        }
+        catch (Exception)
+        {
+            return HistoryView.Unreadable;
+        }
+    });
+
+    /// <summary>
+    /// The text of version <paramref name="id"/> of the note <paramref name="name"/>, as the editor would hold it, off
+    /// the calling thread (see <see cref="ReadVersionText"/>).
+    /// </summary>
+    public Task<string?> ReadVersion(string name, string id) => Task.Run(() => ReadVersionText(name, id));
+
+    /// <summary>
+    /// The text of version <paramref name="id"/> of the note <paramref name="name"/> as the editor would hold it
+    /// (<c>\n</c> line endings, no byte order mark). A plain version is decoded like a note; a sealed one is opened
+    /// with <see cref="SealedNote.Open"/> under the title in its file name and one <see cref="IKeyStore.Agree"/>, only
+    /// while the session holds the note open. <c>null</c> when there is no such version or it can't be read.
+    /// </summary>
+    public string? ReadVersionText(string name, string id)
+    {
+        try
+        {
+            if (notes.TryFind(name, out NoteInfo? plain) && plain is not null)
+            {
+                return HistoryStore.TryRead(plain, id, out byte[]? bytes) && bytes is not null
+                    ? NoteStore.DecodeText(bytes).Replace("\r\n", "\n", StringComparison.Ordinal)
+                    : null;
+            }
+
+            if (!notes.TryFindSensitive(name, out NoteInfo? found) || found is null || OpenNote(found) is null)
+            {
+                return null;
+            }
+
+            NoteVersion? version = HistoryStore.Versions(found)
+                .FirstOrDefault(v => string.Equals(v.Id, id, StringComparison.Ordinal));
+            byte[]? machine = KeyStore.MachinePublicKey();
+            if (version?.SealedTitle is not { } title || machine is null
+                || !HistoryStore.TryRead(found, id, out byte[]? file) || file is null)
+            {
+                return null;
+            }
+
+            return SensitiveSession.ToEditable(found, SealedNote.Open(title, file, machine, KeyStore.Agree), string.Empty).Text;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    // The session's note when it is the sensitive note found on disk, else null.
+    private EditableNote? OpenNote(NoteInfo found)
+    {
+        EditableNote? open = Session.Note;
+        return open is not null
+            && string.Equals(open.Name, found.Name, StringComparison.Ordinal)
+            && string.Equals(open.Path, found.Path, StringComparison.Ordinal)
+            ? open
+            : null;
+    }
 
     /// <summary>
     /// The notes tagged <paramref name="tag"/> (normalized like <see cref="TagIndex.NormalizeTag"/>) after syncing the

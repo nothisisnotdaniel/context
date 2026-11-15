@@ -91,6 +91,24 @@ that day instead. Times' data folder is `TIMES_DATA_DIR` when set (an absolute p
 folder; it is only read. The desktop app has an `End the day` button in the current view, and it closes the day by
 itself after you book your leaving in Times (the todos move once, at a leaving at 17:00 or later).
 
+### Note history
+
+The desktop app keeps the previous text of a note as a version every time you save a change in it. The versions sit
+in a `.history` folder next to the note (`.history/<title>/`), at most 50 per note and 25 MB in total; the oldest go
+first. `History` in a note's toolbar lists them, shows how each differs from the saved text, and `Restore this
+version` puts one back after asking (the current text is kept as a version too). Renaming or moving a note takes its
+history along; deleting the note removes it. Captures, the day's end, the briefing, imports and the command line keep
+no versions. A sensitive note's versions stay sealed; making it plain removes them.
+
+- After a sensitive note is renamed, its old title stays readable in the file names of its older versions
+  (`.history/<new>/<id>~<old>.ctxs`) until they are pruned or the note is deleted, just as a sensitive note's own file
+  name is readable.
+- A version's path holds the note's title twice (file names of about 130 characters), so on Windows a long data
+  folder path can hit the path length limit; the save then fails with `Can't keep the old version of <name>. Nothing
+  was saved.`
+- When `.history` in a folder is broken (for example a file or a link called `.history`), every save of the notes in
+  that folder fails with the same message. Remove that `.history` entry from the data folder to fix it.
+
 ### Weekly review
 
 `context review` prints one page for a weekly review: `Review, <from> to <to>` (the last 7 days, today included), then
