@@ -17,6 +17,9 @@ public sealed class SettingsPanelTests : IDisposable
     private const string ReplaceQuestion = "Replace the calendar link? The downloaded calendar copy is deleted too.";
     private const string RemoveQuestion = "Remove the calendar link? The downloaded calendar copy is deleted too.";
 
+    // 175: Load awaits two Task.Run hops (the calendar link, then the key), so no wait relies on bUnit's 1 s default.
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
+
     private static readonly DateTime CacheTime = new(2026, 10, 29, 7, 30, 0, DateTimeKind.Utc);
 
     private readonly DesktopFixture data = new();
@@ -98,13 +101,13 @@ public sealed class SettingsPanelTests : IDisposable
         Task click = cut.Find("button.calendar-link-save").ClickAsync(new MouseEventArgs());
         Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
 
-        cut.WaitForAssertion(() => Assert.True(cut.Find("button.calendar-link-save").HasAttribute("disabled")));
+        cut.WaitForAssertion(() => Assert.True(cut.Find("button.calendar-link-save").HasAttribute("disabled")), Wait);
         Assert.True(cut.Find("input").HasAttribute("disabled"));
         Assert.True(cut.Find("button.close").HasAttribute("disabled"));
         release.Set();
         await click;
 
-        cut.WaitForAssertion(() => Assert.False(cut.Find("input").HasAttribute("disabled")));
+        cut.WaitForAssertion(() => Assert.False(cut.Find("input").HasAttribute("disabled")), Wait);
         Assert.True(File.Exists(LinkPath));
     }
 
@@ -129,7 +132,7 @@ public sealed class SettingsPanelTests : IDisposable
 
         // 07:30 UTC is 08:30 in the fixture's zone (UTC+1).
         cut.WaitForAssertion(() => Assert.Equal(
-            $"Calendar link: {Masked} (last download 2026-10-29 08:30)", cut.Find(".calendar-link-state").TextContent));
+            $"Calendar link: {Masked} (last download 2026-10-29 08:30)", cut.Find(".calendar-link-state").TextContent), Wait);
         Assert.DoesNotContain(FakeHttpHandler.PathToken, cut.Markup, StringComparison.Ordinal);
         Assert.DoesNotContain(FakeHttpHandler.QueryToken, cut.Markup, StringComparison.Ordinal);
     }
@@ -173,7 +176,7 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.Equal(FakeHttpHandler.Link + "\n", File.ReadAllText(LinkPath));
         Assert.Empty(cut.FindAll("[role=dialog]"));
         cut.WaitForAssertion(() => Assert.Equal(
-            $"Calendar link: {Masked} (not downloaded yet)", cut.Find(".calendar-link-state").TextContent));
+            $"Calendar link: {Masked} (not downloaded yet)", cut.Find(".calendar-link-state").TextContent), Wait);
 
         // The field is a new element (its handler id changed), without a value, and the component kept no copy:
         // Save is disabled again and Enter saves nothing more.
@@ -257,7 +260,7 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.Equal(OtherLink + "\n", File.ReadAllText(LinkPath));
         Assert.False(File.Exists(CachePath));
         cut.WaitForAssertion(() => Assert.Equal(
-            "Calendar link: https://other.example/… (not downloaded yet)", cut.Find(".calendar-link-state").TextContent));
+            "Calendar link: https://other.example/… (not downloaded yet)", cut.Find(".calendar-link-state").TextContent), Wait);
         Assert.Equal(string.Empty, TypedCopy(cut));
         Assert.DoesNotContain("otherTok51", cut.Markup, StringComparison.Ordinal);
     }
@@ -287,7 +290,7 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.True(status.ClassList.Contains("accent"));
         Assert.False(File.Exists(LinkPath));
         Assert.False(File.Exists(CachePath));
-        cut.WaitForAssertion(() => Assert.Equal("No calendar link set.", cut.Find(".calendar-link-state").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("No calendar link set.", cut.Find(".calendar-link-state").TextContent), Wait);
         Assert.Empty(cut.FindAll("button.calendar-link-remove"));
     }
 
@@ -374,7 +377,7 @@ public sealed class SettingsPanelTests : IDisposable
         data.Keys.CreateMachineKey();
         await data.State!.Refresh();
 
-        cut.WaitForAssertion(() => Assert.Equal("Does not expire", cut.Find(".key-expires").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Does not expire", cut.Find(".key-expires").TextContent), Wait);
         Assert.Equal("Context sensitive notes", cut.Find(".key-name").TextContent);
         Assert.Equal(64, cut.Find(".key-thumbprint").TextContent.Length);
         Assert.Equal(SealedNote.KeyId(data.Keys.MachinePublicKey()!), cut.Find(".key-thumbprint").TextContent, ignoreCase: true);
@@ -441,7 +444,7 @@ public sealed class SettingsPanelTests : IDisposable
         }
 
         await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal("No calendar link set.", cut.Find(".calendar-link-state").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("No calendar link set.", cut.Find(".calendar-link-state").TextContent), Wait);
 
         // Typing and saving.
         await Type(cut, MarkerLink);
@@ -449,7 +452,7 @@ public sealed class SettingsPanelTests : IDisposable
         await cut.Find("button.calendar-link-save").ClickAsync(new MouseEventArgs());
         Assert.Equal("Calendar link saved (https://outlook.example/…).", cut.Find(".settings-result").TextContent);
         Assert.Equal(MarkerLink + "\n", File.ReadAllText(LinkPath));
-        cut.WaitForAssertion(() => Assert.StartsWith("Calendar link: https://outlook.example/…", cut.Find(".calendar-link-state").TextContent));
+        cut.WaitForAssertion(() => Assert.StartsWith("Calendar link: https://outlook.example/…", cut.Find(".calendar-link-state").TextContent), Wait);
         Clean();
         await Views();
 
@@ -508,7 +511,7 @@ public sealed class SettingsPanelTests : IDisposable
         Clean();
 
         // Removed.
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll("button.calendar-link-remove")));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll("button.calendar-link-remove")), Wait);
         await cut.Find("button.calendar-link-remove").ClickAsync(new MouseEventArgs());
         Clean();
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
@@ -540,7 +543,7 @@ public sealed class SettingsPanelTests : IDisposable
     {
         data.CreateState();
         IRenderedComponent<SettingsPanel> cut = data.Bunit.Render<SettingsPanel>();
-        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Markup, StringComparison.Ordinal));
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Markup, StringComparison.Ordinal), Wait);
         await Task.CompletedTask;
         return cut;
     }

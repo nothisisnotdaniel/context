@@ -8,6 +8,7 @@ namespace Context.Tests;
 // 154: TagsPanelTests waits on the tag load behind Task.Run and follows it too.
 // 156: PersonPanelTests waits on the person load behind Task.Run and follows it too.
 // 174: HistoryPanelTests waits on the history and version loads behind Task.Run and follows it too.
+// 175: SettingsPanelTests waits on the settings load (two Task.Run hops) and follows it too.
 public sealed class WaitTimeoutSourceTests
 {
     private const string TestsFolder = "tests/Context.Desktop.Tests";
@@ -28,6 +29,7 @@ public sealed class WaitTimeoutSourceTests
     [InlineData("tests/Context.Desktop.Tests/TagsPanelTests.cs")]
     [InlineData("tests/Context.Desktop.Tests/PersonPanelTests.cs")]
     [InlineData("tests/Context.Desktop.Tests/HistoryPanelTests.cs")]
+    [InlineData("tests/Context.Desktop.Tests/SettingsPanelTests.cs")]
     public void EveryWaitForAssertion_PassesTheWaitConstant(string file)
     {
         string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), file));
