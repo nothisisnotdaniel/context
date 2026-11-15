@@ -235,6 +235,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#201](backlog/201-mention-template-in-the-empty-new.md) Mention --template in the empty /new hint
 - [?] [#202](backlog/202-match-note-and-sensitive-file-extensions.md) Match note and sensitive-file extensions ignoring case on Linux
 - [?] [#203](backlog/203-replace-lone-surrogates-in-meeting-note.md) Replace lone surrogates in meeting note names
+- [?] [#204](backlog/204-cap-todos-json-size-and-refuse.md) Cap todos.json size and refuse non-regular files
+- [?] [#205](backlog/205-say-why-done-did-nothing-while.md) Say why /done did nothing while a dialog is open
 
 ## Dropped with the terminal UI
 
