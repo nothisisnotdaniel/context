@@ -122,7 +122,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     listed `.md` notes count, so sealed notes never appear. A bad `context.db` also empties every `Related` list.
     `context current` writes `related\t<name>\t<#tags then words>` after each appointment line and, with appointments,
     `Can't read context.db.` once on stderr (exit 1, after `Can't read todos.json.` when both). `CurrentPanel`
-    (`OnOpen`, from `Main.RequestOpen`) draws a `tr.related` row with one `note-button` per note (`Title`, full name
+    (`OnOpen`, from `Main.RequestOpen`) starts each appointment row with its grey 1-based number (`td.number`, job 167), draws a `tr.related` row with one `note-button` per note (`Title`, full name
     in `title`) and grey `.matches` under each shown appointment (not counted toward `MaxAppointmentRows`), and red
     `Can't read the related notes.` after the table when the index is unreadable.
   - **Calendar:** the user puts iCalendar files in `<root>/calendar/`. `CalendarStore(root, TimeZoneInfo)`
@@ -389,6 +389,11 @@ Every factory agent reads this file before working on Context. Keep it short and
   `<date>\t<text>`; its error lines go to stderr and make the exit code 1), `today` (the daily note, see Daily
   note: prints it like `note show`, creating it first when it is missing; a sensitive one is `Cli.SensitiveText`,
   exit 1; a failed write is `Can't write <name>.`, exit 1; no arguments, `--json` is a usage error),
+  `meeting <n>` (job 167, see Meeting note: prints the note for appointment `n` of today's `current` list like
+  `note show`, creating it first; no appointments is `There are no appointments today.`, a number beyond them
+  `There is no appointment <n> today.`, a sensitive one `Cli.SensitiveText`, a failed write `Can't write <name>.`, all
+  exit 1; a missing or non-number argument (ASCII digits, at least 1) or `--json` is a usage error; it fetches the feed
+  once and never opens `context.db`),
   `new <title...> [--template <name...>]` (job 165: title words joined with one space; `--template` matched ignoring
   case; prints `Created <name>`; with a template see Templates, without one the plain `# <title>\n` note through
   `Create`; an invalid title or an existing note gives the `ValidateTitle` text or `Note <name> already exists.`, every
@@ -555,7 +560,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `[[note link]]` parsing in `NoteLinkParser.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
-    `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs`, the todo input rules (`TryParseDate`,
+    `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs`, note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs`, the todo input rules (`TryParseDate`,
     `MaxTextLength`) in `TodoInput.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`) and `CalendarLinkView.cs`
     (the calendar link), and the command ranking for the desktop palette in `CommandMatcher.cs`; the notes list is `NoteStore.List()` itself.
   - **Data step in Core, drawing in the front end:** a view's Core data step returns plain types (a kind plus raw
@@ -621,7 +626,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     file bytes, read through `BoundedFile`): a bigger or non-seekable note can't be opened (`Can't read <name>.`), a save
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
-    `/capture`, `/current`, `/export`, `/find`, `/import`, `/new`, `/open`, `/save`, `/settings`, `/tags`, `/today`, `/todo` with `CommandMatcher` (in Core).
+    `/capture`, `/current`, `/export`, `/find`, `/import`, `/meeting`, `/new`, `/open`, `/save`, `/settings`, `/tags`, `/today`, `/todo` with `CommandMatcher` (in Core).
     `/new <title> [--template <name>]` (job 165): the first whitespace-separated `--template` token (ignoring case)
     splits the trimmed title from the trimmed template name and calls `DesktopActions.CreateNoteFromTemplate(title,
     template)` (`NoteTemplates.Prepare` with the injected local clock, then `CreateWithText`; the Templates texts, no
@@ -631,6 +636,18 @@ Every factory agent reads this file before working on Context. Keep it short and
     when the open note is today's note itself: the editor stays as it is, unsaved text included), then
     calls `DesktopActions.OpenDailyNote()` and opens the note (a sensitive one through the unlock flow), with the
     accent `Created <name>` after a create and the red failure text otherwise.
+    `/meeting <number>` (job 167) picks the appointment from the shown `Snapshot.Current` (the `#` column of
+    `CurrentPanel`, which counts the rows hidden behind `… N more` too) and works like `/today` through
+    `DesktopActions.OpenMeetingNote(appointment)`; a blank or invalid number is red `Type /meeting <number>.`, no
+    appointments or a number beyond them the CLI's texts in red, a failed write red `Can't write <name>.`.
+    **Meeting note:** `MeetingNote` (Core) names the note `yyyy-MM-dd <title>` (local start date, invariant; the
+    one-line title with `/ \ : * ? " < > |` and control characters as spaces, collapsed, trimmed, cut to
+    `MaxTitlePart` without splitting a surrogate pair, trailing `.md`, dots and spaces stripped, `Meeting` when empty;
+    always valid for `ValidateTitle` and equal to `NormalizeTitle`). `Format` writes `# <name>`, `#meeting`, `- Title:`,
+    `- Time:` (`MeetingNote.Time`), `- Location:` (only when set) and `- Attendees:` (`@[name]` mentions, or `none`).
+    `Ensure(notes, appointment)` returns `Existing` or `Sensitive` without writing, else creates the top-level note
+    through `CreateWithText` (a race counts as existing). `Today(calendar, feed, day)` gives the numbered list
+    (`CurrentView` order: files plus feed).
     **Daily note:** `DailyNote` (Core) names the note `yyyy-MM-dd` (invariant) for the local day. `Ensure(notes, day,
     compose)` returns `Existing` or `Sensitive` for a note of that name without calling `compose` or writing, else
     creates the top-level note through `CreateWithText` (a `NoteExistsException` race counts as existing).
@@ -757,7 +774,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `wwwroot/index.html` (CSP meta tag, only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
     and `wwwroot/editor/editor.css`.
   - **Desktop rules:** the Core writing calls (`Create`, `Save`, `SaveIfUnchanged`, `Add`, `Complete`, `Set`, `Clear`, `Delete`,
-    `Rename`, `CreateChild`, `Move`, `ClearCache`, `Capture` (`Inbox.Capture`), `Ensure` (`DailyNote.Ensure`), `CreateWithText` (`CreateNoteFromTemplate`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
+    `Rename`, `CreateChild`, `Move`, `ClearCache`, `Capture` (`Inbox.Capture`), `Ensure` (`DailyNote.Ensure`, `MeetingNote.Ensure`), `CreateWithText` (`CreateNoteFromTemplate`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
     `StoreRecoveryPublicKey`) appear only in `DesktopActions.cs` (exemptions: `DotNetObjectReference.Create(` once in
     `EditorInterop.cs`, `ECDiffieHellman.Create(` in `SealedNote.cs`, and `WindowsKeyStore.cs`, whose .NET calls change
     the certificate store and which names no Core store, `File.`, `Directory.` or `Path.`; the reads still write

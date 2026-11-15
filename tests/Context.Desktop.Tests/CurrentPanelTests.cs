@@ -38,10 +38,12 @@ public sealed class CurrentPanelTests : IDisposable
 
         IReadOnlyList<IElement> rows = cut.FindAll("table.appointments tbody tr");
         Assert.Equal(3, rows.Count);
-        Assert.Equal(["…-01:00", "Night", string.Empty], Cells(rows[0]));
-        Assert.Equal(["09:00-09:30", "Standup", "Room 1"], Cells(rows[1]));
-        Assert.Equal(["11:00-12:00", "(no title)", string.Empty], Cells(rows[2]));
-        Assert.Equal("Standup", rows[1].Children[1].GetAttribute("title"));
+        Assert.Equal(["#", "Time", "Appointment", "Where"], cut.FindAll("table.appointments thead th").Select(h => h.TextContent).ToArray());
+        Assert.Equal(["1", "…-01:00", "Night", string.Empty], Cells(rows[0]));
+        Assert.Equal(["2", "09:00-09:30", "Standup", "Room 1"], Cells(rows[1]));
+        Assert.Equal(["3", "11:00-12:00", "(no title)", string.Empty], Cells(rows[2]));
+        Assert.Equal("Standup", rows[1].Children[2].GetAttribute("title"));
+        Assert.True(rows[1].Children[0].ClassList.Contains("number"));
 
         IReadOnlyList<IElement> due = cut.FindAll("table.due tbody tr");
         Assert.Equal(2, due.Count);
@@ -69,9 +71,11 @@ public sealed class CurrentPanelTests : IDisposable
 
         IReadOnlyList<IElement> rows = cut.FindAll("table.appointments tbody tr");
         Assert.Equal(15, rows.Count);
-        Assert.Equal("M13", rows[13].Children[1].TextContent);
+        Assert.Equal("M13", rows[13].Children[2].TextContent);
+        Assert.Equal("14", rows[13].QuerySelector("td.number")!.TextContent);
         Assert.Equal("… 6 more", rows[14].TextContent.Trim());
-        Assert.True(rows[14].Children[1].ClassList.Contains("grey"));
+        Assert.Equal(4, rows[14].Children.Length);
+        Assert.True(rows[14].Children[2].ClassList.Contains("grey"));
     }
 
     // AC-2: the grey empty lines and no tables when there is nothing.
@@ -201,9 +205,10 @@ public sealed class CurrentPanelTests : IDisposable
         Assert.Empty(cut.FindAll("img"));
         string shown = Xss + " " + XssImage + " �";
         IReadOnlyList<IElement> cells = cut.FindAll("table.appointments td");
-        Assert.Equal(shown, cells[1].TextContent);
+        Assert.Equal("1", cells[0].TextContent);
         Assert.Equal(shown, cells[2].TextContent);
-        Assert.Equal(shown, cells[2].GetAttribute("title"));
+        Assert.Equal(shown, cells[3].TextContent);
+        Assert.Equal(shown, cells[3].GetAttribute("title"));
         Assert.Equal(shown + " #work", cut.FindAll("table.due td")[1].TextContent);
         Assert.Contains("&lt;script&gt;", cut.Markup);
         Assert.DoesNotContain("\u0007", cut.Markup, StringComparison.Ordinal);
@@ -308,6 +313,33 @@ public sealed class CurrentPanelTests : IDisposable
         Assert.Equal(14, cut.FindAll("tr.related").Count);
         Assert.Equal("… 2 more", Assert.Single(cut.FindAll("tr.more")).TextContent.Trim());
         Assert.Equal(29, cut.FindAll("table.appointments tbody tr").Count);
+    }
+
+    // 167 AC-1: each shown appointment row starts with its 1-based number; related and "more" rows have four cells
+    // with empty number cells, and the numbers run on past the related rows.
+    [Fact]
+    public async Task Render_NumberCells_WithRelatedAndMoreRows()
+    {
+        string[] events = Enumerable.Range(0, 16)
+            .Select(i => DesktopFixture.Event($"Topic{i:00} acme", $"20261029T{8 + i / 4:00}{i % 4 * 15:00}00",
+                $"20261029T{8 + i / 4:00}{i % 4 * 15 + 10:00}00"))
+            .ToArray();
+        data.WriteCalendar("a.ics", DesktopFixture.Calendar(events));
+        data.WriteNote("ACME", "x");
+
+        IRenderedComponent<CurrentPanel> cut = await data.RenderAsync<CurrentPanel>();
+
+        Assert.Equal(
+            Enumerable.Range(1, 14).Select(i => i.ToString(System.Globalization.CultureInfo.InvariantCulture)).ToArray(),
+            cut.FindAll("tr.appointment td.number").Select(c => c.TextContent).ToArray());
+        Assert.All(cut.FindAll("tr.appointment"), r => Assert.Equal(4, r.Children.Length));
+        IElement related = cut.FindAll("tr.related")[0];
+        Assert.Equal(3, related.Children.Length);
+        Assert.Equal(string.Empty, related.Children[0].TextContent);
+        Assert.Equal(string.Empty, related.Children[1].TextContent);
+        Assert.Equal("2", related.Children[2].GetAttribute("colspan"));
+        IElement more = cut.Find("tr.more");
+        Assert.Equal(["", "", "… 2 more", ""], Cells(more));
     }
 
     // 160 AC-8: a bad context.db with appointments shows the red related line after the table and no related rows.

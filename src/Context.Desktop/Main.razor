@@ -156,6 +156,7 @@ else
     private string? pendingName;
     private string? pendingPerson;
     private bool pendingToday;
+    private Appointment? pendingMeeting;
     private bool paletteOpen;
     private bool running;
     private string statusText = string.Empty;
@@ -307,6 +308,29 @@ else
             return;
         }
 
+        if (pendingMeeting is { } meeting)
+        {
+            pendingMeeting = null;
+            if (running)
+            {
+                return;
+            }
+
+            running = true;
+            ActionResult meetingNote;
+            try
+            {
+                meetingNote = await Actions.OpenMeetingNote(meeting);
+            }
+            finally
+            {
+                running = false;
+            }
+
+            ShowDaily(meetingNote);
+            return;
+        }
+
         if (pendingPerson is not { } person)
         {
             ShowNote(pendingName);
@@ -339,6 +363,7 @@ else
         pendingName = null;
         pendingPerson = null;
         pendingToday = false;
+        pendingMeeting = null;
     }
 
     // Opens the person page Actions gave, or shows why there is none.
@@ -356,7 +381,7 @@ else
         }
     }
 
-    // Opens the daily note Actions gave (Created after a create), or shows why there is none.
+    // Opens the daily or meeting note Actions gave (Created after a create), or shows why there is none.
     private void ShowDaily(ActionResult daily)
     {
         if (daily.Kind != ActionKind.Done)
@@ -389,6 +414,7 @@ else
         pendingName = null;
         pendingPerson = null;
         pendingToday = false;
+        pendingMeeting = null;
         tagShown = null;
         tagsShown = false;
         findShown = null;
@@ -604,6 +630,52 @@ else
                     }
 
                     ShowDaily(daily);
+                }
+
+                break;
+            case "/meeting":
+                // The number of today's appointment in the shown current view, counting the ones behind "… N more".
+                if (!MeetingNote.TryParseNumber(rest, out int meetingNumber))
+                {
+                    ShowStatus("Type /meeting <number>.", "red");
+                    break;
+                }
+
+                Appointment? appointment = MeetingNote.Pick(
+                    Snapshot?.Current?.Appointments ?? [], meetingNumber, out string? meetingError);
+                if (appointment is null)
+                {
+                    ShowStatus(DesktopText.OneLine(meetingError ?? MeetingNote.NoAppointmentsText), "red");
+                    break;
+                }
+
+                // A dirty editor asks first, unless it already shows this meeting's note.
+                if (editor is not null && openName is not null
+                    && !string.Equals(openName, MeetingNote.NameFor(appointment), StringComparison.Ordinal)
+                    && await editor.IsDirtyAsync())
+                {
+                    pendingName = null;
+                    pendingPerson = null;
+                    pendingToday = false;
+                    pendingMeeting = appointment;
+                    discarding = true;
+                    break;
+                }
+
+                if (!running)
+                {
+                    running = true;
+                    ActionResult meetingNote;
+                    try
+                    {
+                        meetingNote = await Actions.OpenMeetingNote(appointment);
+                    }
+                    finally
+                    {
+                        running = false;
+                    }
+
+                    ShowDaily(meetingNote);
                 }
 
                 break;

@@ -444,11 +444,14 @@ public sealed class CliTests : IDisposable
         Assert.Equal(before, Snapshot());
     }
 
-    // 144 AC-9: no help line or usage message names a number for todos.
+    // 144 AC-9: no todo help line or usage message names a number for todos (167: meeting <n> numbers appointments).
     [Fact]
     public void TodoTexts_NameNoNumber()
     {
-        string text = Run("help").Out + Run("todo").Err + Run("todo", "done").Err;
+        // Every help line except meeting's (167 AC-7 lists "meeting <n>").
+        string help = string.Join(
+            '\n', Run("help").Out.Split('\n').Where(l => !l.StartsWith("context meeting <n>", StringComparison.Ordinal)));
+        string text = help + Run("todo").Err + Run("todo", "done").Err;
 
         Assert.Contains("todo done <text...>", text, StringComparison.Ordinal);
         Assert.DoesNotContain("<n>", text, StringComparison.Ordinal);
@@ -1728,4 +1731,149 @@ public sealed class CliTests : IDisposable
         Assert.Equal(Cli.ExitError, result.Code);
         Assert.DoesNotContain('\u001b', result.Err);
     }
+
+    // 167 ------------------------------------------------------------------------------------------
+
+    private const string MeetingIcs =
+        "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Review: Q4/plan\r\nDTSTART:20261029T100000Z\r\n"
+        + "DTEND:20261029T110000Z\r\nLOCATION:Room 1\r\nATTENDEE;CN=Anna Schmidt:mailto:anna@example.org\r\n"
+        + "ATTENDEE;CN=Bob:mailto:bob@example.org\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    // A calendar file (10:00 Review) and a fresh Exchange feed (08:00 Standup): the feed's event is number 1.
+    private void WriteMeetingCalendar()
+    {
+        WriteIcs("work.ics", MeetingIcs);
+        new CalendarLink(root).Set(FakeHttpHandler.Link);
+    }
+
+    // 167 AC-1/AC-5: meeting <n> numbers the appointments as current lists them (feed included), creates the note
+    // and prints it like note show; a second run prints the same and writes nothing.
+    [Fact]
+    public void Meeting_CreatesThenPrintsLikeNoteShow()
+    {
+        WriteMeetingCalendar();
+
+        Result first = Run("meeting", "2");
+
+        const string Expected =
+            "# 2026-10-29 Review Q4 plan\n\n#meeting\n\n- Title: Review: Q4/plan\n- Time: 2026-10-29 10:00-11:00\n"
+            + "- Location: Room 1\n- Attendees: @[Anna Schmidt], @[Bob]\n";
+        Assert.Equal((0, Expected, string.Empty), (first.Code, first.Out, first.Err));
+        Assert.Equal(Expected, Read("2026-10-29 Review Q4 plan.md"));
+        Assert.Equal(Run("note", "show", "2026-10-29 Review Q4 plan").Out, first.Out);
+        Assert.DoesNotContain("example.org", Read("2026-10-29 Review Q4 plan.md"), StringComparison.Ordinal);
+
+        Result standup = Run("MEETING", "01");
+        Assert.Equal(0, standup.Code);
+        Assert.StartsWith("# 2026-10-29 Standup\n\n#meeting\n\n- Title: Standup\n- Time: 2026-10-29 08:00-08:15\n", standup.Out, StringComparison.Ordinal);
+
+        Dictionary<string, string> before = Snapshot();
+        Result second = Run("meeting", "2");
+
+        Assert.Equal((0, Expected, string.Empty), (second.Code, second.Out, second.Err));
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 167 AC-5: an existing note (another case, other bytes) is printed as it is and never changed.
+    [Fact]
+    public void Meeting_ExistingNote_PrintedUnchanged()
+    {
+        WriteIcs("work.ics", MeetingIcs);
+        WriteNote("2026-10-29 REVIEW Q4 PLAN", "mine\n");
+        Dictionary<string, string> before = Snapshot();
+
+        Result result = Run("meeting", "1");
+
+        Assert.Equal((0, "mine\n", string.Empty), (result.Code, result.Out, result.Err));
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 167 AC-5: an existing sensitive note answers the sensitive line and writes nothing.
+    [Fact]
+    public void Meeting_SensitiveNote_SensitiveTextNothingWritten()
+    {
+        WriteIcs("work.ics", MeetingIcs);
+        WriteSealed("2026-10-29 Review Q4 plan");
+        Dictionary<string, string> before = Snapshot();
+
+        AssertError(Run("meeting", "1"), 1, Cli.SensitiveText("2026-10-29 Review Q4 plan"));
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 167 AC-5: no appointments, or a number beyond the count: one stderr line, exit 1, nothing written.
+    [Fact]
+    public void Meeting_NoSuchAppointment_ErrorNothingWritten()
+    {
+        Directory.CreateDirectory(root);
+        AssertError(Run("meeting", "1"), 1, "There are no appointments today.");
+        Assert.Empty(Snapshot());
+
+        WriteIcs("work.ics", MeetingIcs);
+        Dictionary<string, string> before = Snapshot();
+        AssertError(Run("meeting", "2"), 1, "There is no appointment 2 today.");
+        AssertError(Run("meeting", "2147483647"), 1, "There is no appointment 2147483647 today.");
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 167 AC-5: a failed write is one fixed line without exception text.
+    [Fact]
+    public void Meeting_WriteFails_FixedLine()
+    {
+        WriteIcs("work.ics", MeetingIcs);
+        Directory.CreateDirectory(Path.Combine(root, "2026-10-29 Review Q4 plan.md"));
+
+        AssertError(Run("meeting", "1"), 1, "Can't write 2026-10-29 Review Q4 plan.");
+    }
+
+    // 167 AC-5/AC-7: a missing, extra, non-digit, zero or overflowing number, or --json, is a usage error before the
+    // folder is read; help lists meeting <n>.
+    [Theory]
+    [InlineData("meeting")]
+    [InlineData("meeting", "")]
+    [InlineData("meeting", "1", "2")]
+    [InlineData("meeting", "x")]
+    [InlineData("meeting", "-1")]
+    [InlineData("meeting", "+1")]
+    [InlineData("meeting", "1.5")]
+    [InlineData("meeting", "0")]
+    [InlineData("meeting", "2147483648")]
+    [InlineData("meeting", "99999999999999999999999")]
+    [InlineData("meeting", "1", "--json")]
+    [InlineData("--JSON", "meeting", "1")]
+    public void Meeting_BadArguments_UsageError(params string[] args)
+    {
+        AssertUsage(Run(args));
+        Assert.False(Directory.Exists(root));
+    }
+
+    [Fact]
+    public void Meeting_HelpListsIt()
+    {
+        Assert.Contains(Run("help").Out.Split('\n'), l => l.StartsWith("context meeting <n> ", StringComparison.Ordinal));
+    }
+
+    // 167 AC-5: current's text and JSON output stay byte for byte as before (no numbers).
+    [Fact]
+    public void Meeting_CurrentOutputUnchanged()
+    {
+        WriteMeetingCalendar();
+
+        Result text = Run("current");
+        Result json = Run("current", "--json");
+
+        Assert.Equal(
+            "Today, 2026-10-29\nAppointments\n08:00-08:15\tStandup\t\n10:00-11:00\tReview: Q4/plan\tRoom 1\n"
+            + "Due\nNothing due today. Add one with /todo today <text>.\n",
+            text.Out);
+        Assert.Equal(CurrentJsonGolden, json.Out);
+    }
+
+    private const string CurrentJsonGolden =
+        "{\"today\":\"2026-10-29\",\"appointments\":["
+        + "{\"start\":\"2026-10-29T08:00:00\\u002B00:00\",\"end\":\"2026-10-29T08:15:00\\u002B00:00\",\"allDay\":false,"
+        + "\"title\":\"Standup\",\"location\":null,\"related\":[]},"
+        + "{\"start\":\"2026-10-29T10:00:00\\u002B00:00\",\"end\":\"2026-10-29T11:00:00\\u002B00:00\",\"allDay\":false,"
+        + "\"title\":\"Review: Q4/plan\",\"location\":\"Room 1\",\"related\":[]}],"
+        + "\"calendar\":{\"status\":\"fresh\",\"cachedAt\":\"2026-10-29T09:00:00\\u002B00:00\",\"unreadableFiles\":[]},"
+        + "\"due\":[],\"linkedNotes\":[]}\n";
 }

@@ -69,6 +69,14 @@ In the desktop app, `/find role Bereichsleiter` in the command palette (Ctrl/Cmd
 is created first with the day's appointments and the todos due today or earlier; an existing note is printed as it
 is and never changed. In the desktop app, `/today` in the command palette opens the same note.
 
+### Meeting notes
+
+`context current` numbers today's appointments (`1`, `2`, ...). `context meeting 2` prints the note for appointment 2,
+named after its date and title (for example `2026-10-29 Review Q4 plan`). When it doesn't exist yet it is created first,
+tagged `#meeting`, with the appointment's title, time, location and attendees; an existing note is printed as it is and
+never changed. In the desktop app, the current view shows the same numbers and `/meeting 2` in the command palette
+opens the same note.
+
 ### Note templates
 
 Keep notes you write again and again (meetings, reviews) as plain Markdown files in the `templates` folder of the

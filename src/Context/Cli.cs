@@ -48,6 +48,7 @@ internal sealed class Cli
         ("types", "List the page types with their attributes."),
         ("current", "Today's appointments, due todos and linked notes."),
         ("today", "Print today's note, creating it with the day's appointments and due todos."),
+        ("meeting <n>", "Print the note for today's appointment n (as listed by current), creating it first."),
         ("new <title...> [--template <name>]", "Create a note, from templates/<name>.md if given."),
         ("import <path>", "Store a Markdown file as a note."),
         ("export <note> <path>", "Write a note to a new plain file."),
@@ -132,7 +133,7 @@ internal sealed class Cli
 
         string name = args[0].ToLowerInvariant();
         string[] rest = args[1..];
-        if (json && (name is "help" or "--help" or "-h" or "capture" or "todo" or "today" or "new" or "import" or "export"))
+        if (json && (name is "help" or "--help" or "-h" or "capture" or "todo" or "today" or "meeting" or "new" or "import" or "export"))
         {
             // Checked before any argument: nothing is written and the folder is not created.
             return Usage(JsonOnly);
@@ -236,6 +237,14 @@ internal sealed class Cli
                 return NoArguments("current", args, out usage, Current);
             case "today":
                 return NoArguments("today", args, out usage, Today);
+            case "meeting":
+                if (args.Length != 1 || !MeetingNote.TryParseNumber(args[0], out int number))
+                {
+                    usage = "Type: context meeting <n> with the appointment's number in context current.";
+                    return null;
+                }
+
+                return session => Meeting(session, number);
             case "new":
                 return ParseNew(args, out usage);
             case "import":
@@ -560,6 +569,34 @@ internal sealed class Cli
         }
 
         if (result.Kind == DailyNoteKind.Sensitive)
+        {
+            return Error(SensitiveText(OneLine(result.Name)));
+        }
+
+        return ShowNote(session, result.Name);
+    }
+
+    // Prints the note for today's appointment number (1-based, current view order) like note show, creating it first
+    // with the appointment's title, time, location and attendees when it is missing.
+    private int Meeting(Session session, int number)
+    {
+        IReadOnlyList<Appointment> appointments = MeetingNote.Today(session.Calendar, session.Feed, today());
+        if (MeetingNote.Pick(appointments, number, out string? error) is not { } appointment)
+        {
+            return Error(error ?? MeetingNote.NoAppointmentsText);
+        }
+
+        MeetingNoteResult result;
+        try
+        {
+            result = MeetingNote.Ensure(session.Notes, appointment);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Error(MeetingNote.WriteFailedText(MeetingNote.NameFor(appointment)));
+        }
+
+        if (result.Kind == MeetingNoteKind.Sensitive)
         {
             return Error(SensitiveText(OneLine(result.Name)));
         }
