@@ -226,6 +226,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#192](backlog/192-keep-match-words-visible-next-to.md) Keep match words visible next to long related-note titles
 - [?] [#193](backlog/193-give-the-related-notes-row-a.md) Give the related-notes row a proper row header
 - [?] [#194](backlog/194-show-confirmed-overrides-of-a-cancelled.md) Show confirmed overrides of a cancelled recurring series
+- [?] [#195](backlog/195-editor-don-t-show-a-link.md) Editor: don't show a link that runs into a code span
+- [?] [#196](backlog/196-check-mentions-that-run-into-a.md) Check @[...] mentions that run into a code span
 
 ## Dropped with the terminal UI
 
