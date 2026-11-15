@@ -222,6 +222,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#194](backlog/194-show-confirmed-overrides-of-a-cancelled.md) Show confirmed overrides of a cancelled recurring series
 - [?] [#195](backlog/195-editor-don-t-show-a-link.md) Editor: don't show a link that runs into a code span
 - [?] [#196](backlog/196-check-mentions-that-run-into-a.md) Check @[...] mentions that run into a code span
+- [ ] [#227](backlog/227-template-and-daily-note-messages.md) Template and daily note messages
 - [?] [#197](backlog/197-narrow-the-daily-note-error-catch.md) Narrow the daily-note error catch in the desktop app
 - [?] [#198](backlog/198-say-when-today-s-note-already.md) Say when today's note already exists
 - [?] [#199](backlog/199-catch-file-errors-in-context-new.md) Catch file errors in context new --template
