@@ -99,6 +99,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#111](backlog/111-concurrency-and-timeout-for-the-release.md) Concurrency and timeout for the release workflow
 - [ ] [#113](backlog/113-refuse-removed-secret-options-after-a.md) Refuse removed secret options after a command
 - [ ] [#114](backlog/114-owner-only-file-mode-for-all.md) Owner-only file mode for all data files
+- [ ] [#231](backlog/231-bounded-reads-of-regular-files-only.md) Bounded reads of regular files only
 - [ ] [#115](backlog/115-bounded-reads-for-todos-calendar-link.md) Bounded reads for todos, calendar link and notes
 - [ ] [#50](backlog/050-times-bookings-in-current.md) Times bookings in /current
 - [ ] [#52](backlog/052-recent-and-pinned-notes.md) Recent and pinned notes
