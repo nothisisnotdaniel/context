@@ -9,3 +9,7 @@ A todo can have a time as well as a date; the desktop app shows a system notific
 ## Why
 
 A due date alone doesn't remind me at 14:00 to call someone. A notification that fires once, even after the app was closed, closes that gap.
+
+## Notes
+
+CLI: extend the existing `context todo add` with an optional time after the date (for example `context todo add 2026-11-16 14:00 Call Anna`), and show the time in `context todos` and its `--json` (a new `time` field, `null` when there is none). Scripts and the command bar (#72) add todos this way. No new command.

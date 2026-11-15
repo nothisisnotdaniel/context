@@ -9,3 +9,7 @@ A page for each `#<number>` work item that brings together its notes, todos, peo
 ## Why
 
 Project information is spread across notes, todos and Times' day files. Bringing it together, read-only from Times, answers "where do we stand?" in one place.
+
+## Notes
+
+CLI: Times#10 opens the note for a work item when a checkpoint with `#1234` is booked, through Context's CLI and never by writing Context's files. Add one command for that, for example `context item <number> --open`: it opens this work item's page in the running desktop app (starting it if needed) and creates the page when there is none. The spec decides how the CLI reaches the desktop app. Nothing else on the page needs a CLI command.

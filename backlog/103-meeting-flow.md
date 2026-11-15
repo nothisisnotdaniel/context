@@ -9,3 +9,7 @@ As a developer, I want to turn a calendar meeting into a note with action items,
 ## Why
 
 Meetings produce notes, todos and time to book, and today each lands in a different place, or nowhere. One step after the meeting makes all three happen.
+
+## Notes
+
+CLI: `context meeting <n>` already exists (job 167: appointment `n` of today's list, created from a plain note). Extend that command instead of adding a second one: no argument picks the current or next event, and a time or title picks by that. Keep `<n>` working.

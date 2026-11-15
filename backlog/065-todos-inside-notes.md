@@ -9,3 +9,7 @@ A `- [ ]` line in a note (outside code, like tags) shows in the todo sidebar wit
 ## Why
 
 Action items are usually written in the middle of a note, where they're forgotten. Showing them in the sidebar and syncing the tick both ways (only when the line is unchanged) keeps one source.
+
+## Notes
+
+CLI: Times#38 reads open todos through `context todos --json`, so note todos must show there too. Update the existing `context todos` (text and `--json`) to list them, with the note's name (a new `note` field, `null` for todos from todos.json). `context todo done` may tick one only through the same unchanged-line check. No new command.
