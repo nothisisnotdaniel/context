@@ -1086,6 +1086,7 @@ public sealed class TagIndexTests : IDisposable
 
         Assert.Equal([("A", "role", "chef #work", "Chef #work")], AttributeRows());
     }
+
     // 163 AC-7: a version 5 database is re-parsed once and set to 6, so a link the old parser found in a target that runs
     // into a code span is gone.
     [Fact]
