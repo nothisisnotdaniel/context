@@ -254,22 +254,24 @@ public sealed class CliTests : IDisposable
     // 173 AC-1, AC-2: links, people, person and types are gone: each is the usual unknown command, with or without
     // --json anywhere, nothing on stdout, and the data folder is not created.
     [Theory]
-    [InlineData("links", "links", "A")]
-    [InlineData("people", "people")]
-    [InlineData("person", "person", "Anna")]
-    [InlineData("types", "types")]
-    [InlineData("PEOPLE", "PEOPLE")]
-    [InlineData("Links", "Links", "A", "B")]
-    [InlineData("people", "--json", "people")]
-    [InlineData("people", "people", "--json")]
-    [InlineData("links", "--json", "links", "A")]
-    [InlineData("links", "links", "A", "--json")]
-    [InlineData("person", "--json", "person", "Anna")]
-    [InlineData("person", "person", "Anna", "--json")]
-    [InlineData("types", "--json", "types")]
-    [InlineData("TYPES", "TYPES", "--JSON")]
-    public void RemovedMirrorCommands_AreUnknownCommands_FolderNotCreated(string shown, params string[] args)
+    [InlineData("links", "A")]
+    [InlineData("people")]
+    [InlineData("person", "Anna")]
+    [InlineData("types")]
+    [InlineData("PEOPLE")]
+    [InlineData("Links", "A", "B")]
+    [InlineData("--json", "people")]
+    [InlineData("people", "--json")]
+    [InlineData("--json", "links", "A")]
+    [InlineData("links", "A", "--json")]
+    [InlineData("--json", "person", "Anna")]
+    [InlineData("person", "Anna", "--json")]
+    [InlineData("--json", "types")]
+    [InlineData("TYPES", "--JSON")]
+    public void RemovedMirrorCommands_AreUnknownCommands_FolderNotCreated(params string[] args)
     {
+        string shown = args.First(a => !a.Equals("--json", StringComparison.OrdinalIgnoreCase));
+
         Result result = Run(args);
 
         Assert.Equal(Cli.ExitUsage, result.Code);
