@@ -128,6 +128,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#124](backlog/124-check-the-tag-and-uploaded-assets.md) Check the tag and uploaded assets before publishing a release
 - [?] [#125](backlog/125-handle-a-leftover-draft-with-the.md) Handle a leftover draft with the same tag
 - [?] [#126](backlog/126-keep-stale-drafts-out-of-the.md) Keep stale drafts out of the Windows delta base
+- [ ] [#233](backlog/233-sensitive-notes-recovery-rules.md) Sensitive-notes recovery rules
 - [?] [#127](backlog/127-refuse-a-recovery-file-whose-key.md) Refuse a recovery file whose key differs from the stored one
 - [?] [#128](backlog/128-count-a-note-as-restored-only.md) Count a note as restored only when the recovery key opens it
 - [?] [#129](backlog/129-pin-the-windows-certificate-by-thumbprint.md) Pin the Windows certificate by thumbprint
