@@ -37,6 +37,9 @@ internal sealed record TimesBalance
 
     private const string DayFileExtension = ".json";
 
+    // About 1900 years: far beyond any real balance, far inside TimeSpan's range.
+    private const long MaxCorrectionTotalMinutes = 1_000_000_000;
+
     public TimesBalance(TimesBalanceKind kind, TimeSpan total, int counted, int skipped)
     {
         Kind = kind;
@@ -92,6 +95,7 @@ internal sealed record TimesBalance
         days.Sort();
         TimeSpan target = TimeSpan.FromMinutes(ReadTarget(folder));
         TimeSpan total = TimeSpan.Zero;
+        long correctionMinutes = 0;
         int counted = 0;
         int skipped = 0;
         foreach (DateOnly day in days)
@@ -104,7 +108,7 @@ internal sealed record TimesBalance
             }
 
             bool counts = record.Corrections.Count > 0;
-            total += TimeSpan.FromMinutes(record.Corrections.Sum(m => (long)m));
+            correctionMinutes += record.Corrections.Sum(m => (long)m);
             if (record.Kind == TimesDayKind.Absence)
             {
                 counts = true;
@@ -121,6 +125,8 @@ internal sealed record TimesBalance
             }
         }
 
+        // Whole minutes in a long, clamped, so even crafted files full of corrections can't overflow the TimeSpan.
+        total += TimeSpan.FromMinutes(Math.Clamp(correctionMinutes, -MaxCorrectionTotalMinutes, MaxCorrectionTotalMinutes));
         return new TimesBalance(TimesBalanceKind.Ok, total, counted, skipped);
     }
 

@@ -162,6 +162,7 @@ internal sealed class DesktopActions
     private readonly string? timesFolder;
     private int running;
 
+    // Plain fields: only AutoBriefingNow touches them, and Run lets one action run at a time.
     // Set by the first AutoBriefing that runs (the start-up call); later calls are ticks.
     private bool briefingStarted;
 
