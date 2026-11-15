@@ -97,7 +97,7 @@ public sealed class CliTests : IDisposable
             "capture <text...>", "todos", "todo add <yyyy-MM-dd|today|tomorrow> <text...>",
             "todo add every <weekday|day|month> <text...>", "todo done <text...>", "notes",
             "note show <name...>", "tags [tag...]", "links <note...>", "people", "person <name...>", "find <attribute> <value...>",
-            "types", "current", "new <title...> [--template <name>]", "import <path>",
+            "types", "current", "review", "new <title...> [--template <name>]", "import <path>",
             "export <note> <path>", "version",
         })
         {
@@ -1942,4 +1942,134 @@ public sealed class CliTests : IDisposable
         + "\"title\":\"Review: Q4/plan\",\"location\":\"Room 1\",\"related\":[]}],"
         + "\"calendar\":{\"status\":\"fresh\",\"cachedAt\":\"2026-10-29T09:00:00\\u002B00:00\",\"unreadableFiles\":[]},"
         + "\"due\":[],\"linkedNotes\":[]}\n";
+
+    // 169 review ---------------------------------------------------------------------------------
+
+    private void WriteReviewNote(string name, DateTime modifiedUtc)
+    {
+        WriteNote(name, "# " + name + "\n");
+        File.SetLastWriteTimeUtc(Path.Combine(root, name + ".md"), modifiedUtc);
+    }
+
+    private void WriteTodosJson(string json)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, TodoStore.FileName), json);
+    }
+
+    // 169 AC-4: every heading with its lines, newest note first, done date, due date, next week's appointments.
+    [Fact]
+    public void Review_PrintsEverySection()
+    {
+        WriteReviewNote("Plan", new DateTime(2026, 10, 28, 14, 5, 0, DateTimeKind.Utc));
+        WriteReviewNote("Older", new DateTime(2026, 10, 23, 8, 0, 0, DateTimeKind.Utc));
+        WriteReviewNote("Too old", new DateTime(2026, 10, 22, 23, 0, 0, DateTimeKind.Utc));
+        WriteTodosJson("["
+            + "{\"text\":\"Sent report\",\"due\":\"2026-10-20\",\"created\":\"2026-10-01T00:00:00Z\",\"done\":\"2026-10-27T10:00:00Z\"},"
+            + "{\"text\":\"Call Bob\",\"due\":\"2026-10-25\",\"created\":\"2026-10-01T00:00:00Z\"},"
+            + "{\"text\":\"Due today\",\"due\":\"2026-10-29\",\"created\":\"2026-10-01T00:00:00Z\"}]");
+        WriteIcs("a.ics", "BEGIN:VCALENDAR\r\n"
+            + "BEGIN:VEVENT\r\nSUMMARY:Kickoff\r\nLOCATION:Room 1\r\nDTSTART:20261030T090000Z\r\nDTEND:20261030T100000Z\r\nEND:VEVENT\r\n"
+            + "BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20261102\r\nEND:VEVENT\r\n"
+            + "BEGIN:VEVENT\r\nSUMMARY:Today\r\nDTSTART:20261029T090000Z\r\nDTEND:20261029T100000Z\r\nEND:VEVENT\r\n"
+            + "END:VCALENDAR\r\n");
+
+        Result result = Run("review");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(string.Empty, result.Err);
+        Assert.Equal(
+            "Review, 2026-10-23 to 2026-10-29\n"
+            + "Changed notes\n2026-10-28 14:05\tPlan\n2026-10-23 08:00\tOlder\n"
+            + "Done todos\n2026-10-27\tSent report\n"
+            + "Overdue\n2026-10-25\tCall Bob\n"
+            + "Next week\n2026-10-30\t09:00-10:00\tKickoff (Room 1)\n2026-11-02\tall day\t(no title)\n",
+            result.Out);
+        Assert.False(File.Exists(Path.Combine(root, TagIndex.FileName)));
+    }
+
+    // 169 AC-4: an empty folder still prints every heading, with no lines, and exits 0.
+    [Fact]
+    public void Review_Empty_EveryHeading()
+    {
+        Result result = Run("review");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(string.Empty, result.Err);
+        Assert.Equal("Review, 2026-10-23 to 2026-10-29\nChanged notes\nDone todos\nOverdue\nNext week\n", result.Out);
+        Assert.False(File.Exists(Path.Combine(root, TagIndex.FileName)));
+    }
+
+    // 169 AC-4: text from disk is cleaned and kept on one line.
+    [Fact]
+    public void Review_CleansText()
+    {
+        WriteTodosJson("[{\"text\":\"a\\u0007b\\nc\",\"due\":\"2026-10-01\",\"created\":\"2026-10-01T00:00:00Z\"}]");
+        WriteIcs("a.ics", "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:x\\ny\r\nLOCATION:p\u001bq\r\n"
+            + "DTSTART:20261031T090000Z\r\nDTEND:20261031T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+
+        Result result = Run("review");
+
+        Assert.Equal(0, result.Code);
+        Assert.Contains("Overdue\n2026-10-01\ta�b c\n", result.Out, StringComparison.Ordinal);
+        Assert.Contains("2026-10-31\t09:00-10:00\tx y (p�q)\n", result.Out, StringComparison.Ordinal);
+    }
+
+    // 169 AC-5: an unreadable todos.json goes to stderr, the rest is still printed, exit 1.
+    [Fact]
+    public void Review_UnreadableTodos_StderrAndExitOne()
+    {
+        WriteReviewNote("Plan", new DateTime(2026, 10, 28, 14, 5, 0, DateTimeKind.Utc));
+        WriteTodosJson("{ bad");
+
+        Result result = Run("review");
+
+        Assert.Equal(1, result.Code);
+        Assert.Equal(["Can't read todos.json."], result.ErrLines);
+        Assert.Equal(
+            "Review, 2026-10-23 to 2026-10-29\nChanged notes\n2026-10-28 14:05\tPlan\nDone todos\nOverdue\nNext week\n",
+            result.Out);
+    }
+
+    // 169 AC-5: unreadable calendar files and a failed feed give current's stderr lines and exit 1; no link shown.
+    [Fact]
+    public void Review_CalendarErrors_LikeCurrent()
+    {
+        WriteIcs("bad.ics", "not a calendar");
+        new CalendarLink(Directory.CreateDirectory(root).FullName).Set(FakeHttpHandler.Link);
+        http = FakeHttpHandler.Status(HttpStatusCode.InternalServerError);
+
+        Result result = Run("review");
+
+        Assert.Equal(1, result.Code);
+        Assert.Equal(["Can't read calendar/bad.ics", "Can't download the Exchange calendar (HTTP 500)."], result.ErrLines);
+        Assert.Equal(1, http.Requests);
+        Assert.DoesNotContain(FakeHttpHandler.PathToken, result.Out + result.Err, StringComparison.Ordinal);
+    }
+
+    // 169 AC-5: bad todo ids are fixed first with current's line.
+    [Fact]
+    public void Review_MigratesBadIds()
+    {
+        WriteTodosJson("[{\"id\":\"nope\",\"text\":\"Old\",\"due\":\"2026-10-01\",\"created\":\"2026-10-01T00:00:00Z\"}]");
+
+        Result result = Run("review");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(["Fixed a bad todo id in todos.json."], result.ErrLines);
+        Assert.Contains("Overdue\n2026-10-01\tOld\n", result.Out, StringComparison.Ordinal);
+        Assert.Empty(Run("review").ErrLines);
+    }
+
+    // 169 AC-5: any extra argument is a usage error before the folder is read.
+    [Theory]
+    [InlineData("review", "x")]
+    [InlineData("REVIEW", "--json", "now")]
+    public void Review_ExtraArgument_UsageError(params string[] args)
+    {
+        Result result = Run(args);
+
+        AssertUsage(result);
+        Assert.False(Directory.Exists(root));
+    }
 }

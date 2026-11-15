@@ -27,7 +27,7 @@ internal sealed class Cli
     private const string PersonForm = "Type: context person <name>.";
     private const string FindForm = "Type: context find <attribute> <value>.";
     private const string JsonOnly =
-        "--json works only with version, todos, notes, note show, tags, links, people, person, find, types and current.";
+        "--json works only with version, todos, notes, note show, tags, links, people, person, find, types, current and review.";
 
     // Every command with its usage and what it does, in the order help lists them.
     private static readonly (string Usage, string Description)[] Commands =
@@ -48,12 +48,13 @@ internal sealed class Cli
         ("find <attribute> <value...>", "List the notes with an attribute line, e.g. find role Bereichsleiter."),
         ("types", "List the page types with their attributes."),
         ("current", "Today's appointments, due todos and linked notes."),
+        ("review", "The last 7 days' changed notes and done todos, overdue todos and the next 7 days' appointments."),
         ("today", "Print today's note, creating it with the day's appointments and due todos."),
         ("meeting <n>", "Print the note for today's appointment n (as listed by current), creating it first."),
         ("new <title...> [--template <name>]", "Create a note, from templates/<name>.md if given."),
         ("import <path>", "Store a Markdown file as a note."),
         ("export <note> <path>", "Write a note to a new plain file."),
-        ("<command> --json", "Print one JSON object: version, todos, notes, note show, tags, links, people, person, find, types, current."),
+        ("<command> --json", "Print one JSON object: version, todos, notes, note show, tags, links, people, person, find, types, current, review."),
     ];
 
     private readonly TextWriter stdout;
@@ -236,6 +237,8 @@ internal sealed class Cli
                 return NoArguments("types", args, out usage, Types);
             case "current":
                 return NoArguments("current", args, out usage, Current);
+            case "review":
+                return NoArguments("review", args, out usage, Review);
             case "today":
                 return NoArguments("today", args, out usage, Today);
             case "meeting":
@@ -1226,6 +1229,161 @@ internal sealed class Cli
             }
         }));
         return failed ? ExitError : ExitOk;
+    }
+
+    private int Review(Session session)
+    {
+        MigrateTodos(session);
+        ReviewView view = ReviewView.Build(session.Notes, session.Todos, session.Calendar, session.Feed, today());
+        if (session.Json)
+        {
+            return ReviewJson(view);
+        }
+
+        Out($"Review, {Date(view.From)} to {Date(view.To)}");
+        Out("Changed notes");
+        foreach (ChangedNote note in view.ChangedNotes)
+        {
+            Out($"{note.Modified.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}\t{OneLine(note.Name)}");
+        }
+
+        Out("Done todos");
+        foreach (TodoItem todo in view.DoneTodos)
+        {
+            Out($"{Date(view.DoneDate(todo))}\t{OneLine(todo.Text)}");
+        }
+
+        Out("Overdue");
+        foreach (TodoItem todo in view.Overdue)
+        {
+            Out($"{Date(todo.Due)}\t{OneLine(todo.Text)}");
+        }
+
+        Out("Next week");
+        foreach (ReviewDay day in view.Days)
+        {
+            foreach (Appointment appointment in day.Appointments)
+            {
+                string title = appointment.Title.Length == 0 ? "(no title)" : appointment.Title;
+                string where = appointment.Location is null ? string.Empty : $" ({appointment.Location})";
+                Out($"{Date(day.Date)}\t{day.TimeText(appointment)}\t{OneLine(title + where)}");
+            }
+        }
+
+        if (view.Status == CalendarFeedStatus.Stale && view.CachedAtUtc is not null)
+        {
+            DateTime local = TimeZoneInfo.ConvertTimeFromUtc(
+                DateTime.SpecifyKind(view.CachedAtUtc.Value, DateTimeKind.Utc), view.Zone);
+            Out($"Exchange calendar offline, showing the copy from {local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}.");
+        }
+
+        return ReviewErrors(view);
+    }
+
+    // review's stderr lines (calendar files, a failed feed, todos.json), in that order, and its exit code.
+    private int ReviewErrors(ReviewView view)
+    {
+        bool failed = false;
+        foreach (string file in view.UnreadableCalendarFiles)
+        {
+            failed = true;
+            Err($"Can't read {CalendarStore.FolderName}/{OneLine(file)}");
+        }
+
+        if (view.Status == CalendarFeedStatus.Failed)
+        {
+            failed = true;
+            Err($"Can't download the Exchange calendar ({OneLine(view.Reason ?? string.Empty)}).");
+        }
+
+        if (view.TodosUnreadable)
+        {
+            failed = true;
+            Err(TodosUnreadable);
+        }
+
+        return failed ? ExitError : ExitOk;
+    }
+
+    // review as one JSON document: the same stderr lines and exit code as plain.
+    private int ReviewJson(ReviewView view)
+    {
+        int exit = ReviewErrors(view);
+        TimeZoneInfo shownZone = view.Zone;
+        string? cachedAt = view.CachedAtUtc is null || view.Status is not (CalendarFeedStatus.Stale or CalendarFeedStatus.Fresh)
+            ? null
+            : CliJson.Time(
+                TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(view.CachedAtUtc.Value, DateTimeKind.Utc), shownZone),
+                shownZone);
+        stdout.Write(CliJson.Document(w =>
+        {
+            w.WriteString("from", Date(view.From));
+            w.WriteString("to", Date(view.To));
+            w.WriteStartArray("changedNotes");
+            foreach (ChangedNote note in view.ChangedNotes)
+            {
+                w.WriteStartObject();
+                w.WriteString("name", OneLine(note.Name));
+                w.WriteString("modified", CliJson.Time(note.Modified, shownZone));
+                w.WriteEndObject();
+            }
+
+            w.WriteEndArray();
+            if (view.TodosUnreadable)
+            {
+                w.WriteNull("doneTodos");
+                w.WriteNull("overdue");
+            }
+            else
+            {
+                w.WriteStartArray("doneTodos");
+                foreach (TodoItem todo in view.DoneTodos)
+                {
+                    w.WriteStartObject();
+                    w.WriteString("due", Date(todo.Due));
+                    w.WriteString("done", Date(view.DoneDate(todo)));
+                    w.WriteString("text", OneLine(todo.Text));
+                    w.WriteEndObject();
+                }
+
+                w.WriteEndArray();
+                w.WriteStartArray("overdue");
+                foreach (TodoItem todo in view.Overdue)
+                {
+                    w.WriteStartObject();
+                    w.WriteString("due", Date(todo.Due));
+                    w.WriteString("text", OneLine(todo.Text));
+                    w.WriteEndObject();
+                }
+
+                w.WriteEndArray();
+            }
+
+            w.WriteStartArray("appointments");
+            foreach (ReviewDay day in view.Days)
+            {
+                foreach (Appointment appointment in day.Appointments)
+                {
+                    WriteAppointment(w, appointment, shownZone);
+                }
+            }
+
+            w.WriteEndArray();
+            w.WriteStartObject("calendar");
+            w.WriteString("status", CliJson.Status(view.Status));
+            if (cachedAt is null)
+            {
+                w.WriteNull("cachedAt");
+            }
+            else
+            {
+                w.WriteString("cachedAt", cachedAt);
+            }
+
+            CliJson.Strings(w, "unreadableFiles", view.UnreadableCalendarFiles.Select(OneLine));
+            w.WriteEndObject();
+        }));
+        return exit;
     }
 
     private int NewNote(Session session, string title)
