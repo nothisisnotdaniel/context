@@ -37,6 +37,7 @@ internal sealed class Cli
         ("capture <text...>", "Append a dated line to the inbox note."),
         ("todos", "List todos: date, text."),
         ("todo add <yyyy-MM-dd|today|tomorrow> <text...>", "Add a todo."),
+        ("todo add every <weekday|day|month> <text...>", "Add a todo that comes back when it is done."),
         ("todo done <text...>", "Mark the todo with that text done."),
         ("notes", "List note names."),
         ("note show <name...>", "Print a note."),
@@ -322,6 +323,31 @@ internal sealed class Cli
     {
         usage = null;
         string sub = args.Length > 0 ? args[0].ToLowerInvariant() : string.Empty;
+        if (sub == "add" && args.Length > 1 && string.Equals(args[1], "every", StringComparison.OrdinalIgnoreCase))
+        {
+            const string EveryForm = "Type: context todo add every <weekday|day|month> <text>.";
+            string text = args.Length > 3 ? string.Join(' ', args[3..]).Trim() : string.Empty;
+            if (text.Length == 0)
+            {
+                usage = $"A repeating todo needs a repeat and text. {EveryForm}";
+                return null;
+            }
+
+            if (!TodoInput.TryParseRepeat(args[2], today(), out TodoRepeat repeat, out DateOnly firstDue))
+            {
+                usage = $"That repeat isn't valid. {EveryForm}";
+                return null;
+            }
+
+            if (text.Length > TodoInput.MaxTextLength)
+            {
+                usage = $"A todo can be at most {TodoInput.MaxTextLength} characters.";
+                return null;
+            }
+
+            return s => AddTodo(s, text, firstDue, repeat);
+        }
+
         if (sub == "add")
         {
             const string AddForm = "Type: context todo add <yyyy-MM-dd|today|tomorrow> <text>.";
@@ -344,7 +370,7 @@ internal sealed class Cli
                 return null;
             }
 
-            return s => AddTodo(s, text, due);
+            return s => AddTodo(s, text, due, null);
         }
 
         if (sub == "done")
@@ -454,13 +480,13 @@ internal sealed class Cli
         return ExitOk;
     }
 
-    private int AddTodo(Session session, string text, DateOnly due)
+    private int AddTodo(Session session, string text, DateOnly due, TodoRepeat? repeat)
     {
         MigrateTodos(session);
         TodoItem todo;
         try
         {
-            todo = session.Todos.Add(text, due);
+            todo = session.Todos.Add(text, due, repeat);
         }
         catch (TodoStoreException)
         {
@@ -474,26 +500,24 @@ internal sealed class Cli
     {
         MigrateTodos(session);
         TodoItem? done;
+        TodoItem? next;
         try
         {
             IReadOnlyList<TodoItem> todos = session.Todos.List();
             if (todos.Count == 0)
             {
-                return Error("There are no todos to mark done.");
+                return Error(TodoPicker.NoTodosText);
             }
 
             TodoPick pick = TodoPicker.Pick(todos, query);
             if (pick.Todo is null)
             {
-                string shown = OneLine(query);
-                return Error(pick.Matches == 0
-                    ? $"No todo matches \"{shown}\"."
-                    : $"{pick.Matches.ToString(CultureInfo.InvariantCulture)} todos match \"{shown}\". Type more of the todo's text.");
+                return Error(TodoPicker.NoPickText(pick, OneLine(query)));
             }
 
             // The text only picks the todo; it is removed by its id, so a list that changed in between can't
             // make another todo go away.
-            done = session.Todos.Complete(pick.Todo.Id);
+            done = session.Todos.Complete(pick.Todo.Id, today(), out next);
         }
         catch (TodoStoreException)
         {
@@ -505,7 +529,13 @@ internal sealed class Cli
             return Error("The todo list changed. Nothing was done.");
         }
 
-        return Done($"Done: {OneLine(done.Text)}");
+        if (next is null)
+        {
+            return Done($"Done: {OneLine(done.Text)}");
+        }
+
+        Out($"Done: {OneLine(done.Text)}");
+        return Done($"Next: {Date(next.Due)}");
     }
 
     private int Notes(Session session)

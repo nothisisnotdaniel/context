@@ -31,6 +31,18 @@ internal sealed record TodoPick
 /// </summary>
 internal static class TodoPicker
 {
+    /// <summary>The line when there is no open todo to pick.</summary>
+    public const string NoTodosText = "There are no todos to mark done.";
+
+    /// <summary>
+    /// The line when <paramref name="pick"/> found no single todo; <paramref name="shown"/> is the query as it may be
+    /// shown (already cleaned to one line).
+    /// </summary>
+    public static string NoPickText(TodoPick pick, string shown) =>
+        pick.Matches == 0
+            ? $"No todo matches \"{shown}\"."
+            : $"{pick.Matches.ToString(System.Globalization.CultureInfo.InvariantCulture)} todos match \"{shown}\". Type more of the todo's text.";
+
     /// <summary>
     /// Compares the trimmed <paramref name="query"/>, ignoring case (ordinal), with each todo's one-line text
     /// (<see cref="OneLine"/>) in the order of <paramref name="todos"/>: the first todo whose text equals it; if

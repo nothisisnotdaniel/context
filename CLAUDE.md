@@ -352,7 +352,20 @@ Every factory agent reads this file before working on Context. Keep it short and
     drops the ids gets the same ids written again on the next start. `Complete(Guid id)`
     sets `Done` from the clock on that open todo in one read and write and returns it, or returns `null` and writes
     nothing (unknown id or already done). Done todos are never shown, reopened or pruned anywhere but the person page.
-    `context todo add <yyyy-MM-dd|today|tomorrow> <text>` and the desktop's entry row add (text at most 200 chars, past dates allowed); `context todo done <text>` picks the
+    **Recurring todos** (job 168): `TodoItem.Repeat` (`TodoRepeat?`, `TodoRepeat.cs`: `Daily`, `Weekly(DayOfWeek)`,
+    `Monthly(1..31)`) is stored as the optional `repeat` string `day`, `monday`..`sunday` or `month-1`..`month-31`
+    (written only when set, like `done`, so a list without recurring todos has the same bytes as before; not part of
+    `DerivedId`; `Add`/`Migrate` keep it). Only those exact lower-case strings read (`TodoRepeat.TryParseStored`;
+    `"Monday"`, `"week"`, `"month-01"`, `42`, `{}` make the file unreadable like a bad `done`). `TodoRepeat.Label` is the
+    English marker text (`every day`, `every month`, `every Monday`). `TodoInput.TryParseRepeat(token, today, out
+    repeat, out firstDue)` takes `day`, `month` (anchored on today's day of month) or an English weekday name, any case;
+    first due is today, or the first date on or after today on that weekday. `TodoInput.NextDue(repeat, due, today)` is
+    the first date after both `due` and `today` that fits (a month without day N uses its last day).
+    `Complete(id, today, out next)` marks the todo done and, for a recurring one, appends the next open todo (same text
+    and repeat, new id, `created` from the clock, `NextDue` as due) in the same write; `Complete(id)` delegates with
+    `DateOnly.MinValue`. An older build ignores `repeat` and drops it on its next write. `TodoPicker.NoTodosText` and
+    `NoPickText(pick, shown)` are the picker's red lines for `context todo done` and `/done`.
+    `context todo add <yyyy-MM-dd|today|tomorrow> <text>`, `context todo add every <weekday|day|month> <text>` and the desktop's entry row add (text at most 200 chars, past dates allowed); `context todo done <text>` picks the
     todo by its text and marks it done by its id; the desktop marks the ticked todo done by its id.
     **No todo numbers anywhere** (command line and desktop alike): a todo is shown as date and text, picked
     by its text and marked done by its hidden id. `TodoPicker.Pick(todos, query)` (Core, used by `context
@@ -377,8 +390,11 @@ Every factory agent reads this file before working on Context. Keep it short and
   (`Inbox.Capture`: controls to spaces, trimmed, 1-1000 chars, appends `- yyyy-MM-dd HH:mm <text>` to `inbox.md` via
   `ReadForEdit` + `SaveIfUnchanged`, retries 3 times on a change on disk; a missing inbox is created as `# inbox\n` +
   the line through `NoteStore.CreateWithText`, temp file + no-overwrite move), `todos` (`<date>\t<text>`, no number),
-  `todo add <date> <text...>` (`TodoInput` rules), `todo done <text...>` (arguments joined with one space, then
-  `TodoPicker.Pick`, see Todos: `Done: <text>`, or exit 1 with the no-todos, no-match or several-matches line;
+  `todo add <date> <text...>` (`TodoInput` rules), `todo add every <weekday|day|month> <text...>` (job 168,
+  `TryParseRepeat`; prints `Added: <due> <text>`; a bad unit is the usage error `That repeat isn't valid. Type: context
+  todo add every <weekday|day|month> <text>.`, no text `A repeating todo needs a repeat and text. ...`),
+  `todo done <text...>` (arguments joined with one space, then
+  `TodoPicker.Pick`, see Todos: `Done: <text>`, plus `Next: <yyyy-MM-dd>` for a recurring todo, or exit 1 with the no-todos, no-match or several-matches line;
   no text is a usage error), `notes`, `note show <name...>`,
   `tags [tag...]` (`<tag>\t<count>` or note names), `links <note...>` (`<name>\t<link>\t<tags>`), `people`
   (`<name>\t<count>`), `person <name...>` (`Anna Schmidt`, `@[Anna Schmidt]` or an alias; an ambiguous alias adds one stderr hint; `Notes` then `Appointments` with
@@ -561,7 +577,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
     `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs`, note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs`, the todo input rules (`TryParseDate`,
-    `MaxTextLength`) in `TodoInput.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`) and `CalendarLinkView.cs`
+    `MaxTextLength`, `TryParseRepeat`, `NextDue`) in `TodoInput.cs`, the todo repeat in `TodoRepeat.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`) and `CalendarLinkView.cs`
     (the calendar link), and the command ranking for the desktop palette in `CommandMatcher.cs`; the notes list is `NoteStore.List()` itself.
   - **Data step in Core, drawing in the front end:** a view's Core data step returns plain types (a kind plus raw
     text, never markup, never cleaned or escaped, no exception messages). The front ends (`Cli`, and the desktop
@@ -588,7 +604,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     public parameters). `DesktopActions` (with `ActionResult`: `ActionKind` `Done`/`Refused`/`Failed`, `ActionReason`,
     raw text) is the only write path: it never throws, runs one action at a time (`Busy`), refreshes the state after a change and has the test
     hook `BeforeWrite`. `CompleteTodo(todo, confirmation)` removes the todo with `todo.Id` through
-    `TodoStore.Complete(id)` (a todo no longer stored: `The todo list changed. Nothing was done.`).
+    `TodoStore.Complete(id, today, out next)` (today from the local clock; `ActionResult.NextDue` holds the next todo's
+    due date for a recurring one; a todo no longer stored: `The todo list changed. Nothing was done.`).
+    `AddTodo(text, due, repeat?)`.
     Note actions: `CreateNote(title)` (`NoteStore.Create`; invalid: Refused/`Invalid` with the `ValidateTitle` text;
     existing: Refused/`Exists` `Note <name> already exists.`; else Failed `Can't create that note. Nothing was done.`),
     `RenameNote(name, newTitle)` (`NoteStore.Rename`; same name: Done/`Unchanged`, no refresh; same invalid/exists texts;
@@ -609,7 +627,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Confirmation` (public sealed, internal constructor), which destructive actions require. The desktop shows no todo
     numbers (not in `TodoPanel`, not in the `Due` table): `TodoPanel` shows each todo as a `<label>` line with a
     checkbox, date and text (a person mention in the text is a `mention` button, job 159); ticking it opens the dialog (the box stays ticked while it is open), and a
-    `role="status"` result line shows `Done: <text>` (accent) or the fixed red text.
+    `role="status"` result line shows `Done: <text>` (accent), `Done: <text>. Next due yyyy-MM-dd.` for a recurring
+    todo, or the fixed red text. A recurring todo has a grey `span.repeat` after its text (`TodoRepeat.Label`, same
+    `title`). `TodoPanel.AskDone(todo)` opens the same dialog for the palette's `/done`.
     **Editing:** clicking a note name (`NotesPanel` button), a link or `/open` in the palette shows `NoteEditor` in the
     main region (`Main` keeps the open name; a dirty editor asks `Discard changes to <name>?` first). `NoteEditor`
     reads through `DesktopState.ReadForEdit` (`NoteStore.ReadForEdit` -> `EditableNote`: text with `\n`, raw-byte
@@ -626,7 +646,13 @@ Every factory agent reads this file before working on Context. Keep it short and
     file bytes, read through `BoundedFile`): a bigger or non-seekable note can't be opened (`Can't read <name>.`), a save
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
-    `/capture`, `/current`, `/export`, `/find`, `/import`, `/meeting`, `/new`, `/open`, `/save`, `/settings`, `/tags`, `/today`, `/todo` with `CommandMatcher` (in Core).
+    `/capture`, `/current`, `/done`, `/export`, `/find`, `/import`, `/meeting`, `/new`, `/open`, `/save`, `/settings`, `/tags`, `/today`, `/todo` with `CommandMatcher` (in Core; ties
+    in Levenshtein score are ordered by `SwapDistance`, which counts an adjacent swap as one edit, so `/opne` runs `/open`).
+    `/todo every <weekday|day|month> <text>` (job 168) adds a recurring todo (`TryParseRepeat`, then `AddTodo`), accent
+    `Added: <text>`; a missing or bad unit or missing text is red `Type /todo every <weekday|day|month> <text>.`; a bad
+    date stays red `Type /todo <yyyy-MM-dd|today|tomorrow> <text>.`. `/done <text>` picks among `Snapshot.Todos` with
+    `TodoPicker.Pick` (blank: red `Type /done <text>.`; unreadable list: `TodosUnreadableText`; then the CLI's red
+    texts) and opens `TodoPanel`'s `Mark this todo done? <text>` dialog; nothing is written before Confirm.
     `/new <title> [--template <name>]` (job 165): the first whitespace-separated `--template` token (ignoring case)
     splits the trimmed title from the trimmed template name and calls `DesktopActions.CreateNoteFromTemplate(title,
     template)` (`NoteTemplates.Prepare` with the injected local clock, then `CreateWithText`; the Templates texts, no

@@ -51,16 +51,18 @@ internal enum ActionReason
 /// <summary>
 /// The result of a desktop action: a kind, a reason and raw text (the todo's text or the note's name for
 /// <see cref="ActionKind.Done"/>, else a fixed message, which may name the note; never an exception message, never
-/// cleaned or encoded). A saved note comes back in <see cref="Note"/>.
+/// cleaned or encoded). A saved note comes back in <see cref="Note"/>, the due date of the todo a recurring todo's
+/// completion added in <see cref="NextDue"/>.
 /// </summary>
 internal sealed record ActionResult
 {
-    public ActionResult(ActionKind kind, ActionReason reason, string text, EditableNote? note = null)
+    public ActionResult(ActionKind kind, ActionReason reason, string text, EditableNote? note = null, DateOnly? nextDue = null)
     {
         Kind = kind;
         Reason = reason;
         Text = text;
         Note = note;
+        NextDue = nextDue;
     }
 
     public ActionKind Kind { get; }
@@ -71,6 +73,9 @@ internal sealed record ActionResult
 
     /// <summary>The note as saved (or as opened, when nothing changed); <c>null</c> for other actions.</summary>
     public EditableNote? Note { get; }
+
+    /// <summary>When a recurring todo was marked done: the due date of the new todo; <c>null</c> otherwise.</summary>
+    public DateOnly? NextDue { get; }
 
     /// <summary>Only the type name, so the raw text never leaks through formatting.</summary>
     public override string ToString() => nameof(ActionResult);
@@ -316,8 +321,9 @@ internal sealed class DesktopActions
 
     /// <summary>
     /// Marks <paramref name="todo"/> done, which removes the stored todo with the same id through
-    /// <see cref="TodoStore.Complete"/> in one read and write, but only when the user <paramref name="confirmed"/> it.
-    /// A todo that is no longer stored is refused as <see cref="ActionReason.Changed"/>.
+    /// <see cref="TodoStore.Complete(Guid, DateOnly, out TodoItem?)"/> in one read and write, but only when the user
+    /// <paramref name="confirmed"/> it. A recurring todo is added again in the same write; its due date comes back in
+    /// <see cref="ActionResult.NextDue"/>. A todo that is no longer stored is refused as <see cref="ActionReason.Changed"/>.
     /// </summary>
     public Task<ActionResult> CompleteTodo(TodoItem todo, Confirmation? confirmed) =>
         Run(() => CompleteTodoNow(todo, confirmed));
@@ -331,11 +337,13 @@ internal sealed class DesktopActions
     public Task<ActionResult> SaveNote(EditableNote opened, string text) => Run(() => SaveNoteNow(opened, text));
 
     /// <summary>
-    /// Adds a todo due <paramref name="due"/> through <see cref="TodoStore.Add"/>. Blank text is refused with
+    /// Adds a todo due <paramref name="due"/> (recurring when <paramref name="repeat"/> is set) through
+    /// <see cref="TodoStore.Add"/>. Blank text is refused with
     /// <see cref="EmptyTodoText"/> and text over <see cref="MaxTodoLength"/> characters is refused; both
     /// write nothing. The result's text is the todo's text when done.
     /// </summary>
-    public Task<ActionResult> AddTodo(string text, DateOnly due) => Run(() => AddTodoNow(text, due));
+    public Task<ActionResult> AddTodo(string text, DateOnly due, TodoRepeat? repeat = null) =>
+        Run(() => AddTodoNow(text, due, repeat));
 
     /// <summary>
     /// Creates the note <paramref name="title"/> through <see cref="NoteStore.Create"/>. An invalid title is refused
@@ -625,10 +633,10 @@ internal sealed class DesktopActions
 
         try
         {
-            TodoItem? done = todos.Complete(todo.Id);
+            TodoItem? done = todos.Complete(todo.Id, DateOnly.FromDateTime(localNow()), out TodoItem? next);
             return done is null
                 ? Refused(ActionReason.Changed, TodosChangedText)
-                : new ActionResult(ActionKind.Done, ActionReason.None, done.Text);
+                : new ActionResult(ActionKind.Done, ActionReason.None, done.Text, nextDue: next?.Due);
         }
         catch (TodoStoreException)
         {
@@ -677,7 +685,7 @@ internal sealed class DesktopActions
         }
     }
 
-    private ActionResult AddTodoNow(string text, DateOnly due)
+    private ActionResult AddTodoNow(string text, DateOnly due, TodoRepeat? repeat)
     {
         string trimmed = text.Trim();
         if (trimmed.Length == 0)
@@ -692,7 +700,7 @@ internal sealed class DesktopActions
 
         try
         {
-            TodoItem added = todos.Add(trimmed, due);
+            TodoItem added = todos.Add(trimmed, due, repeat);
             return new ActionResult(ActionKind.Done, ActionReason.None, added.Text);
         }
         catch (TodoStoreException)

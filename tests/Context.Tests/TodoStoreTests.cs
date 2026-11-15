@@ -725,13 +725,16 @@ public sealed class TodoStoreTests : IDisposable
     private static readonly DateTime DoneAt = new(2026, 11, 14, 8, 30, 0, DateTimeKind.Utc);
 
     // 159: a todo the way every build writes it: id, text, due, created, then done only when it is set.
-    private static string JsonTodo(Guid id, string text, string due, string created, string? done = null) =>
+    // 168: then repeat, only when it is set.
+    private static string JsonTodo(Guid id, string text, string due, string created, string? done = null, string? repeat = null) =>
         "  {\n"
         + $"    \"id\": \"{id}\",\n"
         + $"    \"text\": \"{text}\",\n"
         + $"    \"due\": \"{due}\",\n"
-        + $"    \"created\": \"{created}\"" + (done is null ? "\n" : $",\n    \"done\": \"{done}\"\n")
-        + "  }";
+        + $"    \"created\": \"{created}\""
+        + (done is null ? string.Empty : $",\n    \"done\": \"{done}\"")
+        + (repeat is null ? string.Empty : $",\n    \"repeat\": \"{repeat}\"")
+        + "\n  }";
 
     private static string JsonList(params string[] todos) => "[\n" + string.Join(",\n", todos) + "\n]\n";
 
@@ -999,6 +1002,160 @@ public sealed class TodoStoreTests : IDisposable
         Assert.Empty(store.ListDone());
         Assert.NotNull(store.Complete(IdA));
         Assert.Equal(DoneAt, Assert.Single(store.ListDone()).Done);
+    }
+
+    // 168: the next id and the day for the recurring tests.
+    private static readonly Guid IdC = new("cccccccc-0000-0000-0000-000000000003");
+    private static readonly DateOnly RepeatToday = new(2026, 11, 14);
+
+    // 168 AC-3: completing a recurring todo keeps the done record and appends one open todo, in one write.
+    [Fact]
+    public void Complete_Recurring_KeepsDone_AppendsNext()
+    {
+        new TodoStore(root, () => Start, () => IdA).Add("Water plants", new DateOnly(2026, 11, 9), TodoRepeat.Weekly(DayOfWeek.Monday));
+        new TodoStore(root, () => Start, () => IdB).Add("Call", new DateOnly(2026, 11, 1));
+        TodoStore store = new TodoStore(root, () => DoneAt, () => IdC);
+
+        TodoItem done = store.Complete(IdA, RepeatToday, out TodoItem? next)!;
+
+        Assert.Equal(
+            new TodoItem(IdA, "Water plants", new DateOnly(2026, 11, 9), Start, DoneAt, TodoRepeat.Weekly(DayOfWeek.Monday)), done);
+        Assert.Equal(
+            new TodoItem(IdC, "Water plants", new DateOnly(2026, 11, 16), DoneAt, null, TodoRepeat.Weekly(DayOfWeek.Monday)), next);
+        string expected = JsonList(
+            JsonTodo(IdA, "Water plants", "2026-11-09", "2026-10-28T09:00:00Z", "2026-11-14T08:30:00Z", "monday"),
+            JsonTodo(IdB, "Call", "2026-11-01", "2026-10-28T09:00:00Z"),
+            JsonTodo(IdC, "Water plants", "2026-11-16", "2026-11-14T08:30:00Z", repeat: "monday"));
+        Assert.Equal(expected, File.ReadAllText(FilePath));
+        TodoStore fresh = new TodoStore(root);
+        Assert.Equal([IdB, IdC], fresh.List().Select(t => t.Id));
+        Assert.Equal([done], fresh.ListDone());
+        AssertNoTempFile();
+    }
+
+    // 168 AC-3: an overdue daily todo comes back tomorrow, never in the past; Complete(id) still works for it.
+    [Fact]
+    public void Complete_RecurringOverdue_NextAfterToday()
+    {
+        new TodoStore(root, () => Start, () => IdA).Add("Stretch", new DateOnly(2026, 11, 1), TodoRepeat.Daily);
+        TodoStore store = new TodoStore(root, () => DoneAt, () => IdC);
+
+        store.Complete(IdA, RepeatToday, out TodoItem? next);
+
+        Assert.Equal(new DateOnly(2026, 11, 15), next!.Due);
+        Assert.Equal(TodoRepeat.Daily, next.Repeat);
+        Assert.Equal(next, Assert.Single(store.List()));
+    }
+
+    // 168 AC-3: a todo that doesn't repeat writes exactly the bytes it did before this job, and has no next todo.
+    [Fact]
+    public void Complete_NonRecurring_SameBytesAsBefore_NoNext()
+    {
+        new TodoStore(root, () => Start, () => IdA).Add("Buy milk", new DateOnly(2026, 11, 3));
+        new TodoStore(root, () => Start, () => IdB).Add("Call", new DateOnly(2026, 11, 1));
+        TodoStore store = new TodoStore(root, () => DoneAt, () => IdC);
+
+        TodoItem? done = store.Complete(IdA, RepeatToday, out TodoItem? next);
+
+        Assert.NotNull(done);
+        Assert.Null(next);
+        string expected = JsonList(
+            JsonTodo(IdA, "Buy milk", "2026-11-03", "2026-10-28T09:00:00Z", "2026-11-14T08:30:00Z"),
+            JsonTodo(IdB, "Call", "2026-11-01", "2026-10-28T09:00:00Z"));
+        Assert.Equal(Encoding.UTF8.GetBytes(expected), File.ReadAllBytes(FilePath));
+    }
+
+    // 168 AC-3: an unknown or already-done id writes nothing and gives no next todo.
+    [Fact]
+    public void Complete_Recurring_UnknownOrDone_WritesNothing_NoNext()
+    {
+        new TodoStore(root, () => Start, () => IdA).Add("Stretch", new DateOnly(2026, 11, 14), TodoRepeat.Daily);
+        TodoStore store = new TodoStore(root, () => DoneAt, () => IdC);
+        byte[] before = File.ReadAllBytes(FilePath);
+
+        Assert.Null(store.Complete(IdB, RepeatToday, out TodoItem? unknown));
+        Assert.Null(unknown);
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+
+        Assert.NotNull(store.Complete(IdA, RepeatToday, out _));
+        byte[] afterFirst = File.ReadAllBytes(FilePath);
+        Assert.Null(store.Complete(IdA, RepeatToday, out TodoItem? again));
+        Assert.Null(again);
+        Assert.Equal(afterFirst, File.ReadAllBytes(FilePath));
+        Assert.Single(store.List());
+    }
+
+    // 168 AC-4: a file without repeat reads and migrates to the same bytes a build from before this job writes.
+    [Fact]
+    public void Migrate_NoRepeat_SameBytesAsBefore()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath,
+            "[{\"text\":\"a\",\"due\":\"2026-11-04\",\"created\":\"2026-10-01T09:00:00Z\"},"
+            + "{\"id\":\"" + IdB + "\",\"text\":\"b\",\"due\":\"2026-11-03\",\"created\":\"2026-10-01T09:00:00Z\",\"repeat\":null}]");
+        DateTime created = new(2026, 10, 1, 9, 0, 0, DateTimeKind.Utc);
+        Guid derived = TodoStore.DerivedId("a", new DateOnly(2026, 11, 4), created, 0);
+        Assert.All(new TodoStore(root).List(), t => Assert.Null(t.Repeat));
+
+        Assert.True(new TodoStore(root).Migrate());
+
+        string expected = JsonList(
+            JsonTodo(derived, "a", "2026-11-04", "2026-10-01T09:00:00Z"),
+            JsonTodo(IdB, "b", "2026-11-03", "2026-10-01T09:00:00Z"));
+        Assert.Equal(Encoding.UTF8.GetBytes(expected), File.ReadAllBytes(FilePath));
+    }
+
+    // 168 AC-4: every repeat kind round-trips through Add, read and Migrate; repeat is not part of the derived id.
+    [Fact]
+    public void Repeat_RoundTrips_NotInDerivedId()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath,
+            "[{\"text\":\"a\",\"due\":\"2026-11-04\",\"created\":\"2026-10-01T09:00:00Z\",\"repeat\":\"month-31\"},"
+            + "{\"id\":\"" + IdB + "\",\"text\":\"b\",\"due\":\"2026-11-03\",\"created\":\"2026-10-01T09:00:00Z\",\"repeat\":\"day\"}]");
+        DateTime created = new(2026, 10, 1, 9, 0, 0, DateTimeKind.Utc);
+        Guid derived = TodoStore.DerivedId("a", new DateOnly(2026, 11, 4), created, 0);
+
+        Assert.True(new TodoStore(root).Migrate());
+        new TodoStore(root, () => Start, () => IdC).Add("c", new DateOnly(2026, 11, 5), TodoRepeat.Weekly(DayOfWeek.Friday));
+
+        string expected = JsonList(
+            JsonTodo(derived, "a", "2026-11-04", "2026-10-01T09:00:00Z", repeat: "month-31"),
+            JsonTodo(IdB, "b", "2026-11-03", "2026-10-01T09:00:00Z", repeat: "day"),
+            JsonTodo(IdC, "c", "2026-11-05", "2026-10-28T09:00:00Z", repeat: "friday"));
+        Assert.Equal(expected, File.ReadAllText(FilePath));
+        Assert.Equal(
+            [TodoRepeat.Daily, TodoRepeat.Monthly(31), TodoRepeat.Weekly(DayOfWeek.Friday)],
+            new TodoStore(root).List().Select(t => t.Repeat));
+    }
+
+    // 168 AC-4: a repeat that is not null and not a stored string makes the file unreadable, never overwritten.
+    [Theory]
+    [InlineData("\"week\"")]
+    [InlineData("\"Monday\"")]
+    [InlineData("\"month-32\"")]
+    [InlineData("\"\"")]
+    [InlineData("42")]
+    [InlineData("true")]
+    [InlineData("{}")]
+    [InlineData("[]")]
+    public void BadRepeat_Unreadable_NeverOverwritten(string repeat)
+    {
+        Directory.CreateDirectory(root);
+        string content = "[{\"id\":\"" + IdA + "\",\"text\":\"a\",\"due\":\"2026-11-03\",\"created\":\"2026-10-01T09:00:00Z\",\"repeat\":"
+            + repeat + "}]";
+        byte[] original = Encoding.UTF8.GetBytes(content);
+        File.WriteAllBytes(FilePath, original);
+        TodoStore store = Store();
+
+        TodoStoreException error = Assert.Throws<TodoStoreException>(() => store.List());
+        Assert.Equal("Can't read todos.json.", error.Message);
+        Assert.Throws<TodoStoreException>(() => store.ListDone());
+        Assert.Throws<TodoStoreException>(() => store.Add("x", new DateOnly(2026, 11, 3)));
+        Assert.Throws<TodoStoreException>(() => store.Complete(IdA, RepeatToday, out _));
+        Assert.False(store.Migrate());
+        Assert.Equal(original, File.ReadAllBytes(FilePath));
+        Assert.Single(Directory.GetFiles(root));
     }
 
     private bool CanCreateFileInRoot()

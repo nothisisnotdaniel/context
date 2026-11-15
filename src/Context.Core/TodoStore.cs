@@ -6,19 +6,21 @@ using System.Text.Json.Serialization;
 namespace Context;
 
 /// <summary>
-/// A todo: its id, its text, the day it is due, when it was added (UTC) and when it was done (UTC, <c>null</c> while
-/// it is open). The id is never shown; it is how a todo is addressed for <see cref="TodoStore.Complete"/>, so a list
-/// that changed since it was shown can't make another todo done.
+/// A todo: its id, its text, the day it is due, when it was added (UTC), when it was done (UTC, <c>null</c> while
+/// it is open) and how it repeats (<c>null</c> for a todo that doesn't). The id is never shown; it is how a todo is
+/// addressed for <see cref="TodoStore.Complete(Guid)"/>, so a list that changed since it was shown can't make another
+/// todo done.
 /// </summary>
 internal sealed record TodoItem
 {
-    public TodoItem(Guid id, string text, DateOnly due, DateTime created, DateTime? done = null)
+    public TodoItem(Guid id, string text, DateOnly due, DateTime created, DateTime? done = null, TodoRepeat? repeat = null)
     {
         Id = id;
         Text = text;
         Due = due;
         Created = created;
         Done = done;
+        Repeat = repeat;
     }
 
     /// <summary>Unique within the list, stable across reads; never shown to the user.</summary>
@@ -33,6 +35,9 @@ internal sealed record TodoItem
 
     /// <summary>When the todo was marked done, UTC; <c>null</c> for an open todo.</summary>
     public DateTime? Done { get; }
+
+    /// <summary>How the todo repeats; <c>null</c> for a todo that doesn't. Not part of the id.</summary>
+    public TodoRepeat? Repeat { get; }
 }
 
 /// <summary>Thrown when <c>todos.json</c> exists but can't be read or parsed. The file is never overwritten then.</summary>
@@ -100,19 +105,13 @@ internal sealed class TodoStore
         Read().Where(t => t.Done is not null).OrderByDescending(t => t.Done).ThenBy(t => t.Created).ToList();
 
     /// <summary>
-    /// Adds a todo, creating the root folder if needed, and returns it. Throws
-    /// <see cref="TodoStoreException"/> (and writes nothing) if the existing file can't be read.
+    /// Adds a todo (recurring when <paramref name="repeat"/> is set), creating the root folder if needed, and returns
+    /// it. Throws <see cref="TodoStoreException"/> (and writes nothing) if the existing file can't be read.
     /// </summary>
-    public TodoItem Add(string text, DateOnly due)
+    public TodoItem Add(string text, DateOnly due, TodoRepeat? repeat = null)
     {
         List<TodoItem> todos = Read();
-        Guid id = newId();
-        while (id == Guid.Empty || todos.Any(t => t.Id == id))
-        {
-            id = Guid.NewGuid();
-        }
-
-        TodoItem todo = new TodoItem(id, text, due, DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc));
+        TodoItem todo = NewTodo(todos, text, due, repeat);
         todos.Add(todo);
         Directory.CreateDirectory(root);
         Write(todos);
@@ -123,10 +122,20 @@ internal sealed class TodoStore
     /// Marks the open todo with <paramref name="id"/> done (<see cref="TodoItem.Done"/> from the clock) in one read
     /// and write and returns it; it stays in the file. Returns <c>null</c> (and writes nothing) when no open todo has
     /// that id, including one that is already done. Throws <see cref="TodoStoreException"/> if the file can't be
-    /// read; nothing is written then.
+    /// read; nothing is written then. A recurring todo still gets its next todo, with <see cref="DateOnly.MinValue"/>
+    /// as today (so the next due date follows only its due date); callers that know today use the other overload.
     /// </summary>
-    public TodoItem? Complete(Guid id)
+    public TodoItem? Complete(Guid id) => Complete(id, DateOnly.MinValue, out _);
+
+    /// <summary>
+    /// <see cref="Complete(Guid)"/>; when the todo repeats, the same write also appends one new open todo with the
+    /// same text and repeat, a new id, <see cref="TodoItem.Created"/> from the clock and the due date
+    /// <see cref="TodoInput.NextDue"/> gives for <paramref name="today"/>, and returns it in <paramref name="next"/>
+    /// (<c>null</c> for a todo that doesn't repeat, and whenever <c>null</c> is returned).
+    /// </summary>
+    public TodoItem? Complete(Guid id, DateOnly today, out TodoItem? next)
     {
+        next = null;
         List<TodoItem> todos = Read();
         int index = todos.FindIndex(t => t.Id == id && t.Done is null);
         if (index < 0)
@@ -136,9 +145,17 @@ internal sealed class TodoStore
 
         TodoItem open = todos[index];
         TodoItem done = new TodoItem(
-            open.Id, open.Text, open.Due, open.Created, DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc));
+            open.Id, open.Text, open.Due, open.Created, DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc), open.Repeat);
         todos[index] = done;
+        TodoItem? again = null;
+        if (open.Repeat is { } repeat && TryNextDue(repeat, open.Due, today, out DateOnly nextDue))
+        {
+            again = NewTodo(todos, open.Text, nextDue, repeat);
+            todos.Add(again);
+        }
+
         Write(todos);
+        next = again;
         return done;
     }
 
@@ -191,6 +208,33 @@ internal sealed class TodoStore
 
         badIds = bad;
         return true;
+    }
+
+    /// <summary>A new open todo with an id no todo in <paramref name="todos"/> has and the clock's time.</summary>
+    private TodoItem NewTodo(List<TodoItem> todos, string text, DateOnly due, TodoRepeat? repeat)
+    {
+        Guid id = newId();
+        while (id == Guid.Empty || todos.Any(t => t.Id == id))
+        {
+            id = Guid.NewGuid();
+        }
+
+        return new TodoItem(id, text, due, DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc), repeat: repeat);
+    }
+
+    /// <summary><see cref="TodoInput.NextDue"/>, or <c>false</c> at the end of the calendar (no next todo then).</summary>
+    private static bool TryNextDue(TodoRepeat repeat, DateOnly due, DateOnly today, out DateOnly next)
+    {
+        try
+        {
+            next = TodoInput.NextDue(repeat, due, today);
+            return true;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            next = default;
+            return false;
+        }
     }
 
     /// <summary>
@@ -281,7 +325,18 @@ internal sealed class TodoStore
                 while (id == Guid.Empty || used.Contains(id) || !taken.Add(id));
             }
 
-            todos.Add(new TodoItem(id, item.Text!, item.Due!.Value, created, AsUtc(item.Done)));
+            TodoRepeat? repeat = null;
+            if (item.Repeat is { } stored)
+            {
+                if (!TodoRepeat.TryParseStored(stored, out TodoRepeat parsed))
+                {
+                    throw new TodoStoreException($"Can't read {FileName}.");
+                }
+
+                repeat = parsed;
+            }
+
+            todos.Add(new TodoItem(id, item.Text!, item.Due!.Value, created, AsUtc(item.Done), repeat));
         }
 
         return todos;
@@ -323,7 +378,7 @@ internal sealed class TodoStore
     private void Write(List<TodoItem> todos)
     {
         List<TodoJson> items = todos
-            .Select(t => new TodoJson { Id = JsonSerializer.SerializeToElement(t.Id), Text = t.Text, Due = t.Due, Created = t.Created, Done = t.Done })
+            .Select(t => new TodoJson { Id = JsonSerializer.SerializeToElement(t.Id), Text = t.Text, Due = t.Due, Created = t.Created, Done = t.Done, Repeat = t.Repeat?.Stored })
             .ToList();
         string json = JsonSerializer.Serialize(items, JsonOptions) + "\n";
         string temp = Path.Combine(root, $".{FileName}.{Guid.NewGuid():N}.tmp");
@@ -363,5 +418,13 @@ internal sealed class TodoStore
         /// </summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public DateTime? Done { get; set; }
+
+        /// <summary>
+        /// How the todo repeats (<see cref="TodoRepeat.Stored"/>); left out of the file for a todo that doesn't, so a
+        /// list without recurring todos is written as before. A value that is not null and not one of the stored
+        /// strings (including a number or an object) makes the file unreadable.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Repeat { get; set; }
     }
 }
