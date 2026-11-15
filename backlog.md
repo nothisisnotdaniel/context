@@ -216,6 +216,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#175](backlog/175-remove-the-empty-child-folder-after.md) Remove the empty child folder after a subpage move
 - [?] [#176](backlog/176-merge-find-and-findexact-in-notestore.md) Merge Find and FindExact in NoteStore
 - [?] [#177](backlog/177-keep-deep-note-trees-readable-in.md) Keep deep note trees readable in the sidebar
+- [ ] [#238](backlog/238-stable-tests-and-locked-restore-on.md) Stable tests and locked restore on CI
 - [?] [#180](backlog/180-force-a-fresh-locked-restore-on.md) Force a fresh locked restore on CI
 - [ ] [#230](backlog/230-clean-invisible-and-control-characters-in.md) Clean invisible and control characters in text
 - [ ] [#182](backlog/182-refuse-invisible-characters-in-person-names.md) Refuse invisible characters in person names and note titles
