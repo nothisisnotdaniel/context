@@ -48,6 +48,7 @@ internal sealed class Cli
         ("types", "List the page types with their attributes."),
         ("current", "Today's appointments, due todos and linked notes."),
         ("today", "Print today's note, creating it with the day's appointments and due todos."),
+        ("new <title...> [--template <name>]", "Create a note, from templates/<name>.md if given."),
         ("import <path>", "Store a Markdown file as a note."),
         ("export <note> <path>", "Write a note to a new plain file."),
         ("<command> --json", "Print one JSON object: version, todos, notes, note show, tags, links, people, person, find, types, current."),
@@ -131,7 +132,7 @@ internal sealed class Cli
 
         string name = args[0].ToLowerInvariant();
         string[] rest = args[1..];
-        if (json && (name is "help" or "--help" or "-h" or "capture" or "todo" or "today" or "import" or "export"))
+        if (json && (name is "help" or "--help" or "-h" or "capture" or "todo" or "today" or "new" or "import" or "export"))
         {
             // Checked before any argument: nothing is written and the folder is not created.
             return Usage(JsonOnly);
@@ -235,6 +236,8 @@ internal sealed class Cli
                 return NoArguments("current", args, out usage, Current);
             case "today":
                 return NoArguments("today", args, out usage, Today);
+            case "new":
+                return ParseNew(args, out usage);
             case "import":
                 if (args.Length != 1)
                 {
@@ -286,6 +289,24 @@ internal sealed class Cli
         }
 
         return s => Capture(s, text);
+    }
+
+    // context new <title...> [--template <name...>]: the words before --template (ignoring case) are the title, the
+    // words after it the template name. A missing title or template name is a usage error.
+    private Func<Session, int>? ParseNew(string[] args, out string? usage)
+    {
+        const string NewForm = "Type: context new <title> [--template <name>].";
+        usage = null;
+        int flag = Array.FindIndex(args, a => string.Equals(a, "--template", StringComparison.OrdinalIgnoreCase));
+        string title = string.Join(' ', flag < 0 ? args : args[..flag]).Trim();
+        string? template = flag < 0 ? null : string.Join(' ', args[(flag + 1)..]).Trim();
+        if (title.Length == 0 || template is { Length: 0 })
+        {
+            usage = NewForm;
+            return null;
+        }
+
+        return template is null ? s => NewNote(s, title) : s => NewNoteFromTemplate(s, title, template);
     }
 
     private Func<Session, int>? ParseTodo(string[] args, out string? usage)
@@ -1138,6 +1159,68 @@ internal sealed class Cli
             }
         }));
         return failed ? ExitError : ExitOk;
+    }
+
+    private int NewNote(Session session, string title)
+    {
+        string? invalid = NoteStore.ValidateTitle(NoteStore.NormalizeTitle(title));
+        if (invalid is not null)
+        {
+            return Error(invalid);
+        }
+
+        try
+        {
+            NoteInfo created = session.Notes.Create(title);
+            Out($"Created {OneLine(created.Name)}");
+            return ExitOk;
+        }
+        catch (NoteExistsException e)
+        {
+            return Error($"Note {OneLine(e.Name)} already exists.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Error($"Can't write {OneLine(NoteStore.NormalizeTitle(title))}.");
+        }
+    }
+
+    private int NewNoteFromTemplate(Session session, string title, string template)
+    {
+        TemplateNote prepared = new NoteTemplates(session.Notes).Prepare(title, template, now());
+        string name = OneLine(prepared.Template);
+        switch (prepared.Kind)
+        {
+            case TemplateNoteKind.InvalidTitle:
+                return Error(prepared.Text);
+            case TemplateNoteKind.Exists:
+                return Error($"Note {OneLine(prepared.Title)} already exists.");
+            case TemplateNoteKind.TemplatesSensitive:
+                return Error($"{NoteTemplates.FolderName} is sensitive, so its templates can't be used.");
+            case TemplateNoteKind.Missing:
+                return Error(prepared.Templates.Count == 0
+                    ? $"No template called {name}. Add one as {NoteTemplates.FolderName}/{name}.md."
+                    : $"No template called {name}. Templates: {string.Join(", ", prepared.Templates.Select(OneLine))}.");
+            case TemplateNoteKind.Unreadable:
+                return Error($"Can't read template {name}.");
+            case TemplateNoteKind.TooBig:
+                return Error($"Template {name} is too big.");
+        }
+
+        try
+        {
+            NoteInfo created = session.Notes.CreateWithText(prepared.Title, prepared.Text);
+            Out($"Created {OneLine(created.Name)}");
+            return ExitOk;
+        }
+        catch (NoteExistsException e)
+        {
+            return Error($"Note {OneLine(e.Name)} already exists.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Error($"Can't write {OneLine(prepared.Title)}.");
+        }
     }
 
     private int Import(Session session, string argument)

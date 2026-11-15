@@ -959,7 +959,7 @@ internal sealed class NoteStore
     }
 
     // True for a symbolic link, a junction or any other reparse point; one that can't be checked counts as a link.
-    private static bool IsLink(FileSystemInfo info)
+    internal static bool IsLink(FileSystemInfo info)
     {
         try
         {

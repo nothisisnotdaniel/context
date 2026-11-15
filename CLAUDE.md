@@ -312,6 +312,21 @@ Every factory agent reads this file before working on Context. Keep it short and
     also sensitive names). `Descendants(name)` counts the notes below; `Delete` removes the note and every listed
     descendant, then only the child folders that are now empty. `SaveIfUnchanged` writes its temp file in the
     note's own folder, named after `Title`. `Save` (import) and `Create` stay top-level only.
+  - **Templates** (job 165, `NoteTemplates.cs`): `NoteTemplates(NoteStore)`. `List()` gives the titles of the regular
+    `*.md` files directly in `<root>/templates/` that pass `ValidateTitle` (sorted ignoring case, then ordinal; no
+    subfolders, `.ctxs`, links/reparse points or names starting with `.`; a missing, linked or unreadable folder is
+    empty, nothing created). `TryRead(name, out text)` (`TemplateReadKind` `Found`/`Missing`/`Unreadable`/
+    `TemplatesSensitive`) normalizes the name (`NormalizeTitle`), matches it against `List()` only (exact, then ignoring
+    case; never a path), refuses when the top-level `templates` is sensitive, and reads through `BoundedFile` at
+    `MaxEditBytes` (BOM dropped). `Fill(text, title, localNow)` replaces `{{date}}` (`yyyy-MM-dd`), `{{time}}` (`HH:mm`,
+    invariant) and `{{title}}` in one pass (inserted literally; any other `{{...}}` kept, line endings kept, a leading
+    BOM dropped). `Prepare(title, template, localNow)` returns a `TemplateNote` (`TemplateNoteKind` `Ready`,
+    `InvalidTitle`, `Exists` (plain or sensitive, ignoring case; checked before the template is read),
+    `TemplatesSensitive`, `Missing` with `Templates`, `Unreadable`, `TooBig` over `MaxEditBytes`); it never writes, the
+    front ends write the `Ready` text through `CreateWithText` (exact bytes, no `# title` line added). Texts (both front
+    ends): `No template called <name>. Templates: <a>, <b>.` / `No template called <name>. Add one as templates/<name>.md.`,
+    `Can't read template <name>.`, `Template <name> is too big.`, `templates is sensitive, so its templates can't be used.`,
+    plus the `CreateNote` title texts.
   - **Todos:** `TodoStore` keeps the list in `<root>/todos.json` (same root as notes; System.Text.Json,
     camelCase, UTF-8 no BOM). `List()` gives the **open** todos sorted by `Due`, then `Created` (UTC), then file
     order. A done todo (job 159) stays in the file with `done` (UTC date-time, an offset converted and no zone taken as UTC on read; `TodoItem.Done`, written only when set,
@@ -372,6 +387,11 @@ Every factory agent reads this file before working on Context. Keep it short and
   `<date>\t<text>`; its error lines go to stderr and make the exit code 1), `today` (the daily note, see Daily
   note: prints it like `note show`, creating it first when it is missing; a sensitive one is `Cli.SensitiveText`,
   exit 1; a failed write is `Can't write <name>.`, exit 1; no arguments, `--json` is a usage error),
+  `new <title...> [--template <name...>]` (job 165: title words joined with one space; `--template` matched ignoring
+  case; prints `Created <name>`; with a template see Templates, without one the plain `# <title>\n` note through
+  `Create`; an invalid title or an existing note gives the `ValidateTitle` text or `Note <name> already exists.`, every
+  refusal one stderr line, exit 1; a failed write `Can't write <name>.`; no title, `--template` without a name or
+  `--json` is a usage error before the folder is read),
   `import <path>`, `export <note> <path>` (paths relative to the current directory, no `~`). When `Migrate(out n)`
   replaced bad todo ids, `todos`, `todo add`, `todo done` and `current` first write one extra stderr line,
   `Fixed a bad todo id in todos.json.` or `Fixed <n> bad todo ids in todos.json.` (fixed text, the bad value is never
@@ -533,7 +553,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `[[note link]]` parsing in `NoteLinkParser.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
-    `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, the inbox capture in `Inbox.cs`, the todo input rules (`TryParseDate`,
+    `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs`, the todo input rules (`TryParseDate`,
     `MaxTextLength`) in `TodoInput.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`) and `CalendarLinkView.cs`
     (the calendar link), and the command ranking for the desktop palette in `CommandMatcher.cs`; the notes list is `NoteStore.List()` itself.
   - **Data step in Core, drawing in the front end:** a view's Core data step returns plain types (a kind plus raw
@@ -600,6 +620,11 @@ Every factory agent reads this file before working on Context. Keep it short and
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
     `/capture`, `/current`, `/export`, `/find`, `/import`, `/new`, `/open`, `/save`, `/settings`, `/tags`, `/today`, `/todo` with `CommandMatcher` (in Core).
+    `/new <title> [--template <name>]` (job 165): the first whitespace-separated `--template` token (ignoring case)
+    splits the trimmed title from the trimmed template name and calls `DesktopActions.CreateNoteFromTemplate(title,
+    template)` (`NoteTemplates.Prepare` with the injected local clock, then `CreateWithText`; the Templates texts, no
+    key-store call); Done opens the note through `RequestOpen` with accent `Created <name>`, else the red text; a blank
+    title or template is red `Type /new <title> --template <template>.`; without the token `/new` is unchanged.
     `/today` (argument ignored) asks `Discard changes to <name>?` first when another note has unsaved changes (not
     when the open note is today's note itself: the editor stays as it is, unsaved text included), then
     calls `DesktopActions.OpenDailyNote()` and opens the note (a sensitive one through the unlock flow), with the
@@ -730,7 +755,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `wwwroot/index.html` (CSP meta tag, only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
     and `wwwroot/editor/editor.css`.
   - **Desktop rules:** the Core writing calls (`Create`, `Save`, `SaveIfUnchanged`, `Add`, `Complete`, `Set`, `Clear`, `Delete`,
-    `Rename`, `CreateChild`, `Move`, `ClearCache`, `Capture` (`Inbox.Capture`), `Ensure` (`DailyNote.Ensure`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
+    `Rename`, `CreateChild`, `Move`, `ClearCache`, `Capture` (`Inbox.Capture`), `Ensure` (`DailyNote.Ensure`), `CreateWithText` (`CreateNoteFromTemplate`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
     `StoreRecoveryPublicKey`) appear only in `DesktopActions.cs` (exemptions: `DotNetObjectReference.Create(` once in
     `EditorInterop.cs`, `ECDiffieHellman.Create(` in `SealedNote.cs`, and `WindowsKeyStore.cs`, whose .NET calls change
     the certificate store and which names no Core store, `File.`, `Directory.` or `Path.`; the reads still write

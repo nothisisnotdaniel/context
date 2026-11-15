@@ -234,6 +234,133 @@ public sealed class NoteActionsTests : IDisposable
         Assert.Equal(before, Files());
     }
 
+    // 165 AC-4: a note from a template is the filled template, byte for byte (no BOM, no added title line), the
+    // template is unchanged and the state refreshes.
+    [Fact]
+    public async Task CreateNoteFromTemplate_WritesFilledTemplate()
+    {
+        byte[] template = [.. Bom, .. Encoding.UTF8.GetBytes("Agenda for {{title}}\r\n{{date}} {{time}} {{x}}\n")];
+        WriteTemplate("Meeting.md", template);
+        await data.RefreshAsync();
+        int builds = data.State!.Builds;
+
+        ActionResult result = await data.Actions!.CreateNoteFromTemplate(" Sync.md ", "meeting.md");
+
+        Assert.Equal((ActionKind.Done, ActionReason.None, "Sync"), (result.Kind, result.Reason, result.Text));
+        Assert.Equal(
+            Encoding.UTF8.GetBytes("Agenda for Sync\r\n2026-10-29 10:05 {{x}}\n"),
+            File.ReadAllBytes(Path.Combine(data.Root, "Sync.md")));
+        Assert.Equal(template, File.ReadAllBytes(Path.Combine(data.Root, NoteTemplates.FolderName, "Meeting.md")));
+        Assert.Equal(builds + 1, data.State.Builds);
+    }
+
+    // 165 AC-6: an invalid or taken title (plain or sensitive, ignoring case) gives the CreateNote texts; the template
+    // is not read (an unreadable one would answer otherwise) and nothing is written.
+    [Theory]
+    [InlineData("a/b", "Invalid", "A note title can't contain / \\ : or control characters.")]
+    [InlineData(" ", "Invalid", "A note needs a title.")]
+    [InlineData("plan", "Exists", "Note plan already exists.")]
+    [InlineData("SECRET.md", "Exists", "Note SECRET already exists.")]
+    public async Task CreateNoteFromTemplate_BadOrTakenTitle_RefusedTemplateNotRead(string title, string reason, string text)
+    {
+        data.WriteNote("Plan", "Mine\n");
+        data.WriteFile("secret" + NoteStore.SensitiveExtension, "sealed");
+        WriteTemplate("big.md", new byte[NoteStore.MaxEditBytes + 1]);
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult result = await data.Actions!.CreateNoteFromTemplate(title, "big");
+
+        Assert.Equal(ActionKind.Refused, result.Kind);
+        Assert.Equal(reason, result.Reason.ToString());
+        Assert.Equal(text, result.Text);
+        Assert.Equal(before, Files());
+    }
+
+    // 165 AC-5: a missing template lists the templates there are (List order), or says how to add one.
+    [Fact]
+    public async Task CreateNoteFromTemplate_Missing_Hints()
+    {
+        await data.RefreshAsync();
+
+        ActionResult none = await data.Actions!.CreateNoteFromTemplate("Plan", "standup");
+
+        Assert.Equal((ActionKind.Refused, "No template called standup. Add one as templates/standup.md."), (none.Kind, none.Text));
+        Assert.False(Directory.Exists(data.Root));
+
+        WriteTemplate("review.md", Encoding.UTF8.GetBytes("r"));
+        WriteTemplate("Meeting.md", Encoding.UTF8.GetBytes("m"));
+        SortedDictionary<string, string> before = Files();
+
+        foreach (string name in new[] { "standup", "../review", "..\\review", "templates/review", Path.Combine(data.Root, "templates", "review") })
+        {
+            ActionResult some = await data.Actions.CreateNoteFromTemplate("Plan", name);
+
+            Assert.Equal(ActionKind.Refused, some.Kind);
+            Assert.EndsWith(". Templates: Meeting, review.", some.Text, StringComparison.Ordinal);
+        }
+
+        Assert.Equal(before, Files());
+    }
+
+    // 165 AC-5: a template over 5 MB can't be read, and a filled text over MaxEditBytes is too big; nothing written.
+    [Fact]
+    public async Task CreateNoteFromTemplate_UnreadableOrTooBig_NothingWritten()
+    {
+        WriteTemplate("big.md", new byte[NoteStore.MaxEditBytes + 1]);
+        WriteTemplate("long.md", Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat("{{title}}", (int)(NoteStore.MaxEditBytes / 9)))));
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult big = await data.Actions!.CreateNoteFromTemplate("Plan", "BIG");
+        ActionResult tooBig = await data.Actions.CreateNoteFromTemplate("A long title", "long");
+
+        Assert.Equal((ActionKind.Failed, "Can't read template big."), (big.Kind, big.Text));
+        Assert.Equal((ActionKind.Refused, "Template long is too big."), (tooBig.Kind, tooBig.Text));
+        Assert.Equal(before, Files());
+    }
+
+    // 165 AC-7: with sensitive notes set up, a note from a template makes no key-store call and writes only the .md.
+    [Fact]
+    public async Task CreateNoteFromTemplate_EncryptionOn_NoAgreeOnlyPlainMd()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("Diary", "# Diary\n");
+        data.WriteSensitive("Salary", "# Salary\n");
+        WriteTemplate("meeting.md", Encoding.UTF8.GetBytes("# {{title}}\n"));
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult result = await data.Actions!.CreateNoteFromTemplate("Sync", "meeting");
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Equal(0, data.Keys.Agrees);
+        SortedDictionary<string, string> after = Files();
+        Assert.Equal(["Sync.md"], after.Keys.Except(before.Keys).ToArray());
+        Assert.All(before, file => Assert.Equal(file.Value, after[file.Key]));
+        Assert.Equal("# Sync\n", File.ReadAllText(Path.Combine(data.Root, "Sync.md")));
+    }
+
+    // 165 AC-7: a sensitive top-level templates note (any case) means no template is read; no key-store call.
+    [Theory]
+    [InlineData("templates")]
+    [InlineData("Templates")]
+    public async Task CreateNoteFromTemplate_TemplatesSensitive_Refused(string name)
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive(name, "# templates\n");
+        WriteTemplate("meeting.md", Encoding.UTF8.GetBytes("m"));
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult result = await data.Actions!.CreateNoteFromTemplate("Sync", "meeting");
+
+        Assert.Equal(ActionKind.Refused, result.Kind);
+        Assert.Equal("templates is sensitive, so its templates can't be used.", result.Text);
+        Assert.Equal(0, data.Keys.Agrees);
+        Assert.Equal(before, Files());
+    }
+
     // 134 AC-3: any other error is Failed with the fixed text, never the exception's, and nothing is written.
     [Fact]
     public async Task CreateNote_FolderCantBeMade_FailedFixedText()
@@ -612,5 +739,13 @@ public sealed class NoteActionsTests : IDisposable
         return opened;
     }
 
+    private void WriteTemplate(string file, byte[] bytes)
+    {
+        string path = Path.Combine(data.Root, NoteTemplates.FolderName, file);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, bytes);
+    }
+
     private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName);
 }
+

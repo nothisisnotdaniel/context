@@ -108,6 +108,78 @@ public sealed class MainTests : IDisposable
         Assert.False(Directory.Exists(data.Root));
     }
 
+    // 165 AC-8: /new <title> --template <name> creates the note from the template, opens it and shows the accent status.
+    [Theory]
+    [InlineData("/new Weekly sync --template meeting")]
+    [InlineData("/new   Weekly sync   --TEMPLATE   Meeting.md  ")]
+    public async Task PaletteNewTemplate_CreatesOpensAndShowsCreated(string line)
+    {
+        data.WriteFile(Path.Combine(NoteTemplates.FolderName, "meeting.md"), "# {{title}}\n{{date}}\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, line);
+
+        Assert.Equal("# Weekly sync\n2026-10-29\n", File.ReadAllText(Path.Combine(data.Root, "Weekly sync.md")));
+        cut.WaitForAssertion(() => Assert.Equal("Weekly sync", cut.Find(".note-title").TextContent), Wait);
+        Assert.Equal("Created Weekly sync", cut.Find(".main-status").TextContent);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
+        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
+    }
+
+    // 165 AC-8: a blank title or template is the red usage line; a refusal shows its red text; nothing is written.
+    [Theory]
+    [InlineData("/new --template meeting", "Type /new <title> --template <template>.")]
+    [InlineData("/new Plan --template", "Type /new <title> --template <template>.")]
+    [InlineData("/new Plan --template   ", "Type /new <title> --template <template>.")]
+    [InlineData("/new Plan --template standup", "No template called standup. Templates: meeting.")]
+    [InlineData("/new a/b --template meeting", "A note title can't contain / \\ : or control characters.")]
+    [InlineData("/new meeting --template meeting", "Note meeting already exists.")]
+    public async Task PaletteNewTemplate_BlankOrRefused_RedLine(string line, string text)
+    {
+        data.WriteNote("Meeting", "# Meeting\n");
+        data.WriteFile(Path.Combine(NoteTemplates.FolderName, "meeting.md"), "# {{title}}\n");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+
+        await RunPalette(cut, line);
+
+        cut.WaitForAssertion(() => Assert.Equal(text, cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    // 165 AC-8: --template inside a word is part of the title, so /new without the token behaves as before.
+    [Fact]
+    public async Task PaletteNew_WithoutTemplateToken_PlainNote()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, "/new Plan--template");
+
+        Assert.Equal("# Plan--template\n", File.ReadAllText(Path.Combine(data.Root, "Plan--template.md")));
+        cut.WaitForAssertion(() => Assert.Equal("Created Plan--template", cut.Find(".main-status").TextContent), Wait);
+    }
+
+    // 165 AC-8: with unsaved changes in the open note, the new note from a template asks to discard first.
+    [Fact]
+    public async Task PaletteNewTemplate_DirtyEditor_AsksBeforeOpening()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        data.WriteFile(Path.Combine(NoteTemplates.FolderName, "meeting.md"), "# {{title}}\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        js.Edit("# Plan\n\nUnsaved\n");
+
+        await RunPalette(cut, "/new Fresh --template meeting");
+
+        Assert.True(File.Exists(Path.Combine(data.Root, "Fresh.md")));
+        cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("Fresh", cut.Find(".note-title").TextContent), Wait);
+    }
+
     // 134 AC-7: creating from the entry row while the open note has unsaved changes asks to discard first.
     [Fact]
     public async Task EntryRow_DirtyEditor_AsksBeforeOpeningTheNewNote()
