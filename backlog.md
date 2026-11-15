@@ -237,6 +237,10 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#203](backlog/203-replace-lone-surrogates-in-meeting-note.md) Replace lone surrogates in meeting note names
 - [?] [#204](backlog/204-cap-todos-json-size-and-refuse.md) Cap todos.json size and refuse non-regular files
 - [?] [#205](backlog/205-say-why-done-did-nothing-while.md) Say why /done did nothing while a dialog is open
+- [?] [#206](backlog/206-base-the-search-index-size-cap.md) Base the search index size cap on the text actually read
+- [?] [#207](backlog/207-limit-memory-used-by-a-broad.md) Limit memory used by a broad full-text search
+- [?] [#208](backlog/208-avoid-a-full-scan-when-re.md) Avoid a full scan when re-indexing one note's text
+- [?] [#209](backlog/209-announce-the-search-result-count-to.md) Announce the search result count to screen readers
 
 ## Dropped with the terminal UI
 
