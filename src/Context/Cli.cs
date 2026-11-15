@@ -26,8 +26,9 @@ internal sealed class Cli
     private const string IndexUnreadable = "Can't read context.db.";
     private const string PersonForm = "Type: context person <name>.";
     private const string FindForm = "Type: context find <attribute> <value>.";
+    private const string SearchForm = "Type: context search <text>.";
     private const string JsonOnly =
-        "--json works only with version, todos, notes, note show, tags, links, people, person, find, types, current and review.";
+        "--json works only with version, todos, notes, note show, tags, links, people, person, find, search, types, current and review.";
 
     // Every command with its usage and what it does, in the order help lists them.
     private static readonly (string Usage, string Description)[] Commands =
@@ -46,6 +47,7 @@ internal sealed class Cli
         ("people", "List the people mentioned with @[Name], with counts."),
         ("person <name...>", "List the notes, appointments and todos that mention a person."),
         ("find <attribute> <value...>", "List the notes with an attribute line, e.g. find role Bereichsleiter."),
+        ("search <text...>", "List the notes whose text contains the text, with the first matching line."),
         ("types", "List the page types with their attributes."),
         ("current", "Today's appointments, due todos and linked notes."),
         ("review", "The last 7 days' changed notes and done todos, overdue todos and the next 7 days' appointments."),
@@ -54,7 +56,7 @@ internal sealed class Cli
         ("new <title...> [--template <name>]", "Create a note, from templates/<name>.md if given."),
         ("import <path>", "Store a Markdown file as a note."),
         ("export <note> <path>", "Write a note to a new plain file."),
-        ("<command> --json", "Print one JSON object: version, todos, notes, note show, tags, links, people, person, find, types, current, review."),
+        ("<command> --json", "Print one JSON object: version, todos, notes, note show, tags, links, people, person, find, search, types, current, review."),
     ];
 
     private readonly TextWriter stdout;
@@ -233,6 +235,15 @@ internal sealed class Cli
                 }
 
                 return s => Find(s, findKey, findValue);
+            case "search":
+                string query = string.Join(' ', args);
+                if (query.Trim().Length == 0)
+                {
+                    usage = SearchForm;
+                    return null;
+                }
+
+                return s => Search(s, query);
             case "types":
                 return NoArguments("types", args, out usage, Types);
             case "current":
@@ -818,6 +829,44 @@ internal sealed class Cli
                 foreach (string note in view.Notes)
                 {
                     Out(OneLine(note));
+                }
+
+                return ExitOk;
+        }
+    }
+
+    private int Search(Session session, string text)
+    {
+        SearchView view = SearchView.Build(session.Index, session.Notes, text);
+        switch (view.Kind)
+        {
+            case SearchViewKind.TooShort:
+                return Error($"Type at least {SearchView.MinQueryLength} characters to search.");
+            case SearchViewKind.TooLong:
+                return Error($"Search text can be at most {SearchView.MaxQueryLength} characters.");
+            case SearchViewKind.IndexUnreadable:
+                return Error(IndexUnreadable);
+            case SearchViewKind.Found or SearchViewKind.NoMatches when session.Json:
+                return Json(w =>
+                {
+                    w.WriteString("query", OneLine(view.Query));
+                    w.WriteStartArray("results");
+                    foreach (SearchHit hit in view.Hits)
+                    {
+                        w.WriteStartObject();
+                        w.WriteString("note", OneLine(hit.Note));
+                        w.WriteNumber("line", hit.LineNumber);
+                        w.WriteString("text", OneLine(hit.Line));
+                        w.WriteEndObject();
+                    }
+
+                    w.WriteEndArray();
+                });
+            default:
+                // NoMatches lists nothing, like find.
+                foreach (SearchHit hit in view.Hits)
+                {
+                    Out($"{OneLine(hit.Note)}\t{hit.LineNumber.ToString(CultureInfo.InvariantCulture)}\t{OneLine(hit.Line)}");
                 }
 
                 return ExitOk;

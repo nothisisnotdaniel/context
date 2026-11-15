@@ -183,6 +183,7 @@ internal sealed class TagIndex
             value TEXT NOT NULL,
             PRIMARY KEY(note, key, value_key));
         CREATE INDEX IF NOT EXISTS note_attributes_key_value ON note_attributes(key, value_key);
+        CREATE VIRTUAL TABLE IF NOT EXISTS note_text USING fts5(note UNINDEXED, body, tokenize='trigram');
         """;
 
     /// <summary>
@@ -190,9 +191,9 @@ internal sealed class TagIndex
     /// database has an older one, <see cref="Sync"/> re-parses every note once. 1: <c>#[bracket tags]</c>.
     /// 2: <c>[[note links]]</c>. 3: subpages (full names, link targets up to <see cref="NoteLinkParser.MaxTargetLength"/>).
     /// 4: <c>@[person]</c> mentions (and <c>@[[x]]</c> is no link). 5: <c>key:: value</c> attributes. 6: a link target
-    /// that runs into a code span is no link.
+    /// that runs into a code span is no link. 7: note text (the full-text table <c>note_text</c>).
     /// </summary>
-    public const int ParserVersion = 6;
+    public const int ParserVersion = 7;
 
     /// <summary>
     /// How long opening <c>context.db</c> and starting <see cref="Sync"/>'s write transaction wait while another
@@ -229,7 +230,9 @@ internal sealed class TagIndex
     /// the root folder and the database if missing. A note is re-parsed (tags and <c>[[note links]]</c>) only
     /// when its last-write time (UTC ticks) differs from the stored one. Notes that are gone lose their rows.
     /// A note that can't be read is kept with no tags, no links and no stored time, so it is retried on the
-    /// next sync. Link targets are stored as written and resolved against note names only when queried.
+    /// next sync. Link targets are stored as written and resolved against note names only when queried. A re-parsed
+    /// note's text is written to <c>note_text</c> again (no row for a note that can't be read or is over
+    /// <see cref="NoteStore.MaxEditBytes"/>); sensitive notes are never listed, so never indexed.
     /// Throws <see cref="TagIndexException"/> if the database can't be opened or isn't valid.
     /// </summary>
     public void Sync(NoteStore store)
@@ -247,11 +250,14 @@ internal sealed class TagIndex
                 version = Convert.ToInt64(pragma.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
             }
 
+            EnsureSecureDelete(connection, transaction);
             bool upgrade = version < ParserVersion;
             if (upgrade)
             {
-                // Tags were parsed by an older parser: forget the stored times so every note is re-parsed.
+                // Tags were parsed by an older parser: forget the stored times so every note is re-parsed. Every note
+                // text is written again then, so the old rows go in one statement instead of one scan per note.
                 Execute(connection, transaction, "UPDATE notes SET modified = NULL");
+                Execute(connection, transaction, "DELETE FROM note_text");
             }
 
             Dictionary<string, long?> stored = new(StringComparer.Ordinal);
@@ -278,10 +284,13 @@ internal sealed class TagIndex
                 IReadOnlyList<string> targets;
                 IReadOnlyList<string> people;
                 IReadOnlyList<PageAttribute> attributes;
+                string? body;
                 long? newModified = modified;
                 try
                 {
                     string text = store.Read(note);
+                    // The full text only for a note the editor could open too; its tags and links still count.
+                    body = new FileInfo(note.Path).Length <= NoteStore.MaxEditBytes ? text : null;
                     tags = TagParser.Parse(text);
                     targets = NoteLinkParser.Parse(text);
                     people = PersonParser.Parse(text);
@@ -293,6 +302,7 @@ internal sealed class TagIndex
                     targets = [];
                     people = [];
                     attributes = [];
+                    body = null;
                     newModified = null;
                 }
 
@@ -343,6 +353,21 @@ internal sealed class TagIndex
                         ("$value", attribute.Value));
                 }
 
+                if (!upgrade)
+                {
+                    Execute(connection, transaction, "DELETE FROM note_text WHERE note = $note", ("$note", note.Name));
+                }
+
+                if (body is not null)
+                {
+                    Execute(
+                        connection,
+                        transaction,
+                        "INSERT INTO note_text(note, body) VALUES($note, $body)",
+                        ("$note", note.Name),
+                        ("$body", body));
+                }
+
                 Execute(
                     connection,
                     transaction,
@@ -358,6 +383,7 @@ internal sealed class TagIndex
                 Execute(connection, transaction, "DELETE FROM note_links WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_people WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_attributes WHERE note = $note", ("$note", gone));
+                Execute(connection, transaction, "DELETE FROM note_text WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM notes WHERE name = $note", ("$note", gone));
             }
 
@@ -366,6 +392,7 @@ internal sealed class TagIndex
             Execute(connection, transaction, "DELETE FROM note_links WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_people WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_attributes WHERE note NOT IN (SELECT name FROM notes)");
+            Execute(connection, transaction, "DELETE FROM note_text WHERE note NOT IN (SELECT name FROM notes)");
             if (upgrade)
             {
                 // A constant, not user input: PRAGMA takes no parameters.
@@ -374,6 +401,30 @@ internal sealed class TagIndex
 
             transaction.Commit();
             return 0;
+        });
+    }
+
+    /// <summary>
+    /// The <c>(note, body)</c> rows of <c>note_text</c> that contain <paramref name="text"/> by the trigram tokenizer
+    /// (ignoring case), unsorted. The text reaches SQL only as a parameter, quoted as one FTS5 phrase, so FTS syntax in
+    /// it (<c>OR</c>, <c>NEAR</c>, <c>*</c>, <c>-</c>, quotes) is literal text. Under 3 characters nothing matches. The
+    /// match is only a pre-filter: <see cref="SearchView.Build"/> checks each line itself.
+    /// </summary>
+    public IReadOnlyList<(string Note, string Body)> Search(string text)
+    {
+        string phrase = "\"" + text.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+        return Run(connection =>
+        {
+            List<(string Note, string Body)> rows = [];
+            using SqliteCommand command = Command(connection, null, "SELECT note, body FROM note_text WHERE note_text MATCH $q");
+            command.Parameters.AddWithValue("$q", phrase);
+            using SqliteDataReader reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                rows.Add((reader.GetString(0), reader.GetString(1)));
+            }
+
+            return (IReadOnlyList<(string Note, string Body)>)rows;
         });
     }
 
@@ -810,6 +861,23 @@ internal sealed class TagIndex
             .ThenBy(n => n, StringComparer.Ordinal)
             .ToList();
 
+    // Turns on FTS5's secure-delete for note_text (stored in the table, so set once): a deleted or rewritten note's
+    // text is then removed from the index pages instead of only being marked deleted. Checked first, so a sync with
+    // nothing to do writes nothing.
+    private static void EnsureSecureDelete(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        using (SqliteCommand check = Command(connection, transaction, "SELECT v FROM note_text_config WHERE k = 'secure-delete'"))
+        {
+            object? value = check.ExecuteScalar();
+            if (value is long on && on == 1)
+            {
+                return;
+            }
+        }
+
+        Execute(connection, transaction, "INSERT INTO note_text(note_text, rank) VALUES('secure-delete', 1)");
+    }
+
     // Opens the database, creates the tables if needed and runs the work. Any SQLite error becomes a
     // TagIndexException. The file is never deleted or replaced.
     private T Run<T>(Func<SqliteConnection, T> work)
@@ -834,6 +902,8 @@ internal sealed class TagIndex
                 null,
                 "PRAGMA busy_timeout = "
                     + ((long)busyTimeout.TotalMilliseconds).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            // Freed pages are zeroed, so the text of a deleted note (one just marked sensitive) doesn't linger in the file.
+            Execute(connection, null, "PRAGMA secure_delete = ON");
             Execute(connection, null, Schema);
             return work(connection);
         }

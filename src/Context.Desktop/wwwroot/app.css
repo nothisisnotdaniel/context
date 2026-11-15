@@ -365,7 +365,8 @@ input[type="password"]:disabled {
 /* Note names in the notes list, the tag panel and the find panel: plain link-like text, not bordered buttons. */
 .note .name,
 .tag-notes .note-button,
-.find-notes .note-button {
+.find-notes .note-button,
+.search-hits .note-button {
     background: none;
     border: none;
     border-radius: 3px;
@@ -376,18 +377,27 @@ input[type="password"]:disabled {
 }
 
 .tag-notes .note-button,
-.find-notes .note-button {
+.find-notes .note-button,
+.search-hits .note-button {
     max-width: 100%;
+}
+
+/* The search panel's matching line: one grey line under the note name, cut with the full text in title. */
+.search-hits .line {
+    display: block;
+    font-size: 0.9em;
 }
 
 .note .name:hover:not(:disabled),
 .tag-notes .note-button:hover:not(:disabled),
-.find-notes .note-button:hover:not(:disabled) {
+.find-notes .note-button:hover:not(:disabled),
+.search-hits .note-button:hover:not(:disabled) {
     text-decoration: underline;
 }
 
 .tag-notes li,
-.find-notes li {
+.find-notes li,
+.search-hits li {
     padding: 3px 0;
 }
 
@@ -434,7 +444,8 @@ input[type="password"]:disabled {
 }
 
 .tag-panel,
-.find-panel {
+.find-panel,
+.search-panel {
     border-bottom: 1px solid var(--line);
     margin-bottom: 16px;
     padding-bottom: 12px;

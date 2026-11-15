@@ -7,7 +7,7 @@ namespace Context.Tests;
 public sealed class CliJsonTests : IDisposable
 {
     private const string JsonOnly =
-        "--json works only with version, todos, notes, note show, tags, links, people, person, find, types, current and review. Run 'context help'.";
+        "--json works only with version, todos, notes, note show, tags, links, people, person, find, search, types, current and review. Run 'context help'.";
 
     private static readonly DateOnly Today = new(2026, 10, 29);
     private static readonly DateTime Now = new(2026, 10, 29, 9, 0, 0, DateTimeKind.Utc);
@@ -770,6 +770,27 @@ public sealed class CliJsonTests : IDisposable
 
         BreakIndex();
         AssertError(Run("find", "role", "x", "--json"), 1, "Can't read context.db.");
+    }
+
+    // 170 AC-9: search pins its field names and order; no hit gives an empty array; a bad index is the error line.
+    [Fact]
+    public void Search_FieldsInOrder()
+    {
+        WriteNote("b", "# b\nthe Budget 2027 & more\nbudget again");
+        WriteNote("A", "budget");
+        WriteNote("C", "nothing here");
+
+        Result result = Run("search", "--json", "budget");
+
+        AssertDocument(result);
+        Assert.Equal(
+            "{\"query\":\"budget\",\"results\":[{\"note\":\"A\",\"line\":1,\"text\":\"budget\"},"
+                + "{\"note\":\"b\",\"line\":2,\"text\":\"the Budget 2027 \\u0026 more\"}]}\n",
+            result.Out);
+        Assert.Equal("{\"query\":\"zzz top\",\"results\":[]}\n", Run("search", "zzz", "top", "--json").Out);
+
+        BreakIndex();
+        AssertError(Run("search", "budget", "--json"), 1, "Can't read context.db.");
     }
 
     // 157 AC-8: types pins its field names and order, sorted by type.

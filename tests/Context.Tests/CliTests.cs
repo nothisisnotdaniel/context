@@ -97,7 +97,7 @@ public sealed class CliTests : IDisposable
             "capture <text...>", "todos", "todo add <yyyy-MM-dd|today|tomorrow> <text...>",
             "todo add every <weekday|day|month> <text...>", "todo done <text...>", "notes",
             "note show <name...>", "tags [tag...]", "links <note...>", "people", "person <name...>", "find <attribute> <value...>",
-            "types", "current", "review", "new <title...> [--template <name>]", "import <path>",
+            "search <text...>", "types", "current", "review", "new <title...> [--template <name>]", "import <path>",
             "export <note> <path>", "version",
         })
         {
@@ -1460,6 +1460,84 @@ public sealed class CliTests : IDisposable
         Dictionary<string, string> before = Snapshot();
 
         AssertError(Run("find", "role", "x"), 1, "Can't read context.db.");
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 170 AC-8 -----------------------------------------------------------------------------------
+
+    [Fact]
+    public void Search_PrintsNameLineNumberLine_Sorted_WritesOnlyContextDb()
+    {
+        WriteNote("beta", "# beta\r\nplan 2027 budget\r\nBudget again");
+        WriteNote("Alpha", "the budget");
+        WriteNote("gamma", "no match");
+        Dictionary<string, string> before = SnapshotWithoutDb();
+
+        Result result = Run("search", "BUDGET");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(string.Empty, result.Err);
+        Assert.Equal("Alpha\t1\tthe budget\nbeta\t2\tplan 2027 budget\n", result.Out);
+        Assert.Equal(before, SnapshotWithoutDb());
+    }
+
+    [Fact]
+    public void Search_ArgsJoinedWithOneSpace_CleansNameAndLine()
+    {
+        WriteNote("A\u0007b", "x plan 2027\u0007 y\tz");
+        WriteNote("C", "plan  2027");
+
+        Assert.Equal("A\uFFFDb\t1\tx plan 2027\uFFFD y    z\n", Run("search", "plan", "2027").Out);
+    }
+
+    [Fact]
+    public void Search_NoHits_NoOutput_ExitZero()
+    {
+        WriteNote("A", "something");
+
+        Result result = Run("search", "nothing");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(string.Empty, result.Out);
+        Assert.Equal(string.Empty, result.Err);
+    }
+
+    [Theory]
+    [InlineData("search")]
+    [InlineData("search", " ")]
+    [InlineData("SEARCH", "", "\t")]
+    public void Search_NoText_UsageError_FolderNotRead(params string[] args)
+    {
+        Result result = Run(args);
+
+        AssertUsage(result);
+        Assert.Equal("Type: context search <text>. Run 'context help'.", result.ErrLines[0]);
+        Assert.False(Directory.Exists(root));
+    }
+
+    [Theory]
+    [InlineData("Type at least 3 characters to search.", "ab")]
+    [InlineData("Type at least 3 characters to search.", " a ", " ")]
+    [InlineData("Search text can be at most 200 characters.", "LONG")]
+    public void Search_TooShortOrTooLong_IsError_DbNotCreated(string error, params string[] words)
+    {
+        WriteNote("A", "abc");
+        string[] args = ["search", .. words.Select(w => w == "LONG" ? new string('x', 201) : w)];
+
+        Result result = Run(args);
+
+        AssertError(result, 1, error);
+        Assert.False(File.Exists(Path.Combine(root, TagIndex.FileName)));
+    }
+
+    [Fact]
+    public void Search_BadContextDb_IsError()
+    {
+        WriteNote("A", "abc");
+        File.WriteAllText(Path.Combine(root, TagIndex.FileName), "not a database at all, not at all, really not");
+        Dictionary<string, string> before = Snapshot();
+
+        AssertError(Run("search", "abc"), 1, "Can't read context.db.");
         Assert.Equal(before, Snapshot());
     }
 

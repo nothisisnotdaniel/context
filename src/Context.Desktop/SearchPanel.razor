@@ -1,0 +1,117 @@
+@using System.Globalization
+@inherits StateComponent
+@* The notes whose text contains the typed text (DesktopState.Search), each with its first matching line; clicking a
+   note opens it. It reads only, and reloads whenever the state changes. *@
+
+<section class="search-panel" aria-label="Notes containing this text">
+    <div class="panel-bar">
+        <h2 class="cut" title="@Heading">@Heading</h2>
+        <button type="button" class="close" @onclick="() => OnClose.InvokeAsync()">Close</button>
+    </div>
+    @if (Text.Trim().Length == 0)
+    {
+        <p class="red" role="status">Type /search &lt;text&gt;.</p>
+    }
+    else if (view is null)
+    {
+        <p class="grey" role="status">Loading…</p>
+    }
+    else if (view.Kind is SearchViewKind.TooShort)
+    {
+        <p class="red" role="status">Type at least @(SearchView.MinQueryLength.ToString(CultureInfo.InvariantCulture)) characters to search.</p>
+    }
+    else if (view.Kind is SearchViewKind.TooLong)
+    {
+        <p class="red" role="status">Search text can be at most @(SearchView.MaxQueryLength.ToString(CultureInfo.InvariantCulture)) characters.</p>
+    }
+    else if (view.Kind is SearchViewKind.IndexUnreadable)
+    {
+        <p class="red" role="status">Can't read the search index.</p>
+    }
+    else if (view.Hits.Count == 0)
+    {
+        <p class="grey" role="status">No notes contain @DesktopText.OneLine(Text.Trim()).</p>
+    }
+    else
+    {
+        <ul class="search-hits">
+            @foreach (SearchHit hit in view.Hits.Take(MaxRows))
+            {
+                string name = hit.Note;
+                string shown = DesktopText.OneLine(name);
+                string line = DesktopText.OneLine(hit.Line);
+                <li>
+                    <button type="button" class="note-button cut" title="@shown" @onclick="() => OnOpen.InvokeAsync(name)">@shown</button>
+                    <span class="line grey cut" title="@line">@line</span>
+                </li>
+            }
+        </ul>
+        @if (view.Hits.Count > MaxRows)
+        {
+            <p class="grey more">@More(view.Hits.Count)</p>
+        }
+    }
+</section>
+
+@code {
+    /// <summary>At most this many hits are shown; a grey <c>… N more</c> line follows when there are more.</summary>
+    internal const int MaxRows = 100;
+
+    private SearchView? view;
+    private string? loaded;
+    private int request;
+
+    /// <summary>The text as typed after <c>/search</c>.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Text { get; set; } = string.Empty;
+
+    /// <summary>Called with a note's name when it is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    private static string More(int count) =>
+        $"{CurrentView.Outside} {(count - MaxRows).ToString(CultureInfo.InvariantCulture)} more";
+
+    private string Heading => $"Search: {DesktopText.OneLine(Text.Trim())}";
+
+    protected override Task OnParametersSetAsync()
+    {
+        if (string.Equals(loaded, Text, StringComparison.Ordinal))
+        {
+            return Task.CompletedTask;
+        }
+
+        // Another query: its rows are not known yet, so the old ones go.
+        loaded = Text;
+        view = null;
+        return Load();
+    }
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    // Keeps the shown rows while it reloads. A result for another query, or an older request's result, is dropped. A
+    // blank query reads nothing.
+    private async Task Load()
+    {
+        int mine = ++request;
+        string text = Text;
+        if (text.Trim().Length == 0)
+        {
+            return;
+        }
+
+        SearchView result = await State.Search(text);
+        if (mine == request && string.Equals(text, Text, StringComparison.Ordinal))
+        {
+            view = result;
+        }
+    }
+}
