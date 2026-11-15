@@ -11,7 +11,10 @@ internal enum ActionKind
     /// <summary>A check said no; nothing was touched.</summary>
     Refused,
 
-    /// <summary>The change could not be made; nothing was changed.</summary>
+    /// <summary>
+    /// The change could not be made; nothing was changed, except after <see cref="ActionReason.LineKept"/>: a triage
+    /// action saved its target, but the inbox line could not be removed.
+    /// </summary>
     Failed,
 }
 
@@ -51,6 +54,9 @@ internal enum ActionReason
 
     /// <summary>The note was marked sensitive, but its old plain versions could not be removed.</summary>
     PlainHistoryLeft,
+
+    /// <summary>A triage action saved its target, but the line is still in the inbox (the target is kept).</summary>
+    LineKept,
 }
 
 /// <summary>
@@ -158,6 +164,20 @@ internal sealed class DesktopActions
     public const string CaptureTooLargeText = Inbox.NoteName + " is too large. Nothing was captured.";
     public const string CaptureChangedText = Inbox.NoteName + " kept changing on disk. Nothing was captured.";
     public const string CaptureFailedText = "Can't write " + Inbox.NoteName + ". Nothing was captured.";
+
+    public const string TriageSensitiveText = Inbox.NoteName + " is sensitive. Nothing to triage.";
+    public const string TriageLineGoneText = "That line is no longer in the inbox. Nothing was done.";
+    public const string TriageInboxTargetText = "Pick a note other than " + Inbox.NoteName + ".";
+    public const string TriageDroppedText = "Dropped.";
+    public const string TriagePastDayText = "Pick a day after today.";
+    public const string TriageDateText = "Type a date: yyyy-MM-dd, today or tomorrow.";
+    public const string TriageChangedText = Inbox.NoteName + " kept changing on disk. Nothing was done.";
+    public const string TriageTooLargeText = Inbox.NoteName + " is too large. Nothing was done.";
+    public const string TriageFailedText = "Can't write " + Inbox.NoteName + ". Nothing was done.";
+    public const string TriageUnreadableText = "Can't read " + Inbox.NoteName + ". Nothing was done.";
+
+    /// <summary>The longest title a triage note's title field is pre-filled with.</summary>
+    public const int TriageTitleLength = 100;
 
     public const string UnsupportedText = "Sensitive notes need macOS or Windows.";
     public const string NoRecoveryText = "Set up recovery first.";
@@ -447,6 +467,28 @@ internal sealed class DesktopActions
     /// <summary>The red line when a todo's text is too long.</summary>
     public static string TodoTooLongText => $"A todo can be at most {MaxTodoLength} characters. Nothing was done.";
 
+    /// <summary>The accent line after a triage line became the note <paramref name="name"/>.</summary>
+    public static string TriageCreatedText(string name) => $"Created {name}.";
+
+    /// <summary>The accent line after a triage line became a todo.</summary>
+    public static string TriageTodoText(string text) => $"Added: {text}";
+
+    /// <summary>The accent line after a triage line was added to the note <paramref name="name"/>.</summary>
+    public static string TriageAddedText(string name) => $"Added to {name}.";
+
+    /// <summary>The accent line after a triage line was snoozed.</summary>
+    public static string TriageSnoozedText(DateOnly until) =>
+        $"Snoozed until {until.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)}.";
+
+    /// <summary>The red line when the typed note for "Add to note" names no note.</summary>
+    public static string NoNoteNamedText(string name) => $"No note named {name}.";
+
+    /// <summary>The red line when a sensitive note can't be unlocked.</summary>
+    public static string CantUnlockText(string name) => $"Can't unlock {name}.";
+
+    /// <summary>The red line when a triage target was saved, but the line could not be removed from the inbox.</summary>
+    public static string TriageKeptText(string target) => $"Saved to {target}, but the line is still in the inbox.";
+
     /// <summary>The red line when a capture's text is too long.</summary>
     public static string CaptureTooLongText => $"A capture can be at most {Inbox.MaxTextLength} characters.";
 
@@ -455,6 +497,12 @@ internal sealed class DesktopActions
 
     /// <summary>Test hook: runs before every save attempt of <see cref="CaptureText"/>, after the inbox was read.</summary>
     internal Action? BeforeCaptureSave { get; set; }
+
+    /// <summary>
+    /// Test hook: runs before every save attempt of the inbox in a triage action (removing or snoozing the line),
+    /// after the inbox was read.
+    /// </summary>
+    internal Action? BeforeTriageRemove { get; set; }
 
     /// <summary>Test hook: runs in <see cref="MarkSensitive"/> after the plain versions were sealed, before the note is.</summary>
     internal Action? AfterHistorySealed { get; set; }
@@ -468,6 +516,47 @@ internal sealed class DesktopActions
     /// <see cref="CapturedText"/> when done.
     /// </summary>
     public Task<ActionResult> CaptureText(string text) => Run(() => CaptureTextNow(text));
+
+    /// <summary>
+    /// Triage: creates the note <paramref name="title"/> as <c># &lt;Title&gt;\n\n&lt;text&gt;\n</c> through
+    /// <see cref="NoteStore.CreateWithText"/>, then removes <paramref name="item"/>'s line from the inbox. Before the
+    /// note is written the inbox must still hold the line (else <see cref="TriageLineGoneText"/>, nothing written). A bad
+    /// or taken title gives the <see cref="CreateNote"/> texts and leaves the inbox as it is. When the note was created
+    /// but the line can't be removed the result is <see cref="ActionKind.Failed"/>/<see cref="ActionReason.LineKept"/>.
+    /// </summary>
+    public Task<ActionResult> TriageToNote(InboxItem item, string title) => Run(() => TriageToNoteNow(item, title));
+
+    /// <summary>
+    /// Triage: adds the todo <paramref name="text"/> due <paramref name="due"/> (the <see cref="AddTodo"/> rules and
+    /// texts), then removes the line, with the checks and results of <see cref="TriageToNote"/>.
+    /// </summary>
+    public Task<ActionResult> TriageToTodo(InboxItem item, string text, DateOnly due) =>
+        Run(() => TriageToTodoNow(item, text, due));
+
+    /// <summary>
+    /// Triage: appends <c>- &lt;text&gt;\n</c> (after a missing final newline) to the note <paramref name="name"/>,
+    /// then removes the line, with the checks and results of <see cref="TriageToNote"/>. A plain note is written through
+    /// <see cref="NoteStore.ReadForEdit"/> and <see cref="NoteStore.SaveIfUnchanged"/> (read again on a change on disk);
+    /// a sensitive one only when <paramref name="unlocked"/> is that note as the <see cref="DesktopState.Session"/> holds
+    /// it, re-sealed through the <see cref="SaveNote"/> sensitive path (no plain bytes are written). The inbox itself is
+    /// refused with <see cref="TriageInboxTargetText"/>.
+    /// </summary>
+    public Task<ActionResult> TriageAppend(InboxItem item, string name, EditableNote? unlocked) =>
+        Run(() => TriageAppendNow(item, name, unlocked));
+
+    /// <summary>
+    /// Triage: removes the first inbox line equal to <paramref name="item"/>'s line, only when the user
+    /// <paramref name="confirmed"/> it (else <see cref="ActionReason.NotConfirmed"/>, nothing written).
+    /// </summary>
+    public Task<ActionResult> TriageDrop(InboxItem item, Confirmation? confirmed) =>
+        Run(() => TriageDropNow(item, confirmed));
+
+    /// <summary>
+    /// Triage: rewrites <paramref name="item"/>'s line in place with the token <c>snooze:yyyy-MM-dd</c> for
+    /// <paramref name="until"/>, which must be after today (the injected local clock; else
+    /// <see cref="TriagePastDayText"/>, nothing written).
+    /// </summary>
+    public Task<ActionResult> TriageSnooze(InboxItem item, DateOnly until) => Run(() => TriageSnoozeNow(item, until));
 
     /// <summary>
     /// Marks <paramref name="todo"/> done, which removes the stored todo with the same id through
@@ -759,7 +848,9 @@ internal sealed class DesktopActions
                 result = Failed(ActionReason.WriteFailed, FailedText);
             }
 
-            if (refresh && result.Kind == ActionKind.Done && result.Reason != ActionReason.Unchanged)
+            bool changed = (result.Kind == ActionKind.Done && result.Reason != ActionReason.Unchanged)
+                || result.Reason == ActionReason.LineKept;
+            if (refresh && changed)
             {
                 try
                 {
@@ -997,6 +1088,206 @@ internal sealed class DesktopActions
             return Failed(ActionReason.WriteFailed, CaptureFailedText);
         }
     }
+
+    private ActionResult TriageToNoteNow(InboxItem item, string title)
+    {
+        string normalized = NoteStore.NormalizeTitle(title);
+        string? invalid = NoteStore.ValidateTitle(normalized);
+        if (invalid is not null)
+        {
+            return Refused(ActionReason.Invalid, invalid);
+        }
+
+        if (TriageCheck(item) is { } refused)
+        {
+            return refused;
+        }
+
+        NoteInfo created;
+        try
+        {
+            created = notes.CreateWithText(title, $"# {normalized}\n\n{item.Text}\n");
+        }
+        catch (NoteExistsException e)
+        {
+            return Refused(ActionReason.Exists, ExistsText(e.Name));
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, CreateFailedText);
+        }
+
+        return TriageRemove(item, created.Name, TriageCreatedText(created.Name), null);
+    }
+
+    private ActionResult TriageToTodoNow(InboxItem item, string text, DateOnly due)
+    {
+        if (TriageCheck(item) is { } refused)
+        {
+            return refused;
+        }
+
+        ActionResult added = AddTodoNow(text, due, null, null);
+        return added.Kind == ActionKind.Done
+            ? TriageRemove(item, TodoStore.FileName, TriageTodoText(added.Text), null)
+            : added;
+    }
+
+    private ActionResult TriageAppendNow(InboxItem item, string name, EditableNote? unlocked)
+    {
+        if (string.Equals(name.Trim(), Inbox.NoteName, StringComparison.OrdinalIgnoreCase))
+        {
+            return Refused(ActionReason.Invalid, TriageInboxTargetText);
+        }
+
+        if (TriageCheck(item) is { } refused)
+        {
+            return refused;
+        }
+
+        if (unlocked is not null)
+        {
+            // Only the sensitive note the session holds, by its own name; SaveNoteNow re-seals it and never writes plain bytes.
+            if (!IsSealedPath(unlocked.Path)
+                || !string.Equals(unlocked.Name, name, StringComparison.Ordinal)
+                || !ReferenceEquals(unlocked, state.Session.Note))
+            {
+                return Refused(ActionReason.Locked, CantUnlockText(name));
+            }
+
+            ActionResult sealedSave = SaveNoteNow(unlocked, Appended(unlocked.Text, item.Text));
+            return sealedSave.Kind == ActionKind.Done
+                ? TriageRemove(item, unlocked.Name, TriageAddedText(unlocked.Name), sealedSave.Note)
+                : sealedSave;
+        }
+
+        try
+        {
+            if (notes.TryFindSensitive(name, out _))
+            {
+                return Refused(ActionReason.Locked, CantUnlockText(name));
+            }
+
+            for (int attempt = 0; attempt <= Inbox.MaxRetries; attempt++)
+            {
+                if (!notes.TryFind(name, out NoteInfo? found) || found is null)
+                {
+                    return Refused(ActionReason.Missing, NoNoteNamedText(name));
+                }
+
+                EditableNote opened = notes.ReadForEdit(found);
+                NoteSaveResult result = notes.SaveIfUnchanged(opened, Appended(opened.Text, item.Text), out EditableNote? saved);
+                switch (result)
+                {
+                    case NoteSaveResult.Saved:
+                        return TriageRemove(item, found.Name, TriageAddedText(found.Name), saved);
+                    case NoteSaveResult.TooLarge:
+                        return Refused(ActionReason.Invalid, TooLargeText(found.Name));
+                    default:
+                        // ChangedOnDisk or Missing: read again.
+                        continue;
+                }
+            }
+
+            return Refused(ActionReason.ChangedOnDisk, ChangedText(name));
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, NoteWriteFailedText(name));
+        }
+    }
+
+    private ActionResult TriageDropNow(InboxItem item, Confirmation? confirmed)
+    {
+        if (confirmed is null)
+        {
+            return Refused(ActionReason.NotConfirmed, NotConfirmedText);
+        }
+
+        return TriageInboxWrite(() => InboxTriage.Remove(notes, item.Line, BeforeTriageRemove), TriageDroppedText);
+    }
+
+    private ActionResult TriageSnoozeNow(InboxItem item, DateOnly until)
+    {
+        if (until <= DateOnly.FromDateTime(localNow()))
+        {
+            return Refused(ActionReason.Invalid, TriagePastDayText);
+        }
+
+        return TriageInboxWrite(() => InboxTriage.Snooze(notes, item.Line, until, BeforeTriageRemove), TriageSnoozedText(until));
+    }
+
+    // Drop and Later: the inbox is the only file written.
+    private ActionResult TriageInboxWrite(Func<TriageResult> write, string doneText)
+    {
+        try
+        {
+            if (notes.TryFindSensitive(Inbox.NoteName, out _))
+            {
+                return Refused(ActionReason.Locked, TriageSensitiveText);
+            }
+
+            return write() switch
+            {
+                TriageResult.Done => new ActionResult(ActionKind.Done, ActionReason.None, doneText),
+                TriageResult.Gone => Refused(ActionReason.Changed, TriageLineGoneText),
+                TriageResult.TooLarge => Refused(ActionReason.Invalid, TriageTooLargeText),
+                _ => Refused(ActionReason.ChangedOnDisk, TriageChangedText),
+            };
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, TriageFailedText);
+        }
+    }
+
+    // Before a triage target is written: the inbox is plain and still holds the exact line; else the refusal. A
+    // sensitive inbox is never opened (no key-store call).
+    private ActionResult? TriageCheck(InboxItem item)
+    {
+        try
+        {
+            if (notes.TryFindSensitive(Inbox.NoteName, out _))
+            {
+                return Refused(ActionReason.Locked, TriageSensitiveText);
+            }
+
+            if (!notes.TryFind(Inbox.NoteName, out NoteInfo? inbox)
+                || inbox is null
+                || !InboxTriage.Contains(notes.ReadForEdit(inbox).Text, item.Line))
+            {
+                return Refused(ActionReason.Changed, TriageLineGoneText);
+            }
+
+            return null;
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.Unreadable, TriageUnreadableText);
+        }
+    }
+
+    // After the target was saved: removes the line. When that fails the target is kept and the result says so.
+    private ActionResult TriageRemove(InboxItem item, string target, string doneText, EditableNote? saved)
+    {
+        TriageResult removed;
+        try
+        {
+            removed = InboxTriage.Remove(notes, item.Line, BeforeTriageRemove);
+        }
+        catch (Exception)
+        {
+            removed = TriageResult.ChangedOnDisk;
+        }
+
+        return removed == TriageResult.Done
+            ? new ActionResult(ActionKind.Done, ActionReason.None, doneText, saved)
+            : new ActionResult(ActionKind.Failed, ActionReason.LineKept, TriageKeptText(target), saved);
+    }
+
+    // The note text with "- <text>\n" appended, after a missing final newline.
+    private static string Appended(string text, string line) =>
+        (text.Length == 0 || text.EndsWith('\n') ? text : text + "\n") + "- " + line + "\n";
 
     private ActionResult OpenDailyNoteNow()
     {

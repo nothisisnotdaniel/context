@@ -16,10 +16,12 @@ public sealed class DesktopSourceTests
     // 172: Briefing.Ensure (caught by Ensure). 174: NoteHistory.Keep and RemoveHistory, and DesktopActions.RestoreVersion,
     // which components reach only through the injected Actions (only Actions.RestoreVersion( itself is let through).
     // 177: NoteAttachments.Add (caught by Add), MoveWithNote and RemoveUnlinked. 178: TodoStore.MarkNotified.
+    // 179: InboxTriage.Snooze; InboxTriage.Remove is checked on its own (Sources_CallInboxTriageWritesOnlyInDesktopActions),
+    // since components remove from their own lists.
     private static readonly Regex Writes = new(
         @"(?:(?<!\bActions)|(?!\.\s*RestoreVersion\s*\())\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
         + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture|CreateChild|Move|Ensure|CreateWithText"
-        + @"|CloseDay|RefreshWorked|MoveTodos|AutoClose|MoveDue|SaveDayEnd|Keep|RemoveHistory|RestoreVersion|MoveWithNote|RemoveUnlinked|MarkNotified)\s*\(",
+        + @"|CloseDay|RefreshWorked|MoveTodos|AutoClose|MoveDue|SaveDayEnd|Keep|RemoveHistory|RestoreVersion|MoveWithNote|RemoveUnlinked|MarkNotified|Snooze)\s*\(",
         RegexOptions.CultureInvariant);
 
     // 136: the real key stores and the real file dialog, spelled in pieces: no test file may hold their names (see
@@ -846,6 +848,7 @@ public sealed class DesktopSourceTests
     [InlineData("RecoveryFile.Create(password, out publicKey)")]
     [InlineData("Inbox.Capture(notes, cleaned, localNow(), BeforeCaptureSave)")]
     [InlineData("Inbox . Capture (store, text, now)")]
+    [InlineData("InboxTriage.Snooze(notes, item.Line, until, BeforeWrite)")]
     [InlineData("DailyNote.Ensure(notes, day, compose)")]
     [InlineData("Briefing.Ensure(notes, day, compose)")]
     [InlineData("notes.CreateWithText(prepared.Title, prepared.Text)")]
@@ -869,6 +872,7 @@ public sealed class DesktopSourceTests
     [Theory]
     [InlineData("Actions.RestoreVersion(name, version.Id, request.Note, confirmed)")]
     [InlineData("Actions.MarkSensitive(name, confirmed)")]
+    [InlineData("Actions.TriageSnooze(item, until)")]
     public void Writes_Pattern_LeavesCallsOnActions(string call)
     {
         Assert.DoesNotMatch(Writes, call);
@@ -1383,6 +1387,64 @@ public sealed class DesktopSourceTests
             .ToList();
 
         Assert.Equal([ActionsFile], found);
+    }
+
+    // 179: the inbox triage writes (InboxTriage.Remove and InboxTriage.Snooze) are called only in DesktopActions.cs.
+    [Theory]
+    [InlineData(@"\bInboxTriage\s*\.\s*Remove\s*\(")]
+    [InlineData(@"\bInboxTriage\s*\.\s*Snooze\s*\(")]
+    public void Sources_CallInboxTriageWritesOnlyInDesktopActions(string pattern)
+    {
+        string root = RepoFiles.Root();
+        Regex call = new Regex(pattern, RegexOptions.CultureInvariant);
+        List<string> found = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
+            .Where(f => call.IsMatch(File.ReadAllText(Path.Combine(root, f))))
+            .ToList();
+
+        Assert.Equal([ActionsFile], found);
+    }
+
+    // 179: the triage panel passes the component rules and shows only fixed texts or text that went through
+    // DesktopText.OneLine.
+    [Fact]
+    public void TriagePanel_FollowsTheComponentRules()
+    {
+        string razor = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "TriagePanel.razor"));
+
+        Assert.DoesNotContain(RawMarkup, m => razor.Contains(m, StringComparison.Ordinal));
+        Assert.DoesNotContain(RazorForbidden, m => razor.Contains(m, StringComparison.Ordinal));
+        Assert.Equal(
+            ["AppendToNote", "CreateFromItem", "DropConfirmed", "PanelKeyDown", "SnoozeChosen", "SnoozeTyped", "TodoFromItem"],
+            ActionCallers(razor).Order(StringComparer.Ordinal).ToArray());
+        Assert.Empty(ActionCallProblems(razor));
+        Assert.Empty(UntypedButtons(razor));
+        Assert.Empty(BadInputs(razor));
+        Assert.DoesNotMatch(FileSystemClass, razor);
+        Assert.DoesNotContain("@bind", razor, StringComparison.Ordinal);
+        Assert.DoesNotContain("new Confirmation(", razor, StringComparison.Ordinal);
+        Assert.DoesNotContain("Session.Lock(", razor, StringComparison.Ordinal);
+
+        List<string> shown = Regex.Matches(razor, @"ShowStatus\(([^;]*)\);").Select(m => m.Groups[1].Value).ToList();
+        Assert.NotEmpty(shown);
+        Assert.All(
+            shown,
+            s => Assert.True(
+                s.StartsWith("DesktopText.OneLine(", StringComparison.Ordinal)
+                || s.StartsWith("DesktopActions.Triage", StringComparison.Ordinal)
+                || s.StartsWith("string.Empty, string.Empty", StringComparison.Ordinal),
+                s));
+    }
+
+    // 179: the triage panel is styled.
+    [Theory]
+    [InlineData(".triage-panel {")]
+    [InlineData(".triage-buttons,")]
+    [InlineData(".triage-status:empty {")]
+    public void AppCss_StylesTheTriagePanel(string selector)
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+
+        Assert.Contains(selector, css, StringComparison.Ordinal);
     }
 
     // 140 AC-10: the capture box passes the component rules (also checked for every .razor file by the scans above)

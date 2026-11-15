@@ -1112,6 +1112,76 @@ input[type="password"]:disabled {
     min-width: 0;
 }
 
+/* Inbox triage: the line on top of the inbox, the count left, the five actions and the form of the chosen one. */
+.triage-panel {
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+}
+
+.triage-panel:focus {
+    outline: none;
+}
+
+.triage-item {
+    align-items: baseline;
+    display: flex;
+    gap: 10px;
+    margin: 8px 0 2px;
+    min-width: 0;
+}
+
+.triage-item .stamp {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+}
+
+.triage-item .text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.triage-left {
+    font-variant-numeric: tabular-nums;
+    margin: 0 0 8px;
+}
+
+.triage-buttons,
+.triage-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.triage-buttons button[aria-pressed="true"] {
+    border-color: var(--accent-strong);
+}
+
+.triage-form input {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+.triage-form .triage-date,
+.triage-form .triage-until {
+    flex: 0 0 9em;
+}
+
+.triage-form .triage-submit {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: var(--on-accent);
+}
+
+.triage-status {
+    margin: 0;
+}
+
+.triage-status:empty {
+    display: none;
+}
+
 /* The weekly review: changed notes, done and overdue todos, and next week's appointments grouped by day. */
 .review-panel {
     border-bottom: 1px solid var(--line);
