@@ -600,7 +600,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
     `/capture`, `/current`, `/export`, `/find`, `/import`, `/new`, `/open`, `/save`, `/settings`, `/tags`, `/today`, `/todo` with `CommandMatcher` (in Core).
-    `/today` (argument ignored) asks `Discard changes to <name>?` first when another note has unsaved changes, then
+    `/today` (argument ignored) asks `Discard changes to <name>?` first when another note has unsaved changes (not
+    when the open note is today's note itself: the editor stays as it is, unsaved text included), then
     calls `DesktopActions.OpenDailyNote()` and opens the note (a sensitive one through the unlock flow), with the
     accent `Created <name>` after a create and the red failure text otherwise.
     **Daily note:** `DailyNote` (Core) names the note `yyyy-MM-dd` (invariant) for the local day. `Ensure(notes, day,
