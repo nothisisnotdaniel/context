@@ -139,7 +139,7 @@ internal sealed record ReviewView
     /// <summary>The day <paramref name="todo"/> was done, in <see cref="Zone"/>.</summary>
     public DateOnly DoneDate(TodoItem todo) =>
         todo.Done is { } done
-            ? DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(done, DateTimeKind.Utc), Zone))
+            ? DayInZone(done, Zone)
             : throw new ArgumentException("The todo is not done.", nameof(todo));
 
     /// <summary>
@@ -169,8 +169,7 @@ internal sealed record ReviewView
             IReadOnlyList<TodoItem> finished = todos.ListDone();
             overdue = open.Where(t => t.Due < today).ToList();
             done = finished
-                .Where(t => t.Done is { } d
-                    && InRange(DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(d, DateTimeKind.Utc), zone)), from, today))
+                .Where(t => t.Done is { } d && InRange(DayInZone(d, zone), from, today))
                 .ToList();
         }
         catch (TodoStoreException)
@@ -220,6 +219,10 @@ internal sealed record ReviewView
         DateTime utc = time.Kind == DateTimeKind.Utc ? time : time.ToUniversalTime();
         return TimeZoneInfo.ConvertTimeFromUtc(utc, zone);
     }
+
+    // A UTC done time as its day in zone.
+    private static DateOnly DayInZone(DateTime utc, TimeZoneInfo zone) =>
+        DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), zone));
 
     private static bool InRange(DateOnly day, DateOnly from, DateOnly to) => day >= from && day <= to;
 }
