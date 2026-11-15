@@ -402,9 +402,12 @@ internal sealed class NoteStore
     /// folders that are now empty (any other file keeps its folder), and returns true; or returns false and deletes
     /// nothing when no note matches. With <paramref name="removeHistory"/> the kept versions of every deleted note go
     /// too (<see cref="NoteHistory.RemoveHistory"/>, with a <c>.history</c> folder that is then empty); otherwise they
-    /// stay, and so does a child folder that still holds a <c>.history</c>.
+    /// stay, and so does a child folder that still holds a <c>.history</c>. With <paramref name="removeAttachments"/>
+    /// the <c>.attachments</c> folder inside every deleted child folder goes too (only a real folder, never through a
+    /// link), so an emptied child folder is removed; the attachments of the note's own level are left to
+    /// <see cref="NoteAttachments.RemoveUnlinked"/>.
     /// </summary>
-    public bool Delete(string name, bool removeHistory = false)
+    public bool Delete(string name, bool removeHistory = false, bool removeAttachments = false)
     {
         List<Entry> entries = ListEntries();
         Entry? match = FindEntry(entries, name);
@@ -426,10 +429,33 @@ internal sealed class NoteStore
 
         foreach (string folder in subtree.Select(e => e.ChildFolder).OfType<string>().OrderByDescending(f => f.Length))
         {
+            if (removeAttachments)
+            {
+                RemoveAttachmentsFolder(Path.Combine(folder, NoteAttachments.FolderName));
+            }
+
             RemoveIfEmpty(folder);
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// The folder that holds the subpages of the note <paramref name="parent"/> (found like <see cref="TryFind"/>), or
+    /// the root for null or blank: where a note moved there is stored. Throws <see cref="ArgumentException"/> when
+    /// <paramref name="parent"/> names no note or can't have subpages (like <see cref="Move"/>).
+    /// </summary>
+    internal string LevelFolder(string? parent)
+    {
+        if (string.IsNullOrWhiteSpace(parent))
+        {
+            return root;
+        }
+
+        Entry owner = FindEntry(ListEntries(), parent)
+            ?? throw new ArgumentException($"No note called {parent.Trim()}.", nameof(parent));
+        CheckCanHoldSubpages(owner);
+        return ChildFolderFor(owner);
     }
 
     /// <summary>
@@ -763,7 +789,7 @@ internal sealed class NoteStore
     }
 
     // A new temp file only the owner can read and write (mode 0600 off Windows).
-    private static FileStreamOptions PrivateTempOptions()
+    internal static FileStreamOptions PrivateTempOptions()
     {
         FileStreamOptions options = new FileStreamOptions
         {
@@ -1160,8 +1186,26 @@ internal sealed class NoteStore
         }
     }
 
+    // Removes a child folder's .attachments with everything in it, only when it is a real folder (not a link or
+    // reparse point); a file inside is deleted, never followed. Never throws: what can't be removed stays.
+    private static void RemoveAttachmentsFolder(string folder)
+    {
+        try
+        {
+            DirectoryInfo info = new DirectoryInfo(folder);
+            if (info.Exists && !IsLink(info))
+            {
+                info.Delete(recursive: true);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Left in place.
+        }
+    }
+
     // Removes a folder only when it is empty; never follows a link and never throws.
-    private static void RemoveIfEmpty(string folder)
+    internal static void RemoveIfEmpty(string folder)
     {
         try
         {

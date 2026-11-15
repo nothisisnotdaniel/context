@@ -6,7 +6,7 @@ namespace Context.Tests;
 public sealed class DesktopSourceTests
 {
     private const string Csp =
-        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; "
+        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; "
         + "connect-src 'self'; base-uri 'none'; form-action 'none'";
 
     // The Core calls that change data (AC-8). CalendarLink's real names are Set/Clear; Save/Delete are listed too.
@@ -15,10 +15,11 @@ public sealed class DesktopSourceTests
     // 152: NoteStore.CreateChild and NoteStore.Move. 164: DailyNote.Ensure. 165: NoteStore.CreateWithText.
     // 172: Briefing.Ensure (caught by Ensure). 174: NoteHistory.Keep and RemoveHistory, and DesktopActions.RestoreVersion,
     // which components reach only through the injected Actions (only Actions.RestoreVersion( itself is let through).
+    // 177: NoteAttachments.Add (caught by Add), MoveWithNote and RemoveUnlinked.
     private static readonly Regex Writes = new(
         @"(?:(?<!\bActions)|(?!\.\s*RestoreVersion\s*\())\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
         + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture|CreateChild|Move|Ensure|CreateWithText"
-        + @"|CloseDay|RefreshWorked|MoveTodos|AutoClose|MoveDue|SaveDayEnd|Keep|RemoveHistory|RestoreVersion)\s*\(",
+        + @"|CloseDay|RefreshWorked|MoveTodos|AutoClose|MoveDue|SaveDayEnd|Keep|RemoveHistory|RestoreVersion|MoveWithNote|RemoveUnlinked)\s*\(",
         RegexOptions.CultureInvariant);
 
     // 136: the real key stores and the real file dialog, spelled in pieces: no test file may hold their names (see
@@ -667,18 +668,22 @@ public sealed class DesktopSourceTests
     }
 
     // 094 AC-9: the [JSInvokable] methods only raise EditorInterop's events; none calls Actions or DesktopActions.
-    // 156 AC-10: OnPerson is one more of them.
+    // 156 AC-10: OnPerson is one more of them. 177 AC-6, AC-9: OnDrop and OnAttachment too.
     [Fact]
     public void JSInvokable_MethodsChangeNothing()
     {
         string text = File.ReadAllText(Path.Combine(RepoFiles.Root(), InteropFile));
         MatchCollection invokable = Regex.Matches(
-            text, @"\[JSInvokable\]\s*public\s+Task\s+(\w+)\((?:string raw|bool dirty)\)\s*=>\s*([^;]*);");
+            text,
+            @"\[JSInvokable\]\s*public\s+Task\s+(\w+)\((?:string raw|bool dirty|int count, DroppedFile\[\] files|string href)\)\s*=>\s*([^;]*);");
 
-        Assert.Equal(["OnTag", "OnLink", "OnPerson", "OnDirty"], invokable.Select(m => m.Groups[1].Value).ToArray());
-        Assert.Equal(4, Regex.Matches(text, @"\[JSInvokable").Count);
+        Assert.Equal(
+            ["OnTag", "OnLink", "OnPerson", "OnDirty", "OnDrop", "OnAttachment"],
+            invokable.Select(m => m.Groups[1].Value).ToArray());
+        Assert.Equal(6, Regex.Matches(text, @"\[JSInvokable").Count);
         Assert.All(invokable, m => Assert.Matches(
-            @"^(TagClicked\?\.Invoke\(raw\)|LinkClicked\?\.Invoke\(raw\)|PersonClicked\?\.Invoke\(raw\)|DirtyChanged\?\.Invoke\(dirty\)) \?\? Task\.CompletedTask$",
+            @"^\s*(TagClicked\?\.Invoke\(raw\)|LinkClicked\?\.Invoke\(raw\)|PersonClicked\?\.Invoke\(raw\)|DirtyChanged\?\.Invoke\(dirty\)"
+            + @"|FilesDropped\?\.Invoke\(new DroppedFiles\(count, files\)\)|AttachmentClicked\?\.Invoke\(href\)) \?\? Task\.CompletedTask$",
             m.Groups[2].Value));
         Assert.Equal(
             "DirtyChanged?.Invoke(dirty) ?? Task.CompletedTask",
@@ -721,7 +726,8 @@ public sealed class DesktopSourceTests
     }
 
     // 142 AC-5: Enter on a focused chip goes through a keydown handler in the source and in the committed bundle,
-    // and the page still calls back only through OnTag, OnLink, (141) OnDirty and (156) OnPerson.
+    // and the page still calls back only through OnTag, OnLink, (141) OnDirty, (156) OnPerson and (177) OnDrop and
+    // OnAttachment.
     [Theory]
     [InlineData("editor/src/view.js")]
     [InlineData("wwwroot/editor/editor.js")]
@@ -732,7 +738,7 @@ public sealed class DesktopSourceTests
         Assert.Matches(@"handleDOMEvents:\s*\{\s*(?://[^\n]*\n\s*)*keydown\(", text);
         Assert.Contains("opensChip", text, StringComparison.Ordinal);
         Assert.Equal(
-            ["OnDirty", "OnLink", "OnPerson", "OnTag"],
+            ["OnAttachment", "OnDirty", "OnDrop", "OnLink", "OnPerson", "OnTag"],
             Regex.Matches(text, @"invokeMethodAsync\(""(\w+)""").Select(m => m.Groups[1].Value).Distinct().Order(StringComparer.Ordinal));
     }
 
@@ -817,7 +823,9 @@ public sealed class DesktopSourceTests
     [InlineData("notes.Delete(name)")]
     [InlineData("notes . Rename (a, b)")]
     [InlineData("notes.CreateChild(owner.Name, normalized)")]
-    [InlineData("notes.Move(source.Name, owner?.Name)")]
+    [InlineData("attachments.MoveWithNote(source.Name, owner?.Name)")]
+    [InlineData("attachments.RemoveUnlinked(plain, linked)")]
+    [InlineData("attachments.Add(name, file.Name, file.Bytes)")]
     [InlineData("SealedNote.Seal(name, text, recipients)")]
     [InlineData("SealedNote.AddRecipient(name, file, key, agree, added)")]
     [InlineData("notes.DeleteSensitive(name)")]

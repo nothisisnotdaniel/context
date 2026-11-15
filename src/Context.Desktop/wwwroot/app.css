@@ -458,6 +458,11 @@ input[type="password"]:disabled {
     margin: 8px 0 0;
 }
 
+/* One line per dropped file in the editor's status line. */
+.note-editor .status .line {
+    display: block;
+}
+
 .editor-host {
     border: 1px solid var(--line);
     border-radius: 8px;

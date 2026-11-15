@@ -4,8 +4,8 @@ using Microsoft.JSInterop;
 namespace Context.Tests;
 
 /// <summary>
-/// Plans bunit's strict JS interop for the bundled editor (<c>ContextEditor.*</c>): mount, focus, markClean and
-/// destroy do nothing; isLossless, isDirty and getMarkdown return what the test sets.
+/// Plans bunit's strict JS interop for the bundled editor (<c>ContextEditor.*</c>): mount, focus, markClean,
+/// insertAttachment and destroy do nothing; isLossless, isDirty and getMarkdown return what the test sets.
 /// </summary>
 internal sealed class EditorJs
 {
@@ -18,6 +18,7 @@ internal sealed class EditorJs
         js.SetupVoid("ContextEditor.focus", _ => true).SetVoidResult();
         js.SetupVoid("ContextEditor.markClean", _ => true).SetVoidResult();
         js.SetupVoid("ContextEditor.destroy", _ => true).SetVoidResult();
+        js.SetupVoid("ContextEditor.insertAttachment", _ => true).SetVoidResult();
         Lossless = lossless;
         Dirty = dirty;
         Markdown = markdown;
@@ -61,6 +62,10 @@ internal sealed class EditorJs
 
     /// <summary>The markdown passed to the latest mount.</summary>
     public string MountedText() => (string)Calls("ContextEditor.mount")[^1].Arguments[1]!;
+
+    /// <summary>The inline images passed to the latest mount (its 4th argument).</summary>
+    public IReadOnlyList<InlineImage> MountedImages() =>
+        (IReadOnlyList<InlineImage>)Calls("ContextEditor.mount")[^1].Arguments[3]!;
 
     /// <summary>The .NET object the latest mount handed to the page (what the editor calls back).</summary>
     public EditorInterop Page() =>

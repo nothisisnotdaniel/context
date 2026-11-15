@@ -59,14 +59,24 @@ internal enum ActionReason
 /// </summary>
 internal sealed record ActionResult
 {
-    public ActionResult(ActionKind kind, ActionReason reason, string text, EditableNote? note = null, DateOnly? nextDue = null)
+    public ActionResult(
+        ActionKind kind,
+        ActionReason reason,
+        string text,
+        EditableNote? note = null,
+        DateOnly? nextDue = null,
+        IReadOnlyList<AttachmentLine>? attached = null)
     {
         Kind = kind;
         Reason = reason;
         Text = text;
         Note = note;
         NextDue = nextDue;
+        Attached = attached;
     }
+
+    /// <summary>For <see cref="DesktopActions.AttachFiles"/>: one line per dropped file, in drop order; else <c>null</c>.</summary>
+    public IReadOnlyList<AttachmentLine>? Attached { get; }
 
     public ActionKind Kind { get; }
 
@@ -82,6 +92,41 @@ internal sealed record ActionResult
 
     /// <summary>Only the type name, so the raw text never leaks through formatting.</summary>
     public override string ToString() => nameof(ActionResult);
+}
+
+/// <summary>
+/// How one dropped file ended: <see cref="ActionKind.Done"/> with the stored attachment's link source, name, type and
+/// (for an image) base64 bytes, else the fixed refusal. <see cref="Text"/> is raw (it may hold the dropped name).
+/// </summary>
+internal sealed record AttachmentLine
+{
+    public AttachmentLine(ActionKind kind, string text, string? src = null, string? name = null, bool isImage = false, string? mime = null, string? base64 = null)
+    {
+        Kind = kind;
+        Text = text;
+        Src = src;
+        Name = name;
+        IsImage = isImage;
+        Mime = mime;
+        Base64 = base64;
+    }
+
+    public ActionKind Kind { get; }
+
+    public string Text { get; }
+
+    public string? Src { get; }
+
+    public string? Name { get; }
+
+    public bool IsImage { get; }
+
+    public string? Mime { get; }
+
+    public string? Base64 { get; }
+
+    /// <summary>Only the type name, so the raw text and bytes never leak through formatting.</summary>
+    public override string ToString() => nameof(AttachmentLine);
 }
 
 /// <summary>
@@ -127,6 +172,9 @@ internal sealed class DesktopActions
     public const string RecoverySavedText = "Recovery file saved. Keep it and its password safe.";
     public const string RecoveryUnreadableText = "Can't read that recovery file.";
 
+    public const string AttachSensitiveText = "Attachments can't be added to a sensitive note.";
+    public const string TooManyFilesText = "Drop at most 10 files.";
+
     public const string ImportInsideText = "That file is already in the Context folder. Nothing changed.";
     public const string ExportInsideText = "Export to a path outside the Context folder. Nothing was written.";
 
@@ -154,6 +202,7 @@ internal sealed class DesktopActions
     private const string RemoveArgument = "off";
 
     private readonly NoteStore notes;
+    private readonly NoteAttachments attachments;
     private readonly TodoStore todos;
     private readonly DesktopState state;
     private readonly INoteLauncher launcher;
@@ -190,10 +239,14 @@ internal sealed class DesktopActions
         this.calendarLink = calendarLink;
         this.calendarFeed = calendarFeed;
         this.notes = notes;
+        attachments = new NoteAttachments(notes);
         this.todos = todos;
         this.state = state;
         this.launcher = launcher;
     }
+
+    /// <summary>The attachments store, for tests (its <see cref="NoteAttachments.BeforeMoveStep"/> hook).</summary>
+    internal NoteAttachments Attachments => attachments;
 
     /// <summary>How often <c>Program.cs</c>'s day-end timer calls <see cref="AutoDayEnd"/>.</summary>
     public static readonly TimeSpan DayEndInterval = TimeSpan.FromSeconds(30);
@@ -244,6 +297,25 @@ internal sealed class DesktopActions
 
     /// <summary>The red line when a move fails.</summary>
     public static string MoveFailedText(string name) => $"Can't move {name}. Nothing was moved.";
+
+    /// <summary>The red line when the attachments of a moved note couldn't be carried along (everything was undone).</summary>
+    public static string AttachmentsMoveFailedText(string name) => $"Can't move the attachments of {name}. Nothing was moved.";
+
+    /// <summary>The accent line for a stored attachment.</summary>
+    public static string AttachedText(string name) => $"Attached {name}.";
+
+    /// <summary>The red line for a dropped file over 10 MB.</summary>
+    public static string AttachTooLargeText(string name) => $"{name} is over 10 MB. Nothing was attached.";
+
+    /// <summary>The red line for a dropped file of another type.</summary>
+    public static string AttachUnsupportedText(string name) =>
+        $"{name} isn't a PNG, JPEG, GIF, WebP or PDF file. Nothing was attached.";
+
+    /// <summary>The red line when a dropped file couldn't be stored.</summary>
+    public static string AttachFailedText(string name) => $"Can't attach {name}.";
+
+    /// <summary>The red line when an attachment link can't be opened.</summary>
+    public static string OpenAttachmentText(string name) => $"Can't open {name}.";
 
     /// <summary>The red line when a delete fails.</summary>
     public static string DeleteFailedText(string name) => $"Can't delete {name}.";
@@ -537,6 +609,25 @@ internal sealed class DesktopActions
     /// file (no link or reparse point, no folder, seekable). Never writes and never refreshes.
     /// </summary>
     public Task<ActionResult> OpenExternally(string name) => Run(() => OpenExternallyNow(name), refresh: false);
+
+    /// <summary>
+    /// Stores the files dropped onto the plain note <paramref name="name"/> through <see cref="NoteAttachments.Add"/>,
+    /// each once, in drop order, and answers one <see cref="ActionResult.Attached"/> line per file. A sensitive note
+    /// (checked first, without a key-store call) and a drop of more than <see cref="NoteAttachments.MaxFilesPerDrop"/>
+    /// (<paramref name="count"/>, as the page counted them) are refused and nothing is written. Never touches the note
+    /// file or <c>context.db</c> and never refreshes.
+    /// </summary>
+    public Task<ActionResult> AttachFiles(string name, int count, IReadOnlyList<DroppedFile> files) =>
+        Run(() => AttachFilesNow(name, count, files), refresh: false);
+
+    /// <summary>
+    /// Opens the attachment PDF the link <paramref name="src"/> of the plain note <paramref name="name"/> points to in
+    /// the system viewer: <see cref="INoteLauncher.Launch"/> once, only with a path <see cref="NoteAttachments.TryResolve"/>
+    /// accepted as a PDF; anything else is Refused <c>Can't open &lt;name&gt;.</c> (Failed when the launcher throws).
+    /// Never writes or refreshes.
+    /// </summary>
+    public Task<ActionResult> OpenAttachment(string name, string src) =>
+        Run(() => OpenAttachmentNow(name, src), refresh: false);
 
     /// <summary>
     /// Makes the plain note <paramref name="name"/> sensitive, only when the user <paramref name="confirmed"/> it:
@@ -1252,7 +1343,7 @@ internal sealed class DesktopActions
                 return new ActionResult(ActionKind.Done, ActionReason.Unchanged, source.Name);
             }
 
-            NoteInfo? moved = notes.Move(source.Name, owner?.Name);
+            NoteInfo? moved = attachments.MoveWithNote(source.Name, owner?.Name);
             return moved is null
                 ? Refused(ActionReason.Missing, NoteMissingText(name))
                 : new ActionResult(ActionKind.Done, ActionReason.None, moved.Name);
@@ -1265,6 +1356,10 @@ internal sealed class DesktopActions
         {
             // Below the calendar note, or a full name over NoteStore.MaxNameLength for the note or a subpage.
             return Refused(ActionReason.Invalid, CantMoveText(name, newParent.Trim()));
+        }
+        catch (AttachmentMoveException)
+        {
+            return Failed(ActionReason.WriteFailed, AttachmentsMoveFailedText(name));
         }
         catch (Exception)
         {
@@ -1281,8 +1376,17 @@ internal sealed class DesktopActions
 
         try
         {
-            if (notes.Delete(name, removeHistory: true))
+            // The names the note links are read before it goes; an unreadable note removes no attachment.
+            notes.TryFind(name, out NoteInfo? plain);
+            IReadOnlyList<string> linked = plain is null ? [] : attachments.LinkedNamesOf(plain.Name);
+            if (notes.Delete(name, removeHistory: true, removeAttachments: true))
             {
+                if (plain is not null)
+                {
+                    // Never throws; a file it can't remove stays and the delete is still done.
+                    attachments.RemoveUnlinked(plain, linked);
+                }
+
                 return new ActionResult(ActionKind.Done, ActionReason.None, name);
             }
 
@@ -1332,6 +1436,105 @@ internal sealed class DesktopActions
         catch (Exception)
         {
             return Failed(ActionReason.WriteFailed, OpenExternallyText(name));
+        }
+    }
+
+    private ActionResult AttachFilesNow(string name, int count, IReadOnlyList<DroppedFile> files)
+    {
+        try
+        {
+            if (!notes.TryFind(name, out NoteInfo? note) || note is null)
+            {
+                // A sensitive note is only ever matched by name: no key-store call.
+                return notes.TryFindSensitive(name, out _)
+                    ? Refused(ActionReason.Invalid, AttachSensitiveText)
+                    : Refused(ActionReason.Missing, NoteMissingText(name));
+            }
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, FailedText);
+        }
+
+        if (count > NoteAttachments.MaxFilesPerDrop || files.Count > NoteAttachments.MaxFilesPerDrop)
+        {
+            return Refused(ActionReason.Invalid, TooManyFilesText);
+        }
+
+        List<AttachmentLine> lines = [];
+        foreach (DroppedFile file in files)
+        {
+            lines.Insert(lines.Count, AttachOne(name, file));
+        }
+
+        bool any = lines.Any(l => l.Kind == ActionKind.Done);
+        return new ActionResult(any ? ActionKind.Done : ActionKind.Refused, ActionReason.None, name, attached: lines);
+    }
+
+    private AttachmentLine AttachOne(string name, DroppedFile file)
+    {
+        string shown = file.Name;
+        if (file.Size > NoteAttachments.MaxBytes || file.Bytes is { LongLength: > NoteAttachments.MaxBytes })
+        {
+            return new AttachmentLine(ActionKind.Refused, AttachTooLargeText(shown));
+        }
+
+        if (file.Bytes is null)
+        {
+            return new AttachmentLine(ActionKind.Failed, AttachFailedText(shown));
+        }
+
+        try
+        {
+            AttachmentAdd added = attachments.Add(name, file.Name, file.Bytes);
+            return added.Kind switch
+            {
+                AttachmentAddKind.Added when added.Name is not null && added.Src is not null => new AttachmentLine(
+                    ActionKind.Done,
+                    AttachedText(added.Name),
+                    added.Src,
+                    added.Name,
+                    NoteAttachments.IsImage(added.Type),
+                    NoteAttachments.MimeOf(added.Type),
+                    NoteAttachments.IsImage(added.Type) ? Convert.ToBase64String(file.Bytes) : null),
+                AttachmentAddKind.TooLarge => new AttachmentLine(ActionKind.Refused, AttachTooLargeText(shown)),
+                AttachmentAddKind.Unsupported => new AttachmentLine(ActionKind.Refused, AttachUnsupportedText(shown)),
+                _ => new AttachmentLine(ActionKind.Refused, AttachFailedText(shown)),
+            };
+        }
+        catch (Exception)
+        {
+            return new AttachmentLine(ActionKind.Failed, AttachFailedText(shown));
+        }
+    }
+
+    private ActionResult OpenAttachmentNow(string name, string src)
+    {
+        int slash = src.LastIndexOfAny(['/', '\\']);
+        string shown = src[(slash + 1)..];
+        ResolvedAttachment? resolved;
+        try
+        {
+            resolved = attachments.TryResolve(name, src);
+        }
+        catch (Exception)
+        {
+            resolved = null;
+        }
+
+        if (resolved is null || resolved.Type != AttachmentType.Pdf)
+        {
+            return Refused(ActionReason.Invalid, OpenAttachmentText(shown));
+        }
+
+        try
+        {
+            launcher.Launch(resolved.Path);
+            return new ActionResult(ActionKind.Done, ActionReason.None, shown);
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, OpenAttachmentText(shown));
         }
     }
 

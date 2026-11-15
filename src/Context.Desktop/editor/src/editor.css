@@ -116,6 +116,10 @@
   text-decoration: underline;
 }
 
+.note-editor-body img {
+  max-width: 100%;
+}
+
 .note-editor-body .image-placeholder {
   color: var(--grey);
   font-style: italic;
