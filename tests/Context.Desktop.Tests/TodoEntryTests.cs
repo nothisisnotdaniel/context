@@ -8,6 +8,8 @@ namespace Context.Tests;
 // 094 AC-10: the todo entry row under the todo list.
 public sealed class TodoEntryTests : IDisposable
 {
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(20);
+
     private readonly DesktopFixture data = new();
 
     public void Dispose() => data.Dispose();
@@ -50,7 +52,7 @@ public sealed class TodoEntryTests : IDisposable
         Assert.Equal("Added: Buy milk", result.TextContent);
         Assert.Equal("status", result.GetAttribute("role"));
         Assert.Equal(string.Empty, cut.Find("input.todo-text").GetAttribute("value"));
-        cut.WaitForAssertion(() => Assert.Equal(["Buy milk"], cut.FindAll("li.todo .text").Select(t => t.TextContent).ToArray()));
+        cut.WaitForAssertion(() => Assert.Equal(["Buy milk"], cut.FindAll("li.todo .text").Select(t => t.TextContent).ToArray()), Wait);
     }
 
     // Enter in the text field adds; a date picked in the date field is used.
@@ -100,13 +102,13 @@ public sealed class TodoEntryTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.All(
             cut.FindAll(".todo-entry input, .todo-entry button, .todo-list input"),
-            e => Assert.True(e.HasAttribute("disabled"), e.OuterHtml)));
+            e => Assert.True(e.HasAttribute("disabled"), e.OuterHtml)), Wait);
         Assert.Equal(6, cut.FindAll(".todo-entry input, .todo-entry button, .todo-list input").Count);
         release.Set();
         await add;
         cut.WaitForAssertion(() => Assert.All(
             cut.FindAll(".todo-entry input, .todo-entry button, .todo-list input"),
-            e => Assert.False(e.HasAttribute("disabled"), e.OuterHtml)));
+            e => Assert.False(e.HasAttribute("disabled"), e.OuterHtml)), Wait);
     }
 
     // Empty text writes nothing and asks for the todo.

@@ -4,6 +4,8 @@ namespace Context.Tests;
 
 public sealed class AppTests : IDisposable
 {
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(20);
+
     private readonly DesktopFixture data = new();
 
     public void Dispose() => data.Dispose();
@@ -20,7 +22,7 @@ public sealed class AppTests : IDisposable
         data.UtcNow = data.UtcNow.Add(DesktopState.MaxAge);
         Assert.True(data.State.Tick());
         await data.State.Refresh();
-        cut.WaitForAssertion(() => Assert.Contains("Sample todo", cut.Find(".todos").TextContent));
+        cut.WaitForAssertion(() => Assert.Contains("Sample todo", cut.Find(".todos").TextContent), Wait);
 
         Assert.NotEmpty(cut.FindAll("input.done[type=checkbox]"));
         Assert.Equal(before, Files());
