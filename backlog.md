@@ -233,6 +233,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#199](backlog/199-catch-file-errors-in-context-new.md) Catch file errors in context new --template
 - [?] [#200](backlog/200-list-the-template-folder-once-when.md) List the template folder once when a template is missing
 - [?] [#201](backlog/201-mention-template-in-the-empty-new.md) Mention --template in the empty /new hint
+- [?] [#202](backlog/202-match-note-and-sensitive-file-extensions.md) Match note and sensitive-file extensions ignoring case on Linux
 
 ## Dropped with the terminal UI
 
