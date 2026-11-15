@@ -186,7 +186,7 @@ internal sealed class DesktopActions
     /// <summary>How often <c>Program.cs</c>'s day-end timer calls <see cref="AutoDayEnd"/>.</summary>
     public static readonly TimeSpan DayEndInterval = TimeSpan.FromSeconds(30);
 
-    /// <summary>The accent line after <see cref="EndDay"/>.</summary>
+    /// <summary>The grey line after a successful <see cref="EndDay"/>.</summary>
     public static string DayClosedText(int moved, DateOnly to) =>
         $"Day closed. Moved {moved} todo(s) to {DailyNote.NameFor(to)}.";
 

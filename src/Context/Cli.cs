@@ -301,8 +301,10 @@ internal sealed class Cli
         }
 
         if (args.Length == 1 && DateOnly.TryParseExact(
-            args[0], DateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly day))
+            args[0], DateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly day)
+            && day < DateOnly.MaxValue)
         {
+            // The last date has no next day to move todos to, so it is a usage error like any other bad date.
             return session => DayEndCommand(session, day);
         }
 

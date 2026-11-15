@@ -2203,6 +2203,7 @@ public sealed class CliTests : IDisposable
     [InlineData("dayend", "tomorrow")]
     [InlineData("dayend", "2026-11-31")]
     [InlineData("dayend", "14.11.2026")]
+    [InlineData("dayend", "9999-12-31")]
     [InlineData("dayend", "today", "today")]
     [InlineData("dayend", "2026-11-14", "x")]
     [InlineData("dayend", "--json")]
