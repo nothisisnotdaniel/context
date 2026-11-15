@@ -5,6 +5,7 @@
     <div class="notes-bar">
         <h2>Notes</h2>
         <div class="notes-bar-buttons">
+            <button type="button" class="triage-open" @onclick="() => OnTriage.InvokeAsync()">Triage</button>
             <button type="button" class="tags-open" @onclick="() => OnTags.InvokeAsync()">Tags</button>
             <button type="button" class="settings-open" @onclick="() => OnSettings.InvokeAsync()">Settings</button>
         </div>
@@ -115,6 +116,9 @@
     /// <summary>Called when the Settings button is clicked.</summary>
     [Parameter]
     public EventCallback OnSettings { get; set; }
+
+    [Parameter]
+    public EventCallback OnTriage { get; set; }
 
     // The full names of the notes whose subpages are shown. Kept across State.Changed; a name that no longer has
     // subpages simply shows no toggle.

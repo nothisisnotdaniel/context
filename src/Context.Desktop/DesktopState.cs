@@ -398,6 +398,34 @@ internal sealed class DesktopState
     });
 
     /// <summary>
+    /// The inbox lines to triage for today (<see cref="InboxTriage.Items"/> over the plain <c>inbox</c> note read through
+    /// <see cref="NoteStore.ReadForEdit"/>), off the calling thread. A missing inbox is an empty queue; a sensitive inbox
+    /// is <see cref="TriageKind.Sensitive"/> without any key-store call. Reads only and never throws.
+    /// </summary>
+    public Task<TriageView> Triage() => Task.Run(() =>
+    {
+        DateOnly day = today();
+        try
+        {
+            if (notes.TryFindSensitive(Inbox.NoteName, out _))
+            {
+                return new TriageView(TriageKind.Sensitive, InboxQueue.Empty, day);
+            }
+
+            if (!notes.TryFind(Inbox.NoteName, out NoteInfo? found) || found is null)
+            {
+                return new TriageView(TriageKind.Shown, InboxQueue.Empty, day);
+            }
+
+            return new TriageView(TriageKind.Shown, InboxTriage.Items(notes.ReadForEdit(found).Text, day), day);
+        }
+        catch (Exception)
+        {
+            return new TriageView(TriageKind.Unreadable, InboxQueue.Empty, day);
+        }
+    });
+
+    /// <summary>
     /// The weekly review (<see cref="ReviewView.Build"/>) for today: the notes changed and the todos done in the last 7
     /// days, the overdue todos and the next 7 days' appointments, off the calling thread. It never opens
     /// <c>context.db</c> and never throws: any failure gives an empty view with <see cref="ReviewView.TodosUnreadable"/>

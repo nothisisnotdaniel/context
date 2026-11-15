@@ -10,10 +10,14 @@
     {
         <div class="layout" @onkeydown="OpenPalette">
             <aside class="notes-region">
-                <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" />
+                <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" OnTriage="ShowTriage" />
             </aside>
             <main class="current-region">
                 <CaptureBox Guard="CaptureHeld" OnCaptured="Captured" />
+                @if (triageShown)
+                {
+                    <TriagePanel Guard="TriageHeld" OnTriaged="Triaged" OnClose="CloseTriage" />
+                }
                 @if (settingsShown)
                 {
                     <SettingsPanel OnClose="CloseSettings" />
@@ -170,6 +174,7 @@ else
     private string? tagShown;
     private bool tagsShown;
     private bool reviewShown;
+    private bool triageShown;
     private (string Key, string Value)? findShown;
     private string? searchShown;
     private bool settingsShown;
@@ -294,6 +299,11 @@ else
 
     private void CloseReview() => reviewShown = false;
 
+    // Inbox triage: shown under the capture box until closed or until a note or the current view opens.
+    private void ShowTriage() => triageShown = true;
+
+    private void CloseTriage() => triageShown = false;
+
     // The settings: shown at the top of the main region until closed or until a note or the current view opens.
     private void ShowSettings() => settingsShown = true;
 
@@ -306,6 +316,7 @@ else
         {
             settingsShown = false;
             reviewShown = false;
+            triageShown = false;
             return;
         }
 
@@ -512,6 +523,7 @@ else
         tagShown = null;
         tagsShown = false;
         reviewShown = false;
+        triageShown = false;
         findShown = null;
         searchShown = null;
         settingsShown = false;
@@ -699,6 +711,10 @@ else
                 break;
             case "/settings":
                 ShowSettings();
+                break;
+            case "/triage":
+                // The argument is ignored.
+                ShowTriage();
                 break;
             case "/tags":
                 if (rest.Length == 0)
@@ -948,6 +964,53 @@ else
     private async Task Captured()
     {
         if (InboxOpen() && editor is not null && !await editor.IsDirtyAsync())
+        {
+            await editor.ReloadAsync();
+        }
+    }
+
+    // Asked before a triage action (target: the existing note it adds to, or null): the open inbox or the open target
+    // has unsaved changes, which the write would leave stuck behind "changed on disk". Null when the action may run.
+    private async Task<string?> TriageHeld(string? target)
+    {
+        if (openName is not { } name || editor is null)
+        {
+            return null;
+        }
+
+        bool touched = InboxOpen() || (target is not null && string.Equals(name, target, StringComparison.Ordinal));
+        if (touched && await editor.IsDirtyAsync())
+        {
+            return $"Save {name} first.";
+        }
+
+        return null;
+    }
+
+    // After a triage action: an open inbox and an open target show what was written, unless text was typed into the
+    // editor since the check. A sensitive target shows the note as re-sealed (still held by the session).
+    private async Task Triaged(string target)
+    {
+        if (openName is not { } name || editor is null || await editor.IsDirtyAsync())
+        {
+            return;
+        }
+
+        if (target.Length > 0 && string.Equals(name, target, StringComparison.Ordinal))
+        {
+            if (openSensitive)
+            {
+                if (State.Session.Note is { } saved && string.Equals(saved.Name, name, StringComparison.Ordinal))
+                {
+                    await editor.ShowSavedAsync(saved);
+                }
+            }
+            else
+            {
+                await editor.ReloadAsync();
+            }
+        }
+        else if (InboxOpen())
         {
             await editor.ReloadAsync();
         }
