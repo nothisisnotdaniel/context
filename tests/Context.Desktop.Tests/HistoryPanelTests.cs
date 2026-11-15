@@ -56,6 +56,8 @@ public sealed class HistoryPanelTests : IDisposable
         Assert.All(cut.FindAll(".diff-line"), l => Assert.Equal(l.TextContent, l.GetAttribute("title")));
         Assert.Equal("Restore this version", cut.Find("button.restore-version").TextContent);
         Assert.Equal("true", cut.Find(".history-row button").GetAttribute("aria-pressed"));
+        Assert.Equal("0", cut.Find(".diff-lines").GetAttribute("tabindex"));
+        Assert.Equal("Changes from 2026-10-29 10:00:00 to the saved text", cut.Find(".diff-lines").GetAttribute("aria-label"));
     }
 
     // AC-12: no versions is grey "No earlier versions of <name>."

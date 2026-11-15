@@ -314,6 +314,48 @@ public sealed class SensitiveFlowTests : IDisposable
         Assert.Equal(2, data.Keys.Agrees);
     }
 
+    // 174 AC-9 (nit): plain versions that can't be removed after the mark are reported in red.
+    [Fact]
+    public async Task MarkSensitive_PlainVersionsLeft_RedStatus()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        data.WriteNote("Plan", "# Plan\n");
+        string folder = Path.Combine(data.Root, NoteHistory.FolderName, "Plan");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "20261029T080000000Z.md"), "old\n");
+        UnixFileMode mode = File.GetUnixFileMode(folder);
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        data.Actions!.AfterHistorySealed = () =>
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+            }
+        };
+        await Open(cut, js, "Plan");
+        try
+        {
+            await cut.Find("button.mark-sensitive").ClickAsync(new MouseEventArgs());
+            await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+            cut.WaitForAssertion(() => Assert.Equal(
+                "Marked Plan sensitive, but its old readable versions couldn't be removed. Delete .history/Plan in the data folder.",
+                cut.Find(".main-status").TextContent), Wait);
+        }
+        finally
+        {
+            File.SetUnixFileMode(folder, mode);
+        }
+
+        Assert.Contains("red", cut.Find(".main-status").GetAttribute("class"), StringComparison.Ordinal);
+        Assert.Contains("Plan.ctxs", RootFiles());
+    }
+
     // AC-3: Mark sensitive asks first; Cancel changes nothing, the confirm button seals the note and closes it.
     [Fact]
     public async Task MarkSensitive_AsksFirst_ThenSealsAndCloses()

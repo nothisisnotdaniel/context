@@ -46,6 +46,9 @@ internal enum ActionReason
 
     /// <summary>The name is an alias of more than one person, so it links to no one.</summary>
     Ambiguous,
+
+    /// <summary>The note was marked sensitive, but its old plain versions could not be removed.</summary>
+    PlainHistoryLeft,
 }
 
 /// <summary>
@@ -268,6 +271,10 @@ internal sealed class DesktopActions
 
     /// <summary>The red line when the history of a note can't be sealed while marking it sensitive.</summary>
     public static string SealHistoryFailedText(string name) => $"Can't seal the history of {name}. Nothing was changed.";
+
+    /// <summary>The red line when a note was marked sensitive but its old plain versions are still on disk.</summary>
+    public static string PlainHistoryLeftText(string name) =>
+        $"Marked {name} sensitive, but its old readable versions couldn't be removed. Delete .history/{name} in the data folder.";
 
     /// <summary>The red line when a sensitive note must be open for the action.</summary>
     public static string UnlockFirstText(string name) => $"Unlock {name} first.";
@@ -1722,8 +1729,13 @@ internal sealed class DesktopActions
                 throw;
             }
 
-            // Only now the plain versions go; when that fails the sealed ones and the rest stay.
-            RemoveHistoryQuietly(source.Path, ".md");
+            // Only now the plain versions go; when that fails the sealed ones and the rest stay, and the user is told,
+            // since readable copies of a note now sealed are still on disk.
+            if (!RemoveHistoryQuietly(source.Path, ".md"))
+            {
+                return new ActionResult(ActionKind.Done, ActionReason.PlainHistoryLeft, source.Name);
+            }
+
             return new ActionResult(ActionKind.Done, ActionReason.None, source.Name);
         }
         catch (Exception)
@@ -1908,16 +1920,18 @@ internal sealed class DesktopActions
         }
     }
 
-    // Removes the versions of one kind; a failure leaves them (the note itself is already done).
-    private void RemoveHistoryQuietly(string notePath, string extension)
+    // Removes the versions of one kind; a failure leaves them (the note itself is already done) and gives false.
+    private bool RemoveHistoryQuietly(string notePath, string extension)
     {
         try
         {
             state.HistoryStore.RemoveHistory(notePath, extension);
+            return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // Left in place.
+            return false;
         }
     }
 

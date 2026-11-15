@@ -1373,7 +1373,12 @@ else
             marking = false;
         }
 
-        if (marked.Kind == ActionKind.Done)
+        if (marked.Kind == ActionKind.Done && marked.Reason == ActionReason.PlainHistoryLeft)
+        {
+            ShowNote(null);
+            ShowStatus(DesktopText.OneLine(DesktopActions.PlainHistoryLeftText(marked.Text)), "red");
+        }
+        else if (marked.Kind == ActionKind.Done)
         {
             ShowNote(null);
             ShowStatus($"Marked {DesktopText.OneLine(marked.Text)} sensitive.", "accent");

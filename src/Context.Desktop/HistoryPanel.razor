@@ -54,7 +54,7 @@
                 }
                 else
                 {
-                    <ol class="diff-lines">
+                    <ol class="diff-lines" tabindex="0" aria-label="Changes from @TimeText(shown.SavedUtc, State.Zone) to the saved text">
                         @foreach (DiffLine line in diff.Lines)
                         {
                             string text = LineText(line);

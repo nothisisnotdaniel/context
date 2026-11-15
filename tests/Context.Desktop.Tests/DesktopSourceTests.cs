@@ -14,9 +14,9 @@ public sealed class DesktopSourceTests
     // and the key store's two changing calls; RecoveryFile.Create is caught by Create. 140: Inbox.Capture.
     // 152: NoteStore.CreateChild and NoteStore.Move. 164: DailyNote.Ensure. 165: NoteStore.CreateWithText.
     // 172: Briefing.Ensure (caught by Ensure). 174: NoteHistory.Keep and RemoveHistory, and DesktopActions.RestoreVersion,
-    // which components reach only through the injected Actions (a call on Actions itself is the sanctioned path).
+    // which components reach only through the injected Actions (only Actions.RestoreVersion( itself is let through).
     private static readonly Regex Writes = new(
-        @"(?<!\bActions)\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
+        @"(?:(?<!\bActions)|(?!\.\s*RestoreVersion\s*\())\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
         + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture|CreateChild|Move|Ensure|CreateWithText"
         + @"|CloseDay|RefreshWorked|MoveTodos|AutoClose|MoveDue|SaveDayEnd|Keep|RemoveHistory|RestoreVersion)\s*\(",
         RegexOptions.CultureInvariant);
@@ -839,6 +839,8 @@ public sealed class DesktopSourceTests
     [InlineData("state.HistoryStore.Keep(found.Path, current, found.Name)")]
     [InlineData("state.HistoryStore.RemoveHistory(path, \".md\")")]
     [InlineData("desktopActions.RestoreVersion(name, id, opened, confirmed)")]
+    [InlineData("Actions.Save(text)")]
+    [InlineData("x.Actions.Delete(name)")]
     public void Writes_Pattern_CatchesCalls(string call)
     {
         Assert.Matches(Writes, call);

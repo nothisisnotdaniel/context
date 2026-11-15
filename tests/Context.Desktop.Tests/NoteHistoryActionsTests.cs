@@ -237,6 +237,46 @@ public sealed class NoteHistoryActionsTests : IDisposable
         Assert.Equal("older\n", Unseal(Path.Combine(data.Root, ".history", "Plan", "20261028T090000000Z~Plan.ctxs"), "Plan"));
     }
 
+    // AC-9 (nit): when the plain versions can't be removed after the mark, the note stays sealed and the result says so.
+    [Fact]
+    public async Task MarkSensitive_PlainVersionsLeft_IsReported()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteNote("Plan", "now\n");
+        WriteVersion("Plan", Id, "old\n");
+        await data.RefreshAsync();
+        string folder = Path.Combine(data.Root, ".history", "Plan");
+        UnixFileMode mode = File.GetUnixFileMode(folder);
+        data.Actions!.AfterHistorySealed = () =>
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+            }
+        };
+        ActionResult result;
+        try
+        {
+            result = await data.Actions.MarkSensitive("Plan", new Confirmation());
+        }
+        finally
+        {
+            File.SetUnixFileMode(folder, mode);
+        }
+
+        Assert.Equal((ActionKind.Done, ActionReason.PlainHistoryLeft, "Plan"), (result.Kind, result.Reason, result.Text));
+        Assert.Equal(
+            [".history/Plan/" + Id + ".md", ".history/Plan/" + Id + "~Plan.ctxs", "Plan.ctxs"], RootFiles());
+        Assert.Equal(
+            "Marked Plan sensitive, but its old readable versions couldn't be removed. Delete .history/Plan in the data folder.",
+            DesktopActions.PlainHistoryLeftText("Plan"));
+    }
+
     // AC-9: a version that isn't UTF-8 fails the mark; no sealed version is left and the plain ones stay byte for byte.
     [Fact]
     public async Task MarkSensitive_VersionNotUtf8_FailsAndChangesNothing()
