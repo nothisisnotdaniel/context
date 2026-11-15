@@ -1164,3 +1164,49 @@ input[type="password"]:disabled {
     flex: 0 1 auto;
     min-width: 4em;
 }
+
+.history-panel {
+    border-top: 1px solid var(--line);
+    margin-top: 16px;
+    padding-top: 12px;
+}
+
+.history-bar {
+    align-items: baseline;
+    display: flex;
+    gap: 8px;
+    justify-content: space-between;
+}
+
+.history-bar h2 {
+    margin-top: 0;
+}
+
+.history-rows {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    list-style: none;
+    margin: 0 0 8px;
+    padding: 0;
+}
+
+.history-row .version.chosen {
+    font-weight: 600;
+}
+
+.diff-lines {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9em;
+    list-style: none;
+    margin: 0 0 8px;
+    max-height: 24em;
+    overflow-y: auto;
+    padding: 0;
+}
+
+.diff-line {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: pre;
+}

@@ -214,7 +214,7 @@ public sealed class MainTests : IDisposable
 
         IReadOnlyList<IElement> buttons = cut.FindAll(".note-toolbar button");
         Assert.Equal(
-            ["Rename", "Delete", "New subpage", "Move", "Open in default editor", "Export", "Mark sensitive"], buttons.Select(b => b.TextContent).ToArray());
+            ["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export", "Mark sensitive"], buttons.Select(b => b.TextContent).ToArray());
         Assert.All(buttons, b => Assert.Equal("button", b.GetAttribute("type")));
     }
 
@@ -230,7 +230,7 @@ public sealed class MainTests : IDisposable
         await NameButton(cut, "Big").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Equal("Can't read Big.", cut.Find(".unreadable").TextContent), Wait);
-        Assert.Equal(7, cut.FindAll(".note-toolbar button").Count);
+        Assert.Equal(8, cut.FindAll(".note-toolbar button").Count);
     }
 
     // 134 AC-8: Rename swaps in a prefilled field; Enter or Save name renames and the editor shows the new name.
@@ -1119,6 +1119,100 @@ public sealed class MainTests : IDisposable
 
         Assert.Equal("Meeting 1.md", data.Dialog.SuggestedName);
         Assert.Equal("# Meeting 1\n", File.ReadAllText(data.Outside("m1.md")));
+    }
+
+    // 174 AC-12: History shows the panel under the editor and hides it again; another note starts without it.
+    [Fact]
+    public async Task History_Button_TogglesThePanel()
+    {
+        data.WriteNote("Plan", "now\n");
+        data.WriteNote("Other", "o\n");
+        WriteHistoryVersion("Plan", "20261029T090000000Z", "old\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        Assert.Empty(cut.FindAll(".history-panel"));
+
+        await cut.Find("button.history").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal(["2026-10-29 10:00:00"], cut.FindAll(".history-row button").Select(b => b.TextContent)), Wait);
+        Assert.Equal("true", cut.Find("button.history").GetAttribute("aria-pressed"));
+        await cut.Find("button.history").ClickAsync(new MouseEventArgs());
+        Assert.Empty(cut.FindAll(".history-panel"));
+
+        await cut.Find("button.history").ClickAsync(new MouseEventArgs());
+        await Open(cut, js, "Other");
+        Assert.Empty(cut.FindAll(".history-panel"));
+    }
+
+    // 174 AC-13: Restore asks first; on confirm the version is saved, the editor reloads and the status says so.
+    [Fact]
+    public async Task Restore_AsksThenRestores_AndTheEditorReloads()
+    {
+        data.WriteNote("Plan", "now\n");
+        WriteHistoryVersion("Plan", "20261029T090000000Z", "old\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        await ChooseFirstVersion(cut);
+
+        await cut.Find("button.restore-version").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(
+            "Restore Plan to the version from 2026-10-29 10:00:00? The current text is kept as a version.",
+            cut.Find("[role=dialog] .question").TextContent);
+        Assert.Equal("Restore", cut.Find("[role=dialog] button.confirm").TextContent);
+        Assert.Equal("now\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        int mounts = js.Calls("ContextEditor.mount").Count;
+
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Restored Plan to 2026-10-29 10:00:00.", cut.Find(".main-status").TextContent), Wait);
+        Assert.Contains("accent", cut.Find(".main-status").GetAttribute("class"), StringComparison.Ordinal);
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Equal("old\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.Equal("now\n", File.ReadAllText(Path.Combine(data.Root, ".history", "Plan", "20261029T090000000Z-1.md")));
+        Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count);
+        Assert.Equal("old\n", js.MountedText());
+    }
+
+    // 174 AC-13: Cancel writes nothing; a dirty editor is refused before anything is asked.
+    [Fact]
+    public async Task Restore_CancelOrDirty_WritesNothing()
+    {
+        data.WriteNote("Plan", "now\n");
+        WriteHistoryVersion("Plan", "20261029T090000000Z", "old\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        await ChooseFirstVersion(cut);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+
+        await cut.Find("button.restore-version").ClickAsync(new MouseEventArgs());
+        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+
+        js.Edit("typed\n");
+        await cut.Find("button.restore-version").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal("Save Plan first.", cut.Find(".main-status").TextContent);
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    private static async Task ChooseFirstVersion(IRenderedComponent<Main> cut)
+    {
+        await cut.Find("button.history").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.NotEmpty(cut.FindAll(".history-row button")), Wait);
+        await cut.Find(".history-row button").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.NotEmpty(cut.FindAll("button.restore-version")), Wait);
+    }
+
+    private void WriteHistoryVersion(string name, string id, string text)
+    {
+        string folder = Path.Combine(data.Root, NoteHistory.FolderName, name);
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, id + ".md"), text);
     }
 
     private static async Task Open(IRenderedComponent<Main> cut, EditorJs js, string name)

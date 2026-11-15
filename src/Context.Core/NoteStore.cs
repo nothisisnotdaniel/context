@@ -400,9 +400,11 @@ internal sealed class NoteStore
     /// Deletes the note called <paramref name="name"/> (found like <see cref="TryFind"/>, so only a file
     /// <see cref="List"/> returns) and every subpage below it that <see cref="List"/> reports, then removes the child
     /// folders that are now empty (any other file keeps its folder), and returns true; or returns false and deletes
-    /// nothing when no note matches.
+    /// nothing when no note matches. With <paramref name="removeHistory"/> the kept versions of every deleted note go
+    /// too (<see cref="NoteHistory.RemoveHistory"/>, with a <c>.history</c> folder that is then empty); otherwise they
+    /// stay, and so does a child folder that still holds a <c>.history</c>.
     /// </summary>
-    public bool Delete(string name)
+    public bool Delete(string name, bool removeHistory = false)
     {
         List<Entry> entries = ListEntries();
         Entry? match = FindEntry(entries, name);
@@ -414,6 +416,11 @@ internal sealed class NoteStore
         List<Entry> subtree = entries.Where(e => ReferenceEquals(e, match) || IsBelow(e.Note.Name, match.Note.Name)).ToList();
         foreach (Entry entry in subtree.OrderByDescending(e => e.Note.Name.Length))
         {
+            if (removeHistory)
+            {
+                NoteHistory.Remove(entry.Note.Path, null);
+            }
+
             File.Delete(entry.Note.Path);
         }
 
@@ -431,7 +438,8 @@ internal sealed class NoteStore
     /// to it whose name equals its title (exact case first, then ignoring case). A folder that is a link or reparse
     /// point, starts with <c>.</c>, is the top-level <c>calendar</c> folder or has no matching note is never read; a
     /// subpage whose title fails <see cref="ValidateTitle"/> or whose full name is over <see cref="MaxNameLength"/> is
-    /// left out. A missing root lists as empty and is not created.
+    /// left out; at the top level a file whose name starts with <c>.</c> is left out too. A missing root lists as empty
+    /// and is not created.
     /// </summary>
     public IReadOnlyList<NoteInfo> List() => ListEntries().Select(e => e.Note).ToList();
 
@@ -475,13 +483,19 @@ internal sealed class NoteStore
 
     /// <summary>
     /// Deletes the sensitive note <see cref="TryFindSensitive"/> finds for <paramref name="name"/> and returns true,
-    /// or returns false and deletes nothing when there is none. Never deletes a <c>.md</c> file.
+    /// or returns false and deletes nothing when there is none. Never deletes a <c>.md</c> file. With
+    /// <paramref name="removeHistory"/> its kept versions (<c>.history/&lt;Title&gt;/</c>) go too; otherwise they stay.
     /// </summary>
-    public bool DeleteSensitive(string name)
+    public bool DeleteSensitive(string name, bool removeHistory = false)
     {
         if (!TryFindSensitive(name, out NoteInfo? match) || match is null)
         {
             return false;
+        }
+
+        if (removeHistory)
+        {
+            NoteHistory.Remove(match.Path, null);
         }
 
         File.Delete(match.Path);
@@ -544,7 +558,16 @@ internal sealed class NoteStore
     /// returns the note as saved in <paramref name="saved"/>. The file is hashed again just before the move. Throws
     /// <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> when it can't write.
     /// </summary>
-    public NoteSaveResult SaveIfUnchanged(EditableNote opened, string text, out EditableNote? saved)
+    public NoteSaveResult SaveIfUnchanged(EditableNote opened, string text, out EditableNote? saved) =>
+        SaveIfUnchanged(opened, text, out saved, null);
+
+    /// <summary>
+    /// Like <see cref="SaveIfUnchanged(EditableNote, string, out EditableNote?)"/>; with <paramref name="history"/>, the
+    /// file's previous bytes are kept as a version (<see cref="NoteHistory.Keep"/>) after the last version check and
+    /// before the move, so a save that writes nothing keeps nothing. When that throws
+    /// (<see cref="NoteHistoryException"/>) the note is not changed.
+    /// </summary>
+    public NoteSaveResult SaveIfUnchanged(EditableNote opened, string text, out EditableNote? saved, NoteHistory? history)
     {
         saved = null;
         string plainText = text.Replace("\r\n", "\n", StringComparison.Ordinal);
@@ -553,7 +576,7 @@ internal sealed class NoteStore
             return NoteSaveResult.Unchanged;
         }
 
-        NoteSaveResult check = CheckVersion(opened);
+        NoteSaveResult check = CheckVersion(opened, out _);
         if (check != NoteSaveResult.Saved)
         {
             return check;
@@ -578,10 +601,15 @@ internal sealed class NoteStore
                 stream.Write(plain);
             }
 
-            check = CheckVersion(opened);
+            check = CheckVersion(opened, out byte[]? previous);
             if (check != NoteSaveResult.Saved)
             {
                 return check;
+            }
+
+            if (history is not null && previous is not null)
+            {
+                history.Keep(opened.Path, previous);
             }
 
             File.Move(temp, opened.Path, overwrite: true);
@@ -600,9 +628,9 @@ internal sealed class NoteStore
 
     // Saved when the file still hashes to the version it was opened with. A file that is now too large or not a
     // regular file can't have that version, so it counts as changed (read with the same bound as ReadForEdit).
-    private static NoteSaveResult CheckVersion(EditableNote opened)
+    private static NoteSaveResult CheckVersion(EditableNote opened, out byte[]? current)
     {
-        byte[] current;
+        current = null;
         try
         {
             current = BoundedFile.Read(opened.Path, MaxEditBytes);
@@ -727,7 +755,7 @@ internal sealed class NoteStore
     public const long MaxEditBytes = MaxImportBytes;
 
     // Decodes text the way File.ReadAllText does: UTF-8 unless a byte order mark says otherwise; the mark is dropped.
-    private static string DecodeText(byte[] bytes)
+    internal static string DecodeText(byte[] bytes)
     {
         using MemoryStream stream = new MemoryStream(bytes, writable: false);
         using StreamReader reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
@@ -892,7 +920,8 @@ internal sealed class NoteStore
             .Where(p => string.Equals(Path.GetExtension(p), Extension, StringComparison.OrdinalIgnoreCase))
             .Select(p => (Title: Path.GetFileNameWithoutExtension(p), Path: p))
             .Where(n => parent is null
-                || (ValidateTitle(n.Title) is null && parent.Length + 1 + n.Title.Length <= MaxNameLength))
+                ? !n.Title.StartsWith('.')
+                : (ValidateTitle(n.Title) is null && parent.Length + 1 + n.Title.Length <= MaxNameLength))
             .OrderBy(n => n.Title, StringComparer.OrdinalIgnoreCase)
             .ThenBy(n => n.Title, StringComparer.Ordinal)
             .ToList();
@@ -1060,8 +1089,36 @@ internal sealed class NoteStore
         return folder;
     }
 
-    // Moves a note's file, then its child folder, never over anything. When the folder move fails the file goes back.
+    // Moves a note's history, then its file, then its child folder, never over anything. When a later step fails the
+    // earlier ones are moved back.
     private void MoveTree(Entry source, string target, string folderTarget, string newName, bool caseOnly)
+    {
+        if (!NoteHistory.MoveHistory(source.Note.Path, target, caseOnly))
+        {
+            throw new IOException($"{newName} already has a history.");
+        }
+
+        try
+        {
+            MoveFileAndFolder(source, target, folderTarget, newName, caseOnly);
+        }
+        catch (Exception)
+        {
+            try
+            {
+                NoteHistory.MoveHistory(target, source.Note.Path, caseOnly);
+            }
+            catch (Exception back) when (back is IOException or UnauthorizedAccessException)
+            {
+                // The history stays under the new name; the original error is the one to report.
+            }
+
+            throw;
+        }
+    }
+
+    // Moves a note's file, then its child folder, never over anything. When the folder move fails the file goes back.
+    private void MoveFileAndFolder(Entry source, string target, string folderTarget, string newName, bool caseOnly)
     {
         try
         {

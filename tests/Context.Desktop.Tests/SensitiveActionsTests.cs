@@ -363,7 +363,8 @@ public sealed class SensitiveActionsTests : IDisposable
         Assert.Equal("Plan", result.Text);
         Assert.Equal("# Plan\n\n" + Marker + "\n", result.Note!.Text);
         Assert.Equal(1, data.Keys.Agrees);
-        Assert.Equal(["Plan.ctxs"], RootFiles());
+        Assert.Equal([".history/Plan/20261029T090000000Z~Plan.ctxs", "Plan.ctxs"], RootFiles());
+        Assert.Equal(before, File.ReadAllBytes(Path.Combine(data.Root, ".history", "Plan", "20261029T090000000Z~Plan.ctxs")));
         byte[] after = File.ReadAllBytes(opened.Path);
         Assert.Empty(SealedValues(before).Intersect(SealedValues(after)));
         Assert.Equal("# Plan\r\n\r\n" + Marker + "\r\n", SealedNote.Open("Plan", after, data.Keys.MachinePublicKey()!, data.Keys.Agree));

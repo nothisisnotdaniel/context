@@ -87,6 +87,7 @@
                         {
                             <button type="button" class="rename" disabled="@running" @onclick="StartRename">Rename</button>
                             <button type="button" class="delete" disabled="@running" @onclick="AskDelete">Delete</button>
+                            <button type="button" class="history" disabled="@running" aria-pressed="@(historyShown ? "true" : "false")" @onclick="ToggleHistory">History</button>
                             @if (openSensitive)
                             {
                                 <button type="button" class="make-plain" disabled="@running" @onclick="AskMakePlain">Make plain</button>
@@ -107,6 +108,10 @@
                     </div>
                     <NoteEditor @key="(name, openSensitive)" @ref="editor" Name="@name" Sensitive="openSensitive"
                                 OnTag="ShowTag" OnOpenNote="RequestOpen" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked" />
+                    @if (historyShown)
+                    {
+                        <HistoryPanel Name="@name" Sensitive="openSensitive" OnRestore="AskRestore" OnClose="CloseHistory" />
+                    }
                     @if (People.PersonOf(name) is { } person)
                     {
                         <PersonPanel Person="@person" OnOpen="RequestOpen" />
@@ -139,8 +144,13 @@
         }
         @if (unsealing && openName is { } plain)
         {
-            <ConfirmDialog Question="@($"Make {DesktopText.OneLine(plain)} plain? It will be stored as readable text again.")"
+            <ConfirmDialog Question="@($"Make {DesktopText.OneLine(plain)} plain? It will be stored as readable text again. Its history will be removed.")"
                            ConfirmLabel="Make plain" Busy="running" OnConfirm="MakePlainConfirmed" OnCancel="CancelSensitive" />
+        }
+        @if (restoring is { } version && openName is { } restored)
+        {
+            <ConfirmDialog Question="@($"Restore {DesktopText.OneLine(restored)} to the version from {HistoryPanel.TimeText(version.SavedUtc, State.Zone)}? The current text is kept as a version.")"
+                           ConfirmLabel="Restore" Busy="running" OnConfirm="RestoreConfirmed" OnCancel="CancelRestore" />
         }
         @if (paletteOpen)
         {
@@ -180,6 +190,8 @@ else
     private bool openSensitive;
     private bool marking;
     private bool unsealing;
+    private bool historyShown;
+    private (string Id, DateTime SavedUtc)? restoring;
     private NotesPanel? notesPanel;
     private TodoPanel? todoPanel;
     private bool subpaging;
@@ -508,6 +520,8 @@ else
         deleting = false;
         marking = false;
         unsealing = false;
+        historyShown = false;
+        restoring = null;
         if (name is null)
         {
             editor = null;
@@ -1225,6 +1239,73 @@ else
         else
         {
             ShowStatus(DesktopText.OneLine(deleted.Text), "red");
+        }
+    }
+
+    // The History button shows or hides the open note's kept versions.
+    private void ToggleHistory()
+    {
+        historyShown = !historyShown;
+        restoring = null;
+    }
+
+    private void CloseHistory()
+    {
+        historyShown = false;
+        restoring = null;
+    }
+
+    // Restore this version: refused while the editor has unsaved changes, otherwise asked in a dialog.
+    private async Task AskRestore((string Id, DateTime SavedUtc) version)
+    {
+        if (await CleanForSensitive())
+        {
+            restoring = version;
+        }
+    }
+
+    private void CancelRestore()
+    {
+        if (!running)
+        {
+            restoring = null;
+        }
+    }
+
+    // Confirmed in the dialog: saves the version's text over the open note (the current text becomes a version) and
+    // shows the saved text in the editor.
+    private async Task RestoreConfirmed(Confirmation confirmed)
+    {
+        if (openName is not { } name || restoring is not { } version || running || editor is null)
+        {
+            return;
+        }
+
+        if (await editor.PrepareSaveAsync() is not { } request)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult restored;
+        try
+        {
+            restored = await Actions.RestoreVersion(name, version.Id, request.Note, confirmed);
+        }
+        finally
+        {
+            running = false;
+            restoring = null;
+        }
+
+        if (restored.Kind == ActionKind.Done && restored.Note is { } saved)
+        {
+            await editor.ShowSavedAsync(saved);
+            ShowStatus($"Restored {DesktopText.OneLine(name)} to {HistoryPanel.TimeText(version.SavedUtc, State.Zone)}.", "accent");
+        }
+        else
+        {
+            ShowStatus(DesktopText.OneLine(restored.Text), "red");
         }
     }
 

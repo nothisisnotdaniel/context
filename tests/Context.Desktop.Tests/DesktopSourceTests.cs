@@ -13,11 +13,12 @@ public sealed class DesktopSourceTests
     // 134: NoteStore.Rename and NoteStore.Delete. 136: sealing (SealedNote.Seal, AddRecipient), NoteStore.DeleteSensitive
     // and the key store's two changing calls; RecoveryFile.Create is caught by Create. 140: Inbox.Capture.
     // 152: NoteStore.CreateChild and NoteStore.Move. 164: DailyNote.Ensure. 165: NoteStore.CreateWithText.
-    // 172: Briefing.Ensure (caught by Ensure).
+    // 172: Briefing.Ensure (caught by Ensure). 174: NoteHistory.Keep and RemoveHistory, and DesktopActions.RestoreVersion,
+    // which components reach only through the injected Actions (a call on Actions itself is the sanctioned path).
     private static readonly Regex Writes = new(
-        @"\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
+        @"(?<!\bActions)\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
         + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture|CreateChild|Move|Ensure|CreateWithText"
-        + @"|CloseDay|RefreshWorked|MoveTodos|AutoClose|MoveDue|SaveDayEnd)\s*\(",
+        + @"|CloseDay|RefreshWorked|MoveTodos|AutoClose|MoveDue|SaveDayEnd|Keep|RemoveHistory|RestoreVersion)\s*\(",
         RegexOptions.CultureInvariant);
 
     // 136: the real key stores and the real file dialog, spelled in pieces: no test file may hold their names (see
@@ -834,9 +835,21 @@ public sealed class DesktopSourceTests
     [InlineData("dayEnd.AutoClose(today, now)")]
     [InlineData("todos.MoveDue(day, day.AddDays(1))")]
     [InlineData("settings.SaveDayEnd(values)")]
+    [InlineData("history.Keep(note.Path, bytes)")]
+    [InlineData("state.HistoryStore.Keep(found.Path, current, found.Name)")]
+    [InlineData("state.HistoryStore.RemoveHistory(path, \".md\")")]
+    [InlineData("desktopActions.RestoreVersion(name, id, opened, confirmed)")]
     public void Writes_Pattern_CatchesCalls(string call)
     {
         Assert.Matches(Writes, call);
+    }
+
+    [Theory]
+    [InlineData("Actions.RestoreVersion(name, version.Id, request.Note, confirmed)")]
+    [InlineData("Actions.MarkSensitive(name, confirmed)")]
+    public void Writes_Pattern_LeavesCallsOnActions(string call)
+    {
+        Assert.DoesNotMatch(Writes, call);
     }
 
     // AC-8 (control): the pattern doesn't flag the reads the Desktop needs.

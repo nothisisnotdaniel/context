@@ -1123,4 +1123,207 @@ public sealed class NoteStoreTests : IDisposable
         Assert.Equal(["Meetings"], store.List().Select(n => n.Name).ToArray());
         Assert.True(File.Exists(Path.Combine(root, "Meetings.md")));
     }
+
+    // 174: a version file in a note's history folder (".history/<Title>/<id>.md" next to the note).
+    private string WriteVersion(string name, string id, string text)
+    {
+        string[] parts = name.Split('/');
+        string folder = Path.Combine([root, .. parts[..^1], NoteHistory.FolderName, parts[^1]]);
+        Directory.CreateDirectory(folder);
+        string path = Path.Combine(folder, id + ".md");
+        File.WriteAllText(path, text);
+        return path;
+    }
+
+    private NoteHistory HistoryOf(NoteStore store) =>
+        new NoteHistory(store, () => new DateTime(2026, 10, 29, 9, 0, 0, DateTimeKind.Utc));
+
+    // 174 AC-1: a save with a history keeps the previous bytes, unchanged, before the note changes.
+    [Fact]
+    public void SaveIfUnchanged_WithHistory_KeepsThePreviousBytes()
+    {
+        string path = WriteAt("Work/Projects/N", "\uFEFFold\r\n");
+        WriteAt("Work", "w");
+        WriteAt("Work/Projects", "p");
+        NoteStore store = new NoteStore(root);
+        byte[] before = File.ReadAllBytes(path);
+        Assert.True(store.TryFind("Work/Projects/N", out NoteInfo? note));
+        EditableNote opened = store.ReadForEdit(note!);
+
+        Assert.Equal(NoteSaveResult.Saved, store.SaveIfUnchanged(opened, "new\n", out _, HistoryOf(store)));
+
+        string version = Path.Combine(root, "Work", "Projects", ".history", "N", "20261029T090000000Z.md");
+        Assert.Equal(before, File.ReadAllBytes(version));
+        Assert.Equal(["Work", "Work/Projects", "Work/Projects/N"], store.List().Select(n => n.Name));
+    }
+
+    // 174 AC-1: unchanged text and a file changed on disk keep no version.
+    [Fact]
+    public void SaveIfUnchanged_UnchangedOrChangedOnDisk_KeepsNothing()
+    {
+        string path = WriteAt("Plan", "old\n");
+        NoteStore store = new NoteStore(root);
+        Assert.True(store.TryFind("Plan", out NoteInfo? note));
+        EditableNote opened = store.ReadForEdit(note!);
+
+        Assert.Equal(NoteSaveResult.Unchanged, store.SaveIfUnchanged(opened, "old\n", out _, HistoryOf(store)));
+        File.WriteAllText(path, "outside\n");
+        Assert.Equal(NoteSaveResult.ChangedOnDisk, store.SaveIfUnchanged(opened, "mine\n", out _, HistoryOf(store)));
+
+        Assert.False(Directory.Exists(Path.Combine(root, ".history")));
+    }
+
+    // 174 AC-4: when the version can't be written the note is not changed and no temp file is left.
+    [Fact]
+    public void SaveIfUnchanged_KeepFails_LeavesTheNote()
+    {
+        string path = WriteAt("Plan", "old\n");
+        File.WriteAllText(Path.Combine(root, ".history"), "in the way");
+        NoteStore store = new NoteStore(root);
+        Assert.True(store.TryFind("Plan", out NoteInfo? note));
+        EditableNote opened = store.ReadForEdit(note!);
+
+        Assert.Throws<NoteHistoryException>(() => store.SaveIfUnchanged(opened, "new\n", out _, HistoryOf(store)));
+
+        Assert.Equal("old\n", File.ReadAllText(path));
+        Assert.Equal([".history", "Plan.md"], Directory.GetFiles(root).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+    }
+
+    // 174 AC-6: a rename moves the history; a case-only rename too.
+    [Fact]
+    public void Rename_MovesTheHistory_CaseOnlyToo()
+    {
+        WriteAt("Plan", "p");
+        WriteVersion("Plan", "20261029T090000000Z", "old");
+        NoteStore store = new NoteStore(root);
+
+        store.Rename("Plan", "Project");
+        Assert.Equal("old", File.ReadAllText(Path.Combine(root, ".history", "Project", "20261029T090000000Z.md")));
+        Assert.Equal(["Project"], Directory.GetDirectories(Path.Combine(root, ".history")).Select(Path.GetFileName));
+
+        store.Rename("Project", "PROJECT");
+        Assert.Equal(["PROJECT"], Directory.GetDirectories(Path.Combine(root, ".history")).Select(Path.GetFileName));
+        Assert.Equal("old", File.ReadAllText(Path.Combine(root, ".history", "PROJECT", "20261029T090000000Z.md")));
+    }
+
+    // 174 AC-6: a rename never moves a history over an existing one; nothing moves.
+    [Fact]
+    public void Rename_TargetHistoryExists_ChangesNothing()
+    {
+        WriteAt("Plan", "p");
+        WriteVersion("Plan", "20261029T090000000Z", "mine");
+        WriteVersion("Project", "20261028T090000000Z", "left over");
+        NoteStore store = new NoteStore(root);
+
+        Assert.ThrowsAny<IOException>(() => store.Rename("Plan", "Project"));
+
+        Assert.True(File.Exists(Path.Combine(root, "Plan.md")));
+        Assert.Equal("mine", File.ReadAllText(Path.Combine(root, ".history", "Plan", "20261029T090000000Z.md")));
+        Assert.Equal("left over", File.ReadAllText(Path.Combine(root, ".history", "Project", "20261028T090000000Z.md")));
+    }
+
+    // 174 AC-6: a move takes the history to the new folder; the subpages' histories move with the child folder.
+    [Fact]
+    public void Move_TakesTheHistory_AndTheSubpagesHistories()
+    {
+        WriteAt("Work", "w");
+        WriteAt("Plan", "p");
+        WriteAt("Plan/Step", "s");
+        WriteVersion("Plan", "20261029T090000000Z", "plan old");
+        WriteVersion("Plan/Step", "20261029T090000000Z", "step old");
+        NoteStore store = new NoteStore(root);
+
+        store.Move("Plan", "Work");
+
+        Assert.Equal("plan old", File.ReadAllText(Path.Combine(root, "Work", ".history", "Plan", "20261029T090000000Z.md")));
+        Assert.Equal("step old", File.ReadAllText(Path.Combine(root, "Work", "Plan", ".history", "Step", "20261029T090000000Z.md")));
+        Assert.False(Directory.Exists(Path.Combine(root, ".history")));
+        Assert.Equal(["Work", "Work/Plan", "Work/Plan/Step"], store.List().Select(n => n.Name));
+    }
+
+    // 174 AC-6: Delete keeps the history unless asked; with removeHistory every deleted note's history goes.
+    [Fact]
+    public void Delete_History_OnlyWhenAsked()
+    {
+        WriteAt("Plan", "p");
+        WriteAt("Plan/Step", "s");
+        WriteAt("Other", "o");
+        WriteVersion("Plan", "20261029T090000000Z", "plan old");
+        WriteVersion("Plan/Step", "20261029T090000000Z", "step old");
+        WriteVersion("Other", "20261029T090000000Z", "other old");
+        NoteStore store = new NoteStore(root);
+
+        Assert.True(store.Delete("Other"));
+        Assert.True(File.Exists(Path.Combine(root, ".history", "Other", "20261029T090000000Z.md")));
+
+        Assert.True(store.Delete("Plan", removeHistory: true));
+        Assert.False(Directory.Exists(Path.Combine(root, "Plan")));
+        Assert.False(Directory.Exists(Path.Combine(root, ".history", "Plan")));
+        Assert.True(Directory.Exists(Path.Combine(root, ".history", "Other")));
+    }
+
+    // 174 AC-6: a delete with removeHistory removes a .history it empties, so a later note starts with none.
+    [Fact]
+    public void Delete_RemoveHistory_RemovesAnEmptiedHistoryFolder()
+    {
+        WriteAt("Plan", "p");
+        WriteVersion("Plan", "20261029T090000000Z", "old");
+        NoteStore store = new NoteStore(root);
+
+        Assert.True(store.Delete("Plan", removeHistory: true));
+
+        Assert.False(Directory.Exists(Path.Combine(root, ".history")));
+    }
+
+    // 174 AC-6: DeleteSensitive keeps the history unless asked.
+    [Fact]
+    public void DeleteSensitive_History_OnlyWhenAsked()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllBytes(Path.Combine(root, "Plan.ctxs"), [1]);
+        File.WriteAllBytes(Path.Combine(root, "Other.ctxs"), [1]);
+        string folder = Path.Combine(root, ".history");
+        Directory.CreateDirectory(Path.Combine(folder, "Plan"));
+        Directory.CreateDirectory(Path.Combine(folder, "Other"));
+        File.WriteAllBytes(Path.Combine(folder, "Plan", "20261029T090000000Z~Plan.ctxs"), [2]);
+        File.WriteAllBytes(Path.Combine(folder, "Other", "20261029T090000000Z~Other.ctxs"), [2]);
+        NoteStore store = new NoteStore(root);
+
+        Assert.True(store.DeleteSensitive("Other"));
+        Assert.True(File.Exists(Path.Combine(folder, "Other", "20261029T090000000Z~Other.ctxs")));
+
+        Assert.True(store.DeleteSensitive("Plan", removeHistory: true));
+        Assert.False(Directory.Exists(Path.Combine(folder, "Plan")));
+        Assert.True(store.DeleteSensitive("Other", removeHistory: false) is false);
+    }
+
+    // 174 AC-14: a top-level dot-file is not listed, and neither is a .md under .history.
+    [Fact]
+    public void List_LeavesOutDotFilesAndHistory()
+    {
+        WriteAt("Plan", "p");
+        WriteAt(".x", "hidden");
+        WriteVersion("Plan", "20261029T090000000Z", "old");
+        WriteAt("Plan/Step", "s");
+        WriteVersion("Plan/Step", "20261029T090000000Z", "old");
+        NoteStore store = new NoteStore(root);
+
+        Assert.Equal(["Plan", "Plan/Step"], store.List().Select(n => n.Name));
+        Assert.False(store.TryFind(".x", out _));
+    }
+
+    // 174 AC-14: titles like .history and .drafts are refused when creating, renaming and adding a subpage.
+    [Theory]
+    [InlineData(".history")]
+    [InlineData(".drafts")]
+    public void DotTitles_AreRefused_Everywhere(string title)
+    {
+        WriteAt("Plan", "p");
+        NoteStore store = new NoteStore(root);
+
+        Assert.Equal("A note title can't start with a dot.", Assert.Throws<ArgumentException>(() => store.Create(title)).Message.Split(" (")[0]);
+        Assert.Equal("A note title can't start with a dot.", Assert.Throws<ArgumentException>(() => store.Rename("Plan", title)).Message.Split(" (")[0]);
+        Assert.Equal("A note title can't start with a dot.", Assert.Throws<ArgumentException>(() => store.CreateChild("Plan", title)).Message.Split(" (")[0]);
+        Assert.Equal(["Plan"], store.List().Select(n => n.Name));
+    }
 }

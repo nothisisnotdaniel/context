@@ -154,6 +154,33 @@
         StateHasChanged();
     }
 
+    /// <summary>
+    /// Mounts <paramref name="saved"/> (the note as a restore saved it, plain or sensitive) without taking the focus;
+    /// it becomes the text as opened. An editor that isn't mounted or a running save is left alone.
+    /// </summary>
+    internal async Task ShowSavedAsync(EditableNote saved)
+    {
+        if (!mounted || saving)
+        {
+            return;
+        }
+
+        try
+        {
+            lossy = !await Interop.IsLosslessAsync(saved.Text);
+            await Interop.MountAsync(host, saved.Text);
+            opened = saved;
+            dirty = false;
+            ShowStatus(string.Empty, string.Empty);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            // The page is gone; the editor keeps what it has.
+        }
+
+        StateHasChanged();
+    }
+
     public async ValueTask DisposeAsync()
     {
         Dispose();

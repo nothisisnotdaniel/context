@@ -323,6 +323,17 @@ public sealed class CliTests : IDisposable
 
     // AC-3 ---------------------------------------------------------------------------------------
 
+    // 174 AC-5: the command line keeps no versions when it changes a note.
+    [Fact]
+    public void Capture_KeepsNoVersion()
+    {
+        Run("capture", "first");
+        Run("capture", "second");
+
+        Assert.Contains("second", Read("inbox.md"), StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(root, NoteHistory.FolderName)));
+    }
+
     [Fact]
     public void Capture_JoinsArgumentsAndAppendsToInbox()
     {
