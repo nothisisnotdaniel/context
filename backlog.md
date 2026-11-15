@@ -112,6 +112,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#24](backlog/024-voice-notes.md) Voice notes (after: #23)
 - [ ] [#25](backlog/025-outlook-as-a-source.md) Outlook as a source
 - [ ] [#27](backlog/027-todo-dates-with-years.md) Todo dates with years
+- [ ] [#232](backlog/232-search-index-limits-and-accessibility.md) Search index limits and accessibility
 - [ ] [#29](backlog/029-index-limits.md) Index limits
 - [ ] [#37](backlog/037-note-store-cleanup.md) Note store cleanup
 - [?] [#92](backlog/092-times-inside-the-context-desktop-app.md) Times inside the Context desktop app
