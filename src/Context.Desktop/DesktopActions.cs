@@ -159,7 +159,15 @@ internal sealed class DesktopActions
     private readonly Func<DateTime> localNow;
     private readonly CalendarStore calendar;
     private readonly DayEnd dayEnd;
+    private readonly string? timesFolder;
     private int running;
+
+    // Plain fields: only AutoBriefingNow touches them, and Run lets one action run at a time.
+    // Set by the first AutoBriefing that runs (the start-up call); later calls are ticks.
+    private bool briefingStarted;
+
+    // The day whose briefing AutoBriefing created or found, so later ticks that day read nothing.
+    private DateOnly? briefedDay;
 
     public DesktopActions(
         NoteStore notes,
@@ -175,6 +183,7 @@ internal sealed class DesktopActions
         this.localNow = localNow ?? (() => DateTime.Now);
         this.calendar = calendar ?? new CalendarStore(notes.Root, TimeZoneInfo.Local);
         dayEnd = new DayEnd(notes, todos, this.calendar, calendarFeed, timesFolder, new SettingsStore(notes.Root));
+        this.timesFolder = timesFolder;
         this.calendarLink = calendarLink;
         this.calendarFeed = calendarFeed;
         this.notes = notes;
@@ -201,6 +210,12 @@ internal sealed class DesktopActions
 
     /// <summary>The answer of <see cref="AutoDayEnd"/> when <c>settings.json</c> can't be read or written.</summary>
     public const string SettingsUnreadableText = "Can't read settings.json. The day was not closed automatically.";
+
+    /// <summary>The red line when the top-level <c>briefings</c> note is sensitive.</summary>
+    public const string BriefingSensitiveText = Briefing.FolderName + " is sensitive, so no briefing can be written.";
+
+    /// <summary>The red line when a briefing can't be written.</summary>
+    public static string BriefingFailedText(string name) => $"Can't write {name}.";
 
     /// <summary>The red line when a note with that name exists (ignoring case).</summary>
     public static string ExistsText(string name) => $"Note {name} already exists.";
@@ -450,6 +465,27 @@ internal sealed class DesktopActions
     /// or when <c>settings.json</c> is broken. Never throws and never asks anything.
     /// </summary>
     public Task<ActionResult> AutoDayEnd() => Run(AutoDayEndNow);
+
+    /// <summary>The name of today's briefing (<see cref="Briefing.NameFor"/>, the day from the injected local clock).</summary>
+    public string BriefingName() => Briefing.NameFor(DateOnly.FromDateTime(localNow()));
+
+    /// <summary>
+    /// Makes sure today's briefing (<see cref="BriefingName"/>) exists through <see cref="Briefing.Ensure"/>,
+    /// whatever the weekday and whether or not Times has data; a missing one is created, then the state is refreshed.
+    /// An existing page is left as it is (<see cref="ActionReason.Unchanged"/>, done, no refresh). A sensitive
+    /// <c>briefings</c> is Refused with <see cref="BriefingSensitiveText"/>, a failed write is Failed with
+    /// <see cref="BriefingFailedText"/>. The result's text is the page's name when done.
+    /// </summary>
+    public Task<ActionResult> OpenBriefing() => Run(OpenBriefingNow);
+
+    /// <summary>
+    /// The automatic briefing, called only by <c>Program.cs</c> after <see cref="AutoDayEnd"/> (at start and on the
+    /// day-end timer): creates today's briefing when <see cref="Briefing.ShouldCreate"/> holds (the first call that
+    /// runs counts as the start) and then offers it through <see cref="DesktopState.OfferBriefing"/>. An existing
+    /// page is never changed or offered; a sensitive <c>briefings</c> writes and shows nothing. Refused while another
+    /// action runs (the next call tries again). Never throws and never asks anything.
+    /// </summary>
+    public Task<ActionResult> AutoBriefing() => Run(AutoBriefingNow);
 
     /// <summary>
     /// Moves the note <paramref name="name"/> and its subpages under the note <paramref name="newParent"/> (matched
@@ -800,6 +836,59 @@ internal sealed class DesktopActions
             return Failed(ActionReason.WriteFailed, DailyNoteFailedText(DailyNote.NameFor(day)));
         }
     }
+
+    private ActionResult OpenBriefingNow()
+    {
+        DateOnly day = DateOnly.FromDateTime(localNow());
+        try
+        {
+            BriefingResult result = Briefing.Ensure(notes, day, () => ComposeBriefing(day));
+            return result.Kind switch
+            {
+                BriefingKind.Created => new ActionResult(ActionKind.Done, ActionReason.None, result.Name),
+                BriefingKind.Existing => new ActionResult(ActionKind.Done, ActionReason.Unchanged, result.Name),
+                _ => Refused(ActionReason.Locked, BriefingSensitiveText),
+            };
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, BriefingFailedText(Briefing.NameFor(day)));
+        }
+    }
+
+    private ActionResult AutoBriefingNow()
+    {
+        bool atStart = !briefingStarted;
+        briefingStarted = true;
+        DateOnly day = DateOnly.FromDateTime(localNow());
+        if (briefedDay == day || !Briefing.ShouldCreate(day, TimesDay.Read(timesFolder, day), atStart))
+        {
+            return new ActionResult(ActionKind.Done, ActionReason.Unchanged, Briefing.NameFor(day));
+        }
+
+        try
+        {
+            BriefingResult result = Briefing.Ensure(notes, day, () => ComposeBriefing(day));
+            switch (result.Kind)
+            {
+                case BriefingKind.Created:
+                    briefedDay = day;
+                    state.OfferBriefing(result.Name);
+                    return new ActionResult(ActionKind.Done, ActionReason.None, result.Name);
+                case BriefingKind.Existing:
+                    briefedDay = day;
+                    return new ActionResult(ActionKind.Done, ActionReason.Unchanged, result.Name);
+                default:
+                    return Refused(ActionReason.Locked, BriefingSensitiveText);
+            }
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, BriefingFailedText(Briefing.NameFor(day)));
+        }
+    }
+
+    private string ComposeBriefing(DateOnly day) => Briefing.Compose(todos, calendar, calendarFeed, timesFolder, day);
 
     private ActionResult EndDayNow(DateOnly day)
     {

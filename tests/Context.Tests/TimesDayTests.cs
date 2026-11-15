@@ -157,7 +157,7 @@ public sealed class TimesDayTests : IDisposable
     [Fact]
     public void Read_SortsStableAndIgnoresExtras()
     {
-        string json = "{\"corrections\":[1],\"entries\":[" +
+        string json = "{\"corrections\":[{\"minutes\":15,\"reason\":\"r\"}],\"later\":[1],\"entries\":[" +
             "{\"kind\":\"leaving\",\"time\":\"17:00\",\"name\":\"x\"}," +
             "{\"kind\":\"arrival\",\"time\":\"08:00\",\"extra\":true}," +
             "{\"kind\":\"checkpoint\",\"time\":\"08:00\",\"name\":\"first\"}," +
@@ -172,6 +172,47 @@ public sealed class TimesDayTests : IDisposable
             day.Entries.Select(e => e.Kind));
         Assert.Equal(["first", "second"], day.Entries.Where(e => e.Name is not null).Select(e => e.Name));
         Assert.Null(day.Entries[^1].Name);
+    }
+
+    // 172 AC-1: corrections are read for entries and absence files, in file order; none gives an empty list.
+    [Fact]
+    public void Read_Corrections_ForEntriesAndAbsence()
+    {
+        TimesDay entries = Read(
+            "{\"entries\":[{\"kind\":\"arrival\",\"time\":\"08:00\"}],\"corrections\":[" +
+            "{\"minutes\":120,\"reason\":\"overtime\"},{\"reason\":\"\",\"minutes\":-59999}]}");
+        Assert.Equal(TimesDayKind.Entries, entries.Kind);
+        Assert.Equal([120, -59999], entries.Corrections);
+
+        TimesDay absence = Read("{\"absence\":\"vacation\",\"corrections\":[{\"minutes\":59999,\"reason\":\"x\"}]}");
+        Assert.Equal(TimesDayKind.Absence, absence.Kind);
+        Assert.Equal([59999], absence.Corrections);
+
+        Assert.Empty(Read(Example).Corrections);
+        Assert.Empty(Read("{\"entries\":[],\"corrections\":[]}").Corrections);
+    }
+
+    // 172 AC-1: a bad corrections value makes the file unreadable.
+    [Theory]
+    [InlineData("[1]")]
+    [InlineData("{}")]
+    [InlineData("null")]
+    [InlineData("[{\"minutes\":0,\"reason\":\"r\"}]")]
+    [InlineData("[{\"minutes\":60000,\"reason\":\"r\"}]")]
+    [InlineData("[{\"minutes\":-60000,\"reason\":\"r\"}]")]
+    [InlineData("[{\"minutes\":1.5,\"reason\":\"r\"}]")]
+    [InlineData("[{\"minutes\":\"5\",\"reason\":\"r\"}]")]
+    [InlineData("[{\"minutes\":5}]")]
+    [InlineData("[{\"reason\":\"r\"}]")]
+    [InlineData("[{\"minutes\":5,\"reason\":null}]")]
+    [InlineData("[{\"minutes\":5,\"reason\":\"r\",\"extra\":1}]")]
+    [InlineData("[{\"minutes\":5,\"minutes\":6,\"reason\":\"r\"}]")]
+    public void Read_BadCorrections_IsUnreadable(string corrections)
+    {
+        Assert.Equal(
+            TimesDayKind.Unreadable,
+            Read("{\"entries\":[{\"kind\":\"arrival\",\"time\":\"08:00\"}],\"corrections\":" + corrections + "}").Kind);
+        Assert.Equal(TimesDayKind.Unreadable, Read("{\"absence\":\"sick\",\"corrections\":" + corrections + "}").Kind);
     }
 
     // AC-1: a work item gathers its names in first-booked order; a lunch leaving and the arrival after it.

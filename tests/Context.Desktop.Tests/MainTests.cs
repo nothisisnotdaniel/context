@@ -1430,6 +1430,161 @@ public sealed class MainTests : IDisposable
         Assert.False(File.Exists(Path.Combine(data.Root, "2026-10-29.md")));
     }
 
+    // 172 AC-8: /briefing creates today's briefing, opens it and shows the accent status; an argument is ignored.
+    [Theory]
+    [InlineData("/briefing")]
+    [InlineData("/briefing extra words")]
+    public async Task PaletteBriefing_CreatesOpensAndShowsCreated(string line)
+    {
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, line);
+
+        cut.WaitForAssertion(() => Assert.Equal("Created briefings/2026-10-29", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
+        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
+        Assert.StartsWith(
+            "# 2026-10-29\n\n## Appointments\n",
+            File.ReadAllText(Path.Combine(data.Root, "briefings", "2026-10-29.md")),
+            StringComparison.Ordinal);
+        Assert.Null(data.State!.TakeBriefing());
+        Assert.False(File.Exists(Path.Combine(data.Root, "briefings", "2026-10-29 extra words.md")));
+    }
+
+    // 172 AC-8: with unsaved changes it asks first and writes nothing until the user discards them.
+    [Fact]
+    public async Task PaletteBriefing_DirtyEditor_AsksFirst()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        js.Edit("# Plan\n\nUnsaved\n");
+
+        await RunPalette(cut, "/briefing");
+
+        cut.WaitForAssertion(
+            () => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
+        Assert.False(File.Exists(Path.Combine(data.Root, "briefings.md")));
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("Created briefings/2026-10-29", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(File.Exists(Path.Combine(data.Root, "briefings", "2026-10-29.md")));
+        cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.mount").Count), Wait);
+    }
+
+    // 172 AC-8: keeping the unsaved changes writes nothing.
+    [Fact]
+    public async Task PaletteBriefing_DirtyEditor_KeepWritesNothing()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        js.Edit("# Plan\n\nUnsaved\n");
+
+        await RunPalette(cut, "/briefing");
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll("[role=dialog] button.cancel")), Wait);
+        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+
+        Assert.False(File.Exists(Path.Combine(data.Root, "briefings.md")));
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+    }
+
+    // 172 AC-8: a sensitive briefings note and a failed write show the fixed red lines and open nothing.
+    [Fact]
+    public async Task PaletteBriefing_SensitiveAndFailure_RedLines()
+    {
+        data.WriteFile("briefings.ctxs", "{\"v\":1,\"text\":\"c2VhbGVk\"}");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, "/briefing");
+
+        cut.WaitForAssertion(
+            () => Assert.Equal("briefings is sensitive, so no briefing can be written.", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+
+        File.Delete(Path.Combine(data.Root, "briefings.ctxs"));
+        data.WriteNote("briefings", "# briefings\n");
+        data.WriteFile("briefings", "a file where the folder goes");
+        await RunPalette(cut, "/briefing");
+
+        cut.WaitForAssertion(
+            () => Assert.Equal("Can't write briefings/2026-10-29.", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Empty(js.Calls("ContextEditor.mount"));
+    }
+
+    // 172 AC-8: the palette lists /briefing with its hint.
+    [Fact]
+    public async Task Palette_OffersBriefing()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "k", CtrlKey = true });
+
+        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/briefing" });
+
+        IElement row = cut.FindAll(".palette-row")[0];
+        Assert.Equal("/briefing", row.QuerySelector(".usage")!.TextContent);
+        Assert.Equal("Open today's briefing", row.QuerySelector(".description")!.TextContent);
+    }
+
+    // 172 AC-7: a briefing the automatic write offers opens when no note has unsaved changes.
+    [Fact]
+    public async Task OfferedBriefing_CleanEditor_Opens()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+
+        ActionResult result = await data.Actions!.AutoBriefing();
+
+        Assert.Equal(ActionReason.None, result.Reason);
+        cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.mount").Count), Wait);
+        cut.WaitForAssertion(() => Assert.NotEqual("Plan", cut.Find(".note-title").TextContent), Wait);
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Null(data.State!.TakeBriefing());
+    }
+
+    // 172 AC-7: a briefing offered before Main renders (the start-up call) opens on the first render.
+    [Fact]
+    public async Task OfferedBriefing_BeforeRender_OpensFirst()
+    {
+        EditorJs js = new EditorJs(data.Bunit);
+        await data.RefreshAsync();
+        await data.Actions!.AutoBriefing();
+
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
+        Assert.Null(data.State!.TakeBriefing());
+    }
+
+    // 172 AC-7: with unsaved changes the editor is left alone and the accent status points to /briefing.
+    [Fact]
+    public async Task OfferedBriefing_DirtyEditor_ShowsReadyStatus()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        js.Edit("# Plan\n\nUnsaved\n");
+
+        await data.Actions!.AutoBriefing();
+
+        cut.WaitForAssertion(
+            () => Assert.Equal(
+                "Today's briefing is ready: briefings/2026-10-29. Type /briefing to open it.",
+                cut.Find(".main-status").TextContent),
+            Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        Assert.Single(js.Calls("ContextEditor.mount"));
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+    }
+
     private static async Task RunPalette(IRenderedComponent<Main> cut, string line)
     {
         await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
