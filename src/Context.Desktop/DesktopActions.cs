@@ -1148,7 +1148,9 @@ internal sealed class DesktopActions
         if (unlocked is not null)
         {
             // Only the sensitive note the session holds, by its own name; SaveNoteNow re-seals it and never writes plain bytes.
-            if (!IsSealedPath(unlocked.Path) || !string.Equals(unlocked.Name, name, StringComparison.Ordinal))
+            if (!IsSealedPath(unlocked.Path)
+                || !string.Equals(unlocked.Name, name, StringComparison.Ordinal)
+                || !ReferenceEquals(unlocked, state.Session.Note))
             {
                 return Refused(ActionReason.Locked, CantUnlockText(name));
             }

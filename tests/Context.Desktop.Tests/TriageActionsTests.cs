@@ -179,6 +179,25 @@ public sealed class TriageActionsTests : IDisposable
         Assert.Equal(before, Files());
     }
 
+    // AC-8: an unlocked note the session doesn't hold (here: closed again) is refused and nothing is written.
+    [Fact]
+    public async Task TriageAppend_NoteNotInSession_Refused()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteNote("inbox", InboxText);
+        data.WriteSensitive("Secret", "# Secret\n");
+        await data.RefreshAsync();
+        EditableNote? unlocked = await data.State!.ReadSensitive("Secret");
+        Assert.NotNull(unlocked);
+        data.State.Session.Close("Secret");
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult result = await data.Actions!.TriageAppend(Item, "Secret", unlocked);
+
+        Assert.Equal((ActionKind.Refused, "Can't unlock Secret."), (result.Kind, result.Text));
+        Assert.Equal(before, Files());
+    }
+
     // AC-9: when the inbox no longer holds the exact line, nothing is written to any target.
     [Fact]
     public async Task Triage_LineGone_NothingWritten()
