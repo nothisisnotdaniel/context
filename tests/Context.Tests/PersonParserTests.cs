@@ -185,4 +185,27 @@ public sealed class PersonParserTests
         Assert.Equal(person, People.PersonOf(note));
         Assert.Equal("people/Anna", People.PersonNote("Anna"));
     }
+
+    // 163 AC-1: nested and mixed run lengths.
+    [Theory]
+    [InlineData("`` a ` @[X] `` @[Real]", "Real")]
+    [InlineData("` `` ` @[Real] ``", "Real")]
+    [InlineData("an unclosed ` @[Real]", "Real")]
+    public void Parse_MixedRunLengths_SkipsSpans(string markdown, string name)
+    {
+        Assert.Equal([name], PersonParser.Parse(markdown));
+    }
+
+    // 163 AC-2: many unmatched backtick runs of different lengths are parsed in linear time.
+    [Fact]
+    public void Parse_ManyUnmatchedRuns_IsFast()
+    {
+        string line = string.Concat(Enumerable.Range(1, 3000).Select(k => new string('`', k) + "a #t [[x]] @[P] "));
+        System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+
+        IReadOnlyList<string> names = PersonParser.Parse(line);
+
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), $"took {watch.Elapsed}");
+        Assert.Equal(["P"], names);
+    }
 }

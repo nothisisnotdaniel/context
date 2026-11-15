@@ -13,13 +13,17 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `TagParser.Parse` finds `#tag` (at line start or after whitespace, a letter first, then letters,
     digits, `-`, `_`; at most 50 chars; lower-cased, distinct) and `#[tag with spaces]` (`#[` at line start or
     after whitespace, up to the first `]` on the line, not followed by `(`; trimmed, whitespace runs become one
-    space, then the same rules plus spaces) outside fenced code blocks and inline backtick spans. `#work` and
+    space, then the same rules plus spaces) outside fenced code blocks and inline backtick spans (a run of backticks up to the next run of the same length on
+    the line; a run with no match is plain text). Code spans come from `CodeSpans.For(line)` (in `TagParser.cs`; `null`
+    for a line with no backtick, else every run's match found in one pass, so a line full of stray backticks stays
+    linear), shared by the tag, link and mention parsers. `TagParser.Collapse` is the one whitespace-collapsing loop
+    (`CollapseWhitespace`, `NormalizeBracket` with its early exit, and `PersonParser.Normalize` use it). `#work` and
     `#[Work]` are one tag. `TagParser.Format` shows a tag as `#tag`, or `#[tag]` when it has a space; all tag
     output uses it. `TagIndex.NormalizeTag` (for a typed tag, as in `context tags <tag>`) accepts `work`, `#work`, `[a b]`, `#[a b]`. `TagIndex` keeps the index in SQLite at `<root>/context.db` (`Microsoft.Data.Sqlite`,
     `Pooling=False`, parameterized SQL only): `notes(name, modified)` (last-write UTC ticks, NULL for a
     note that couldn't be read so it is retried), `note_tags(note, tag)`, `note_links(note, target)`, `note_people(note, person, spelling)` and `note_attributes(note, key, value_key, value)` (job 157, primary key `(note, key, value_key)`, index on `(key, value_key)`). `Sync(NoteStore)` updates it
     in one transaction and only re-parses files whose time changed. `PRAGMA user_version` holds the parser
-    version (`TagIndex.ParserVersion`, now 5: `key:: value` attributes); when it is lower, `Sync` clears every stored time in the same
+    version (`TagIndex.ParserVersion`, now 6: a link target that runs into a code span is no link; 5 was `key:: value` attributes); when it is lower, `Sync` clears every stored time in the same
     transaction (so all notes are re-parsed once) and then sets it. Bump it whenever parsing changes. Queries: `Tags()`, `NotesWithTag`,
     `NoteTags()`, `FindNote`, `Links`, `People()`, `NotesMentioning`, `NotesWithAttribute(key, value)` (by `AttributeParser.ValueKey`), `NotesWithoutAttribute(key)`. A database that can't be opened or isn't valid throws `TagIndexException` (an
     `IOException`) and is never deleted or overwritten. The file database waits up to `TagIndex.BusyTimeout` (5 s; an
@@ -30,7 +34,9 @@ Every factory agent reads this file before working on Context. Keep it short and
   - **Note links:** `NoteLinkParser.Parse` finds `[[Note name]]` anywhere in a line (`[[`, text with no `[` up to the
     first `]` on the line, then `]]`; trimmed; empty or over 403 chars (`MaxTargetLength` = `NoteStore.MaxNameLength + 3`) is no link; distinct ignoring
     case, first spelling kept), skipping fences and code spans through `TagParser.LinesOutsideFences` and
-    `TagParser.SkipCodeSpan` (shared, not copied). It scans each line once (cached next `]` and `[`). `[[...]]` is never
+    `CodeSpans` (shared, not copied). A backtick run that opens a matched code span between `[[` and that first `]`
+    means no link, and the scan goes on at that span (job 163: ``[[a `b]] c` `` is no link; ``[[a`b]]`` links to ``a`b``). It scans
+    each line once (cached next `]`, `[` and code-span start). `[[...]]` is never
     a tag and `#[...]` never a link; `|alias` and `#heading` are part of the target. Targets are stored as written and
     resolved only at query time by `NameLookup.Resolve` (like `context note show`: as written, then without one `.md`; exact, then
     ignoring case), never turned into a path, so a link to a missing note starts working once the note exists. `Links`

@@ -100,31 +100,9 @@ internal static class PersonParser
         // Stops at the first refused character, or once the name is too long, so the work per "@[" is bounded by the
         // next '[' or by the title length, not by the distance to the next ']'.
         System.Text.StringBuilder builder = new(NoteStore.MaxTitleLength + 1);
-        bool pendingSpace = false;
-        foreach (char c in text)
+        if (!TagParser.Collapse(text, builder, NoteStore.MaxTitleLength, static (c, _) => !RefusedChars.Contains(c, StringComparison.Ordinal)))
         {
-            if (char.IsWhiteSpace(c))
-            {
-                pendingSpace = builder.Length > 0;
-                continue;
-            }
-
-            if (RefusedChars.Contains(c, StringComparison.Ordinal))
-            {
-                return null;
-            }
-
-            if (pendingSpace)
-            {
-                builder.Append(' ');
-                pendingSpace = false;
-            }
-
-            builder.Append(c);
-            if (builder.Length > NoteStore.MaxTitleLength)
-            {
-                return null;
-            }
+            return null;
         }
 
         string name = builder.ToString();
@@ -143,6 +121,7 @@ internal static class PersonParser
     // Calls found(start, end, name) for every mention in the line, in order: line[start..end] is "@[...]".
     private static void ScanLine(string line, Action<int, int, string> found)
     {
+        CodeSpans? spans = CodeSpans.For(line);
         int i = 0;
         int nextClose = -1;
         while (i < line.Length)
@@ -150,7 +129,7 @@ internal static class PersonParser
             char c = line[i];
             if (c == '`')
             {
-                i = TagParser.SkipCodeSpan(line, i);
+                i = spans!.Skip(i);
                 continue;
             }
 
