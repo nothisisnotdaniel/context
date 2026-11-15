@@ -243,6 +243,9 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#210](backlog/210-strip-bidi-and-line-separator-characters.md) Strip bidi and line-separator characters in SafeText
 - [?] [#212](backlog/212-add-a-line-to-a-daily.md) Add a line to a daily note from the CLI
 - [?] [#213](backlog/213-keep-times-names-from-becoming-tags.md) Keep Times names from becoming tags or links in generated notes
+- [?] [#214](backlog/214-say-which-versions-the-history-diff.md) Say which versions the history diff compares
+- [?] [#215](backlog/215-cap-the-total-size-of-note.md) Cap the total size of note history
+- [?] [#216](backlog/216-fix-the-flaky-breadcrumb-test-in.md) Fix the flaky breadcrumb test in MainTests
 
 ## Dropped with the terminal UI
 
