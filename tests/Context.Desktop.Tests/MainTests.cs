@@ -824,6 +824,10 @@ public sealed class MainTests : IDisposable
         await cut.FindAll(".notes-region button.name").Single(b => b.GetAttribute("title") == name).ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
+
+        // 175: the links panel loads behind Task.Run on its own schedule; its render re-parses the whole markup, so
+        // a test that reads the page before it lands can compare elements from two renders. Wait until it is in.
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);
     }
 
     // 152 AC-14: a subpage shows the breadcrumb above the toolbar; a top-level note shows none.
