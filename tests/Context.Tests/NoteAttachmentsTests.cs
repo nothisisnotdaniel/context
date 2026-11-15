@@ -12,6 +12,9 @@ public sealed class NoteAttachmentsTests : IDisposable
     private static readonly byte[] Svg = Encoding.ASCII.GetBytes("<svg xmlns=\"http://www.w3.org/2000/svg\"><script/></svg>");
     private static readonly byte[] Html = Encoding.ASCII.GetBytes("<html><script>alert(1)</script></html>");
 
+    // Generous: the linear scans take well under a second; the old quadratic ones took hours.
+    private static readonly TimeSpan ScanBound = TimeSpan.FromSeconds(60);
+
     private const string Letters100 =
         "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij";
 
@@ -779,6 +782,113 @@ public sealed class NoteAttachmentsTests : IDisposable
         "svg" => Svg,
         _ => Html,
     };
+
+    // Review round 1 (security): a crafted note can't make the link scanners run for hours. Each marker costs at most
+    // MaxScannedName characters, so about 5 MB of markers with one ')' at the end is scanned in linear time.
+    [Fact]
+    public async Task LinkScans_AdversarialNote_FinishLinear()
+    {
+        StringBuilder text = new StringBuilder("![a](.attachments/real.png) [b](.attachments/doc.pdf)\n");
+        while (text.Length < NoteStore.MaxEditBytes - 1)
+        {
+            text.Append(NoteAttachments.LinkMarker);
+        }
+
+        text.Append(')');
+        string note = text.ToString();
+
+        Task<(IReadOnlyList<string> Images, IReadOnlyList<string> Names)> scan =
+            Task.Run(() => (NoteAttachments.ImageSources(note), NoteAttachments.LinkedNames(note)));
+
+        Assert.Same(scan, await Task.WhenAny(scan, Task.Delay(ScanBound)));
+        (IReadOnlyList<string> images, IReadOnlyList<string> names) = await scan;
+        Assert.Equal([".attachments/real.png"], images);
+        Assert.Equal(["real.png", "doc.pdf"], names);
+    }
+
+    // Review round 1 (security): about 5 MB of distinct valid names is scanned in linear time (no quadratic distinct check).
+    [Fact]
+    public async Task LinkedNames_ManyDistinctNames_FinishLinear()
+    {
+        StringBuilder text = new StringBuilder();
+        int count = 0;
+        while (text.Length < NoteStore.MaxEditBytes - 64)
+        {
+            text.Append("](.attachments/n").Append(count).Append(".png)");
+            count++;
+        }
+
+        string note = text.ToString();
+        Task<IReadOnlyList<string>> scan = Task.Run(() => NoteAttachments.LinkedNames(note));
+
+        Assert.Same(scan, await Task.WhenAny(scan, Task.Delay(ScanBound)));
+        IReadOnlyList<string> names = await scan;
+        Assert.Equal(count, names.Count);
+        Assert.Equal("n0.png", names[0]);
+    }
+
+    // Review round 1 (security): only MaxScannedName characters after a marker count; the longest stored name still does.
+    [Fact]
+    public void LinkedNames_LooksOnlyAsFarAsTheLongestStoredName()
+    {
+        string longest = Letters100 + ".jpeg";
+        string tooLong = Letters100 + ".jpegx";
+        string text = $"![a](.attachments/{longest}) ![b](.attachments/{tooLong}) ![c](.attachments/end.png)";
+
+        Assert.Equal(NoteAttachments.MaxScannedName, longest.Length);
+        Assert.Equal([longest, "end.png"], NoteAttachments.LinkedNames(text));
+        Assert.Equal([".attachments/" + longest, ".attachments/end.png"], NoteAttachments.ImageSources(text));
+    }
+
+    // Review round 1 (security): up to MaxLinkedNames a delete removes the sole attachments; past it every one stays.
+    [Theory]
+    [InlineData(NoteAttachments.MaxLinkedNames, 0)]
+    [InlineData(NoteAttachments.MaxLinkedNames + 1, 2)]
+    public void RemoveUnlinked_PastTheCap_KeepsEvery(int linkCount, int expectedLeft)
+    {
+        WriteNote("Note", "x");
+        attachments.Add("Note", "a.png", Png);
+        attachments.Add("Note", "b.pdf", Pdf);
+        StringBuilder text = new StringBuilder("![a](.attachments/a.png) [b](.attachments/b.pdf)\n");
+        for (int i = 2; i < linkCount; i++)
+        {
+            text.Append("[x](.attachments/x").Append(i).Append(".png)\n");
+        }
+
+        File.WriteAllText(NotePath("Note"), text.ToString());
+        store.TryFind("Note", out NoteInfo? note);
+        IReadOnlyList<string> linked = attachments.LinkedNamesOf("Note");
+
+        store.Delete("Note", removeHistory: true, removeAttachments: true);
+        attachments.RemoveUnlinked(note!, linked);
+
+        Assert.Equal(linkCount, linked.Count);
+        string folder = Path.Combine(root, ".attachments");
+        Assert.Equal(expectedLeft, Directory.Exists(folder) ? Directory.GetFiles(folder).Length : 0);
+    }
+
+    // Review round 1 (security): a note linking more than MaxLinkedNames names moves plainly; every file stays.
+    [Fact]
+    public void MoveWithNote_PastTheCap_PlainMove_KeepsSources()
+    {
+        store.Create("Target");
+        WriteNoteWith("Note", "shot.png", Png);
+        StringBuilder text = new StringBuilder(File.ReadAllText(NotePath("Note")));
+        for (int i = 0; i < NoteAttachments.MaxLinkedNames; i++)
+        {
+            text.Append("[x](.attachments/x").Append(i).Append(".png)\n");
+        }
+
+        File.WriteAllText(NotePath("Note"), text.ToString());
+        byte[] noteBytes = File.ReadAllBytes(NotePath("Note"));
+
+        NoteInfo? moved = attachments.MoveWithNote("Note", "Target");
+
+        Assert.Equal("Target/Note", moved?.Name);
+        Assert.Equal(noteBytes, File.ReadAllBytes(Path.Combine(root, "Target", "Note.md")));
+        Assert.Equal(Png, File.ReadAllBytes(Path.Combine(root, ".attachments", "shot.png")));
+        Assert.False(Directory.Exists(Path.Combine(root, "Target", ".attachments")));
+    }
 
     private string NotePath(string name) => Path.Combine([root, .. name.Split('/')]) + ".md";
 

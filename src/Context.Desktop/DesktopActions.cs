@@ -1464,7 +1464,7 @@ internal sealed class DesktopActions
         List<AttachmentLine> lines = [];
         foreach (DroppedFile file in files)
         {
-            lines.Insert(lines.Count, AttachOne(name, file));
+            lines.Add(AttachOne(name, file));
         }
 
         bool any = lines.Any(l => l.Kind == ActionKind.Done);

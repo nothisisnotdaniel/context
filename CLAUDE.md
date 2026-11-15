@@ -382,7 +382,10 @@ Every factory agent reads this file before working on Context. Keep it short and
     `0600` temp file in the folder, then a no-overwrite move, never touching the note or `context.db`.
     `TryResolve(note, src)` accepts only `.attachments/<stored name>`, a regular file inside the root, no link, at
     most `MaxBytes`, passing `Sniff`. `ImageSources(text)` (at most 20) and `LinkedNames(text)` (ordinal, followed
-    by `)` or a space, code included) never read files. `MoveWithNote(name, newParent)` (only `DesktopActions.MoveNote`)
+    by `)` or a space, code included) never read files; both look only `MaxScannedName` (105) characters past each
+    marker and keep distinct names in a `HashSet`, so a crafted note is scanned in linear time. A note linking more
+    than `MaxLinkedNames` (100) names keeps every attachment: `MoveWithNote` makes a plain move and `RemoveUnlinked`
+    removes nothing (so `KeptBySiblings` never runs names x sibling bytes unbounded). `MoveWithNote(name, newParent)` (only `DesktopActions.MoveNote`)
     copies each resolved linked file into the target level (Add rules, clash `-N`), moves the note with `Move`,
     rewrites only renamed `](.attachments/<old>` byte for byte (CRLF/BOM kept, no history version), then deletes the
     sources no remaining sibling links; any failure before that undoes everything (`NoteExistsException` and

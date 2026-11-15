@@ -119,6 +119,18 @@ internal sealed class NoteAttachments
     /// <summary>The longest stem of a stored name (the part before its one <c>.</c>).</summary>
     public const int MaxStemLength = 100;
 
+    /// <summary>The longest extension a stored file can have (<c>jpeg</c>, <c>webp</c>).</summary>
+    public const int MaxExtensionLength = 4;
+
+    /// <summary>The longest name a link scan looks at: stem, <c>.</c> and extension.</summary>
+    public const int MaxScannedName = MaxStemLength + 1 + MaxExtensionLength;
+
+    /// <summary>
+    /// The most distinct linked names a move or delete acts on; a note that links more keeps every attachment (a move
+    /// carries none, a delete removes none), so a crafted note can't make the sibling check run for hours.
+    /// </summary>
+    public const int MaxLinkedNames = 100;
+
     /// <summary>The highest clash suffix tried (<c>-2</c> to <c>-99</c>).</summary>
     public const int MaxClash = 99;
 
@@ -420,28 +432,20 @@ internal sealed class NoteAttachments
     public static IReadOnlyList<string> ImageSources(string text)
     {
         List<string> sources = [];
+        HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
         int at = 0;
         while (sources.Count < MaxInlineImages)
         {
-            int start = text.IndexOf(LinkMarker, at, StringComparison.Ordinal);
-            if (start < 0)
+            string? name = NextLinkedName(text, ref at, ')');
+            if (name is null)
             {
                 break;
             }
 
-            int nameStart = start + LinkMarker.Length;
-            int close = text.IndexOf(')', nameStart);
-            at = nameStart;
-            if (close < 0)
+            string src = SrcPrefix + name;
+            if (IsImageExtension(name) && seen.Add(src))
             {
-                break;
-            }
-
-            string name = text[nameStart..close];
-            string src = FolderName + "/" + name;
-            if (IsStoredName(name) && IsImageExtension(name) && !sources.Contains(src))
-            {
-                sources.Insert(sources.Count, src);
+                sources.Add(src);
             }
         }
 
@@ -451,36 +455,66 @@ internal sealed class NoteAttachments
     /// <summary>
     /// The distinct names (ordinal) of every <c>](.attachments/&lt;name&gt;</c> in <paramref name="text"/> that is
     /// followed by <c>)</c> or a space and whose name has the stored shape (<see cref="IsStoredName"/>), in text order.
-    /// Image and plain links count, and so do links in code (keeping errs on the safe side).
+    /// Image and plain links count, and so do links in code (keeping errs on the safe side). Only the first
+    /// <see cref="MaxScannedName"/> characters after each marker are looked at, so the scan is linear in the text;
+    /// a longer name can't be a stored one.
     /// </summary>
     public static IReadOnlyList<string> LinkedNames(string text)
     {
         List<string> names = [];
+        HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
         int at = 0;
         while (true)
         {
-            int start = text.IndexOf(LinkMarker, at, StringComparison.Ordinal);
-            if (start < 0)
+            string? name = NextLinkedName(text, ref at, ')', ' ');
+            if (name is null)
             {
                 break;
             }
 
-            int nameStart = start + LinkMarker.Length;
-            int end = text.IndexOfAny([')', ' '], nameStart);
-            at = nameStart;
-            if (end < 0)
+            if (seen.Add(name))
             {
-                break;
-            }
-
-            string name = text[nameStart..end];
-            if (IsStoredName(name) && !names.Contains(name, StringComparer.Ordinal))
-            {
-                names.Insert(names.Count, name);
+                names.Add(name);
             }
         }
 
         return names;
+    }
+
+    /// <summary>
+    /// The next name of the stored shape after a <see cref="LinkMarker"/> at or after <paramref name="at"/> that ends at
+    /// one of <paramref name="ends"/> within <see cref="MaxScannedName"/> characters, or <c>null</c> when there is none.
+    /// Each marker costs at most <see cref="MaxScannedName"/> characters and allocates only a name that short, so a
+    /// whole scan is linear in the text. <paramref name="at"/> moves past the marker.
+    /// </summary>
+    private static string? NextLinkedName(string text, ref int at, params char[] ends)
+    {
+        while (at < text.Length)
+        {
+            int start = text.IndexOf(LinkMarker, at, StringComparison.Ordinal);
+            if (start < 0)
+            {
+                at = text.Length;
+                return null;
+            }
+
+            int nameStart = start + LinkMarker.Length;
+            at = nameStart;
+            int window = Math.Min(MaxScannedName + 1, text.Length - nameStart);
+            int end = text.AsSpan(nameStart, window).IndexOfAny(ends);
+            if (end <= 0)
+            {
+                continue;
+            }
+
+            string name = text.Substring(nameStart, end);
+            if (IsStoredName(name))
+            {
+                return name;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -514,7 +548,8 @@ internal sealed class NoteAttachments
     /// deleted. Any failure before the cleanup removes the copies (and a folder this move created) and moves the note
     /// back: the two refusals of <see cref="NoteStore.Move"/> are rethrown unchanged, anything else is an
     /// <see cref="AttachmentMoveException"/>. A failed cleanup only leaves sources behind. A move within the level
-    /// touches no attachment.
+    /// touches no attachment, and so does a note that links more than <see cref="MaxLinkedNames"/> names (a plain move;
+    /// every file stays where it is).
     /// </summary>
     public NoteInfo? MoveWithNote(string name, string? newParent)
     {
@@ -539,7 +574,14 @@ internal sealed class NoteAttachments
         try
         {
             original = BoundedFile.Read(source.Path, NoteStore.MaxEditBytes);
-            foreach (string linkedName in LinkedNames(DecodeText(original)))
+            IReadOnlyList<string> names = LinkedNames(DecodeText(original));
+            if (names.Count > MaxLinkedNames)
+            {
+                // Too many to check against the siblings: carry none and delete none, so every file stays.
+                return notes.Move(name, newParent);
+            }
+
+            foreach (string linkedName in names)
             {
                 ResolvedAttachment? resolved = TryResolve(source.Name, FolderName + "/" + linkedName);
                 if (resolved is not null)
@@ -657,14 +699,16 @@ internal sealed class NoteAttachments
     /// After the note <paramref name="deleted"/> is gone: deletes from its level's <c>.attachments</c> each of
     /// <paramref name="names"/> (taken from its text before the delete) that no remaining sibling links (see
     /// <see cref="KeptBySiblings"/>), only regular files of the stored shape, never through a link, then removes that
-    /// folder when it is empty. Returns how many files went. Never throws: a file it can't remove stays.
+    /// folder when it is empty. Returns how many files went. Never throws: a file it can't remove stays. More than
+    /// <see cref="MaxLinkedNames"/> names remove nothing.
     /// </summary>
     public int RemoveUnlinked(NoteInfo deleted, IReadOnlyList<string> names)
     {
         try
         {
-            if (names.Count == 0)
+            if (names.Count == 0 || names.Count > MaxLinkedNames)
             {
+                // More than MaxLinkedNames: too many to check against the siblings, so every attachment stays.
                 return 0;
             }
 
@@ -785,6 +829,9 @@ internal sealed class NoteAttachments
     {
         byte[] bytes = BoundedFile.Read(path, NoteStore.MaxEditBytes);
         byte[] marker = Encoding.ASCII.GetBytes(LinkMarker);
+        List<KeyValuePair<byte[], byte[]>> pairs = renamed
+            .Select(p => new KeyValuePair<byte[], byte[]>(Encoding.ASCII.GetBytes(p.Key), Encoding.ASCII.GetBytes(p.Value)))
+            .ToList();
         List<byte> output = new List<byte>(bytes.Length + 64);
         int at = 0;
         while (at < bytes.Length)
@@ -796,23 +843,23 @@ internal sealed class NoteAttachments
             }
 
             int nameStart = at + found + marker.Length;
-            output.AddRange(bytes.AsSpan(at, nameStart - at).ToArray());
+            output.AddRange(bytes.AsSpan(at, nameStart - at));
             at = nameStart;
-            foreach (KeyValuePair<string, string> pair in renamed)
+            foreach (KeyValuePair<byte[], byte[]> pair in pairs)
             {
-                byte[] old = Encoding.ASCII.GetBytes(pair.Key);
+                byte[] old = pair.Key;
                 int end = nameStart + old.Length;
                 if (end < bytes.Length && bytes.AsSpan(nameStart, old.Length).SequenceEqual(old)
                     && (bytes[end] == (byte)')' || bytes[end] == (byte)' '))
                 {
-                    output.AddRange(Encoding.ASCII.GetBytes(pair.Value));
+                    output.AddRange(pair.Value);
                     at = end;
                     break;
                 }
             }
         }
 
-        output.AddRange(bytes.AsSpan(at).ToArray());
+        output.AddRange(bytes.AsSpan(at));
         string temp = Path.Combine(Path.GetDirectoryName(path) ?? string.Empty, $".{Guid.NewGuid():N}.tmp");
         try
         {

@@ -197,6 +197,17 @@ public sealed class NoteEditorTests : IDisposable
         Assert.DoesNotContain("boom-143", cut.Markup, StringComparison.Ordinal);
     }
 
+    // 177 review nit: an empty status line has no child nodes at all, so `.status:empty` hides it.
+    [Fact]
+    public async Task EmptyStatus_HasNoChildNodes()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+
+        Assert.Equal(0, cut.Find(".status").ChildNodes.Length);
+    }
+
     // AC-8: the Save button saves the editor's Markdown and says so.
     [Fact]
     public async Task SaveButton_SavesMarkdown()

@@ -9,6 +9,9 @@ public sealed class AttachmentActionsTests : IDisposable
     private static readonly byte[] Pdf = Encoding.ASCII.GetBytes("%PDF-1.7\n%...");
     private static readonly byte[] Svg = Encoding.ASCII.GetBytes("<svg xmlns=\"http://www.w3.org/2000/svg\"/>");
 
+    // Generous: the bounded scans take well under a second; the old quadratic ones took hours.
+    private static readonly TimeSpan DeleteBound = TimeSpan.FromSeconds(60);
+
     private readonly DesktopFixture data = new();
 
     public void Dispose() => data.Dispose();
@@ -282,6 +285,33 @@ public sealed class AttachmentActionsTests : IDisposable
         Assert.False(File.Exists(NotePath("Plan")));
         Assert.False(File.Exists(Path.Combine(data.Root, ".attachments", "sole.png")));
         Assert.Equal(shared, Files()[".attachments/shared.pdf"]);
+    }
+
+    // Review round 1 (security): a crafted 5 MB note of distinct links, next to a 5 MB sibling, is deleted quickly and,
+    // past NoteAttachments.MaxLinkedNames, removes no attachment.
+    [Fact]
+    public async Task DeleteNote_CraftedNote_FinishesAndKeepsAttachments()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        await data.RefreshAsync();
+        await data.Actions!.AttachFiles("Plan", 1, [new DroppedFile("sole.png", Png.Length, Png)]);
+        StringBuilder text = new StringBuilder("![sole.png](.attachments/sole.png)\n");
+        for (int i = 0; text.Length < NoteStore.MaxEditBytes - 64; i++)
+        {
+            text.Append("](.attachments/n").Append(i).Append(".png)");
+        }
+
+        data.WriteNote("Plan", text.ToString());
+        data.WriteNote("Other", new string('n', (int)NoteStore.MaxEditBytes - 16));
+        string sole = Files()[".attachments/sole.png"];
+
+        Task<ActionResult> delete = data.Actions.DeleteNote("Plan", new Confirmation());
+
+        Assert.Same(delete, await Task.WhenAny(delete, Task.Delay(DeleteBound)));
+        ActionResult result = await delete;
+        Assert.Equal((ActionKind.Done, "Plan"), (result.Kind, result.Text));
+        Assert.False(File.Exists(NotePath("Plan")));
+        Assert.Equal(sole, Files()[".attachments/sole.png"]);
     }
 
     // AC-4/AC-15: deleting a note with subpages removes the child .attachments, and a sole attachment of its level.
