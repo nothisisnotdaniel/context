@@ -72,6 +72,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#49](backlog/049-weekly-review.md) Weekly review → 169-weekly-review
 - [x] [#47](backlog/047-full-text-search.md) Full-text search → 170-full-text-search
 - [x] [#70](backlog/070-day-s-end-in-the-daily.md) Day's end in the daily note → 171-days-end-daily-note
+- [ ] [#211](backlog/211-remove-cli-commands-that-only-mirror.md) Remove CLI commands that only mirror desktop views
 - [ ] [#71](backlog/071-morning-briefing.md) Morning briefing
 - [ ] [#53](backlog/053-note-history.md) Note history
 - [ ] [#54](backlog/054-attachments.md) Attachments
@@ -242,7 +243,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#208](backlog/208-avoid-a-full-scan-when-re.md) Avoid a full scan when re-indexing one note's text
 - [?] [#209](backlog/209-announce-the-search-result-count-to.md) Announce the search result count to screen readers
 - [?] [#210](backlog/210-strip-bidi-and-line-separator-characters.md) Strip bidi and line-separator characters in SafeText
-- [ ] [#211](backlog/211-remove-cli-commands-that-only-mirror.md) Remove CLI commands that only mirror desktop views
 - [?] [#212](backlog/212-add-a-line-to-a-daily.md) Add a line to a daily note from the CLI
 
 ## Dropped with the terminal UI
