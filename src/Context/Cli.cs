@@ -47,6 +47,7 @@ internal sealed class Cli
         ("find <attribute> <value...>", "List the notes with an attribute line, e.g. find role Bereichsleiter."),
         ("types", "List the page types with their attributes."),
         ("current", "Today's appointments, due todos and linked notes."),
+        ("today", "Print today's note, creating it with the day's appointments and due todos."),
         ("import <path>", "Store a Markdown file as a note."),
         ("export <note> <path>", "Write a note to a new plain file."),
         ("<command> --json", "Print one JSON object: version, todos, notes, note show, tags, links, people, person, find, types, current."),
@@ -130,7 +131,7 @@ internal sealed class Cli
 
         string name = args[0].ToLowerInvariant();
         string[] rest = args[1..];
-        if (json && (name is "help" or "--help" or "-h" or "capture" or "todo" or "import" or "export"))
+        if (json && (name is "help" or "--help" or "-h" or "capture" or "todo" or "today" or "import" or "export"))
         {
             // Checked before any argument: nothing is written and the folder is not created.
             return Usage(JsonOnly);
@@ -232,6 +233,8 @@ internal sealed class Cli
                 return NoArguments("types", args, out usage, Types);
             case "current":
                 return NoArguments("current", args, out usage, Current);
+            case "today":
+                return NoArguments("today", args, out usage, Today);
             case "import":
                 if (args.Length != 1)
                 {
@@ -518,6 +521,29 @@ internal sealed class Cli
         }
 
         return ExitOk;
+    }
+
+    // Prints today's note like note show, creating it first (title, appointments, due todos) when it is missing.
+    private int Today(Session session)
+    {
+        DateOnly day = today();
+        DailyNoteResult result;
+        try
+        {
+            result = DailyNote.Ensure(
+                session.Notes, day, () => DailyNote.Compose(session.Todos, session.Calendar, session.Feed, day));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Error($"Can't write {DailyNote.NameFor(day)}.");
+        }
+
+        if (result.Kind == DailyNoteKind.Sensitive)
+        {
+            return Error(SensitiveText(OneLine(result.Name)));
+        }
+
+        return ShowNote(session, result.Name);
     }
 
     /// <summary>The error line for a command that would need the text of a sensitive note.</summary>

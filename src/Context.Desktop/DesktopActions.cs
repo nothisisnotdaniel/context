@@ -152,6 +152,7 @@ internal sealed class DesktopActions
     private readonly CalendarLink? calendarLink;
     private readonly CalendarFeed? calendarFeed;
     private readonly Func<DateTime> localNow;
+    private readonly CalendarStore calendar;
     private int running;
 
     public DesktopActions(
@@ -161,9 +162,11 @@ internal sealed class DesktopActions
         INoteLauncher launcher,
         CalendarLink? calendarLink = null,
         CalendarFeed? calendarFeed = null,
-        Func<DateTime>? localNow = null)
+        Func<DateTime>? localNow = null,
+        CalendarStore? calendar = null)
     {
         this.localNow = localNow ?? (() => DateTime.Now);
+        this.calendar = calendar ?? new CalendarStore(notes.Root, TimeZoneInfo.Local);
         this.calendarLink = calendarLink;
         this.calendarFeed = calendarFeed;
         this.notes = notes;
@@ -270,6 +273,9 @@ internal sealed class DesktopActions
     /// <summary>The red line when the export target can't be written.</summary>
     public static string CantWriteText(string path) => $"Can't write {path}.";
 
+    /// <summary>The red line when the daily note can't be created.</summary>
+    public static string DailyNoteFailedText(string name) => $"Can't write {name}. Nothing was done.";
+
     /// <summary>The red line when a todo's text is too long.</summary>
     public static string TodoTooLongText => $"A todo can be at most {MaxTodoLength} characters. Nothing was done.";
 
@@ -351,6 +357,18 @@ internal sealed class DesktopActions
     /// an existing page is never changed. The result's text is the person page's full name when done.
     /// </summary>
     public Task<ActionResult> OpenPerson(string name) => Run(() => OpenPersonNow(name));
+
+    /// <summary>The name of today's daily note (<see cref="DailyNote.NameFor"/>), by the injected local clock.</summary>
+    public string DailyNoteName() => DailyNote.NameFor(DateOnly.FromDateTime(localNow()));
+
+    /// <summary>
+    /// Makes sure today's daily note (<see cref="DailyNoteName"/>, the day from the injected local clock) exists
+    /// through <see cref="DailyNote.Ensure"/>: a missing one is created with the day's appointments (calendar files
+    /// and the feed) and the due todos, then the state is refreshed. An existing plain or sensitive note is left as
+    /// it is (<see cref="ActionReason.Unchanged"/>, done, nothing read or written, no key-store call, no refresh). The
+    /// result's text is the note's name when done, else <see cref="DailyNoteFailedText"/>.
+    /// </summary>
+    public Task<ActionResult> OpenDailyNote() => Run(OpenDailyNoteNow);
 
     /// <summary>
     /// Moves the note <paramref name="name"/> and its subpages under the note <paramref name="newParent"/> (matched
@@ -682,6 +700,23 @@ internal sealed class DesktopActions
         catch (Exception)
         {
             return Failed(ActionReason.WriteFailed, CaptureFailedText);
+        }
+    }
+
+    private ActionResult OpenDailyNoteNow()
+    {
+        DateOnly day = DateOnly.FromDateTime(localNow());
+        try
+        {
+            DailyNoteResult result = DailyNote.Ensure(notes, day, () => DailyNote.Compose(todos, calendar, calendarFeed, day));
+            return new ActionResult(
+                ActionKind.Done,
+                result.Kind == DailyNoteKind.Created ? ActionReason.None : ActionReason.Unchanged,
+                result.Name);
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, DailyNoteFailedText(DailyNote.NameFor(day)));
         }
     }
 

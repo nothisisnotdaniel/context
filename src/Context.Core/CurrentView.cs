@@ -178,21 +178,8 @@ internal sealed record CurrentView
     public static CurrentView Build(
         TodoStore todos, TagIndex index, NoteStore notes, CalendarStore calendar, CalendarFeed? feed, DateOnly today)
     {
-        CalendarFeedResult result = feed?.Fetch() ?? new CalendarFeedResult(CalendarFeedStatus.NotConfigured);
-        IReadOnlyList<Appointment> extra = [];
-        if (result.Text is not null)
-        {
-            try
-            {
-                extra = IcsParser.Parse(result.Text, calendar.Zone, today);
-            }
-            catch (FormatException)
-            {
-                // The feed only caches text that parsed, so this only happens if the cache was changed by hand.
-            }
-        }
-
-        CalendarDay day = calendar.Day(today, extra);
+        CalendarFeedResult result = Fetch(feed);
+        CalendarDay day = calendar.Day(today, FeedEvents(result, calendar.Zone, today));
 
         IReadOnlyList<TodoItem> items;
         bool todosUnreadable = false;
@@ -206,14 +193,7 @@ internal sealed record CurrentView
             todosUnreadable = true;
         }
 
-        List<DueTodo> due = [];
-        foreach (TodoItem todo in items)
-        {
-            if (todo.Due <= today)
-            {
-                due.Add(new DueTodo(todo.Due, todo.Text, todo.Due < today));
-            }
-        }
+        List<DueTodo> due = DueOn(items, today);
 
         IReadOnlyList<LinkedNote> linked = [];
         IReadOnlyList<IReadOnlyList<RelatedNote>>? related = null;
@@ -257,6 +237,43 @@ internal sealed record CurrentView
             linked,
             indexUnreadable,
             related);
+    }
+
+    /// <summary>Fetches the feed once; no feed is <see cref="CalendarFeedStatus.NotConfigured"/>.</summary>
+    internal static CalendarFeedResult Fetch(CalendarFeed? feed) =>
+        feed?.Fetch() ?? new CalendarFeedResult(CalendarFeedStatus.NotConfigured);
+
+    /// <summary>The feed's events touching <paramref name="day"/>, or none when it has no text or doesn't parse.</summary>
+    internal static IReadOnlyList<Appointment> FeedEvents(CalendarFeedResult result, TimeZoneInfo zone, DateOnly day)
+    {
+        if (result.Text is not null)
+        {
+            try
+            {
+                return IcsParser.Parse(result.Text, zone, day);
+            }
+            catch (FormatException)
+            {
+                // The feed only caches text that parsed, so this only happens if the cache was changed by hand.
+            }
+        }
+
+        return [];
+    }
+
+    /// <summary>Every todo of <paramref name="items"/> due on or before <paramref name="today"/>, in their order.</summary>
+    internal static List<DueTodo> DueOn(IReadOnlyList<TodoItem> items, DateOnly today)
+    {
+        List<DueTodo> due = [];
+        foreach (TodoItem todo in items)
+        {
+            if (todo.Due <= today)
+            {
+                due.Add(new DueTodo(todo.Due, todo.Text, todo.Due < today));
+            }
+        }
+
+        return due;
     }
 
     /// <summary>The time text of <paramref name="appointment"/> on <see cref="Today"/>.</summary>

@@ -369,7 +369,9 @@ Every factory agent reads this file before working on Context. Keep it short and
   `No notes, appointments or todos mention <name>.`; unreadable calendar files on stderr, exit 1; an unreadable
   `todos.json` adds `Can't read todos.json.` on stderr, exit 1, the rest still printed; no `Migrate`), `current` (the
   current view's sections as text: `Today, <date>`, `Appointments`, `Due`, `Linked notes`; no row caps, `Due` lines as
-  `<date>\t<text>`; its error lines go to stderr and make the exit code 1),
+  `<date>\t<text>`; its error lines go to stderr and make the exit code 1), `today` (the daily note, see Daily
+  note: prints it like `note show`, creating it first when it is missing; a sensitive one is `Cli.SensitiveText`,
+  exit 1; a failed write is `Can't write <name>.`, exit 1; no arguments, `--json` is a usage error),
   `import <path>`, `export <note> <path>` (paths relative to the current directory, no `~`). When `Migrate(out n)`
   replaced bad todo ids, `todos`, `todo add`, `todo done` and `current` first write one extra stderr line,
   `Fixed a bad todo id in todos.json.` or `Fixed <n> bad todo ids in todos.json.` (fixed text, the bad value is never
@@ -531,7 +533,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `[[note link]]` parsing in `NoteLinkParser.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
-    `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the inbox capture in `Inbox.cs`, the todo input rules (`TryParseDate`,
+    `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, the inbox capture in `Inbox.cs`, the todo input rules (`TryParseDate`,
     `MaxTextLength`) in `TodoInput.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`) and `CalendarLinkView.cs`
     (the calendar link), and the command ranking for the desktop palette in `CommandMatcher.cs`; the notes list is `NoteStore.List()` itself.
   - **Data step in Core, drawing in the front end:** a view's Core data step returns plain types (a kind plus raw
@@ -597,7 +599,18 @@ Every factory agent reads this file before working on Context. Keep it short and
     file bytes, read through `BoundedFile`): a bigger or non-seekable note can't be opened (`Can't read <name>.`), a save
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
-    `/capture`, `/current`, `/export`, `/find`, `/import`, `/new`, `/open`, `/save`, `/settings`, `/tags`, `/todo` with `CommandMatcher` (in Core).
+    `/capture`, `/current`, `/export`, `/find`, `/import`, `/new`, `/open`, `/save`, `/settings`, `/tags`, `/today`, `/todo` with `CommandMatcher` (in Core).
+    `/today` (argument ignored) asks `Discard changes to <name>?` first when another note has unsaved changes, then
+    calls `DesktopActions.OpenDailyNote()` and opens the note (a sensitive one through the unlock flow), with the
+    accent `Created <name>` after a create and the red failure text otherwise.
+    **Daily note:** `DailyNote` (Core) names the note `yyyy-MM-dd` (invariant) for the local day. `Ensure(notes, day,
+    compose)` returns `Existing` or `Sensitive` for a note of that name without calling `compose` or writing, else
+    creates the top-level note through `CreateWithText` (a `NoteExistsException` race counts as existing).
+    `Compose` writes `# <name>`, `## Appointments` (`CurrentView.Time` lines, `(no title)`, ` (<location>)`,
+    `- No appointments.`, unreadable calendar files and a failed feed as lines) and `## Todos` (open todos due on or
+    before the day, overdue ones with ` (due yyyy-MM-dd)`, `- Nothing due.` or `- Can't read todos.json.`); every
+    inserted text is one line; it shares `Fetch`, `FeedEvents` and `DueOn` with `CurrentView` and never opens
+    `context.db`. An existing daily note is never read, changed or replaced.
     **Settings:** `SettingsPanel` (the `Settings` button in `NotesPanel`, or `/settings`; `Main`'s `settingsShown`;
     at the top of the main region; `Close`, opening a note or the current view hides it) has two sections, both
     reloaded after every `State.Changed`. *Exchange calendar* shows `DesktopState.CalendarLinkSetting()`
@@ -716,7 +729,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `wwwroot/index.html` (CSP meta tag, only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
     and `wwwroot/editor/editor.css`.
   - **Desktop rules:** the Core writing calls (`Create`, `Save`, `SaveIfUnchanged`, `Add`, `Complete`, `Set`, `Clear`, `Delete`,
-    `Rename`, `CreateChild`, `Move`, `ClearCache`, `Capture` (`Inbox.Capture`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
+    `Rename`, `CreateChild`, `Move`, `ClearCache`, `Capture` (`Inbox.Capture`), `Ensure` (`DailyNote.Ensure`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
     `StoreRecoveryPublicKey`) appear only in `DesktopActions.cs` (exemptions: `DotNetObjectReference.Create(` once in
     `EditorInterop.cs`, `ECDiffieHellman.Create(` in `SealedNote.cs`, and `WindowsKeyStore.cs`, whose .NET calls change
     the certificate store and which names no Core store, `File.`, `Directory.` or `Path.`; the reads still write

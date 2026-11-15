@@ -1536,4 +1536,66 @@ public sealed class CliTests : IDisposable
         Assert.Equal(["Can't read todos.json."], none.ErrLines);
         Assert.Equal(before, SnapshotWithoutDb());
     }
+
+    // 164 ------------------------------------------------------------------------------------------
+
+    // 164 AC-6: today creates the daily note and prints it like note show; a second run prints the same, writes nothing.
+    [Fact]
+    public void Today_CreatesThenPrintsLikeNoteShow()
+    {
+        Run("todo", "add", "today", "call Anna");
+        Directory.CreateDirectory(Path.Combine(root, CalendarStore.FolderName));
+        File.WriteAllText(
+            Path.Combine(root, CalendarStore.FolderName, "work.ics"),
+            "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Standup\r\nDTSTART:20261029T090000Z\r\n"
+            + "DTEND:20261029T091500Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+
+        Result first = Run("today");
+
+        const string Expected =
+            "# 2026-10-29\n\n## Appointments\n- 09:00-09:15 Standup\n\n## Todos\n- call Anna\n";
+        Assert.Equal((0, Expected, string.Empty), (first.Code, first.Out, first.Err));
+        Assert.Equal(Expected, Read("2026-10-29.md"));
+        Assert.Equal(Run("note", "show", "2026-10-29").Out, first.Out);
+
+        Dictionary<string, string> before = Snapshot();
+        Run("todo", "add", "today", "later todo");
+        Dictionary<string, string> withTodo = Snapshot();
+        Result second = Run("TODAY");
+
+        Assert.Equal((0, Expected, string.Empty), (second.Code, second.Out, second.Err));
+        Assert.NotEqual(before, withTodo);
+        Assert.Equal(withTodo, Snapshot());
+    }
+
+    // 164 AC-6: a sensitive daily note answers the sensitive line and writes nothing.
+    [Fact]
+    public void Today_SensitiveNote_SensitiveTextNothingWritten()
+    {
+        WriteSealed("2026-10-29");
+        Dictionary<string, string> before = Snapshot();
+
+        AssertError(Run("today"), 1, Cli.SensitiveText("2026-10-29"));
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 164 AC-6: a write failure is one fixed line without exception text.
+    [Fact]
+    public void Today_WriteFails_FixedLine()
+    {
+        Directory.CreateDirectory(Path.Combine(root, "2026-10-29.md"));
+
+        AssertError(Run("today"), 1, "Can't write 2026-10-29.");
+    }
+
+    // 164 AC-6: --json with today is a usage error that creates nothing; today takes no arguments; help lists it.
+    [Fact]
+    public void Today_JsonOrArguments_UsageError_HelpListsIt()
+    {
+        AssertUsage(Run("today", "--json"));
+        AssertUsage(Run("--json", "today"));
+        AssertUsage(Run("today", "x"));
+        Assert.False(Directory.Exists(root));
+        Assert.Contains(Run("help").Out.Split('\n'), l => l.StartsWith("context today ", StringComparison.Ordinal));
+    }
 }

@@ -155,6 +155,7 @@ else
     private bool discarding;
     private string? pendingName;
     private string? pendingPerson;
+    private bool pendingToday;
     private bool paletteOpen;
     private bool running;
     private string statusText = string.Empty;
@@ -283,6 +284,29 @@ else
     private async Task Discard(Confirmation confirmed)
     {
         discarding = false;
+        if (pendingToday)
+        {
+            pendingToday = false;
+            if (running)
+            {
+                return;
+            }
+
+            running = true;
+            ActionResult daily;
+            try
+            {
+                daily = await Actions.OpenDailyNote();
+            }
+            finally
+            {
+                running = false;
+            }
+
+            ShowDaily(daily);
+            return;
+        }
+
         if (pendingPerson is not { } person)
         {
             ShowNote(pendingName);
@@ -314,6 +338,7 @@ else
         discarding = false;
         pendingName = null;
         pendingPerson = null;
+        pendingToday = false;
     }
 
     // Opens the person page Actions gave, or shows why there is none.
@@ -331,6 +356,30 @@ else
         }
     }
 
+    // Opens the daily note Actions gave (Created after a create), or shows why there is none.
+    private void ShowDaily(ActionResult daily)
+    {
+        if (daily.Kind != ActionKind.Done)
+        {
+            ShowStatus(DesktopText.OneLine(daily.Text), "red");
+            return;
+        }
+
+        if (string.Equals(daily.Text, openName, StringComparison.Ordinal))
+        {
+            settingsShown = false;
+        }
+        else
+        {
+            ShowNote(daily.Text);
+        }
+
+        if (daily.Reason != ActionReason.Unchanged)
+        {
+            ShowStatus($"Created {DesktopText.OneLine(daily.Text)}", "accent");
+        }
+    }
+
     private void ShowNote(string? name)
     {
         openName = name;
@@ -339,6 +388,7 @@ else
             && snapshot.Sensitive.Any(n => string.Equals(n.Name, name, StringComparison.Ordinal));
         pendingName = null;
         pendingPerson = null;
+        pendingToday = false;
         tagShown = null;
         tagsShown = false;
         findShown = null;
@@ -517,6 +567,36 @@ else
                 else
                 {
                     ShowTag(rest);
+                }
+
+                break;
+            case "/today":
+                // The argument is ignored. A dirty editor asks first, unless it already shows today's note.
+                if (editor is not null && openName is not null
+                    && !string.Equals(openName, Actions.DailyNoteName(), StringComparison.Ordinal)
+                    && await editor.IsDirtyAsync())
+                {
+                    pendingName = null;
+                    pendingPerson = null;
+                    pendingToday = true;
+                    discarding = true;
+                    break;
+                }
+
+                if (!running)
+                {
+                    running = true;
+                    ActionResult daily;
+                    try
+                    {
+                        daily = await Actions.OpenDailyNote();
+                    }
+                    finally
+                    {
+                        running = false;
+                    }
+
+                    ShowDaily(daily);
                 }
 
                 break;

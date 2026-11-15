@@ -12,10 +12,10 @@ public sealed class DesktopSourceTests
     // The Core calls that change data (AC-8). CalendarLink's real names are Set/Clear; Save/Delete are listed too.
     // 134: NoteStore.Rename and NoteStore.Delete. 136: sealing (SealedNote.Seal, AddRecipient), NoteStore.DeleteSensitive
     // and the key store's two changing calls; RecoveryFile.Create is caught by Create. 140: Inbox.Capture.
-    // 152: NoteStore.CreateChild and NoteStore.Move.
+    // 152: NoteStore.CreateChild and NoteStore.Move. 164: DailyNote.Ensure.
     private static readonly Regex Writes = new(
         @"\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
-        + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture|CreateChild|Move)\s*\(",
+        + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture|CreateChild|Move|Ensure)\s*\(",
         RegexOptions.CultureInvariant);
 
     // 136: the real key stores and the real file dialog, spelled in pieces: no test file may hold their names (see
@@ -823,6 +823,7 @@ public sealed class DesktopSourceTests
     [InlineData("RecoveryFile.Create(password, out publicKey)")]
     [InlineData("Inbox.Capture(notes, cleaned, localNow(), BeforeCaptureSave)")]
     [InlineData("Inbox . Capture (store, text, now)")]
+    [InlineData("DailyNote.Ensure(notes, day, compose)")]
     public void Writes_Pattern_CatchesCalls(string call)
     {
         Assert.Matches(Writes, call);
@@ -848,6 +849,8 @@ public sealed class DesktopSourceTests
     [InlineData("Actions.SetUpSensitive(password, path)")]
     [InlineData("Actions.RestoreFromRecovery(path, password)")]
     [InlineData("Actions.CaptureText(typed)")]
+    [InlineData("Actions.OpenDailyNote()")]
+    [InlineData("Actions.DailyNoteName()")]
     [InlineData("@onkeydown=\"e => Capture(e)\"")]
     [InlineData("SealedNote.Open(found.Name, file, machine, KeyStore.Agree)")]
     [InlineData("State.ReadSensitive(Name)")]
@@ -1002,7 +1005,7 @@ public sealed class DesktopSourceTests
 
         Assert.Equal([ProgramFile, RealLauncherFile], found);
         Assert.Contains(
-            "notes, todos, state, new " + RealLauncher + "(), calendarLink, feed, () => DateTime.Now)",
+            "notes, todos, state, new " + RealLauncher + "(), calendarLink, feed, () => DateTime.Now, calendar)",
             File.ReadAllText(Path.Combine(root, ProgramFile)),
             StringComparison.Ordinal);
     }

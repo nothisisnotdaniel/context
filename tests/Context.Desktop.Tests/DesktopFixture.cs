@@ -120,7 +120,7 @@ internal sealed class DesktopFixture : IDisposable
             Keys,
             Session,
             link);
-        Actions = new DesktopActions(Notes, Todos, State, Launcher, link, feed, () => LocalNow);
+        Actions = new DesktopActions(Notes, Todos, State, Launcher, link, feed, () => LocalNow, new CalendarStore(Root, Zone));
         Bunit.Services.AddSingleton(State);
         Bunit.Services.AddSingleton(Actions);
         Bunit.Services.AddTransient<EditorInterop>();
