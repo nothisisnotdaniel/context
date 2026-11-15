@@ -274,6 +274,16 @@ internal sealed class NoteTemplates
         return reader.ReadToEnd();
     }
 
+    // Top level only, the extension matched ignoring case on every OS (Linux matches patterns case-sensitively by
+    // default), no attribute skipping, and an unreadable folder throws (caught below) rather than listing in part.
+    private static readonly EnumerationOptions ListOptions = new()
+    {
+        MatchCasing = MatchCasing.CaseInsensitive,
+        RecurseSubdirectories = false,
+        AttributesToSkip = 0,
+        IgnoreInaccessible = false,
+    };
+
     // The listed templates with their paths, sorted ignoring case, then ordinal.
     private List<(string Name, string Path)> Entries()
     {
@@ -285,7 +295,7 @@ internal sealed class NoteTemplates
                 return [];
             }
 
-            return folder.EnumerateFiles("*" + Extension, SearchOption.TopDirectoryOnly)
+            return folder.EnumerateFiles("*" + Extension, ListOptions)
                 .Where(f => string.Equals(f.Extension, Extension, StringComparison.OrdinalIgnoreCase)
                     && !f.Name.StartsWith('.')
                     && !NoteStore.IsLink(f))
