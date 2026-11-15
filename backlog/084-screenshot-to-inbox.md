@@ -4,7 +4,7 @@ As a Context user, I want a hotkey that captures a screen area into my inbox, so
 
 ## What
 
-A global hotkey in the desktop app lets the user pick a screen area; the image is saved to `attachments/` and a time-stamped inbox line links it. Also a watched folder setting, so screenshots saved by ShareX or CleanShot X land in the inbox the same way. Builds on quick capture and attachments.
+A global hotkey in the desktop app lets the user pick a screen area; the image is saved to the inbox note's `.attachments/` folder and a time-stamped inbox line links it. Also a watched folder setting, so screenshots saved by ShareX or CleanShot X land in the inbox the same way. Builds on quick capture and attachments.
 
 ## Why
 

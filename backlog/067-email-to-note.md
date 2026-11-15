@@ -4,7 +4,7 @@ As a Context user, I want to drop an email file into the desktop app to make a n
 
 ## What
 
-Drop an `.eml` or `.msg` file into the desktop app to create a note from it with the sender, date, subject and the plain-text body (HTML turned into text, no scripts or remote images loaded), the sender and recipients as `@[Full Name]`, and its attachments in `attachments/`. Size cap; the source file is never changed. Builds on people pages and attachments.
+Drop an `.eml` or `.msg` file into the desktop app to create a note from it with the sender, date, subject and the plain-text body (HTML turned into text, no scripts or remote images loaded), the sender and recipients as `@[Full Name]`, and its attachments in the note's `.attachments/` folder. Size cap; the source file is never changed. Builds on people pages and attachments.
 
 ## Why
 
