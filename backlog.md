@@ -76,7 +76,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#211](backlog/211-remove-cli-commands-that-only-mirror.md) Remove CLI commands that only mirror desktop views → 173-remove-mirror-cli-commands
 - [x] [#53](backlog/053-note-history.md) Note history → 174-note-history
 - [x] [#218](backlog/218-make-the-wait-guard-check-every.md) Make the wait guard check every desktop test file → 176-wait-guard-all-files
-- [ ] [#54](backlog/054-attachments.md) Attachments
+- [x] [#54](backlog/054-attachments.md) Attachments → 177-note-attachments
 - [ ] [#55](backlog/055-timed-reminders.md) Timed reminders
 - [ ] [#57](backlog/057-inbox-triage.md) Inbox triage
 - [ ] [#60](backlog/060-decision-log.md) Decision log
