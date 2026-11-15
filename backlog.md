@@ -244,6 +244,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#209](backlog/209-announce-the-search-result-count-to.md) Announce the search result count to screen readers
 - [?] [#210](backlog/210-strip-bidi-and-line-separator-characters.md) Strip bidi and line-separator characters in SafeText
 - [?] [#212](backlog/212-add-a-line-to-a-daily.md) Add a line to a daily note from the CLI
+- [?] [#213](backlog/213-keep-times-names-from-becoming-tags.md) Keep Times names from becoming tags or links in generated notes
 
 ## Dropped with the terminal UI
 
