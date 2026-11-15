@@ -1065,3 +1065,73 @@ input[type="password"]:disabled {
     flex: 0 1 auto;
     min-width: 0;
 }
+
+/* The weekly review: changed notes, done and overdue todos, and next week's appointments grouped by day. */
+.review-panel {
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+}
+
+.review-range {
+    margin: 4px 0 8px;
+}
+
+.review-panel h3 {
+    margin: 12px 0 4px;
+}
+
+.review-panel h4.review-day {
+    font-variant-numeric: tabular-nums;
+    margin: 8px 0 2px;
+}
+
+.review-notes,
+.review-todos,
+.review-appointments {
+    list-style: none;
+    margin: 0 0 8px;
+    padding: 0;
+}
+
+.review-note,
+.review-todo,
+.review-appointment {
+    align-items: baseline;
+    display: flex;
+    gap: 10px;
+    min-width: 0;
+    padding: 3px 0;
+}
+
+.review-note .date,
+.review-todo .date,
+.review-appointment .time {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+}
+
+.review-note .note-button {
+    background: none;
+    border: none;
+    border-radius: 3px;
+    color: var(--accent-strong);
+    max-width: 100%;
+    padding: 0;
+    text-align: left;
+}
+
+.review-note .note-button:hover:not(:disabled) {
+    text-decoration: underline;
+}
+
+.review-todo .text,
+.review-appointment .title {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.review-appointment .location {
+    flex: 0 1 auto;
+    min-width: 4em;
+}

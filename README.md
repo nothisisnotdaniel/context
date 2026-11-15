@@ -77,6 +77,14 @@ tagged `#meeting`, with the appointment's title, time, location and attendees; a
 never changed. In the desktop app, the current view shows the same numbers and `/meeting 2` in the command palette
 opens the same note.
 
+### Weekly review
+
+`context review` prints one page for a weekly review: `Review, <from> to <to>` (the last 7 days, today included), then
+`Changed notes` (when each note was last written, newest first; sensitive notes are left out), `Done todos` (done in
+those 7 days), `Overdue` (open todos due before today) and `Next week` (the appointments from tomorrow to 7 days
+ahead, one line per day an appointment touches). Every heading is printed, also when its section is empty. It never
+opens `context.db`. In the desktop app, `/review` in the command palette shows the same page; click a note to open it.
+
 ### Note templates
 
 Keep notes you write again and again (meetings, reviews) as plain Markdown files in the `templates` folder of the
@@ -90,7 +98,7 @@ desktop app, `/new Weekly sync --template meeting` in the command palette does t
 ### JSON output
 
 Add `--json` to a read command (`version`, `todos`, `notes`, `note show`, `tags`, `links`, `people`, `person`,
-`find`, `types`, `current`) to get one
+`find`, `types`, `current`, `review`) to get one
 JSON object on one line instead of text. Property names are fixed camelCase; missing values are `null`; dates are
 `yyyy-MM-dd` and times ISO 8601 with offset. Errors stay one text line on stderr with the same exit codes, and
 write commands and `help` refuse the flag.
@@ -111,6 +119,7 @@ plain ASCII; any JSON parser, `ConvertFrom-Json` included, reads them back.
 | `find <key> <value>` | `{"key":"role","value":"Bereichsleiter","notes":["people/Anna Schmidt"]}` |
 | `types` | `{"types":[{"type":"organization","attributes":[]},{"type":"person","attributes":["aliases","affiliation","role"]}]}` |
 | `current` | `{"today":"...","appointments":[{"start":"...","end":"...","allDay":false,"title":"ACME kickoff","location":null,"related":[{"name":"projects/ACME Rollout","tags":["acme"],"words":["acme"]}]}],"calendar":{...},"due":[...],"linkedNotes":[...]}` |
+| `review` | `{"from":"...","to":"...","changedNotes":[{"name":"A","modified":"..."}],"doneTodos":[{"due":"...","done":"...","text":"..."}],"overdue":[{"due":"...","text":"..."}],"appointments":[...],"calendar":{...}}` |
 
 PowerShell examples:
 
@@ -130,6 +139,9 @@ if ($null -eq $current.due) { Write-Warning 'todos.json could not be read' }
 # Meeting prep: the notes related to each of today's appointments
 $current.appointments | ForEach-Object { "$($_.title): $(($_.related | ForEach-Object { $_.name }) -join ', ')" }
 
+# Notes changed this week
+(context review --json | ConvertFrom-Json).changedNotes | ForEach-Object { "$($_.modified) $($_.name)" }
+
 # The text of one note
 (context note show Plan --json | ConvertFrom-Json).text
 
@@ -139,6 +151,7 @@ $current.appointments | ForEach-Object { "$($_.title): $(($_.related | ForEach-O
 
 `current` writes its document even when part of the data can't be read: then it exits 1, its error lines are on
 stderr, and `due` or `linkedNotes` is `null` (and each appointment's `related` when `context.db` can't be read).
+`review` does the same: `doneTodos` and `overdue` are `null` when `todos.json` can't be read.
 
 `related` lists up to three notes per appointment that share a tag or a title word with the appointment's title or
 attendee names (meeting prep): `tags` are the matching tags (raw, without `#`), `words` the shared title words. Only

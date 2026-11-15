@@ -1632,4 +1632,100 @@ public sealed class MainTests : IDisposable
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
         Assert.Empty(cut.FindAll(".find-panel"));
     }
+
+    // 169 AC-7: the palette lists /review with its description.
+    [Fact]
+    public void Palette_ListsReview()
+    {
+        PaletteCommand review = Assert.Single(CommandPalette.Commands, c => c.Name == "/review");
+        Assert.Equal("/review", review.Usage);
+        Assert.Equal("Show the last week and the next one", review.Description);
+    }
+
+    // 169 AC-7, AC-9: /review (argument ignored) shows the panel in the main region under the capture box; Close hides it.
+    [Theory]
+    [InlineData("/review")]
+    [InlineData("/review next")]
+    public async Task Review_ShowsPanel_CloseHides(string line)
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        Assert.Empty(cut.FindAll(".review-panel"));
+
+        await RunPalette(cut, line);
+
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".review-panel .review-range")), Wait);
+        Assert.Equal("capture-box", cut.Find("main.current-region").Children[0].ClassName);
+        Assert.True(cut.Find("main.current-region").Children[1].ClassList.Contains("review-panel"));
+        Assert.Equal("Week review", cut.Find(".review-panel h2").TextContent);
+        Assert.Empty(cut.FindAll(".palette"));
+        Assert.Empty(cut.FindAll(".main-status.red"));
+
+        await cut.Find(".review-panel button.close").ClickAsync(new MouseEventArgs());
+
+        Assert.Empty(cut.FindAll(".review-panel"));
+    }
+
+    // 169 AC-9: opening a note (also the one already open) or /current hides the review.
+    [Fact]
+    public async Task Review_OpeningANoteOrTheCurrentView_HidesIt()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, "/review");
+        Assert.Single(cut.FindAll(".review-panel"));
+        await Open(cut, js, "Plan");
+        Assert.Empty(cut.FindAll(".review-panel"));
+
+        await RunPalette(cut, "/review");
+        Assert.Single(cut.FindAll(".review-panel"));
+        await NameButton(cut, "Plan").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".review-panel")), Wait);
+
+        await RunPalette(cut, "/review");
+        Assert.Single(cut.FindAll(".review-panel"));
+        await RunPalette(cut, "/current");
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".review-panel")), Wait);
+    }
+
+    // 169 AC-8: a changed note's button opens it in the editor, which hides the review.
+    [Fact]
+    public async Task Review_NoteButton_OpensTheNote()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        File.SetLastWriteTimeUtc(Path.Combine(data.Root, "Plan.md"), new DateTime(2026, 10, 28, 9, 0, 0, DateTimeKind.Utc));
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await RunPalette(cut, "/review");
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".review-panel .review-note button")), Wait);
+
+        await cut.Find(".review-panel .review-note button").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
+        Assert.Empty(cut.FindAll(".review-panel"));
+    }
+
+    // 169 AC-8: with unsaved changes in the open note, a changed note's button asks to discard first.
+    [Fact]
+    public async Task Review_NoteButton_DirtyEditor_AsksFirst()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        data.WriteNote("Other", "# Other\n");
+        File.SetLastWriteTimeUtc(Path.Combine(data.Root, "Other.md"), new DateTime(2026, 10, 28, 9, 0, 0, DateTimeKind.Utc));
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        js.Edit("# Plan\n\nUnsaved\n");
+        await RunPalette(cut, "/review");
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".review-panel .review-note button")), Wait);
+
+        await cut.Find(".review-panel .review-note button").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("Other", cut.Find(".note-title").TextContent), Wait);
+    }
 }

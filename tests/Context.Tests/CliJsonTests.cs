@@ -7,7 +7,7 @@ namespace Context.Tests;
 public sealed class CliJsonTests : IDisposable
 {
     private const string JsonOnly =
-        "--json works only with version, todos, notes, note show, tags, links, people, person, find, types and current. Run 'context help'.";
+        "--json works only with version, todos, notes, note show, tags, links, people, person, find, types, current and review. Run 'context help'.";
 
     private static readonly DateOnly Today = new(2026, 10, 29);
     private static readonly DateTime Now = new(2026, 10, 29, 9, 0, 0, DateTimeKind.Utc);
@@ -691,7 +691,7 @@ public sealed class CliJsonTests : IDisposable
             Assert.Contains($"context {command} --json | ConvertFrom-Json", readme, StringComparison.Ordinal);
         }
 
-        string[] reads = ["version", "todos", "notes", "note show", "tags", "links", "find", "types", "current"];
+        string[] reads = ["version", "todos", "notes", "note show", "tags", "links", "find", "types", "current", "review"];
         string[] jsonLines = [.. readme.Split('\n').Where(l => l.Contains("--json", StringComparison.Ordinal) && l.Contains("context ", StringComparison.Ordinal))];
         Assert.NotEmpty(jsonLines);
         foreach (string line in jsonLines)
@@ -840,5 +840,52 @@ public sealed class CliJsonTests : IDisposable
             "{\"person\":\"Anna\",\"notes\":[\"A\"],\"appointments\":[],\"todos\":null,\"doneTodos\":null}\n",
             unreadable.Out);
         Assert.Equal(["Can't read todos.json."], unreadable.ErrLines);
+    }
+
+    // 169 AC-6: review pins its field names and order; a multi-day event once per day it touches.
+    [Fact]
+    public void Review_FieldsInOrder()
+    {
+        WriteNote("Plan", "# Plan\n");
+        File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), new DateTime(2026, 10, 28, 13, 5, 0, DateTimeKind.Utc));
+        File.WriteAllText(Path.Combine(root, TodoStore.FileName), "["
+            + "{\"text\":\"Sent\",\"due\":\"2026-10-20\",\"created\":\"2026-10-01T00:00:00Z\",\"done\":\"2026-10-27T10:00:00Z\"},"
+            + "{\"text\":\"Late\",\"due\":\"2026-10-25\",\"created\":\"2026-10-01T00:00:00Z\"}]");
+        WriteIcs("a.ics", "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Trip\r\nDTSTART:20261031T200000\r\n"
+            + "DTEND:20261102T100000\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+
+        Result result = Run("review", "--json");
+
+        AssertDocument(result);
+        Assert.Equal(string.Empty, result.Err);
+        string trip = "{\"start\":\"2026-10-31T20:00:00\\u002B01:00\",\"end\":\"2026-11-02T10:00:00\\u002B01:00\","
+            + "\"allDay\":false,\"title\":\"Trip\",\"location\":null}";
+        Assert.Equal(
+            "{\"from\":\"2026-10-23\",\"to\":\"2026-10-29\","
+            + "\"changedNotes\":[{\"name\":\"Plan\",\"modified\":\"2026-10-28T14:05:00\\u002B01:00\"}],"
+            + "\"doneTodos\":[{\"due\":\"2026-10-20\",\"done\":\"2026-10-27\",\"text\":\"Sent\"}],"
+            + "\"overdue\":[{\"due\":\"2026-10-25\",\"text\":\"Late\"}],"
+            + $"\"appointments\":[{trip},{trip},{trip}],"
+            + "\"calendar\":{\"status\":\"notConfigured\",\"cachedAt\":null,\"unreadableFiles\":[]}}\n",
+            result.Out);
+    }
+
+    // 169 AC-6: doneTodos and overdue are null when todos.json can't be read; the stderr line and exit 1 stay.
+    [Fact]
+    public void Review_UnreadableTodos_Null()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, TodoStore.FileName), "{ bad");
+        WriteIcs("bad.ics", "not a calendar");
+
+        Result result = Run("review", "--json");
+
+        JsonElement doc = AssertDocument(result, Cli.ExitError);
+        Assert.Equal(["Can't read calendar/bad.ics", "Can't read todos.json."], result.ErrLines);
+        Assert.Equal(JsonValueKind.Null, doc.GetProperty("doneTodos").ValueKind);
+        Assert.Equal(JsonValueKind.Null, doc.GetProperty("overdue").ValueKind);
+        Assert.Equal(JsonValueKind.Array, doc.GetProperty("changedNotes").ValueKind);
+        Assert.Equal("bad.ics", doc.GetProperty("calendar").GetProperty("unreadableFiles")[0].GetString());
+        Assert.False(File.Exists(Path.Combine(root, TagIndex.FileName)));
     }
 }

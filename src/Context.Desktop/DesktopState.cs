@@ -271,6 +271,38 @@ internal sealed class DesktopState
     });
 
     /// <summary>
+    /// The weekly review (<see cref="ReviewView.Build"/>) for today: the notes changed and the todos done in the last 7
+    /// days, the overdue todos and the next 7 days' appointments, off the calling thread. It never opens
+    /// <c>context.db</c> and never throws: any failure gives an empty view with <see cref="ReviewView.TodosUnreadable"/>
+    /// set.
+    /// </summary>
+    public Task<ReviewView> Review() => Task.Run(() =>
+    {
+        DateOnly day = today();
+        try
+        {
+            return ReviewView.Build(notes, todos, calendar, feed, day);
+        }
+        catch (Exception)
+        {
+            return new ReviewView(
+                day.AddDays(-(ReviewView.WindowDays - 1)),
+                day,
+                calendar.Zone,
+                [],
+                true,
+                [],
+                [],
+                [],
+                calendar.Folder,
+                [],
+                CalendarFeedStatus.NotConfigured,
+                null,
+                null);
+        }
+    });
+
+    /// <summary>
     /// The notes with the attribute <paramref name="key"/><c>::</c> <paramref name="value"/> (<see cref="FindView.Build"/>)
     /// after syncing the index, off the calling thread. Reads only and never throws: any failure gives the
     /// <see cref="FindViewKind.IndexUnreadable"/> view.

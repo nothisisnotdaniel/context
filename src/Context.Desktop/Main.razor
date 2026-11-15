@@ -18,6 +18,10 @@
                 {
                     <SettingsPanel OnClose="CloseSettings" />
                 }
+                @if (reviewShown)
+                {
+                    <ReviewPanel OnOpen="RequestOpen" OnClose="CloseReview" />
+                }
                 @if (tagsShown)
                 {
                     <TagsPanel Selected="@tagShown" OnTag="ShowTag" OnClose="CloseTags" />
@@ -150,6 +154,7 @@ else
     private NoteEditor? editor;
     private string? tagShown;
     private bool tagsShown;
+    private bool reviewShown;
     private (string Key, string Value)? findShown;
     private bool settingsShown;
     private bool discarding;
@@ -227,6 +232,11 @@ else
         tagShown = null;
     }
 
+    // The weekly review: shown at the top of the main region until closed or until a note or the current view opens.
+    private void ShowReview() => reviewShown = true;
+
+    private void CloseReview() => reviewShown = false;
+
     // The settings: shown at the top of the main region until closed or until a note or the current view opens.
     private void ShowSettings() => settingsShown = true;
 
@@ -238,6 +248,7 @@ else
         if (name is not null && string.Equals(name, openName, StringComparison.Ordinal))
         {
             settingsShown = false;
+            reviewShown = false;
             return;
         }
 
@@ -418,6 +429,7 @@ else
         pendingMeeting = null;
         tagShown = null;
         tagsShown = false;
+        reviewShown = false;
         findShown = null;
         settingsShown = false;
         renaming = false;
@@ -589,6 +601,10 @@ else
                     }
                 }
 
+                break;
+            case "/review":
+                // The argument is ignored.
+                ShowReview();
                 break;
             case "/settings":
                 ShowSettings();
