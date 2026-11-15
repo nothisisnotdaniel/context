@@ -248,6 +248,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#215](backlog/215-cap-the-total-size-of-note.md) Cap the total size of note history
 - [?] [#217](backlog/217-wait-for-the-page-s-own.md) Wait for the page's own loads in MainTests.Open
 - [?] [#219](backlog/219-make-the-calendarstore-speed-test-stable.md) Make the CalendarStore speed test stable under load
+- [?] [#220](backlog/220-open-a-pdf-attachment-from-the.md) Open a PDF attachment from the keyboard
 
 ## Dropped with the terminal UI
 
