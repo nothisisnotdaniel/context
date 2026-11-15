@@ -4,8 +4,8 @@ As a Context and Times user, I want one screen at the start of my day with meeti
 
 ## What
 
-On the first Times arrival of the day (or when the desktop app starts on a workday with no arrival yet), the desktop app shows one screen with today's meetings, the todos due today and overdue, yesterday's still-open checkpoint and the flexitime balance (read-only from Times' files). Dismissed with one key; shown once per day.
+On the first Times arrival of the day (or when the desktop app starts on a workday with no arrival yet), the desktop app shows one screen with today's meetings, the todos due today and overdue, yesterday's still-open checkpoint and the flexitime balance (read-only from Times' files). Stored and always accessible.
 
 ## Why
 
-The same information is spread across both apps. Showing it once a day, dismissed with one key, is a light way to plan the day.
+The same information is spread across both apps. This get's saved and is always accessible in a briefing page hierarchy.
