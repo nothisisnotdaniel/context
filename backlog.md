@@ -77,7 +77,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#53](backlog/053-note-history.md) Note history → 174-note-history
 - [x] [#218](backlog/218-make-the-wait-guard-check-every.md) Make the wait guard check every desktop test file → 176-wait-guard-all-files
 - [x] [#54](backlog/054-attachments.md) Attachments → 177-note-attachments
-- [ ] [#55](backlog/055-timed-reminders.md) Timed reminders
+- [x] [#55](backlog/055-timed-reminders.md) Timed reminders → 178-timed-reminders
 - [ ] [#57](backlog/057-inbox-triage.md) Inbox triage
 - [ ] [#60](backlog/060-decision-log.md) Decision log
 - [ ] [#62](backlog/062-links-to-headings.md) Links to headings
