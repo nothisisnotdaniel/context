@@ -137,12 +137,12 @@ public sealed class NotesPanelTests : IDisposable
 
         Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         Assert.Equal(["Plan"], opened);
-        cut.WaitForAssertion(() => Assert.Equal(string.Empty, cut.Find(".note-new-title").GetAttribute("value")));
+        cut.WaitForAssertion(() => Assert.Equal(string.Empty, cut.Find(".note-new-title").GetAttribute("value")), Wait);
         IElement status = cut.Find(".note-entry-result");
         Assert.Equal("Created Plan", status.TextContent);
         Assert.True(status.ClassList.Contains("accent"));
         Assert.Equal("status", status.GetAttribute("role"));
-        cut.WaitForAssertion(() => Assert.Contains("Plan", cut.Find(".note-list").TextContent));
+        cut.WaitForAssertion(() => Assert.Contains("Plan", cut.Find(".note-list").TextContent), Wait);
     }
 
     // 134 AC-7: a refusal shows the fixed red text, keeps the typed title and opens nothing.
@@ -261,7 +261,7 @@ public sealed class NotesPanelTests : IDisposable
         Assert.Equal(["Alpha.md", "Beta.md"], Files().Keys);
         Assert.Equal("b\n", File.ReadAllText(Path.Combine(data.Root, "Beta.md")));
         cut.WaitForAssertion(() => Assert.Equal(
-            ["Alpha", "Beta"], cut.FindAll("li.note button.name").Select(n => n.TextContent).ToArray()));
+            ["Alpha", "Beta"], cut.FindAll("li.note button.name").Select(n => n.TextContent).ToArray()), Wait);
     }
 
     // 139 AC-6: more than 100 files are refused as a whole.
@@ -400,7 +400,7 @@ public sealed class NotesPanelTests : IDisposable
 
     private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName);
 
-    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(20);
 
     private void WriteTree()
     {

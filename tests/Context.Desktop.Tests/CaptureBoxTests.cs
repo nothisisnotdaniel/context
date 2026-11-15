@@ -8,6 +8,8 @@ namespace Context.Tests;
 // 140 AC-6 / AC-7: the capture box on its own.
 public sealed class CaptureBoxTests : IDisposable
 {
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(20);
+
     private const string Line = "- 2026-10-29 10:05 ";
 
     private readonly DesktopFixture data = new();
@@ -108,13 +110,13 @@ public sealed class CaptureBoxTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.All(
             cut.FindAll(".capture-box input, .capture-box button"),
-            e => Assert.True(e.HasAttribute("disabled"), e.OuterHtml)));
+            e => Assert.True(e.HasAttribute("disabled"), e.OuterHtml)), Wait);
         Assert.Equal(2, cut.FindAll(".capture-box input, .capture-box button").Count);
         release.Set();
         await capture;
         cut.WaitForAssertion(() => Assert.All(
             cut.FindAll(".capture-box input, .capture-box button"),
-            e => Assert.False(e.HasAttribute("disabled"), e.OuterHtml)));
+            e => Assert.False(e.HasAttribute("disabled"), e.OuterHtml)), Wait);
         Assert.Equal($"# inbox\n{Line}call Anna\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
     }
 

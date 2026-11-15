@@ -4,6 +4,8 @@ namespace Context.Tests;
 
 public sealed class DataWatcherTests : IDisposable
 {
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(20);
+
     private static readonly string Root = Path.Combine(Path.GetTempPath(), "watch-root", "Context");
 
     private readonly DesktopFixture data = new();
@@ -110,7 +112,7 @@ public sealed class DataWatcherTests : IDisposable
 
         await Task.Delay(1000);
         Assert.Equal(2, state.Builds);
-        cut.WaitForAssertion(() => Assert.Contains("New 4", cut.Markup), TimeSpan.FromSeconds(5));
+        cut.WaitForAssertion(() => Assert.Contains("New 4", cut.Markup), Wait);
         Assert.Equal(6, cut.FindAll("li.todo").Count);
     }
 

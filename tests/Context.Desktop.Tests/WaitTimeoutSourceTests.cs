@@ -9,10 +9,10 @@ namespace Context.Tests;
 // 156: PersonPanelTests waits on the person load behind Task.Run and follows it too.
 // 174: HistoryPanelTests waits on the history and version loads behind Task.Run and follows it too.
 // 175: SettingsPanelTests waits on the settings load (two Task.Run hops) and follows it too.
+// 176: the guard finds every test file that waits, so a new file needs no registration.
 public sealed class WaitTimeoutSourceTests
 {
     private const string TestsFolder = "tests/Context.Desktop.Tests";
-    private const string Call = "WaitForAssertion(";
 
     // Spelled in pieces so this file does not hold the name it looks for.
     private static readonly Regex DefaultAssigned = new(
@@ -22,43 +22,124 @@ public sealed class WaitTimeoutSourceTests
         @"private\s+static\s+readonly\s+TimeSpan\s+Wait\s*=\s*TimeSpan\.FromSeconds\((\d+)\)\s*;",
         RegexOptions.CultureInvariant);
 
+    private static readonly string[] CallNames = ["WaitForAssertion(", "WaitForState(", "WaitForElement("];
+
+    private static readonly string[] FormerlyListed =
+    [
+        "SensitiveFlowTests.cs", "MainTests.cs", "EditingFlowTests.cs", "TagsPanelTests.cs",
+        "PersonPanelTests.cs", "HistoryPanelTests.cs", "SettingsPanelTests.cs",
+    ];
+
+    public static TheoryData<string> WaitingFiles()
+    {
+        TheoryData<string> data = [];
+        foreach (string file in Discover())
+        {
+            data.Add(file);
+        }
+
+        return data;
+    }
+
+    private static List<string> Discover()
+    {
+        string root = RepoFiles.Root();
+        return RepoFiles.Sources(root, TestsFolder, ".cs")
+            .Where(f => Path.GetFileName(f) != nameof(WaitTimeoutSourceTests) + ".cs")
+            .Where(f => CallNames.Any(n => File.ReadAllText(Path.Combine(root, f)).Contains(n, StringComparison.Ordinal)))
+            .ToList();
+    }
+
+    [Fact]
+    public void Discovery_FindsTheFormerlyListedFiles()
+    {
+        List<string> names = Discover().Select(Path.GetFileName).ToList()!;
+
+        Assert.All(FormerlyListed, f => Assert.Contains(f, names));
+        Assert.True(names.Count >= FormerlyListed.Length, $"found only {names.Count} files");
+    }
+
     [Theory]
-    [InlineData("tests/Context.Desktop.Tests/SensitiveFlowTests.cs")]
-    [InlineData("tests/Context.Desktop.Tests/MainTests.cs")]
-    [InlineData("tests/Context.Desktop.Tests/EditingFlowTests.cs")]
-    [InlineData("tests/Context.Desktop.Tests/TagsPanelTests.cs")]
-    [InlineData("tests/Context.Desktop.Tests/PersonPanelTests.cs")]
-    [InlineData("tests/Context.Desktop.Tests/HistoryPanelTests.cs")]
-    [InlineData("tests/Context.Desktop.Tests/SettingsPanelTests.cs")]
-    public void EveryWaitForAssertion_PassesTheWaitConstant(string file)
+    [MemberData(nameof(WaitingFiles))]
+    public void EveryWait_PassesTheWaitConstant(string file)
     {
         string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), file));
 
-        MatchCollection constants = WaitConstant.Matches(source);
-        Assert.True(
-            constants.Count == 1,
-            $"{file} needs exactly one 'private static readonly TimeSpan Wait = TimeSpan.FromSeconds(<n>);', "
-            + $"found {constants.Count}");
-        Match constant = constants[0];
-        int seconds = int.Parse(constant.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-        Assert.InRange(seconds, 10, 30);
+        Assert.Empty(Problems(source).Select(p => $"{file}: {p}"));
+    }
 
-        List<string> missing = [];
-        int calls = 0;
-        for (int start = source.IndexOf(Call, StringComparison.Ordinal); start >= 0;
-             start = source.IndexOf(Call, start + Call.Length, StringComparison.Ordinal))
+    [Fact]
+    public void Problems_FlagsACallWithoutWait()
+    {
+        string source = "private static readonly TimeSpan Wait = TimeSpan.FromSeconds(20);\n"
+            + "cut.WaitForAssertion(() => Assert.True(x));\n";
+
+        string problem = Assert.Single(Problems(source));
+        Assert.Contains("line 2", problem, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Problems_FlagsTwoConstants()
+    {
+        string source = "private static readonly TimeSpan Wait = TimeSpan.FromSeconds(20);\n"
+            + "private static readonly TimeSpan Wait = TimeSpan.FromSeconds(15);\n"
+            + "cut.WaitForAssertion(() => Assert.True(x), Wait);\n";
+
+        Assert.Contains(Problems(source), p => p.Contains("exactly one", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Problems_FlagsNoConstant()
+    {
+        Assert.Contains(
+            Problems("cut.WaitForAssertion(() => Assert.True(x), Wait);\n"),
+            p => p.Contains("exactly one", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Problems_AcceptsWaitForStateWithWait()
+    {
+        string source = "private static readonly TimeSpan Wait = TimeSpan.FromSeconds(20);\n"
+            + "cut.WaitForState(() => ok, Wait);\n";
+
+        Assert.Empty(Problems(source));
+    }
+
+    // Everything wrong with one test source: its Wait constant and the last argument of each wait call.
+    private static List<string> Problems(string source)
+    {
+        List<string> problems = [];
+        MatchCollection constants = WaitConstant.Matches(source);
+        if (constants.Count != 1)
         {
-            calls++;
-            string last = LastArgument(source, start + Call.Length);
-            if (last != "Wait")
+            problems.Add(
+                "needs exactly one 'private static readonly TimeSpan Wait = TimeSpan.FromSeconds(<n>);', "
+                + $"found {constants.Count}");
+        }
+        else
+        {
+            int seconds = int.Parse(constants[0].Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+            if (seconds is < 10 or > 30)
             {
-                int line = source.AsSpan(0, start).Count('\n') + 1;
-                missing.Add($"line {line}: last argument is '{last}'");
+                problems.Add($"Wait is {seconds} s, expected 10-30");
             }
         }
 
-        Assert.True(calls > 0, "No " + Call + " call found in " + file);
-        Assert.Empty(missing);
+        foreach (string call in CallNames)
+        {
+            for (int start = source.IndexOf(call, StringComparison.Ordinal); start >= 0;
+                 start = source.IndexOf(call, start + call.Length, StringComparison.Ordinal))
+            {
+                string last = LastArgument(source, start + call.Length);
+                if (last != "Wait")
+                {
+                    int line = source.AsSpan(0, start).Count('\n') + 1;
+                    problems.Add($"line {line}: {call} last argument is '{last}'");
+                }
+            }
+        }
+
+        return problems;
     }
 
     [Fact]

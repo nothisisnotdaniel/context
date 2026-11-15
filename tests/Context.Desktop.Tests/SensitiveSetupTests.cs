@@ -7,6 +7,8 @@ namespace Context.Tests;
 // 136 AC-4, AC-8: the recovery dialog, with a file dialog that only returns the path the test sets.
 public sealed class SensitiveSetupTests : IDisposable
 {
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(20);
+
     private const string Password = "long enough password";
 
     private readonly DesktopFixture data = new();
@@ -98,7 +100,7 @@ public sealed class SensitiveSetupTests : IDisposable
             await cut.Find("button.confirm").ClickAsync(new MouseEventArgs());
         }
 
-        cut.WaitForAssertion(() => Assert.Equal(["Recovery file saved. Keep it and its password safe."], done));
+        cut.WaitForAssertion(() => Assert.Equal(["Recovery file saved. Keep it and its password safe."], done), Wait);
         Assert.True(File.Exists(data.RecoveryPath));
         Assert.NotNull(data.Keys.RecoveryPublicKey());
         Assert.NotNull(data.Keys.MachinePublicKey());
@@ -116,7 +118,7 @@ public sealed class SensitiveSetupTests : IDisposable
 
         await cut.Find("button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Single(done));
+        cut.WaitForAssertion(() => Assert.Single(done), Wait);
         using System.Security.Cryptography.ECDiffieHellman key = RecoveryFile.Read(File.ReadAllBytes(data.RecoveryPath), "caf\u00E9 au lait long");
         Assert.Equal(data.Keys.RecoveryPublicKey(), key.ExportSubjectPublicKeyInfo());
     }
@@ -132,7 +134,7 @@ public sealed class SensitiveSetupTests : IDisposable
 
         await cut.Find("button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal(DesktopActions.RecoveryFileExistsText, cut.Find(".setup-status").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal(DesktopActions.RecoveryFileExistsText, cut.Find(".setup-status").TextContent), Wait);
         Assert.Equal("mine", File.ReadAllText(data.RecoveryPath));
         Assert.Empty(done);
     }
@@ -156,14 +158,14 @@ public sealed class SensitiveSetupTests : IDisposable
 
         await cut.Find("input.recovery-password").InputAsync(new ChangeEventArgs { Value = "wrong long password" });
         await cut.Find("button.confirm").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal("Can't read that recovery file.", cut.Find(".setup-status").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Can't read that recovery file.", cut.Find(".setup-status").TextContent), Wait);
         Assert.Empty(done);
         Assert.Null(data.Keys.MachinePublicKey());
 
         await cut.Find("input.recovery-password").InputAsync(new ChangeEventArgs { Value = Password });
         await cut.Find("button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal(["Restored 1 of 1 notes."], done));
+        cut.WaitForAssertion(() => Assert.Equal(["Restored 1 of 1 notes."], done), Wait);
         Assert.Equal(2, data.Dialog.Opens);
         Assert.Equal(0, data.Dialog.Saves);
         Assert.Equal("plan\n", (await data.State!.ReadSensitive("Plan"))!.Text);
@@ -214,9 +216,9 @@ public sealed class SensitiveSetupTests : IDisposable
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Equal(
-            "Recovery file saved. Keep it and its password safe.", cut.Find(".sensitive-result").TextContent));
+            "Recovery file saved. Keep it and its password safe.", cut.Find(".sensitive-result").TextContent), Wait);
         Assert.Empty(cut.FindAll("[role=dialog]"));
-        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("button.sensitive-setup-open")));
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("button.sensitive-setup-open")), Wait);
         Assert.Single(cut.FindAll("button.sensitive-restore-open"));
         Assert.DoesNotContain(Password, cut.Markup, StringComparison.Ordinal);
     }

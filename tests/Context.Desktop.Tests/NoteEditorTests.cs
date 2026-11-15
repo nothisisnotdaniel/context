@@ -9,6 +9,8 @@ namespace Context.Tests;
 // 094 AC-4 to AC-9: the note editor with the page's editor mocked through bunit's JS interop.
 public sealed class NoteEditorTests : IDisposable
 {
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(20);
+
     private readonly DesktopFixture data = new();
 
     public void Dispose() => data.Dispose();
@@ -54,7 +56,7 @@ public sealed class NoteEditorTests : IDisposable
         using FileStream held = new FileStream(
             Path.Combine(data.Root, "Bad.md"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
         IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p.Add(e => e.Name, "Bad"));
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".unreadable")));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".unreadable")), Wait);
 
         IElement line = cut.Find(".unreadable");
         Assert.Equal("Can't read Bad.", line.TextContent);
@@ -73,7 +75,7 @@ public sealed class NoteEditorTests : IDisposable
 
         await data.RefreshAsync();
         IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p.Add(e => e.Name, "Big"));
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".unreadable")));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".unreadable")), Wait);
 
         Assert.Equal("Can't read Big.", cut.Find(".unreadable").TextContent);
         Assert.Empty(js.Calls("ContextEditor.mount"));
@@ -107,7 +109,7 @@ public sealed class NoteEditorTests : IDisposable
         await data.RefreshAsync();
         string name = "Plan";
         IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p.Add(e => e.Name, name));
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".editor-failed")));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".editor-failed")), Wait);
 
         Assert.Equal(
             $"The editor couldn't start. {DesktopText.OneLine(name)} was not changed.",
@@ -321,7 +323,7 @@ public sealed class NoteEditorTests : IDisposable
         IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p
             .Add(e => e.Name, "Plan")
             .Add(e => e.OnOpenNote, (string name) => opened.Add(name)));
-        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")));
+        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
 
         await cut.InvokeAsync(() => js.Page().OnLink(raw));
 
@@ -349,7 +351,7 @@ public sealed class NoteEditorTests : IDisposable
         IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p
             .Add(e => e.Name, "Plan")
             .Add(e => e.OnTag, (string t) => tags.Add(t)));
-        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")));
+        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
 
         await cut.InvokeAsync(() => js.Page().OnTag(raw));
 
@@ -369,7 +371,7 @@ public sealed class NoteEditorTests : IDisposable
         IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p
             .Add(e => e.Name, "Plan")
             .Add(e => e.OnPerson, (string name) => people.Add(name)));
-        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")));
+        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
 
         await cut.InvokeAsync(() => js.Page().OnPerson(raw));
 
@@ -569,7 +571,7 @@ public sealed class NoteEditorTests : IDisposable
         IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p
             .Add(e => e.Name, "Plan")
             .Add(e => e.Sensitive, true));
-        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")));
+        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
         return cut;
     }
 
@@ -577,7 +579,7 @@ public sealed class NoteEditorTests : IDisposable
     {
         await data.RefreshAsync();
         IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p.Add(e => e.Name, name));
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".editor-failed")));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".editor-failed")), Wait);
         return cut;
     }
 
@@ -594,8 +596,8 @@ public sealed class NoteEditorTests : IDisposable
     {
         await data.RefreshAsync();
         IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p.Add(e => e.Name, name));
-        cut.WaitForAssertion(() => Assert.NotEmpty(cut.FindAll(".editor-host")));
-        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")));
+        cut.WaitForAssertion(() => Assert.NotEmpty(cut.FindAll(".editor-host")), Wait);
+        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
         return cut;
     }
 }

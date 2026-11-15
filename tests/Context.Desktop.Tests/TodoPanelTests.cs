@@ -6,6 +6,8 @@ namespace Context.Tests;
 
 public sealed class TodoPanelTests : IDisposable
 {
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(20);
+
     private readonly DesktopFixture data = new();
 
     public void Dispose() => data.Dispose();
@@ -150,7 +152,7 @@ public sealed class TodoPanelTests : IDisposable
             Assert.All(cut.FindAll(".todo-list input, [role=dialog] button"), b => Assert.True(b.HasAttribute("disabled"), b.OuterHtml));
             Assert.Equal(5, cut.FindAll(".todo-entry input, .todo-entry button").Count);
             Assert.All(cut.FindAll(".todo-entry input, .todo-entry button"), b => Assert.True(b.HasAttribute("disabled"), b.OuterHtml));
-        });
+        }, Wait);
         release.Set();
         await confirm;
 
@@ -164,7 +166,7 @@ public sealed class TodoPanelTests : IDisposable
             Assert.Equal(["First todo", "Third todo"], cut.FindAll("li.todo .text").Select(t => t.TextContent).ToArray());
             Assert.All(cut.FindAll(".todo-list input, .todo-entry input, .todo-entry button"), b => Assert.False(b.HasAttribute("disabled")));
             Assert.All(cut.FindAll(".todo-list input"), b => Assert.False(b.HasAttribute("checked")));
-        });
+        }, Wait);
         Assert.Equal(["First todo", "Third todo"], data.Todos!.List().Select(t => t.Text).ToArray());
     }
 
@@ -178,7 +180,7 @@ public sealed class TodoPanelTests : IDisposable
         Box(cut, 1).Change(true);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Done: Second todo", cut.Find("p.result").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Done: Second todo", cut.Find("p.result").TextContent), Wait);
         Assert.Equal(["Sooner", "First todo", "Third todo"], data.Todos!.List().Select(t => t.Text).ToArray());
     }
 
@@ -198,7 +200,7 @@ public sealed class TodoPanelTests : IDisposable
             IElement result = cut.Find("p.result");
             Assert.Equal("The todo list changed. Nothing was done.", result.TextContent);
             Assert.True(result.ClassList.Contains("red"));
-        });
+        }, Wait);
         Assert.Equal(files, Files());
     }
 

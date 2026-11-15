@@ -8,6 +8,8 @@ namespace Context.Tests;
 // 137: the linked notes under the open note.
 public sealed class LinksPanelTests : IDisposable
 {
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(20);
+
     private const string NotADatabase = "this is not a database, just some text that fills the header....";
 
     private readonly DesktopFixture data = new();
@@ -27,7 +29,7 @@ public sealed class LinksPanelTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Equal(
             expected.Links.Select(l => l.Note).ToArray(),
-            cut.FindAll(".link-row .name").Select(n => n.TextContent).ToArray()));
+            cut.FindAll(".link-row .name").Select(n => n.TextContent).ToArray()), Wait);
         Assert.Equal("Linked notes", cut.Find("h2").TextContent);
         Assert.Equal(
             new SortedDictionary<string, string>(StringComparer.Ordinal)
@@ -61,7 +63,7 @@ public sealed class LinksPanelTests : IDisposable
             .Add(l => l.Name, "Plan")
             .Add(l => l.OnOpen, (string name) => opened.Add(name))
             .Add(l => l.OnTag, (string tag) => tags.Add(tag)));
-        cut.WaitForAssertion(() => Assert.Equal(5, cut.FindAll(".link-row").Count));
+        cut.WaitForAssertion(() => Assert.Equal(5, cut.FindAll(".link-row").Count), Wait);
 
         IElement ghost = Row(cut, "Ghost").QuerySelector(".name")!;
         Assert.Equal("SPAN", ghost.TagName);
@@ -91,7 +93,7 @@ public sealed class LinksPanelTests : IDisposable
 
         IRenderedComponent<LinksPanel> cut = Render(name);
 
-        cut.WaitForAssertion(() => Assert.Equal(name + " has no linked notes.", cut.Find("p[role=status]").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal(name + " has no linked notes.", cut.Find("p[role=status]").TextContent), Wait);
         Assert.True(cut.Find("p[role=status]").ClassList.Contains("grey"));
         Assert.Empty(cut.FindAll(".link-rows"));
     }
@@ -108,7 +110,7 @@ public sealed class LinksPanelTests : IDisposable
 
         IRenderedComponent<LinksPanel> cut = Render("Plan");
 
-        cut.WaitForAssertion(() => Assert.Equal("Can't read the links.", cut.Find("p[role=status]").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Can't read the links.", cut.Find("p[role=status]").TextContent), Wait);
         Assert.True(cut.Find("p[role=status]").ClassList.Contains("red"));
         Assert.Equal(before, FileSnapshot.Take(data.Root));
     }
@@ -135,14 +137,14 @@ public sealed class LinksPanelTests : IDisposable
             Monitor.Exit(gate);
         }
 
-        cut.WaitForAssertion(() => Assert.Equal(["Other"], Names(cut)));
+        cut.WaitForAssertion(() => Assert.Equal(["Other"], Names(cut)), Wait);
         int renders = cut.RenderCount;
         Monitor.Enter(gate);
         try
         {
             // A second load for the same note waits on the index: the rows stay, without a loading line.
             typeof(DesktopState).GetMethod("RaiseChanged", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(data.State, null);
-            cut.WaitForAssertion(() => Assert.True(cut.RenderCount > renders));
+            cut.WaitForAssertion(() => Assert.True(cut.RenderCount > renders), Wait);
             Assert.Equal(["Other"], Names(cut));
             Assert.Empty(cut.FindAll("p[role=status]"));
         }
@@ -151,7 +153,7 @@ public sealed class LinksPanelTests : IDisposable
             Monitor.Exit(gate);
         }
 
-        cut.WaitForAssertion(() => Assert.Equal(["Other"], Names(cut)));
+        cut.WaitForAssertion(() => Assert.Equal(["Other"], Names(cut)), Wait);
     }
 
     // AC-7: a sensitive note shows only the grey line; the index is not asked (a broken one gives no red line)
@@ -169,7 +171,7 @@ public sealed class LinksPanelTests : IDisposable
             .Add(l => l.Name, "Secret")
             .Add(l => l.Sensitive, true));
         await data.State!.Refresh();
-        cut.WaitForAssertion(() => Assert.True(cut.RenderCount >= 2));
+        cut.WaitForAssertion(() => Assert.True(cut.RenderCount >= 2), Wait);
 
         IElement line = Assert.Single(cut.FindAll("p"));
         Assert.Equal("Sensitive notes have no links.", line.TextContent);
@@ -188,20 +190,20 @@ public sealed class LinksPanelTests : IDisposable
         data.WriteNote("Other", "#work\n");
         await data.RefreshAsync();
         IRenderedComponent<LinksPanel> cut = Render("Plan");
-        cut.WaitForAssertion(() => Assert.Equal("Plan has no linked notes.", cut.Find("p[role=status]").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("Plan has no linked notes.", cut.Find("p[role=status]").TextContent), Wait);
 
         // A save that adds a tag and a link.
         data.WriteNote("Plan", "now #work and [[Other]]\n");
         File.SetLastWriteTimeUtc(Path.Combine(data.Root, "Plan.md"), DateTime.UtcNow.AddSeconds(5));
         await data.State!.Refresh();
-        cut.WaitForAssertion(() => Assert.Equal(["Other"], Names(cut)));
+        cut.WaitForAssertion(() => Assert.Equal(["Other"], Names(cut)), Wait);
         Assert.Equal("links to", Row(cut, "Other").QuerySelector(".link-kind")!.TextContent);
         Assert.Equal(["#work"], Row(cut, "Other").QuerySelectorAll(".link-tags button").Select(b => b.TextContent).ToArray());
 
         // Another note gains a link to the open one.
         data.WriteNote("Third", "see [[Plan]]\n");
         await data.State!.Refresh();
-        cut.WaitForAssertion(() => Assert.Equal(["Other", "Third"], Names(cut).Order(StringComparer.Ordinal).ToArray()));
+        cut.WaitForAssertion(() => Assert.Equal(["Other", "Third"], Names(cut).Order(StringComparer.Ordinal).ToArray()), Wait);
         Assert.Equal("linked from", Row(cut, "Third").QuerySelector(".link-kind")!.TextContent);
     }
 
@@ -230,12 +232,12 @@ public sealed class LinksPanelTests : IDisposable
             Monitor.Exit(gate);
         }
 
-        cut.WaitForAssertion(() => Assert.Equal(["Two"], Names(cut)));
+        cut.WaitForAssertion(() => Assert.Equal(["Two"], Names(cut)), Wait);
         await data.State!.Refresh();
-        cut.WaitForAssertion(() => Assert.Equal(["Two"], Names(cut)));
+        cut.WaitForAssertion(() => Assert.Equal(["Two"], Names(cut)), Wait);
 
         cut.Render(p => p.Add(l => l.Name, "Plan"));
-        cut.WaitForAssertion(() => Assert.Equal(["One"], Names(cut)));
+        cut.WaitForAssertion(() => Assert.Equal(["One"], Names(cut)), Wait);
     }
 
     // AC-9: showing the links changes no user data.
@@ -248,9 +250,9 @@ public sealed class LinksPanelTests : IDisposable
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
 
         IRenderedComponent<LinksPanel> cut = Render("Plan");
-        cut.WaitForAssertion(() => Assert.Equal(5, cut.FindAll(".link-row").Count));
+        cut.WaitForAssertion(() => Assert.Equal(5, cut.FindAll(".link-row").Count), Wait);
         await data.State!.Refresh();
-        cut.WaitForAssertion(() => Assert.Equal(5, cut.FindAll(".link-row").Count));
+        cut.WaitForAssertion(() => Assert.Equal(5, cut.FindAll(".link-row").Count), Wait);
 
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
     }
@@ -276,7 +278,7 @@ public sealed class LinksPanelTests : IDisposable
 
         IRenderedComponent<LinksPanel> cut = Render("Plan");
 
-        cut.WaitForAssertion(() => Assert.Contains("<b>x</b>", Names(cut)));
+        cut.WaitForAssertion(() => Assert.Contains("<b>x</b>", Names(cut)), Wait);
         Assert.Empty(cut.FindAll(".link-rows b"));
         Assert.Empty(cut.FindAll(".link-rows img"));
         Assert.DoesNotContain("\u0007", cut.Markup, StringComparison.Ordinal);
@@ -298,7 +300,7 @@ public sealed class LinksPanelTests : IDisposable
 
         IRenderedComponent<LinksPanel> cut = Render("<b>x</b>\u0001");
 
-        cut.WaitForAssertion(() => Assert.Equal("<b>x</b>� has no linked notes.", cut.Find("p[role=status]").TextContent));
+        cut.WaitForAssertion(() => Assert.Equal("<b>x</b>� has no linked notes.", cut.Find("p[role=status]").TextContent), Wait);
         Assert.Empty(cut.FindAll("b"));
     }
 
