@@ -234,6 +234,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#200](backlog/200-list-the-template-folder-once-when.md) List the template folder once when a template is missing
 - [?] [#201](backlog/201-mention-template-in-the-empty-new.md) Mention --template in the empty /new hint
 - [?] [#202](backlog/202-match-note-and-sensitive-file-extensions.md) Match note and sensitive-file extensions ignoring case on Linux
+- [?] [#203](backlog/203-replace-lone-surrogates-in-meeting-note.md) Replace lone surrogates in meeting note names
 
 ## Dropped with the terminal UI
 
