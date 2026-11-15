@@ -12,7 +12,7 @@ scriptable command-line tool, `context`.
 
 A note can have subpages: the children of `Meetings.md` are the `.md` files in the `Meetings/` folder next to it, to
 any depth. A subpage's name is its path with `/` on every OS, so `notes` lists `Meetings/Meeting 1` right after
-`Meetings`, and `note show`, `links` and `export` take that name (quote it when it has spaces):
+`Meetings`, and `note show` and `export` take that name (quote it when it has spaces):
 
 ```sh
 context note show "Meetings/Meeting 1"
@@ -24,20 +24,18 @@ notes only; subpages are created, moved and deleted in the desktop app.
 ### People
 
 Write `@[Anna Schmidt]` in a note to mention a person (at the start of a line or after a space; not in code).
-`context people` lists everyone mentioned, with the number of notes that mention them. `context person Anna Schmidt`
-(or `context person "@[Anna Schmidt]"`) lists those notes, then the appointments whose title or location mentions
-the person or that list them as an attendee, latest first, then the open todos that mention them and the done ones
-(latest done first). Appointments come from `calendar/*.ics` and the last
-downloaded copy of the Exchange calendar; nothing is downloaded. In the desktop app, clicking a mention (in a note or
+The desktop app's people list shows everyone mentioned, with the number of notes that mention them, and a person's
+page lists those notes, then the appointments whose title or location mentions the person or that list them as an
+attendee, latest first, then the open todos that mention them and the done ones (latest done first). Appointments
+come from `calendar/*.ics` and the last downloaded copy of the Exchange calendar. In the desktop app, clicking a mention (in a note or
 in the todo list) opens the person's page `people/Anna Schmidt`, creating it (and `people`) on that click if needed.
 A done todo stays in `todos.json` with a `done` field, so the person's page still lists it.
 
 Give a person shorthands with an `aliases::` line on their page, for example `aliases:: Anna, AS` on
-`people/Anna Schmidt`: then `@[Anna]` and `@[AS]` in any note count as mentions of Anna Schmidt, in
-`context people`, `context person` (`context person AS` works too) and the desktop app. A person's full name always
-wins over an alias. An alias that two people share links to no one: `context person Anna` then lists only the
-`@[Anna]` mentions and adds a hint on stderr, clicking such a mention in the desktop app shows the hint instead of
-making a page, and both person pages warn about it. Alias changes count from the next run.
+`people/Anna Schmidt`: then `@[Anna]` and `@[AS]` in any note count as mentions of Anna Schmidt in the desktop
+app's people list and on her page. A person's full name always wins over an alias. An alias that two people share
+links to no one: clicking such a mention in the desktop app shows a hint instead of making a page, and both person
+pages warn about it. Alias changes count from the next run.
 
 ### Attributes and page types
 
@@ -57,7 +55,7 @@ nothing. A value that is one `[[link]]` is also a note link, so `ACME` lists Ann
 values match ignoring case, and `[[ACME]]`, `ACME` and `acme` are the same value.
 
 A page's types are its `type::` lines (`type:: organization`); a page under `people` without one is a `person`.
-`context find type person` lists them. `context types` prints each type with its attributes (`person` comes with
+`context find type person` lists them. Each type has attributes (`person` comes with
 `aliases`, `affiliation` and `role`, `organization` with none). Define your own type as a subpage of a top-level note `types`,
 for example `types/project` with the lines `attribute:: owner` and `attribute:: due`; a `types/person` page replaces
 the built-in one. A new person page made by clicking a mention starts with one empty line per `person` attribute.
@@ -113,8 +111,8 @@ desktop app, `/new Weekly sync --template meeting` in the command palette does t
 
 ### JSON output
 
-Add `--json` to a read command (`version`, `todos`, `notes`, `note show`, `tags`, `links`, `people`, `person`,
-`find`, `search`, `types`, `current`, `review`) to get one
+Add `--json` to a read command (`version`, `todos`, `notes`, `note show`, `tags`,
+`find`, `search`, `current`, `review`) to get one
 JSON object on one line instead of text. Property names are fixed camelCase; missing values are `null`; dates are
 `yyyy-MM-dd` and times ISO 8601 with offset. Errors stay one text line on stderr with the same exit codes, and
 write commands and `help` refuse the flag.
@@ -129,12 +127,8 @@ plain ASCII; any JSON parser, `ConvertFrom-Json` included, reads them back.
 | `note show <name>` | `{"name":"A","text":"..."}` |
 | `tags` | `{"tags":[{"tag":"work","count":2}]}` |
 | `tags <tag>` | `{"tag":"work","notes":["A"]}` |
-| `links <note>` | `{"note":"A","links":[{"note":"B","direction":"to","missing":false,"sharedTags":["work"]}]}` |
-| `people` | `{"people":[{"person":"Anna Schmidt","count":2}]}` |
-| `person <name>` | `{"person":"Anna Schmidt","notes":["A"],"appointments":[{"start":"...","end":"...","allDay":false,"title":"...","location":null}]}` |
 | `find <key> <value>` | `{"key":"role","value":"Bereichsleiter","notes":["people/Anna Schmidt"]}` |
 | `search <text>` | `{"query":"budget","results":[{"note":"A","line":3,"text":"Budget 2027"}]}` |
-| `types` | `{"types":[{"type":"organization","attributes":[]},{"type":"person","attributes":["aliases","affiliation","role"]}]}` |
 | `current` | `{"today":"...","appointments":[{"start":"...","end":"...","allDay":false,"title":"ACME kickoff","location":null,"related":[{"name":"projects/ACME Rollout","tags":["acme"],"words":["acme"]}]}],"calendar":{...},"due":[...],"linkedNotes":[...]}` |
 | `review` | `{"from":"...","to":"...","changedNotes":[{"name":"A","modified":"..."}],"doneTodos":[{"due":"...","done":"...","text":"..."}],"overdue":[{"due":"...","text":"..."}],"appointments":[...],"calendar":{...}}` |
 

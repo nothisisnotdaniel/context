@@ -7,7 +7,7 @@ namespace Context.Tests;
 public sealed class CliJsonTests : IDisposable
 {
     private const string JsonOnly =
-        "--json works only with version, todos, notes, note show, tags, links, people, person, find, search, types, current and review. Run 'context help'.";
+        "--json works only with version, todos, notes, note show, tags, find, search, current and review. Run 'context help'.";
 
     private static readonly DateOnly Today = new(2026, 10, 29);
     private static readonly DateTime Now = new(2026, 10, 29, 9, 0, 0, DateTimeKind.Utc);
@@ -175,7 +175,6 @@ public sealed class CliJsonTests : IDisposable
         Assert.Equal("# A\n#work [[B]] [[Ghost]]\n", Run("note", "show", "A").Out);
         Assert.Equal("#home\t1\n#work\t2\n", Run("tags").Out);
         Assert.Equal("A\nB\n", Run("tags", "work").Out);
-        Assert.Equal("B\tlinks to\t#work\nGhost\tlinks to (missing)\t\n", Run("links", "A").Out);
         Result current = Run("current");
         Assert.Equal((0, string.Empty), (current.Code, current.Err));
         Assert.Equal(
@@ -301,46 +300,6 @@ public sealed class CliJsonTests : IDisposable
 
         Assert.Equal((0, string.Empty), (result.Code, result.Err));
         Assert.Equal("{\"tag\":\"nope\",\"notes\":[]}\n", result.Out);
-    }
-
-    // AC-8 ---------------------------------------------------------------------------------------
-
-    [Fact]
-    public void Links_DirectionMissingAndSharedTags()
-    {
-        Fixture();
-        WriteNote("C", "[[a]]\n#home\n");
-
-        Assert.Equal(
-            "{\"note\":\"A\",\"links\":["
-                + "{\"note\":\"B\",\"direction\":\"to\",\"missing\":false,\"sharedTags\":[\"work\"]},"
-                + "{\"note\":\"C\",\"direction\":\"from\",\"missing\":false,\"sharedTags\":[]},"
-                + "{\"note\":\"Ghost\",\"direction\":\"to\",\"missing\":true,\"sharedTags\":[]}]}\n",
-            Run("links", "a", "--json").Out);
-        Assert.Equal(
-            "{\"note\":\"B\",\"links\":["
-                + "{\"note\":\"A\",\"direction\":\"from\",\"missing\":false,\"sharedTags\":[\"work\"]},"
-                + "{\"note\":\"C\",\"direction\":\"none\",\"missing\":false,\"sharedTags\":[\"home\"]}]}\n",
-            Run("links", "B", "--json").Out);
-    }
-
-    [Fact]
-    public void Links_BothWays()
-    {
-        WriteNote("A", "[[B]]");
-        WriteNote("B", "[[A]]");
-
-        Assert.Equal(
-            "{\"note\":\"A\",\"links\":[{\"note\":\"B\",\"direction\":\"both\",\"missing\":false,\"sharedTags\":[]}]}\n",
-            Run("links", "A", "--json").Out);
-    }
-
-    [Fact]
-    public void Links_NoLinks_EmptyArray()
-    {
-        WriteNote("Alone", "nothing");
-
-        Assert.Equal("{\"note\":\"Alone\",\"links\":[]}\n", Run("links", "alone", "--json").Out);
     }
 
     // AC-9 ---------------------------------------------------------------------------------------
@@ -536,11 +495,10 @@ public sealed class CliJsonTests : IDisposable
         { ["todos", "x", "--json"], Cli.ExitUsage, "todos takes no arguments. Run 'context help'." },
         { ["notes", "x", "--json"], Cli.ExitUsage, "notes takes no arguments. Run 'context help'." },
         { ["current", "x", "--json"], Cli.ExitUsage, "current takes no arguments. Run 'context help'." },
-        { ["links", "--json"], Cli.ExitUsage, "Type: context links <note>. Run 'context help'." },
         { ["note", "--json"], Cli.ExitUsage, "Type: context note show <name>. Run 'context help'." },
         { ["nope", "--json"], Cli.ExitUsage, "Unknown command: nope. Run 'context help'." },
-        { ["links", "Nope", "--json"], Cli.ExitError, "No note named Nope." },
-        { ["links", "Secret", "--json"], Cli.ExitError, Cli.SensitiveText("Secret") },
+        { ["note", "show", "Nope", "--json"], Cli.ExitError, "No note named Nope." },
+        { ["note", "show", "Secret", "--json"], Cli.ExitError, Cli.SensitiveText("Secret") },
     };
 
     [Theory]
@@ -567,7 +525,6 @@ public sealed class CliJsonTests : IDisposable
         AssertError(Run("todos", "--json"), 1, "Can't read todos.json.");
         AssertError(Run("tags", "--json"), 1, "Can't read context.db.");
         AssertError(Run("tags", "work", "--json"), 1, "Can't read context.db.");
-        AssertError(Run("links", "A", "--json"), 1, "Can't read context.db.");
     }
 
     // AC-12 --------------------------------------------------------------------------------------
@@ -652,6 +609,17 @@ public sealed class CliJsonTests : IDisposable
         Assert.Equal(name, AssertDocument(new Result(0, outputs[2], string.Empty)).GetProperty("notes")[0].GetString());
     }
 
+    // 173 AC-4: the refusal names exactly the JSON commands that are left.
+    [Fact]
+    public void WriteCommand_JsonRefusal_NamesTheKeptCommands()
+    {
+        AssertError(
+            Run("capture", "x", "--json"),
+            Cli.ExitUsage,
+            "--json works only with version, todos, notes, note show, tags, find, search, current and review. Run 'context help'.");
+        Assert.False(Directory.Exists(root));
+    }
+
     // AC-14 --------------------------------------------------------------------------------------
 
     [Fact]
@@ -661,7 +629,7 @@ public sealed class CliJsonTests : IDisposable
 
         string line = Assert.Single(help.Split('\n'), l => l.Contains("--json", StringComparison.Ordinal));
         Assert.StartsWith("context ", line, StringComparison.Ordinal);
-        foreach (string command in new[] { "version", "todos", "notes", "note show", "tags", "links", "current" })
+        foreach (string command in new[] { "version", "todos", "notes", "note show", "tags", "current" })
         {
             Assert.Contains(command, line, StringComparison.Ordinal);
         }
@@ -691,7 +659,7 @@ public sealed class CliJsonTests : IDisposable
             Assert.Contains($"context {command} --json | ConvertFrom-Json", readme, StringComparison.Ordinal);
         }
 
-        string[] reads = ["version", "todos", "notes", "note show", "tags", "links", "find", "types", "current", "review"];
+        string[] reads = ["version", "todos", "notes", "note show", "tags", "find", "current", "review"];
         string[] jsonLines = [.. readme.Split('\n').Where(l => l.Contains("--json", StringComparison.Ordinal) && l.Contains("context ", StringComparison.Ordinal))];
         Assert.NotEmpty(jsonLines);
         foreach (string line in jsonLines)
@@ -700,56 +668,6 @@ public sealed class CliJsonTests : IDisposable
             string after = line[(at + "context ".Length)..];
             Assert.Contains(reads, r => after.StartsWith(r, StringComparison.Ordinal));
         }
-    }
-
-    // 156 AC-8: people pins its field names and order.
-    [Fact]
-    public void People_FieldsInOrder()
-    {
-        WriteNote("A", "@[Anna Schmidt] @[bob]");
-        WriteNote("B", "@[ANNA schmidt]");
-
-        Result result = Run("people", "--json");
-
-        AssertDocument(result);
-        Assert.Equal(
-            "{\"people\":[{\"person\":\"ANNA schmidt\",\"count\":2},{\"person\":\"bob\",\"count\":1}]}\n",
-            result.Out);
-    }
-
-    // 156 AC-8: person pins its field names and order; a missing location is null and times use the usual format.
-    [Fact]
-    public void Person_FieldsInOrder()
-    {
-        WriteNote("A", "@[Anna]");
-        WriteIcs("a.ics", "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Call @[Anna]\r\nDTSTART:20261027T090000Z\r\n"
-            + "DTEND:20261027T100000Z\r\nLOCATION:Room 1\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nSUMMARY:Off\r\n"
-            + "DTSTART;VALUE=DATE:20261028\r\nATTENDEE;CN=anna:mailto:anna@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
-
-        Result result = Run("person", "anna", "--json");
-
-        AssertDocument(result);
-        Assert.Equal(
-            "{\"person\":\"Anna\",\"notes\":[\"A\"],\"appointments\":["
-                + "{\"start\":\"2026-10-28T00:00:00\\u002B01:00\",\"end\":\"2026-10-29T00:00:00\\u002B01:00\",\"allDay\":true,"
-                + "\"title\":\"Off\",\"location\":null},"
-                + "{\"start\":\"2026-10-27T10:00:00\\u002B01:00\",\"end\":\"2026-10-27T11:00:00\\u002B01:00\",\"allDay\":false,"
-                + "\"title\":\"Call @[Anna]\",\"location\":\"Room 1\"}],\"todos\":[],\"doneTodos\":[]}\n",
-            result.Out);
-        Assert.DoesNotContain("example.com", result.Out, StringComparison.Ordinal);
-    }
-
-    // 156 AC-8: no mentions gives empty arrays; a bad index is the usual error line.
-    [Fact]
-    public void Person_NoMentions_EmptyArrays_BadDbIsError()
-    {
-        WriteNote("A", "x");
-
-        Assert.Equal("{\"person\":\"Carl\",\"notes\":[],\"appointments\":[],\"todos\":[],\"doneTodos\":[]}\n", Run("person", "Carl", "--json").Out);
-
-        BreakIndex();
-        AssertError(Run("person", "Carl", "--json"), 1, "Can't read context.db.");
-        AssertError(Run("people", "--json"), 1, "Can't read context.db.");
     }
 
     // 157 AC-8: find pins its field names and order; no match gives an empty array; a bad index is the error line.
@@ -791,76 +709,6 @@ public sealed class CliJsonTests : IDisposable
 
         BreakIndex();
         AssertError(Run("search", "budget", "--json"), 1, "Can't read context.db.");
-    }
-
-    // 157 AC-8: types pins its field names and order, sorted by type.
-    [Fact]
-    public void Types_FieldsInOrder()
-    {
-        WriteNote("types", "# types");
-        Directory.CreateDirectory(Path.Combine(root, "types"));
-        File.WriteAllText(Path.Combine(root, "types", "Project.md"), "attribute:: owner\nattribute:: due\n");
-
-        Result result = Run("types", "--json");
-
-        AssertDocument(result);
-        Assert.Equal(
-            "{\"types\":[{\"type\":\"organization\",\"attributes\":[]},"
-                + "{\"type\":\"person\",\"attributes\":[\"aliases\",\"affiliation\",\"role\"]},"
-                + "{\"type\":\"project\",\"attributes\":[\"owner\",\"due\"]}]}\n",
-            result.Out);
-    }
-    // 158 AC-5 / AC-6: an alias gives the person's document in the usual shape; an ambiguous one only adds a stderr line.
-    [Fact]
-    public void Person_Alias_SameShape()
-    {
-        WriteNote("people", "# people");
-        Directory.CreateDirectory(Path.Combine(root, "people"));
-        File.WriteAllText(Path.Combine(root, "people", "Anna Schmidt.md"), "# Anna Schmidt\naliases:: AS, Anna\n");
-        WriteNote("A", "@[AS]");
-        WriteNote("B", "@[Anna]");
-
-        Result result = Run("person", "as", "--json");
-
-        AssertDocument(result);
-        Assert.Equal("{\"person\":\"Anna Schmidt\",\"notes\":[\"A\",\"B\"],\"appointments\":[],\"todos\":[],\"doneTodos\":[]}\n", result.Out);
-
-        File.WriteAllText(Path.Combine(root, "people", "Anna Berg.md"), "# Anna Berg\naliases:: Anna\n");
-        Result ambiguous = Run("person", "Anna", "--json");
-
-        Assert.Equal(0, ambiguous.Code);
-        Assert.Equal("{\"person\":\"Anna\",\"notes\":[\"B\"],\"appointments\":[],\"todos\":[],\"doneTodos\":[]}\n", ambiguous.Out);
-        Assert.Equal(["@[Anna] is an alias of more than one person: Anna Berg, Anna Schmidt."], ambiguous.ErrLines);
-    }
-
-    // 159 AC-7: person adds todos [{due,text}] and doneTodos [{due,done,text}] after the existing fields; done is the
-    // day in the zone; null for both when todos.json can't be read (with the stderr line and exit code 1).
-    [Fact]
-    public void Person_Todos_FieldsInOrder_UnreadableIsNull()
-    {
-        WriteNote("A", "@[Anna]");
-        TodoItem open = new TodoStore(root, () => Now).Add("Call @[Anna] & <co>", new DateOnly(2026, 11, 5));
-        TodoItem done = new TodoStore(root, () => Now).Add("Sent @[anna]\nthe plan", new DateOnly(2026, 10, 25));
-        new TodoStore(root, () => new DateTime(2026, 10, 27, 23, 30, 0, DateTimeKind.Utc)).Complete(done.Id);
-
-        Result result = Run("person", "Anna", "--json");
-
-        AssertDocument(result);
-        Assert.Equal(
-            "{\"person\":\"Anna\",\"notes\":[\"A\"],\"appointments\":[],"
-                + "\"todos\":[{\"due\":\"2026-11-05\",\"text\":\"Call @[Anna] \\u0026 \\u003Cco\\u003E\"}],"
-                + "\"doneTodos\":[{\"due\":\"2026-10-25\",\"done\":\"2026-10-28\",\"text\":\"Sent @[anna] the plan\"}]}\n",
-            result.Out);
-        Assert.NotEqual(Guid.Empty, open.Id);
-
-        File.WriteAllText(Path.Combine(root, TodoStore.FileName), "[{\"text\":\"@[Anna]\",\"due\":\"2026-11-03\",\"done\":42}]");
-        Result unreadable = Run("person", "Anna", "--json");
-
-        Assert.Equal(1, unreadable.Code);
-        Assert.Equal(
-            "{\"person\":\"Anna\",\"notes\":[\"A\"],\"appointments\":[],\"todos\":null,\"doneTodos\":null}\n",
-            unreadable.Out);
-        Assert.Equal(["Can't read todos.json."], unreadable.ErrLines);
     }
 
     // 169 AC-6: review pins its field names and order; a multi-day event once per day it touches.
