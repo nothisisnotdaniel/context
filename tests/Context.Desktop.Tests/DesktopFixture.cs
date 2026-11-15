@@ -157,10 +157,10 @@ internal sealed class DesktopFixture : IDisposable
         File.WriteAllBytes(Path.Combine(Root, name + NoteStore.SensitiveExtension), SealedNote.Seal(name, text, recipients));
     }
 
-    public void AddTodo(string text, DateOnly due)
+    public void AddTodo(string text, DateOnly due, TodoRepeat? repeat = null)
     {
         TodoStore store = new TodoStore(Root, () => created = created.AddMinutes(1));
-        store.Add(text, due);
+        store.Add(text, due, repeat);
     }
 
     public void WriteFile(string relative, string text)

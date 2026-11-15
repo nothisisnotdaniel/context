@@ -184,6 +184,14 @@ ol {
     margin: 0;
 }
 
+/* A recurring todo's marker after its text: the words (every day, every Monday), not a colour or an icon. */
+.todo .repeat {
+    color: var(--grey);
+    flex: none;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
 /* A person mention in a todo's text, styled like the editor's mention chip: a long name is cut, the full text is in
    its title. */
 .todo .mention {

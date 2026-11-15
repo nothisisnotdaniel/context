@@ -94,7 +94,8 @@ public sealed class CliTests : IDisposable
         Assert.Equal(string.Empty, result.Err);
         foreach (string usage in new[]
         {
-            "capture <text...>", "todos", "todo add <yyyy-MM-dd|today|tomorrow> <text...>", "todo done <text...>", "notes",
+            "capture <text...>", "todos", "todo add <yyyy-MM-dd|today|tomorrow> <text...>",
+            "todo add every <weekday|day|month> <text...>", "todo done <text...>", "notes",
             "note show <name...>", "tags [tag...]", "links <note...>", "people", "person <name...>", "find <attribute> <value...>",
             "types", "current", "new <title...> [--template <name>]", "import <path>",
             "export <note> <path>", "version",
@@ -428,6 +429,71 @@ public sealed class CliTests : IDisposable
     {
         AssertError(Run("todo", "done", "x"), 1, "There are no todos to mark done.");
         Assert.False(File.Exists(Path.Combine(root, TodoStore.FileName)));
+    }
+
+    // 168 AC-9: todo add every follows the repeat rules and prints what todo add prints.
+    [Fact]
+    public void TodoAddEvery_AddsRecurring_FirstDue_TodosUnchanged()
+    {
+        Result weekly = Run("todo", "add", "every", "Monday", "water", "plants");
+        Result daily = Run("todo", "add", "EVERY", "day", "stretch");
+        Result monthly = Run("todo", "add", "every", "month", "pay rent");
+
+        Assert.Equal((0, "Added: 2026-11-02 water plants\n", string.Empty), (weekly.Code, weekly.Out, weekly.Err));
+        Assert.Equal((0, "Added: 2026-10-29 stretch\n", string.Empty), (daily.Code, daily.Out, daily.Err));
+        Assert.Equal((0, "Added: 2026-10-29 pay rent\n", string.Empty), (monthly.Code, monthly.Out, monthly.Err));
+        Assert.Equal(
+            [TodoRepeat.Daily, TodoRepeat.Monthly(29), TodoRepeat.Weekly(DayOfWeek.Monday)],
+            new TodoStore(root).List().Select(t => t.Repeat));
+        Assert.Equal("2026-10-29\tstretch\n2026-10-29\tpay rent\n2026-11-02\twater plants\n", Run("todos").Out);
+        Assert.Equal(
+            "{\"todos\":[{\"due\":\"2026-10-29\",\"text\":\"stretch\"},{\"due\":\"2026-10-29\",\"text\":\"pay rent\"},"
+            + "{\"due\":\"2026-11-02\",\"text\":\"water plants\"}]}\n",
+            Run("todos", "--json").Out);
+    }
+
+    // 168 AC-9: a bad unit is a usage error with exit 2 and writes nothing.
+    [Theory]
+    [InlineData("week")]
+    [InlineData("mon")]
+    [InlineData("2")]
+    public void TodoAddEvery_BadUnit_IsUsageError(string unit)
+    {
+        Result result = Run("todo", "add", "every", unit, "x");
+
+        Assert.Equal(2, result.Code);
+        Assert.Equal(string.Empty, result.Out);
+        Assert.Equal(
+            ["That repeat isn't valid. Type: context todo add every <weekday|day|month> <text>. Run 'context help'."],
+            result.ErrLines);
+        Assert.False(Directory.Exists(root));
+    }
+
+    // 168 AC-9: no unit or no text, or too long a text, is a usage error too.
+    [Theory]
+    [InlineData("todo", "add", "every")]
+    [InlineData("todo", "add", "every", "day")]
+    [InlineData("todo", "add", "every", "day", " ")]
+    public void TodoAddEvery_NoText_IsUsageError(params string[] args)
+    {
+        AssertUsage(Run(args));
+        Assert.False(Directory.Exists(root));
+        AssertUsage(Run("todo", "add", "every", "day", new string('a', 201)));
+    }
+
+    // 168 AC-9: done on a recurring todo prints Done and the next due date, and the next todo is listed.
+    [Fact]
+    public void TodoDone_Recurring_PrintsNext()
+    {
+        Run("todo", "add", "every", "thursday", "water plants");
+        Run("todo", "add", "today", "call Anna");
+
+        Result result = Run("todo", "done", "water");
+
+        Assert.Equal((0, "Done: water plants\nNext: 2026-11-05\n", string.Empty), (result.Code, result.Out, result.Err));
+        Assert.Equal("2026-10-29\tcall Anna\n2026-11-05\twater plants\n", Run("todos").Out);
+        Result plain = Run("todo", "done", "call");
+        Assert.Equal((0, "Done: call Anna\n", string.Empty), (plain.Code, plain.Out, plain.Err));
     }
 
     // 144 AC-8: no text is a usage error that names the new form and leaves the file alone.

@@ -65,4 +65,24 @@ public sealed class CommandMatcherTests
     {
         Assert.Equal(expected, CommandMatcher.Levenshtein(a, b));
     }
+
+    // 168: a swapped pair counts as one edit, only to order ties.
+    [Theory]
+    [InlineData("open", "opne", 1)]
+    [InlineData("done", "opne", 2)]
+    [InlineData("kitten", "sitting", 3)]
+    [InlineData("", "abc", 3)]
+    public void SwapDistance_CountsASwapAsOneEdit(string a, string b, int expected)
+    {
+        Assert.Equal(expected, CommandMatcher.SwapDistance(a, b));
+    }
+
+    // 168: /opne matches /open and /done equally (Levenshtein 2), and the swapped /open ranks first.
+    [Fact]
+    public void Match_SwappedLetters_RankTheMeantCommandFirst()
+    {
+        string[] names = ["/done", "/open", "/today"];
+
+        Assert.Equal(["/open", "/done"], CommandMatcher.Match(names, n => n, "/opne plan"));
+    }
 }

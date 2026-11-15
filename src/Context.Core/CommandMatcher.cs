@@ -11,7 +11,8 @@ internal static class CommandMatcher
     /// returns every item in name order, ignoring case. Otherwise each name scores the smaller Levenshtein distance
     /// to the whole name or to its prefix of the token's length, so a prefix scores 0 and typos still match. An item
     /// is kept if its score is 0 for a 1-letter token, at most 1 for 2–3 letters and at most 2 for longer tokens.
-    /// Results are sorted by score, then by name ignoring case.
+    /// Results are sorted by score, then by <see cref="SwapDistance"/> (so a swapped pair of letters, as in <c>/opne</c>,
+    /// ranks the meant command before another one the same Levenshtein distance away), then by name ignoring case.
     /// </summary>
     public static IReadOnlyList<T> Match<T>(IEnumerable<T> items, Func<T, string> nameOf, string line)
     {
@@ -40,7 +41,7 @@ internal static class CommandMatcher
             _ => 2,
         };
 
-        List<(T Item, string Name, int Score)> scored = [];
+        List<(T Item, string Name, int Score, int Swap)> scored = [];
         foreach (T item in items)
         {
             string fullName = nameOf(item);
@@ -49,15 +50,52 @@ internal static class CommandMatcher
             int score = Math.Min(Levenshtein(token, name), Levenshtein(token, prefix));
             if (score <= limit)
             {
-                scored.Add((item, fullName, score));
+                int swap = Math.Min(SwapDistance(token, name), SwapDistance(token, prefix));
+                scored.Add((item, fullName, score, swap));
             }
         }
 
         return scored
             .OrderBy(s => s.Score)
+            .ThenBy(s => s.Swap)
             .ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
             .Select(s => s.Item)
             .ToList();
+    }
+
+    /// <summary>
+    /// The edit distance that also counts swapping two adjacent letters as one edit (optimal string alignment). Only a
+    /// tie-break: which items match still depends on <see cref="Levenshtein"/> alone.
+    /// </summary>
+    public static int SwapDistance(string a, string b)
+    {
+        int[,] d = new int[a.Length + 1, b.Length + 1];
+        for (int i = 0; i <= a.Length; i++)
+        {
+            d[i, 0] = i;
+        }
+
+        for (int j = 0; j <= b.Length; j++)
+        {
+            d[0, j] = j;
+        }
+
+        for (int i = 1; i <= a.Length; i++)
+        {
+            for (int j = 1; j <= b.Length; j++)
+            {
+                int cost = a[i - 1] == b[j - 1] ? 0 : 1;
+                int best = Math.Min(Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1), d[i - 1, j - 1] + cost);
+                if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1])
+                {
+                    best = Math.Min(best, d[i - 2, j - 2] + 1);
+                }
+
+                d[i, j] = best;
+            }
+        }
+
+        return d[a.Length, b.Length];
     }
 
     /// <summary>The Levenshtein (edit) distance between two strings: inserts, deletes and substitutions.</summary>

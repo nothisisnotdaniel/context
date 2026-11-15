@@ -111,7 +111,7 @@
                 }
             </main>
             <aside class="todos-region">
-                <TodoPanel OnPerson="OpenMention" />
+                <TodoPanel @ref="todoPanel" OnPerson="OpenMention" />
             </aside>
         </div>
         @if (discarding)
@@ -170,6 +170,7 @@ else
     private bool marking;
     private bool unsealing;
     private NotesPanel? notesPanel;
+    private TodoPanel? todoPanel;
     private bool subpaging;
     private string subpageText = string.Empty;
     private ElementReference subpageField;
@@ -679,9 +680,30 @@ else
                 }
 
                 break;
+            case "/done":
+                PickDone(rest);
+                break;
             case "/todo":
                 int split = rest.IndexOfAny([' ', '\t']);
-                if (split < 0 || !DesktopText.TryParseDue(rest[..split], Snapshot?.Today ?? default, out DateOnly due))
+                TodoRepeat? repeat = null;
+                DateOnly due;
+                if (string.Equals(split < 0 ? rest : rest[..split], "every", StringComparison.OrdinalIgnoreCase))
+                {
+                    // /todo every <unit> <text>: the unit is the next word, the text the rest.
+                    string every = split < 0 ? string.Empty : rest[(split + 1)..].TrimStart();
+                    int unitEnd = every.IndexOfAny([' ', '\t']);
+                    if (unitEnd < 0 || every[(unitEnd + 1)..].Trim().Length == 0
+                        || !TodoInput.TryParseRepeat(every[..unitEnd], Snapshot?.Today ?? default, out TodoRepeat parsed, out due))
+                    {
+                        ShowStatus("Type /todo every <weekday|day|month> <text>.", "red");
+                        break;
+                    }
+
+                    repeat = parsed;
+                    rest = every;
+                    split = unitEnd;
+                }
+                else if (split < 0 || !DesktopText.TryParseDue(rest[..split], Snapshot?.Today ?? default, out due))
                 {
                     ShowStatus("Type /todo <yyyy-MM-dd|today|tomorrow> <text>.", "red");
                     break;
@@ -692,7 +714,7 @@ else
                     running = true;
                     try
                     {
-                        ActionResult added = await Actions.AddTodo(rest[(split + 1)..], due);
+                        ActionResult added = await Actions.AddTodo(rest[(split + 1)..], due, repeat);
                         ShowStatus(
                             added.Kind == ActionKind.Done ? $"Added: {DesktopText.OneLine(added.Text)}" : DesktopText.OneLine(added.Text),
                             added.Kind == ActionKind.Done ? "accent" : "red");
@@ -708,6 +730,39 @@ else
                 ShowStatus("Unknown command.", "red");
                 break;
         }
+    }
+
+    // /done <text>: picks the open todo by its text like context todo done and asks the todo panel's dialog to
+    // confirm; nothing is written until the user confirms there.
+    private void PickDone(string query)
+    {
+        if (query.Length == 0)
+        {
+            ShowStatus("Type /done <text>.", "red");
+            return;
+        }
+
+        if (Snapshot is not { } snapshot || snapshot.TodosUnreadable)
+        {
+            ShowStatus(DesktopActions.TodosUnreadableText, "red");
+            return;
+        }
+
+        if (snapshot.Todos.Count == 0)
+        {
+            ShowStatus(TodoPicker.NoTodosText, "red");
+            return;
+        }
+
+        TodoPick pick = TodoPicker.Pick(snapshot.Todos, query);
+        if (pick.Todo is not { } todo)
+        {
+            ShowStatus(TodoPicker.NoPickText(pick, DesktopText.OneLine(query)), "red");
+            return;
+        }
+
+        ShowStatus(string.Empty, string.Empty);
+        todoPanel?.AskDone(todo);
     }
 
     // True when the note in the editor is the plain inbox note, the one a capture appends to.

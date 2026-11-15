@@ -46,6 +46,10 @@
                                 {
                                     @text
                                 }</span>
+                            @if (todo.Repeat is { } repeat)
+                            {
+                                <span class="repeat" title="@repeat.Label">@repeat.Label</span>
+                            }
                         </label>
                     </li>
                 }
@@ -56,7 +60,14 @@
     {
         @if (shown.Kind == ActionKind.Done)
         {
-            <p class="result accent" role="status">Done: @DesktopText.OneLine(shown.Text)</p>
+            @if (shown.NextDue is { } nextDue)
+            {
+                <p class="result accent" role="status">Done: @(DesktopText.OneLine(shown.Text)). Next due @(nextDue.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)).</p>
+            }
+            else
+            {
+                <p class="result accent" role="status">Done: @DesktopText.OneLine(shown.Text)</p>
+            }
         }
         else
         {
@@ -165,6 +176,19 @@
         if (!running)
         {
             asking = todo;
+        }
+    }
+
+    /// <summary>
+    /// Opens the same <c>Mark this todo done?</c> dialog a ticked checkbox opens, for the todo the palette's
+    /// <c>/done</c> picked. Nothing is written until the user confirms.
+    /// </summary>
+    internal void AskDone(TodoItem todo)
+    {
+        if (!running && asking is null)
+        {
+            asking = todo;
+            StateHasChanged();
         }
     }
 
