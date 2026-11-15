@@ -101,6 +101,7 @@ public sealed class NoteLinkParserTests
     [InlineData("[[")]
     [InlineData("[[a")]
     [InlineData("[[a]")]
+    [InlineData("[[a `")]
     public void Parse_LongHostileLine_IsFast(string unit)
     {
         string line = string.Concat(Enumerable.Repeat(unit, 200_000)) + "]]";
@@ -117,5 +118,59 @@ public sealed class NoteLinkParserTests
     {
         Assert.Empty(NoteLinkParser.Parse("@[Anna] and @[[Anna]]"));
         Assert.Empty(PersonParser.Parse("[[Anna]] and @[[Anna]]"));
+    }
+
+    // 163 AC-3: a backtick run that opens a matched code span inside the target means no link; the span is skipped.
+    [Theory]
+    [InlineData("[[a `b]] c` d")]
+    [InlineData("[[x `]]` y]]")]
+    [InlineData("[[a ``b]] c`` d")]
+    [InlineData("[[a ` x ``b]] c`` d")]
+    public void Parse_TargetRunsIntoCodeSpan_IsNoLink(string markdown)
+    {
+        Assert.Empty(NoteLinkParser.Parse(markdown));
+    }
+
+    // 163 AC-3: scanning goes on after the skipped span.
+    [Theory]
+    [InlineData("[[a `b]] c` [[real]]", "real")]
+    [InlineData("[[x `]]` [[real]]", "real")]
+    [InlineData("[[a `[[b]]` c]] [[real]]", "real")]
+    public void Parse_AfterSpanInTarget_FindsLaterLink(string markdown, string target)
+    {
+        Assert.Equal([target], NoteLinkParser.Parse(markdown));
+    }
+
+    // 163 AC-4: a backtick with no match inside a target is plain text, and a span after the link changes nothing.
+    [Theory]
+    [InlineData("[[a`b]]", "a`b")]
+    [InlineData("[[a]] `code`", "a")]
+    [InlineData("[[a ``b]] c` d", "a ``b")]
+    [InlineData("`x` [[a]] `y`", "a")]
+    public void Parse_UnmatchedBacktickInTarget_IsPlainText(string markdown, string target)
+    {
+        Assert.Equal([target], NoteLinkParser.Parse(markdown));
+    }
+
+    // 163 AC-1: nested and mixed run lengths.
+    [Theory]
+    [InlineData("`` a ` [[x]] `` [[real]]", "real")]
+    [InlineData("` `` ` [[real]] ``", "real")]
+    public void Parse_MixedRunLengths_SkipsSpans(string markdown, string target)
+    {
+        Assert.Equal([target], NoteLinkParser.Parse(markdown));
+    }
+
+    // 163 AC-2: many unmatched backtick runs of different lengths are parsed in linear time.
+    [Fact]
+    public void Parse_ManyUnmatchedRuns_IsFast()
+    {
+        string line = string.Concat(Enumerable.Range(1, 3000).Select(k => new string('`', k) + "a #t [[x]] @[P] "));
+        System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+
+        IReadOnlyList<string> targets = NoteLinkParser.Parse(line);
+
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), $"took {watch.Elapsed}");
+        Assert.Equal(["x"], targets);
     }
 }

@@ -15,8 +15,9 @@ internal static class NoteLinkParser
     /// that <c>]</c> directly followed by a second <c>]</c>. The target is that text, trimmed (inner spaces kept
     /// as written); an empty target or one longer than <see cref="MaxTargetLength"/> is not a link. Targets are
     /// distinct ignoring case (ordinal); the first spelling is kept. Lines inside fenced code blocks and text
-    /// inside inline backtick spans are skipped, as in <see cref="TagParser"/>. <c>#[tag]</c> and <c>@[person]</c> are
-    /// never links.
+    /// inside inline backtick spans are skipped, as in <see cref="TagParser"/>; a backtick run that opens a matched code
+    /// span between <c>[[</c> and that <c>]</c> means no link (a backtick with no match is plain text in the target).
+    /// <c>#[tag]</c> and <c>@[person]</c> are never links.
     /// Targets are raw text: they are only compared with note names, never turned into a path.
     /// </summary>
     public static IReadOnlyList<string> Parse(string markdown)
@@ -35,15 +36,18 @@ internal static class NoteLinkParser
     {
         // The first ']' and the first '[' at or after the current text start; remembered so a line full of
         // "[[" is still scanned once (each search only moves forward).
+        // nextSpan is the first run opening a matched code span at or after the text start, found the same way.
+        CodeSpans? spans = CodeSpans.For(line);
         int nextClose = -1;
         int nextOpen = -1;
+        int nextSpan = -1;
         int i = 0;
         while (i < line.Length)
         {
             char c = line[i];
             if (c == '`')
             {
-                i = TagParser.SkipCodeSpan(line, i);
+                i = spans!.Skip(i);
                 continue;
             }
 
@@ -71,7 +75,19 @@ internal static class NoteLinkParser
                 nextOpen = IndexOrEnd(line, '[', textStart);
             }
 
+            if (nextSpan < textStart)
+            {
+                nextSpan = spans?.NextSpanStart(textStart, line.Length) ?? line.Length;
+            }
+
             bool closed = nextClose + 1 < line.Length && line[nextClose + 1] == ']';
+            if (closed && nextOpen > nextClose && nextSpan < nextClose)
+            {
+                // A code span opens inside the target: no link; carry on at that span, so it is skipped.
+                i = nextSpan;
+                continue;
+            }
+
             if (closed && nextOpen > nextClose)
             {
                 ReadOnlySpan<char> target = line.AsSpan(textStart, nextClose - textStart).Trim();

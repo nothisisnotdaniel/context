@@ -204,4 +204,87 @@ public sealed class TagParserTests
         Assert.Empty(TagParser.Parse("@[Anna] @[anna schmidt]"));
         Assert.Empty(PersonParser.Parse("#[anna] #anna"));
     }
+
+    // 163 AC-1: nested and mixed run lengths.
+    [Theory]
+    [InlineData("`` a ` #code `` #real", "real")]
+    [InlineData("` `` ` #real ``", "real")]
+    [InlineData("x ``` #a `` #b ` ``` #real", "real")]
+    public void Parse_MixedRunLengths_SkipsSpans(string markdown, string tag)
+    {
+        Assert.Equal([tag], TagParser.Parse(markdown));
+    }
+
+    // 163 AC-2: many unmatched backtick runs of different lengths are parsed in linear time.
+    [Fact]
+    public void Parse_ManyUnmatchedRuns_IsFast()
+    {
+        string line = string.Concat(Enumerable.Range(1, 3000).Select(k => new string('`', k) + "a #t [[x]] @[P] "));
+        System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+
+        IReadOnlyList<string> tags = TagParser.Parse(line);
+
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), $"took {watch.Elapsed}");
+        Assert.Equal(["t"], tags);
+    }
+
+    // 163 AC-6: CollapseWhitespace trims and turns each whitespace run into one space.
+    [Theory]
+    [InlineData("  a \t\n b  ", "a b")]
+    [InlineData("", "")]
+    [InlineData("   ", "")]
+    [InlineData("a", "a")]
+    [InlineData("A  B\u00a0C", "A B C")]
+    public void CollapseWhitespace_TrimsAndCollapses(string text, string expected)
+    {
+        Assert.Equal(expected, TagParser.CollapseWhitespace(text));
+    }
+
+    // 163 AC-6: NormalizeBracket gives the collapsed, lower-cased text when it passes the tag rules, else null.
+    [Theory]
+    [InlineData("  Deep   Work ", "deep work")]
+    [InlineData("Über-Plan_2", "über-plan_2")]
+    [InlineData("a\t \nb", "a b")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", null)]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaa  aaaaaaaaaaaaaaaaaaaaaaaaa", null)]
+    [InlineData("2work", null)]
+    [InlineData(" 2 work", null)]
+    [InlineData("a/b", null)]
+    [InlineData("a `b", null)]
+    [InlineData("   ", null)]
+    [InlineData("", null)]
+    public void NormalizeBracket_FollowsTagRules(string text, string? expected)
+    {
+        Assert.Equal(expected, TagParser.NormalizeBracket(text));
+    }
+
+    // 163 AC-6: TagParser.cs holds one whitespace-collapsing loop.
+    [Fact]
+    public void Source_DeclaresCollapsingStateOnce()
+    {
+        string path = Path.Combine(RepoRoot(), "src", "Context.Core", "TagParser.cs");
+        Assert.True(File.Exists(path), "TagParser.cs not found");
+
+        string source = File.ReadAllText(path);
+        int count = source.Split("bool pendingSpace").Length - 1;
+
+        Assert.Equal(1, count);
+    }
+
+    private static string RepoRoot()
+    {
+        DirectoryInfo? dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "Context.slnx")))
+            {
+                return dir.FullName;
+            }
+
+            dir = dir.Parent;
+        }
+
+        throw new InvalidOperationException("Context.slnx not found");
+    }
 }

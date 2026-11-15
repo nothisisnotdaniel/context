@@ -58,6 +58,7 @@ internal static class TagParser
 
     private static void ParseLine(string line, List<string> tags, HashSet<string> seen)
     {
+        CodeSpans? spans = CodeSpans.For(line);
         int i = 0;
         int nextClose = -1;
         while (i < line.Length)
@@ -65,7 +66,7 @@ internal static class TagParser
             char c = line[i];
             if (c == '`')
             {
-                i = SkipCodeSpan(line, i);
+                i = spans!.Skip(i);
                 continue;
             }
 
@@ -121,46 +122,6 @@ internal static class TagParser
     }
 
     /// <summary>
-    /// At a run of backticks starting at <paramref name="start"/>: returns the index just after the matching
-    /// closing run of the same length, or just after the opening run when there is none (then the backticks
-    /// are plain text). Shared with <see cref="NoteLinkParser"/>.
-    /// </summary>
-    internal static int SkipCodeSpan(string line, int start)
-    {
-        int open = start;
-        while (open < line.Length && line[open] == '`')
-        {
-            open++;
-        }
-
-        int runLength = open - start;
-        int i = open;
-        while (i < line.Length)
-        {
-            if (line[i] != '`')
-            {
-                i++;
-                continue;
-            }
-
-            int close = i;
-            while (close < line.Length && line[close] == '`')
-            {
-                close++;
-            }
-
-            if (close - i == runLength)
-            {
-                return close;
-            }
-
-            i = close;
-        }
-
-        return open;
-    }
-
-    /// <summary>
     /// How <paramref name="tag"/> is written in a note: <c>#tag</c>, or <c>#[tag]</c> when it contains a
     /// space.
     /// </summary>
@@ -177,32 +138,9 @@ internal static class TagParser
         // Stops at the first character that can't be in a tag, or once the name is too long, so the work
         // per "#[" is bounded by the next '#' or by MaxTagLength, not by the distance to the next ']'.
         System.Text.StringBuilder builder = new(MaxTagLength + 1);
-        bool pendingSpace = false;
-        foreach (char c in text)
+        if (!Collapse(text, builder, MaxTagLength, static (c, length) => length == 0 ? char.IsLetter(c) : IsTagChar(c)))
         {
-            if (char.IsWhiteSpace(c))
-            {
-                pendingSpace = builder.Length > 0;
-                continue;
-            }
-
-            bool valid = builder.Length == 0 ? char.IsLetter(c) : IsTagChar(c);
-            if (!valid)
-            {
-                return null;
-            }
-
-            if (pendingSpace)
-            {
-                builder.Append(' ');
-                pendingSpace = false;
-            }
-
-            builder.Append(c);
-            if (builder.Length > MaxTagLength)
-            {
-                return null;
-            }
+            return null;
         }
 
         return builder.Length == 0 ? null : builder.ToString().ToLowerInvariant();
@@ -212,6 +150,23 @@ internal static class TagParser
     internal static string CollapseWhitespace(ReadOnlySpan<char> text)
     {
         System.Text.StringBuilder builder = new(text.Length);
+        Collapse(text, builder, int.MaxValue, null);
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// The one whitespace-collapsing loop: appends <paramref name="text"/> to the empty <paramref name="builder"/>,
+    /// trimmed, with each whitespace run turned into one space. Stops and returns <c>false</c> at the first
+    /// non-whitespace character that <paramref name="valid"/> refuses (called with the character and the length
+    /// collapsed so far), or once the result is longer than <paramref name="maxLength"/>. Shared with
+    /// <see cref="PersonParser"/>.
+    /// </summary>
+    internal static bool Collapse(
+        ReadOnlySpan<char> text,
+        System.Text.StringBuilder builder,
+        int maxLength,
+        Func<char, int, bool>? valid)
+    {
         bool pendingSpace = false;
         foreach (char c in text)
         {
@@ -221,6 +176,11 @@ internal static class TagParser
                 continue;
             }
 
+            if (valid is not null && !valid(c, builder.Length))
+            {
+                return false;
+            }
+
             if (pendingSpace)
             {
                 builder.Append(' ');
@@ -228,9 +188,13 @@ internal static class TagParser
             }
 
             builder.Append(c);
+            if (builder.Length > maxLength)
+            {
+                return false;
+            }
         }
 
-        return builder.ToString();
+        return true;
     }
 
     private static void Add(string tag, List<string> tags, HashSet<string> seen)
@@ -242,4 +206,84 @@ internal static class TagParser
     }
 
     private static bool IsTagChar(char c) => char.IsLetterOrDigit(c) || c is '-' or '_';
+}
+
+/// <summary>
+/// The inline code spans of one line, found in one pass: a span is a run of backticks up to the next run of the
+/// same length on the line; a run with no such match is plain text. Built only for a line that holds a backtick
+/// (<see cref="For"/>), so every lookup is a dictionary hit and no path rescans the line per backtick run. Shared by
+/// <see cref="TagParser"/>, <see cref="NoteLinkParser"/> and <see cref="PersonParser"/>.
+/// </summary>
+internal sealed class CodeSpans
+{
+    private readonly List<int> starts = [];
+    private readonly List<int> ends = [];
+
+    // For each run: the index of the next run of the same length, or -1 when there is none.
+    private readonly List<int> matches = [];
+    private readonly Dictionary<int, int> runAt = [];
+    private int cursor;
+
+    private CodeSpans(string line)
+    {
+        Dictionary<int, int> lastRunOfLength = [];
+        int i = line.IndexOf('`');
+        while (i >= 0)
+        {
+            int end = i;
+            while (end < line.Length && line[end] == '`')
+            {
+                end++;
+            }
+
+            int run = starts.Count;
+            starts.Add(i);
+            ends.Add(end);
+            matches.Add(-1);
+            runAt[i] = run;
+            if (lastRunOfLength.TryGetValue(end - i, out int previous))
+            {
+                matches[previous] = run;
+            }
+
+            lastRunOfLength[end - i] = run;
+            i = end < line.Length ? line.IndexOf('`', end) : -1;
+        }
+    }
+
+    /// <summary>The code spans of <paramref name="line"/>, or <c>null</c> (nothing allocated) when it has no backtick.</summary>
+    public static CodeSpans? For(string line) => line.Contains('`', StringComparison.Ordinal) ? new CodeSpans(line) : null;
+
+    /// <summary>
+    /// At the backtick run starting at <paramref name="start"/>: the index just after the matching closing run, or just
+    /// after the opening run when there is none (then the backticks are plain text). A <paramref name="start"/> inside a
+    /// run (the scanners never land there) is treated as plain text up to the run's end.
+    /// </summary>
+    public int Skip(int start)
+    {
+        if (runAt.TryGetValue(start, out int run))
+        {
+            int match = matches[run];
+            return match >= 0 ? ends[match] : ends[run];
+        }
+
+        int index = starts.BinarySearch(start);
+        int containing = index >= 0 ? index : ~index - 1;
+        return containing >= 0 && start < ends[containing] ? ends[containing] : start + 1;
+    }
+
+    /// <summary>
+    /// The start of the first run at or after <paramref name="from"/> that opens a matched code span, or the line's
+    /// length when there is none. Calls must come with <paramref name="from"/> never decreasing: the search only moves
+    /// forward, so all calls together cost one pass over the runs.
+    /// </summary>
+    public int NextSpanStart(int from, int lineLength)
+    {
+        while (cursor < starts.Count && (starts[cursor] < from || matches[cursor] < 0))
+        {
+            cursor++;
+        }
+
+        return cursor < starts.Count ? starts[cursor] : lineLength;
+    }
 }

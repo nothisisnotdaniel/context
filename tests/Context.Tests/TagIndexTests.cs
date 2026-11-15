@@ -388,7 +388,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(5, TagIndex.ParserVersion);
+        Assert.Equal(6, TagIndex.ParserVersion);
     }
 
     // 024 AC-6
@@ -846,8 +846,8 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(5, TagIndex.ParserVersion);
-        Assert.Equal(5, UserVersion());
+        Assert.Equal(6, TagIndex.ParserVersion);
+        Assert.Equal(6, UserVersion());
         Assert.Equal(["A", "Beta"], NoteRows());
         Assert.Equal([("A", "work"), ("Beta", "home")], Rows());
         Assert.Equal([("A", "Beta")], LinkRows());
@@ -956,7 +956,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(5, UserVersion());
+        Assert.Equal(6, UserVersion());
         Assert.Equal([("A", "anna", "Anna")], PeopleRows());
         Assert.Equal([("A", "work")], Rows());
 
@@ -1077,7 +1077,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(5, UserVersion());
+        Assert.Equal(6, UserVersion());
         Assert.Equal([("A", "role", "chef #work", "Chef #work")], AttributeRows());
 
         File.WriteAllText(a, "role:: Other");
@@ -1086,6 +1086,34 @@ public sealed class TagIndexTests : IDisposable
 
         Assert.Equal([("A", "role", "chef #work", "Chef #work")], AttributeRows());
     }
+
+    // 163 AC-7: a version 5 database is re-parsed once and set to 6, so a link the old parser found in a target that runs
+    // into a code span is gone.
+    [Fact]
+    public void Sync_VersionFiveDatabase_DropsLinkIntoCodeSpan()
+    {
+        WriteNote("A", "[[a `b]] c`");
+        string a = Path.Combine(root, "A.md");
+        File.SetLastWriteTimeUtc(a, new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc));
+        index.Sync(store);
+        Assert.Empty(LinkRows());
+
+        // Make it look like an index from the old parser: version 5 and the link it stored.
+        using (SqliteConnection connection = Open())
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "INSERT INTO note_links(note, target) VALUES ('A', 'a `b'); PRAGMA user_version = 5;";
+            command.ExecuteNonQuery();
+        }
+
+        Assert.Equal([("A", "a `b")], LinkRows());
+
+        index.Sync(store);
+
+        Assert.Empty(LinkRows());
+        Assert.Equal(6, UserVersion());
+    }
+
     private void EditNested(string name, string text)
     {
         string path = Path.Combine([root, .. name.Split('/')]) + ".md";
@@ -1168,7 +1196,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
         Assert.Equal(["Anna|1", "AS|1"], index.People().Select(Describe));
         Assert.Empty(index.NotesMentioning("Anna Schmidt"));
-        Assert.Equal(5, UserVersion());
-        Assert.Equal(5, TagIndex.ParserVersion);
+        Assert.Equal(6, UserVersion());
+        Assert.Equal(6, TagIndex.ParserVersion);
     }
 }
