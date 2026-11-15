@@ -67,7 +67,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#28](backlog/028-tag-and-link-parser-fixes.md) Tag and link parser fixes → 163-tag-link-parser-fixes
 - [x] [#43](backlog/043-daily-note.md) Daily note → 164-daily-note
 - [x] [#44](backlog/044-note-templates.md) Note templates → 165-note-templates
-- [ ] [#45](backlog/045-meeting-notes-from-appointments.md) Meeting notes from appointments
+- [x] [#45](backlog/045-meeting-notes-from-appointments.md) Meeting notes from appointments → 167-meeting-notes-appointments
 - [ ] [#48](backlog/048-recurring-todos.md) Recurring todos
 - [ ] [#49](backlog/049-weekly-review.md) Weekly review
 - [ ] [#47](backlog/047-full-text-search.md) Full-text search
