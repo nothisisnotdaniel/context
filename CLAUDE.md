@@ -396,6 +396,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     the todo went away in between.
     `today` is injected as `Func<DateOnly>` (and `TodoStore` takes an optional UTC clock), so tests never
     use the real clock.
+- **New features are desktop-only.** Don't add a CLI command (or a new CLI option) for a new feature unless
+  its story asks for one, for example because Times or a script needs it. The commands below stay and keep
+  working; a feature that changes what one of them prints or does updates it and its tests.
 - **Command line (scriptable):** `context <command> [args]` runs one command through `Cli`
   (`src/Context/Cli.cs`) and exits; no arguments is the usage error `No command given. Run 'context help'.`
   (exit code 2, the data folder is not created). `Cli(stdout, stderr,
