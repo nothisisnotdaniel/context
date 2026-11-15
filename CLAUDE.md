@@ -313,7 +313,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     descendant, then only the child folders that are now empty. `SaveIfUnchanged` writes its temp file in the
     note's own folder, named after `Title`. `Save` (import) and `Create` stay top-level only.
   - **Templates** (job 165, `NoteTemplates.cs`): `NoteTemplates(NoteStore)`. `List()` gives the titles of the regular
-    `*.md` files directly in `<root>/templates/` that pass `ValidateTitle` (sorted ignoring case, then ordinal; no
+    `*.md` files directly in `<root>/templates/` (job 166: the `.md` extension matched ignoring case on every OS, through
+    `EnumerationOptions` with `MatchCasing.CaseInsensitive`, `AttributesToSkip = 0`, `IgnoreInaccessible = false`) that pass `ValidateTitle` (sorted ignoring case, then ordinal; no
     subfolders, `.ctxs`, links/reparse points or names starting with `.`; a missing, linked or unreadable folder is
     empty, nothing created). `TryRead(name, out text)` (`TemplateReadKind` `Found`/`Missing`/`Unreadable`/
     `TemplatesSensitive`) normalizes the name (`NormalizeTitle`), matches it against `List()` only (exact, then ignoring

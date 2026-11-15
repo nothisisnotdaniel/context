@@ -195,6 +195,92 @@ public sealed class NoteTemplatesTests : IDisposable
         Assert.Equal(string.Empty, text);
     }
 
+    // 166 AC-2: the .md extension is matched ignoring case on every OS, and the title is the name without it.
+    [Theory]
+    [InlineData("x.Md")]
+    [InlineData("x.mD")]
+    [InlineData("x.MD")]
+    public void List_MixedCaseExtension_Listed(string file)
+    {
+        WriteTemplate(file, "x");
+
+        Assert.Equal(["x"], Templates().List());
+        Assert.Equal(TemplateReadKind.Found, Templates().TryRead("x", out string text));
+        Assert.Equal("x", text);
+    }
+
+    // 166 AC-3: an upper-case .MD template is found by its title, any case, or the title with the extension.
+    [Theory]
+    [InlineData("alpha")]
+    [InlineData("ALPHA")]
+    [InlineData("alpha.MD")]
+    public void TryRead_UpperCaseExtension_Found(string typed)
+    {
+        WriteTemplate("alpha.MD", "alpha text");
+
+        Assert.Equal(TemplateReadKind.Found, Templates().TryRead(typed, out string text, out string? found));
+        Assert.Equal("alpha text", text);
+        Assert.Equal("alpha", found);
+    }
+
+    // 166 AC-4: other extensions, subfolders and dot files are skipped whatever the case.
+    [Fact]
+    public void List_MixedCase_OtherFiltersStillApply()
+    {
+        WriteTemplate("ok.MD", "ok");
+        WriteTemplate("x.mdx", "x");
+        WriteTemplate("y.md.txt", "x");
+        WriteTemplate("z.markdown", "x");
+        WriteTemplate("w.CTXS", "x");
+        WriteTemplate(".hidden.MD", "x");
+        Directory.CreateDirectory(TemplatePath("Sub.MD"));
+
+        Assert.Equal(["ok"], Templates().List());
+        Assert.Equal(TemplateReadKind.Missing, Templates().TryRead("Sub", out _));
+        Assert.Equal(TemplateReadKind.Missing, Templates().TryRead(".hidden", out _));
+    }
+
+    // 166 AC-4: a symlink with an upper-case extension is skipped (where the OS allows creating one).
+    [Fact]
+    public void List_SkipsSymlinkedUpperCaseFile()
+    {
+        WriteTemplate("ok.md", "ok");
+        string target = Path.Combine(parent, "secret.md");
+        File.WriteAllText(target, "secret");
+        try
+        {
+            File.CreateSymbolicLink(TemplatePath("link.MD"), target);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return;
+        }
+
+        Assert.Equal(["ok"], Templates().List());
+        Assert.Equal(TemplateReadKind.Missing, Templates().TryRead("link", out string text));
+        Assert.Equal(string.Empty, text);
+    }
+
+    // 166 AC-5: Plan.md and plan.MD both listed where the file system keeps both (case-sensitive, e.g. Linux CI).
+    [Fact]
+    public void List_SameTitleDifferentCaseExtensions_BothListed()
+    {
+        WriteTemplate("Plan.md", "upper");
+        WriteTemplate("plan.MD", "lower");
+        if (Directory.GetFiles(Path.Combine(root, NoteTemplates.FolderName)).Length != 2)
+        {
+            return;
+        }
+
+        Assert.Equal(["Plan", "plan"], Templates().List());
+        Assert.Equal(TemplateReadKind.Found, Templates().TryRead("plan", out string lower));
+        Assert.Equal("lower", lower);
+        Assert.Equal(TemplateReadKind.Found, Templates().TryRead("Plan", out string upper));
+        Assert.Equal("upper", upper);
+        Assert.Equal(TemplateReadKind.Found, Templates().TryRead("PLAN", out string first));
+        Assert.Equal("upper", first);
+    }
+
     // AC-3: date, time and title are filled from one clock reading, invariantly.
     [Fact]
     public void Fill_ReplacesEveryPlaceholder()
