@@ -230,6 +230,9 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#196](backlog/196-check-mentions-that-run-into-a.md) Check @[...] mentions that run into a code span
 - [?] [#197](backlog/197-narrow-the-daily-note-error-catch.md) Narrow the daily-note error catch in the desktop app
 - [?] [#198](backlog/198-say-when-today-s-note-already.md) Say when today's note already exists
+- [?] [#199](backlog/199-catch-file-errors-in-context-new.md) Catch file errors in context new --template
+- [?] [#200](backlog/200-list-the-template-folder-once-when.md) List the template folder once when a template is missing
+- [?] [#201](backlog/201-mention-template-in-the-empty-new.md) Mention --template in the empty /new hint
 
 ## Dropped with the terminal UI
 
