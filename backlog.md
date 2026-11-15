@@ -242,6 +242,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#208](backlog/208-avoid-a-full-scan-when-re.md) Avoid a full scan when re-indexing one note's text
 - [?] [#209](backlog/209-announce-the-search-result-count-to.md) Announce the search result count to screen readers
 - [?] [#210](backlog/210-strip-bidi-and-line-separator-characters.md) Strip bidi and line-separator characters in SafeText
+- [ ] [#211](backlog/211-remove-cli-commands-that-only-mirror.md) Remove CLI commands that only mirror desktop views
 
 ## Dropped with the terminal UI
 
