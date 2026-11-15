@@ -11,4 +11,5 @@ return new Cli(
     NoteStore.DefaultFolder(),
     Today,
     () => DateTime.Now,
-    http).Run(args);
+    http,
+    TimesFolder.Resolve(Environment.GetEnvironmentVariable(TimesFolder.VariableName))).Run(args);

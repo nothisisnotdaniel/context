@@ -4,6 +4,10 @@
 {
     <section class="current">
         <h1 class="title">Today, @view.Today.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</h1>
+        <div class="day-end">
+            <button type="button" class="end-day" disabled="@endingDay" @onclick="() => EndDay(view.Today)">End the day</button>
+            <p class="day-end-status cut @dayEndClass" role="status" title="@dayEndText">@dayEndText</p>
+        </div>
 
         @if (view.Appointments.Count == 0)
         {
@@ -143,6 +147,27 @@
     /// <summary>Opens a related note (through <c>Main.RequestOpen</c>, which asks first when the editor is dirty).</summary>
     [Parameter]
     public EventCallback<string> OnOpen { get; set; }
+
+    private bool endingDay;
+    private string dayEndText = string.Empty;
+    private string dayEndClass = string.Empty;
+
+    // The End the day button: closes the shown day off the UI thread (DesktopActions.EndDay) and shows one line.
+    private async Task EndDay(DateOnly day)
+    {
+        endingDay = true;
+        try
+        {
+            ActionResult result = await Actions.EndDay(day);
+            bool ok = result.Kind == ActionKind.Done && result.Reason is ActionReason.None or ActionReason.Unchanged;
+            dayEndText = DesktopText.OneLine(result.Text);
+            dayEndClass = ok ? "grey" : "red";
+        }
+        finally
+        {
+            endingDay = false;
+        }
+    }
 
     // The shown appointments with their related notes and their 1-based number (the one /meeting takes); the related
     // rows don't count toward MaxAppointmentRows.

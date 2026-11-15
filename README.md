@@ -85,6 +85,14 @@ tagged `#meeting`, with the appointment's title, time, location and attendees; a
 never changed. In the desktop app, the current view shows the same numbers and `/meeting 2` in the command palette
 opens the same note.
 
+### Day's end
+
+`context dayend` writes the day's worked hours from the Times app into today's daily note (a `## Worked` section) and
+moves the todos due today or earlier to tomorrow, listing them in both daily notes. `context dayend 2026-11-14` closes
+that day instead. Times' data folder is `TIMES_DATA_DIR` when set (an absolute path), else `Times` in the app data
+folder; it is only read. The desktop app has an `End the day` button in the current view, and it closes the day by
+itself after you book your leaving in Times (the todos move once, at a leaving at 17:00 or later).
+
 ### Weekly review
 
 `context review` prints one page for a weekly review: `Review, <from> to <to>` (the last 7 days, today included), then

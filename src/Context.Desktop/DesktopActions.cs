@@ -158,6 +158,7 @@ internal sealed class DesktopActions
     private readonly CalendarFeed? calendarFeed;
     private readonly Func<DateTime> localNow;
     private readonly CalendarStore calendar;
+    private readonly DayEnd dayEnd;
     private int running;
 
     public DesktopActions(
@@ -168,10 +169,12 @@ internal sealed class DesktopActions
         CalendarLink? calendarLink = null,
         CalendarFeed? calendarFeed = null,
         Func<DateTime>? localNow = null,
-        CalendarStore? calendar = null)
+        CalendarStore? calendar = null,
+        string? timesFolder = null)
     {
         this.localNow = localNow ?? (() => DateTime.Now);
         this.calendar = calendar ?? new CalendarStore(notes.Root, TimeZoneInfo.Local);
+        dayEnd = new DayEnd(notes, todos, this.calendar, calendarFeed, timesFolder, new SettingsStore(notes.Root));
         this.calendarLink = calendarLink;
         this.calendarFeed = calendarFeed;
         this.notes = notes;
@@ -179,6 +182,25 @@ internal sealed class DesktopActions
         this.state = state;
         this.launcher = launcher;
     }
+
+    /// <summary>How often <c>Program.cs</c>'s day-end timer calls <see cref="AutoDayEnd"/>.</summary>
+    public static readonly TimeSpan DayEndInterval = TimeSpan.FromSeconds(30);
+
+    /// <summary>The grey line after a successful <see cref="EndDay"/>.</summary>
+    public static string DayClosedText(int moved, DateOnly to) =>
+        $"Day closed. Moved {moved} todo(s) to {DailyNote.NameFor(to)}.";
+
+    /// <summary>The red line when a daily note the day's end needs is sensitive.</summary>
+    public static string DayEndSensitiveText(string name) => $"{name} is sensitive. Nothing was written to it.";
+
+    /// <summary>The red line when <c>todos.json</c> can't be read for the day's end.</summary>
+    public const string DayEndTodosUnreadableText = "Can't read todos.json. The worked hours were written; no todos moved.";
+
+    /// <summary>The red line when a file of the day's end can't be written.</summary>
+    public static string DayEndWriteFailedText(string name) => $"Can't write {name}.";
+
+    /// <summary>The answer of <see cref="AutoDayEnd"/> when <c>settings.json</c> can't be read or written.</summary>
+    public const string SettingsUnreadableText = "Can't read settings.json. The day was not closed automatically.";
 
     /// <summary>The red line when a note with that name exists (ignoring case).</summary>
     public static string ExistsText(string name) => $"Note {name} already exists.";
@@ -413,6 +435,21 @@ internal sealed class DesktopActions
     /// result's text is the note's name when done, else <see cref="DailyNoteFailedText"/>.
     /// </summary>
     public Task<ActionResult> OpenDailyNote() => Run(OpenDailyNoteNow);
+
+    /// <summary>
+    /// Closes <paramref name="day"/> through <see cref="DayEnd.CloseDay"/>: Times' worked hours into its daily note,
+    /// then its due todos moved to the next day and listed in both notes. Never reads or writes
+    /// <c>settings.json</c>. The text is <see cref="DayClosedText"/> when done, else a fixed red text.
+    /// </summary>
+    public Task<ActionResult> EndDay(DateOnly day) => Run(() => EndDayNow(day));
+
+    /// <summary>
+    /// The automatic day's end, called only by <c>Program.cs</c>'s day-end timer (at start and every
+    /// <see cref="DayEndInterval"/>): <see cref="DayEnd.AutoClose"/> with the injected local clock. Done with
+    /// <see cref="ActionReason.Unchanged"/> (no refresh) when nothing was written; Refused while another action runs
+    /// or when <c>settings.json</c> is broken. Never throws and never asks anything.
+    /// </summary>
+    public Task<ActionResult> AutoDayEnd() => Run(AutoDayEndNow);
 
     /// <summary>
     /// Moves the note <paramref name="name"/> and its subpages under the note <paramref name="newParent"/> (matched
@@ -762,6 +799,46 @@ internal sealed class DesktopActions
         {
             return Failed(ActionReason.WriteFailed, DailyNoteFailedText(DailyNote.NameFor(day)));
         }
+    }
+
+    private ActionResult EndDayNow(DateOnly day)
+    {
+        DayEndResult result = dayEnd.CloseDay(day);
+        return DayEndAnswer(result, DayClosedText(result.Moved.Count, result.To));
+    }
+
+    private ActionResult AutoDayEndNow()
+    {
+        DateTime now = localNow();
+        DayEndResult result = dayEnd.AutoClose(DateOnly.FromDateTime(now), now);
+        if (result.Kind == DayEndKind.SettingsUnreadable)
+        {
+            return new ActionResult(
+                result.Changed ? ActionKind.Done : ActionKind.Refused, ActionReason.Unreadable, SettingsUnreadableText);
+        }
+
+        if (result.Kind == DayEndKind.Done && !result.Changed)
+        {
+            return new ActionResult(ActionKind.Done, ActionReason.Unchanged, result.Name);
+        }
+
+        return DayEndAnswer(result, result.Name);
+    }
+
+    // The answer for a day's end result; a partial write still counts as a change, so the state is refreshed.
+    private static ActionResult DayEndAnswer(DayEndResult result, string doneText)
+    {
+        ActionKind failed = result.Changed ? ActionKind.Done : ActionKind.Failed;
+        return result.Kind switch
+        {
+            DayEndKind.Done => new ActionResult(
+                ActionKind.Done, result.Changed ? ActionReason.None : ActionReason.Unchanged, doneText),
+            DayEndKind.Sensitive => new ActionResult(
+                result.Changed ? ActionKind.Done : ActionKind.Refused, ActionReason.Locked,
+                DayEndSensitiveText(result.Name)),
+            DayEndKind.TodosUnreadable => new ActionResult(failed, ActionReason.Unreadable, DayEndTodosUnreadableText),
+            _ => new ActionResult(failed, ActionReason.WriteFailed, DayEndWriteFailedText(result.Name)),
+        };
     }
 
     private ActionResult OpenMeetingNoteNow(Appointment appointment)

@@ -84,7 +84,7 @@ public sealed class CurrentPanelTests : IDisposable
     {
         IRenderedComponent<CurrentPanel> cut = await data.RenderAsync<CurrentPanel>();
 
-        IReadOnlyList<IElement> lines = cut.FindAll("p");
+        IReadOnlyList<IElement> lines = cut.FindAll("p:not(.day-end-status)");
         string folder = Path.Combine(data.Root, CalendarStore.FolderName);
         Assert.Equal(
             [
@@ -399,6 +399,61 @@ public sealed class CurrentPanelTests : IDisposable
         Assert.Equal("ACME �" + XssImage, button.GetAttribute("title"));
         Assert.Empty(cut.FindAll("img"));
         Assert.DoesNotContain("\u0007", cut.Markup, StringComparison.Ordinal);
+    }
+
+    // 171 AC-13: the End the day button closes the shown day; the result line is grey on success.
+    [Fact]
+    public async Task EndDay_Button_ClosesTheDay_GreyLine()
+    {
+        Directory.CreateDirectory(data.TimesFolder);
+        File.WriteAllText(
+            Path.Combine(data.TimesFolder, "2026-10-29.json"),
+            "{\"entries\":[{\"kind\":\"arrival\",\"time\":\"08:00\"},{\"kind\":\"leaving\",\"time\":\"16:00\"}]}");
+        data.AddTodo("call Anna", DesktopFixture.Today);
+
+        IRenderedComponent<CurrentPanel> cut = await data.RenderAsync<CurrentPanel>();
+        IElement button = cut.Find("div.day-end button.end-day");
+        Assert.Equal("End the day", button.TextContent);
+        Assert.Equal("button", button.GetAttribute("type"));
+        Assert.Equal(string.Empty, cut.Find("p.day-end-status").TextContent);
+
+        await cut.InvokeAsync(() => button.Click());
+
+        cut.WaitForAssertion(
+            () =>
+            {
+                IElement line = cut.Find("p.day-end-status");
+                Assert.Equal("Day closed. Moved 1 todo(s) to 2026-10-30.", line.TextContent);
+                Assert.Equal("status", line.GetAttribute("role"));
+                Assert.Equal(line.TextContent, line.GetAttribute("title"));
+                Assert.True(line.ClassList.Contains("grey"));
+            },
+            Wait);
+        Assert.Contains(
+            "## Worked\n- Arrived 08:00, left 16:00, worked 8:00\n",
+            File.ReadAllText(Path.Combine(data.Root, "2026-10-29.md")),
+            StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(data.Root, SettingsStore.FileName)));
+    }
+
+    // 171 AC-13: a refusal shows the red line.
+    [Fact]
+    public async Task EndDay_Button_Sensitive_RedLine()
+    {
+        data.WriteFile("2026-10-29.ctxs", "{\"v\":1,\"text\":\"c2VhbGVk\"}");
+
+        IRenderedComponent<CurrentPanel> cut = await data.RenderAsync<CurrentPanel>();
+        await cut.InvokeAsync(() => cut.Find("button.end-day").Click());
+
+        cut.WaitForAssertion(
+            () =>
+            {
+                IElement line = cut.Find("p.day-end-status");
+                Assert.Equal("2026-10-29 is sensitive. Nothing was written to it.", line.TextContent);
+                Assert.True(line.ClassList.Contains("red"));
+            },
+            Wait);
+        Assert.Equal(0, data.Keys.Agrees);
     }
 
     private static string[] Cells(IElement row) => row.Children.Select(c => c.TextContent).ToArray();

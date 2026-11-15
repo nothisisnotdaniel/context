@@ -1185,4 +1185,53 @@ public sealed class TodoStoreTests : IDisposable
             return false;
         }
     }
+
+    // 171 AC-5: MoveDue moves open todos due on or before the day, keeps id, created and repeat, in List() order.
+    [Fact]
+    public void MoveDue_MovesOpenDueTodosOnly()
+    {
+        TodoStore store = Store();
+        TodoItem late = store.Add("Late", new DateOnly(2026, 11, 10));
+        TodoItem due = store.Add("Due", new DateOnly(2026, 11, 14), TodoRepeat.Weekly(DayOfWeek.Saturday));
+        TodoItem later = store.Add("Later", new DateOnly(2026, 11, 15));
+        TodoItem done = store.Add("Done", new DateOnly(2026, 11, 12));
+        store.Complete(done.Id);
+        string doneLine = File.ReadAllText(FilePath);
+
+        IReadOnlyList<TodoItem> moved = store.MoveDue(new DateOnly(2026, 11, 14), new DateOnly(2026, 11, 15));
+
+        Assert.Equal(
+            [new TodoItem(late.Id, "Late", new DateOnly(2026, 11, 15), late.Created),
+             new TodoItem(due.Id, "Due", new DateOnly(2026, 11, 15), due.Created, null, due.Repeat)],
+            moved);
+        IReadOnlyList<TodoItem> open = store.List();
+        Assert.All(open, t => Assert.Equal(new DateOnly(2026, 11, 15), t.Due));
+        Assert.Equal([late.Id, due.Id, later.Id], open.Select(t => t.Id));
+        TodoItem stillDone = Assert.Single(store.ListDone());
+        Assert.Equal(new DateOnly(2026, 11, 12), stillDone.Due);
+        Assert.Equal(done.Id, stillDone.Id);
+        Assert.NotEqual(doneLine, File.ReadAllText(FilePath));
+    }
+
+    // 171 AC-5: nothing due writes nothing; a missing file stays missing; an unreadable file is never written.
+    [Fact]
+    public void MoveDue_NothingDue_WritesNothing()
+    {
+        TodoStore store = Store();
+        Assert.Empty(store.MoveDue(new DateOnly(2026, 11, 14), new DateOnly(2026, 11, 15)));
+        Assert.False(File.Exists(FilePath));
+
+        store.Add("Later", new DateOnly(2026, 11, 20));
+        DateTime written = File.GetLastWriteTimeUtc(FilePath);
+        byte[] before = File.ReadAllBytes(FilePath);
+        File.SetLastWriteTimeUtc(FilePath, written.AddHours(-1));
+
+        Assert.Empty(store.MoveDue(new DateOnly(2026, 11, 14), new DateOnly(2026, 11, 15)));
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+        Assert.Equal(written.AddHours(-1), File.GetLastWriteTimeUtc(FilePath));
+
+        File.WriteAllText(FilePath, "not json");
+        Assert.Throws<TodoStoreException>(() => store.MoveDue(new DateOnly(2026, 11, 30), new DateOnly(2026, 12, 1)));
+        Assert.Equal("not json", File.ReadAllText(FilePath));
+    }
 }
