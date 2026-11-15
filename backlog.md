@@ -133,6 +133,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#131](backlog/131-check-the-sensitive-setup-dialog-input.md) Check the sensitive-setup dialog input widths by eye
 - [?] [#132](backlog/132-explain-a-refused-case-only-rename.md) Explain a refused case-only rename and hidden setup buttons
 - [h] [#133](backlog/133-run-the-sensitive-notes-manual-checks.md) Run the sensitive-notes manual checks on macOS and Windows
+- [ ] [#228](backlog/228-tags-and-links-panel-fixes.md) Tags and links panel fixes
 - [?] [#134](backlog/134-desktop-tags-and-links-call-counter.md) Desktop tags and links: call counter for load tests
 - [?] [#135](backlog/135-desktop-panels-skip-statehaschanged-after-disposal.md) Desktop panels: skip StateHasChanged after disposal
 - [?] [#136](backlog/136-links-panel-no-has-no-linked.md) Links panel: no 'has no linked notes' flash during rename
