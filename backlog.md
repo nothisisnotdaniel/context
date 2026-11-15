@@ -249,6 +249,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#217](backlog/217-wait-for-the-page-s-own.md) Wait for the page's own loads in MainTests.Open
 - [?] [#219](backlog/219-make-the-calendarstore-speed-test-stable.md) Make the CalendarStore speed test stable under load
 - [?] [#220](backlog/220-open-a-pdf-attachment-from-the.md) Open a PDF attachment from the keyboard
+- [?] [#221](backlog/221-stop-a-hung-reminder-notification-process.md) Stop a hung reminder notification process
+- [?] [#222](backlog/222-give-the-todo-time-field-a.md) Give the todo time field a visible label
 
 ## Dropped with the terminal UI
 
