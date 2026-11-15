@@ -448,9 +448,10 @@ public sealed class CliTests : IDisposable
     [Fact]
     public void TodoTexts_NameNoNumber()
     {
-        string todoHelp = string.Join(
-            '\n', Run("help").Out.Split('\n').Where(l => l.Contains("todo", StringComparison.OrdinalIgnoreCase)));
-        string text = todoHelp + Run("todo").Err + Run("todo", "done").Err;
+        // Every help line except meeting's (167 AC-7 lists "meeting <n>").
+        string help = string.Join(
+            '\n', Run("help").Out.Split('\n').Where(l => !l.StartsWith("context meeting <n>", StringComparison.Ordinal)));
+        string text = help + Run("todo").Err + Run("todo", "done").Err;
 
         Assert.Contains("todo done <text...>", text, StringComparison.Ordinal);
         Assert.DoesNotContain("<n>", text, StringComparison.Ordinal);
