@@ -12,10 +12,10 @@ public sealed class DesktopSourceTests
     // The Core calls that change data (AC-8). CalendarLink's real names are Set/Clear; Save/Delete are listed too.
     // 134: NoteStore.Rename and NoteStore.Delete. 136: sealing (SealedNote.Seal, AddRecipient), NoteStore.DeleteSensitive
     // and the key store's two changing calls; RecoveryFile.Create is caught by Create. 140: Inbox.Capture.
-    // 152: NoteStore.CreateChild and NoteStore.Move. 164: DailyNote.Ensure.
+    // 152: NoteStore.CreateChild and NoteStore.Move. 164: DailyNote.Ensure. 165: NoteStore.CreateWithText.
     private static readonly Regex Writes = new(
         @"\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
-        + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture|CreateChild|Move|Ensure)\s*\(",
+        + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture|CreateChild|Move|Ensure|CreateWithText)\s*\(",
         RegexOptions.CultureInvariant);
 
     // 136: the real key stores and the real file dialog, spelled in pieces: no test file may hold their names (see
@@ -824,6 +824,7 @@ public sealed class DesktopSourceTests
     [InlineData("Inbox.Capture(notes, cleaned, localNow(), BeforeCaptureSave)")]
     [InlineData("Inbox . Capture (store, text, now)")]
     [InlineData("DailyNote.Ensure(notes, day, compose)")]
+    [InlineData("notes.CreateWithText(prepared.Title, prepared.Text)")]
     public void Writes_Pattern_CatchesCalls(string call)
     {
         Assert.Matches(Writes, call);

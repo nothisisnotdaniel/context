@@ -507,9 +507,14 @@ else
 
                 break;
             case "/new":
+                (string Title, string Template)? fromTemplate = SplitTemplate(rest);
                 if (rest.Length == 0)
                 {
                     ShowStatus("Type /new <title>.", "red");
+                }
+                else if (fromTemplate is { } typed && (typed.Title.Length == 0 || typed.Template.Length == 0))
+                {
+                    ShowStatus("Type /new <title> --template <template>.", "red");
                 }
                 else if (!running)
                 {
@@ -517,7 +522,9 @@ else
                     ActionResult made;
                     try
                     {
-                        made = await Actions.CreateNote(rest);
+                        made = fromTemplate is { } named
+                            ? await Actions.CreateNoteFromTemplate(named.Title, named.Template)
+                            : await Actions.CreateNote(rest);
                     }
                     finally
                     {
@@ -1198,6 +1205,37 @@ else
 
     private void ShowExported(ActionResult exported) =>
         ShowStatus(DesktopText.OneLine(exported.Text), exported.Kind == ActionKind.Done ? "accent" : "red");
+
+    // Splits "/new" text at its first "--template" token (a whitespace-separated word, ignoring case): the trimmed
+    // title before it and the trimmed template name after it, or null when there is no such token.
+    private static (string Title, string Template)? SplitTemplate(string text)
+    {
+        const string Flag = "--template";
+        int i = 0;
+        while (i < text.Length)
+        {
+            if (char.IsWhiteSpace(text[i]))
+            {
+                i++;
+                continue;
+            }
+
+            int end = i;
+            while (end < text.Length && !char.IsWhiteSpace(text[end]))
+            {
+                end++;
+            }
+
+            if (end - i == Flag.Length && string.Compare(text, i, Flag, 0, Flag.Length, StringComparison.OrdinalIgnoreCase) == 0)
+            {
+                return (text[..i].Trim(), text[end..].Trim());
+            }
+
+            i = end;
+        }
+
+        return null;
+    }
 
     private void ShowStatus(string text, string cssClass)
     {

@@ -69,6 +69,16 @@ In the desktop app, `/find role Bereichsleiter` in the command palette (Ctrl/Cmd
 is created first with the day's appointments and the todos due today or earlier; an existing note is printed as it
 is and never changed. In the desktop app, `/today` in the command palette opens the same note.
 
+### Note templates
+
+Keep notes you write again and again (meetings, reviews) as plain Markdown files in the `templates` folder of the
+data folder, for example `templates/meeting.md`. `context new Weekly sync --template meeting` creates the note
+`Weekly sync` from it: every `{{date}}` becomes the date (`yyyy-MM-dd`), every `{{time}}` the time (`HH:mm`) and every
+`{{title}}` the note's title; anything else stays as written, and no `# title` line is added. `context new <title>`
+without `--template` creates a note with just its title. A template name is only matched against the files in
+`templates/` (ignoring case), never used as a path; a name that isn't there prints the templates you have. In the
+desktop app, `/new Weekly sync --template meeting` in the command palette does the same and opens the note.
+
 ### JSON output
 
 Add `--json` to a read command (`version`, `todos`, `notes`, `note show`, `tags`, `links`, `people`, `person`,

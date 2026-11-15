@@ -273,6 +273,22 @@ internal sealed class DesktopActions
     /// <summary>The red line when the export target can't be written.</summary>
     public static string CantWriteText(string path) => $"Can't write {path}.";
 
+    /// <summary>The red line when no template has the typed name; lists the templates there are, if any.</summary>
+    public static string TemplateMissingText(string name, IReadOnlyList<string> templates) =>
+        templates.Count == 0
+            ? $"No template called {name}. Add one as {NoteTemplates.FolderName}/{name}.md."
+            : $"No template called {name}. Templates: {string.Join(", ", templates)}.";
+
+    /// <summary>The red line when the template is too large or can't be read.</summary>
+    public static string TemplateUnreadableText(string name) => $"Can't read template {name}.";
+
+    /// <summary>The red line when the filled template would be over <see cref="NoteStore.MaxEditBytes"/>.</summary>
+    public static string TemplateTooBigText(string name) => $"Template {name} is too big.";
+
+    /// <summary>The red line when the top-level <c>templates</c> note is sensitive.</summary>
+    public const string TemplatesSensitiveText =
+        NoteTemplates.FolderName + " is sensitive, so its templates can't be used.";
+
     /// <summary>The red line when the daily note can't be created.</summary>
     public static string DailyNoteFailedText(string name) => $"Can't write {name}. Nothing was done.";
 
@@ -327,6 +343,17 @@ internal sealed class DesktopActions
     /// text is the new note's name when done.
     /// </summary>
     public Task<ActionResult> CreateNote(string title) => Run(() => CreateNoteNow(title));
+
+    /// <summary>
+    /// Creates the top-level note <paramref name="title"/> from the template <paramref name="template"/>
+    /// (<see cref="NoteTemplates.Prepare"/>, filled from the injected local clock) through
+    /// <see cref="NoteStore.CreateWithText"/>. The <see cref="CreateNote"/> texts for a bad or taken title (the template
+    /// is then not read), else <see cref="TemplateMissingText"/>, <see cref="TemplateUnreadableText"/>,
+    /// <see cref="TemplateTooBigText"/> or <see cref="TemplatesSensitiveText"/>; none of them writes anything and none
+    /// calls the key store. The result's text is the new note's name when done.
+    /// </summary>
+    public Task<ActionResult> CreateNoteFromTemplate(string title, string template) =>
+        Run(() => CreateNoteFromTemplateNow(title, template));
 
     /// <summary>
     /// Renames the note <paramref name="name"/> to <paramref name="newTitle"/> through <see cref="NoteStore.Rename"/>
@@ -731,6 +758,40 @@ internal sealed class DesktopActions
         try
         {
             NoteInfo created = notes.Create(title);
+            return new ActionResult(ActionKind.Done, ActionReason.None, created.Name);
+        }
+        catch (NoteExistsException e)
+        {
+            return Refused(ActionReason.Exists, ExistsText(e.Name));
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, CreateFailedText);
+        }
+    }
+
+    private ActionResult CreateNoteFromTemplateNow(string title, string template)
+    {
+        try
+        {
+            TemplateNote prepared = new NoteTemplates(notes).Prepare(title, template, localNow());
+            switch (prepared.Kind)
+            {
+                case TemplateNoteKind.InvalidTitle:
+                    return Refused(ActionReason.Invalid, prepared.Text);
+                case TemplateNoteKind.Exists:
+                    return Refused(ActionReason.Exists, ExistsText(prepared.Title));
+                case TemplateNoteKind.TemplatesSensitive:
+                    return Refused(ActionReason.Locked, TemplatesSensitiveText);
+                case TemplateNoteKind.Missing:
+                    return Refused(ActionReason.Missing, TemplateMissingText(prepared.Template, prepared.Templates));
+                case TemplateNoteKind.Unreadable:
+                    return Failed(ActionReason.Unreadable, TemplateUnreadableText(prepared.Template));
+                case TemplateNoteKind.TooBig:
+                    return Refused(ActionReason.Invalid, TemplateTooBigText(prepared.Template));
+            }
+
+            NoteInfo created = notes.CreateWithText(prepared.Title, prepared.Text);
             return new ActionResult(ActionKind.Done, ActionReason.None, created.Name);
         }
         catch (NoteExistsException e)

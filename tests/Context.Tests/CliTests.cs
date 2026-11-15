@@ -96,7 +96,7 @@ public sealed class CliTests : IDisposable
         {
             "capture <text...>", "todos", "todo add <yyyy-MM-dd|today|tomorrow> <text...>", "todo done <text...>", "notes",
             "note show <name...>", "tags [tag...]", "links <note...>", "people", "person <name...>", "find <attribute> <value...>",
-            "types", "current", "import <path>",
+            "types", "current", "new <title...> [--template <name>]", "import <path>",
             "export <note> <path>", "version",
         })
         {
@@ -1597,5 +1597,135 @@ public sealed class CliTests : IDisposable
         AssertUsage(Run("today", "x"));
         Assert.False(Directory.Exists(root));
         Assert.Contains(Run("help").Out.Split('\n'), l => l.StartsWith("context today ", StringComparison.Ordinal));
+    }
+
+    // 165 ---------------------------------------------------------------------------------------
+
+    private void WriteTemplate(string file, string text)
+    {
+        string path = Path.Combine(root, NoteTemplates.FolderName, file);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, text);
+    }
+
+    // 165 AC-9: a note from a template, title words joined with one space, filled from the fixed clock; exact bytes.
+    [Fact]
+    public void New_FromTemplate_CreatesFilledNote()
+    {
+        WriteTemplate("meeting.md", "# {{title}}\r\n{{date}} {{time}}\r\n{{Date}}\r\n");
+        string template = File.ReadAllText(Path.Combine(root, NoteTemplates.FolderName, "meeting.md"));
+
+        Result result = Run("new", "Weekly", "sync", "--TEMPLATE", "Meeting.md");
+
+        Assert.Equal((0, "Created Weekly sync\n", string.Empty), (result.Code, result.Out, result.Err));
+        Assert.Equal(
+            Encoding.UTF8.GetBytes("# Weekly sync\r\n2026-10-29 09:00\r\n{{Date}}\r\n"),
+            File.ReadAllBytes(Path.Combine(root, "Weekly sync.md")));
+        Assert.Equal(template, File.ReadAllText(Path.Combine(root, NoteTemplates.FolderName, "meeting.md")));
+    }
+
+    // 165 AC-9: without --template the plain note is created.
+    [Fact]
+    public void New_Plain_CreatesTitleNote()
+    {
+        Result result = Run("new", "Plan", "B");
+
+        Assert.Equal((0, "Created Plan B\n", string.Empty), (result.Code, result.Out, result.Err));
+        Assert.Equal("# Plan B\n", Read("Plan B.md"));
+    }
+
+    // 165 AC-9 (with AC-6): an invalid or taken title is one stderr line, exit 1, nothing written, template not read.
+    [Theory]
+    [InlineData("a/b", "A note title can't contain / \\ : or control characters.")]
+    [InlineData("plan", "Note plan already exists.")]
+    [InlineData("Secret", "Note Secret already exists.")]
+    public void New_BadOrTakenTitle_Error(string title, string line)
+    {
+        WriteNote("Plan", "# Plan\n");
+        File.WriteAllBytes(Path.Combine(root, "secret" + NoteStore.SensitiveExtension), [1]);
+        WriteTemplate("meeting.md", "m");
+        Dictionary<string, string> before = Snapshot();
+
+        AssertError(Run("new", title, "--template", "meeting"), Cli.ExitError, line);
+        AssertError(Run("new", title), Cli.ExitError, line);
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 165 AC-9 (with AC-5): a missing template lists the templates, or says how to add one; nothing written.
+    [Fact]
+    public void New_MissingTemplate_Hints()
+    {
+        AssertError(
+            Run("new", "Plan", "--template", "standup"),
+            Cli.ExitError,
+            "No template called standup. Add one as templates/standup.md.");
+        Assert.False(Directory.Exists(root));
+
+        WriteTemplate("review.md", "r");
+        WriteTemplate("Meeting.md", "m");
+        Dictionary<string, string> before = Snapshot();
+
+        AssertError(
+            Run("new", "Plan", "--template", "../review"),
+            Cli.ExitError,
+            "No template called ../review. Templates: Meeting, review.");
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 165 AC-9 (with AC-5): an unreadable or too-big template, nothing written.
+    [Fact]
+    public void New_UnreadableOrTooBig_Error()
+    {
+        string folder = Path.Combine(root, NoteTemplates.FolderName);
+        Directory.CreateDirectory(folder);
+        File.WriteAllBytes(Path.Combine(folder, "big.md"), new byte[NoteStore.MaxEditBytes + 1]);
+        WriteTemplate("long.md", string.Concat(Enumerable.Repeat("{{title}}", (int)(NoteStore.MaxEditBytes / 9))));
+        Dictionary<string, string> before = Snapshot();
+
+        AssertError(Run("new", "Plan", "--template", "big"), Cli.ExitError, "Can't read template big.");
+        AssertError(Run("new", "A long title", "--template", "LONG"), Cli.ExitError, "Template long is too big.");
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 165 AC-9 (with AC-7): a sensitive templates note means no template is used.
+    [Fact]
+    public void New_TemplatesSensitive_Error()
+    {
+        WriteTemplate("meeting.md", "m");
+        File.WriteAllBytes(Path.Combine(root, "Templates" + NoteStore.SensitiveExtension), [1]);
+        Dictionary<string, string> before = Snapshot();
+
+        AssertError(
+            Run("new", "Plan", "--template", "meeting"),
+            Cli.ExitError,
+            "templates is sensitive, so its templates can't be used.");
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 165 AC-9: no title, --template without a name, or --json is a usage error before the folder is touched.
+    [Theory]
+    [InlineData("new")]
+    [InlineData("new", "  ")]
+    [InlineData("new", "--template", "meeting")]
+    [InlineData("new", "Plan", "--template")]
+    [InlineData("new", "Plan", "--template", " ")]
+    [InlineData("new", "Plan", "--json")]
+    [InlineData("--json", "new", "Plan", "--template", "meeting")]
+    public void New_UsageErrors_FolderNotCreated(params string[] args)
+    {
+        AssertUsage(Run(args));
+        Assert.False(Directory.Exists(root));
+    }
+
+    // 165 AC-9: a name from the folder is cleaned before it is printed.
+    [Fact]
+    public void New_MissingTemplate_NamesCleaned()
+    {
+        WriteTemplate("a\u0007b.md", "x");
+
+        Result result = Run("new", "Plan", "--template", "zz\u001b");
+
+        Assert.Equal(Cli.ExitError, result.Code);
+        Assert.DoesNotContain('\u001b', result.Err);
     }
 }
