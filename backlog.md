@@ -70,7 +70,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#45](backlog/045-meeting-notes-from-appointments.md) Meeting notes from appointments → 167-meeting-notes-appointments
 - [x] [#48](backlog/048-recurring-todos.md) Recurring todos → 168-recurring-todos
 - [x] [#49](backlog/049-weekly-review.md) Weekly review → 169-weekly-review
-- [ ] [#47](backlog/047-full-text-search.md) Full-text search
+- [x] [#47](backlog/047-full-text-search.md) Full-text search → 170-full-text-search
 - [ ] [#70](backlog/070-day-s-end-in-the-daily.md) Day's end in the daily note
 - [ ] [#71](backlog/071-morning-briefing.md) Morning briefing
 - [ ] [#53](backlog/053-note-history.md) Note history
