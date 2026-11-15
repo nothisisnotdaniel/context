@@ -124,6 +124,8 @@ Moving a note to another level takes the attachments it links along into the new
 level still links is copied, so both notes keep working. If anything goes wrong, nothing is moved. Deleting a note
 removes the attachments that only it links in its level; ones another note links stay.
 
+- A note that links more than 100 different attachments isn't moved to another level (`Can't move the attachments
+  of <name>. Nothing was moved.`), and deleting it removes none of its attachments.
 - An older kept version of a moved note still holds the old attachment names, so restoring it can link a missing or
   different file.
 

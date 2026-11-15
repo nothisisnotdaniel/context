@@ -208,6 +208,29 @@ public sealed class AttachmentActionsTests : IDisposable
         Assert.NotNull(data.Actions.Attachments.TryResolve("Plan", ".attachments/shot.png"));
     }
 
+    // Review round 2: a note linking more than NoteAttachments.MaxLinkedNames names is not moved, with the Failed text.
+    [Fact]
+    public async Task MoveNote_PastTheCap_NothingMoved()
+    {
+        data.WriteNote("Target", "# Target\n");
+        await WriteLinked("Plan", "shot.png", Png);
+        StringBuilder text = new StringBuilder(File.ReadAllText(NotePath("Plan")));
+        for (int i = 0; i < NoteAttachments.MaxLinkedNames; i++)
+        {
+            text.Append("[x](.attachments/x").Append(i).Append(".png)\n");
+        }
+
+        data.WriteNote("Plan", text.ToString());
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult result = await data.Actions!.MoveNote("Plan", "Target");
+
+        Assert.Equal(
+            (ActionKind.Failed, "Can't move the attachments of Plan. Nothing was moved."),
+            (result.Kind, result.Text));
+        Assert.Equal(before, Files());
+    }
+
     // AC-14: a failed cleanup still gives the normal Done text.
     [Fact]
     public async Task MoveNote_FailedCleanup_Done()

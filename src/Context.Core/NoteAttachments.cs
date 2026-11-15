@@ -548,8 +548,8 @@ internal sealed class NoteAttachments
     /// deleted. Any failure before the cleanup removes the copies (and a folder this move created) and moves the note
     /// back: the two refusals of <see cref="NoteStore.Move"/> are rethrown unchanged, anything else is an
     /// <see cref="AttachmentMoveException"/>. A failed cleanup only leaves sources behind. A move within the level
-    /// touches no attachment, and so does a note that links more than <see cref="MaxLinkedNames"/> names (a plain move;
-    /// every file stays where it is).
+    /// touches no attachment. A move to another level of a note that links more than <see cref="MaxLinkedNames"/> names
+    /// changes nothing and throws <see cref="AttachmentMoveException"/>, so a note never moves without its attachments.
     /// </summary>
     public NoteInfo? MoveWithNote(string name, string? newParent)
     {
@@ -571,18 +571,20 @@ internal sealed class NoteAttachments
 
         byte[] original;
         List<ResolvedAttachment> linked = [];
+        bool tooMany = false;
         try
         {
             original = BoundedFile.Read(source.Path, NoteStore.MaxEditBytes);
             IReadOnlyList<string> names = LinkedNames(DecodeText(original));
-            if (names.Count > MaxLinkedNames)
-            {
-                // Too many to check against the siblings: carry none and delete none, so every file stays.
-                return notes.Move(name, newParent);
-            }
-
+            tooMany = names.Count > MaxLinkedNames;
             foreach (string linkedName in names)
             {
+                if (tooMany)
+                {
+                    break;
+                }
+
+
                 ResolvedAttachment? resolved = TryResolve(source.Name, FolderName + "/" + linkedName);
                 if (resolved is not null)
                 {
@@ -594,6 +596,12 @@ internal sealed class NoteAttachments
         {
             // An unreadable note has no attachments to carry; its move is the plain one.
             return notes.Move(name, newParent);
+        }
+
+        if (tooMany)
+        {
+            // Too many to carry and check against the siblings: the note stays where it is, with every file.
+            throw new AttachmentMoveException(new IOException($"The note links more than {MaxLinkedNames} attachments."));
         }
 
         if (linked.Count == 0)

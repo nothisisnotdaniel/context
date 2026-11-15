@@ -867,27 +867,34 @@ public sealed class NoteAttachmentsTests : IDisposable
         Assert.Equal(expectedLeft, Directory.Exists(folder) ? Directory.GetFiles(folder).Length : 0);
     }
 
-    // Review round 1 (security): a note linking more than MaxLinkedNames names moves plainly; every file stays.
-    [Fact]
-    public void MoveWithNote_PastTheCap_PlainMove_KeepsSources()
+    // Review round 2: a note linking more than MaxLinkedNames names never moves without its attachments; the move
+    // changes nothing and throws AttachmentMoveException. At the cap it still moves with them.
+    [Theory]
+    [InlineData(NoteAttachments.MaxLinkedNames, true)]
+    [InlineData(NoteAttachments.MaxLinkedNames + 1, false)]
+    public void MoveWithNote_PastTheCap_RefusedAndChangesNothing(int linkCount, bool moves)
     {
         store.Create("Target");
         WriteNoteWith("Note", "shot.png", Png);
         StringBuilder text = new StringBuilder(File.ReadAllText(NotePath("Note")));
-        for (int i = 0; i < NoteAttachments.MaxLinkedNames; i++)
+        for (int i = 1; i < linkCount; i++)
         {
             text.Append("[x](.attachments/x").Append(i).Append(".png)\n");
         }
 
         File.WriteAllText(NotePath("Note"), text.ToString());
-        byte[] noteBytes = File.ReadAllBytes(NotePath("Note"));
+        SortedDictionary<string, string> before = FileSnapshot.Take(root);
 
-        NoteInfo? moved = attachments.MoveWithNote("Note", "Target");
-
-        Assert.Equal("Target/Note", moved?.Name);
-        Assert.Equal(noteBytes, File.ReadAllBytes(Path.Combine(root, "Target", "Note.md")));
-        Assert.Equal(Png, File.ReadAllBytes(Path.Combine(root, ".attachments", "shot.png")));
-        Assert.False(Directory.Exists(Path.Combine(root, "Target", ".attachments")));
+        if (moves)
+        {
+            Assert.Equal("Target/Note", attachments.MoveWithNote("Note", "Target")?.Name);
+            Assert.Equal(Png, File.ReadAllBytes(Path.Combine(root, "Target", ".attachments", "shot.png")));
+        }
+        else
+        {
+            Assert.Throws<AttachmentMoveException>(() => attachments.MoveWithNote("Note", "Target"));
+            Assert.Equal(before, FileSnapshot.Take(root));
+        }
     }
 
     private string NotePath(string name) => Path.Combine([root, .. name.Split('/')]) + ".md";
