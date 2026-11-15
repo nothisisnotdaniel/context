@@ -7,8 +7,9 @@ namespace Context;
 
 /// <summary>
 /// A todo: its id, its text, the day it is due, when it was added (UTC), when it was done (UTC, <c>null</c> while
-/// it is open) and how it repeats (<c>null</c> for a todo that doesn't). The id is never shown; it is how a todo is addressed for <see cref="TodoStore.Complete"/>, so a list
-/// that changed since it was shown can't make another todo done.
+/// it is open) and how it repeats (<c>null</c> for a todo that doesn't). The id is never shown; it is how a todo is
+/// addressed for <see cref="TodoStore.Complete(Guid)"/>, so a list that changed since it was shown can't make another
+/// todo done.
 /// </summary>
 internal sealed record TodoItem
 {
@@ -121,7 +122,8 @@ internal sealed class TodoStore
     /// Marks the open todo with <paramref name="id"/> done (<see cref="TodoItem.Done"/> from the clock) in one read
     /// and write and returns it; it stays in the file. Returns <c>null</c> (and writes nothing) when no open todo has
     /// that id, including one that is already done. Throws <see cref="TodoStoreException"/> if the file can't be
-    /// read; nothing is written then.
+    /// read; nothing is written then. A recurring todo still gets its next todo, with <see cref="DateOnly.MinValue"/>
+    /// as today (so the next due date follows only its due date); callers that know today use the other overload.
     /// </summary>
     public TodoItem? Complete(Guid id) => Complete(id, DateOnly.MinValue, out _);
 
