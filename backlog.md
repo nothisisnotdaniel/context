@@ -241,6 +241,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#207](backlog/207-limit-memory-used-by-a-broad.md) Limit memory used by a broad full-text search
 - [?] [#208](backlog/208-avoid-a-full-scan-when-re.md) Avoid a full scan when re-indexing one note's text
 - [?] [#209](backlog/209-announce-the-search-result-count-to.md) Announce the search result count to screen readers
+- [?] [#210](backlog/210-strip-bidi-and-line-separator-characters.md) Strip bidi and line-separator characters in SafeText
 
 ## Dropped with the terminal UI
 
