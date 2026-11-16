@@ -26,6 +26,7 @@ internal sealed class Cli
     private const string IndexUnreadable = "Can't read context.db.";
     private const string FindForm = "Type: context find <attribute> <value>.";
     private const string SearchForm = "Type: context search <text>.";
+    private const string DecisionsForm = "Type: context decisions [tag].";
     private const string JsonOnly =
         "--json works only with version, todos, notes, note show, tags, find, search, current and review.";
 
@@ -44,6 +45,7 @@ internal sealed class Cli
         ("tags [tag...]", "List tags with counts, or the notes with a tag."),
         ("find <attribute> <value...>", "List the notes with an attribute line, e.g. find role Bereichsleiter."),
         ("search <text...>", "List the notes whose text contains the text, with the first matching line."),
+        ("decisions [tag...]", "List the Decision: lines of all notes, or of the notes with a tag, newest first."),
         ("current", "Today's appointments, due todos and linked notes."),
         ("review", "The last 7 days' changed notes and done todos, overdue todos and the next 7 days' appointments."),
         ("today", "Print today's note, creating it with the day's appointments and due todos."),
@@ -138,7 +140,7 @@ internal sealed class Cli
 
         string name = args[0].ToLowerInvariant();
         string[] rest = args[1..];
-        if (json && (name is "help" or "--help" or "-h" or "capture" or "todo" or "today" or "dayend" or "meeting" or "new" or "import" or "export"))
+        if (json && (name is "help" or "--help" or "-h" or "capture" or "todo" or "today" or "decisions" or "dayend" or "meeting" or "new" or "import" or "export"))
         {
             // Checked before any argument: nothing is written and the folder is not created.
             return Usage(JsonOnly);
@@ -225,6 +227,15 @@ internal sealed class Cli
                 }
 
                 return s => Search(s, query);
+            case "decisions":
+                string decisionsTag = string.Join(' ', args);
+                if (!DecisionsView.TryNormalizeTag(decisionsTag, out _))
+                {
+                    usage = DecisionsForm;
+                    return null;
+                }
+
+                return s => Decisions(s, decisionsTag);
             case "current":
                 return NoArguments("current", args, out usage, Current);
             case "review":
@@ -793,6 +804,27 @@ internal sealed class Cli
                 foreach (string note in view.Notes)
                 {
                     Out(OneLine(note));
+                }
+
+                return ExitOk;
+        }
+    }
+
+    private int Decisions(Session session, string tag)
+    {
+        DecisionsView view = DecisionsView.Build(session.Index, session.Notes, tag, zone);
+        switch (view.Kind)
+        {
+            case DecisionsViewKind.InvalidTag:
+                return Usage(DecisionsForm);
+            case DecisionsViewKind.IndexUnreadable:
+                return Error(IndexUnreadable);
+            default:
+                // NoDecisions lists nothing, like search.
+                foreach (Decision decision in view.Decisions)
+                {
+                    string people = string.Join(", ", decision.People.Select(OneLine));
+                    Out($"{Date(decision.Date)}\t{OneLine(decision.Note)}\t{people}\t{OneLine(decision.Text)}");
                 }
 
                 return ExitOk;

@@ -498,6 +498,26 @@ internal sealed class DesktopState
     });
 
     /// <summary>
+    /// The <c>Decision:</c> lines of every plain note, or of the notes with <paramref name="tag"/>
+    /// (<see cref="DecisionsView.Build"/>, dated in the calendar's zone) after syncing the index, off the calling
+    /// thread. Reads only and never throws: any failure gives the <see cref="DecisionsViewKind.IndexUnreadable"/> view.
+    /// </summary>
+    public Task<DecisionsView> Decisions(string tag) => Task.Run(() =>
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                return DecisionsView.Build(index, notes, tag, calendar.Zone);
+            }
+        }
+        catch (Exception)
+        {
+            return new DecisionsView(DecisionsViewKind.IndexUnreadable, string.Empty, []);
+        }
+    });
+
+    /// <summary>
     /// The calendar link as the settings page shows it (<see cref="CalendarLinkView.Show"/>): the masked link and
     /// the time of the cached copy, <c>NotSet</c> or <c>Unreadable</c>, off the calling thread. The link itself never
     /// leaves Core. Reads only (no download) and never throws: any failure gives the <c>Unreadable</c> view.

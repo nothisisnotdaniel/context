@@ -389,7 +389,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(7, TagIndex.ParserVersion);
+        Assert.Equal(8, TagIndex.ParserVersion);
     }
 
     // 024 AC-6
@@ -438,13 +438,13 @@ public sealed class TagIndexTests : IDisposable
         using (SqliteConnection connection = Open())
         {
             using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 8";
+            command.CommandText = "PRAGMA user_version = 9";
             command.ExecuteNonQuery();
         }
 
         index.Sync(store);
 
-        Assert.Equal(8, UserVersion());
+        Assert.Equal(9, UserVersion());
     }
 
     // 048 AC-4: the old constructor means a tag link only.
@@ -847,8 +847,8 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(7, TagIndex.ParserVersion);
-        Assert.Equal(7, UserVersion());
+        Assert.Equal(8, TagIndex.ParserVersion);
+        Assert.Equal(8, UserVersion());
         Assert.Equal(["A", "Beta"], NoteRows());
         Assert.Equal([("A", "work"), ("Beta", "home")], Rows());
         Assert.Equal([("A", "Beta")], LinkRows());
@@ -957,7 +957,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(7, UserVersion());
+        Assert.Equal(8, UserVersion());
         Assert.Equal([("A", "anna", "Anna")], PeopleRows());
         Assert.Equal([("A", "work")], Rows());
 
@@ -1078,7 +1078,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(7, UserVersion());
+        Assert.Equal(8, UserVersion());
         Assert.Equal([("A", "role", "chef #work", "Chef #work")], AttributeRows());
 
         File.WriteAllText(a, "role:: Other");
@@ -1112,7 +1112,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Empty(LinkRows());
-        Assert.Equal(7, UserVersion());
+        Assert.Equal(8, UserVersion());
     }
 
     private void EditNested(string name, string text)
@@ -1197,8 +1197,8 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
         Assert.Equal(["Anna|1", "AS|1"], index.People().Select(Describe));
         Assert.Empty(index.NotesMentioning("Anna Schmidt"));
-        Assert.Equal(7, UserVersion());
-        Assert.Equal(7, TagIndex.ParserVersion);
+        Assert.Equal(8, UserVersion());
+        Assert.Equal(8, TagIndex.ParserVersion);
     }
 
     // 170 ----------------------------------------------------------------------------------------
@@ -1343,5 +1343,96 @@ public sealed class TagIndexTests : IDisposable
 
         Assert.Equal(["Plan"], index.NotesWithTag("work"));
         Assert.Empty(index.NotesWithTag("old"));
+    }
+
+    // 180 ----------------------------------------------------------------------------------------
+
+    private List<(string Note, long Line, string Text)> DecisionRows()
+    {
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT note, line, text FROM note_decisions ORDER BY note, line";
+        using SqliteDataReader reader = command.ExecuteReader();
+        List<(string Note, long Line, string Text)> rows = [];
+        while (reader.Read())
+        {
+            rows.Add((reader.GetString(0), reader.GetInt64(1), reader.GetString(2)));
+        }
+
+        return rows;
+    }
+
+    // 180 AC-3: one note_decisions row per decision; removing a line or the note removes its rows on the next Sync.
+    [Fact]
+    public void Sync_Decisions_WrittenAndPruned()
+    {
+        WriteNote("Plan", "# Plan\nDecision: ship it\n- decision: wait\n");
+        WriteNote("Other", "Decision: other");
+        string plan = Path.Combine(root, "Plan.md");
+        File.SetLastWriteTimeUtc(plan, new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc));
+
+        index.Sync(store);
+
+        Assert.Equal([("Other", 1L, "other"), ("Plan", 2L, "ship it"), ("Plan", 3L, "wait")], DecisionRows());
+
+        File.WriteAllText(plan, "# Plan\nDecision: ship it\n");
+        File.SetLastWriteTimeUtc(plan, new DateTime(2026, 1, 3, 3, 4, 5, DateTimeKind.Utc));
+        File.Delete(Path.Combine(root, "Other.md"));
+        index.Sync(store);
+
+        Assert.Equal([("Plan", 2L, "ship it")], DecisionRows());
+    }
+
+    // 180 AC-3: a database at user_version 7 is fully re-parsed (decisions appear for unchanged notes) and set to 8.
+    [Fact]
+    public void Sync_Version7Database_ReparsedForDecisions()
+    {
+        WriteNote("Plan", "Decision: ship it");
+        File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc));
+        index.Sync(store);
+        using (SqliteConnection connection = Open())
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "PRAGMA user_version = 7; DELETE FROM note_decisions;";
+            command.ExecuteNonQuery();
+        }
+
+        Assert.Empty(DecisionRows());
+
+        index.Sync(store);
+
+        Assert.Equal([("Plan", 1L, "ship it")], DecisionRows());
+        Assert.Equal(8, UserVersion());
+    }
+
+    // 180 AC-3: a sensitive .ctxs note never adds decision rows.
+    [Fact]
+    public void Sync_SensitiveNote_HasNoDecisionRows()
+    {
+        WriteNote("Other", "Decision: kept");
+        File.WriteAllText(Path.Combine(root, "Plan.ctxs"), "Decision: secret");
+
+        index.Sync(store);
+
+        Assert.Equal([("Other", 1L, "kept")], DecisionRows());
+        Assert.DoesNotContain(index.Decisions(null), r => r.Note == "Plan");
+    }
+
+    // 180 AC-6: Decisions(tag) gives the stored time and filters by the note's tag, normalized and as a parameter.
+    [Fact]
+    public void Decisions_TagFilter_AndModified()
+    {
+        WriteNote("Plan", "#work\nDecision: ship it");
+        WriteNote("Home", "#home\nDecision: paint");
+        DateTime time = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), time);
+        index.Sync(store);
+
+        (string Note, int Line, string Text, DateTime Modified) row = Assert.Single(index.Decisions("#Work"));
+        Assert.Equal(("Plan", 2, "ship it", time), row);
+        Assert.Equal(DateTimeKind.Utc, row.Modified.Kind);
+        Assert.Equal(2, index.Decisions(null).Count);
+        Assert.Equal(2, index.Decisions(" ").Count);
+        Assert.Empty(index.Decisions("x' OR '1'='1"));
     }
 }

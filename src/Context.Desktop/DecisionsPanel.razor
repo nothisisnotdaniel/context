@@ -1,0 +1,128 @@
+@using System.Globalization
+@inherits StateComponent
+@* The Decision: lines of every note, or of the notes with a tag (DesktopState.Decisions), newest first, each with its
+   date, note and people; clicking a note opens it. It reads only, and reloads whenever the state changes. *@
+
+<section class="decisions-panel" aria-label="Decisions">
+    <div class="panel-bar">
+        <h2 class="cut" title="@Heading">@Heading</h2>
+        <button type="button" class="close" @onclick="() => OnClose.InvokeAsync()">Close</button>
+    </div>
+    @if (!Valid)
+    {
+        <p class="red" role="status">Type /decisions [tag].</p>
+    }
+    else if (view is null)
+    {
+        <p class="grey" role="status">Loading…</p>
+    }
+    else if (view.Kind is DecisionsViewKind.IndexUnreadable)
+    {
+        <p class="red" role="status">Can't read the decisions.</p>
+    }
+    else if (view.Kind is DecisionsViewKind.InvalidTag)
+    {
+        <p class="red" role="status">Type /decisions [tag].</p>
+    }
+    else if (view.Decisions.Count == 0)
+    {
+        <p class="grey" role="status">@Empty</p>
+    }
+    else
+    {
+        <ul class="decision-rows">
+            @foreach (Decision decision in view.Decisions.Take(MaxRows))
+            {
+                string name = decision.Note;
+                string shown = DesktopText.OneLine(name);
+                string people = DesktopText.OneLine(string.Join(", ", decision.People));
+                string text = DesktopText.OneLine(decision.Text);
+                <li>
+                    <span class="date grey">@decision.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</span>
+                    <button type="button" class="note-button cut" title="@shown" @onclick="() => OnOpen.InvokeAsync(name)">@shown</button>
+                    @if (people.Length > 0)
+                    {
+                        <span class="people grey cut" title="@people">@people</span>
+                    }
+                    <span class="text cut" title="@text">@text</span>
+                </li>
+            }
+        </ul>
+        @if (view.Decisions.Count > MaxRows)
+        {
+            <p class="grey more">@More(view.Decisions.Count)</p>
+        }
+    }
+</section>
+
+@code {
+    /// <summary>At most this many decisions are shown; a grey <c>… N more</c> line follows when there are more.</summary>
+    internal const int MaxRows = 100;
+
+    private DecisionsView? view;
+    private string? loaded;
+    private int request;
+
+    /// <summary>The tag as typed after <c>/decisions</c>; blank for every note.</summary>
+    [Parameter]
+    public string Tag { get; set; } = string.Empty;
+
+    /// <summary>Called with a note's name when it is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    private bool Valid => DecisionsView.TryNormalizeTag(Tag, out _);
+
+    private string Normalized => DecisionsView.TryNormalizeTag(Tag, out string tag) ? tag : string.Empty;
+
+    private string Heading => Normalized.Length == 0
+        ? "Decisions"
+        : $"Decisions: {DesktopText.OneLine(TagParser.Format(Normalized))}";
+
+    private string Empty => Normalized.Length == 0
+        ? "No decisions yet."
+        : $"No decisions in notes tagged {DesktopText.OneLine(TagParser.Format(Normalized))}.";
+
+    private static string More(int count) =>
+        $"{CurrentView.Outside} {(count - MaxRows).ToString(CultureInfo.InvariantCulture)} more";
+
+    protected override Task OnParametersSetAsync()
+    {
+        if (string.Equals(loaded, Tag, StringComparison.Ordinal))
+        {
+            return Task.CompletedTask;
+        }
+
+        // Another tag: its rows are not known yet, so the old ones go.
+        loaded = Tag;
+        view = null;
+        return Load();
+    }
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    // Keeps the shown rows while it reloads. A result for another tag, or an older request's result, is dropped. An
+    // invalid tag reads nothing.
+    private async Task Load()
+    {
+        int mine = ++request;
+        string tag = Tag;
+        if (!DecisionsView.TryNormalizeTag(tag, out _))
+        {
+            return;
+        }
+
+        DecisionsView result = await State.Decisions(tag);
+        if (mine == request && string.Equals(tag, Tag, StringComparison.Ordinal))
+        {
+            view = result;
+        }
+    }
+}

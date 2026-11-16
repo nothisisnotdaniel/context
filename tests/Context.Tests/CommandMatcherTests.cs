@@ -74,6 +74,22 @@ public sealed class CommandMatcherTests
         Assert.Equal(expected, CommandMatcher.Match(names, n => n, line));
     }
 
+    // 180 AC-8: with /decisions among the palette's names it is found by its prefix, with a tag and by a typo.
+    [Theory]
+    [InlineData("/dec", new[] { "/decisions" })]
+    [InlineData("/decisions #work", new[] { "/decisions" })]
+    [InlineData("/decsions", new[] { "/decisions" })]
+    public void Match_Decisions(string line, string[] expected)
+    {
+        string[] names =
+        [
+            "/briefing", "/capture", "/current", "/decisions", "/done", "/export", "/find", "/import", "/meeting", "/new",
+            "/open", "/review", "/save", "/search", "/settings", "/tags", "/today", "/todo", "/triage",
+        ];
+
+        Assert.Equal(expected, CommandMatcher.Match(names, n => n, line));
+    }
+
     [Theory]
     [InlineData("", "", 0)]
     [InlineData("open", "opne", 2)]
