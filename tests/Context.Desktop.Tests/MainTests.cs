@@ -2015,6 +2015,58 @@ public sealed class MainTests : IDisposable
         Assert.True(cut.Find(".search-panel p[role=status]").ClassList.Contains("red"));
     }
 
+    // 180 AC-8: the palette lists /decisions with its usage.
+    [Fact]
+    public void Palette_ListsDecisions()
+    {
+        PaletteCommand decisions = Assert.Single(CommandPalette.Commands, c => c.Name == "/decisions");
+        Assert.Equal("/decisions [tag]", decisions.Usage);
+    }
+
+    // 180 AC-8: /decisions shows DecisionsPanel; its note button opens the note, which hides the panel; /current hides
+    // it too; a tag filters.
+    [Fact]
+    public async Task Decisions_ShowsDecisionsPanel_OpenHidesIt()
+    {
+        data.WriteNote("2026-11-10 Anna", "# Anna\n#work\nDecision: ship it\n");
+        data.WriteNote("2026-11-11 Plan", "Decision: paint\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, "/decisions");
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["2026-11-11 Plan", "2026-11-10 Anna"], cut.FindAll(".decisions-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
+        Assert.Equal("Decisions", cut.Find(".decisions-panel h2").TextContent);
+
+        await cut.FindAll(".decisions-panel .note-button")[1].ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("2026-11-10 Anna", cut.Find(".note-title").TextContent), Wait);
+        Assert.Empty(cut.FindAll(".decisions-panel"));
+
+        await RunPalette(cut, "/decisions #work");
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["2026-11-10 Anna"], cut.FindAll(".decisions-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
+        Assert.Equal("Decisions: #work", cut.Find(".decisions-panel h2").TextContent);
+        await RunPalette(cut, "/current");
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".decisions-panel")), Wait);
+    }
+
+    // 180 AC-8: an invalid tag shows the panel with the red usage line; Close hides it.
+    [Fact]
+    public async Task Decisions_InvalidTag_RedUsage_CloseHides()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, "/decisions #1x");
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            "Type /decisions [tag].", cut.Find(".decisions-panel p[role=status]").TextContent), Wait);
+        Assert.True(cut.Find(".decisions-panel p[role=status]").ClassList.Contains("red"));
+        await cut.Find(".decisions-panel button.close").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".decisions-panel")), Wait);
+    }
+
     // 169 AC-7: the palette lists /review with its description.
     [Fact]
     public void Palette_ListsReview()

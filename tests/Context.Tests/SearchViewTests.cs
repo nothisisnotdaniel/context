@@ -273,7 +273,7 @@ public sealed class SearchViewTests : IDisposable
         Assert.Equal(before, File.ReadAllBytes(DbPath));
     }
 
-    // AC-5: a version-6 database with rows gets note_text filled for every note on its first Sync, then version 7.
+    // AC-5: a version-6 database with rows gets note_text filled for every note on its first Sync, then the current version.
     [Fact]
     public void Build_Version6Database_FillsNoteTextOnce()
     {
@@ -294,7 +294,7 @@ public sealed class SearchViewTests : IDisposable
         using SqliteConnection check = Open();
         using SqliteCommand version = check.CreateCommand();
         version.CommandText = "PRAGMA user_version";
-        Assert.Equal(7L, (long)version.ExecuteScalar()!);
+        Assert.Equal((long)TagIndex.ParserVersion, (long)version.ExecuteScalar()!);
     }
 
     private SqliteConnection Open()

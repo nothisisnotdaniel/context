@@ -100,7 +100,7 @@ public sealed class CliTests : IDisposable
             "todo add every <weekday|day|month> <text...>", "todo done <text...>", "notes",
             "note show <name...>", "tags [tag...]", "find <attribute> <value...>",
             "search <text...>", "current", "review", "new <title...> [--template <name>]", "import <path>",
-            "export <note> <path>", "version", "dayend [today|yyyy-MM-dd]",
+            "export <note> <path>", "version", "dayend [today|yyyy-MM-dd]", "decisions [tag...]",
         })
         {
             Assert.Contains($"context {usage} ", result.Out, StringComparison.Ordinal);
@@ -1508,6 +1508,103 @@ public sealed class CliTests : IDisposable
 
         AssertError(Run("search", "abc"), 1, "Can't read context.db.");
         Assert.Equal(before, Snapshot());
+    }
+
+    // 180 ------------------------------------------------------------------------------------------
+
+    // 180 AC-7: one line per decision, date, note, people and text, newest first, each field one clean line.
+    [Fact]
+    public void Decisions_PrintsOneLinePerDecision()
+    {
+        WriteNote("2026-11-10 Weekly sync", "# x\nDecision: ship it with @[Anna] and @[Bo]\n");
+        WriteNote("2026-11-12", "- decision: a\u0007b\tc\n");
+        WriteNote("Plans", "Decision: later");
+        File.SetLastWriteTimeUtc(Path.Combine(root, "Plans.md"), new DateTime(2026, 11, 1, 8, 0, 0, DateTimeKind.Utc));
+
+        Result result = Run("decisions");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(string.Empty, result.Err);
+        Assert.Equal(
+            "2026-11-12\t2026-11-12\t\ta\uFFFDb c\n"
+                + "2026-11-10\t2026-11-10 Weekly sync\tAnna, Bo\tship it with @[Anna] and @[Bo]\n"
+                + "2026-11-01\tPlans\t\tlater\n",
+            result.Out);
+    }
+
+    // 180 AC-7: no decisions prints nothing and exits 0.
+    [Fact]
+    public void Decisions_None_NoOutput_ExitZero()
+    {
+        WriteNote("A", "nothing");
+
+        Result result = Run("decisions");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(string.Empty, result.Out);
+        Assert.Equal(string.Empty, result.Err);
+    }
+
+    // 180 AC-7: a tag filters; its words are joined with one space, so #[a b] works.
+    [Theory]
+    [InlineData("work")]
+    [InlineData("#work")]
+    [InlineData("DECISIONS", "[work]")]
+    [InlineData("decisions", "#[project", "alpha]")]
+    public void Decisions_Tag_Filters(params string[] args)
+    {
+        WriteNote("Plan", "#work #[project alpha]\nDecision: go");
+        WriteNote("Home", "#home\nDecision: paint");
+        File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), new DateTime(2026, 11, 1, 8, 0, 0, DateTimeKind.Utc));
+        string[] full = args[0].Equals("decisions", StringComparison.OrdinalIgnoreCase) ? args : ["decisions", .. args];
+
+        Result result = Run(full);
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal("2026-11-01\tPlan\t\tgo\n", result.Out);
+    }
+
+    // 180 AC-7: an invalid tag is a usage error and the folder is not read.
+    [Theory]
+    [InlineData("#1x")]
+    [InlineData("#")]
+    public void Decisions_InvalidTag_UsageError_FolderNotRead(string tag)
+    {
+        Result result = Run("decisions", tag);
+
+        AssertUsage(result);
+        Assert.Equal("Type: context decisions [tag]. Run 'context help'.", result.ErrLines[0]);
+        Assert.False(Directory.Exists(root));
+    }
+
+    // 180 AC-7: --json is a usage error before the folder is read.
+    [Fact]
+    public void Decisions_Json_UsageError()
+    {
+        Result result = Run("decisions", "--json");
+
+        AssertUsage(result);
+        Assert.False(Directory.Exists(root));
+    }
+
+    // 180 AC-7: a bad context.db is an error and the file is left alone.
+    [Fact]
+    public void Decisions_BadContextDb_IsError()
+    {
+        WriteNote("A", "Decision: x");
+        File.WriteAllText(Path.Combine(root, TagIndex.FileName), "not a database at all, not at all, really not");
+        Dictionary<string, string> before = Snapshot();
+
+        AssertError(Run("decisions"), 1, "Can't read context.db.");
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 180 AC-7: context with no arguments still creates no folder.
+    [Fact]
+    public void NoArguments_StillCreatesNoFolder()
+    {
+        AssertUsage(Run());
+        Assert.False(Directory.Exists(root));
     }
 
     // 164 ------------------------------------------------------------------------------------------

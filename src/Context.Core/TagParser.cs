@@ -35,11 +35,20 @@ internal static class TagParser
     /// inside a fenced code block. The <c>```</c> fence lines themselves are left out too. Shared with
     /// <see cref="NoteLinkParser"/>.
     /// </summary>
-    internal static IEnumerable<string> LinesOutsideFences(string markdown)
+    internal static IEnumerable<string> LinesOutsideFences(string markdown) =>
+        NumberedLinesOutsideFences(markdown).Select(l => l.Line);
+
+    /// <summary>
+    /// The lines of <see cref="LinesOutsideFences"/>, each with its 1-based number in <paramref name="markdown"/>
+    /// (fence lines and fenced lines still count). Used by <see cref="DecisionParser"/>.
+    /// </summary>
+    internal static IEnumerable<(int Number, string Line)> NumberedLinesOutsideFences(string markdown)
     {
         bool inFence = false;
+        int number = 0;
         foreach (string rawLine in markdown.Split('\n'))
         {
+            number++;
             string line = rawLine.TrimEnd('\r');
             if (line.TrimStart().StartsWith(Fence, StringComparison.Ordinal))
             {
@@ -52,7 +61,7 @@ internal static class TagParser
                 continue;
             }
 
-            yield return line;
+            yield return (number, line);
         }
     }
 

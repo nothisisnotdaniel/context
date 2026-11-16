@@ -374,7 +374,8 @@ input[type="password"]:disabled {
 .note .name,
 .tag-notes .note-button,
 .find-notes .note-button,
-.search-hits .note-button {
+.search-hits .note-button,
+.decision-rows .note-button {
     background: none;
     border: none;
     border-radius: 3px;
@@ -399,7 +400,8 @@ input[type="password"]:disabled {
 .note .name:hover:not(:disabled),
 .tag-notes .note-button:hover:not(:disabled),
 .find-notes .note-button:hover:not(:disabled),
-.search-hits .note-button:hover:not(:disabled) {
+.search-hits .note-button:hover:not(:disabled),
+.decision-rows .note-button:hover:not(:disabled) {
     text-decoration: underline;
 }
 
@@ -407,6 +409,33 @@ input[type="password"]:disabled {
 .find-notes li,
 .search-hits li {
     padding: 3px 0;
+}
+
+/* The decisions panel: one line per decision (grey date, note, grey people, the text), cut with the full text in title. */
+.decision-rows li {
+    align-items: baseline;
+    display: flex;
+    gap: 8px;
+    padding: 3px 0;
+}
+
+.decision-rows .date {
+    flex: none;
+}
+
+.decision-rows .note-button {
+    flex: none;
+    max-width: 30%;
+}
+
+.decision-rows .people {
+    flex: none;
+    max-width: 25%;
+}
+
+.decision-rows .text {
+    flex: 1;
+    min-width: 0;
 }
 
 /* The main region's status line and the bars above the editor and the tag panel. */
@@ -453,7 +482,8 @@ input[type="password"]:disabled {
 
 .tag-panel,
 .find-panel,
-.search-panel {
+.search-panel,
+.decisions-panel {
     border-bottom: 1px solid var(--line);
     margin-bottom: 16px;
     padding-bottom: 12px;

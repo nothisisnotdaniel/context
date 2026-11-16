@@ -69,6 +69,16 @@ one line per note: its name, the number of the first line that contains the text
 text needs at least 3 and at most 200 characters. Sensitive notes are never searched. In the desktop app,
 `/search budget 2027` in the command palette lists the same notes; click one to open it.
 
+### Decision log
+
+Write a decision as its own line, `Decision: we ship in March` (any case, also as a list item `- Decision: ...`;
+not inside a code block or after `1. `). `context decisions` prints every decision of every note, newest first, one
+line each: the date, the note, the people mentioned on the line (`@[Anna]`, resolved through aliases) and the text,
+separated by tabs (none: no output). The date is the note title's leading date (`2026-11-10 Weekly sync`), else the
+day the note was last changed. `context decisions work` (or `#work`, `[project alpha]`) lists only the decisions of
+notes with that tag. Sensitive notes are never listed, and a text is cut at 1000 characters. In the desktop app,
+`/decisions` or `/decisions #work` in the command palette lists the same decisions; click a note to open it.
+
 ### Daily note
 
 `context today` prints today's note, named after the date (for example `2026-10-29`). When it doesn't exist yet it

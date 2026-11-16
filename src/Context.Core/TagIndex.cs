@@ -183,6 +183,11 @@ internal sealed class TagIndex
             value TEXT NOT NULL,
             PRIMARY KEY(note, key, value_key));
         CREATE INDEX IF NOT EXISTS note_attributes_key_value ON note_attributes(key, value_key);
+        CREATE TABLE IF NOT EXISTS note_decisions(
+            note TEXT NOT NULL,
+            line INTEGER NOT NULL,
+            text TEXT NOT NULL,
+            PRIMARY KEY(note, line));
         CREATE VIRTUAL TABLE IF NOT EXISTS note_text USING fts5(note UNINDEXED, body, tokenize='trigram');
         """;
 
@@ -191,9 +196,10 @@ internal sealed class TagIndex
     /// database has an older one, <see cref="Sync"/> re-parses every note once. 1: <c>#[bracket tags]</c>.
     /// 2: <c>[[note links]]</c>. 3: subpages (full names, link targets up to <see cref="NoteLinkParser.MaxTargetLength"/>).
     /// 4: <c>@[person]</c> mentions (and <c>@[[x]]</c> is no link). 5: <c>key:: value</c> attributes. 6: a link target
-    /// that runs into a code span is no link. 7: note text (the full-text table <c>note_text</c>).
+    /// that runs into a code span is no link. 7: note text (the full-text table <c>note_text</c>). 8: <c>Decision:</c> lines
+    /// (<c>note_decisions</c>).
     /// </summary>
-    public const int ParserVersion = 7;
+    public const int ParserVersion = 8;
 
     /// <summary>
     /// How long opening <c>context.db</c> and starting <see cref="Sync"/>'s write transaction wait while another
@@ -284,6 +290,7 @@ internal sealed class TagIndex
                 IReadOnlyList<string> targets;
                 IReadOnlyList<string> people;
                 IReadOnlyList<PageAttribute> attributes;
+                IReadOnlyList<ParsedDecision> decisions;
                 string? body;
                 long? newModified = modified;
                 try
@@ -295,6 +302,7 @@ internal sealed class TagIndex
                     targets = NoteLinkParser.Parse(text);
                     people = PersonParser.Parse(text);
                     attributes = AttributeParser.Parse(text);
+                    decisions = DecisionParser.Parse(text);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
@@ -302,6 +310,7 @@ internal sealed class TagIndex
                     targets = [];
                     people = [];
                     attributes = [];
+                    decisions = [];
                     body = null;
                     newModified = null;
                 }
@@ -353,6 +362,18 @@ internal sealed class TagIndex
                         ("$value", attribute.Value));
                 }
 
+                Execute(connection, transaction, "DELETE FROM note_decisions WHERE note = $note", ("$note", note.Name));
+                foreach (ParsedDecision decision in decisions)
+                {
+                    Execute(
+                        connection,
+                        transaction,
+                        "INSERT INTO note_decisions(note, line, text) VALUES($note, $line, $text)",
+                        ("$note", note.Name),
+                        ("$line", decision.Line),
+                        ("$text", decision.Text));
+                }
+
                 if (!upgrade)
                 {
                     Execute(connection, transaction, "DELETE FROM note_text WHERE note = $note", ("$note", note.Name));
@@ -383,6 +404,7 @@ internal sealed class TagIndex
                 Execute(connection, transaction, "DELETE FROM note_links WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_people WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_attributes WHERE note = $note", ("$note", gone));
+                Execute(connection, transaction, "DELETE FROM note_decisions WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_text WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM notes WHERE name = $note", ("$note", gone));
             }
@@ -392,6 +414,7 @@ internal sealed class TagIndex
             Execute(connection, transaction, "DELETE FROM note_links WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_people WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_attributes WHERE note NOT IN (SELECT name FROM notes)");
+            Execute(connection, transaction, "DELETE FROM note_decisions WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_text WHERE note NOT IN (SELECT name FROM notes)");
             if (upgrade)
             {
@@ -425,6 +448,48 @@ internal sealed class TagIndex
             }
 
             return (IReadOnlyList<(string Note, string Body)>)rows;
+        });
+    }
+
+    /// <summary>
+    /// Every row of <c>note_decisions</c> with its note's stored last-write time (UTC), unsorted. With a non-blank
+    /// <paramref name="tag"/> (normalized by <see cref="NormalizeTag"/>, reaching SQL only as a parameter) only the
+    /// decisions of notes that have that tag. A note without a stored time (it couldn't be read) has no rows.
+    /// </summary>
+    public IReadOnlyList<(string Note, int Line, string Text, DateTime Modified)> Decisions(string? tag)
+    {
+        string? wanted = string.IsNullOrWhiteSpace(tag) ? null : NormalizeTag(tag);
+        return Run(connection =>
+        {
+            List<(string Note, int Line, string Text, DateTime Modified)> rows = [];
+            string sql = "SELECT d.note, d.line, d.text, n.modified FROM note_decisions d "
+                + "JOIN notes n ON n.name = d.note WHERE n.modified IS NOT NULL";
+            if (wanted is not null)
+            {
+                sql += " AND d.note IN (SELECT note FROM note_tags WHERE tag = $tag)";
+            }
+
+            using SqliteCommand command = Command(connection, null, sql);
+            if (wanted is not null)
+            {
+                command.Parameters.AddWithValue("$tag", wanted);
+            }
+
+            using SqliteDataReader reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                // A line or time edited by hand out of range is skipped, like a note that couldn't be read.
+                long line = reader.GetInt64(1);
+                long ticks = reader.GetInt64(3);
+                if (line < 1 || line > int.MaxValue || ticks < DateTime.MinValue.Ticks || ticks > DateTime.MaxValue.Ticks)
+                {
+                    continue;
+                }
+
+                rows.Add((reader.GetString(0), (int)line, reader.GetString(2), new DateTime(ticks, DateTimeKind.Utc)));
+            }
+
+            return (IReadOnlyList<(string Note, int Line, string Text, DateTime Modified)>)rows;
         });
     }
 

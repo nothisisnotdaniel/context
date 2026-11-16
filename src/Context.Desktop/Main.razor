@@ -42,6 +42,10 @@
                 {
                     <SearchPanel Text="@search" OnOpen="RequestOpen" OnClose="CloseSearch" />
                 }
+                @if (decisionsShown is { } decisionsTag)
+                {
+                    <DecisionsPanel Tag="@decisionsTag" OnOpen="RequestOpen" OnClose="CloseDecisions" />
+                }
                 <p class="main-status cut @statusClass" role="status" title="@statusText">@statusText</p>
                 @if (openName is { } name)
                 {
@@ -177,6 +181,7 @@ else
     private bool triageShown;
     private (string Key, string Value)? findShown;
     private string? searchShown;
+    private string? decisionsShown;
     private bool settingsShown;
     private bool discarding;
     private string? pendingName;
@@ -284,6 +289,8 @@ else
     private void CloseFind() => findShown = null;
 
     private void CloseSearch() => searchShown = null;
+
+    private void CloseDecisions() => decisionsShown = null;
 
     // The tags view: every tag with its note count; a click on one shows the tag panel below it.
     private void ShowTags() => tagsShown = true;
@@ -526,6 +533,7 @@ else
         triageShown = false;
         findShown = null;
         searchShown = null;
+        decisionsShown = null;
         settingsShown = false;
         renaming = false;
         subpaging = false;
@@ -622,6 +630,12 @@ else
                 // The text to look for in every plain note: /search budget 2027. Read only; SearchPanel shows the
                 // usage line for a blank or bad text.
                 searchShown = rest;
+                ShowStatus(string.Empty, string.Empty);
+                break;
+            case "/decisions":
+                // Every note's Decision: lines, or those of the notes with a tag: /decisions #work. Read only;
+                // DecisionsPanel shows the usage line for an invalid tag.
+                decisionsShown = rest;
                 ShowStatus(string.Empty, string.Empty);
                 break;
             case "/import":

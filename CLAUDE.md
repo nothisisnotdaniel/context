@@ -21,11 +21,11 @@ Every factory agent reads this file before working on Context. Keep it short and
     `#[Work]` are one tag. `TagParser.Format` shows a tag as `#tag`, or `#[tag]` when it has a space; all tag
     output uses it. `TagIndex.NormalizeTag` (for a typed tag, as in `context tags <tag>`) accepts `work`, `#work`, `[a b]`, `#[a b]`. `TagIndex` keeps the index in SQLite at `<root>/context.db` (`Microsoft.Data.Sqlite`,
     `Pooling=False`, parameterized SQL only): `notes(name, modified)` (last-write UTC ticks, NULL for a
-    note that couldn't be read so it is retried), `note_tags(note, tag)`, `note_links(note, target)`, `note_people(note, person, spelling)` and `note_attributes(note, key, value_key, value)` (job 157, primary key `(note, key, value_key)`, index on `(key, value_key)`) and `note_text` (job 170: FTS5 `fts5(note UNINDEXED, body, tokenize='trigram')` with FTS5 `secure-delete` on, set once in `Sync` after checking `note_text_config`; one row per plain note with its whole text, none for a note that can't be read or is over `NoteStore.MaxEditBytes`; sensitive notes are never listed, so never indexed; every connection sets `PRAGMA secure_delete = ON`, so a deleted note's text doesn't linger in free pages of `context.db`; the rollback journal `context.db-journal` briefly holds the old pages and is unlinked, not zeroed, after each commit, which is outside this guarantee). `Sync(NoteStore)` updates it
+    note that couldn't be read so it is retried), `note_tags(note, tag)`, `note_links(note, target)`, `note_people(note, person, spelling)`, `note_decisions(note, line, text)` (job 180, primary key `(note, line)`; one row per `DecisionParser` line, written and pruned with the note's other rows) and `note_attributes(note, key, value_key, value)` (job 157, primary key `(note, key, value_key)`, index on `(key, value_key)`) and `note_text` (job 170: FTS5 `fts5(note UNINDEXED, body, tokenize='trigram')` with FTS5 `secure-delete` on, set once in `Sync` after checking `note_text_config`; one row per plain note with its whole text, none for a note that can't be read or is over `NoteStore.MaxEditBytes`; sensitive notes are never listed, so never indexed; every connection sets `PRAGMA secure_delete = ON`, so a deleted note's text doesn't linger in free pages of `context.db`; the rollback journal `context.db-journal` briefly holds the old pages and is unlinked, not zeroed, after each commit, which is outside this guarantee). `Sync(NoteStore)` updates it
     in one transaction and only re-parses files whose time changed. `PRAGMA user_version` holds the parser
-    version (`TagIndex.ParserVersion`, now 7: note text in `note_text`; 6 was a link target that runs into a code span is no link); when it is lower, `Sync` clears every stored time and empties `note_text` in the same
+    version (`TagIndex.ParserVersion`, now 8: `Decision:` lines in `note_decisions`; 7 was note text in `note_text`; 6 was a link target that runs into a code span is no link); when it is lower, `Sync` clears every stored time and empties `note_text` in the same
     transaction (so all notes are re-parsed and their text written once) and then sets it. Bump it whenever parsing changes. Queries: `Tags()`, `NotesWithTag`,
-    `NoteTags()`, `FindNote`, `Links`, `People()`, `NotesMentioning`, `NotesWithAttribute(key, value)` (by `AttributeParser.ValueKey`), `NotesWithoutAttribute(key)`, `Search(text)` (`(Note, Body)` rows for `note_text MATCH $q`, `$q` the text as one FTS5 phrase: `"` + text with `"` doubled + `"`, always a parameter, so FTS syntax is literal). A database that can't be opened or isn't valid throws `TagIndexException` (an
+    `NoteTags()`, `FindNote`, `Links`, `People()`, `NotesMentioning`, `NotesWithAttribute(key, value)` (by `AttributeParser.ValueKey`), `NotesWithoutAttribute(key)`, `Search(text)` (`(Note, Body)` rows for `note_text MATCH $q`, `$q` the text as one FTS5 phrase: `"` + text with `"` doubled + `"`, always a parameter, so FTS syntax is literal), `Decisions(tag?)` (`(Note, Line, Text, Modified)` rows of `note_decisions` joined to `notes` with a stored time, `Modified` UTC; a tag keeps the notes with that `note_tags` row). A database that can't be opened or isn't valid throws `TagIndexException` (an
     `IOException`) and is never deleted or overwritten. The file database waits up to `TagIndex.BusyTimeout` (5 s; an
     internal constructor argument shortens it for tests) for another process's lock, and `Sync` starts with
     `BEGIN IMMEDIATE`, so the desktop app and a command-line run can share it. `TagsView.Build`, `LinksView.Build`
@@ -106,6 +106,18 @@ Every factory agent reads this file before working on Context. Keep it short and
     `TagIndexException` gives `IndexUnreadable`; kinds `Found`, `NoMatches`. The command line has `context search
     <text...>`, the desktop `/search` (`SearchPanel`). Out of scope: sensitive notes, todos, calendar, ranking,
     highlighting, fuzzy/stemmed search, diacritic folding.
+  - **Decision log** (job 180, `DecisionParser.cs`, `DecisionsView.cs`): `DecisionParser.Parse(markdown)` finds lines
+    outside fences (`TagParser.NumberedLinesOutsideFences`, 1-based numbers counting every line) that are optional
+    spaces or tabs, an optional `-`, `*` or `+` and one space, then `Decision:` ignoring case; the rest is trimmed and
+    collapsed (`TagParser.Collapse`), cut to `MaxTextLength` (1000) without splitting a surrogate pair; an empty rest,
+    `Decisions:`, text before it or `1. ` is no decision (`ParsedDecision(Line, Text)`). `DecisionsView.TryNormalizeTag`
+    (blank: no filter; else `NormalizeTag`, valid only when `NormalizeBracket` keeps it). `DecisionsView.Build(index,
+    store, tag, zone)`: an invalid tag is `InvalidTag` without opening the index; else `Sync`, `TagIndex.Decisions`,
+    each as `Decision(Note, Line, Date, Text, People)`: `Date` is the title's (last segment's) leading `yyyy-MM-dd`
+    (the whole title or followed by whitespace, a real date), else the last write time as a day in `zone`; `People`
+    the line's `PersonParser.Parse` mentions shown as `TagIndex.Aliases()` resolves them (else as written), distinct
+    by `PersonParser.Key`, in line order. Sorted by date descending, then note ignoring case, then ordinal, then line;
+    kinds `Found`, `NoDecisions`, `InvalidTag`, `IndexUnreadable` (`TagIndexException`). Sensitive notes never appear.
 - **Views:**
   - **Review view (job 169):** `ReviewView.Build(notes, todos, calendar, feed, today)` in Core (`ReviewView.cs`) holds
     `From` (today-6) and `To` (today), the calendar's `Zone`, `ChangedNotes` (`ChangedNote`: name and last-write time
@@ -498,6 +510,10 @@ Every factory agent reads this file before working on Context. Keep it short and
   per hit, both through `OneLine`, exit 0, no hits no output; blank is the usage error `Type: context search <text>.`
   before the folder is read; too short `Type at least 3 characters to search.`, too long `Search text can be at most
   200 characters.`, bad db `Can't read context.db.`, all exit 1),
+  `decisions [tag...]` (job 180, see Decision log: arguments joined with one space as the tag; per decision
+  `<yyyy-MM-dd>\t<note>\t<people joined ", ">\t<text>`, each through `OneLine`, exit 0, none no output; an invalid
+  tag is the usage error `Type: context decisions [tag].` before the folder is read; bad db `Can't read context.db.`,
+  exit 1; `--json` is a usage error),
   `dayend [today|yyyy-MM-dd]` (job 171, see Day's end: `DayEnd.CloseDay` for today or that day, printing
   `Updated <D>.` and `Moved <n> todo(s) to <D+1>.`, exit 0; a sensitive D or D+1 note `Cli.SensitiveText`, a bad
   `todos.json` `Can't read todos.json.`, a failed write `Can't write <name>.`, all stderr only, exit 1; any other or a
@@ -675,7 +691,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
     `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs`, note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs` (its triage queue, remove and snooze in `InboxTriage.cs`), the day's end in `DayEnd.cs` (Times' day file in `TimesDay.cs`, `settings.json` in `SettingsStore.cs`), the morning briefing in `Briefing.cs` (Times' flexitime balance in `TimesBalance.cs`), the todo input rules (`TryParseDate`,
-    `MaxTextLength`, `TryParseRepeat`, `NextDue`) in `TodoInput.cs`, the todo repeat in `TodoRepeat.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`), `SearchView.cs` (`search`), `ReviewView.cs` (the weekly review) and `CalendarLinkView.cs`
+    `MaxTextLength`, `TryParseRepeat`, `NextDue`) in `TodoInput.cs`, the todo repeat in `TodoRepeat.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`), `SearchView.cs` (`search`), `DecisionsView.cs` (`decisions`, with `DecisionParser.cs`), `ReviewView.cs` (the weekly review) and `CalendarLinkView.cs`
     (the calendar link), and the command ranking for the desktop palette in `CommandMatcher.cs`; the notes list is `NoteStore.List()` itself.
   - **Data step in Core, drawing in the front end:** a view's Core data step returns plain types (a kind plus raw
     text, never markup, never cleaned or escaped, no exception messages). The front ends (`Cli`, and the desktop
@@ -755,7 +771,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     file bytes, read through `BoundedFile`): a bigger or non-seekable note can't be opened (`Can't read <name>.`), a save
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
-    `/briefing`, `/capture`, `/current`, `/done`, `/export`, `/find`, `/import`, `/meeting`, `/new`, `/open`, `/review`, `/save`, `/search`, `/settings`, `/tags`, `/today`, `/todo`, `/triage` with `CommandMatcher` (in Core; ties
+    `/briefing`, `/capture`, `/current`, `/decisions`, `/done`, `/export`, `/find`, `/import`, `/meeting`, `/new`, `/open`, `/review`, `/save`, `/search`, `/settings`, `/tags`, `/today`, `/todo`, `/triage` with `CommandMatcher` (in Core; ties
     in Levenshtein score are ordered by `SwapDistance`, which counts an adjacent swap as one edit, so `/opne` runs `/open`).
     `/todo every <weekday|day|month> <text>` (job 168) adds a recurring todo (`TryParseRepeat`, then `AddTodo`), accent
     `Added: <text>`; a missing or bad unit or missing text is red `Type /todo every <weekday|day|month> <text>.`; a bad
@@ -895,6 +911,13 @@ Every factory agent reads this file before working on Context. Keep it short and
     <text>.`, red `Can't read the search index.`, red `Type /search <text>.` for blank (nothing read), red `Type at least
     3 characters to search.` and `Search text can be at most 200 characters.`; same read-only (no `Actions.`), reload and
     stale-result rules. Opening a note or the current view closes it.
+    `DecisionsPanel` (job 180, `/decisions [tag]`; `Main`'s `decisionsShown`, after `SearchPanel`) has the heading
+    `Decisions` (with a tag `Decisions: #tag`) and `Close`, and lists `DesktopState.Decisions(tag)` (`DecisionsView.Build`
+    under `indexGate`, never throws): per decision a grey `span.date`, a `note-button` (through `OnOpen`, full name in
+    `title`), grey `span.people` (only with people) and the one-line `span.text` (cut by CSS, full text in `title`); at
+    most `MaxRows` (100), then grey `… <n> more`. Grey `Loading…`, grey `No decisions yet.` / `No decisions in notes
+    tagged #<tag>.`, red `Can't read the decisions.`, red `Type /decisions [tag].` for an invalid tag (nothing read);
+    same read-only (no `Actions.`), reload and stale-result rules. Opening a note or the current view closes it.
     **Import and export:** the only paths the desktop reads or writes outside the data folder come from the OS
     dialog (`IFileDialog.OpenMarkdownFiles()`: several `*.md`, empty when cancelled or failed;
     `SaveExportFile(suggestedName)`: `null` when cancelled, adds `.md` to a name without extension; Photino's save
@@ -1050,7 +1073,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     tracked private key), plus shared helpers such as
     `RemovedFeature.cs` and `RemovedConsole.cs` (the names of the removed whole-folder protection and of the removed
     terminal console, spelled in pieces; `RemovedFeatureSourceTests.cs` fails when `src/`, `tests/` or this file
-    names either again) and `FakeHttpHandler.cs` (canned HTTP responses). The view tests (`CurrentViewTests`, `ReviewViewTests`, `TagsViewTests`, `LinksViewTests`, `FindViewTests`, `SearchViewTests`, `CalendarLinkViewTests`) check the view data field by field. Note, todo, tag and calendar tests use their
+    names either again) and `FakeHttpHandler.cs` (canned HTTP responses). The view tests (`CurrentViewTests`, `ReviewViewTests`, `TagsViewTests`, `LinksViewTests`, `FindViewTests`, `SearchViewTests`, `DecisionsViewTests`, `CalendarLinkViewTests`) check the view data field by field. Note, todo, tag and calendar tests use their
     own temp folder (deleted in `Dispose`), never the real app data folder.
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
