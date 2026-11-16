@@ -173,10 +173,12 @@ internal sealed record CurrentView
     /// <summary>
     /// Reads everything the view needs. The feed (if any) is fetched once. The index is synced once and read through
     /// one <see cref="TagIndex.NoteTags"/> call when there is at least one appointment, and synced when something is
-    /// due; with no appointments and nothing due (also when <c>todos.json</c> can't be read) it isn't touched.
+    /// due; <paramref name="dueOnDayOnly"/> keeps only the todos due exactly on <paramref name="today"/> (a chosen day's
+    /// view: none is overdue); with no appointments and nothing due (also when <c>todos.json</c> can't be read) it isn't touched.
     /// </summary>
     public static CurrentView Build(
-        TodoStore todos, TagIndex index, NoteStore notes, CalendarStore calendar, CalendarFeed? feed, DateOnly today)
+        TodoStore todos, TagIndex index, NoteStore notes, CalendarStore calendar, CalendarFeed? feed, DateOnly today,
+        bool dueOnDayOnly = false)
     {
         CalendarFeedResult result = Fetch(feed);
         CalendarDay day = calendar.Day(today, FeedEvents(result, calendar.Zone, today));
@@ -194,6 +196,10 @@ internal sealed record CurrentView
         }
 
         List<DueTodo> due = DueOn(items, today);
+        if (dueOnDayOnly)
+        {
+            due = due.Where(t => t.Due == today).ToList();
+        }
 
         IReadOnlyList<LinkedNote> linked = [];
         IReadOnlyList<IReadOnlyList<RelatedNote>>? related = null;

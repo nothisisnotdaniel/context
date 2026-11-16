@@ -569,30 +569,71 @@ input[type="password"]:disabled {
     white-space: nowrap;
 }
 
-/* Quick capture: one row at the top of the main region; the result line sits under it and takes no room when empty. */
-.capture-box {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 0;
-    margin-bottom: 12px;
-    padding: 0 8px 8px;
+/* The top bar: a slim bar flush to the top and the sides of the main region, icons on the right. */
+.top-bar {
+    align-items: center;
     background: var(--panel);
     border-bottom: 1px solid var(--line);
+    display: flex;
+    gap: 8px;
+    margin: 0 -24px 12px;
+    padding: 0;
+    position: relative;
 }
 
-.capture-box .capture-text {
-    flex: 1 1 0;
-    min-width: 0;
+.top-bar-start {
+    flex: 1 1 auto;
 }
 
-.capture-status {
-    flex: 1 1 100%;
-    margin: 0;
+.top-bar-buttons {
+    display: flex;
+    flex: none;
+    gap: 6px;
+    justify-content: flex-end;
+    padding: 2px 8px;
+    position: relative;
+    z-index: 3;
 }
 
-.capture-status:empty {
-    display: none;
+.top-bar-buttons button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    color: var(--text);
+}
+
+.top-bar-buttons button:hover {
+    color: var(--accent-strong);
+}
+
+.top-bar-buttons button:focus-visible {
+    outline: 2px solid var(--accent-strong);
+    outline-offset: 1px;
+}
+
+.top-bar-buttons button svg {
+    width: 18px;
+    height: 18px;
+}
+
+.day-pick-backdrop {
+    background: transparent;
+    inset: 0;
+    position: fixed;
+    z-index: 2;
+}
+
+.day-pick {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    padding: 8px;
+    position: absolute;
+    right: 8px;
+    top: 100%;
+    z-index: 3;
 }
 
 /* Day's end: the End the day button under the current view's title, with its result line beside it. */

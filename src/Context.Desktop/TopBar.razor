@@ -1,0 +1,71 @@
+@* The slim bar across the top of the main area: Today (home) and Pick a day (calendar). The pick opens a small popover
+   with one native date input; a valid date is handed to the parent, which decides (unsaved changes) what to show. *@
+
+<div class="top-bar" @onkeydown="Key">
+    <div class="top-bar-start"></div>
+    <div class="top-bar-buttons">
+        <button type="button" class="today-open" aria-label="Today" title="Today" @onclick="() => OnToday.InvokeAsync()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg></button>
+        <button type="button" class="day-pick-open" aria-label="Pick a day" title="Pick a day" aria-expanded="@(open ? "true" : "false")" @onclick="Toggle"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>
+    </div>
+    @if (open)
+    {
+        <div class="day-pick-backdrop" @onclick="Close"></div>
+        <div class="day-pick">
+            <input type="date" aria-label="Day" @ref="field" min="1900-01-01" max="2100-12-31" @onchange="Picked" />
+        </div>
+    }
+</div>
+
+@code {
+    private const string Format = "yyyy-MM-dd";
+
+    private bool open;
+    private bool focusField;
+    private ElementReference field;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // The popover just opened: the date input takes the focus, so Esc and typing work at once.
+        if (focusField && open)
+        {
+            focusField = false;
+            await field.FocusAsync();
+        }
+    }
+
+    /// <summary>Called when Today is clicked.</summary>
+    [Parameter]
+    public EventCallback OnToday { get; set; }
+
+    /// <summary>Called with a valid picked day (1900..2100).</summary>
+    [Parameter]
+    public EventCallback<DateOnly> OnPick { get; set; }
+
+    private void Toggle()
+    {
+        open = !open;
+        focusField = open;
+    }
+
+    private void Close() => open = false;
+
+    private void Key(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            open = false;
+        }
+    }
+
+    private async Task Picked(ChangeEventArgs e)
+    {
+        if (!DateOnly.TryParseExact(e.Value?.ToString(), Format, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly day)
+            || day.Year < 1900 || day.Year > 2100)
+        {
+            return;
+        }
+
+        open = false;
+        await OnPick.InvokeAsync(day);
+    }
+}

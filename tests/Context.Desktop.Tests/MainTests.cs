@@ -576,7 +576,7 @@ public sealed class MainTests : IDisposable
             await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
         }
 
-        Assert.Equal("capture-box", cut.Find("main.current-region").Children[0].ClassName);
+        Assert.Equal("top-bar", cut.Find("main.current-region").Children[0].ClassName);
         IElement panel = cut.Find("main.current-region").Children[1];
         Assert.True(panel.ClassList.Contains("settings-panel"));
         Assert.Equal("Settings", panel.QuerySelector("h2")!.TextContent);
@@ -1419,9 +1419,9 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
     }
 
-    // 140 AC-6: the capture box is the first thing in the main region, whatever else is shown there.
+    // 198 AC-1: the top bar is the first thing in the main region, whatever else is shown there.
     [Fact]
-    public async Task CaptureBox_AlwaysAtTheTopOfTheMainRegion()
+    public async Task TopBar_AlwaysAtTheTopOfTheMainRegion()
     {
         data.WriteNote("Plan", "# Plan\n\n#work\n");
         EditorJs js = new EditorJs(data.Bunit);
@@ -1430,10 +1430,10 @@ public sealed class MainTests : IDisposable
         void AssertBox()
         {
             IElement first = cut.Find("main.current-region").Children[0];
-            Assert.Equal("capture-box", first.ClassName);
-            Assert.Single(cut.FindAll(".capture-box"));
-            Assert.Equal("Capture", cut.Find(".capture-box input[type=text]").GetAttribute("aria-label"));
-            Assert.Empty(cut.FindAll("button.capture"));
+            Assert.Equal("top-bar", first.ClassName);
+            Assert.Single(cut.FindAll(".top-bar"));
+            Assert.Empty(cut.FindAll(".capture-box"));
+            Assert.Empty(cut.FindAll("input[aria-label=Capture]"));
         }
 
         AssertBox();
@@ -1451,9 +1451,9 @@ public sealed class MainTests : IDisposable
         AssertBox();
     }
 
-    // 140 AC-6: no capture box when the data folder can't be read.
+    // 198 AC-1: no top bar when the data folder can't be read.
     [Fact]
-    public async Task CaptureBox_NotShownWhenTheFolderCantBeRead()
+    public async Task TopBar_NotShownWhenTheFolderCantBeRead()
     {
         data.SaveLink(FakeHttpHandler.Link);
         data.FeedClockThrows = new InvalidOperationException("boom");
@@ -1461,29 +1461,15 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
         Assert.Equal("Can't read the data folder.", cut.Find(".failed").TextContent);
+        Assert.Empty(cut.FindAll(".top-bar"));
         Assert.Empty(cut.FindAll(".capture-box"));
-    }
-
-    // 140 AC-7: a capture from the box in Main writes the line and the notes list shows the new inbox note.
-    [Fact]
-    public async Task CaptureBox_Enter_WritesAndListsTheInbox()
-    {
-        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        await cut.Find("input.capture-text").InputAsync(new ChangeEventArgs { Value = "call Anna" });
-
-        await cut.Find("input.capture-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
-
-        Assert.Equal("# inbox\n- 2026-10-29 10:05 call Anna\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
-        Assert.Equal("Captured.", cut.Find(".capture-status").TextContent);
-        cut.WaitForAssertion(() => Assert.Equal(["inbox"], cut.FindAll(".note-list button.name").Select(b => b.TextContent).ToArray()), Wait);
     }
 
     // 140 AC-8: with unsaved changes in the open inbox a capture (box or palette) writes nothing and says to save.
     [Theory]
-    [InlineData(false, "inbox")]
-    [InlineData(true, "inbox")]
-    [InlineData(false, "Inbox")]
-    public async Task Capture_DirtyOpenInbox_RefusedNothingWritten(bool palette, string name)
+    [InlineData("inbox")]
+    [InlineData("Inbox")]
+    public async Task Capture_DirtyOpenInbox_RefusedNothingWritten(string name)
     {
         data.WriteNote(name, "# inbox\n");
         EditorJs js = new EditorJs(data.Bunit);
@@ -1493,19 +1479,8 @@ public sealed class MainTests : IDisposable
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
         int mounts = js.Calls("ContextEditor.mount").Count;
 
-        IElement status;
-        if (palette)
-        {
-            await RunPalette(cut, "/capture call Anna");
-            status = cut.Find(".main-status");
-        }
-        else
-        {
-            await cut.Find("input.capture-text").InputAsync(new ChangeEventArgs { Value = "call Anna" });
-            await cut.Find(".capture-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
-            status = cut.Find(".capture-status");
-            Assert.Equal("call Anna", cut.Find("input.capture-text").GetAttribute("value"));
-        }
+        await RunPalette(cut, "/capture call Anna");
+        IElement status = cut.Find(".main-status");
 
         Assert.Equal($"Save {name} first.", status.TextContent);
         Assert.True(status.ClassList.Contains("red"));
@@ -1515,10 +1490,8 @@ public sealed class MainTests : IDisposable
 
     // 140 AC-8: with the inbox open and no unsaved changes the capture is written and the editor is mounted again
     // with the saved text (without taking the focus), so a later save is not refused as changed on disk.
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Capture_CleanOpenInbox_RemountsWithTheNewLine_ThenSaves(bool palette)
+    [Fact]
+    public async Task Capture_CleanOpenInbox_RemountsWithTheNewLine_ThenSaves()
     {
         data.WriteNote("inbox", "# inbox\n");
         EditorJs js = new EditorJs(data.Bunit);
@@ -1527,17 +1500,8 @@ public sealed class MainTests : IDisposable
         int mounts = js.Calls("ContextEditor.mount").Count;
         int focuses = js.Calls("ContextEditor.focus").Count;
 
-        if (palette)
-        {
-            await RunPalette(cut, "/capture call Anna");
-            Assert.Equal("Captured.", cut.Find(".main-status").TextContent);
-        }
-        else
-        {
-            await cut.Find("input.capture-text").InputAsync(new ChangeEventArgs { Value = "call Anna" });
-            await cut.Find(".capture-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
-            Assert.Equal("Captured.", cut.Find(".capture-status").TextContent);
-        }
+        await RunPalette(cut, "/capture call Anna");
+        Assert.Equal("Captured.", cut.Find(".main-status").TextContent);
 
         string captured = "# inbox\n- 2026-10-29 10:05 call Anna\n";
         Assert.Equal(captured, File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
@@ -1564,11 +1528,10 @@ public sealed class MainTests : IDisposable
         await Open(cut, js, "Plan");
         js.Edit("# Plan\n\nUnsaved\n");
         int mounts = js.Calls("ContextEditor.mount").Count;
-        await cut.Find("input.capture-text").InputAsync(new ChangeEventArgs { Value = "call Anna" });
 
-        await cut.Find(".capture-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await RunPalette(cut, "/capture call Anna");
 
-        Assert.Equal("Captured.", cut.Find(".capture-status").TextContent);
+        Assert.Equal("Captured.", cut.Find(".main-status").TextContent);
         Assert.Equal("# inbox\n- 2026-10-29 10:05 call Anna\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
         Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
@@ -1592,7 +1555,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal("# inbox\n- 2026-10-29 10:05 idea  #work\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
         Assert.Equal("Captured.", cut.Find(".main-status").TextContent);
         Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
-        Assert.Equal(string.Empty, cut.Find(".capture-status").TextContent);
+        Assert.Empty(cut.FindAll(".capture-status"));
     }
 
     // 140 AC-9: /capture without text is a red usage line; a refusal shows its red text; both write nothing.
@@ -2202,7 +2165,7 @@ public sealed class MainTests : IDisposable
         await RunPalette(cut, line);
 
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".review-panel .review-range")), Wait);
-        Assert.Equal("capture-box", cut.Find("main.current-region").Children[0].ClassName);
+        Assert.Equal("top-bar", cut.Find("main.current-region").Children[0].ClassName);
         Assert.True(cut.Find("main.current-region").Children[1].ClassList.Contains("review-panel"));
         Assert.Equal("Week review", cut.Find(".review-panel h2").TextContent);
         Assert.Empty(cut.FindAll(".palette"));
@@ -2275,5 +2238,249 @@ public sealed class MainTests : IDisposable
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal("Other", cut.Find(".note-title").TextContent), Wait);
+    }
+
+    // 198 AC-2: both buttons sit in .top-bar-buttons after an empty .top-bar-start, each with an inline svg.
+    [Fact]
+    public async Task TopBar_HasTodayAndPickADayButtons()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        IElement bar = cut.Find(".top-bar");
+        Assert.Equal(["top-bar-start", "top-bar-buttons"], bar.Children.Select(c => c.ClassName ?? string.Empty).ToArray());
+        Assert.Equal(string.Empty, cut.Find(".top-bar-start").InnerHtml);
+        foreach ((string css, string label) in new[] { ("today-open", "Today"), ("day-pick-open", "Pick a day") })
+        {
+            IElement button = cut.Find(".top-bar-buttons button." + css);
+            Assert.Equal(label, button.GetAttribute("aria-label"));
+            Assert.Equal(label, button.GetAttribute("title"));
+            Assert.Equal("true", button.QuerySelector("svg")!.GetAttribute("aria-hidden"));
+        }
+    }
+
+    // 198 AC-3: Today closes an open note, a page and the review panel and shows today's view.
+    [Fact]
+    public async Task TopBar_Today_ClosesNotePagesAndReview()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent), Wait);
+        Assert.Empty(cut.FindAll(".note-editor"));
+        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".settings-panel")), Wait);
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        Assert.Empty(cut.FindAll(".settings-panel"));
+        await RunPalette(cut, "/tags");
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tags-panel")), Wait);
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        Assert.Empty(cut.FindAll(".tags-panel"));
+        Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent);
+    }
+
+    // 198 AC-4: Today with unsaved changes asks; Keep leaves the note, Discard shows today's view.
+    [Fact]
+    public async Task TopBar_Today_DirtyEditor_KeepOrDiscard()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        js.Edit("# Plan\n\nUnsaved\n");
+
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
+        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll("[role=dialog]")), Wait);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent), Wait);
+    }
+
+    // 198 AC-5: the popover opens and closes by button, Esc and backdrop; the view and the open note stay.
+    [Fact]
+    public async Task TopBar_Picker_OpensAndCloses_NothingElseChanges()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        int mounts = js.Calls("ContextEditor.mount").Count;
+
+        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        Assert.Equal("date", cut.Find("input[aria-label=Day]").GetAttribute("type"));
+        Assert.Equal("1900-01-01", cut.Find("input[aria-label=Day]").GetAttribute("min"));
+        Assert.Equal("2100-12-31", cut.Find("input[aria-label=Day]").GetAttribute("max"));
+        Assert.Equal("true", cut.Find("button.day-pick-open").GetAttribute("aria-expanded"));
+        await cut.Find("button.day-pick-open").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        Assert.Empty(cut.FindAll(".day-pick-backdrop"));
+        Assert.Equal("false", cut.Find("button.day-pick-open").GetAttribute("aria-expanded"));
+        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        await cut.Find("input[aria-label=Day]").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        Assert.Empty(cut.FindAll(".day-pick-backdrop"));
+        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        await cut.Find(".day-pick-backdrop").ClickAsync(new MouseEventArgs());
+        Assert.Empty(cut.FindAll("input[aria-label=Day]"));
+        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        Assert.Empty(cut.FindAll("input[aria-label=Day]"));
+
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
+    }
+
+    private static async Task PickDate(IRenderedComponent<Main> cut, string value)
+    {
+        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        await cut.Find("input[aria-label=Day]").ChangeAsync(new ChangeEventArgs { Value = value });
+    }
+
+    // 198 AC-6, AC-7: a picked day shows its appointments, todos due that day and linked notes; no End the day.
+    [Fact]
+    public async Task TopBar_PickDay_ShowsThatDaysView()
+    {
+        data.WriteCalendar("work.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("Planning", "20261120T090000", "20261120T100000"),
+            DesktopFixture.Event("Today only", "20261029T090000", "20261029T100000")));
+        data.AddTodo("Ship #launch", new DateOnly(2026, 11, 20));
+        data.AddTodo("Other day", new DateOnly(2026, 11, 21));
+        data.AddTodo("Overdue", new DateOnly(2026, 10, 1));
+        data.WriteNote("Launch plan", "# Launch\n#launch\n");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await PickDate(cut, "2026-11-20");
+
+        cut.WaitForAssertion(() => Assert.Equal("2026-11-20", cut.Find("h1.title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Markup), Wait);
+        Assert.Empty(cut.FindAll(".day-pick-backdrop"));
+        Assert.Contains("Planning", cut.Find("table.appointments").TextContent);
+        Assert.DoesNotContain("Today only", cut.Find(".current").TextContent);
+        Assert.Equal(["Ship #launch"], cut.FindAll("tr.due-todo td.cut").Select(e => e.TextContent).ToArray());
+        Assert.Equal(["Launch plan"], cut.FindAll("li.linked-note .name").Select(e => e.TextContent).ToArray());
+        Assert.Empty(cut.FindAll("button.end-day"));
+        Assert.Empty(cut.FindAll(".day-end-status"));
+    }
+
+    // 198 AC-6: empty states name the day.
+    [Fact]
+    public async Task TopBar_PickDay_EmptyStatesNameTheDay()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await PickDate(cut, "2026-11-20");
+
+        cut.WaitForAssertion(() => Assert.Contains("No appointments on 2026-11-20.", cut.Find(".current").TextContent), Wait);
+        Assert.Contains("Nothing due on 2026-11-20.", cut.Find(".current").TextContent);
+    }
+
+    // 198 AC-7: picking today's date shows exactly today's view; Today after another day returns to it.
+    [Fact]
+    public async Task TopBar_PickToday_AndTodayAfterAnotherDay_ShowTodaysView()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await PickDate(cut, "2026-10-29");
+        Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent);
+        Assert.Single(cut.FindAll("button.end-day"));
+
+        await PickDate(cut, "2026-11-20");
+        cut.WaitForAssertion(() => Assert.Equal("2026-11-20", cut.Find("h1.title").TextContent), Wait);
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent), Wait);
+        Assert.Single(cut.FindAll("button.end-day"));
+    }
+
+    // 198 AC-8: a dirty note asks first; Keep keeps it and no day shows; Discard shows the day. Bad values are ignored.
+    [Fact]
+    public async Task TopBar_PickDay_DirtyEditor_KeepOrDiscard()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        js.Edit("# Plan\n\nUnsaved\n");
+
+        await PickDate(cut, "2026-11-20");
+
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll("[role=dialog]")), Wait);
+        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        Assert.Empty(cut.FindAll("h1.title"));
+        await PickDate(cut, "2026-11-20");
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll("[role=dialog]")), Wait);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("2026-11-20", cut.Find("h1.title").TextContent), Wait);
+        Assert.Empty(cut.FindAll(".note-editor"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("nonsense")]
+    [InlineData("1899-12-31")]
+    [InlineData("2101-01-01")]
+    [InlineData("20261120")]
+    public async Task TopBar_PickDay_BadValue_Ignored(string value)
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await PickDate(cut, value);
+
+        Assert.Single(cut.FindAll("input[aria-label=Day]"));
+        Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent);
+    }
+
+    // 198 AC-8: opening a note after viewing another day shows the note, and Today then shows today's view.
+    [Fact]
+    public async Task TopBar_OtherDay_ThenOpenNote_ShowsTheNote()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await PickDate(cut, "2026-11-20");
+        cut.WaitForAssertion(() => Assert.Equal("2026-11-20", cut.Find("h1.title").TextContent), Wait);
+
+        await Open(cut, js, "Plan");
+
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent), Wait);
+    }
+
+    // 198 AC-9: the other day's view reloads after a state change and keeps showing that day.
+    [Fact]
+    public async Task TopBar_OtherDay_ReloadsAfterStateChange()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await PickDate(cut, "2026-11-20");
+        cut.WaitForAssertion(() => Assert.Contains("Nothing due on 2026-11-20.", cut.Find(".current").TextContent), Wait);
+
+        data.AddTodo("Late addition", new DateOnly(2026, 11, 20));
+        data.WriteCalendar("new.ics", DesktopFixture.Calendar(DesktopFixture.Event("Added talk", "20261120T130000", "20261120T140000")));
+        await data.State!.Refresh();
+
+        cut.WaitForAssertion(() => Assert.Contains("Late addition", cut.Find(".current").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Contains("Added talk", cut.Find(".current").TextContent), Wait);
+        Assert.Equal("2026-11-20", cut.Find("h1.title").TextContent);
+    }
+
+    // 198 AC-9: an unreadable todos.json and calendar file still show their lines for another day.
+    [Fact]
+    public async Task TopBar_OtherDay_ShowsUnreadableLines()
+    {
+        data.WriteFile("todos.json", "not json");
+        data.WriteCalendar("bad.ics", "nope");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await PickDate(cut, "2026-11-20");
+
+        cut.WaitForAssertion(() => Assert.Contains("Can't read todos.json.", cut.Find(".current").TextContent), Wait);
+        Assert.Contains("Can't read calendar/bad.ics", cut.Find(".current").TextContent);
     }
 }

@@ -239,11 +239,11 @@ public sealed class DesktopSourceTests
 
     // 192 AC-5: the capture bar is a band; the note time rule is gone.
     [Fact]
-    public void AppCss_CaptureBoxIsABand_NoNoteTimeRule()
+    public void AppCss_TopBarIsABand_NoNoteTimeRule()
     {
         string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
 
-        int at = css.IndexOf(".capture-box {", StringComparison.Ordinal);
+        int at = css.IndexOf(".top-bar {", StringComparison.Ordinal);
         Assert.True(at >= 0);
         string block = css[at..css.IndexOf('}', at)];
         Assert.Contains("background: var(--panel)", block, StringComparison.Ordinal);
@@ -1502,45 +1502,6 @@ public sealed class DesktopSourceTests
         Assert.Contains(selector, css, StringComparison.Ordinal);
     }
 
-    // 140 AC-10: the capture box passes the component rules (also checked for every .razor file by the scans above)
-    // and shows only fixed texts or text that went through DesktopText.OneLine.
-    [Fact]
-    public void CaptureBox_FollowsTheComponentRules()
-    {
-        string razor = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "CaptureBox.razor"));
-
-        Assert.DoesNotContain(RawMarkup, m => razor.Contains(m, StringComparison.Ordinal));
-        Assert.DoesNotContain(RazorForbidden, m => razor.Contains(m, StringComparison.Ordinal));
-        Assert.Equal(["Capture"], ActionCallers(razor));
-        Assert.Empty(ActionCallProblems(razor));
-        Assert.Empty(UntypedButtons(razor));
-        Assert.Empty(BadInputs(razor));
-        Assert.DoesNotMatch(FileSystemClass, razor);
-        Assert.DoesNotContain("@bind", razor, StringComparison.Ordinal);
-        Assert.Single(Regex.Matches(razor, @"\bActions\s*\."));
-
-        // Every status text is the fixed Captured text or a OneLine text.
-        List<string> shown = Regex.Matches(razor, @"ShowStatus\(([^;]*)\);").Select(m => m.Groups[1].Value).ToList();
-        Assert.Equal(3, shown.Count);
-        Assert.All(
-            shown,
-            s => Assert.True(
-                s.StartsWith("DesktopText.OneLine(", StringComparison.Ordinal)
-                || s.StartsWith("DesktopActions.CapturedText,", StringComparison.Ordinal),
-                s));
-    }
-
-    // 140: the capture row is styled.
-    [Theory]
-    [InlineData(".capture-box {")]
-    [InlineData(".capture-status:empty {")]
-    public void AppCss_StylesTheCapture(string selector)
-    {
-        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
-
-        Assert.Contains(selector, css, StringComparison.Ordinal);
-    }
-
     // 136: the sensitive session and the sealed format are not named by the console or the Core (see
     // CoreDependencyTests); in the Desktop a Confirmation still comes only from ConfirmDialog, also for Mark
     // sensitive and Make plain.
@@ -1773,16 +1734,14 @@ public sealed class DesktopSourceTests
         string region = css[css.IndexOf(".current-region {", StringComparison.Ordinal)..];
         region = region[..region.IndexOf('}')];
         Assert.Contains("padding-top: 0;", region);
-        string bar = css[css.IndexOf(".capture-box {", StringComparison.Ordinal)..];
+        string bar = css[css.IndexOf(".top-bar {", StringComparison.Ordinal)..];
         bar = bar[..bar.IndexOf('}')];
-        Assert.Contains("margin-top: 0;", bar);
-        Assert.Matches(@"padding:\s*0 8px 8px;", bar);
-        Assert.DoesNotContain(".capture-box .capture {", css);
+        Assert.Contains("padding: 0;", bar);
+        Assert.DoesNotContain(".capture-box", css);
     }
 
     // 194 AC-8, 197 AC-4/AC-5: every submit-only box has exactly its short placeholder, and the submit buttons are gone.
     [Theory]
-    [InlineData("CaptureBox.razor", "Capture to inbox", "class=\"capture\"")]
     [InlineData("NotesPanel.razor", "New note title", "class=\"note-new\"")]
     [InlineData("TodoPanel.razor", "New todo", "class=\"add\"")]
     [InlineData("SettingsPanel.razor", "https:// or webcal:// link", "class=\"calendar-link-save\"")]
@@ -1821,5 +1780,23 @@ public sealed class DesktopSourceTests
         Assert.DoesNotContain("Sidebar logo", md);
         Assert.DoesNotContain("svg.logo", md);
         Assert.Contains("Return to", md);
+    }
+
+    // 198 AC-2: the top bar's buttons align right, the icons are 18px like the sidebar's, no URL in TopBar.razor.
+    [Fact]
+    public void TopBar_CssAndMarkup()
+    {
+        string root = RepoFiles.Root();
+        string css = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+        string razor = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "TopBar.razor"));
+        string buttons = css[css.IndexOf(".top-bar-buttons {", StringComparison.Ordinal)..];
+        buttons = buttons[..buttons.IndexOf('}')];
+        Assert.Contains("justify-content: flex-end;", buttons);
+        string svg = css[css.IndexOf(".top-bar-buttons button svg {", StringComparison.Ordinal)..];
+        svg = svg[..svg.IndexOf('}')];
+        Assert.Contains("width: 18px;", svg);
+        Assert.Contains("height: 18px;", svg);
+        Assert.DoesNotContain("http", razor, StringComparison.Ordinal);
+        Assert.Equal(2, Regex.Matches(razor, "stroke=\"currentColor\"").Count);
     }
 }
