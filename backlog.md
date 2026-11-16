@@ -196,7 +196,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#239](backlog/239-wider-text-column-in-the-decisions.md) Wider text column in the Decisions panel
 - [?] [#240](backlog/240-cap-the-rows-read-for-the.md) Cap the rows read for the decision log
 - [?] [#241](backlog/241-see-decisions-past-the-first-100.md) See decisions past the first 100
-- [ ] [#242](backlog/242-tidy-the-desktop-layout-icon-buttons.md) Tidy the desktop layout: icon buttons, no dates, set-apart capture bar
+- [x] [#242](backlog/242-tidy-the-desktop-layout-icon-buttons.md) Tidy the desktop layout: icon buttons, no dates, set-apart capture bar → 192-tidy-desktop-layout
 
 ## Dropped with the terminal UI
 
