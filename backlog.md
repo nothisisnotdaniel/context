@@ -197,6 +197,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#240](backlog/240-cap-the-rows-read-for-the.md) Cap the rows read for the decision log
 - [?] [#241](backlog/241-see-decisions-past-the-first-100.md) See decisions past the first 100
 - [x] [#242](backlog/242-tidy-the-desktop-layout-icon-buttons.md) Tidy the desktop layout: icon buttons, no dates, set-apart capture bar → 192-tidy-desktop-layout
+- [ ] [#243](backlog/243-open-triage-tags-and-settings-as.md) Open Triage, Tags and Settings as their own pages with an × close
 
 ## Dropped with the terminal UI
 
