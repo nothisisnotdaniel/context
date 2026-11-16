@@ -72,18 +72,16 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.Equal("off", field.GetAttribute("autocomplete"));
         Assert.Equal("2048", field.GetAttribute("maxlength"));
         Assert.False(field.HasAttribute("value"));
-        Assert.Equal("Save link", cut.Find("button.calendar-link-save").TextContent);
-        Assert.True(cut.Find("button.calendar-link-save").HasAttribute("disabled"));
+        Assert.Empty(cut.FindAll("button.calendar-link-save"));
+        Assert.Equal("https:// or webcal:// link - Return to save", field.GetAttribute("placeholder"));
 
         await Type(cut, FakeHttpHandler.Link);
 
-        Assert.False(cut.Find("button.calendar-link-save").HasAttribute("disabled"));
         Assert.False(cut.Find("input").HasAttribute("value"));
         Assert.DoesNotContain(FakeHttpHandler.PathToken, cut.Markup, StringComparison.Ordinal);
 
         await Type(cut, string.Empty);
 
-        Assert.True(cut.Find("button.calendar-link-save").HasAttribute("disabled"));
         await cut.Find("input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
         Assert.False(Directory.Exists(data.Root));
     }
@@ -102,10 +100,10 @@ public sealed class SettingsPanelTests : IDisposable
         };
         await Type(cut, FakeHttpHandler.Link);
 
-        Task click = cut.Find("button.calendar-link-save").ClickAsync(new MouseEventArgs());
+        Task click = cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
         Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
 
-        cut.WaitForAssertion(() => Assert.True(cut.Find("button.calendar-link-save").HasAttribute("disabled")), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.Find("input").HasAttribute("disabled")), Wait);
         Assert.True(cut.Find("input").HasAttribute("disabled"));
         Assert.True(cut.Find("button.close").HasAttribute("disabled"));
         release.Set();
@@ -171,7 +169,7 @@ public sealed class SettingsPanelTests : IDisposable
         }
         else
         {
-            await cut.Find("button.calendar-link-save").ClickAsync(new MouseEventArgs());
+            await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
         }
 
         IElement status = cut.Find(".settings-result");
@@ -187,7 +185,6 @@ public sealed class SettingsPanelTests : IDisposable
         IElement field = cut.Find("input");
         Assert.NotEqual(fieldBefore, field.GetAttribute("blazor:oninput"));
         Assert.False(field.HasAttribute("value"));
-        Assert.True(cut.Find("button.calendar-link-save").HasAttribute("disabled"));
         Assert.Equal(string.Empty, TypedCopy(cut));
         Assert.DoesNotContain(FakeHttpHandler.PathToken, cut.Markup, StringComparison.Ordinal);
     }
@@ -209,7 +206,7 @@ public sealed class SettingsPanelTests : IDisposable
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
         await Type(cut, value);
 
-        await cut.Find("button.calendar-link-save").ClickAsync(new MouseEventArgs());
+        await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         IElement status = cut.Find(".settings-result");
         Assert.Equal(InvalidText, status.TextContent);
@@ -232,7 +229,7 @@ public sealed class SettingsPanelTests : IDisposable
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
         await Type(cut, OtherLink);
 
-        await cut.Find("button.calendar-link-save").ClickAsync(new MouseEventArgs());
+        await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Equal(ReplaceQuestion, cut.Find("[role=dialog] .question").TextContent);
         Assert.Equal("Replace", cut.Find("[role=dialog] button.confirm").TextContent);
@@ -453,7 +450,7 @@ public sealed class SettingsPanelTests : IDisposable
         // Typing and saving.
         await Type(cut, MarkerLink);
         Clean();
-        await cut.Find("button.calendar-link-save").ClickAsync(new MouseEventArgs());
+        await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
         Assert.Equal("Calendar link saved (https://outlook.example/…).", cut.Find(".settings-result").TextContent);
         Assert.Equal(MarkerLink + "\n", File.ReadAllText(LinkPath));
         cut.WaitForAssertion(() => Assert.StartsWith("Calendar link: https://outlook.example/…", cut.Find(".calendar-link-state").TextContent), Wait);
@@ -462,18 +459,18 @@ public sealed class SettingsPanelTests : IDisposable
 
         // Refused: an invalid value that holds the marker.
         await Type(cut, "http://outlook.example/" + Marker);
-        await cut.Find("button.calendar-link-save").ClickAsync(new MouseEventArgs());
+        await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
         Assert.Equal(InvalidText, cut.Find(".settings-result").TextContent);
         Clean();
 
         // Replaced: asked, cancelled, asked again, confirmed.
         await Type(cut, OtherMarkerLink);
-        await cut.Find("button.calendar-link-save").ClickAsync(new MouseEventArgs());
+        await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
         Assert.Equal(ReplaceQuestion, cut.Find("[role=dialog] .question").TextContent);
         Clean();
         await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
         Clean();
-        await cut.Find("button.calendar-link-save").ClickAsync(new MouseEventArgs());
+        await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
         Assert.Equal("Calendar link saved (https://other.example/…).", cut.Find(".settings-result").TextContent);
         Assert.Equal(OtherMarkerLink + "\n", File.ReadAllText(LinkPath));
@@ -484,7 +481,7 @@ public sealed class SettingsPanelTests : IDisposable
         if (!OperatingSystem.IsWindows())
         {
             await Type(cut, MarkerLink);
-            await cut.Find("button.calendar-link-save").ClickAsync(new MouseEventArgs());
+            await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
             UnixFileMode mode = File.GetUnixFileMode(data.Root);
             File.SetUnixFileMode(data.Root, UnixFileMode.UserRead | UnixFileMode.UserExecute);
             try

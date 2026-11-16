@@ -5,8 +5,7 @@
 
 <div class="capture-box">
     <input type="text" class="capture-text" value="@typed" maxlength="@Inbox.MaxTextLength" disabled="@capturing"
-           aria-label="Capture" placeholder="Capture to inbox" @ref="field" @oninput="Typed" @onkeydown="e => Capture(e)" />
-    <button type="button" class="capture" disabled="@capturing" @onclick="() => Capture(null)">Capture</button>
+           aria-label="Capture" placeholder="Capture to inbox - Return to capture" @ref="field" @oninput="Typed" @onkeydown="e => Capture(e)" />
     <p class="capture-status cut @statusClass" role="status" title="@statusText">@statusText</p>
 </div>
 

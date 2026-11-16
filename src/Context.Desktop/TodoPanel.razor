@@ -90,14 +90,13 @@
         bool entryOff = adding || running;
         <div class="todo-entry">
             <input type="text" class="todo-text" value="@newText" maxlength="@DesktopActions.MaxTodoLength"
-                   disabled="@entryOff" aria-label="New todo" placeholder="New todo" @ref="textField" @oninput="TextTyped" @onkeydown="e => Add(e)" />
+                   disabled="@entryOff" aria-label="New todo" placeholder="New todo - Return to add" @ref="textField" @oninput="TextTyped" @onkeydown="e => Add(e)" />
             <input type="date" class="todo-due" value="@shownDue.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)"
-                   disabled="@entryOff" aria-label="Due date" @onchange="DueChosen" />
+                   disabled="@entryOff" aria-label="Due date" @onchange="DueChosen" @onkeydown="e => Add(e)" />
             <input type="time" class="todo-time" value="@(dueTime?.ToString(TodoStore.StoredTimeFormat, CultureInfo.InvariantCulture) ?? string.Empty)"
-                   disabled="@entryOff" aria-label="Due time" @onchange="TimeChosen" />
+                   disabled="@entryOff" aria-label="Due time" @onchange="TimeChosen" @onkeydown="e => Add(e)" />
             <button type="button" class="due-today" disabled="@entryOff" @onclick="() => due = open.Today">Today</button>
             <button type="button" class="due-tomorrow" disabled="@entryOff" @onclick="() => due = open.Today.AddDays(1)">Tomorrow</button>
-            <button type="button" class="add" disabled="@entryOff" @onclick="() => Add(null)">Add</button>
         </div>
         @if (added is { } addShown)
         {

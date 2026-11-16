@@ -16,20 +16,18 @@ public sealed class CaptureBoxTests : IDisposable
 
     public void Dispose() => data.Dispose();
 
-    // AC-6: a text field with its label, placeholder and limit, a Capture button and an empty status line.
+    // AC-6: a text field with its label, placeholder and limit and an empty status line.
     [Fact]
-    public async Task Render_FieldButtonAndStatusLine()
+    public async Task Render_FieldAndStatusLine()
     {
         IRenderedComponent<CaptureBox> cut = await data.RenderAsync<CaptureBox>();
 
         IElement field = cut.Find(".capture-box input");
         Assert.Equal("text", field.GetAttribute("type"));
         Assert.Equal("Capture", field.GetAttribute("aria-label"));
-        Assert.Equal("Capture to inbox", field.GetAttribute("placeholder"));
+        Assert.Equal("Capture to inbox - Return to capture", field.GetAttribute("placeholder"));
         Assert.Equal("1000", field.GetAttribute("maxlength"));
-        IElement button = Assert.Single(cut.FindAll(".capture-box button"));
-        Assert.Equal("button", button.GetAttribute("type"));
-        Assert.Equal("Capture", button.TextContent);
+        Assert.Empty(cut.FindAll(".capture-box button"));
         IElement status = cut.Find(".capture-box .capture-status");
         Assert.Equal("status", status.GetAttribute("role"));
         Assert.Equal(string.Empty, status.TextContent);
@@ -59,20 +57,20 @@ public sealed class CaptureBoxTests : IDisposable
         Assert.Equal(fieldId, ((ElementReference)focus.Arguments[0]!).Id);
     }
 
-    // AC-7: the button captures as well and leaves the focus where it is; a second capture appends a second line.
+    // AC-7: a second capture appends a second line.
     [Fact]
-    public async Task Button_CapturesWithoutMovingFocus()
+    public async Task SecondEnter_AppendsAndRefocuses()
     {
         IRenderedComponent<CaptureBox> cut = await data.RenderAsync<CaptureBox>();
         await cut.Find("input.capture-text").InputAsync(new ChangeEventArgs { Value = "one" });
-        await cut.Find("button.capture").ClickAsync(new MouseEventArgs());
+        await cut.Find(".capture-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
         await cut.Find("input.capture-text").InputAsync(new ChangeEventArgs { Value = "two" });
 
-        await cut.Find("button.capture").ClickAsync(new MouseEventArgs());
+        await cut.Find(".capture-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Equal($"# inbox\n{Line}one\n{Line}two\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
         Assert.Equal(string.Empty, cut.Find("input.capture-text").GetAttribute("value"));
-        Assert.DoesNotContain(data.Bunit.JSInterop.Invocations, i => i.Identifier.Contains("focus", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(data.Bunit.JSInterop.Invocations, i => i.Identifier.Contains("focus", StringComparison.OrdinalIgnoreCase));
     }
 
     // AC-7: a refusal shows its text in red, keeps what was typed and writes nothing.
@@ -87,7 +85,7 @@ public sealed class CaptureBoxTests : IDisposable
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
         await cut.Find("input.capture-text").InputAsync(new ChangeEventArgs { Value = typed });
 
-        await cut.Find("button.capture").ClickAsync(new MouseEventArgs());
+        await cut.Find(".capture-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         IElement status = cut.Find(".capture-status");
         Assert.Equal(expected, status.TextContent);
@@ -99,23 +97,23 @@ public sealed class CaptureBoxTests : IDisposable
 
     // AC-7: while the capture runs the field and the button are disabled; a second Enter starts nothing.
     [Fact]
-    public async Task Capture_Running_FieldAndButtonDisabled()
+    public async Task Capture_Running_FieldDisabled()
     {
         IRenderedComponent<CaptureBox> cut = await data.RenderAsync<CaptureBox>();
         using ManualResetEventSlim release = new ManualResetEventSlim();
         data.Actions!.BeforeWrite = () => release.Wait(TimeSpan.FromSeconds(10));
         await cut.Find("input.capture-text").InputAsync(new ChangeEventArgs { Value = "call Anna" });
 
-        Task capture = cut.Find("button.capture").ClickAsync(new MouseEventArgs());
+        Task capture = cut.Find(".capture-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         cut.WaitForAssertion(() => Assert.All(
-            cut.FindAll(".capture-box input, .capture-box button"),
+            cut.FindAll(".capture-box input"),
             e => Assert.True(e.HasAttribute("disabled"), e.OuterHtml)), Wait);
-        Assert.Equal(2, cut.FindAll(".capture-box input, .capture-box button").Count);
+        Assert.Single(cut.FindAll(".capture-box input"));
         release.Set();
         await capture;
         cut.WaitForAssertion(() => Assert.All(
-            cut.FindAll(".capture-box input, .capture-box button"),
+            cut.FindAll(".capture-box input"),
             e => Assert.False(e.HasAttribute("disabled"), e.OuterHtml)), Wait);
         Assert.Equal($"# inbox\n{Line}call Anna\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
     }
@@ -133,7 +131,7 @@ public sealed class CaptureBoxTests : IDisposable
             .Add(b => b.OnCaptured, () => captured++));
         await cut.Find("input.capture-text").InputAsync(new ChangeEventArgs { Value = "call Anna" });
 
-        await cut.Find("button.capture").ClickAsync(new MouseEventArgs());
+        await cut.Find(".capture-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Equal("Save inbox first.", cut.Find(".capture-status").TextContent);
         Assert.True(cut.Find(".capture-status").ClassList.Contains("red"));
@@ -142,7 +140,7 @@ public sealed class CaptureBoxTests : IDisposable
         Assert.Equal(0, captured);
 
         held = null;
-        await cut.Find("button.capture").ClickAsync(new MouseEventArgs());
+        await cut.Find(".capture-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Equal("Captured.", cut.Find(".capture-status").TextContent);
         Assert.Equal($"# inbox\n{Line}call Anna\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));

@@ -26,8 +26,7 @@
         }
         <div class="note-entry">
             <input type="text" class="note-new-title" value="@newTitle" maxlength="200" disabled="@creating"
-                   aria-label="New note" placeholder="New note title" @oninput="TitleTyped" @onkeydown="e => Create(e)" />
-            <button type="button" class="note-new" disabled="@creating" @onclick="() => Create(null)">New note</button>
+                   aria-label="New note" placeholder="New note title - Return to create" @oninput="TitleTyped" @onkeydown="e => Create(e)" />
         </div>
         <div class="note-import">
             <button type="button" class="import" disabled="@importing" @onclick="Import">Import</button>

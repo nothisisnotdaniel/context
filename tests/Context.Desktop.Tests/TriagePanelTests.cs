@@ -201,8 +201,10 @@ public sealed class TriagePanelTests : IDisposable
         Assert.True(cut.Find(".triage-status").ClassList.Contains("red"));
         Assert.False(File.Exists(Path.Combine(data.Root, TodoStore.FileName)));
 
+        Assert.Empty(cut.FindAll("button.triage-submit"));
+        Assert.Equal("Empty: today", cut.Find("input.triage-date").GetAttribute("placeholder"));
         await cut.Find("input.triage-date").InputAsync(new ChangeEventArgs { Value = string.Empty });
-        await cut.Find("button.triage-submit").ClickAsync(new MouseEventArgs());
+        await cut.Find("input.triage-date").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         cut.WaitForAssertion(() => Assert.Equal("Added: call Anna", cut.Find(".triage-status").TextContent), Wait);
         TodoItem todo = Assert.Single(data.State!.Snapshot!.Todos);
@@ -341,7 +343,7 @@ public sealed class TriagePanelTests : IDisposable
         Assert.Equal(InboxText, File.ReadAllText(InboxPath));
 
         await cut.Find("input.triage-until").InputAsync(new ChangeEventArgs { Value = "2026-12-01" });
-        await cut.Find("button.triage-submit").ClickAsync(new MouseEventArgs());
+        await cut.Find("input.triage-until").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         cut.WaitForAssertion(() => Assert.Equal("Snoozed until 2026-12-01.", cut.Find(".triage-status").TextContent), Wait);
         Assert.Contains(Line + " snooze:2026-12-01\n", File.ReadAllText(InboxPath), StringComparison.Ordinal);

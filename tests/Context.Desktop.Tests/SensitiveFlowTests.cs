@@ -471,7 +471,7 @@ public sealed class SensitiveFlowTests : IDisposable
 
         await cut.Find("button.rename").ClickAsync(new MouseEventArgs());
         await cut.Find("input.rename-title").InputAsync(new Microsoft.AspNetCore.Components.ChangeEventArgs { Value = "Project" });
-        await cut.Find("button.save-name").ClickAsync(new MouseEventArgs());
+        await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         cut.WaitForAssertion(() => Assert.Equal("Project", cut.Find(".note-title").TextContent), Wait);
         Assert.Equal(["Project.ctxs"], RootFiles());

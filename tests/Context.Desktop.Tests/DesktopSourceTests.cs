@@ -1722,4 +1722,41 @@ public sealed class DesktopSourceTests
         string block = css[at..css.IndexOf('}', at)];
         Assert.DoesNotMatch(@"#[0-9a-fA-F]{3,8}\b|\b(rgb|rgba|hsl|hsla)\(|\b(white|black|red|green|blue|gray|grey|transparent|orange|yellow|purple|silver)\b", block);
     }
+
+    // 194 AC-1: the capture bar starts at the top edge: no top padding on the region, no top margin or padding on the bar,
+    // and the dead button rule is gone.
+    [Fact]
+    public void Css_CaptureBarIsFlushAtTheTop()
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+        string region = css[css.IndexOf(".current-region {", StringComparison.Ordinal)..];
+        region = region[..region.IndexOf('}')];
+        Assert.Contains("padding-top: 0;", region);
+        string bar = css[css.IndexOf(".capture-box {", StringComparison.Ordinal)..];
+        bar = bar[..bar.IndexOf('}')];
+        Assert.Contains("margin-top: 0;", bar);
+        Assert.Matches(@"padding:\s*0 8px 8px;", bar);
+        Assert.DoesNotContain(".capture-box .capture {", css);
+    }
+
+    // 194 AC-8: every submit-only box says what Return does, and the submit buttons are gone from the markup.
+    [Theory]
+    [InlineData("CaptureBox.razor", "Return to capture", "class=\"capture\"")]
+    [InlineData("NotesPanel.razor", "Return to create", "class=\"note-new\"")]
+    [InlineData("TodoPanel.razor", "Return to add", "class=\"add\"")]
+    [InlineData("SettingsPanel.razor", "Return to save", "class=\"calendar-link-save\"")]
+    [InlineData("Main.razor", "Return to move", "class=\"move-here\"")]
+    [InlineData("Main.razor", "Return to create", "class=\"create-subpage\"")]
+    [InlineData("Main.razor", "Return to save", "class=\"save-name\"")]
+    [InlineData("TriagePanel.razor", "Return to snooze", "class=\"triage-submit\"")]
+    [InlineData("TriagePanel.razor", "Note name - Return to add", "class=\"triage-submit\"")]
+    [InlineData("TriagePanel.razor", "Todo text - Return to add", "class=\"triage-submit\"")]
+    [InlineData("TriagePanel.razor", "Note title - Return to create", "class=\"triage-submit\"")]
+    public void Razor_SubmitButtonGone_PlaceholderSaysReturn(string file, string hint, string removed)
+    {
+        string razor = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, file));
+        Assert.Contains("placeholder=\"", razor);
+        Assert.Contains(hint, razor);
+        Assert.DoesNotContain(removed, razor);
+    }
 }

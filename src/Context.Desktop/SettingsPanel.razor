@@ -29,8 +29,7 @@
     <div class="calendar-link-entry">
         <input type="password" class="calendar-link-field" @key="fieldKey" maxlength="@DesktopActions.MaxCalendarLinkLength"
                autocomplete="off" spellcheck="false" disabled="@busy" aria-label="Calendar link"
-               placeholder="https:// or webcal:// link" @oninput="LinkTyped" @onkeydown="e => Save(e)" />
-        <button type="button" class="calendar-link-save" disabled="@(busy || typed.Length == 0)" @onclick="() => Save(null)">Save link</button>
+               placeholder="https:// or webcal:// link - Return to save" @oninput="LinkTyped" @onkeydown="e => Save(e)" />
         @if (link is not null && link.Kind != CalendarLinkViewKind.NotSet)
         {
             <button type="button" class="calendar-link-remove" disabled="@busy" @onclick="AskRemove">Remove link</button>

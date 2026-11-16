@@ -193,7 +193,7 @@ public sealed class MainTests : IDisposable
         js.Edit("# Plan\n\nUnsaved\n");
 
         await cut.Find(".note-new-title").InputAsync(new ChangeEventArgs { Value = "Fresh" });
-        await cut.Find("button.note-new").ClickAsync(new MouseEventArgs());
+        await cut.Find(".note-new-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         Assert.True(File.Exists(Path.Combine(data.Root, "Fresh.md")));
         Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent);
@@ -254,7 +254,7 @@ public sealed class MainTests : IDisposable
         }
         else
         {
-            await cut.Find(".note-toolbar button.save-name").ClickAsync(new MouseEventArgs());
+            await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
         }
 
         Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Project.md")));
@@ -325,7 +325,7 @@ public sealed class MainTests : IDisposable
         await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
         js.Edit("# Plan\n\nUnsaved\n");
 
-        await cut.Find(".note-toolbar button.save-name").ClickAsync(new MouseEventArgs());
+        await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Equal("Save Plan first.", cut.Find(".main-status").TextContent);
         Assert.Equal("Project", cut.Find(".rename-title").GetAttribute("value"));
@@ -345,7 +345,7 @@ public sealed class MainTests : IDisposable
         await cut.Find(".note-toolbar button.rename").ClickAsync(new MouseEventArgs());
         await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "other" });
 
-        await cut.Find(".note-toolbar button.save-name").ClickAsync(new MouseEventArgs());
+        await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Equal("Note other already exists.", cut.Find(".main-status").TextContent);
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
@@ -1081,8 +1081,9 @@ public sealed class MainTests : IDisposable
         await cut.Find(".note-toolbar button.new-subpage").ClickAsync(new MouseEventArgs());
         IElement field = cut.Find(".note-toolbar input.subpage-title");
         Assert.Equal("Subpage title", field.GetAttribute("aria-label"));
+        Assert.Equal("Subpage title - Return to create", field.GetAttribute("placeholder"));
         Assert.Equal(string.Empty, field.GetAttribute("value"));
-        Assert.Equal(["Create subpage", "Cancel"], cut.FindAll(".note-toolbar button").Select(b => b.TextContent).ToArray());
+        Assert.Equal(["Cancel"], cut.FindAll(".note-toolbar button").Select(b => b.TextContent).ToArray());
         await field.InputAsync(new ChangeEventArgs { Value = "Meeting 2" });
         if (enter)
         {
@@ -1090,7 +1091,7 @@ public sealed class MainTests : IDisposable
         }
         else
         {
-            await cut.Find(".note-toolbar button.create-subpage").ClickAsync(new MouseEventArgs());
+            await cut.Find(".note-toolbar .subpage-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
         }
 
         Assert.Equal("# Meeting 2\n", File.ReadAllText(Path.Combine(data.Root, "Meetings", "Meeting 2.md")));
@@ -1115,7 +1116,7 @@ public sealed class MainTests : IDisposable
         await cut.Find(".note-toolbar button.new-subpage").ClickAsync(new MouseEventArgs());
         await cut.Find(".subpage-title").InputAsync(new ChangeEventArgs { Value = "meeting 1" });
 
-        await cut.Find(".note-toolbar button.create-subpage").ClickAsync(new MouseEventArgs());
+        await cut.Find(".note-toolbar .subpage-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Equal("Note Meetings/meeting 1 already exists.", cut.Find(".main-status").TextContent);
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
@@ -1170,7 +1171,7 @@ public sealed class MainTests : IDisposable
         IElement field = cut.Find(".note-toolbar input.move-parent");
         Assert.Equal("New parent", field.GetAttribute("aria-label"));
         Assert.Equal("Meetings", field.GetAttribute("value"));
-        Assert.Equal(["Move here", "Cancel"], cut.FindAll(".note-toolbar button").Select(b => b.TextContent).ToArray());
+        Assert.Equal(["Cancel"], cut.FindAll(".note-toolbar button").Select(b => b.TextContent).ToArray());
         await field.InputAsync(new ChangeEventArgs { Value = "archive" });
         if (enter)
         {
@@ -1178,7 +1179,7 @@ public sealed class MainTests : IDisposable
         }
         else
         {
-            await cut.Find(".note-toolbar button.move-here").ClickAsync(new MouseEventArgs());
+            await cut.Find(".note-toolbar .move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
         }
 
         Assert.Equal("# Meeting 1\n", File.ReadAllText(Path.Combine(data.Root, "Archive", "Meeting 1.md")));
@@ -1198,7 +1199,7 @@ public sealed class MainTests : IDisposable
         await cut.Find(".note-toolbar button.move").ClickAsync(new MouseEventArgs());
         await cut.Find(".move-parent").InputAsync(new ChangeEventArgs { Value = "" });
 
-        await cut.Find(".note-toolbar button.move-here").ClickAsync(new MouseEventArgs());
+        await cut.Find(".note-toolbar .move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         cut.WaitForAssertion(() => Assert.Equal("Meeting 1", cut.Find(".note-title").TextContent), Wait);
         Assert.True(File.Exists(Path.Combine(data.Root, "Meeting 1.md")));
@@ -1221,7 +1222,7 @@ public sealed class MainTests : IDisposable
         await cut.Find(".note-toolbar button.move").ClickAsync(new MouseEventArgs());
         await cut.Find(".move-parent").InputAsync(new ChangeEventArgs { Value = "Nowhere" });
 
-        await cut.Find(".note-toolbar button.move-here").ClickAsync(new MouseEventArgs());
+        await cut.Find(".note-toolbar .move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Equal("No note called Nowhere. Nothing was moved.", cut.Find(".main-status").TextContent);
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
@@ -1251,7 +1252,7 @@ public sealed class MainTests : IDisposable
         await cut.Find(".note-toolbar button.rename").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal("Meeting 1", cut.Find(".rename-title").GetAttribute("value")), Wait);
         await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Kickoff" });
-        await cut.Find(".note-toolbar button.save-name").ClickAsync(new MouseEventArgs());
+        await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         Assert.True(File.Exists(Path.Combine(data.Root, "Meetings", "Kickoff.md")));
         cut.WaitForAssertion(() => Assert.Equal("Meetings/Kickoff", cut.Find(".note-title").TextContent), Wait);
@@ -1432,7 +1433,7 @@ public sealed class MainTests : IDisposable
             Assert.Equal("capture-box", first.ClassName);
             Assert.Single(cut.FindAll(".capture-box"));
             Assert.Equal("Capture", cut.Find(".capture-box input[type=text]").GetAttribute("aria-label"));
-            Assert.Equal("button", cut.Find(".capture-box button.capture").GetAttribute("type"));
+            Assert.Empty(cut.FindAll("button.capture"));
         }
 
         AssertBox();
@@ -1501,7 +1502,7 @@ public sealed class MainTests : IDisposable
         else
         {
             await cut.Find("input.capture-text").InputAsync(new ChangeEventArgs { Value = "call Anna" });
-            await cut.Find("button.capture").ClickAsync(new MouseEventArgs());
+            await cut.Find(".capture-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
             status = cut.Find(".capture-status");
             Assert.Equal("call Anna", cut.Find("input.capture-text").GetAttribute("value"));
         }
@@ -1534,7 +1535,7 @@ public sealed class MainTests : IDisposable
         else
         {
             await cut.Find("input.capture-text").InputAsync(new ChangeEventArgs { Value = "call Anna" });
-            await cut.Find("button.capture").ClickAsync(new MouseEventArgs());
+            await cut.Find(".capture-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
             Assert.Equal("Captured.", cut.Find(".capture-status").TextContent);
         }
 
@@ -1565,7 +1566,7 @@ public sealed class MainTests : IDisposable
         int mounts = js.Calls("ContextEditor.mount").Count;
         await cut.Find("input.capture-text").InputAsync(new ChangeEventArgs { Value = "call Anna" });
 
-        await cut.Find("button.capture").ClickAsync(new MouseEventArgs());
+        await cut.Find(".capture-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Equal("Captured.", cut.Find(".capture-status").TextContent);
         Assert.Equal("# inbox\n- 2026-10-29 10:05 call Anna\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
