@@ -152,12 +152,6 @@ ol {
     font-size: 12px;
 }
 
-.note .time {
-    flex: none;
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
-}
-
 .linked-note .tags {
     flex: 0 1 auto;
     min-width: 0;
@@ -583,6 +577,9 @@ input[type="password"]:disabled {
     flex-wrap: wrap;
     gap: 6px;
     margin-bottom: 12px;
+    padding: 8px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
 }
 
 .capture-box .capture-text {
@@ -784,6 +781,30 @@ input[type="password"]:disabled {
     display: flex;
     flex: none;
     gap: 6px;
+}
+
+.notes-bar-buttons button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    color: var(--text);
+}
+
+.notes-bar-buttons button:hover {
+    color: var(--accent-strong);
+}
+
+.notes-bar-buttons button:focus-visible {
+    outline: 2px solid var(--accent-strong);
+    outline-offset: 1px;
+}
+
+.notes-bar-buttons button svg {
+    width: 18px;
+    height: 18px;
 }
 
 /* The settings: the calendar link's entry row and the key table. */

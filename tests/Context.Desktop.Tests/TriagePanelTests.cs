@@ -398,7 +398,7 @@ public sealed class TriagePanelTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        Assert.Equal("Triage", cut.Find(".notes-bar-buttons button.triage-open").TextContent);
+        Assert.Equal("Triage", cut.Find(".notes-bar-buttons button.triage-open").GetAttribute("aria-label"));
         await cut.Find("button.triage-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".triage-panel .triage-item")), Wait);
 

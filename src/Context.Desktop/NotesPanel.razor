@@ -5,9 +5,9 @@
     <div class="notes-bar">
         <h2>Notes</h2>
         <div class="notes-bar-buttons">
-            <button type="button" class="triage-open" @onclick="() => OnTriage.InvokeAsync()">Triage</button>
-            <button type="button" class="tags-open" @onclick="() => OnTags.InvokeAsync()">Tags</button>
-            <button type="button" class="settings-open" @onclick="() => OnSettings.InvokeAsync()">Settings</button>
+            <button type="button" class="triage-open" aria-label="Triage" title="Triage" @onclick="() => OnTriage.InvokeAsync()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z"/></svg></button>
+            <button type="button" class="tags-open" aria-label="Tags" title="Tags" @onclick="() => OnTags.InvokeAsync()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z"/><circle cx="7" cy="7" r="1.5"/></svg></button>
+            <button type="button" class="settings-open" aria-label="Settings" title="Settings" @onclick="() => OnSettings.InvokeAsync()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="8" cy="18" r="2"/></svg></button>
         </div>
     </div>
     @if (Snapshot is { } snapshot)
@@ -193,7 +193,6 @@
                         {
                             <span class="locked grey">locked</span>
                         }
-                        <span class="time grey">@note.Modified.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)</span>
                     </div>
                     @if (open)
                     {

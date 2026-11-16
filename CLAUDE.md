@@ -943,6 +943,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     a dirty editor is refused with `Save <name> first.`, else `SaveExportFile("<name>.md")` and `ExportNote`'s text
     in the toolbar's status line. Rules (`DesktopSourceTests`): `WritePlainCopy` and `ReadImport` are named in
     `Context.Desktop` only in `DesktopActions.cs`, and no `.razor` file matches `\b(File|Directory|Path)\.`.
+    **Tidy layout (job 192):** the Triage, Tags and Settings buttons in `NotesPanel`'s bar are icon-only (inline `svg`, `aria-hidden`, `currentColor`; `aria-label` and `title` carry the name), note rows show no modified date, and `.capture-box` is a band (`--panel` background, `--line` bottom border).
     **Quick capture:** `CaptureBox` is the first thing in `Main`'s main region, whatever else is shown there (not
     with `Can't read the data folder.`): a text field (`aria-label="Capture"`, placeholder `Capture to inbox`,
     `maxlength` `Inbox.MaxTextLength`), a `Capture` button and a `role="status"` line. Enter or the button calls
@@ -960,7 +961,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     After a capture `Main.Captured` (the box's `OnCaptured`) calls `NoteEditor.ReloadAsync` when the inbox is open
     without unsaved changes: the note is read again and the page editor mounted with it, without taking the focus,
     so the new line shows and a later save is not refused as changed on disk; another open note is left alone.
-    **Inbox triage (job 179):** `TriagePanel` (`/triage`, argument ignored, or the `Triage` button in `NotesPanel`'s
+    **Inbox triage (job 179):** `TriagePanel` (`/triage`, argument ignored, or the `Triage` icon button in `NotesPanel`'s
     bar; `Main`'s `triageShown`, right under the capture box, hidden by Close, Esc or opening a note or the current
     view) shows the first line of `DesktopState.Triage()` (`InboxTriage.Items`: every `- ` line; text without the
     `- `, a leading `yyyy-MM-dd HH:mm ` stamp, shown grey, and a final ` snooze:yyyy-MM-dd`; lines snoozed past today

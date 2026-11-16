@@ -565,7 +565,7 @@ public sealed class MainTests : IDisposable
         data.WriteNote("Plan", "# Plan\n");
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         Assert.Empty(cut.FindAll(".settings-panel"));
-        Assert.Equal("Settings", cut.Find(".notes-region button.settings-open").TextContent);
+        Assert.Equal("Settings", cut.Find(".notes-region button.settings-open").GetAttribute("aria-label"));
 
         if (palette)
         {

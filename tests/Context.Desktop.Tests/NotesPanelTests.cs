@@ -12,26 +12,64 @@ public sealed class NotesPanelTests : IDisposable
 
     public void Dispose() => data.Dispose();
 
-    // AC-4: NoteStore.List() names with their last-write time, in that order.
+    // AC-4: NoteStore.List() names in order; 192 AC-4: rows show no date.
     [Fact]
-    public async Task Render_Notes_NamesAndTimesInListOrder()
+    public async Task Render_Notes_NamesInListOrder_NoDate()
     {
         data.WriteNote("beta", "b");
         data.WriteNote("Alpha", "a");
         data.WriteFile(Path.Combine("sub", "Hidden.md"), "x");
-        DateTime alpha = new(2026, 10, 20, 8, 5, 0, DateTimeKind.Local);
-        DateTime beta = new(2026, 10, 21, 17, 45, 0, DateTimeKind.Local);
-        File.SetLastWriteTime(Path.Combine(data.Root, "Alpha.md"), alpha);
-        File.SetLastWriteTime(Path.Combine(data.Root, "beta.md"), beta);
 
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
         IReadOnlyList<IElement> items = cut.FindAll("li.note");
         Assert.Equal(["Alpha", "beta"], items.Select(i => i.QuerySelector(".name")!.TextContent).ToArray());
-        Assert.Equal(
-            [Time(alpha), Time(beta)],
-            items.Select(i => i.QuerySelector(".time")!.TextContent).ToArray());
         Assert.Equal("Alpha", items[0].QuerySelector(".name")!.GetAttribute("title"));
+        Assert.Empty(cut.FindAll("li.note .time"));
+        Assert.DoesNotMatch(@"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", cut.Find(".note-list").TextContent);
+    }
+
+    // 192 AC-4: toggle, name, then locked, in that order, without a time.
+    [Fact]
+    public async Task Row_Order_ToggleNameLocked_NoTime()
+    {
+        data.WriteNote("Plan", "p");
+        data.WriteFile(Path.Combine("Plan", "Sub.md"), "s");
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("Secret", "x");
+
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        IElement plan = cut.FindAll("li.note > .note-row")[0];
+        Assert.Equal(["toggle", "name"], plan.Children.Select(c => c.ClassList.First()).Where(c => c is "toggle" or "name" or "locked" or "time").ToArray());
+        IElement secret = cut.FindAll("li.note > .note-row")[1];
+        Assert.Equal(["toggle-space", "name", "locked"], secret.Children.Select(c => c.ClassList.First()).ToArray());
+        Assert.Empty(cut.FindAll(".note-row .time"));
+    }
+
+    // 192 AC-1, AC-2: icon buttons with names, typed, svg child, no visible text, safe decorative svg.
+    [Theory]
+    [InlineData("triage-open", "Triage")]
+    [InlineData("tags-open", "Tags")]
+    [InlineData("settings-open", "Settings")]
+    public async Task BarButtons_AreIconOnly_WithSafeSvg(string cls, string label)
+    {
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        IElement button = cut.Find($".notes-bar-buttons button.{cls}");
+        Assert.Equal(label, button.GetAttribute("aria-label"));
+        Assert.Equal(label, button.GetAttribute("title"));
+        Assert.Equal("button", button.GetAttribute("type"));
+        Assert.Equal(string.Empty, button.TextContent.Trim());
+        IElement svg = Assert.Single(button.QuerySelectorAll("svg"));
+        Assert.Equal("true", svg.GetAttribute("aria-hidden"));
+        string markup = svg.OuterHtml;
+        foreach (string banned in new[] { "<script", "href", "src=", "url(", "style" })
+        {
+            Assert.DoesNotContain(banned, markup, StringComparison.OrdinalIgnoreCase);
+        }
+        Assert.Contains("currentColor", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("#", markup, StringComparison.Ordinal);
     }
 
     // AC-4: an empty folder shows the empty state.
@@ -182,7 +220,7 @@ public sealed class NotesPanelTests : IDisposable
         IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OnTags, () => asked++));
 
         IElement button = cut.Find(".notes button.tags-open");
-        Assert.Equal("Tags", button.TextContent);
+        Assert.Equal("Tags", button.GetAttribute("aria-label"));
         Assert.Equal("button", button.GetAttribute("type"));
         await button.ClickAsync(new MouseEventArgs());
 
@@ -201,7 +239,7 @@ public sealed class NotesPanelTests : IDisposable
         IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OnSettings, () => asked++));
 
         IElement button = cut.Find(".notes button.settings-open");
-        Assert.Equal("Settings", button.TextContent);
+        Assert.Equal("Settings", button.GetAttribute("aria-label"));
         Assert.Equal("button", button.GetAttribute("type"));
         await button.ClickAsync(new MouseEventArgs());
 
@@ -488,5 +526,4 @@ public sealed class NotesPanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(["Alpha", "Meetings", "Plan"], Titles(cut)), Wait);
     }
 
-    private static string Time(DateTime local) => local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
 }
