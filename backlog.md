@@ -202,6 +202,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#241](backlog/241-see-decisions-past-the-first-100.md) See decisions past the first 100
 - [x] [#242](backlog/242-tidy-the-desktop-layout-icon-buttons.md) Tidy the desktop layout: icon buttons, no dates, set-apart capture bar → 192-tidy-desktop-layout
 - [x] [#243](backlog/243-open-triage-tags-and-settings-as.md) Open Triage, Tags and Settings as their own pages with an × close → 193-page-views-close-x
+- [?] [#248](backlog/248-check-return-hint-placeholders-fit-their.md) Check Return-hint placeholders fit their columns
 
 ## Dropped with the terminal UI
 
