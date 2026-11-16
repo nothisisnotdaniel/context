@@ -2318,7 +2318,12 @@ public sealed class MainTests : IDisposable
         Assert.Equal("date", cut.Find("input[aria-label=Day]").GetAttribute("type"));
         Assert.Equal("1900-01-01", cut.Find("input[aria-label=Day]").GetAttribute("min"));
         Assert.Equal("2100-12-31", cut.Find("input[aria-label=Day]").GetAttribute("max"));
-        await cut.Find(".day-pick").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        Assert.Equal("true", cut.Find("button.day-pick-open").GetAttribute("aria-expanded"));
+        await cut.Find("button.day-pick-open").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        Assert.Empty(cut.FindAll(".day-pick-backdrop"));
+        Assert.Equal("false", cut.Find("button.day-pick-open").GetAttribute("aria-expanded"));
+        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        await cut.Find("input[aria-label=Day]").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
         Assert.Empty(cut.FindAll(".day-pick-backdrop"));
         await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
         await cut.Find(".day-pick-backdrop").ClickAsync(new MouseEventArgs());
