@@ -78,6 +78,8 @@ public sealed class NotesPanelTests : IDisposable
         }
 
         Assert.Equal("Notes", cut.Find("ul.note-list:not(.note-children)").GetAttribute("aria-label"));
+        await cut.Find("button.toggle[aria-label='Expand Plan']").ClickAsync(new MouseEventArgs());
+        Assert.NotEmpty(cut.FindAll("ul.note-children"));
         Assert.DoesNotContain(cut.FindAll("ul.note-children"), u => u.HasAttribute("aria-label"));
         Assert.Equal(["triage-open", "tags-open", "settings-open"], bar.QuerySelectorAll(".notes-bar-buttons button").Select(b => b.ClassList.First()).ToArray());
     }
