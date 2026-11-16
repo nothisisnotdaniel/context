@@ -237,6 +237,20 @@ public sealed class DesktopSourceTests
         Assert.Contains(selector, css, StringComparison.Ordinal);
     }
 
+    // 192 AC-5: the capture bar is a band; the note time rule is gone.
+    [Fact]
+    public void AppCss_CaptureBoxIsABand_NoNoteTimeRule()
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+
+        int at = css.IndexOf(".capture-box {", StringComparison.Ordinal);
+        Assert.True(at >= 0);
+        string block = css[at..css.IndexOf('}', at)];
+        Assert.Contains("background: var(--panel)", block, StringComparison.Ordinal);
+        Assert.Contains("border-bottom: 1px solid var(--line)", block, StringComparison.Ordinal);
+        Assert.DoesNotContain(".note .time", css, StringComparison.Ordinal);
+    }
+
     // 143 AC-9: the editor-failed line shares the margin rule of the unreadable line and has no rule of its own.
     [Fact]
     public void AppCss_EditorFailed_OnlyInTheUnreadableRule()
