@@ -193,6 +193,9 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#221](backlog/221-stop-a-hung-reminder-notification-process.md) Stop a hung reminder notification process
 - [?] [#222](backlog/222-give-the-todo-time-field-a.md) Give the todo time field a visible label
 - [?] [#223](backlog/223-open-the-palette-with-ctrl-k.md) Open the palette with Ctrl+K from a triage text field
+- [?] [#239](backlog/239-wider-text-column-in-the-decisions.md) Wider text column in the Decisions panel
+- [?] [#240](backlog/240-cap-the-rows-read-for-the.md) Cap the rows read for the decision log
+- [?] [#241](backlog/241-see-decisions-past-the-first-100.md) See decisions past the first 100
 
 ## Dropped with the terminal UI
 
