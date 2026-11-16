@@ -301,6 +301,7 @@ public sealed class DesktopSourceTests
 
     private static string RuleBody(string css, string selector)
     {
+        css = css.ReplaceLineEndings("\n");
         int at = css.IndexOf(selector + " {", StringComparison.Ordinal);
         Assert.True(at >= 0, selector);
         int open = css.IndexOf('{', at);
