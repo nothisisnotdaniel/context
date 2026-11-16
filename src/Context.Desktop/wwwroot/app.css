@@ -1351,3 +1351,42 @@ input[type="password"]:disabled {
     text-overflow: ellipsis;
     white-space: pre;
 }
+
+/* Triage, Tags and Settings open as a page in place of the note area; the x closes it. */
+.page {
+    margin-bottom: 16px;
+}
+
+.page .close {
+    align-items: center;
+    background: none;
+    border: 1px solid var(--background);
+    border-radius: 6px;
+    color: var(--text);
+    cursor: pointer;
+    display: inline-flex;
+    height: 32px;
+    justify-content: center;
+    min-width: 32px;
+    padding: 0;
+    width: 32px;
+}
+
+.page .close:hover:not(:disabled) {
+    background: var(--panel);
+    border-color: var(--line);
+}
+
+.page .close:focus-visible {
+    outline: 2px solid var(--accent-strong);
+    outline-offset: 2px;
+}
+
+.page .close:disabled {
+    color: var(--grey);
+    cursor: default;
+}
+
+.note-area[hidden] {
+    display: none;
+}

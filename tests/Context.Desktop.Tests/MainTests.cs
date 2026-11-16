@@ -427,7 +427,7 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(
             ["Ghost", "Other"],
             cut.FindAll(".links-panel .link-row .name").Select(n => n.TextContent).Order(StringComparer.Ordinal).ToArray()), Wait);
-        IElement region = cut.Find(".current-region");
+        IElement region = cut.Find(".note-area");
         Assert.True(region.Children.Index().Single(c => c.Item.ClassList.Contains("note-editor")).Index
             < region.Children.Index().Single(c => c.Item.ClassList.Contains("links-panel")).Index);
         Assert.Equal("Linked notes", cut.Find(".links-panel h2").TextContent);
@@ -586,6 +586,119 @@ public sealed class MainTests : IDisposable
         await cut.Find(".settings-panel button.close").ClickAsync(new MouseEventArgs());
 
         Assert.Empty(cut.FindAll(".settings-panel"));
+    }
+
+    // 193 AC-1, AC-2, AC-3, AC-8: each page replaces the note area and the others; the x closes it.
+    [Theory]
+    [InlineData("triage-open", ".triage-panel")]
+    [InlineData("tags-open", ".tags-panel")]
+    [InlineData("settings-open", ".settings-panel")]
+    public async Task Page_OpensInPlaceOfTheNoteArea_CloseShowsItAgain(string button, string page)
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        Assert.False(cut.Find(".note-area").HasAttribute("hidden"));
+        await Open(cut, js, "Plan");
+
+        await cut.Find("button." + button).ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(page).TextContent, StringComparison.Ordinal), Wait);
+
+        Assert.True(cut.Find(".note-area").HasAttribute("hidden"));
+        Assert.Single(cut.FindAll(".page"));
+        IElement close = cut.Find(".page > .panel-bar button.close");
+        Assert.Equal("Close", close.GetAttribute("aria-label"));
+        Assert.Equal("Close", close.GetAttribute("title"));
+        Assert.Equal(string.Empty, close.TextContent);
+        Assert.NotNull(close.QuerySelector("svg"));
+        Assert.Equal("close", cut.Find(".page > .panel-bar").LastElementChild!.ClassName);
+        Assert.Single(cut.FindAll(".page > .panel-bar button.close"));
+
+        await close.ClickAsync(new MouseEventArgs());
+
+        Assert.Empty(cut.FindAll(".page"));
+        Assert.False(cut.Find(".note-area").HasAttribute("hidden"));
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+    }
+
+    // 193 AC-1: with the current view shown, the view hides and returns.
+    [Fact]
+    public async Task Page_OverTheCurrentView_HidesAndRestoresIt()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await cut.Find("button.tags-open").ClickAsync(new MouseEventArgs());
+        Assert.True(cut.Find(".note-area").HasAttribute("hidden"));
+        await cut.Find(".page > .panel-bar button.close").ClickAsync(new MouseEventArgs());
+
+        Assert.False(cut.Find(".note-area").HasAttribute("hidden"));
+    }
+
+    // 193 AC-2: opening a second page (button or palette) replaces the first.
+    [Fact]
+    public async Task Page_OpeningAnother_ReplacesTheFirst()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await cut.Find("button.tags-open").ClickAsync(new MouseEventArgs());
+        await cut.Find("button.triage-open").ClickAsync(new MouseEventArgs());
+        Assert.Single(cut.FindAll(".page"));
+        Assert.Single(cut.FindAll(".triage-panel"));
+
+        await RunPalette(cut, "/settings");
+        Assert.Single(cut.FindAll(".page"));
+        Assert.Single(cut.FindAll(".settings-panel"));
+
+        await RunPalette(cut, "/tags");
+        Assert.Single(cut.FindAll(".page"));
+        Assert.Single(cut.FindAll(".tags-panel"));
+
+        await RunPalette(cut, "/triage");
+        Assert.Single(cut.FindAll(".page"));
+        Assert.Single(cut.FindAll(".triage-panel"));
+    }
+
+    // 193 AC-4: opening and closing a page keeps unsaved text, writes nothing and asks nothing; another note still asks.
+    [Fact]
+    public async Task Page_DirtyEditor_SurvivesOpenAndClose_OtherNoteStillAsks()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        data.WriteNote("Other", "# Other\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        js.Edit("# Plan\n\nUnsaved\n");
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, "context.db");
+
+        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        await cut.Find(".page > .panel-bar button.close").ClickAsync(new MouseEventArgs());
+
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, "context.db"));
+        Assert.Single(cut.FindAll(".note-editor"));
+
+        await cut.Find("button.tags-open").ClickAsync(new MouseEventArgs());
+        await NameButton(cut, "Other").ClickAsync(new MouseEventArgs());
+        Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("Other", cut.Find(".note-title").TextContent);
+            Assert.Empty(cut.FindAll(".page"));
+        }, Wait);
+    }
+
+    // 193 AC-5: Esc closes Triage.
+    [Fact]
+    public async Task Page_TriageEscape_ClosesIt()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await cut.Find("button.triage-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".triage-panel").TextContent, StringComparison.Ordinal), Wait);
+
+        await cut.Find(".triage-panel").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+
+        Assert.Empty(cut.FindAll(".page"));
     }
 
     // 138 AC-1: opening a note or the current view hides the settings.
@@ -1790,7 +1903,7 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(
             ["Plan"], cut.FindAll(".person-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Equal("Mentioned in", cut.Find(".person-panel h2").TextContent);
-        IElement region = cut.Find(".current-region");
+        IElement region = cut.Find(".note-area");
         int person = region.Children.Index().Single(c => c.Item.ClassList.Contains("person-panel")).Index;
         Assert.True(region.Children.Index().Single(c => c.Item.ClassList.Contains("note-editor")).Index < person);
         Assert.True(person < region.Children.Index().Single(c => c.Item.ClassList.Contains("links-panel")).Index);

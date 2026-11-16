@@ -304,6 +304,27 @@ public sealed class EditingFlowTests : IDisposable
         Assert.Empty(cut.FindAll(".tag-panel"));
     }
 
+    // 193 AC-6: the tag panel inside the Tags page keeps its text Close; the page-level x is the only other close button.
+    [Fact]
+    public async Task TagsPage_TagPanelKeepsItsTextClose_PageHasOneX()
+    {
+        data.WriteNote("Plan", "# Plan\n\n#work\n");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await cut.Find(".notes-region button.tags-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".tags-panel").TextContent, StringComparison.Ordinal), Wait);
+        await TagButton(cut, "#work").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-panel")), Wait);
+
+        Assert.Equal("Close", cut.Find(".tag-panel button.close").TextContent);
+        Assert.Single(cut.FindAll(".page > .panel-bar button.close"));
+        Assert.Equal(2, cut.FindAll("button.close").Count);
+
+        await cut.Find(".tag-panel button.close").ClickAsync(new MouseEventArgs());
+        Assert.Single(cut.FindAll(".tags-panel"));
+        await cut.Find(".page > .panel-bar button.close").ClickAsync(new MouseEventArgs());
+        Assert.Empty(cut.FindAll(".tags-panel"));
+    }
+
     // 137 AC-1: /tags <tag> still opens the tag panel directly, without the tags view.
     [Fact]
     public async Task Palette_TagsWithATag_OpensOnlyTheTagPanel()

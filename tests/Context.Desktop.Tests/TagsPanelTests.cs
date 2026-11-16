@@ -33,7 +33,11 @@ public sealed class TagsPanelTests : IDisposable
         Assert.Equal(3, expected.Count);
         Assert.Contains("#[big project]", cut.FindAll(".tag-list button").Select(b => b.TextContent));
         Assert.Equal("Tags", cut.Find(".panel-bar h2").TextContent);
-        Assert.Equal("Close", cut.Find(".panel-bar button.close").TextContent);
+        IElement close = cut.Find(".page > .panel-bar button.close");
+        Assert.Equal(string.Empty, close.TextContent);
+        Assert.Equal("Close", close.GetAttribute("aria-label"));
+        Assert.Equal("Close", close.GetAttribute("title"));
+        Assert.NotNull(close.QuerySelector("svg"));
         Assert.All(cut.FindAll("button"), b => Assert.Equal("button", b.GetAttribute("type")));
         IElement work = cut.FindAll(".tag-row").Single(r => r.QuerySelector("button")!.TextContent == "#work");
         Assert.Equal("3", work.QuerySelector(".count")!.TextContent);

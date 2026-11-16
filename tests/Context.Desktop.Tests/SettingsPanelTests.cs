@@ -42,7 +42,11 @@ public sealed class SettingsPanelTests : IDisposable
         IRenderedComponent<SettingsPanel> cut = await Show();
 
         Assert.Equal("Settings", cut.Find(".panel-bar h2").TextContent);
-        Assert.Equal("Close", cut.Find(".panel-bar button.close").TextContent);
+        IElement close = cut.Find(".page > .panel-bar button.close");
+        Assert.Equal(string.Empty, close.TextContent);
+        Assert.Equal("Close", close.GetAttribute("aria-label"));
+        Assert.Equal("Close", close.GetAttribute("title"));
+        Assert.NotNull(close.QuerySelector("svg"));
         Assert.Equal(["Exchange calendar", "Sensitive notes"], cut.FindAll("h3").Select(h => h.TextContent).ToArray());
         IElement line = cut.Find(".calendar-link-state");
         Assert.Equal("No calendar link set.", line.TextContent);
