@@ -25,7 +25,7 @@ public sealed class CaptureBoxTests : IDisposable
         IElement field = cut.Find(".capture-box input");
         Assert.Equal("text", field.GetAttribute("type"));
         Assert.Equal("Capture", field.GetAttribute("aria-label"));
-        Assert.Equal("Capture to inbox - Return to capture", field.GetAttribute("placeholder"));
+        Assert.Equal("Capture to inbox", field.GetAttribute("placeholder"));
         Assert.Equal("1000", field.GetAttribute("maxlength"));
         Assert.Empty(cut.FindAll(".capture-box button"));
         IElement status = cut.Find(".capture-box .capture-status");

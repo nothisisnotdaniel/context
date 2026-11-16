@@ -47,9 +47,9 @@ public sealed class NotesPanelTests : IDisposable
         Assert.Empty(cut.FindAll(".note-row .time"));
     }
 
-    // 195 AC-1..AC-6: sidebar logo.
+    // 197 AC-1, AC-3: the bar holds only the icon buttons; the list keeps its label.
     [Fact]
-    public async Task Logo_FirstChild_Labelled_NoNotesHeading_SafeSvg()
+    public async Task Bar_OnlyIconButtons_NoLogo_ListLabelled()
     {
         data.WriteNote("Plan", "p");
         data.WriteFile(Path.Combine("Plan", "Sub.md"), "s");
@@ -57,41 +57,36 @@ public sealed class NotesPanelTests : IDisposable
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
         IElement bar = cut.Find(".notes-bar");
-        IElement logo = bar.Children[0];
-        Assert.Equal("svg", logo.LocalName);
-        Assert.True(logo.ClassList.Contains("logo"));
-        Assert.True(bar.Children[1].ClassList.Contains("notes-bar-buttons"));
-        Assert.Equal("img", logo.GetAttribute("role"));
-        Assert.Equal("Context", logo.GetAttribute("aria-label"));
+        Assert.Single(bar.Children);
+        Assert.True(bar.Children[0].ClassList.Contains("notes-bar-buttons"));
+        Assert.Empty(bar.QuerySelectorAll("svg.logo"));
+        Assert.All(bar.QuerySelectorAll("svg"), s => Assert.NotNull(s.Closest(".notes-bar-buttons")));
         Assert.DoesNotContain(cut.FindAll("h2"), h => h.TextContent.Contains("Notes"));
         Assert.DoesNotContain("Notes", bar.TextContent);
-        Assert.True(int.Parse(logo.GetAttribute("width")!, CultureInfo.InvariantCulture) <= 24);
-        Assert.True(int.Parse(logo.GetAttribute("height")!, CultureInfo.InvariantCulture) <= 24);
-        string markup = logo.OuterHtml;
-        Assert.DoesNotMatch("#[0-9a-fA-F]{3}|rgb|href|src=|<image", markup);
-        foreach (string attr in new[] { "fill", "stroke" })
-        {
-            foreach (IElement e in logo.QuerySelectorAll("*").Append(logo))
-            {
-                Assert.True(e.GetAttribute(attr) is null or "none" or "currentColor", attr);
-            }
-        }
-
         Assert.Equal("Notes", cut.Find("ul.note-list:not(.note-children)").GetAttribute("aria-label"));
         await cut.Find("button.toggle[aria-label='Expand Plan']").ClickAsync(new MouseEventArgs());
-        Assert.NotEmpty(cut.FindAll("ul.note-children"));
         Assert.DoesNotContain(cut.FindAll("ul.note-children"), u => u.HasAttribute("aria-label"));
-        Assert.Equal(["triage-open", "tags-open", "settings-open"], bar.QuerySelectorAll(".notes-bar-buttons button").Select(b => b.ClassList.First()).ToArray());
+        AssertBarButtons(bar);
     }
 
-    // 195 AC-6
+    // 197 AC-1: the same without notes.
     [Fact]
-    public async Task Logo_NoNotes_StillShown()
+    public async Task Bar_NoNotes_OnlyIconButtons()
     {
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
         Assert.Equal("No notes yet", cut.Find(".notes p").TextContent);
-        Assert.NotNull(cut.Find(".notes-bar svg.logo"));
+        IElement bar = cut.Find(".notes-bar");
+        Assert.Single(bar.Children);
+        Assert.Empty(bar.QuerySelectorAll("svg.logo"));
+        AssertBarButtons(bar);
+    }
+
+    private static void AssertBarButtons(IElement bar)
+    {
+        IElement[] buttons = bar.QuerySelectorAll(".notes-bar-buttons button").ToArray();
+        Assert.Equal(["triage-open", "tags-open", "settings-open"], buttons.Select(b => b.ClassList.First()).ToArray());
+        Assert.Equal(["Triage", "Tags", "Settings"], buttons.Select(b => b.GetAttribute("aria-label")!).ToArray());
     }
 
     // 192 AC-1, AC-2: icon buttons with names, typed, svg child, no visible text, safe decorative svg.
@@ -196,7 +191,7 @@ public sealed class NotesPanelTests : IDisposable
 
         Assert.Equal("text", cut.Find(".note-entry input").GetAttribute("type"));
         Assert.Empty(cut.FindAll("button.note-new"));
-        Assert.Equal("New note title - Return to create", cut.Find(".note-new-title").GetAttribute("placeholder"));
+        Assert.Equal("New note title", cut.Find(".note-new-title").GetAttribute("placeholder"));
     }
 
     // 134 AC-7: Enter or the button creates the note, clears the field, opens the note and shows the accent status.

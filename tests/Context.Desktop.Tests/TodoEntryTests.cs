@@ -28,7 +28,7 @@ public sealed class TodoEntryTests : IDisposable
         Assert.Equal("2026-10-29", date.GetAttribute("value"));
         Assert.Equal(["Today", "Tomorrow"], cut.FindAll(".todo-entry button").Select(b => b.TextContent).ToArray());
         Assert.Empty(cut.FindAll("button.add"));
-        Assert.Equal("New todo - Return to add", text.GetAttribute("placeholder"));
+        Assert.Equal("New todo", text.GetAttribute("placeholder"));
         Assert.All(cut.FindAll(".todo-entry button"), b => Assert.Equal("button", b.GetAttribute("type")));
     }
 
