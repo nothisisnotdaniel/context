@@ -2,10 +2,10 @@
 @* Every tag with its note count (DesktopState.Tags), in the index's order; clicking one shows its notes. It reads
    only, and reloads whenever the state changes. *@
 
-<section class="tags-panel" aria-label="Tags">
+<section class="page tags-panel" aria-label="Tags">
     <div class="panel-bar">
         <h2>Tags</h2>
-        <button type="button" class="close" @onclick="() => OnClose.InvokeAsync()">Close</button>
+        <button type="button" class="close"  aria-label="Close" title="Close" @onclick="() => OnClose.InvokeAsync()"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" /></svg></button>
     </div>
     @if (view is null)
     {

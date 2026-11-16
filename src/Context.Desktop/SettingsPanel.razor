@@ -4,10 +4,10 @@
    until it is saved or the panel closes, handed only to DesktopActions and never rendered back; what is shown is
    the masked link from DesktopState.CalendarLinkSetting. Both sections reload whenever the state changes. *@
 
-<section class="settings-panel" aria-label="Settings">
+<section class="page settings-panel" aria-label="Settings">
     <div class="panel-bar">
         <h2>Settings</h2>
-        <button type="button" class="close" disabled="@busy" @onclick="Close">Close</button>
+        <button type="button" class="close" disabled="@busy" aria-label="Close" title="Close" @onclick="Close"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" /></svg></button>
     </div>
     <h3>Exchange calendar</h3>
     @if (link is null)

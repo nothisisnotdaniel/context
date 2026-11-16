@@ -859,8 +859,12 @@ Every factory agent reads this file before working on Context. Keep it short and
     state change) and opens the page when no note has unsaved changes and no dialog or edit field is open; otherwise the
     editor is left alone and the accent status reads `Today's briefing is ready: briefings/<day>. Type /briefing to open
     it.`. The page is a snapshot, never refreshed.
-    **Settings:** `SettingsPanel` (the `Settings` button in `NotesPanel`, or `/settings`; `Main`'s `settingsShown`;
-    at the top of the main region; `Close`, opening a note or the current view hides it) has two sections, both
+    **Pages (job 193):** `Main` holds one `page` (none, triage, tags, settings); opening one replaces another. The note area
+    (`div.note-area`: breadcrumb to `LinksPanel`) or `CurrentPanel` gets `hidden` while a page shows, but stays mounted so
+    unsaved editor text survives. Each page's root has class `page` and an icon-only `button.close` (aria-label and title
+    `Close`) last in `.panel-bar`; `TagPanel` keeps its text `Close`.
+    **Settings:** `SettingsPanel` (the `Settings` button in `NotesPanel`, or `/settings`; `Main`'s `page`;
+    a page in place of the note area; the × (job 193), opening a note or the current view hides it) has two sections, both
     reloaded after every `State.Changed`. *Exchange calendar* shows `DesktopState.CalendarLinkSetting()`
     (`CalendarLinkView.Show`: grey `No calendar link set.`, the masked link with the last download in the calendar's
     zone, or red `Can't read calendar-link.txt. …`), one `<input type="password">` (no `value`, no `@bind`,
@@ -883,8 +887,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     `CurrentPanel` calendar texts. It reloads on `State.Changed` keeping the shown rows; `Close`, opening a note or the
     current view hides it.
     **Tags and links:** `TagsPanel` (the `Tags` button in `NotesPanel`, or `/tags` without an argument; `Main`'s
-    `tagsShown`) lists `DesktopState.Tags()` (`TagsView.Build`): one button per tag with its grey note count; a click
-    shows `TagPanel` for it below the list (`aria-pressed` on that button); its `Close` hides both, `TagPanel`'s only
+    `page`) lists `DesktopState.Tags()` (`TagsView.Build`): one button per tag with its grey note count; a click
+    shows `TagPanel` for it below the list (`aria-pressed` on that button); its × hides both, `TagPanel`'s only
     itself, and opening a note or the current view hides both. `/tags <tag>` opens `TagPanel` directly. `LinksPanel`
     sits under `NoteEditor` and lists `DesktopState.Links(name)` (`LinksView.Build`): per `NoteLink` the name (a button
     through `RequestOpen`; a missing target is grey text), the link text (see Note links) and the shared tags as buttons
@@ -962,7 +966,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     without unsaved changes: the note is read again and the page editor mounted with it, without taking the focus,
     so the new line shows and a later save is not refused as changed on disk; another open note is left alone.
     **Inbox triage (job 179):** `TriagePanel` (`/triage`, argument ignored, or the `Triage` icon button in `NotesPanel`'s
-    bar; `Main`'s `triageShown`, right under the capture box, hidden by Close, Esc or opening a note or the current
+    bar; `Main`'s `page`, a page under the capture box, hidden by the ×, Esc or opening a note or the current
     view) shows the first line of `DesktopState.Triage()` (`InboxTriage.Items`: every `- ` line; text without the
     `- `, a leading `yyyy-MM-dd HH:mm ` stamp, shown grey, and a final ` snooze:yyyy-MM-dd`; lines snoozed past today
     are left out and counted, due snoozed lines come first by day, then file order), `<n> left` and the buttons

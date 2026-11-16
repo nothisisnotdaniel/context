@@ -14,11 +14,11 @@
             </aside>
             <main class="current-region">
                 <CaptureBox Guard="CaptureHeld" OnCaptured="Captured" />
-                @if (triageShown)
+                @if (page == Page.Triage)
                 {
                     <TriagePanel Guard="TriageHeld" OnTriaged="Triaged" OnClose="CloseTriage" />
                 }
-                @if (settingsShown)
+                @if (page == Page.Settings)
                 {
                     <SettingsPanel OnClose="CloseSettings" />
                 }
@@ -26,7 +26,7 @@
                 {
                     <ReviewPanel OnOpen="RequestOpen" OnClose="CloseReview" />
                 }
-                @if (tagsShown)
+                @if (page == Page.Tags)
                 {
                     <TagsPanel Selected="@tagShown" OnTag="ShowTag" OnClose="CloseTags" />
                 }
@@ -47,90 +47,92 @@
                     <DecisionsPanel Tag="@decisionsTag" OnOpen="RequestOpen" OnClose="CloseDecisions" />
                 }
                 <p class="main-status cut @statusClass" role="status" title="@statusText">@statusText</p>
-                @if (openName is { } name)
-                {
-                    @if (name.Contains('/'))
+                <div class="note-area" hidden="@(page != Page.None)">
+                    @if (openName is { } name)
                     {
-                        <nav class="breadcrumb" aria-label="Breadcrumb">
-                            <ol>
-                                @foreach ((string ancestor, string segment) in Ancestors(name))
-                                {
-                                    string ancestorShown = DesktopText.OneLine(ancestor);
-                                    string segmentShown = DesktopText.OneLine(segment);
-                                    <li>
-                                        <button type="button" class="crumb cut" title="@ancestorShown" @onclick="() => RequestOpen(ancestor)">@segmentShown</button>
-                                    </li>
-                                }
-                                @{
-                                    string currentShown = DesktopText.OneLine(name[(name.LastIndexOf('/') + 1)..]);
-                                    string fullShown = DesktopText.OneLine(name);
-                                }
-                                <li><span class="crumb-current cut" aria-current="page" title="@fullShown">@currentShown</span></li>
-                            </ol>
-                        </nav>
-                    }
-                    <div class="note-toolbar">
-                        @if (subpaging)
+                        @if (name.Contains('/'))
                         {
-                            <input type="text" class="subpage-title" value="@subpageText" maxlength="200" disabled="@running"
-                                   aria-label="Subpage title" @ref="subpageField" @oninput="SubpageTyped" @onkeydown="e => CreateSubpage(e)" />
-                            <button type="button" class="create-subpage" disabled="@running" @onclick="() => CreateSubpage(null)">Create subpage</button>
-                            <button type="button" class="cancel-subpage" disabled="@running" @onclick="CancelSubpage">Cancel</button>
+                            <nav class="breadcrumb" aria-label="Breadcrumb">
+                                <ol>
+                                    @foreach ((string ancestor, string segment) in Ancestors(name))
+                                    {
+                                        string ancestorShown = DesktopText.OneLine(ancestor);
+                                        string segmentShown = DesktopText.OneLine(segment);
+                                        <li>
+                                            <button type="button" class="crumb cut" title="@ancestorShown" @onclick="() => RequestOpen(ancestor)">@segmentShown</button>
+                                        </li>
+                                    }
+                                    @{
+                                        string currentShown = DesktopText.OneLine(name[(name.LastIndexOf('/') + 1)..]);
+                                        string fullShown = DesktopText.OneLine(name);
+                                    }
+                                    <li><span class="crumb-current cut" aria-current="page" title="@fullShown">@currentShown</span></li>
+                                </ol>
+                            </nav>
                         }
-                        else if (moving)
-                        {
-                            <input type="text" class="move-parent" value="@moveText" maxlength="500" disabled="@running"
-                                   aria-label="New parent" placeholder="Empty: top level" @ref="moveField" @oninput="MoveTyped" @onkeydown="e => MoveHere(e)" />
-                            <button type="button" class="move-here" disabled="@running" @onclick="() => MoveHere(null)">Move here</button>
-                            <button type="button" class="cancel-move" disabled="@running" @onclick="CancelMove">Cancel</button>
-                        }
-                        else if (renaming)
-                        {
-                            <input type="text" class="rename-title" value="@renameText" maxlength="200" disabled="@running"
-                                   aria-label="New name" @ref="renameField" @oninput="RenameTyped" @onkeydown="e => SaveName(e)" />
-                            <button type="button" class="save-name" disabled="@running" @onclick="() => SaveName(null)">Save name</button>
-                            <button type="button" class="cancel-rename" disabled="@running" @onclick="CancelRename">Cancel</button>
-                        }
-                        else
-                        {
-                            <button type="button" class="rename" disabled="@running" @onclick="StartRename">Rename</button>
-                            <button type="button" class="delete" disabled="@running" @onclick="AskDelete">Delete</button>
-                            <button type="button" class="history" disabled="@running" aria-pressed="@(historyShown ? "true" : "false")" @onclick="ToggleHistory">History</button>
-                            @if (openSensitive)
+                        <div class="note-toolbar">
+                            @if (subpaging)
                             {
-                                <button type="button" class="make-plain" disabled="@running" @onclick="AskMakePlain">Make plain</button>
-                                <button type="button" class="lock" disabled="@running" @onclick="LockOpen">Lock</button>
+                                <input type="text" class="subpage-title" value="@subpageText" maxlength="200" disabled="@running"
+                                       aria-label="Subpage title" @ref="subpageField" @oninput="SubpageTyped" @onkeydown="e => CreateSubpage(e)" />
+                                <button type="button" class="create-subpage" disabled="@running" @onclick="() => CreateSubpage(null)">Create subpage</button>
+                                <button type="button" class="cancel-subpage" disabled="@running" @onclick="CancelSubpage">Cancel</button>
+                            }
+                            else if (moving)
+                            {
+                                <input type="text" class="move-parent" value="@moveText" maxlength="500" disabled="@running"
+                                       aria-label="New parent" placeholder="Empty: top level" @ref="moveField" @oninput="MoveTyped" @onkeydown="e => MoveHere(e)" />
+                                <button type="button" class="move-here" disabled="@running" @onclick="() => MoveHere(null)">Move here</button>
+                                <button type="button" class="cancel-move" disabled="@running" @onclick="CancelMove">Cancel</button>
+                            }
+                            else if (renaming)
+                            {
+                                <input type="text" class="rename-title" value="@renameText" maxlength="200" disabled="@running"
+                                       aria-label="New name" @ref="renameField" @oninput="RenameTyped" @onkeydown="e => SaveName(e)" />
+                                <button type="button" class="save-name" disabled="@running" @onclick="() => SaveName(null)">Save name</button>
+                                <button type="button" class="cancel-rename" disabled="@running" @onclick="CancelRename">Cancel</button>
                             }
                             else
                             {
-                                <button type="button" class="new-subpage" disabled="@running" @onclick="StartSubpage">New subpage</button>
-                                <button type="button" class="move" disabled="@running" @onclick="StartMove">Move</button>
-                                <button type="button" class="open-external" disabled="@running" @onclick="OpenOutside">Open in default editor</button>
-                                <button type="button" class="export" disabled="@running" @onclick="Export">Export</button>
-                                @if (snapshot.SensitiveSupported)
+                                <button type="button" class="rename" disabled="@running" @onclick="StartRename">Rename</button>
+                                <button type="button" class="delete" disabled="@running" @onclick="AskDelete">Delete</button>
+                                <button type="button" class="history" disabled="@running" aria-pressed="@(historyShown ? "true" : "false")" @onclick="ToggleHistory">History</button>
+                                @if (openSensitive)
                                 {
-                                    <button type="button" class="mark-sensitive" disabled="@running" @onclick="AskMark">Mark sensitive</button>
+                                    <button type="button" class="make-plain" disabled="@running" @onclick="AskMakePlain">Make plain</button>
+                                    <button type="button" class="lock" disabled="@running" @onclick="LockOpen">Lock</button>
+                                }
+                                else
+                                {
+                                    <button type="button" class="new-subpage" disabled="@running" @onclick="StartSubpage">New subpage</button>
+                                    <button type="button" class="move" disabled="@running" @onclick="StartMove">Move</button>
+                                    <button type="button" class="open-external" disabled="@running" @onclick="OpenOutside">Open in default editor</button>
+                                    <button type="button" class="export" disabled="@running" @onclick="Export">Export</button>
+                                    @if (snapshot.SensitiveSupported)
+                                    {
+                                        <button type="button" class="mark-sensitive" disabled="@running" @onclick="AskMark">Mark sensitive</button>
+                                    }
                                 }
                             }
+                        </div>
+                        <NoteEditor @key="(name, openSensitive)" @ref="editor" Name="@name" Sensitive="openSensitive"
+                                    OnTag="ShowTag" OnOpenNote="RequestOpen" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked"
+                                    OnAttach="AttachDropped" OnOpenAttachment="OpenAttachment" />
+                        @if (historyShown)
+                        {
+                            <HistoryPanel Name="@name" Sensitive="openSensitive" OnRestore="AskRestore" OnClose="CloseHistory" />
                         }
-                    </div>
-                    <NoteEditor @key="(name, openSensitive)" @ref="editor" Name="@name" Sensitive="openSensitive"
-                                OnTag="ShowTag" OnOpenNote="RequestOpen" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked"
-                                OnAttach="AttachDropped" OnOpenAttachment="OpenAttachment" />
-                    @if (historyShown)
-                    {
-                        <HistoryPanel Name="@name" Sensitive="openSensitive" OnRestore="AskRestore" OnClose="CloseHistory" />
+                        @if (People.PersonOf(name) is { } person)
+                        {
+                            <PersonPanel Person="@person" OnOpen="RequestOpen" />
+                        }
+                        <LinksPanel Name="@name" Sensitive="openSensitive" OnOpen="RequestOpen" OnTag="ShowTag" />
                     }
-                    @if (People.PersonOf(name) is { } person)
+                    else
                     {
-                        <PersonPanel Person="@person" OnOpen="RequestOpen" />
+                        <CurrentPanel OnOpen="RequestOpen" />
                     }
-                    <LinksPanel Name="@name" Sensitive="openSensitive" OnOpen="RequestOpen" OnTag="ShowTag" />
-                }
-                else
-                {
-                    <CurrentPanel OnOpen="RequestOpen" />
-                }
+                </div>
             </main>
             <aside class="todos-region">
                 <TodoPanel @ref="todoPanel" OnPerson="OpenMention" />
@@ -176,13 +178,12 @@ else
     private string? openName;
     private NoteEditor? editor;
     private string? tagShown;
-    private bool tagsShown;
+    private Page page;
     private bool reviewShown;
-    private bool triageShown;
     private (string Key, string Value)? findShown;
     private string? searchShown;
     private string? decisionsShown;
-    private bool settingsShown;
+    private enum Page { None, Triage, Tags, Settings }
     private bool discarding;
     private string? pendingName;
     private string? pendingPerson;
@@ -293,12 +294,23 @@ else
     private void CloseDecisions() => decisionsShown = null;
 
     // The tags view: every tag with its note count; a click on one shows the tag panel below it.
-    private void ShowTags() => tagsShown = true;
+    private void ShowTags() => OpenPage(Page.Tags);
 
     private void CloseTags()
     {
-        tagsShown = false;
+        page = Page.None;
         tagShown = null;
+    }
+
+    // Triage, Tags and Settings are pages: one at a time, in place of the note area or the current view.
+    private void OpenPage(Page next)
+    {
+        if (page == Page.Tags && next != Page.Tags)
+        {
+            tagShown = null;
+        }
+
+        page = next;
     }
 
     // The weekly review: shown at the top of the main region until closed or until a note or the current view opens.
@@ -307,23 +319,22 @@ else
     private void CloseReview() => reviewShown = false;
 
     // Inbox triage: shown under the capture box until closed or until a note or the current view opens.
-    private void ShowTriage() => triageShown = true;
+    private void ShowTriage() => OpenPage(Page.Triage);
 
-    private void CloseTriage() => triageShown = false;
+    private void CloseTriage() => page = Page.None;
 
     // The settings: shown at the top of the main region until closed or until a note or the current view opens.
-    private void ShowSettings() => settingsShown = true;
+    private void ShowSettings() => OpenPage(Page.Settings);
 
-    private void CloseSettings() => settingsShown = false;
+    private void CloseSettings() => page = Page.None;
 
     // Opens the note called name (null: the current view), asking first when the open note has unsaved changes.
     private async Task RequestOpen(string? name)
     {
         if (name is not null && string.Equals(name, openName, StringComparison.Ordinal))
         {
-            settingsShown = false;
+            page = Page.None;
             reviewShown = false;
-            triageShown = false;
             return;
         }
 
@@ -503,7 +514,7 @@ else
 
         if (string.Equals(daily.Text, openName, StringComparison.Ordinal))
         {
-            settingsShown = false;
+            page = Page.None;
         }
         else
         {
@@ -528,13 +539,11 @@ else
         pendingBriefing = false;
         pendingMeeting = null;
         tagShown = null;
-        tagsShown = false;
+        page = Page.None;
         reviewShown = false;
-        triageShown = false;
         findShown = null;
         searchShown = null;
         decisionsShown = null;
-        settingsShown = false;
         renaming = false;
         subpaging = false;
         moving = false;

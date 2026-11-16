@@ -1707,4 +1707,19 @@ public sealed class DesktopSourceTests
         Assert.Single(Regex.Matches(css, Regex.Escape(bare + ":focus-visible")));
         Assert.Single(Regex.Matches(css, Regex.Escape(bare + ":disabled")));
     }
+
+    // 193 AC-9: the page, close and hidden note-area rules exist and use theme variables only.
+    [Theory]
+    [InlineData(".page {")]
+    [InlineData(".page .close {")]
+    [InlineData(".note-area[hidden] {")]
+    public void AppCss_PageRules_ExistWithoutColourLiterals(string selector)
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+
+        int at = css.IndexOf("\n" + selector, StringComparison.Ordinal);
+        Assert.True(at >= 0);
+        string block = css[at..css.IndexOf('}', at)];
+        Assert.DoesNotMatch(@"#[0-9a-fA-F]{3,8}\b|\b(rgb|rgba|hsl|hsla)\(|\b(white|black|red|green|blue|gray|grey|transparent|orange|yellow|purple|silver)\b", block);
+    }
 }
