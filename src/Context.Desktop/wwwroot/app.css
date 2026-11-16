@@ -497,19 +497,16 @@ input[type="password"]:disabled {
 }
 
 .editor-host {
-    border: 1px solid var(--line);
-    border-radius: 8px;
     margin-top: 12px;
-    padding: 4px 16px;
 }
 
 .editor-host:empty {
     display: none;
 }
 
+/* No box: a thin accent bar to the left of the text, drawn as an inset shadow so nothing shifts. */
 .editor-host:focus-within {
-    border-color: var(--accent-strong);
-    box-shadow: 0 0 0 1px var(--accent-strong);
+    box-shadow: -3px 0 0 0 var(--accent-strong);
 }
 
 /* The todo entry row under the list. */
