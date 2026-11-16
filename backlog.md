@@ -80,6 +80,9 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#55](backlog/055-timed-reminders.md) Timed reminders → 178-timed-reminders
 - [x] [#57](backlog/057-inbox-triage.md) Inbox triage → 179-inbox-triage
 - [x] [#60](backlog/060-decision-log.md) Decision log → 180-decision-log
+- [ ] [#250](backlog/250-top-bar-with-home-and-calendar.md) Top bar with Home and Calendar in place of the capture box
+- [ ] [#251](backlog/251-page-actions-behind-a-menu-in.md) Page actions behind a … menu in the top bar (after: #250)
+- [ ] [#252](backlog/252-remove-the-sidebar-logo-and-the.md) Remove the sidebar logo and the Return hints
 - [ ] [#244](backlog/244-edit-a-note-in-place-no.md) Edit a note in place: no repeated title
 - [ ] [#245](backlog/245-auto-save-in-the-note-editor.md) Auto save in the note editor
 - [x] [#246](backlog/246-capture-bar-at-the-very-top.md) Capture bar at the very top, Enter instead of buttons next to inputs → 194-capture-bar-enter-submit
