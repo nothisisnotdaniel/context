@@ -72,7 +72,6 @@ public sealed class NotesPanelTests : IDisposable
         Assert.DoesNotContain("#", markup, StringComparison.Ordinal);
     }
 
-
     // AC-4: an empty folder shows the empty state.
     [Fact]
     public async Task Render_NoNotes_EmptyLine()
