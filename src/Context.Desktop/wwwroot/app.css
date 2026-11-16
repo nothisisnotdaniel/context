@@ -759,7 +759,7 @@ input[type="password"]:disabled {
     display: none;
 }
 
-/* The Tags button beside the notes heading. */
+/* The sidebar bar: the logo and the icon buttons. */
 .notes-bar {
     align-items: center;
     display: flex;
@@ -768,8 +768,11 @@ input[type="password"]:disabled {
     margin-bottom: 8px;
 }
 
-.notes-bar h2 {
-    margin-bottom: 0;
+.notes-bar .logo {
+    color: var(--accent-strong);
+    flex: none;
+    height: 22px;
+    width: 22px;
 }
 
 .notes-bar-buttons {

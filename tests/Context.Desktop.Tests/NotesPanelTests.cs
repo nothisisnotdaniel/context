@@ -47,6 +47,53 @@ public sealed class NotesPanelTests : IDisposable
         Assert.Empty(cut.FindAll(".note-row .time"));
     }
 
+    // 195 AC-1..AC-6: sidebar logo.
+    [Fact]
+    public async Task Logo_FirstChild_Labelled_NoNotesHeading_SafeSvg()
+    {
+        data.WriteNote("Plan", "p");
+        data.WriteFile(Path.Combine("Plan", "Sub.md"), "s");
+
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        IElement bar = cut.Find(".notes-bar");
+        IElement logo = bar.Children[0];
+        Assert.Equal("svg", logo.LocalName);
+        Assert.True(logo.ClassList.Contains("logo"));
+        Assert.True(bar.Children[1].ClassList.Contains("notes-bar-buttons"));
+        Assert.Equal("img", logo.GetAttribute("role"));
+        Assert.Equal("Context", logo.GetAttribute("aria-label"));
+        Assert.DoesNotContain(cut.FindAll("h2"), h => h.TextContent.Contains("Notes"));
+        Assert.DoesNotContain("Notes", bar.TextContent);
+        Assert.True(int.Parse(logo.GetAttribute("width")!, CultureInfo.InvariantCulture) <= 24);
+        Assert.True(int.Parse(logo.GetAttribute("height")!, CultureInfo.InvariantCulture) <= 24);
+        string markup = logo.OuterHtml;
+        Assert.DoesNotMatch("#[0-9a-fA-F]{3}|rgb|href|src=|<image", markup);
+        foreach (string attr in new[] { "fill", "stroke" })
+        {
+            foreach (IElement e in logo.QuerySelectorAll("*").Append(logo))
+            {
+                Assert.True(e.GetAttribute(attr) is null or "none" or "currentColor", attr);
+            }
+        }
+
+        Assert.Equal("Notes", cut.Find("ul.note-list:not(.note-children)").GetAttribute("aria-label"));
+        await cut.Find("button.toggle[aria-label='Expand Plan']").ClickAsync(new MouseEventArgs());
+        Assert.NotEmpty(cut.FindAll("ul.note-children"));
+        Assert.DoesNotContain(cut.FindAll("ul.note-children"), u => u.HasAttribute("aria-label"));
+        Assert.Equal(["triage-open", "tags-open", "settings-open"], bar.QuerySelectorAll(".notes-bar-buttons button").Select(b => b.ClassList.First()).ToArray());
+    }
+
+    // 195 AC-6
+    [Fact]
+    public async Task Logo_NoNotes_StillShown()
+    {
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        Assert.Equal("No notes yet", cut.Find(".notes p").TextContent);
+        Assert.NotNull(cut.Find(".notes-bar svg.logo"));
+    }
+
     // 192 AC-1, AC-2: icon buttons with names, typed, svg child, no visible text, safe decorative svg.
     [Theory]
     [InlineData("triage-open", "Triage")]
