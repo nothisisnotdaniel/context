@@ -267,6 +267,46 @@ public sealed class DesktopSourceTests
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(css, "editor-failed"));
     }
 
+    // 196 AC-1 to AC-5: the editor area has no box; focus shows as a theme-coloured bar.
+    [Fact]
+    public void AppCss_EditorHost_HasNoBox_AndKeepsAVisibleFocusIndicator()
+    {
+        string root = RepoFiles.Root();
+        string css = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+        string host = RuleBody(css, ".editor-host");
+        string focus = RuleBody(css, ".editor-host:focus-within");
+        string bar = RuleBody(css, ".editor-bar,\n.panel-bar");
+
+        Assert.DoesNotContain("border", host, StringComparison.Ordinal);
+        Assert.DoesNotContain("background", host, StringComparison.Ordinal);
+        Assert.DoesNotContain("padding-left", host, StringComparison.Ordinal);
+        Assert.DoesNotContain("padding-right", host, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"padding:\s*\S+\s+[^0\s;]", host);
+        Assert.DoesNotMatch(@"(margin|padding)-(left|inline)", host);
+        Assert.DoesNotMatch(@"margin:\s*\S+\s+\S+", host);
+        Assert.DoesNotContain("padding", bar, StringComparison.Ordinal);
+        Assert.DoesNotContain("margin-left", bar, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("border-color", focus, StringComparison.Ordinal);
+        Assert.Matches(@"box-shadow:\s*-\d+px 0 0 0 var\(--accent-strong\);", focus);
+        Assert.DoesNotMatch(@"box-shadow:\s*0 0 0", focus);
+        Assert.DoesNotContain("none", focus, StringComparison.Ordinal);
+
+        Assert.DoesNotMatch(@"#[0-9a-fA-F]{3,8}\b|rgba?\(", host + focus);
+
+        Assert.Contains("display: none;", RuleBody(css, ".editor-host:empty"), StringComparison.Ordinal);
+        string editorCss = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "editor", "editor.css"));
+        Assert.Contains("outline: none;", RuleBody(editorCss, ".note-editor-body"), StringComparison.Ordinal);
+    }
+
+    private static string RuleBody(string css, string selector)
+    {
+        int at = css.IndexOf(selector + " {", StringComparison.Ordinal);
+        Assert.True(at >= 0, selector);
+        int open = css.IndexOf('{', at);
+        return css[(open + 1)..css.IndexOf('}', open)];
+    }
+
     [Fact]
     public void EditorCss_StylesOnlyTheEditorBody()
     {
