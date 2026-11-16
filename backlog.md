@@ -79,7 +79,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#54](backlog/054-attachments.md) Attachments → 177-note-attachments
 - [x] [#55](backlog/055-timed-reminders.md) Timed reminders → 178-timed-reminders
 - [x] [#57](backlog/057-inbox-triage.md) Inbox triage → 179-inbox-triage
-- [ ] [#60](backlog/060-decision-log.md) Decision log
+- [x] [#60](backlog/060-decision-log.md) Decision log → 180-decision-log
 - [ ] [#62](backlog/062-links-to-headings.md) Links to headings
 - [ ] [#66](backlog/066-rename-with-link-update.md) Rename with link update
 - [ ] [#68](backlog/068-saved-searches.md) Saved searches
