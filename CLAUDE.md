@@ -947,7 +947,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     a dirty editor is refused with `Save <name> first.`, else `SaveExportFile("<name>.md")` and `ExportNote`'s text
     in the toolbar's status line. Rules (`DesktopSourceTests`): `WritePlainCopy` and `ReadImport` are named in
     `Context.Desktop` only in `DesktopActions.cs`, and no `.razor` file matches `\b(File|Directory|Path)\.`.
-    **Tidy layout (job 192):** the Triage, Tags and Settings buttons in `NotesPanel`'s bar are icon-only (inline `svg`, `aria-hidden`, `currentColor`; `aria-label` and `title` carry the name), note rows show no modified date, and `.capture-box` is a band (`--panel` background, `--line` bottom border).
+    **Tidy layout (job 192):** (job 195: `NotesPanel`'s bar starts with an inline `svg.logo` (`role="img"`, `aria-label="Context"`, `--accent-strong`) instead of a visible "Notes" heading; the top-level `ul.note-list` carries `aria-label="Notes"`.) the Triage, Tags and Settings buttons in `NotesPanel`'s bar are icon-only (inline `svg`, `aria-hidden`, `currentColor`; `aria-label` and `title` carry the name), note rows show no modified date, and `.capture-box` is a band (`--panel` background, `--line` bottom border).
     **Quick capture:** `CaptureBox` is the first thing in `Main`'s main region, whatever else is shown there (not
     with `Can't read the data folder.`): a text field (`aria-label="Capture"`, placeholder `Capture to inbox`,
     `maxlength` `Inbox.MaxTextLength`), a `Capture` button and a `role="status"` line. Enter or the button calls
