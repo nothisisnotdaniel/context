@@ -49,7 +49,7 @@
             case TriageForm.Note:
                 <div class="triage-form">
                     <input type="text" class="triage-title" value="@titleText" maxlength="@NoteStore.MaxNameLength" disabled="@running"
-                           aria-label="Note title" placeholder="Note title - Return to create" @ref="field" @oninput="TitleTyped" @onkeydown="e => CreateFromItem(e)"
+                           aria-label="Note title" placeholder="Note title" @ref="field" @oninput="TitleTyped" @onkeydown="e => CreateFromItem(e)"
                            @onkeydown:stopPropagation="true" />
                     <button type="button" class="triage-cancel" disabled="@running" @onclick="CloseForm">Cancel</button>
                 </div>
@@ -57,7 +57,7 @@
             case TriageForm.Todo:
                 <div class="triage-form">
                     <input type="text" class="triage-todo-text" value="@todoText" maxlength="@DesktopActions.MaxTodoLength" disabled="@running"
-                           aria-label="Todo text" placeholder="Todo text - Return to add" @ref="field" @oninput="TodoTyped" @onkeydown="e => TodoFromItem(e)"
+                           aria-label="Todo text" placeholder="Todo text" @ref="field" @oninput="TodoTyped" @onkeydown="e => TodoFromItem(e)"
                            @onkeydown:stopPropagation="true" />
                     <input type="text" class="triage-date" value="@dateText" maxlength="10" disabled="@running"
                            aria-label="Due date" placeholder="Empty: today" @oninput="DateTyped" @onkeydown="e => TodoFromItem(e)"
@@ -68,7 +68,7 @@
             case TriageForm.Append:
                 <div class="triage-form">
                     <input type="text" class="triage-target" value="@nameText" maxlength="@NoteStore.MaxNameLength" disabled="@running"
-                           aria-label="Note name" placeholder="Note name - Return to add" @ref="field" @oninput="NameTyped" @onkeydown="e => AppendToNote(e)"
+                           aria-label="Note name" placeholder="Note name" @ref="field" @oninput="NameTyped" @onkeydown="e => AppendToNote(e)"
                            @onkeydown:stopPropagation="true" />
                     <button type="button" class="triage-cancel" disabled="@running" @onclick="CloseForm">Cancel</button>
                 </div>
@@ -78,7 +78,7 @@
                     <button type="button" class="triage-tomorrow" disabled="@running" @onclick="() => SnoozeChosen(1)">Tomorrow (1)</button>
                     <button type="button" class="triage-week" disabled="@running" @onclick="() => SnoozeChosen(7)">Next week (2)</button>
                     <input type="text" class="triage-until" value="@laterText" maxlength="10" disabled="@running"
-                           aria-label="Snooze until" placeholder="yyyy-MM-dd - Return to snooze" @oninput="LaterTyped" @onkeydown="e => SnoozeTyped(e)"
+                           aria-label="Snooze until" placeholder="yyyy-MM-dd" @oninput="LaterTyped" @onkeydown="e => SnoozeTyped(e)"
                            @onkeydown:stopPropagation="true" />
                     <button type="button" class="triage-cancel" disabled="@running" @onclick="CloseForm">Cancel</button>
                 </div>

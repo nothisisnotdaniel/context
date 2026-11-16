@@ -73,7 +73,7 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.Equal("2048", field.GetAttribute("maxlength"));
         Assert.False(field.HasAttribute("value"));
         Assert.Empty(cut.FindAll("button.calendar-link-save"));
-        Assert.Equal("https:// or webcal:// link - Return to save", field.GetAttribute("placeholder"));
+        Assert.Equal("https:// or webcal:// link", field.GetAttribute("placeholder"));
 
         await Type(cut, FakeHttpHandler.Link);
 

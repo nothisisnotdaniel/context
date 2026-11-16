@@ -1780,24 +1780,46 @@ public sealed class DesktopSourceTests
         Assert.DoesNotContain(".capture-box .capture {", css);
     }
 
-    // 194 AC-8: every submit-only box says what Return does, and the submit buttons are gone from the markup.
+    // 194 AC-8, 197 AC-4/AC-5: every submit-only box has exactly its short placeholder, and the submit buttons are gone.
     [Theory]
-    [InlineData("CaptureBox.razor", "Return to capture", "class=\"capture\"")]
-    [InlineData("NotesPanel.razor", "Return to create", "class=\"note-new\"")]
-    [InlineData("TodoPanel.razor", "Return to add", "class=\"add\"")]
-    [InlineData("SettingsPanel.razor", "Return to save", "class=\"calendar-link-save\"")]
-    [InlineData("Main.razor", "Return to move", "class=\"move-here\"")]
-    [InlineData("Main.razor", "Return to create", "class=\"create-subpage\"")]
-    [InlineData("Main.razor", "Return to save", "class=\"save-name\"")]
-    [InlineData("TriagePanel.razor", "Return to snooze", "class=\"triage-submit\"")]
-    [InlineData("TriagePanel.razor", "Note name - Return to add", "class=\"triage-submit\"")]
-    [InlineData("TriagePanel.razor", "Todo text - Return to add", "class=\"triage-submit\"")]
-    [InlineData("TriagePanel.razor", "Note title - Return to create", "class=\"triage-submit\"")]
-    public void Razor_SubmitButtonGone_PlaceholderSaysReturn(string file, string hint, string removed)
+    [InlineData("CaptureBox.razor", "Capture to inbox", "class=\"capture\"")]
+    [InlineData("NotesPanel.razor", "New note title", "class=\"note-new\"")]
+    [InlineData("TodoPanel.razor", "New todo", "class=\"add\"")]
+    [InlineData("SettingsPanel.razor", "https:// or webcal:// link", "class=\"calendar-link-save\"")]
+    [InlineData("Main.razor", "Empty: top level", "class=\"move-here\"")]
+    [InlineData("Main.razor", "Subpage title", "class=\"create-subpage\"")]
+    [InlineData("Main.razor", "New name", "class=\"save-name\"")]
+    [InlineData("TriagePanel.razor", "yyyy-MM-dd", "class=\"triage-submit\"")]
+    [InlineData("TriagePanel.razor", "Note name", "class=\"triage-submit\"")]
+    [InlineData("TriagePanel.razor", "Todo text", "class=\"triage-submit\"")]
+    [InlineData("TriagePanel.razor", "Note title", "class=\"triage-submit\"")]
+    public void Razor_SubmitButtonGone_PlaceholderIsShort(string file, string placeholder, string removed)
     {
         string razor = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, file));
-        Assert.Contains("placeholder=\"", razor);
-        Assert.Contains(hint, razor);
+        Assert.Contains("placeholder=\"" + placeholder + "\"", razor);
+        Assert.DoesNotContain("Return to", razor);
         Assert.DoesNotContain(removed, razor);
+    }
+
+    // 197 AC-2, AC-5, AC-7
+    [Fact]
+    public void Css_NoLogoRule_BarAlignsRight_NoReturnHints_ClaudeMdUpdated()
+    {
+        string root = RepoFiles.Root();
+        string css = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+        Assert.DoesNotContain(".logo", css);
+        string bar = css[css.IndexOf(".notes-bar {", StringComparison.Ordinal)..];
+        bar = bar[..bar.IndexOf('}')];
+        Assert.Contains("justify-content: flex-end;", bar);
+        foreach (string f in Directory.EnumerateFiles(Path.Combine(root, RepoFiles.DesktopFolder), "*.razor", SearchOption.AllDirectories)
+                     .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar) && !f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar)))
+        {
+            Assert.DoesNotContain("Return to", File.ReadAllText(f));
+        }
+
+        string md = File.ReadAllText(Path.Combine(root, "CLAUDE.md"));
+        Assert.DoesNotContain("Sidebar logo", md);
+        Assert.DoesNotContain("svg.logo", md);
+        Assert.Contains("Return to", md);
     }
 }

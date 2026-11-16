@@ -1081,7 +1081,7 @@ public sealed class MainTests : IDisposable
         await cut.Find(".note-toolbar button.new-subpage").ClickAsync(new MouseEventArgs());
         IElement field = cut.Find(".note-toolbar input.subpage-title");
         Assert.Equal("Subpage title", field.GetAttribute("aria-label"));
-        Assert.Equal("Subpage title - Return to create", field.GetAttribute("placeholder"));
+        Assert.Equal("Subpage title", field.GetAttribute("placeholder"));
         Assert.Equal(string.Empty, field.GetAttribute("value"));
         Assert.Equal(["Cancel"], cut.FindAll(".note-toolbar button").Select(b => b.TextContent).ToArray());
         await field.InputAsync(new ChangeEventArgs { Value = "Meeting 2" });

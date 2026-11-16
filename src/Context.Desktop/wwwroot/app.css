@@ -756,20 +756,13 @@ input[type="password"]:disabled {
     display: none;
 }
 
-/* The sidebar bar: the logo and the icon buttons. */
+/* The sidebar bar: only the icon buttons, right-aligned. */
 .notes-bar {
     align-items: center;
     display: flex;
     gap: 8px;
-    justify-content: space-between;
+    justify-content: flex-end;
     margin-bottom: 8px;
-}
-
-.notes-bar .logo {
-    color: var(--accent-strong);
-    flex: none;
-    height: 22px;
-    width: 22px;
 }
 
 .notes-bar-buttons {
