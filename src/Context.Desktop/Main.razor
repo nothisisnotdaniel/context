@@ -13,7 +13,7 @@
                 <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" OnTriage="ShowTriage" />
             </aside>
             <main class="current-region">
-                <CaptureBox Guard="CaptureHeld" OnCaptured="Captured" />
+                <TopBar OnToday="ShowToday" OnPick="PickDay" />
                 @if (page == Page.Triage)
                 {
                     <TriagePanel Guard="TriageHeld" OnTriaged="Triaged" OnClose="CloseTriage" />
@@ -127,7 +127,7 @@
                     }
                     else
                     {
-                        <CurrentPanel OnOpen="RequestOpen" />
+                        <CurrentPanel OnOpen="RequestOpen" Day="@shownDay" />
                     }
                 </div>
             </main>
@@ -185,6 +185,8 @@ else
     private string? pendingName;
     private string? pendingPerson;
     private bool pendingToday;
+    private DateOnly? shownDay;
+    private DateOnly? pendingDay;
     private bool pendingBriefing;
     private Appointment? pendingMeeting;
     private bool paletteOpen;
@@ -324,6 +326,20 @@ else
     private void ShowSettings() => OpenPage(Page.Settings);
 
     private void CloseSettings() => page = Page.None;
+
+    // The Today button: the current view of today, asking first when the open note has unsaved changes.
+    private Task ShowToday()
+    {
+        pendingDay = null;
+        return RequestOpen(null);
+    }
+
+    // A day picked in the top bar: that day's view, asking first like RequestOpen; applied once the guard resolves.
+    private Task PickDay(DateOnly day)
+    {
+        pendingDay = day;
+        return RequestOpen(null);
+    }
 
     // Opens the note called name (null: the current view), asking first when the open note has unsaved changes.
     private async Task RequestOpen(string? name)
@@ -478,6 +494,7 @@ else
     private void KeepEditing()
     {
         discarding = false;
+        pendingDay = null;
         pendingName = null;
         pendingPerson = null;
         pendingToday = false;
@@ -526,6 +543,8 @@ else
 
     private void ShowNote(string? name)
     {
+        shownDay = name is null ? pendingDay : null;
+        pendingDay = null;
         openName = name;
         openSensitive = name is not null
             && Snapshot is { } snapshot

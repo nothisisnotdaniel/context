@@ -69,6 +69,26 @@ public sealed class CurrentViewTests : IDisposable
     private static DateTime At(int day, int hour, int minute = 0) => new(2026, 10, day, hour, minute, 0);
 
     // AC-4: every appointment comes back; the 15-row cap is the renderer's.
+    // 198 AC-11: dueOnDayOnly keeps only the todos due exactly on the day (none overdue); the default is unchanged.
+    [Fact]
+    public void Build_DueOnDayOnly_KeepsOnlyTheDay_DefaultUnchanged()
+    {
+        TodoStore todos = Todos();
+        todos.Add("today", Today);
+        todos.Add("old", Today.AddDays(-2));
+        todos.Add("next", Today.AddDays(1));
+        CalendarStore calendar = new(root, Zone);
+
+        CurrentView only = CurrentView.Build(todos, new TagIndex(root), new NoteStore(root), calendar, null, Today, dueOnDayOnly: true);
+        CurrentView next = CurrentView.Build(todos, new TagIndex(root), new NoteStore(root), calendar, null, Today.AddDays(1), dueOnDayOnly: true);
+        CurrentView normal = Build();
+
+        Assert.Equal(["today"], only.Due.Select(t => t.Text).ToArray());
+        Assert.All(only.Due, t => Assert.False(t.Overdue));
+        Assert.Equal(["next"], next.Due.Select(t => t.Text).ToArray());
+        Assert.Equal(["old", "today"], normal.Due.Select(t => t.Text).OrderBy(t => t, StringComparer.Ordinal).ToArray());
+    }
+
     [Fact]
     public void Build_TwentyAppointments_Untruncated()
     {

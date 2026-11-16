@@ -383,7 +383,7 @@ public sealed class TriagePanelTests : IDisposable
         await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".triage-panel .triage-item")), Wait);
-        Assert.Equal("capture-box", cut.Find("main.current-region").Children[0].ClassName);
+        Assert.Equal("top-bar", cut.Find("main.current-region").Children[0].ClassName);
         Assert.True(cut.Find("main.current-region").Children[1].ClassList.Contains("triage-panel"));
         Assert.Empty(cut.FindAll(".palette"));
 

@@ -879,7 +879,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Thumbprint` (whole, selectable) and `Expires` (`yyyy-MM-dd` in UTC or `Does not expire`); it never calls
     `Agree` and creates no key. Both reads run off the UI thread and never throw.
     **Review:** `ReviewPanel` (`/review`, argument ignored; `Main`'s `reviewShown`, at the top of the main region
-    under the capture box) draws `DesktopState.Review()` (off the UI thread, never throws: on an error an empty view
+    under the top bar) draws `DesktopState.Review()` (off the UI thread, never throws: on an error an empty view
     with `TodosUnreadable`): heading `Week review`, `Close`, the grey range, then `Changed notes` (date and a
     `note-button` through `RequestOpen`), `Done todos`, `Overdue` (`overdue` dates), `Next week` (an `h4` per day with
     appointments: time, title, location), the grey empty texts (`No notes changed.`, `No todos done.`,
@@ -948,12 +948,18 @@ Every factory agent reads this file before working on Context. Keep it short and
     in the toolbar's status line. Rules (`DesktopSourceTests`): `WritePlainCopy` and `ReadImport` are named in
     `Context.Desktop` only in `DesktopActions.cs`, and no `.razor` file matches `\b(File|Directory|Path)\.`.
     **Sidebar bar (job 197):** `NotesPanel`'s bar holds only the icon buttons (`.notes-bar-buttons`: triage, tags, settings), right-aligned (`justify-content: flex-end`); no logo and no visible "Notes" heading, the top-level `ul.note-list` carries `aria-label="Notes"`. **Placeholders:** a box's placeholder says only what it is for (`New todo`, `Capture to inbox`), never a `Return to …` hint; Return still submits and there are no submit buttons.
-    **Tidy layout (job 192):** the Triage, Tags and Settings buttons in `NotesPanel`'s bar are icon-only (inline `svg`, `aria-hidden`, `currentColor`; `aria-label` and `title` carry the name), note rows show no modified date, and `.capture-box` is a band (`--panel` background, `--line` bottom border).
-    **Quick capture:** `CaptureBox` is the first thing in `Main`'s main region, whatever else is shown there (not
-    with `Can't read the data folder.`): a text field (`aria-label="Capture"`, placeholder `Capture to inbox`,
-    `maxlength` `Inbox.MaxTextLength`), a `Capture` button and a `role="status"` line. Enter or the button calls
-    `DesktopActions.CaptureText(text)` once: on Done the field is emptied and the line shows accent `Captured.`, else
-    the red text and the typed text stays; both are disabled meanwhile, and after Enter the field has the focus again.
+    **Tidy layout (job 192):** the Triage, Tags and Settings buttons in `NotesPanel`'s bar are icon-only (inline `svg`, `aria-hidden`, `currentColor`; `aria-label` and `title` carry the name), note rows show no modified date, and `.top-bar` is a band (`--panel` background, `--line` bottom border).
+    **Top bar (job 198):** `TopBar` replaces the capture box as the first child of `Main`'s `main.current-region` (not with
+    `Can't read the data folder.`): an empty `.top-bar-start` and right-aligned `.top-bar-buttons` with icon buttons
+    `button.today-open` (`Today`) and `button.day-pick-open` (`Pick a day`; a popover with `input[type=date]`
+    `aria-label="Day"`, min 1900-01-01, max 2100-12-31, and a `.day-pick-backdrop`; Esc, backdrop or the button closes
+    it). `Main.ShowToday` and `PickDay(DateOnly)` go through `RequestOpen(null)` (the unsaved-changes guard; the picked
+    day waits in `pendingDay` until it resolves and becomes `shownDay`, which any other open resets). `CurrentPanel`
+    gets `Day`: another day than `Snapshot.Today` loads `DesktopState.DayView(day)` (`CurrentView.Build(...,
+    dueOnDayOnly: true)`: only todos due that day, none overdue; read-only, reloaded after each `State.Changed`), shows
+    the date as title, no End the day, and `No appointments on <day>.` / `Nothing due on <day>.`.
+    **Quick capture:** the capture box is gone (job 198); capture is the palette's `/capture <text>`. It calls
+    `DesktopActions.CaptureText(text)` once and answers in the main status line:
     `CaptureText` cleans the text with `Inbox.Clean` (empty: Refused `Type something to capture.`; over 1000: `A
     capture can be at most 1000 characters.`), refuses a sensitive inbox without any key-store call (`inbox is
     sensitive. Nothing was captured.`) and then calls `Inbox.Capture` with the injected local clock (`Func<DateTime>`
@@ -961,13 +967,13 @@ Every factory agent reads this file before working on Context. Keep it short and
     and a refresh, `inbox is too large. Nothing was captured.`, `inbox kept changing on disk. Nothing was captured.`,
     or Failed `Can't write inbox. Nothing was captured.` (test hook `BeforeCaptureSave`, run before every save
     attempt). The palette's `/capture <text>` runs the same action and answers in the main status line (`/capture`
-    alone: red `Type /capture <text>.`). Both ask `Main.CaptureHeld` first (the box through its `Guard` parameter):
+    alone: red `Type /capture <text>.`). It asks `Main.CaptureHeld` first:
     with the plain inbox note open and unsaved changes nothing is written and the line is red `Save <name> first.`
-    After a capture `Main.Captured` (the box's `OnCaptured`) calls `NoteEditor.ReloadAsync` when the inbox is open
+    After a capture `Main.Captured` calls `NoteEditor.ReloadAsync` when the inbox is open
     without unsaved changes: the note is read again and the page editor mounted with it, without taking the focus,
     so the new line shows and a later save is not refused as changed on disk; another open note is left alone.
     **Inbox triage (job 179):** `TriagePanel` (`/triage`, argument ignored, or the `Triage` icon button in `NotesPanel`'s
-    bar; `Main`'s `page`, a page under the capture box, hidden by the ×, Esc or opening a note or the current
+    bar; `Main`'s `page`, a page under the top bar, hidden by the ×, Esc or opening a note or the current
     view) shows the first line of `DesktopState.Triage()` (`InboxTriage.Items`: every `- ` line; text without the
     `- `, a leading `yyyy-MM-dd HH:mm ` stamp, shown grey, and a final ` snooze:yyyy-MM-dd`; lines snoozed past today
     are left out and counted, due snoozed lines come first by day, then file order), `<n> left` and the buttons
@@ -1084,7 +1090,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `CaptureActionsTests` (`CaptureText`) and `CaptureBoxTests`, `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `ReviewPanelTests`, `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `ReviewPanelTests`, `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
     CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules, the transfer calls and no file system class in `.razor`), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),
