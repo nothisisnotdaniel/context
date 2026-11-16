@@ -9,3 +9,7 @@ Save a search or a tag filter (for example `#1234 and not #done`) under a name a
 ## Why
 
 Typing the same filter (for example `#1234 and not #done`) again and again is tedious.
+
+## Notes
+
+- Search is opened from a magnifying-glass icon button in the sidebar header (next to the Triage, Tags and Settings icon buttons), not only from the palette's `/search`. If the job touches how search is opened and that button doesn't exist yet, add it. Requested by the user on 2026-11-16.

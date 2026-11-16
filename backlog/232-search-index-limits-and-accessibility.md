@@ -26,3 +26,4 @@ As a Context user, I want search and the tag and link index to stay fast and use
 - #207: Proposed by job 170-full-text-search (review-security round 1, nit 2). Proposed by job 170-full-text-search (`factory/jobs/170-full-text-search/`).
 - #208: Proposed by job 170-full-text-search (review-code round 1, nit 1). Proposed by job 170-full-text-search (`factory/jobs/170-full-text-search/`).
 - #209: Proposed by job 170-full-text-search (review-ux round 1, nit 1). Proposed by job 170-full-text-search (`factory/jobs/170-full-text-search/`).
+- Search is opened from a magnifying-glass icon button in the sidebar header (next to the Triage, Tags and Settings icon buttons), not only from the palette's `/search`. If the job touches how search is opened and that button doesn't exist yet, add it. Requested by the user on 2026-11-16.
