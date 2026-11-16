@@ -143,14 +143,13 @@ public sealed class NotesPanelTests : IDisposable
 
     // 134 AC-7: the entry row is a plain text field (no @bind) and a New note button.
     [Fact]
-    public async Task EntryRow_TextFieldAndButton()
+    public async Task EntryRow_TextFieldWithoutButton()
     {
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
         Assert.Equal("text", cut.Find(".note-entry input").GetAttribute("type"));
-        IElement button = cut.Find(".note-entry button.note-new");
-        Assert.Equal("button", button.GetAttribute("type"));
-        Assert.Equal("New note", button.TextContent);
+        Assert.Empty(cut.FindAll("button.note-new"));
+        Assert.Equal("New note title - Return to create", cut.Find(".note-new-title").GetAttribute("placeholder"));
     }
 
     // 134 AC-7: Enter or the button creates the note, clears the field, opens the note and shows the accent status.
@@ -170,7 +169,7 @@ public sealed class NotesPanelTests : IDisposable
         }
         else
         {
-            await cut.Find("button.note-new").ClickAsync(new MouseEventArgs());
+            await cut.Find(".note-new-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
         }
 
         Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
@@ -195,7 +194,7 @@ public sealed class NotesPanelTests : IDisposable
         IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OnOpen, (string name) => opened.Add(name)));
 
         await cut.Find(".note-new-title").InputAsync(new ChangeEventArgs { Value = title });
-        await cut.Find("button.note-new").ClickAsync(new MouseEventArgs());
+        await cut.Find(".note-new-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         IElement status = cut.Find(".note-entry-result");
         Assert.Equal(text, status.TextContent);

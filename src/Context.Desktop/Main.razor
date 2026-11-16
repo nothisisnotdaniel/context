@@ -74,22 +74,19 @@
                             @if (subpaging)
                             {
                                 <input type="text" class="subpage-title" value="@subpageText" maxlength="200" disabled="@running"
-                                       aria-label="Subpage title" @ref="subpageField" @oninput="SubpageTyped" @onkeydown="e => CreateSubpage(e)" />
-                                <button type="button" class="create-subpage" disabled="@running" @onclick="() => CreateSubpage(null)">Create subpage</button>
+                                       aria-label="Subpage title" placeholder="Subpage title - Return to create" @ref="subpageField" @oninput="SubpageTyped" @onkeydown="e => CreateSubpage(e)" />
                                 <button type="button" class="cancel-subpage" disabled="@running" @onclick="CancelSubpage">Cancel</button>
                             }
                             else if (moving)
                             {
                                 <input type="text" class="move-parent" value="@moveText" maxlength="500" disabled="@running"
-                                       aria-label="New parent" placeholder="Empty: top level" @ref="moveField" @oninput="MoveTyped" @onkeydown="e => MoveHere(e)" />
-                                <button type="button" class="move-here" disabled="@running" @onclick="() => MoveHere(null)">Move here</button>
+                                       aria-label="New parent" placeholder="Empty: top level - Return to move" @ref="moveField" @oninput="MoveTyped" @onkeydown="e => MoveHere(e)" />
                                 <button type="button" class="cancel-move" disabled="@running" @onclick="CancelMove">Cancel</button>
                             }
                             else if (renaming)
                             {
                                 <input type="text" class="rename-title" value="@renameText" maxlength="200" disabled="@running"
-                                       aria-label="New name" @ref="renameField" @oninput="RenameTyped" @onkeydown="e => SaveName(e)" />
-                                <button type="button" class="save-name" disabled="@running" @onclick="() => SaveName(null)">Save name</button>
+                                       aria-label="New name" placeholder="New name - Return to save" @ref="renameField" @oninput="RenameTyped" @onkeydown="e => SaveName(e)" />
                                 <button type="button" class="cancel-rename" disabled="@running" @onclick="CancelRename">Cancel</button>
                             }
                             else

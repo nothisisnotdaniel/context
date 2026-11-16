@@ -14,7 +14,7 @@ public sealed class TodoEntryTests : IDisposable
 
     public void Dispose() => data.Dispose();
 
-    // The row: a text field (max 200), a date field defaulting to the injected today, Today/Tomorrow and Add.
+    // The row: a text field (max 200), a date field defaulting to the injected today, Today/Tomorrow and no Add button.
     [Fact]
     public async Task Render_RowWithDefaults()
     {
@@ -26,7 +26,9 @@ public sealed class TodoEntryTests : IDisposable
         IElement date = cut.Find(".todo-entry input.todo-due");
         Assert.Equal("date", date.GetAttribute("type"));
         Assert.Equal("2026-10-29", date.GetAttribute("value"));
-        Assert.Equal(["Today", "Tomorrow", "Add"], cut.FindAll(".todo-entry button").Select(b => b.TextContent).ToArray());
+        Assert.Equal(["Today", "Tomorrow"], cut.FindAll(".todo-entry button").Select(b => b.TextContent).ToArray());
+        Assert.Empty(cut.FindAll("button.add"));
+        Assert.Equal("New todo - Return to add", text.GetAttribute("placeholder"));
         Assert.All(cut.FindAll(".todo-entry button"), b => Assert.Equal("button", b.GetAttribute("type")));
     }
 
@@ -43,7 +45,7 @@ public sealed class TodoEntryTests : IDisposable
         await cut.Find(".todo-entry .due-tomorrow").ClickAsync(new MouseEventArgs());
         await cut.Find("input.todo-text").InputAsync(new ChangeEventArgs { Value = "Buy milk" });
 
-        await cut.Find(".todo-entry button.add").ClickAsync(new MouseEventArgs());
+        await cut.Find(".todo-entry .todo-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         TodoItem added = Assert.Single(data.Todos!.List());
         Assert.Equal("Buy milk", added.Text);
@@ -75,17 +77,17 @@ public sealed class TodoEntryTests : IDisposable
         Assert.Equal(textId, ((ElementReference)focus.Arguments[0]!).Id);
     }
 
-    // The Add button keeps the focus where it is (only Enter in the field gives the focus back to it).
+    // Return adds the todo and gives the focus back to the field.
     [Fact]
-    public async Task AddButton_DoesNotMoveFocus()
+    public async Task Enter_AddsAndFocusesTheField()
     {
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
         await cut.Find("input.todo-text").InputAsync(new ChangeEventArgs { Value = "Buy milk" });
 
-        await cut.Find(".todo-entry button.add").ClickAsync(new MouseEventArgs());
+        await cut.Find(".todo-entry .todo-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Single(data.Todos!.List());
-        Assert.DoesNotContain(data.Bunit.JSInterop.Invocations, i => i.Identifier.Contains("focus", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(data.Bunit.JSInterop.Invocations, i => i.Identifier.Contains("focus", StringComparison.OrdinalIgnoreCase));
     }
 
     // While a todo is being added the whole row and the todo checkboxes are disabled.
@@ -98,17 +100,31 @@ public sealed class TodoEntryTests : IDisposable
         data.Actions!.BeforeWrite = () => release.Wait(TimeSpan.FromSeconds(10));
         await cut.Find("input.todo-text").InputAsync(new ChangeEventArgs { Value = "Buy milk" });
 
-        Task add = cut.Find(".todo-entry button.add").ClickAsync(new MouseEventArgs());
+        Task add = cut.Find(".todo-entry .todo-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         cut.WaitForAssertion(() => Assert.All(
             cut.FindAll(".todo-entry input, .todo-entry button, .todo-list input"),
             e => Assert.True(e.HasAttribute("disabled"), e.OuterHtml)), Wait);
-        Assert.Equal(7, cut.FindAll(".todo-entry input, .todo-entry button, .todo-list input").Count);
+        Assert.Equal(6, cut.FindAll(".todo-entry input, .todo-entry button, .todo-list input").Count);
         release.Set();
         await add;
         cut.WaitForAssertion(() => Assert.All(
             cut.FindAll(".todo-entry input, .todo-entry button, .todo-list input"),
             e => Assert.False(e.HasAttribute("disabled"), e.OuterHtml)), Wait);
+    }
+
+    // 194 AC-4: Return in the date or the time input adds the todo with the typed text as well.
+    [Theory]
+    [InlineData("input.todo-due")]
+    [InlineData("input.todo-time")]
+    public async Task Enter_InDateOrTimeInput_Adds(string selector)
+    {
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+        await cut.Find("input.todo-text").InputAsync(new ChangeEventArgs { Value = "Buy milk" });
+
+        await cut.Find(selector).KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+
+        Assert.Single(data.Todos!.List());
     }
 
     // Empty text writes nothing and asks for the todo.
@@ -118,7 +134,7 @@ public sealed class TodoEntryTests : IDisposable
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
 
-        await cut.Find(".todo-entry button.add").ClickAsync(new MouseEventArgs());
+        await cut.Find(".todo-entry .todo-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Equal("Write the todo first.", cut.Find(".add-result").TextContent);
         Assert.True(cut.Find(".add-result").ClassList.Contains("red"));
@@ -151,7 +167,7 @@ public sealed class TodoEntryTests : IDisposable
         Assert.Equal("14:00", cut.Find("input.todo-time").GetAttribute("value"));
         await cut.Find("input.todo-text").InputAsync(new ChangeEventArgs { Value = "Call Anna" });
 
-        await cut.Find(".todo-entry button.add").ClickAsync(new MouseEventArgs());
+        await cut.Find(".todo-entry .todo-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         TodoItem added = Assert.Single(data.Todos!.List());
         Assert.Equal(new TimeOnly(14, 0), added.Time);
@@ -175,7 +191,7 @@ public sealed class TodoEntryTests : IDisposable
         }
 
         await cut.Find("input.todo-text").InputAsync(new ChangeEventArgs { Value = "Buy milk" });
-        await cut.Find(".todo-entry button.add").ClickAsync(new MouseEventArgs());
+        await cut.Find(".todo-entry .todo-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         TodoItem added = Assert.Single(data.Todos!.List());
         Assert.Null(added.Time);
