@@ -174,7 +174,7 @@ public sealed class DecisionsPanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal("No decisions yet.", cut.Find("p[role=status]").TextContent), Wait);
 
         data.WriteNote("2026-11-10 Plan", "Decision: go\n");
-        File.SetLastWriteTimeUtc(Path.Combine(data.Root, "2026-11-10 Plan.md"), DateTime.UtcNow.AddSeconds(5));
+        File.SetLastWriteTimeUtc(Path.Combine(data.Root, "2026-11-10 Plan.md"), new DateTime(2030, 1, 1, 12, 0, 0, DateTimeKind.Utc));
         await data.State!.Refresh();
 
         cut.WaitForAssertion(() => Assert.Equal(["2026-11-10 Plan"], NoteNames(cut)), Wait);
