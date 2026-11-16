@@ -83,7 +83,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#244](backlog/244-edit-a-note-in-place-no.md) Edit a note in place: no repeated title
 - [ ] [#245](backlog/245-auto-save-in-the-note-editor.md) Auto save in the note editor
 - [x] [#246](backlog/246-capture-bar-at-the-very-top.md) Capture bar at the very top, Enter instead of buttons next to inputs → 194-capture-bar-enter-submit
-- [ ] [#247](backlog/247-small-logo-at-the-top-of.md) Small logo at the top of the sidebar
+- [x] [#247](backlog/247-small-logo-at-the-top-of.md) Small logo at the top of the sidebar → 195-sidebar-logo
 - [ ] [#249](backlog/249-show-the-note-editor-without-its.md) Show the note editor without its own box
 - [ ] [#62](backlog/062-links-to-headings.md) Links to headings
 - [ ] [#66](backlog/066-rename-with-link-update.md) Rename with link update
