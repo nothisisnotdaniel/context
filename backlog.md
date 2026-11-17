@@ -82,7 +82,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#60](backlog/060-decision-log.md) Decision log → 180-decision-log
 - [x] [#250](backlog/250-top-bar-with-home-and-calendar.md) Top bar with Home and Calendar in place of the capture box → 198-top-bar-home-calendar
 - [x] [#253](backlog/253-capture-through-an-icon-in-the.md) Capture through an icon in the top bar → 199-capture-icon-top-bar
-- [ ] [#251](backlog/251-page-actions-behind-a-menu-in.md) Page actions behind a … menu in the top bar (after: #250)
+- [x] [#251](backlog/251-page-actions-behind-a-menu-in.md) Page actions behind a … menu in the top bar (after: #250) → 200-page-actions-menu
 - [ ] [#65](backlog/065-todos-inside-notes.md) Todos inside notes
 - [x] [#252](backlog/252-remove-the-sidebar-logo-and-the.md) Remove the sidebar logo and the Return hints → 197-no-logo-no-hints
 - [ ] [#244](backlog/244-edit-a-note-in-place-no.md) Edit a note in place: no repeated title
