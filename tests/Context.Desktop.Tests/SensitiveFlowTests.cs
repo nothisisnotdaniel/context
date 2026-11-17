@@ -64,12 +64,12 @@ public sealed class SensitiveFlowTests : IDisposable
 
         await Open(cut, js, "Plan");
 
-        Assert.Equal(["Rename", "Delete", "History", "Make plain", "Lock"], ToolbarButtons(cut));
+        Assert.Equal(["Rename", "Delete", "History", "Make plain", "Lock"], await MenuLabelsAsync(cut));
         Assert.Empty(cut.FindAll("button.open-external"));
-        Assert.All(cut.FindAll(".note-toolbar button"), b => Assert.Equal("button", b.GetAttribute("type")));
+        Assert.Empty(cut.FindAll(".note-toolbar"));
 
         await Open(cut, js, "Other");
-        Assert.Equal(["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export", "Mark sensitive"], ToolbarButtons(cut));
+        Assert.Equal(["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export", "Mark sensitive"], await MenuLabelsAsync(cut));
     }
 
     // AC-5: a refused OS prompt, a lost key or a changed file shows one red line and no editor.
@@ -135,7 +135,7 @@ public sealed class SensitiveFlowTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
 
-        await cut.Find("button.history").ClickAsync(new MouseEventArgs());
+        await MainTests.ChooseAsync(cut, "history");
         cut.WaitForAssertion(() => Assert.Equal(["2026-10-29 09:00:00"], cut.FindAll(".history-row button").Select(b => b.TextContent)), Wait);
         Assert.Equal(1, data.Keys.Agrees);
         await cut.Find(".history-row button").ClickAsync(new MouseEventArgs());
@@ -180,7 +180,7 @@ public sealed class SensitiveFlowTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
 
-        await cut.Find("button.lock").ClickAsync(new MouseEventArgs());
+        await MainTests.ChooseAsync(cut, "lock");
 
         cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.destroy")), Wait);
         Assert.Empty(cut.FindAll(".note-editor"));
@@ -340,7 +340,7 @@ public sealed class SensitiveFlowTests : IDisposable
         await Open(cut, js, "Plan");
         try
         {
-            await cut.Find("button.mark-sensitive").ClickAsync(new MouseEventArgs());
+            await MainTests.ChooseAsync(cut, "mark-sensitive");
             await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
             cut.WaitForAssertion(() => Assert.Equal(
@@ -365,7 +365,7 @@ public sealed class SensitiveFlowTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
 
-        await cut.Find("button.mark-sensitive").ClickAsync(new MouseEventArgs());
+        await MainTests.ChooseAsync(cut, "mark-sensitive");
 
         IElement dialog = cut.Find("[role=dialog]");
         Assert.Equal(
@@ -376,7 +376,7 @@ public sealed class SensitiveFlowTests : IDisposable
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal(["Plan.md"], RootFiles());
 
-        await cut.Find("button.mark-sensitive").ClickAsync(new MouseEventArgs());
+        await MainTests.ChooseAsync(cut, "mark-sensitive");
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Equal("Marked Plan sensitive.", cut.Find(".main-status").TextContent), Wait);
@@ -397,7 +397,7 @@ public sealed class SensitiveFlowTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
 
-        await cut.Find("button.mark-sensitive").ClickAsync(new MouseEventArgs());
+        await MainTests.ChooseAsync(cut, "mark-sensitive");
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Equal("Set up recovery first.", cut.Find(".main-status").TextContent), Wait);
@@ -408,8 +408,8 @@ public sealed class SensitiveFlowTests : IDisposable
 
     // AC-3 / AC-7: with unsaved changes neither question is asked.
     [Theory]
-    [InlineData(false, "button.mark-sensitive")]
-    [InlineData(true, "button.make-plain")]
+    [InlineData(false, "mark-sensitive")]
+    [InlineData(true, "make-plain")]
     public async Task MarkAndMakePlain_Dirty_AskToSaveFirst(bool sensitive, string button)
     {
         if (sensitive)
@@ -427,7 +427,7 @@ public sealed class SensitiveFlowTests : IDisposable
         js.Edit("unsaved\n");
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
 
-        await cut.Find(button).ClickAsync(new MouseEventArgs());
+        await MainTests.ChooseAsync(cut, button);
 
         Assert.Equal("Save Plan first.", cut.Find(".main-status").TextContent);
         Assert.Contains("red", cut.Find(".main-status").ClassList);
@@ -444,7 +444,7 @@ public sealed class SensitiveFlowTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
 
-        await cut.Find("button.make-plain").ClickAsync(new MouseEventArgs());
+        await MainTests.ChooseAsync(cut, "make-plain");
 
         Assert.Equal(
             "Make Plan plain? It will be stored as readable text again. Its history will be removed.", cut.Find("[role=dialog] .question").TextContent);
@@ -456,7 +456,8 @@ public sealed class SensitiveFlowTests : IDisposable
         Assert.Equal(["Plan.md"], RootFiles());
         Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         Assert.Empty(cut.FindAll("li.note .locked"));
-        cut.WaitForAssertion(() => Assert.Equal(["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export", "Mark sensitive"], ToolbarButtons(cut)), Wait);
+        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
+        Assert.Equal(["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export", "Mark sensitive"], await MenuLabelsAsync(cut));
         Assert.Equal(1, data.Keys.Agrees);
     }
 
@@ -469,13 +470,13 @@ public sealed class SensitiveFlowTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
 
-        await cut.Find("button.rename").ClickAsync(new MouseEventArgs());
+        await MainTests.ChooseAsync(cut, "rename");
         await cut.Find("input.rename-title").InputAsync(new Microsoft.AspNetCore.Components.ChangeEventArgs { Value = "Project" });
         await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         cut.WaitForAssertion(() => Assert.Equal("Project", cut.Find(".note-title").TextContent), Wait);
         Assert.Equal(["Project.ctxs"], RootFiles());
-        Assert.Equal(["Rename", "Delete", "History", "Make plain", "Lock"], ToolbarButtons(cut));
+        Assert.Equal(["Rename", "Delete", "History", "Make plain", "Lock"], await MenuLabelsAsync(cut));
         cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.mount").Count), Wait);
         Assert.Equal("Secret\n", js.MountedText());
         Assert.Equal(1, data.Keys.Agrees);
@@ -492,7 +493,7 @@ public sealed class SensitiveFlowTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
 
-        await cut.Find("button.delete").ClickAsync(new MouseEventArgs());
+        await MainTests.ChooseAsync(cut, "delete");
         Assert.Equal(["Other.md", "Plan.ctxs"], RootFiles());
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
@@ -512,7 +513,7 @@ public sealed class SensitiveFlowTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
 
-        Assert.Equal(["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export"], ToolbarButtons(cut));
+        Assert.Equal(["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export"], await MenuLabelsAsync(cut));
         Assert.Empty(cut.FindAll(".sensitive-entry"));
         Assert.Empty(cut.FindAll("button.sensitive-setup-open"));
         Assert.Empty(cut.FindAll("button.sensitive-restore-open"));
@@ -529,8 +530,8 @@ public sealed class SensitiveFlowTests : IDisposable
         await Open(cut, js, "Plan");
         int agrees = data.Keys.Agrees;
 
-        Assert.Empty(cut.FindAll(".note-toolbar button.export"));
-        Assert.DoesNotContain("Export", ToolbarButtons(cut));
+        Assert.Empty(cut.FindAll("button.export"));
+        Assert.DoesNotContain("Export", await MenuLabelsAsync(cut));
 
         await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
         await cut.Find(".palette-input").InputAsync(new Microsoft.AspNetCore.Components.ChangeEventArgs { Value = "/export" });
@@ -543,8 +544,14 @@ public sealed class SensitiveFlowTests : IDisposable
         Assert.False(File.Exists(data.Outside("Copy.md")));
     }
 
-    private static string[] ToolbarButtons(IRenderedComponent<Main> cut) =>
-        cut.FindAll(".note-toolbar button").Select(b => b.TextContent).ToArray();
+    // 200: the labels of the More actions menu's items; the menu is closed again afterwards.
+    private static async Task<string[]> MenuLabelsAsync(IRenderedComponent<Main> cut)
+    {
+        await MainTests.OpenMenuAsync(cut);
+        string[] labels = cut.FindAll(".page-menu button").Select(b => b.TextContent).ToArray();
+        await cut.Find(".page-menu-backdrop").ClickAsync(new MouseEventArgs());
+        return labels;
+    }
 
     private string[] RootFiles() => FileSnapshot.Take(data.Root, TagIndex.FileName).Keys.ToArray();
 

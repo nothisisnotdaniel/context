@@ -14,10 +14,6 @@ else if ((otherDay is null ? Snapshot?.Current : dayView) is { } view)
         @if (otherDay is null)
         {
             <h1 class="title">Today, @dayText</h1>
-            <div class="day-end">
-                <button type="button" class="end-day" disabled="@endingDay" @onclick="() => EndDay(view.Today)">End the day</button>
-                <p class="day-end-status cut @dayEndClass" role="status" title="@dayEndText">@dayEndText</p>
-            </div>
         }
         else
         {
@@ -201,27 +197,6 @@ else if ((otherDay is null ? Snapshot?.Current : dayView) is { } view)
         {
             dayView = loaded;
             StateHasChanged();
-        }
-    }
-
-    private bool endingDay;
-    private string dayEndText = string.Empty;
-    private string dayEndClass = string.Empty;
-
-    // The End the day button: closes the shown day off the UI thread (DesktopActions.EndDay) and shows one line.
-    private async Task EndDay(DateOnly day)
-    {
-        endingDay = true;
-        try
-        {
-            ActionResult result = await Actions.EndDay(day);
-            bool ok = result.Kind == ActionKind.Done && result.Reason is ActionReason.None or ActionReason.Unchanged;
-            dayEndText = DesktopText.OneLine(result.Text);
-            dayEndClass = ok ? "grey" : "red";
-        }
-        finally
-        {
-            endingDay = false;
         }
     }
 

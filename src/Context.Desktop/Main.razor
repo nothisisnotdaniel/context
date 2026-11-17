@@ -13,7 +13,8 @@
                 <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" OnTriage="ShowTriage" />
             </aside>
             <main class="current-region">
-                <TopBar OnToday="ShowToday" OnPick="PickDay" OnCapture="CaptureAsync" />
+                <TopBar OnToday="ShowToday" OnPick="PickDay" OnCapture="CaptureAsync" PageActions="@PageActionsFor(snapshot)"
+                        PageActionsDisabled="@(running || renaming || subpaging || moving)" OnPageAction="RunPageAction" />
                 @if (page == Page.Triage)
                 {
                     <TriagePanel Guard="TriageHeld" OnTriaged="Triaged" OnClose="CloseTriage" />
@@ -70,48 +71,29 @@
                                 </ol>
                             </nav>
                         }
-                        <div class="note-toolbar">
-                            @if (subpaging)
-                            {
-                                <input type="text" class="subpage-title" value="@subpageText" maxlength="200" disabled="@running"
-                                       aria-label="Subpage title" placeholder="Subpage title" @ref="subpageField" @oninput="SubpageTyped" @onkeydown="e => CreateSubpage(e)" />
-                                <button type="button" class="cancel-subpage" disabled="@running" @onclick="CancelSubpage">Cancel</button>
-                            }
-                            else if (moving)
-                            {
-                                <input type="text" class="move-parent" value="@moveText" maxlength="500" disabled="@running"
-                                       aria-label="New parent" placeholder="Empty: top level" @ref="moveField" @oninput="MoveTyped" @onkeydown="e => MoveHere(e)" />
-                                <button type="button" class="cancel-move" disabled="@running" @onclick="CancelMove">Cancel</button>
-                            }
-                            else if (renaming)
-                            {
-                                <input type="text" class="rename-title" value="@renameText" maxlength="200" disabled="@running"
-                                       aria-label="New name" placeholder="New name" @ref="renameField" @oninput="RenameTyped" @onkeydown="e => SaveName(e)" />
-                                <button type="button" class="cancel-rename" disabled="@running" @onclick="CancelRename">Cancel</button>
-                            }
-                            else
-                            {
-                                <button type="button" class="rename" disabled="@running" @onclick="StartRename">Rename</button>
-                                <button type="button" class="delete" disabled="@running" @onclick="AskDelete">Delete</button>
-                                <button type="button" class="history" disabled="@running" aria-pressed="@(historyShown ? "true" : "false")" @onclick="ToggleHistory">History</button>
-                                @if (openSensitive)
+                        @if (renaming || subpaging || moving)
+                        {
+                            <div class="note-toolbar">
+                                @if (subpaging)
                                 {
-                                    <button type="button" class="make-plain" disabled="@running" @onclick="AskMakePlain">Make plain</button>
-                                    <button type="button" class="lock" disabled="@running" @onclick="LockOpen">Lock</button>
+                                    <input type="text" class="subpage-title" value="@subpageText" maxlength="200" disabled="@running"
+                                           aria-label="Subpage title" placeholder="Subpage title" @ref="subpageField" @oninput="SubpageTyped" @onkeydown="e => CreateSubpage(e)" />
+                                    <button type="button" class="cancel-subpage" disabled="@running" @onclick="CancelSubpage">Cancel</button>
                                 }
-                                else
+                                else if (moving)
                                 {
-                                    <button type="button" class="new-subpage" disabled="@running" @onclick="StartSubpage">New subpage</button>
-                                    <button type="button" class="move" disabled="@running" @onclick="StartMove">Move</button>
-                                    <button type="button" class="open-external" disabled="@running" @onclick="OpenOutside">Open in default editor</button>
-                                    <button type="button" class="export" disabled="@running" @onclick="Export">Export</button>
-                                    @if (snapshot.SensitiveSupported)
-                                    {
-                                        <button type="button" class="mark-sensitive" disabled="@running" @onclick="AskMark">Mark sensitive</button>
-                                    }
+                                    <input type="text" class="move-parent" value="@moveText" maxlength="500" disabled="@running"
+                                           aria-label="New parent" placeholder="Empty: top level" @ref="moveField" @oninput="MoveTyped" @onkeydown="e => MoveHere(e)" />
+                                    <button type="button" class="cancel-move" disabled="@running" @onclick="CancelMove">Cancel</button>
                                 }
-                            }
-                        </div>
+                                else if (renaming)
+                                {
+                                    <input type="text" class="rename-title" value="@renameText" maxlength="200" disabled="@running"
+                                           aria-label="New name" placeholder="New name" @ref="renameField" @oninput="RenameTyped" @onkeydown="e => SaveName(e)" />
+                                    <button type="button" class="cancel-rename" disabled="@running" @onclick="CancelRename">Cancel</button>
+                                }
+                            </div>
+                        }
                         <NoteEditor @key="(name, openSensitive)" @ref="editor" Name="@name" Sensitive="openSensitive"
                                     OnTag="ShowTag" OnOpenNote="RequestOpen" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked"
                                     OnAttach="AttachDropped" OnOpenAttachment="OpenAttachment" />
@@ -1607,34 +1589,6 @@ else
         ShowStatus($"Locked {DesktopText.OneLine(name)}.", "grey");
     }
 
-    private async Task OpenOutside()
-    {
-        if (openName is not { } name || running)
-        {
-            return;
-        }
-
-        running = true;
-        ActionResult opened;
-        try
-        {
-            opened = await Actions.OpenExternally(name);
-        }
-        finally
-        {
-            running = false;
-        }
-
-        if (opened.Kind == ActionKind.Done)
-        {
-            ShowStatus(string.Empty, string.Empty);
-        }
-        else
-        {
-            ShowStatus(DesktopText.OneLine(opened.Text), "red");
-        }
-    }
-
     // The editor's drop: stores the dropped files next to the open note, then the editor inserts the links (unsaved).
     private async Task AttachDropped(DroppedFiles dropped)
     {
@@ -1674,22 +1628,142 @@ else
         }
     }
 
-    // The toolbar's button: writes the open plain note's saved text to the file chosen in the OS save dialog.
-    private async Task Export()
+    // The shown page's actions for the top bar's More actions menu: a plain or sensitive note's, End the day on today's
+    // view, none on another day or on a page (Triage, Tags, Settings).
+    private IReadOnlyList<PageAction> PageActionsFor(DesktopSnapshot snapshot)
     {
-        if (await ExportTarget() is not { } chosen)
+        if (page != Page.None)
         {
-            return;
+            return [];
         }
 
-        running = true;
-        try
+        if (openName is null)
         {
-            ShowExported(await Actions.ExportNote(chosen.Name, chosen.Target));
+            return shownDay is { } day && day != snapshot.Today ? [] : [new PageAction("end-day", "End the day")];
         }
-        finally
+
+        PageAction[] common =
+        [
+            new PageAction("rename", "Rename"),
+            new PageAction("delete", "Delete"),
+            new PageAction("history", "History", historyShown),
+        ];
+        if (openSensitive)
         {
-            running = false;
+            return [.. common, new PageAction("make-plain", "Make plain"), new PageAction("lock", "Lock")];
+        }
+
+        PageAction[] plain =
+        [
+            .. common,
+            new PageAction("new-subpage", "New subpage"),
+            new PageAction("move", "Move"),
+            new PageAction("open-external", "Open in default editor"),
+            new PageAction("export", "Export"),
+        ];
+        return snapshot.SensitiveSupported ? [.. plain, new PageAction("mark-sensitive", "Mark sensitive")] : plain;
+    }
+
+    // A More actions item: the same handlers the toolbar buttons and End the day used to call. Open in default editor,
+    // Export and End the day call the actions here, so every Actions call stays in a bound handler.
+    private async Task RunPageAction(string id)
+    {
+        switch (id)
+        {
+            case "rename":
+                await StartRename();
+                break;
+            case "delete":
+                AskDelete();
+                break;
+            case "history":
+                ToggleHistory();
+                break;
+            case "new-subpage":
+                await StartSubpage();
+                break;
+            case "move":
+                await StartMove();
+                break;
+            case "mark-sensitive":
+                await AskMark();
+                break;
+            case "make-plain":
+                await AskMakePlain();
+                break;
+            case "lock":
+                await LockOpen();
+                break;
+            case "open-external":
+            {
+                if (openName is not { } name || running)
+                {
+                    return;
+                }
+
+                running = true;
+                ActionResult opened;
+                try
+                {
+                    opened = await Actions.OpenExternally(name);
+                }
+                finally
+                {
+                    running = false;
+                }
+
+                if (opened.Kind == ActionKind.Done)
+                {
+                    ShowStatus(string.Empty, string.Empty);
+                }
+                else
+                {
+                    ShowStatus(DesktopText.OneLine(opened.Text), "red");
+                }
+
+                break;
+            }
+            case "export":
+            {
+                if (await ExportTarget() is not { } chosen)
+                {
+                    return;
+                }
+
+                running = true;
+                try
+                {
+                    ShowExported(await Actions.ExportNote(chosen.Name, chosen.Target));
+                }
+                finally
+                {
+                    running = false;
+                }
+
+                break;
+            }
+            case "end-day":
+            {
+                if (running || openName is not null || Snapshot is not { } snapshot || (shownDay is { } day && day != snapshot.Today))
+                {
+                    return;
+                }
+
+                running = true;
+                ActionResult ended;
+                try
+                {
+                    ended = await Actions.EndDay(snapshot.Today);
+                }
+                finally
+                {
+                    running = false;
+                }
+
+                bool ok = ended.Kind == ActionKind.Done && ended.Reason is ActionReason.None or ActionReason.Unchanged;
+                ShowStatus(DesktopText.OneLine(ended.Text), ok ? "grey" : "red");
+                break;
+            }
         }
     }
 
