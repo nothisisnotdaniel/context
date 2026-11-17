@@ -17,7 +17,7 @@ public sealed class DesktopSourceTests
     // which components reach only through the injected Actions (only Actions.RestoreVersion( itself is let through).
     // 177: NoteAttachments.Add (caught by Add), MoveWithNote and RemoveUnlinked. 178: TodoStore.MarkNotified.
     // 179: InboxTriage.Snooze; InboxTriage.Remove is checked on its own (Sources_CallInboxTriageWritesOnlyInDesktopActions),
-    // since components remove from their own lists.
+    // since components remove from their own lists. 201: NoteTodos.Complete (matched by Complete).
     private static readonly Regex Writes = new(
         @"(?:(?<!\bActions)|(?!\.\s*RestoreVersion\s*\())\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
         + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture|CreateChild|Move|Ensure|CreateWithText"

@@ -298,4 +298,216 @@ public sealed class TodoPanelTests : IDisposable
 
     private static string Line(IElement item) =>
         string.Join(" ", item.QuerySelectorAll("span").Select(c => c.TextContent));
+
+    // 201 ----------------------------------------------------------------------------------------
+
+    private void WriteNoteInPast(string name, string text)
+    {
+        data.WriteNote(name, text);
+        File.SetLastWriteTimeUtc(Path.Combine(data.Root, name + ".md"), new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc));
+    }
+
+    // 201 AC-5, AC-4: note todos merge into the list with their date class (none when undated), the text with
+    // mention buttons and a typed note button carrying the full name.
+    [Fact]
+    public async Task Render_NoteTodos_MergedWithNoteButtons()
+    {
+        data.AddTodo("Stored today", DesktopFixture.Today);
+        WriteNoteInPast("Meeting", "- [ ] call @[Anna] due:2026-10-29\n- [ ] undated\n- [ ] late due:2026-10-01\n");
+        WriteNoteInPast("Projects", "# Projects\n");
+        Directory.CreateDirectory(Path.Combine(data.Root, "Projects"));
+        WriteNoteInPast(Path.Combine("Projects", "Big plan"), "- [ ] later due:2026-12-01\n");
+
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+
+        IReadOnlyList<IElement> items = cut.FindAll("li.todo");
+        Assert.Equal(
+            ["late", "Stored today", "call @[Anna]", "later", "undated"],
+            items.Select(i => i.QuerySelector(".text")!.TextContent).ToArray());
+        Assert.Equal(
+            ["overdue", "today", "today", "later", "none"],
+            items.Select(i => i.QuerySelector(".date")?.ClassList.Single(c => c != "date") ?? "none").ToArray());
+        Assert.Equal(
+            ["Meeting", "Meeting", "Projects/Big plan", "Meeting"],
+            cut.FindAll("button.todo-note").Select(b => b.TextContent).ToArray());
+        Assert.All(cut.FindAll("button.todo-note"), b => Assert.Equal("button", b.GetAttribute("type")));
+        Assert.All(cut.FindAll("button.todo-note"), b => Assert.Equal(b.TextContent, b.GetAttribute("title")));
+        Assert.Empty(items[1].QuerySelectorAll("button.todo-note"));
+        Assert.Equal("Anna", cut.Find("li.todo:nth-child(3) button.mention").TextContent.Trim('@', '[', ']'));
+        Assert.Empty(cut.FindAll("p.grey"));
+    }
+
+    // 201 AC-5: "No todos yet" only when both lists are empty.
+    [Fact]
+    public async Task Render_OnlyNoteTodos_NoEmptyLine()
+    {
+        WriteNoteInPast("Meeting", "- [ ] call Anna\n");
+
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+
+        Assert.Single(cut.FindAll("li.todo"));
+        Assert.DoesNotContain("No todos yet", cut.Markup, StringComparison.Ordinal);
+    }
+
+    // 201 AC-5: the note button calls OnOpen with the full name; no tick, no dialog, nothing written.
+    [Fact]
+    public async Task NoteButton_Click_CallsOnOpen_NoTick()
+    {
+        WriteNoteInPast("Meeting", "- [ ] call Anna\n");
+        await data.RefreshAsync();
+        List<string> opened = [];
+        IRenderedComponent<TodoPanel> cut = data.Bunit.Render<TodoPanel>(p => p
+            .Add(c => c.OnOpen, (string name) => opened.Add(name)));
+        SortedDictionary<string, string> files = Files();
+
+        await cut.Find("button.todo-note").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(["Meeting"], opened);
+        Assert.False(Box(cut, 0).HasAttribute("checked"));
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Equal(files, Files());
+    }
+
+    // 201 AC-6: ticking asks "Mark this todo done? <text>"; Confirm ticks the line and the todo is gone.
+    [Fact]
+    public async Task TickNoteTodo_Confirm_WritesX_ShowsDone_AndRemoves()
+    {
+        string path = Path.Combine(data.Root, "Meeting.md");
+        Directory.CreateDirectory(data.Root);
+        File.WriteAllBytes(path, [0xEF, 0xBB, 0xBF, .. System.Text.Encoding.UTF8.GetBytes("a\r\n- [ ] call Anna\r\nb\r\n")]);
+        File.SetLastWriteTimeUtc(path, new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc));
+        data.AddTodo("Stored", DesktopFixture.Today);
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+
+        Box(cut, 1).Change(true);
+        Assert.Equal("Mark this todo done? call Anna", cut.Find("[role=dialog] .question").TextContent);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Empty(cut.FindAll("[role=dialog]"));
+            IElement result = cut.Find("p.result");
+            Assert.Equal("Done: call Anna", result.TextContent);
+            Assert.True(result.ClassList.Contains("accent"));
+            Assert.Equal(["Stored"], cut.FindAll("li.todo .text").Select(t => t.TextContent).ToArray());
+        }, Wait);
+        Assert.Equal(
+            [0xEF, 0xBB, 0xBF, .. System.Text.Encoding.UTF8.GetBytes("a\r\n- [x] call Anna\r\nb\r\n")],
+            File.ReadAllBytes(path));
+        Assert.Equal(["Stored"], data.Todos!.List().Select(t => t.Text).ToArray());
+    }
+
+    // 201 AC-6: Cancel writes nothing.
+    [Fact]
+    public async Task TickNoteTodo_Cancel_WritesNothing()
+    {
+        WriteNoteInPast("Meeting", "- [ ] call Anna\n");
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+        SortedDictionary<string, string> files = Files();
+
+        Box(cut, 0).Change(true);
+        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.False(Box(cut, 0).HasAttribute("checked"));
+        Assert.Equal(files, Files());
+    }
+
+    // 201 AC-7: a changed line or a gone note shows the red fixed text and writes nothing.
+    [Theory]
+    [InlineData("changed", "The todo's line in Meeting changed. Open the note and tick it there.")]
+    [InlineData("gone", "Meeting no longer exists. Nothing was done.")]
+    public async Task TickNoteTodo_ChangedOrGone_RedText(string how, string text)
+    {
+        WriteNoteInPast("Meeting", "- [ ] call Anna\n");
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+        string path = Path.Combine(data.Root, "Meeting.md");
+        if (how == "gone")
+        {
+            File.Delete(path);
+        }
+        else
+        {
+            File.WriteAllText(path, "- [ ] call Anna today\n");
+        }
+
+        SortedDictionary<string, string> files = Files();
+
+        Box(cut, 0).Change(true);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() =>
+        {
+            IElement result = cut.Find("p.result");
+            Assert.Equal(text, result.TextContent);
+            Assert.True(result.ClassList.Contains("red"));
+            Assert.Equal("status", result.GetAttribute("role"));
+        }, Wait);
+        Assert.Equal(files, Files());
+    }
+
+    // 201 AC-9: a bad context.db shows the red line while the todos.json todos still show.
+    [Fact]
+    public async Task Render_BadDb_RedLine_StoredTodosStay()
+    {
+        WriteNoteInPast("Meeting", "- [ ] call Anna\n");
+        data.AddTodo("Stored", DesktopFixture.Today);
+        data.WriteFile(TagIndex.FileName, "not a database at all, not at all, really not");
+
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+
+        IElement line = cut.Find("p.red");
+        Assert.Equal("Can't read the note todos.", line.TextContent);
+        Assert.Equal(["Stored"], cut.FindAll("li.todo .text").Select(t => t.TextContent).ToArray());
+        Assert.DoesNotContain("No todos yet", cut.Markup, StringComparison.Ordinal);
+    }
+
+    // 201 AC-9: a bad todos.json shows its red line while the note todos still show.
+    [Fact]
+    public async Task Render_BadTodosJson_NoteTodosStay()
+    {
+        WriteNoteInPast("Meeting", "- [ ] call Anna\n");
+        data.WriteFile(TodoStore.FileName, "[ {");
+
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+
+        Assert.Equal("Can't read todos.json", cut.Find("p.red").TextContent);
+        Assert.Equal(["call Anna"], cut.FindAll("li.todo .text").Select(t => t.TextContent).ToArray());
+        Assert.Single(cut.FindAll("button.todo-note"));
+    }
+
+    // 201 AC-9: with sensitive notes set up, a plain note's todo lists and ticks; the key store is never asked.
+    [Fact]
+    public async Task SensitiveSetUp_TickPlainNoteTodo_NoKeyStoreCall()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("Secret", "- [ ] secret todo\n");
+        WriteNoteInPast("Meeting", "- [ ] call Anna\n");
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+        Assert.Equal(["call Anna"], cut.FindAll("li.todo .text").Select(t => t.TextContent).ToArray());
+
+        Box(cut, 0).Change(true);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("Done: call Anna", cut.Find("p.result").TextContent);
+            Assert.Empty(cut.FindAll("li.todo"));
+        }, Wait);
+        Assert.Equal("- [x] call Anna\n", File.ReadAllText(Path.Combine(data.Root, "Meeting.md")));
+        Assert.Equal(0, data.Keys.Agrees);
+    }
+
+    // 201 AC-5: hostile note names and texts are encoded text.
+    [Fact]
+    public async Task Render_NoteTodo_HostileTextEncoded()
+    {
+        WriteNoteInPast("R&D", "- [ ] <img src=x onerror=alert(1)> \u0001\n");
+
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+
+        Assert.Empty(cut.FindAll("img"));
+        Assert.Equal("<img src=x onerror=alert(1)> \uFFFD", cut.Find(".text").TextContent);
+        Assert.Equal("R&D", cut.Find("button.todo-note").TextContent);
+    }
 }

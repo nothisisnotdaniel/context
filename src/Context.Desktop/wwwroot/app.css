@@ -215,6 +215,30 @@ ol {
     outline-offset: 2px;
 }
 
+/* The note a todo inside a note comes from, after its text: a link-like button that opens the note; a long name is cut,
+   the full name is in its title. */
+.todo .todo-note {
+    background: none;
+    border: none;
+    color: var(--grey);
+    cursor: pointer;
+    flex: 0 1 auto;
+    font: inherit;
+    font-size: 12px;
+    max-width: 12em;
+    min-width: 0;
+    overflow: hidden;
+    padding: 0;
+    text-decoration: underline;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.todo .todo-note:focus-visible {
+    outline: 2px solid var(--accent-strong);
+    outline-offset: 2px;
+}
+
 table {
     border-collapse: collapse;
     table-layout: fixed;

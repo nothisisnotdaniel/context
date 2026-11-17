@@ -139,6 +139,18 @@ removes the attachments that only it links in its level; ones another note links
 - An older kept version of a moved note still holds the old attachment names, so restoring it can link a missing or
   different file.
 
+### Todos inside notes
+
+Write an action item as a Markdown task line anywhere in a note: `- [ ] call Anna due:2026-11-20` (`*` or `+`
+instead of `-` and indenting work too; the `due:yyyy-MM-dd` word is optional and can stand anywhere in the line).
+The todo sidebar and `context todos` list it with the todos from `todos.json`, sorted by its due date (on the same
+date the `todos.json` todos first; todos without a date last), with the note's name; in the app the name opens the
+note. `context todos` prints such a todo as `2026-11-20\tcall Anna\tMeeting` (`-` as the date when it has none).
+Ticking it in the sidebar (after `Mark this todo done?`) or `context todo done call Anna` writes `- [x]` into that
+line of the note, and only when the line is still exactly as it was listed; otherwise nothing is written and you see
+`The todo's line in <note> changed. Open the note and tick it there.` Ticking `[x]` in the note itself removes it
+from the list. Lines in code blocks, sensitive notes and numbered lists (`1. [ ]`) are not listed.
+
 ### Timed reminders
 
 Give a todo a time to be reminded at: `context todo add 2026-11-16 14:00 Call Anna` (the time is `HH:mm`, or `H:mm`,
@@ -183,7 +195,7 @@ plain ASCII; any JSON parser, `ConvertFrom-Json` included, reads them back.
 | Command | Shape |
 |---------|-------|
 | `version` | `{"version":"1.2.3"}` |
-| `todos` | `{"todos":[{"due":"2026-11-14","time":"14:00","text":"..."}]}` (`time` is `null` for a todo without one) |
+| `todos` | `{"todos":[{"due":"2026-11-14","time":"14:00","text":"...","note":null}]}` (`time` is `null` for a todo without one; `note` is the note's name for a todo inside a note, whose `time` is `null` and whose `due` is `null` when it has no date) |
 | `notes` | `{"notes":[{"name":"A","locked":false}]}` |
 | `note show <name>` | `{"name":"A","text":"..."}` |
 | `tags` | `{"tags":[{"tag":"work","count":2}]}` |

@@ -182,6 +182,26 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal("Fresh", cut.Find(".note-title").TextContent), Wait);
     }
 
+    // 201 AC-5: a note todo's note button opens the note, after the "Discard changes" check for unsaved edits.
+    [Fact]
+    public async Task TodoNoteButton_DirtyEditor_AsksThenOpensTheNote()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        data.WriteNote("Meeting", "# Meeting\n- [ ] call Anna\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        js.Edit("# Plan\n\nUnsaved\n");
+
+        await cut.Find(".todos-region button.todo-note").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("Meeting", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);
+        Assert.Equal("# Meeting\n- [ ] call Anna\n", File.ReadAllText(Path.Combine(data.Root, "Meeting.md")));
+    }
+
     // 134 AC-7: creating from the entry row while the open note has unsaved changes asks to discard first.
     [Fact]
     public async Task EntryRow_DirtyEditor_AsksBeforeOpeningTheNewNote()

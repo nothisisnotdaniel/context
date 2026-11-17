@@ -17,7 +17,9 @@ internal sealed record DesktopSnapshot
         string folder,
         IReadOnlyList<NoteInfo>? sensitive = null,
         bool sensitiveSupported = false,
-        bool recoveryReady = false)
+        bool recoveryReady = false,
+        IReadOnlyList<NoteTodo>? noteTodos = null,
+        bool noteTodosUnreadable = false)
     {
         Failed = failed;
         Today = today;
@@ -30,6 +32,8 @@ internal sealed record DesktopSnapshot
         Sensitive = sensitive ?? [];
         SensitiveSupported = sensitiveSupported;
         RecoveryReady = recoveryReady;
+        NoteTodos = noteTodos ?? [];
+        NoteTodosUnreadable = noteTodosUnreadable;
     }
 
     /// <summary>Returns only the type name, so formatting a snapshot never prints its raw text.</summary>
@@ -67,6 +71,12 @@ internal sealed record DesktopSnapshot
 
     /// <summary>True when the key store holds a recovery public key, so notes can be marked sensitive.</summary>
     public bool RecoveryReady { get; }
+
+    /// <summary>The open todos inside plain notes (<see cref="TagIndex.NoteTodos"/>), read after a <c>Sync</c>.</summary>
+    public IReadOnlyList<NoteTodo> NoteTodos { get; }
+
+    /// <summary>True when <c>context.db</c> can't be read; then <see cref="NoteTodos"/> is empty.</summary>
+    public bool NoteTodosUnreadable { get; }
 
     /// <summary>The snapshot shown when building one threw.</summary>
     public static DesktopSnapshot ForFailure(string folder, DateOnly today) =>
