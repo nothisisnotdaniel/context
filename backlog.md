@@ -215,6 +215,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#259](backlog/259-check-the-capture-popover-in-a.md) Check the Capture popover in a narrow window
 - [?] [#260](backlog/260-return-focus-to-the-button-after.md) Return focus to the … button after a menu item or outside click
 - [?] [#261](backlog/261-check-context-db-in-the-todo.md) Check context.db in the todo done tests for note todos
+- [?] [#262](backlog/262-rename-a-note-update-its-title.md) Rename a note: update its # title line too
 
 ## Dropped with the terminal UI
 
