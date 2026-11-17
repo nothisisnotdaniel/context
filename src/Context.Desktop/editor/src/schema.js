@@ -14,6 +14,11 @@ export function chipDom(kind, raw) {
   return ["span", { class: "chip " + chip.name + " accent", title: raw, tabindex: "0", role: chip.role }, raw];
 }
 
+/** The toDOM spec of a heading of that level: level 1 is drawn as h2, so the page title is the only level-1 heading. */
+export function headingDom(level) {
+  return ["h" + Math.max(level, 2), 0];
+}
+
 export const schema = new Schema({
   nodes: {
     doc: {
@@ -44,7 +49,8 @@ export const schema = new Schema({
       group: "block",
       defining: true,
       parseDOM: [1, 2, 3, 4, 5, 6].map(level => ({ tag: "h" + level, attrs: { level } })),
-      toDOM(node) { return ["h" + node.attrs.level, 0]; },
+      // The level itself is kept, so a "# " line is saved as "# ".
+      toDOM(node) { return headingDom(node.attrs.level); },
     },
     code_block: {
       content: "text*",

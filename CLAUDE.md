@@ -1059,6 +1059,10 @@ Every factory agent reads this file before working on Context. Keep it short and
     does (`/new` alone: red `Type /new <title>.`). The page editor is `wwwroot/editor/editor.js`
     (`globalThis.ContextEditor`), built from `editor/src/` (`schema.js`, `markdown.js` with markdown-it `html: false`,
     `view.js`, `index.js`); `isLossless` false shows the grey `Saving will reformat parts of this note.`
+    Job 202: `NoteEditor` passes `Name` to `mount` (5th argument) and `isLossless`; `splitTitle(markdown, name)` keeps a
+    first line `# <name>` (ignoring case and surrounding spaces, or the name's last segment) and the blank lines after
+    it as a hidden head that is never parsed and that `getMarkdown`/`roundTrip` put back byte for byte, and inside the
+    editor a level-1 heading keeps `level` 1 (saved as `# `) but is drawn as `h2` (`headingDom`), while typing `# ` makes level 2 (`typedBlock` tests the input rules without a view).
     A note that was read (or unlocked) but whose page editor didn't start (`isLossless` or `mount` threw) shows red
     `The editor couldn't start. <name> was not changed.` (`p.editor-failed`, never together with `.unreadable`) and
     can't be saved, while a failed `focus` after a mount shows nothing.

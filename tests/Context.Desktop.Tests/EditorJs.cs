@@ -67,6 +67,12 @@ internal sealed class EditorJs
     public IReadOnlyList<InlineImage> MountedImages() =>
         (IReadOnlyList<InlineImage>)Calls("ContextEditor.mount")[^1].Arguments[3]!;
 
+    /// <summary>The note name passed to the latest mount (its 5th argument).</summary>
+    public string MountedName() => (string)Calls("ContextEditor.mount")[^1].Arguments[4]!;
+
+    /// <summary>The arguments of the latest isLossless call.</summary>
+    public IReadOnlyList<object?> LosslessArguments() => Calls("ContextEditor.isLossless")[^1].Arguments;
+
     /// <summary>The .NET object the latest mount handed to the page (what the editor calls back).</summary>
     public EditorInterop Page() =>
         ((DotNetObjectReference<EditorInterop>)Calls("ContextEditor.mount")[^1].Arguments[2]!).Value;

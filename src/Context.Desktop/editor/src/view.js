@@ -9,7 +9,7 @@ import { baseKeymap, toggleMark, setBlockType, chainCommands } from "prosemirror
 import { splitListItem, liftListItem, sinkListItem } from "prosemirror-schema-list";
 import { inputRules, wrappingInputRule, textblockTypeInputRule, InputRule } from "prosemirror-inputrules";
 import { schema } from "./schema.js";
-import { parse, serialize } from "./markdown.js";
+import { parse, serialize, splitTitle, joinTitle } from "./markdown.js";
 
 const editors = new WeakMap();
 
@@ -126,7 +126,8 @@ function rules() {
       wrappingInputRule(/^\s*>\s$/, schema.nodes.blockquote),
       wrappingInputRule(/^\s*-\s$/, schema.nodes.bullet_list),
       wrappingInputRule(/^(\d+)\.\s$/, schema.nodes.ordered_list, m => ({ order: +m[1] })),
-      textblockTypeInputRule(/^(#{1,6})\s$/, schema.nodes.heading, m => ({ level: m[1].length })),
+      // "# " gives level 2 too: the page title is the only level-1 heading.
+      textblockTypeInputRule(/^(#{1,6})\s$/, schema.nodes.heading, m => ({ level: Math.max(m[1].length, 2) })),
       textblockTypeInputRule(/^```$/, schema.nodes.code_block),
       tagRule,
       linkRule,
@@ -225,13 +226,37 @@ function chipNode(view, target) {
 }
 
 /**
- * Opens markdown in a new editor inside element; tag, link, mention and attachment clicks, drops and dirty flips call
- * back into dotnet. images ([{ src, mime, base64 }], checked by .NET) are shown inline through blob: URLs.
+ * The doc an empty paragraph becomes when text is typed into it through the editor's input rules, as JSON in the
+ * shape docJson gives. DOM-free: the rules run on an EditorState with no view.
  */
-export function mount(element, markdown, dotnet, images) {
+export function typedBlock(text) {
+  const plugin = rules();
+  let state = EditorState.create({ doc: schema.topNodeType.create(null, schema.nodes.paragraph.create()), plugins: [plugin] });
+  const typing = {
+    get state() { return state; },
+    composing: false,
+    dispatch(tr) { state = state.apply(tr); },
+  };
+  for (const ch of Array.from(String(text))) {
+    const { from, to } = state.selection;
+    if (!plugin.props.handleTextInput(typing, from, to, ch)) {
+      typing.dispatch(state.tr.insertText(ch, from, to));
+    }
+  }
+  return JSON.stringify(state.doc.toJSON());
+}
+
+/**
+ * Opens markdown in a new editor inside element; tag, link, mention and attachment clicks, drops and dirty flips call
+ * back into dotnet. images ([{ src, mime, base64 }], checked by .NET) are shown inline through blob: URLs. With a
+ * name, a first line "# <name>" (and the blank lines after it) is not shown: it stays on the editor as head and
+ * getMarkdown writes it back unchanged.
+ */
+export function mount(element, markdown, dotnet, images, name) {
   destroy(element);
-  const doc = parse(markdown);
-  const editor = { view: null, clean: doc, dirty: false, dotnet, images: new Map(), dropPos: null };
+  const { head, body } = JSON.parse(splitTitle(markdown, name));
+  const doc = parse(body);
+  const editor = { view: null, head, clean: doc, dirty: false, dotnet, images: new Map(), dropPos: null };
   for (const image of images || []) {
     if (image && typeof image.src === "string" && !editor.images.has(image.src)) {
       editor.images.set(image.src, blobUrl(image.mime, image.base64));
@@ -349,10 +374,10 @@ export function insertAttachment(element, src, name, isImage, mime, base64) {
   editor.dropPos = pos + node.nodeSize;
 }
 
-/** The editor's text as Markdown. */
+/** The editor's text as Markdown: the hidden title line first, unchanged. */
 export function getMarkdown(element) {
   const editor = editors.get(element);
-  return editor ? serialize(editor.view.state.doc) : "";
+  return editor ? joinTitle(editor.head, serialize(editor.view.state.doc)) : "";
 }
 
 /** True when the document changed since it was opened or last marked clean. */

@@ -476,14 +476,58 @@ export function serialize(doc) {
   return out.length > 0 && doc.attrs.trailingNewline ? out + "\n" : out;
 }
 
-/** The text after opening and saving without an edit. */
-export function roundTrip(markdown) {
-  return serialize(parse(markdown));
+// The first line when it is the note's own title: "# " (an ATX level-1 heading), then text that, trimmed, equals the
+// name or its last segment ignoring case.
+const TitleLine = /^# ([^\n]*)(?:\n|$)/;
+// Blank lines (spaces and tabs only) straight after the title line.
+const BlankLines = /^(?:[ \t]*\n)*/;
+
+function titleSplit(markdown, name) {
+  if (typeof markdown !== "string" || typeof name !== "string" || name.length === 0) {
+    return { head: "", body: markdown };
+  }
+  const line = TitleLine.exec(markdown);
+  if (!line) {
+    return { head: "", body: markdown };
+  }
+  const text = line[1].trim().toLowerCase();
+  const full = name.trim().toLowerCase();
+  const last = full.slice(full.lastIndexOf("/") + 1).trim();
+  if (text.length === 0 || (text !== full && text !== last)) {
+    return { head: "", body: markdown };
+  }
+  let end = line[0].length;
+  if (markdown[end - 1] === "\n") {
+    end += BlankLines.exec(markdown.slice(end))[0].length;
+  }
+  return { head: markdown.slice(0, end), body: markdown.slice(end) };
+}
+
+/**
+ * Splits note text into the hidden title (head: the first line "# <name>" with its newline and the blank lines after
+ * it, or "") and the body the editor shows. head + body is always the input. Returns { head, body } as JSON.
+ */
+export function splitTitle(markdown, name) {
+  return JSON.stringify(titleSplit(markdown, name));
+}
+
+/** The editor's whole text: the hidden head, then the body; a head without a newline gets a blank line first. */
+export function joinTitle(head, body) {
+  if (head.length > 0 && !head.endsWith("\n") && body.length > 0) {
+    return head + "\n\n" + body;
+  }
+  return head + body;
+}
+
+/** The text after opening and saving without an edit (with a name: the title line is kept as it is). */
+export function roundTrip(markdown, name) {
+  const { head, body } = titleSplit(markdown, name);
+  return joinTitle(head, serialize(parse(body)));
 }
 
 /** True when opening and saving without an edit gives the same text back. */
-export function isLossless(markdown) {
-  return roundTrip(markdown) === markdown;
+export function isLossless(markdown, name) {
+  return roundTrip(markdown, name) === markdown;
 }
 
 /**
