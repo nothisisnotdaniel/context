@@ -619,14 +619,16 @@ input[type="password"]:disabled {
     height: 18px;
 }
 
-.day-pick-backdrop {
+.day-pick-backdrop,
+.capture-pop-backdrop {
     background: transparent;
     inset: 0;
     position: fixed;
     z-index: 2;
 }
 
-.day-pick {
+.day-pick,
+.capture-pop {
     background: var(--panel);
     border: 1px solid var(--line);
     padding: 8px;
@@ -634,6 +636,11 @@ input[type="password"]:disabled {
     right: 8px;
     top: 100%;
     z-index: 3;
+}
+
+.capture-pop input {
+    width: 320px;
+    max-width: calc(100vw - 48px);
 }
 
 /* Day's end: the End the day button under the current view's title, with its result line beside it. */

@@ -13,7 +13,7 @@
                 <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" OnTriage="ShowTriage" />
             </aside>
             <main class="current-region">
-                <TopBar OnToday="ShowToday" OnPick="PickDay" />
+                <TopBar OnToday="ShowToday" OnPick="PickDay" OnCapture="CaptureAsync" />
                 @if (page == Page.Triage)
                 {
                     <TriagePanel Guard="TriageHeld" OnTriaged="Triaged" OnClose="CloseTriage" />
@@ -591,28 +591,9 @@ else
                 {
                     ShowStatus("Type /capture <text>.", "red");
                 }
-                else if (await CaptureHeld() is { } held)
+                else
                 {
-                    ShowStatus(DesktopText.OneLine(held), "red");
-                }
-                else if (!running)
-                {
-                    running = true;
-                    ActionResult captured;
-                    try
-                    {
-                        captured = await Actions.CaptureText(rest);
-                    }
-                    finally
-                    {
-                        running = false;
-                    }
-
-                    ShowStatus(DesktopText.OneLine(captured.Text), captured.Kind == ActionKind.Done ? "accent" : "red");
-                    if (captured.Kind == ActionKind.Done)
-                    {
-                        await Captured();
-                    }
+                    await CaptureAsync(rest);
                 }
 
                 break;
@@ -986,7 +967,7 @@ else
         && !openSensitive
         && string.Equals(name, State.ResolveNote(Inbox.NoteName) ?? Inbox.NoteName, StringComparison.OrdinalIgnoreCase);
 
-    // Asked before a capture (the box and the palette): the open inbox has unsaved changes, which a capture would
+    // Asked before a capture (the palette and the top bar): the open inbox has unsaved changes, which a capture would
     // leave stuck behind "changed on disk". Null when the capture may run.
     private async Task<string?> CaptureHeld()
     {
@@ -996,6 +977,46 @@ else
         }
 
         return null;
+    }
+
+    // The one capture flow (the palette's /capture <text> and the top bar's Capture popover): the open-inbox guard,
+    // the action and its answer in the main status line, then the editor reload. True when the text was captured.
+    private async Task<bool> CaptureAsync(string text)
+    {
+        // The top bar calls this through a plain Func (it needs the result), which re-renders only the top bar, so
+        // every answer re-renders Main itself.
+        if (await CaptureHeld() is { } held)
+        {
+            ShowStatus(DesktopText.OneLine(held), "red");
+            StateHasChanged();
+            return false;
+        }
+
+        if (running)
+        {
+            return false;
+        }
+
+        running = true;
+        ActionResult captured;
+        try
+        {
+            captured = await Actions.CaptureText(text);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        ShowStatus(DesktopText.OneLine(captured.Text), captured.Kind == ActionKind.Done ? "accent" : "red");
+        StateHasChanged();
+        if (captured.Kind != ActionKind.Done)
+        {
+            return false;
+        }
+
+        await Captured();
+        return true;
     }
 
     // After a capture: an open inbox shows the new line, and its next save starts from the file as it is now. Text
