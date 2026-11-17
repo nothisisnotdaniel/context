@@ -212,6 +212,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#256](backlog/256-no-prerelease-for-backlog-only-pushes.md) No prerelease for backlog-only pushes
 - [ ] [#257](backlog/257-web-links-work-in-the-note.md) Web links work in the note editor
 - [ ] [#258](backlog/258-no-accent-bar-left-of-the.md) No accent bar left of the editor while editing
+- [?] [#259](backlog/259-check-the-capture-popover-in-a.md) Check the Capture popover in a narrow window
 
 ## Dropped with the terminal UI
 
