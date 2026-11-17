@@ -172,7 +172,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        js.Edit("# Plan\n\nUnsaved\n");
+        js.EditUnsavable("# Plan\n\nUnsaved\n");
 
         await RunPalette(cut, "/new Fresh --template meeting");
 
@@ -191,7 +191,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        js.Edit("# Plan\n\nUnsaved\n");
+        js.EditUnsavable("# Plan\n\nUnsaved\n");
 
         await cut.Find(".todos-region button.todo-note").ClickAsync(new MouseEventArgs());
 
@@ -210,7 +210,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        js.Edit("# Plan\n\nUnsaved\n");
+        js.EditUnsavable("# Plan\n\nUnsaved\n");
 
         await cut.Find(".note-new-title").InputAsync(new ChangeEventArgs { Value = "Fresh" });
         await cut.Find(".note-new-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
@@ -336,7 +336,7 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
-        js.Edit("# Plan\n\nUnsaved\n");
+        js.EditUnsavable("# Plan\n\nUnsaved\n");
 
         await ChooseAsync(cut, "rename");
 
@@ -356,7 +356,7 @@ public sealed class MainTests : IDisposable
         await Open(cut, js, "Plan");
         await ChooseAsync(cut, "rename");
         await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
-        js.Edit("# Plan\n\nUnsaved\n");
+        js.EditUnsavable("# Plan\n\nUnsaved\n");
 
         await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
@@ -492,7 +492,7 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".links-panel button.name")), Wait);
-        js.Edit("[[Other]]\n\nUnsaved\n");
+        js.EditUnsavable("[[Other]]\n\nUnsaved\n");
 
         await cut.Find(".links-panel button.name").ClickAsync(new MouseEventArgs());
 
@@ -723,7 +723,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        js.Edit("# Plan\n\nUnsaved\n");
+        js.EditUnsavable("# Plan\n\nUnsaved\n");
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, "context.db");
 
         await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
@@ -887,7 +887,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        js.Edit("unsaved\n");
+        js.EditUnsavable("unsaved\n");
 
         if (palette)
         {
@@ -1128,7 +1128,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await OpenFull(cut, js, "Meetings/Meeting 1");
-        js.Edit("# Meeting 1\n\nUnsaved\n");
+        js.EditUnsavable("# Meeting 1\n\nUnsaved\n");
 
         await cut.Find("nav.breadcrumb button.crumb").ClickAsync(new MouseEventArgs());
 
@@ -1220,7 +1220,7 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await OpenFull(cut, js, "Meetings/Meeting 1");
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
-        js.Edit("# Meeting 1\n\nUnsaved\n");
+        js.EditUnsavable("# Meeting 1\n\nUnsaved\n");
 
         await ChooseAsync(cut, button);
 
@@ -1468,12 +1468,204 @@ public sealed class MainTests : IDisposable
         await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
         Assert.Empty(cut.FindAll("[role=dialog]"));
 
-        js.Edit("typed\n");
+        js.EditUnsavable("typed\n");
         await cut.Find("button.restore-version").ClickAsync(new MouseEventArgs());
 
         Assert.Equal("Save Plan first.", cut.Find(".main-status").TextContent);
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    // 203 AC-7: with unsaved changes, opening another note, a mention, /today and /briefing save first; the target
+    // opens with no Discard question and the file holds the edited text.
+    [Theory]
+    [InlineData("open")]
+    [InlineData("mention")]
+    [InlineData("today")]
+    [InlineData("briefing")]
+    public async Task Leave_DirtyEditor_SavesFirstThenOpens(string how)
+    {
+        data.WriteNote("Plan", "@[Anna]\n");
+        data.WriteNote("Other", "# Other\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        js.Edit("@[Anna]\n\nSaved first\n");
+
+        switch (how)
+        {
+            case "open":
+                await NameButton(cut, "Other").ClickAsync(new MouseEventArgs());
+                break;
+            case "mention":
+                await cut.InvokeAsync(() => js.Page().OnPerson("@[Anna]"));
+                break;
+            default:
+                await RunPalette(cut, "/" + how);
+                break;
+        }
+
+        cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.mount").Count), Wait);
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Equal("@[Anna]\n\nSaved first\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.Equal("@[Anna]\n\nSaved first\n", Assert.Single(js.Calls("ContextEditor.markCleanIf")).Arguments[1]);
+    }
+
+    // 203 AC-7: when that save fails, the Discard question appears as before, next to the editor's red text.
+    [Fact]
+    public async Task Leave_DirtyEditor_SaveFails_AsksNextToTheRedText()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        data.WriteNote("Other", "# Other\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        js.Edit("# Plan\n\nMine\n");
+        data.WriteNote("Plan", "# Plan\n\nElsewhere\n");
+
+        await NameButton(cut, "Other").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
+        Assert.Equal(DesktopActions.ChangedOnDiskText("Plan"), cut.Find(".note-editor .status").TextContent);
+        Assert.Contains("red", cut.Find(".note-editor .status").ClassList);
+        Assert.Equal("# Plan\n\nElsewhere\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.Single(js.Calls("ContextEditor.mount"));
+    }
+
+    // 203 AC-8: Rename, New subpage, Move, Export, History's Restore and Mark sensitive save first and go on; they
+    // refuse only when that save fails (the EditUnsavable tests above).
+    [Theory]
+    [InlineData("rename", ".rename-title")]
+    [InlineData("new-subpage", ".note-toolbar input")]
+    [InlineData("move", "input.move-parent")]
+    [InlineData("mark-sensitive", "[role=dialog]")]
+    [InlineData("export", null)]
+    [InlineData("restore", "[role=dialog]")]
+    public async Task SaveFirstActions_DirtyEditor_SaveThenGoOn(string button, string? shown)
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        data.Keys = FakeKeyStore.Ready();
+        data.Dialog.ExportPath = data.Outside("Copy.md");
+        WriteHistoryVersion("Plan", "20261029T080000000Z", "old\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        if (button == "restore")
+        {
+            await ChooseFirstVersion(cut);
+        }
+
+        js.Edit("# Plan\n\nSaved first\n");
+
+        if (button == "restore")
+        {
+            await cut.Find("button.restore-version").ClickAsync(new MouseEventArgs());
+        }
+        else
+        {
+            await ChooseAsync(cut, button);
+        }
+
+        Assert.Equal("# Plan\n\nSaved first\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.DoesNotContain("first.", cut.Find(".main-status").TextContent, StringComparison.Ordinal);
+        if (shown is null)
+        {
+            cut.WaitForAssertion(() => Assert.Equal(1, data.Dialog.ExportSaves), Wait);
+            Assert.Equal("# Plan\n\nSaved first\n", File.ReadAllText(data.Outside("Copy.md")));
+        }
+        else
+        {
+            cut.WaitForAssertion(() => Assert.NotEmpty(cut.FindAll(shown)), Wait);
+        }
+    }
+
+    // 203 AC-8: a capture into the open inbox with unsaved changes saves them first, then adds the line.
+    [Fact]
+    public async Task Capture_DirtyOpenInbox_SavesFirstThenCaptures()
+    {
+        data.WriteNote("inbox", "# inbox\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "inbox");
+        js.Edit("# inbox\n\nTyped\n");
+
+        await RunPalette(cut, "/capture call Anna");
+
+        cut.WaitForAssertion(() => Assert.Equal("Captured.", cut.Find(".main-status").TextContent), Wait);
+        Assert.Equal("# inbox\n\nTyped\n- 2026-10-29 10:05 call Anna\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
+    }
+
+    // 203 AC-6: /save saves at once with the accent text and cancels the pending pause.
+    [Fact]
+    public async Task PaletteSave_SavesAtOnceAndCancelsThePause()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        await js.Change(cut, "# Plan\n\nBy palette\n");
+        cut.WaitForAssertion(() => Assert.Equal(1, data.AutoSave.Pending), Wait);
+
+        await RunPalette(cut, "/save");
+
+        cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".note-editor .status").TextContent), Wait);
+        Assert.Contains("accent", cut.Find(".note-editor .status").ClassList);
+        Assert.Equal("# Plan\n\nBy palette\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.Equal(0, data.AutoSave.Pending);
+        data.AutoSave.Elapse();
+        await cut.InvokeAsync(() => { });
+        Assert.Single(js.Calls("ContextEditor.getMarkdown"));
+    }
+
+    // 203 AC-9: closing the window with unsaved changes saves them and then closes once; with nothing unsaved the
+    // close goes on at once.
+    [Fact]
+    public async Task WindowClose_Dirty_SavesThenClosesOnce()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        Assert.False(data.Guard.Closing());
+        await js.Change(cut, "# Plan\n\nClosing\n");
+
+        Assert.True(data.Guard.Closing());
+
+        cut.WaitForAssertion(() => Assert.Equal(1, data.CloseCalls), Wait);
+        Assert.Equal("# Plan\n\nClosing\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.False(data.Guard.Closing());
+        Assert.Equal(1, data.CloseCalls);
+    }
+
+    // 203 AC-9: when the save before closing fails, the Discard question is shown; Cancel keeps the window open and
+    // Discard closes it.
+    [Fact]
+    public async Task WindowClose_SaveFails_AsksCancelKeepsDiscardCloses()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        await js.Change(cut, "# Plan\n\nMine\n");
+        data.WriteNote("Plan", "# Plan\n\nElsewhere\n");
+
+        Assert.True(data.Guard.Closing());
+
+        cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
+        Assert.Equal(DesktopActions.ChangedOnDiskText("Plan"), cut.Find(".note-editor .status").TextContent);
+        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Equal(0, data.CloseCalls);
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+
+        Assert.True(data.Guard.Closing());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll("[role=dialog] button.confirm")), Wait);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(1, data.CloseCalls);
+        Assert.Equal("# Plan\n\nElsewhere\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.False(data.Guard.Closing());
     }
 
     private static async Task ChooseFirstVersion(IRenderedComponent<Main> cut)
@@ -1581,7 +1773,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, name);
-        js.Edit("# inbox\n\nUnsaved\n");
+        js.EditUnsavable("# inbox\n\nUnsaved\n");
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
         int mounts = js.Calls("ContextEditor.mount").Count;
 
@@ -1740,7 +1932,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        js.Edit("# Plan\n\nUnsaved\n");
+        js.EditUnsavable("# Plan\n\nUnsaved\n");
 
         await RunPalette(cut, "/today");
 
@@ -1819,7 +2011,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        js.Edit("# Plan\n\nUnsaved\n");
+        js.EditUnsavable("# Plan\n\nUnsaved\n");
 
         await RunPalette(cut, "/briefing");
 
@@ -1840,7 +2032,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        js.Edit("# Plan\n\nUnsaved\n");
+        js.EditUnsavable("# Plan\n\nUnsaved\n");
 
         await RunPalette(cut, "/briefing");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("[role=dialog] button.cancel")), Wait);
@@ -1993,7 +2185,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        js.Edit("@[Anna]\n\nUnsaved\n");
+        js.EditUnsavable("@[Anna]\n\nUnsaved\n");
 
         await cut.InvokeAsync(() => js.Page().OnPerson("@[Anna]"));
 
@@ -2036,7 +2228,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        js.Edit("x\n\nUnsaved\n");
+        js.EditUnsavable("x\n\nUnsaved\n");
 
         await cut.Find(".todos-region button.mention").ClickAsync(new MouseEventArgs());
 
@@ -2334,7 +2526,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        js.Edit("# Plan\n\nUnsaved\n");
+        js.EditUnsavable("# Plan\n\nUnsaved\n");
         await RunPalette(cut, "/review");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".review-panel .review-note button")), Wait);
 
@@ -2396,7 +2588,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        js.Edit("# Plan\n\nUnsaved\n");
+        js.EditUnsavable("# Plan\n\nUnsaved\n");
 
         await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
 
@@ -2561,7 +2753,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        js.Edit("# Plan\n\nUnsaved\n");
+        js.EditUnsavable("# Plan\n\nUnsaved\n");
 
         await PickDate(cut, "2026-11-20");
 
@@ -2768,7 +2960,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "inbox");
-        js.Edit("# inbox\n\nUnsaved\n");
+        js.EditUnsavable("# inbox\n\nUnsaved\n");
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
 
         await CaptureByIcon(cut, "buy milk");
@@ -2823,7 +3015,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "inbox");
-        js.Edit("# inbox\n\nUnsaved\n");
+        js.EditUnsavable("# inbox\n\nUnsaved\n");
 
         await CaptureByIcon(cut, " ");
 

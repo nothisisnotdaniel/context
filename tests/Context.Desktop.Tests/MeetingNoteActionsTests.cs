@@ -236,7 +236,7 @@ public sealed class MeetingNoteActionsTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        js.Edit("# Plan\n\nUnsaved\n");
+        js.EditUnsavable("# Plan\n\nUnsaved\n");
 
         await RunPalette(cut, "/meeting 2");
 
@@ -250,6 +250,25 @@ public sealed class MeetingNoteActionsTests : IDisposable
         Assert.Equal("# Plan\n", File.ReadAllText(PathOf("Plan")));
     }
 
+    // 203 AC-7: with unsaved changes the open note is saved first; the meeting note opens with no question.
+    [Fact]
+    public async Task PaletteMeeting_DirtyEditor_SavesFirstThenOpens()
+    {
+        WriteDay();
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        js.Edit("# Plan\n\nSaved first\n");
+
+        await RunPalette(cut, "/meeting 2");
+
+        cut.WaitForAssertion(() => Assert.Equal(Review, cut.Find(".note-title").TextContent), Wait);
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.True(File.Exists(PathOf(Review)));
+        Assert.Equal("# Plan\n\nSaved first\n", File.ReadAllText(PathOf("Plan")));
+    }
+
     // Keep editing leaves the dirty note open and writes nothing.
     [Fact]
     public async Task PaletteMeeting_DirtyEditor_KeepEditing_NothingWritten()
@@ -259,7 +278,7 @@ public sealed class MeetingNoteActionsTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        js.Edit("# Plan\n\nUnsaved\n");
+        js.EditUnsavable("# Plan\n\nUnsaved\n");
 
         await RunPalette(cut, "/meeting 2");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("[role=dialog]")), Wait);

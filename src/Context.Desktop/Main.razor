@@ -1,4 +1,5 @@
 @inherits StateComponent
+@implements IAsyncDisposable
 
 @if (Snapshot is { } snapshot)
 {
@@ -164,6 +165,7 @@ else
     private string? decisionsShown;
     private enum Page { None, Triage, Tags, Settings }
     private bool discarding;
+    private bool pendingClose;
     private string? pendingName;
     private string? pendingPerson;
     private bool pendingToday;
@@ -203,9 +205,24 @@ else
     [Inject]
     internal IFileDialog Dialog { get; set; } = null!;
 
+    /// <summary>Asked by the window's closing handler; this page saves first and asks to discard when that failed.</summary>
+    [Inject]
+    internal CloseGuard Guard { get; set; } = null!;
+
+    public ValueTask DisposeAsync()
+    {
+        Guard.Detach();
+        Dispose();
+        return ValueTask.CompletedTask;
+    }
+
     protected override void OnInitialized()
     {
         base.OnInitialized();
+        Guard.Attach(
+            () => editor?.HasUnsaved ?? false,
+            SaveFirstForCloseAsync,
+            () => InvokeAsync(AskDiscardForClose));
         if (State.TakeBriefing() is { } offered)
         {
             ShowNote(offered);
@@ -333,7 +350,7 @@ else
             return;
         }
 
-        if (editor is not null && openName is not null && await editor.IsDirtyAsync())
+        if (await KeptUnsaved())
         {
             pendingName = name;
             pendingPerson = null;
@@ -344,11 +361,15 @@ else
         ShowNote(name);
     }
 
+    // Saves the open note first when it has unsaved changes (job 203). True when unsaved changes are left because that
+    // save failed; the editor then shows why in red, and the caller asks to discard or refuses as before.
+    private async Task<bool> KeptUnsaved() => editor is not null && openName is not null && !await editor.SaveFirstAsync();
+
     // A mention was clicked in the editor or in the todo list: opens the person's page, making it (and people) on this click only.
     // Asks first when the open note has unsaved changes, like RequestOpen.
     private async Task OpenMention(string person)
     {
-        if (editor is not null && openName is not null && await editor.IsDirtyAsync())
+        if (await KeptUnsaved())
         {
             pendingName = null;
             pendingPerson = person;
@@ -375,9 +396,33 @@ else
         ShowPerson(opened);
     }
 
+    // The window is closing with unsaved changes: saves first on the renderer's thread. True when nothing is left.
+    private async Task<bool> SaveFirstForCloseAsync()
+    {
+        bool saved = true;
+        await InvokeAsync(async () => saved = editor is null || await editor.SaveFirstAsync());
+        return saved;
+    }
+
+    // The window close's save failed: the same question as when leaving the note; Discard closes the window.
+    private void AskDiscardForClose()
+    {
+        KeepEditing();
+        pendingClose = true;
+        discarding = true;
+        StateHasChanged();
+    }
+
     private async Task Discard(Confirmation confirmed)
     {
         discarding = false;
+        if (pendingClose)
+        {
+            pendingClose = false;
+            Guard.Discard();
+            return;
+        }
+
         if (pendingBriefing)
         {
             pendingBriefing = false;
@@ -476,6 +521,7 @@ else
     private void KeepEditing()
     {
         discarding = false;
+        pendingClose = false;
         pendingDay = null;
         pendingName = null;
         pendingPerson = null;
@@ -692,13 +738,12 @@ else
                 {
                     ShowStatus("No note is open.", "grey");
                 }
-                else if (await editor.PrepareSaveAsync() is { } request && !running)
+                else if (!running)
                 {
                     running = true;
                     try
                     {
-                        ActionResult saved = await Actions.SaveNote(request.Note, request.Text);
-                        await editor.ApplySaveAsync(saved);
+                        await editor.SaveAsync(false);
                     }
                     finally
                     {
@@ -733,7 +778,7 @@ else
                 // The argument is ignored. A dirty editor asks first, unless it already shows today's briefing.
                 if (editor is not null && openName is not null
                     && !string.Equals(openName, Actions.BriefingName(), StringComparison.Ordinal)
-                    && await editor.IsDirtyAsync())
+                    && await KeptUnsaved())
                 {
                     pendingName = null;
                     pendingPerson = null;
@@ -765,7 +810,7 @@ else
                 // The argument is ignored. A dirty editor asks first, unless it already shows today's note.
                 if (editor is not null && openName is not null
                     && !string.Equals(openName, Actions.DailyNoteName(), StringComparison.Ordinal)
-                    && await editor.IsDirtyAsync())
+                    && await KeptUnsaved())
                 {
                     pendingName = null;
                     pendingPerson = null;
@@ -812,7 +857,7 @@ else
                 // A dirty editor asks first, unless it already shows this meeting's note.
                 if (editor is not null && openName is not null
                     && !string.Equals(openName, MeetingNote.NameFor(appointment), StringComparison.Ordinal)
-                    && await editor.IsDirtyAsync())
+                    && await KeptUnsaved())
                 {
                     pendingName = null;
                     pendingPerson = null;
@@ -953,7 +998,7 @@ else
     // leave stuck behind "changed on disk". Null when the capture may run.
     private async Task<string?> CaptureHeld()
     {
-        if (InboxOpen() && openName is { } name && editor is not null && await editor.IsDirtyAsync())
+        if (InboxOpen() && openName is { } name && await KeptUnsaved())
         {
             return $"Save {name} first.";
         }
@@ -1021,7 +1066,7 @@ else
         }
 
         bool touched = InboxOpen() || (target is not null && string.Equals(name, target, StringComparison.Ordinal));
-        if (touched && await editor.IsDirtyAsync())
+        if (touched && await KeptUnsaved())
         {
             return $"Save {name} first.";
         }
@@ -1066,7 +1111,7 @@ else
             return;
         }
 
-        if (editor is not null && await editor.IsDirtyAsync())
+        if (await KeptUnsaved())
         {
             ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
             return;
@@ -1108,7 +1153,7 @@ else
             return;
         }
 
-        if (editor is not null && await editor.IsDirtyAsync())
+        if (await KeptUnsaved())
         {
             ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
             return;
@@ -1208,7 +1253,7 @@ else
             return false;
         }
 
-        if (editor is not null && await editor.IsDirtyAsync())
+        if (await KeptUnsaved())
         {
             ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
             return false;
@@ -1293,7 +1338,7 @@ else
             return;
         }
 
-        if (editor is not null && await editor.IsDirtyAsync())
+        if (await KeptUnsaved())
         {
             ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
             return;
@@ -1457,7 +1502,7 @@ else
             return false;
         }
 
-        if (editor is not null && await editor.IsDirtyAsync())
+        if (await KeptUnsaved())
         {
             ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
             return false;
@@ -1553,21 +1598,20 @@ else
             return;
         }
 
-        if (editor is not null && await editor.IsDirtyAsync() && await editor.PrepareSaveAsync() is { } request)
+        if (editor is not null && await editor.IsDirtyAsync())
         {
             running = true;
-            ActionResult saved;
+            ActionResult? saved;
             try
             {
-                saved = await Actions.SaveNote(request.Note, request.Text);
-                await editor.ApplySaveAsync(saved);
+                saved = await editor.SaveAsync(false);
             }
             finally
             {
                 running = false;
             }
 
-            if (saved.Kind != ActionKind.Done)
+            if (saved is null || saved.Kind != ActionKind.Done)
             {
                 return;
             }
@@ -1788,7 +1832,7 @@ else
             return null;
         }
 
-        if (editor is not null && await editor.IsDirtyAsync())
+        if (await KeptUnsaved())
         {
             ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
             return null;

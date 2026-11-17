@@ -417,7 +417,7 @@ public sealed class TriagePanelTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        js.Edit("# Plan\n\nUnsaved\n");
+        js.EditUnsavable("# Plan\n\nUnsaved\n");
         await cut.Find("button.triage-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".triage-panel .triage-item")), Wait);
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
@@ -428,6 +428,29 @@ public sealed class TriagePanelTests : IDisposable
 
         Assert.Equal("Save Plan first.", cut.Find(".triage-status").TextContent);
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    // 203 AC-8: an open target with unsaved changes is saved first; then the line is added and the editor remounted.
+    [Fact]
+    public async Task Main_DirtyOpenTarget_SavedFirstThenAdded()
+    {
+        data.WriteNote("inbox", InboxText);
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        js.Edit("# Plan\n\nTyped\n");
+        await cut.Find("button.triage-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".triage-panel .triage-item")), Wait);
+        int mounts = js.Calls("ContextEditor.mount").Count;
+
+        await cut.Find(".triage-panel").KeyDownAsync(new KeyboardEventArgs { Key = "a" });
+        await cut.Find("input.triage-target").InputAsync(new ChangeEventArgs { Value = "Plan" });
+        await cut.Find("input.triage-target").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+
+        cut.WaitForAssertion(() => Assert.Equal("Added to Plan.", cut.Find(".triage-status").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        Assert.Equal("# Plan\n\nTyped\n- call Anna\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
     }
 
     // AC-7: an open target without unsaved changes is remounted with the added line, and saves from there.
@@ -476,7 +499,7 @@ public sealed class TriagePanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         Assert.Equal("# inbox\n- second\n", js.MountedText());
 
-        js.Edit("# inbox\n- second\nUnsaved\n");
+        js.EditUnsavable("# inbox\n- second\nUnsaved\n");
         cut.WaitForAssertion(() => Assert.Equal("second", cut.Find(".triage-item .text").TextContent), Wait);
         await cut.Find(".triage-panel").KeyDownAsync(new KeyboardEventArgs { Key = "l" });
         await cut.Find(".triage-panel").KeyDownAsync(new KeyboardEventArgs { Key = "1" });

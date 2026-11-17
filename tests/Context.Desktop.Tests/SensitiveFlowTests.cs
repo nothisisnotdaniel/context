@@ -424,7 +424,7 @@ public sealed class SensitiveFlowTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        js.Edit("unsaved\n");
+        js.EditUnsavable("unsaved\n");
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
 
         await MainTests.ChooseAsync(cut, button);
@@ -545,6 +545,35 @@ public sealed class SensitiveFlowTests : IDisposable
     }
 
     // 200: the labels of the More actions menu's items; the menu is closed again afterwards.
+    // 203 AC-11: a sensitive note saves itself after the pause through the same path: sealed again, no .md, no Agree
+    // beyond the open, and each automatic save counts as use of the session.
+    [Fact]
+    public async Task AutoSave_Sensitive_ResealsWithoutAgreeAndTouchesTheSession()
+    {
+        data.WriteSensitive("Plan", "old\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+
+        data.UtcNow = data.UtcNow.AddMinutes(4);
+        await js.Change(cut, "auto one\n");
+        data.AutoSave.Elapse();
+        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".note-editor .status").TextContent), Wait);
+        data.UtcNow = data.UtcNow.AddMinutes(4);
+        Assert.False(data.Session!.Tick());
+        await js.Change(cut, "auto two\n");
+        data.AutoSave.Elapse();
+        cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.markCleanIf").Count), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".note-editor .status").TextContent), Wait);
+        data.UtcNow = data.UtcNow.AddMinutes(4);
+
+        Assert.False(data.Session.Tick());
+        Assert.Single(cut.FindAll(".note-editor"));
+        Assert.Equal(1, data.Keys.Agrees);
+        Assert.Equal([".history/Plan/20261029T090400000Z~Plan.ctxs", "Plan.ctxs"], RootFiles());
+        Assert.Equal("auto two\n", Unsealed("Plan"));
+    }
+
     private static async Task<string[]> MenuLabelsAsync(IRenderedComponent<Main> cut)
     {
         await MainTests.OpenMenuAsync(cut);

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Photino.Blazor;
+using Photino.NET;
 using Velopack;
 
 namespace Context;
@@ -59,6 +60,11 @@ internal static class Program
         builder.Services.AddSingleton(state);
         builder.Services.AddSingleton(actions);
         builder.Services.AddTransient<EditorInterop>();
+        builder.Services.AddSingleton<IAutoSavePause>(new AutoSavePause());
+        // Filled in once the window exists; the guard only calls it after a save-first finished.
+        PhotinoWindow? window = null;
+        CloseGuard closeGuard = new CloseGuard(() => window?.Invoke(() => window.Close()));
+        builder.Services.AddSingleton(closeGuard);
         PhotinoFileDialog dialog = new PhotinoFileDialog();
         builder.Services.AddSingleton<IFileDialog>(dialog);
         builder.RootComponents.Add<App>("app");
@@ -75,10 +81,18 @@ internal static class Program
             .SetGrantBrowserPermissions(false)
             .SetDevToolsEnabled(DevTools);
         dialog.Window = app.MainWindow;
+        window = app.MainWindow;
 
-        // An open sensitive note is locked when the window closes and after five minutes without use.
+        // Closing with unsaved changes cancels the close and saves first (CloseGuard; the save runs asynchronously, so
+        // this handler never waits on the Blazor dispatcher); after the save, or Discard, the guard closes the window
+        // again. An open sensitive note is locked when the window does close and after five minutes without use.
         app.MainWindow.RegisterWindowClosingHandler((_, _) =>
         {
+            if (closeGuard.Closing())
+            {
+                return true;
+            }
+
             session.Lock();
             return false;
         });

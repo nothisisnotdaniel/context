@@ -70,8 +70,8 @@ public sealed record InlineImage
 /// The only bridge to JavaScript: calls the bundled editor (<c>wwwroot/editor/editor.js</c>, global
 /// <c>ContextEditor</c>) for one host element and passes its tag, link and mention clicks and its dirty flips back as
 /// events. It never changes data: its <see cref="JSInvokableAttribute"/> methods only raise <see cref="TagClicked"/>,
-/// <see cref="LinkClicked"/>, <see cref="PersonClicked"/>, <see cref="DirtyChanged"/>, <see cref="FilesDropped"/> and
-/// <see cref="AttachmentClicked"/>, and the component decides what to open, show or store.
+/// <see cref="LinkClicked"/>, <see cref="PersonClicked"/>, <see cref="DirtyChanged"/>, <see cref="FilesDropped"/>,
+/// <see cref="AttachmentClicked"/> and <see cref="Changed"/>, and the component decides what to open, show or store.
 /// </summary>
 internal sealed class EditorInterop
 {
@@ -98,6 +98,12 @@ internal sealed class EditorInterop
     /// only: decisions that protect data ask <see cref="IsDirtyAsync"/>.
     /// </summary>
     public event Func<bool, Task>? DirtyChanged;
+
+    /// <summary>
+    /// Raised on every change of the editor's text (once per changing transaction); the component restarts its
+    /// auto-save pause. Nothing is read or written here.
+    /// </summary>
+    public event Func<Task>? Changed;
 
     /// <summary>Raised once per drop of files onto the editor.</summary>
     public event Func<DroppedFiles, Task>? FilesDropped;
@@ -142,6 +148,13 @@ internal sealed class EditorInterop
     /// <summary>Marks the editor's current text as saved.</summary>
     public ValueTask MarkCleanAsync(ElementReference element) => js.InvokeVoidAsync("ContextEditor.markClean", element);
 
+    /// <summary>
+    /// Marks the editor's text as saved only when its Markdown still equals <paramref name="markdown"/> (the text a
+    /// save just wrote), compared and marked in one JavaScript turn. False when it was edited since, so it stays dirty.
+    /// </summary>
+    public ValueTask<bool> MarkCleanIfAsync(ElementReference element, string markdown) =>
+        js.InvokeAsync<bool>("ContextEditor.markCleanIf", element, markdown);
+
     /// <summary>Puts the cursor in the editor.</summary>
     public ValueTask FocusAsync(ElementReference element) => js.InvokeVoidAsync("ContextEditor.focus", element);
 
@@ -169,6 +182,10 @@ internal sealed class EditorInterop
     /// <summary>Called by the editor when an attachment PDF link is clicked.</summary>
     [JSInvokable]
     public Task OnAttachment(string href) => AttachmentClicked?.Invoke(href) ?? Task.CompletedTask;
+
+    /// <summary>Called by the editor on every change of its text.</summary>
+    [JSInvokable]
+    public Task OnChanged() => Changed?.Invoke() ?? Task.CompletedTask;
 
     /// <summary>Removes the editor from the page and drops the reference the page holds.</summary>
     public async Task DestroyAsync()

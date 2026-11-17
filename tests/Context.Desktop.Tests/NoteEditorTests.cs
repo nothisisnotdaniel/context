@@ -224,7 +224,7 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Equal("Saved Plan.", status.TextContent);
         Assert.Equal("status", status.GetAttribute("role"));
         Assert.Single(js.Calls("ContextEditor.getMarkdown"));
-        Assert.Single(js.Calls("ContextEditor.markClean"));
+        Assert.Single(js.Calls("ContextEditor.markCleanIf"));
     }
 
     // AC-8: Ctrl+S and Cmd+S save; other keys don't.
@@ -693,6 +693,274 @@ public sealed class NoteEditorTests : IDisposable
         Assert.True(title.ClassList.Contains("note-title"));
         Assert.Empty(cut.FindAll("h1"));
     }
+
+    // 203 AC-1: after a change, nothing is saved until the pause elapses; a change before then starts the pause again,
+    // and the one save that follows writes the latest text, hides the dot and says grey "Saved.".
+    [Fact]
+    public async Task AutoSave_AfterPause_SavesLatestTextOnce()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+
+        await js.Change(cut, "# Plan\n\nOne\n");
+        cut.WaitForAssertion(() => Assert.Equal(1, data.AutoSave.Pending), Wait);
+        Assert.Single(cut.FindAll("span.dirty-dot"));
+        Assert.Equal("# Plan\n", File.ReadAllText(PlanPath));
+        await js.Change(cut, "# Plan\n\nTwo\n");
+        cut.WaitForAssertion(() => Assert.Equal((2, 1), (data.AutoSave.Started, data.AutoSave.Pending)), Wait);
+        Assert.Equal("# Plan\n", File.ReadAllText(PlanPath));
+        Assert.Empty(js.Calls("ContextEditor.getMarkdown"));
+
+        data.AutoSave.Elapse();
+
+        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".status").TextContent), Wait);
+        Assert.Equal(["status", "grey"], cut.Find(".status").ClassList.ToArray());
+        Assert.Equal("# Plan\n\nTwo\n", File.ReadAllText(PlanPath));
+        Assert.Single(js.Calls("ContextEditor.getMarkdown"));
+        Assert.Empty(cut.FindAll("span.dirty-dot"));
+        Assert.False(await cut.InvokeAsync(() => cut.Instance.IsDirtyAsync()));
+        Assert.Equal(0, data.AutoSave.Pending);
+    }
+
+    // 203 AC-2: while a save runs the status reads grey "Saving…"; Ctrl+S and SaveFirstAsync wait for it and ask the
+    // page nothing until it returns.
+    [Fact]
+    public async Task AutoSave_WhileRunning_OtherSavesWait()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+        using ManualResetEventSlim entered = new ManualResetEventSlim();
+        using ManualResetEventSlim release = new ManualResetEventSlim();
+        data.Actions!.BeforeWrite = () =>
+        {
+            entered.Set();
+            release.Wait(Wait);
+        };
+        await js.Change(cut, "# Plan\n\nAuto\n");
+        data.AutoSave.Elapse();
+        Assert.True(entered.Wait(Wait));
+        cut.WaitForAssertion(() => Assert.Equal("Saving…", cut.Find(".status").TextContent), Wait);
+        Assert.Equal(["status", "grey"], cut.Find(".status").ClassList.ToArray());
+        int asked = js.Calls("ContextEditor.isDirty").Count;
+
+        Task key = cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        Task<bool> first = cut.InvokeAsync(() => cut.Instance.SaveFirstAsync());
+
+        Assert.False(key.IsCompleted);
+        Assert.False(first.IsCompleted);
+        Assert.Equal(asked, js.Calls("ContextEditor.isDirty").Count);
+        data.Actions.BeforeWrite = null;
+        release.Set();
+        await key;
+        Assert.True(await first);
+        cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".status").TextContent), Wait);
+        Assert.Equal("# Plan\n\nAuto\n", File.ReadAllText(PlanPath));
+        Assert.Single(js.Calls("ContextEditor.getMarkdown"));
+        Assert.Empty(cut.FindAll(".status.red"));
+    }
+
+    // 203 AC-3: an edit typed while the save runs is not marked clean: the dot stays, and the next pause saves it.
+    [Fact]
+    public async Task AutoSave_EditDuringSave_StaysDirtyAndSavesAgain()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+        using ManualResetEventSlim entered = new ManualResetEventSlim();
+        using ManualResetEventSlim release = new ManualResetEventSlim();
+        data.Actions!.BeforeWrite = () =>
+        {
+            entered.Set();
+            release.Wait(Wait);
+        };
+        await js.Change(cut, "# Plan\n\nA\n");
+        data.AutoSave.Elapse();
+        Assert.True(entered.Wait(Wait));
+        await js.Change(cut, "# Plan\n\nAB\n");
+        data.Actions.BeforeWrite = null;
+        release.Set();
+
+        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".status").TextContent), Wait);
+        Assert.Equal("# Plan\n\nA\n", File.ReadAllText(PlanPath));
+        Assert.Equal("# Plan\n\nA\n", Assert.Single(js.Calls("ContextEditor.markCleanIf")).Arguments[1]);
+        Assert.Single(cut.FindAll("span.dirty-dot"));
+        Assert.True(await cut.InvokeAsync(() => cut.Instance.IsDirtyAsync()));
+        cut.WaitForAssertion(() => Assert.Equal(1, data.AutoSave.Pending), Wait);
+
+        data.AutoSave.Elapse();
+
+        cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.markCleanIf").Count), Wait);
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("span.dirty-dot")), Wait);
+        Assert.Equal("# Plan\n\nAB\n", File.ReadAllText(PlanPath));
+        Assert.Equal("Saved.", cut.Find(".status").TextContent);
+    }
+
+    // 203 AC-4: a refused auto save (changed on disk) shows its red text, keeps the editor's text without a remount,
+    // stays dirty and starts no new save until the next edit.
+    [Fact]
+    public async Task AutoSave_ChangedOnDisk_RedTextKeptNoRetry()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+        await js.Change(cut, "# Plan\n\nMine\n");
+        data.WriteNote("Plan", "# Plan\n\nElsewhere\n");
+
+        data.AutoSave.Elapse();
+
+        cut.WaitForAssertion(() => Assert.Equal(DesktopActions.ChangedOnDiskText("Plan"), cut.Find(".status").TextContent), Wait);
+        Assert.Equal(["status", "red"], cut.Find(".status").ClassList.ToArray());
+        Assert.Equal("# Plan\n\nElsewhere\n", File.ReadAllText(PlanPath));
+        Assert.Single(js.Calls("ContextEditor.mount"));
+        Assert.Single(cut.FindAll("span.dirty-dot"));
+        Assert.True(await cut.InvokeAsync(() => cut.Instance.IsDirtyAsync()));
+        Assert.Equal((1, 0), (data.AutoSave.Started, data.AutoSave.Pending));
+        Assert.Empty(js.Calls("ContextEditor.markCleanIf"));
+
+        await js.Change(cut, "# Plan\n\nMine again\n");
+        data.AutoSave.Elapse();
+
+        cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.getMarkdown").Count), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(DesktopActions.ChangedOnDiskText("Plan"), cut.Find(".status").TextContent), Wait);
+        Assert.Single(js.Calls("ContextEditor.mount"));
+    }
+
+    // 203 AC-5: an auto save refused because another change runs shows no red text, leaves the status as it was and
+    // saves after the next pause.
+    [Fact]
+    public async Task AutoSave_Busy_StatusKeptRetriedAfterNextPause()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+        js.Edit("# Plan\n\nFirst\n");
+        await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+        Assert.Equal("Saved Plan.", cut.Find(".status").TextContent);
+        using ManualResetEventSlim entered = new ManualResetEventSlim();
+        using ManualResetEventSlim release = new ManualResetEventSlim();
+        data.Actions!.BeforeWrite = () =>
+        {
+            entered.Set();
+            release.Wait(Wait);
+        };
+        Task<ActionResult> capture = data.Actions.CaptureText("held");
+        Assert.True(entered.Wait(Wait));
+        await js.Change(cut, "# Plan\n\nBusy\n");
+
+        data.AutoSave.Elapse();
+
+        cut.WaitForAssertion(() => Assert.Equal((2, 1), (data.AutoSave.Started, data.AutoSave.Pending)), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".status").TextContent), Wait);
+        Assert.Equal(["status", "accent"], cut.Find(".status").ClassList.ToArray());
+        Assert.DoesNotContain(DesktopActions.BusyText, cut.Markup, StringComparison.Ordinal);
+        Assert.Equal("# Plan\n\nFirst\n", File.ReadAllText(PlanPath));
+        data.Actions.BeforeWrite = null;
+        release.Set();
+        Assert.Equal(ActionKind.Done, (await capture).Kind);
+
+        data.AutoSave.Elapse();
+
+        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".status").TextContent), Wait);
+        Assert.Equal("# Plan\n\nBusy\n", File.ReadAllText(PlanPath));
+        Assert.Empty(cut.FindAll("span.dirty-dot"));
+    }
+
+    // 203 AC-6: the Save button, Ctrl+S and Cmd+S save at once with the accent text and cancel the pending pause, so
+    // no second save follows.
+    [Theory]
+    [InlineData("button")]
+    [InlineData("ctrl")]
+    [InlineData("meta")]
+    public async Task ExplicitSave_SavesAtOnceAndCancelsThePause(string how)
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+        await js.Change(cut, "# Plan\n\nNow\n");
+        cut.WaitForAssertion(() => Assert.Equal(1, data.AutoSave.Pending), Wait);
+
+        if (how == "button")
+        {
+            await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+        }
+        else
+        {
+            await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = how == "ctrl", MetaKey = how == "meta" });
+        }
+
+        Assert.Equal("Saved Plan.", cut.Find(".status").TextContent);
+        Assert.Equal(["status", "accent"], cut.Find(".status").ClassList.ToArray());
+        Assert.Equal("# Plan\n\nNow\n", File.ReadAllText(PlanPath));
+        Assert.Equal((1, 0), (data.AutoSave.Started, data.AutoSave.Pending));
+        data.AutoSave.Elapse();
+        await cut.InvokeAsync(() => { });
+        Assert.Single(js.Calls("ContextEditor.getMarkdown"));
+        Assert.Single(js.Calls("ContextEditor.markCleanIf"));
+        Assert.Equal("Saved Plan.", cut.Find(".status").TextContent);
+    }
+
+    // 203 AC-12: a change report without an edit saves nothing when the pause elapses; the file's bytes stay.
+    [Fact]
+    public async Task AutoSave_NeverEdited_SavesNothing()
+    {
+        data.WriteNote("Plan", "* star\r\n");
+        byte[] before = File.ReadAllBytes(PlanPath);
+        EditorJs js = new EditorJs(data.Bunit, lossless: false);
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+        EditorInterop page = js.Page();
+        data.AutoSave.Elapse();
+        await cut.InvokeAsync(() => page.OnChanged());
+        cut.WaitForAssertion(() => Assert.Equal(1, data.AutoSave.Pending), Wait);
+        int asked = js.Calls("ContextEditor.isDirty").Count;
+
+        data.AutoSave.Elapse();
+
+        cut.WaitForAssertion(() => Assert.Equal(asked + 1, js.Calls("ContextEditor.isDirty").Count), Wait);
+        Assert.Equal(before, File.ReadAllBytes(PlanPath));
+        Assert.Empty(js.Calls("ContextEditor.getMarkdown"));
+        Assert.Equal(string.Empty, cut.Find(".status").TextContent);
+        Assert.Equal(0, data.AutoSave.Pending);
+    }
+
+    // 203 AC-12: an editor disposed while a pause is pending cancels it; nothing is saved afterwards.
+    [Fact]
+    public async Task AutoSave_DisposedWhilePending_SavesNothing()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+        await js.Change(cut, "# Plan\n\nLost\n");
+        cut.WaitForAssertion(() => Assert.Equal(1, data.AutoSave.Pending), Wait);
+
+        await data.Bunit.DisposeComponentsAsync();
+
+        Assert.Equal(0, data.AutoSave.Pending);
+        data.AutoSave.Elapse();
+        Assert.Single(js.Calls("ContextEditor.destroy"));
+        Assert.Equal("# Plan\n", File.ReadAllText(PlanPath));
+        Assert.Empty(js.Calls("ContextEditor.getMarkdown"));
+    }
+
+    // 203 AC-9: the close guard sees unsaved changes while the editor is dirty or an automatic save is pending.
+    [Fact]
+    public async Task HasUnsaved_WhileDirtyOrPending()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+        Assert.False(cut.Instance.HasUnsaved);
+
+        await js.Change(cut, "# Plan\n\nKept\n");
+
+        cut.WaitForAssertion(() => Assert.True(cut.Instance.HasUnsaved), Wait);
+        Assert.True(await cut.InvokeAsync(() => cut.Instance.SaveFirstAsync()));
+        Assert.False(cut.Instance.HasUnsaved);
+        Assert.Equal("# Plan\n\nKept\n", File.ReadAllText(PlanPath));
+    }
+
+    private string PlanPath => Path.Combine(data.Root, "Plan.md");
 
     private async Task<IRenderedComponent<NoteEditor>> RenderPlan(bool sensitive)
     {

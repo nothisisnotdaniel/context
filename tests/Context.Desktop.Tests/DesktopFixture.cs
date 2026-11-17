@@ -26,6 +26,7 @@ internal sealed class DesktopFixture : IDisposable
         Root = Path.Combine(parent, "Context");
         Directory.CreateDirectory(parent);
         Bunit = new BunitContext();
+        Guard = new CloseGuard(() => Interlocked.Increment(ref closeCalls));
     }
 
     /// <summary>The data folder; it does not exist until something is written.</summary>
@@ -59,6 +60,17 @@ internal sealed class DesktopFixture : IDisposable
 
     /// <summary>The file dialog the setup dialog uses; it opens no window.</summary>
     public FakeFileDialog Dialog { get; } = new();
+
+    /// <summary>The editor's pause after the last edit; it ends only on <see cref="FakeAutoSavePause.Elapse"/>.</summary>
+    public FakeAutoSavePause AutoSave { get; } = new();
+
+    /// <summary>The window close guard; its close action only counts (<see cref="CloseCalls"/>).</summary>
+    public CloseGuard Guard { get; }
+
+    /// <summary>How often the close guard closed the window.</summary>
+    public int CloseCalls => closeCalls;
+
+    private int closeCalls;
 
     /// <summary>The session of the open sensitive note, on the <see cref="UtcNow"/> clock (set by <see cref="CreateState"/>).</summary>
     public SensitiveSession? Session { get; private set; }
@@ -132,6 +144,8 @@ internal sealed class DesktopFixture : IDisposable
         Bunit.Services.AddSingleton(Actions);
         Bunit.Services.AddTransient<EditorInterop>();
         Bunit.Services.AddSingleton<IFileDialog>(Dialog);
+        Bunit.Services.AddSingleton<IAutoSavePause>(AutoSave);
+        Bunit.Services.AddSingleton(Guard);
         return State;
     }
 

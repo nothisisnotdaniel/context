@@ -432,6 +432,7 @@ public sealed class DesktopSourceTests
     [InlineData("<button type=\"button\" @onclick=\"() => Go(1)\">x</button>\n@code {\n private Task Go(int n) => Actions.CompleteTodo(n, t, c);\n}")]
     [InlineData("<ConfirmDialog OnConfirm=\"Go\" />\n@code {\n private async Task Go(Confirmation c)\n {\n if (x) { await Actions.CompleteTodo(1, t, c); }\n }\n}")]
     [InlineData("<Bar OnRun=\"Run\" OnGo=\"Go\" />\n@code {\n private Task Run() => Go();\n private Task Go() => Actions.CompleteTodo(1, t, c);\n}")]
+    [InlineData("<button type=\"button\" @onclick=\"() => SaveAsync(false)\">x</button>\n@code {\n public Task SaveFirstAsync() => SaveAsync(true);\n private Task AutoSaveAsync() => SaveAsync(true);\n private Task SaveAsync(bool a) => Actions.CompleteTodo(1, t, c);\n}")]
     public void ActionCall_Pattern_AllowsEventHandlers(string razor)
     {
         Assert.Single(ActionCallers(razor));
@@ -447,6 +448,8 @@ public sealed class DesktopSourceTests
     [InlineData("@code {\n protected override Task OnParametersSetAsync() => Actions.CompleteTodo(1, t, c);\n}")]
     [InlineData("<button type=\"button\" @onclick=\"Go\">x</button>\n@code {\n protected override void OnInitialized() { Go(); }\n private void Go() { Actions.CompleteTodo(1, t, c); }\n}")]
     [InlineData("<button type=\"button\" @onclick=\"Go\">x</button>\n@code {\n private void Helper() { Go(); }\n private void Go() { Actions.CompleteTodo(1, t, c); }\n}")]
+    [InlineData("<button type=\"button\" @onclick=\"Go\">x</button>\n@code {\n private void SaveFirstAsync() { Go(); }\n private void Go() { Actions.CompleteTodo(1, t, c); }\n}")]
+    [InlineData("<button type=\"button\" @onclick=\"SaveAsync\">x</button>\n@code {\n private void Helper() { SaveAsync(); }\n private void SaveAsync() { Actions.CompleteTodo(1, t, c); }\n}")]
     public void ActionCall_Pattern_FlagsOtherCallers(string razor)
     {
         Assert.NotEmpty(ActionCallProblems(razor));
@@ -746,15 +749,16 @@ public sealed class DesktopSourceTests
         string text = File.ReadAllText(Path.Combine(RepoFiles.Root(), InteropFile));
         MatchCollection invokable = Regex.Matches(
             text,
-            @"\[JSInvokable\]\s*public\s+Task\s+(\w+)\((?:string raw|bool dirty|int count, DroppedFile\[\] files|string href)\)\s*=>\s*([^;]*);");
+            @"\[JSInvokable\]\s*public\s+Task\s+(\w+)\((?:string raw|bool dirty|int count, DroppedFile\[\] files|string href|)\)\s*=>\s*([^;]*);");
 
+        // 203: OnChanged (no parameters) only raises Changed; the editor decides when to save.
         Assert.Equal(
-            ["OnTag", "OnLink", "OnPerson", "OnDirty", "OnDrop", "OnAttachment"],
+            ["OnTag", "OnLink", "OnPerson", "OnDirty", "OnDrop", "OnAttachment", "OnChanged"],
             invokable.Select(m => m.Groups[1].Value).ToArray());
-        Assert.Equal(6, Regex.Matches(text, @"\[JSInvokable").Count);
+        Assert.Equal(7, Regex.Matches(text, @"\[JSInvokable").Count);
         Assert.All(invokable, m => Assert.Matches(
             @"^\s*(TagClicked\?\.Invoke\(raw\)|LinkClicked\?\.Invoke\(raw\)|PersonClicked\?\.Invoke\(raw\)|DirtyChanged\?\.Invoke\(dirty\)"
-            + @"|FilesDropped\?\.Invoke\(new DroppedFiles\(count, files\)\)|AttachmentClicked\?\.Invoke\(href\)) \?\? Task\.CompletedTask$",
+            + @"|FilesDropped\?\.Invoke\(new DroppedFiles\(count, files\)\)|AttachmentClicked\?\.Invoke\(href\)|Changed\?\.Invoke\(\)) \?\? Task\.CompletedTask$",
             m.Groups[2].Value));
         Assert.Equal(
             "DirtyChanged?.Invoke(dirty) ?? Task.CompletedTask",
@@ -809,7 +813,7 @@ public sealed class DesktopSourceTests
         Assert.Matches(@"handleDOMEvents:\s*\{\s*(?://[^\n]*\n\s*)*keydown\(", text);
         Assert.Contains("opensChip", text, StringComparison.Ordinal);
         Assert.Equal(
-            ["OnAttachment", "OnDirty", "OnDrop", "OnLink", "OnPerson", "OnTag"],
+            ["OnAttachment", "OnChanged", "OnDirty", "OnDrop", "OnLink", "OnPerson", "OnTag"],
             Regex.Matches(text, @"invokeMethodAsync\(""(\w+)""").Select(m => m.Groups[1].Value).Distinct().Order(StringComparer.Ordinal));
     }
 
@@ -1690,7 +1694,11 @@ public sealed class DesktopSourceTests
             // 199: a helper shared by handlers (Main's CaptureAsync, run by the palette's RunCommand and bound to the
             // top bar's OnCapture) may be called by another method only when that caller is itself a bound,
             // non-lifecycle event handler.
-            if (methods.Any(m => m.Name != name && word.IsMatch(m.Body) && !IsBoundHandler(m.Name, bindings)))
+            // 203: the note editor's one save path (SaveAsync, bound to the Save button) is also run by the pause after
+            // the last edit (AutoSaveAsync) and by the parent before it leaves the note (SaveFirstAsync); only these
+            // two pairs are exempt.
+            if (methods.Any(m => m.Name != name && word.IsMatch(m.Body) && !IsBoundHandler(m.Name, bindings)
+                && !SaveCallers.Contains((m.Name, name))))
             {
                 problems.Add(name + " is called by another method");
             }
@@ -1698,6 +1706,9 @@ public sealed class DesktopSourceTests
 
         return problems;
     }
+
+    private static readonly HashSet<(string Caller, string Callee)> SaveCallers =
+        [("SaveFirstAsync", "SaveAsync"), ("AutoSaveAsync", "SaveAsync")];
 
     private static bool IsBoundHandler(string name, List<string> bindings)
     {
