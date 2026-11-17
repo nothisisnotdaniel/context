@@ -1,0 +1,193 @@
+using System.Globalization;
+
+namespace Context;
+
+/// <summary>An open <c>- [ ] ...</c> line found by <see cref="NoteTodoParser.Parse"/>.</summary>
+internal sealed record ParsedNoteTodo
+{
+    public ParsedNoteTodo(int line, string text, DateOnly? due, string raw)
+    {
+        Line = line;
+        Text = text;
+        Due = due;
+        Raw = raw;
+    }
+
+    /// <summary>
+    /// Returns only the type name: the text is raw outside text, so formatting this record must never print it.
+    /// </summary>
+    public override string ToString() => nameof(ParsedNoteTodo);
+
+    /// <summary>The 1-based number of the line in the note.</summary>
+    public int Line { get; }
+
+    /// <summary>The text after the marker, the due token removed, trimmed and collapsed (raw), never empty.</summary>
+    public string Text { get; }
+
+    /// <summary>The date of the first valid <c>due:yyyy-MM-dd</c> token, or <c>null</c>.</summary>
+    public DateOnly? Due { get; }
+
+    /// <summary>The whole line as written (without its line end).</summary>
+    public string Raw { get; }
+}
+
+/// <summary>Finds open Markdown task lines (<c>- [ ] text</c>) in a note's text.</summary>
+internal static class NoteTodoParser
+{
+    /// <summary>The most characters a note todo's text keeps; a longer one is cut (never inside a surrogate pair).</summary>
+    public const int MaxTextLength = 1000;
+
+    /// <summary>The open box after the list marker; <see cref="NoteTodos.Complete"/> turns its first one into <c>[x]</c>.</summary>
+    public const string OpenBox = "[ ]";
+
+    private const string DuePrefix = "due:";
+    private const string DayFormat = "yyyy-MM-dd";
+
+    /// <summary>
+    /// The open todos in <paramref name="markdown"/>, in line order. A line outside fenced code blocks
+    /// (<see cref="TagParser.NumberedLinesOutsideFences"/>) is one when it is optional spaces or tabs, <c>-</c>,
+    /// <c>*</c> or <c>+</c>, one space, <c>[ ]</c>, one space, then text. The first whitespace-delimited token
+    /// <c>due:yyyy-MM-dd</c> (ASCII digits, a real date, not inside a code span) sets <see cref="ParsedNoteTodo.Due"/>
+    /// and is removed from the text; the text is then trimmed and collapsed (<see cref="TagParser.Collapse"/>) and cut
+    /// to <see cref="MaxTextLength"/>. An empty text is no todo.
+    /// </summary>
+    public static IReadOnlyList<ParsedNoteTodo> Parse(string markdown)
+    {
+        List<ParsedNoteTodo> found = [];
+        foreach ((int number, string line) in TagParser.NumberedLinesOutsideFences(markdown))
+        {
+            ParsedNoteTodo? todo = ParseLine(number, line);
+            if (todo is not null)
+            {
+                found.Add(todo);
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>The todo on the one <paramref name="line"/> (numbered <paramref name="number"/>), or <c>null</c>.</summary>
+    internal static ParsedNoteTodo? ParseLine(int number, string line)
+    {
+        int i = 0;
+        while (i < line.Length && (line[i] == ' ' || line[i] == '\t'))
+        {
+            i++;
+        }
+
+        // "- [ ] " and at least one more character.
+        if (line.Length - i < 7
+            || line[i] is not ('-' or '*' or '+')
+            || line[i + 1] != ' '
+            || string.CompareOrdinal(line, i + 2, OpenBox, 0, OpenBox.Length) != 0
+            || line[i + 5] != ' ')
+        {
+            return null;
+        }
+
+        int start = i + 6;
+        DateOnly? due = null;
+        int dueStart = -1;
+        int dueEnd = -1;
+        bool[]? inCode = CodeMask(line);
+        int j = start;
+        while (j < line.Length)
+        {
+            if (char.IsWhiteSpace(line[j]))
+            {
+                j++;
+                continue;
+            }
+
+            int end = j;
+            while (end < line.Length && !char.IsWhiteSpace(line[end]))
+            {
+                end++;
+            }
+
+            // A due token has no backtick, so it is either wholly inside a code span or wholly outside.
+            if ((inCode is null || !inCode[j]) && TryParseDue(line.AsSpan(j, end - j), out DateOnly date))
+            {
+                due = date;
+                dueStart = j;
+                dueEnd = end;
+                break;
+            }
+
+            j = end;
+        }
+
+        System.Text.StringBuilder builder = new();
+        if (dueStart < 0)
+        {
+            TagParser.Collapse(line.AsSpan(start), builder, int.MaxValue, null);
+        }
+        else
+        {
+            string rest = string.Concat(line.AsSpan(start, dueStart - start), " ", line.AsSpan(dueEnd));
+            TagParser.Collapse(rest.AsSpan(), builder, int.MaxValue, null);
+        }
+
+        if (builder.Length > MaxTextLength)
+        {
+            int cut = char.IsHighSurrogate(builder[MaxTextLength - 1]) ? MaxTextLength - 1 : MaxTextLength;
+            builder.Length = cut;
+        }
+
+        string text = builder.ToString().TrimEnd();
+        return text.Length == 0 ? null : new ParsedNoteTodo(number, text, due, line);
+    }
+
+    // True at every index inside a code span (backticks included); null for a line without a backtick.
+    private static bool[]? CodeMask(string line)
+    {
+        CodeSpans? spans = CodeSpans.For(line);
+        if (spans is null)
+        {
+            return null;
+        }
+
+        bool[] mask = new bool[line.Length];
+        int i = 0;
+        while (i < line.Length)
+        {
+            if (line[i] != '`')
+            {
+                i++;
+                continue;
+            }
+
+            int after = spans.Skip(i);
+            for (int k = i; k < after; k++)
+            {
+                mask[k] = true;
+            }
+
+            i = after;
+        }
+
+        return mask;
+    }
+
+    // Exactly "due:" + yyyy-MM-dd in ASCII digits, a real date.
+    private static bool TryParseDue(ReadOnlySpan<char> token, out DateOnly date)
+    {
+        date = default;
+        if (token.Length != DuePrefix.Length + DayFormat.Length || !token.StartsWith(DuePrefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> day = token[DuePrefix.Length..];
+        for (int k = 0; k < day.Length; k++)
+        {
+            bool dash = k is 4 or 7;
+            if (dash ? day[k] != '-' : !char.IsAsciiDigit(day[k]))
+            {
+                return false;
+            }
+        }
+
+        return DateOnly.TryParseExact(day, DayFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
+    }
+}

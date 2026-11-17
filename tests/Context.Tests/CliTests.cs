@@ -447,10 +447,10 @@ public sealed class CliTests : IDisposable
     {
         Run("todo", "add", "2026-11-01", "Buy milk");
         Run("todo", "add", "2026-11-02", "Call Anna");
-        Dictionary<string, string> before = Snapshot();
+        Dictionary<string, string> before = SnapshotWithoutDb();
 
         AssertError(Run("todo", "done", "1"), 1, "No todo matches \"1\".");
-        Assert.Equal(before, Snapshot());
+        Assert.Equal(before, SnapshotWithoutDb());
 
         Run("todo", "add", "2026-11-03", "Read chapter 1");
         Result result = Run("todo", "done", "1");
@@ -464,10 +464,10 @@ public sealed class CliTests : IDisposable
     public void TodoDone_NoMatch_IsErrorAndWritesNothing()
     {
         Run("todo", "add", "today", "one");
-        Dictionary<string, string> before = Snapshot();
+        Dictionary<string, string> before = SnapshotWithoutDb();
 
         AssertError(Run("todo", "done", "two\u001b[31m", "three"), 1, "No todo matches \"two\uFFFD[31m three\".");
-        Assert.Equal(before, Snapshot());
+        Assert.Equal(before, SnapshotWithoutDb());
     }
 
     // 144 AC-8
@@ -477,10 +477,10 @@ public sealed class CliTests : IDisposable
         Run("todo", "add", "2026-11-01", "Call Anna");
         Run("todo", "add", "2026-11-02", "Call Ben");
         Run("todo", "add", "2026-11-03", "Buy milk");
-        Dictionary<string, string> before = Snapshot();
+        Dictionary<string, string> before = SnapshotWithoutDb();
 
         AssertError(Run("todo", "done", "call"), 1, "2 todos match \"call\". Type more of the todo's text.");
-        Assert.Equal(before, Snapshot());
+        Assert.Equal(before, SnapshotWithoutDb());
     }
 
     // 144 AC-8
@@ -507,8 +507,8 @@ public sealed class CliTests : IDisposable
             new TodoStore(root).List().Select(t => t.Repeat));
         Assert.Equal("2026-10-29\tstretch\n2026-10-29\tpay rent\n2026-11-02\twater plants\n", Run("todos").Out);
         Assert.Equal(
-            "{\"todos\":[{\"due\":\"2026-10-29\",\"time\":null,\"text\":\"stretch\"},{\"due\":\"2026-10-29\",\"time\":null,\"text\":\"pay rent\"},"
-            + "{\"due\":\"2026-11-02\",\"time\":null,\"text\":\"water plants\"}]}\n",
+            "{\"todos\":[{\"due\":\"2026-10-29\",\"time\":null,\"text\":\"stretch\",\"note\":null},{\"due\":\"2026-10-29\",\"time\":null,\"text\":\"pay rent\",\"note\":null},"
+            + "{\"due\":\"2026-11-02\",\"time\":null,\"text\":\"water plants\",\"note\":null}]}\n",
             Run("todos", "--json").Out);
     }
 
@@ -572,9 +572,9 @@ public sealed class CliTests : IDisposable
             new TodoStore(root).List().Select(t => t.Time));
         Assert.Equal("2026-10-29\tCall Bob\n2026-11-16 09:30\tstandup\n2026-11-16 14:00\tCall Anna\n", Run("todos").Out);
         Assert.Equal(
-            "{\"todos\":[{\"due\":\"2026-10-29\",\"time\":null,\"text\":\"Call Bob\"},"
-            + "{\"due\":\"2026-11-16\",\"time\":\"09:30\",\"text\":\"standup\"},"
-            + "{\"due\":\"2026-11-16\",\"time\":\"14:00\",\"text\":\"Call Anna\"}]}\n",
+            "{\"todos\":[{\"due\":\"2026-10-29\",\"time\":null,\"text\":\"Call Bob\",\"note\":null},"
+            + "{\"due\":\"2026-11-16\",\"time\":\"09:30\",\"text\":\"standup\",\"note\":null},"
+            + "{\"due\":\"2026-11-16\",\"time\":\"14:00\",\"text\":\"Call Anna\",\"note\":null}]}\n",
             Run("todos", "--json").Out);
     }
 
@@ -2155,5 +2155,165 @@ public sealed class CliTests : IDisposable
 
         WriteNote("2026-10-28", "# 2026-10-28\n" + new string('x', (int)NoteStore.MaxEditBytes - 20));
         AssertError(Run("dayend", "2026-10-28"), Cli.ExitError, "Can't write 2026-10-28.");
+    }
+
+    // 201 ----------------------------------------------------------------------------------------
+
+    private void BreakDb() =>
+        File.WriteAllText(Path.Combine(root, TagIndex.FileName), "not a database at all, not at all, really not");
+
+    // A fixture with todos.json todos and todos inside notes, sharing a date.
+    private void NoteTodoFixture()
+    {
+        Run("todo", "add", "2026-11-01", "stored one");
+        Run("todo", "add", "2026-11-20", "14:00", "stored two");
+        WriteNote("Meeting", "# Meeting\n- [ ] call Anna due:2026-11-20\n- [ ] no date\n- [x] ticked due:2026-11-01\n");
+        WriteNote("alpha", "```\n- [ ] fenced\n```\n- [ ] first due:2026-11-01\n");
+    }
+
+    // AC-10, AC-4: the merged list; note todos carry their note, "-" when undated.
+    [Fact]
+    public void Todos_MergedList_WithNoteTodos()
+    {
+        NoteTodoFixture();
+
+        Result result = Run("todos");
+
+        Assert.Equal((0, string.Empty), (result.Code, result.Err));
+        Assert.Equal(
+            "2026-11-01\tstored one\n2026-11-01\tfirst\talpha\n2026-11-20 14:00\tstored two\n"
+                + "2026-11-20\tcall Anna\tMeeting\n-\tno date\tMeeting\n",
+            result.Out);
+    }
+
+    // AC-10: --json adds note to every todo; a note todo has time null and due null when undated.
+    [Fact]
+    public void Todos_Json_HasNoteField()
+    {
+        NoteTodoFixture();
+
+        Result result = Run("todos", "--json");
+
+        Assert.Equal((0, string.Empty), (result.Code, result.Err));
+        Assert.Equal(
+            "{\"todos\":[{\"due\":\"2026-11-01\",\"time\":null,\"text\":\"stored one\",\"note\":null},"
+                + "{\"due\":\"2026-11-01\",\"time\":null,\"text\":\"first\",\"note\":\"alpha\"},"
+                + "{\"due\":\"2026-11-20\",\"time\":\"14:00\",\"text\":\"stored two\",\"note\":null},"
+                + "{\"due\":\"2026-11-20\",\"time\":null,\"text\":\"call Anna\",\"note\":\"Meeting\"},"
+                + "{\"due\":null,\"time\":null,\"text\":\"no date\",\"note\":\"Meeting\"}]}\n",
+            result.Out);
+    }
+
+    // AC-10: note text and names go through OneLine.
+    [Fact]
+    public void Todos_NoteTodoText_IsOneSafeLine()
+    {
+        Directory.CreateDirectory(root);
+        WriteNote("Plan", "- [ ] ring\u0007bell\n");
+
+        Assert.Equal("-\tring\uFFFDbell\tPlan\n", Run("todos").Out);
+    }
+
+    // AC-10: a bad context.db still prints the todos.json todos (text or JSON), then the error, exit 1.
+    [Fact]
+    public void Todos_BadDb_PrintsStoredTodos_ThenError()
+    {
+        NoteTodoFixture();
+        BreakDb();
+
+        Result text = Run("todos");
+        Result json = Run("todos", "--json");
+
+        Assert.Equal((1, "2026-11-01\tstored one\n2026-11-20 14:00\tstored two\n"), (text.Code, text.Out));
+        Assert.Equal(["Can't read context.db."], text.ErrLines);
+        Assert.Equal(1, json.Code);
+        Assert.Equal(
+            "{\"todos\":[{\"due\":\"2026-11-01\",\"time\":null,\"text\":\"stored one\",\"note\":null},"
+                + "{\"due\":\"2026-11-20\",\"time\":\"14:00\",\"text\":\"stored two\",\"note\":null}]}\n",
+            json.Out);
+        Assert.Equal(["Can't read context.db."], json.ErrLines);
+    }
+
+    // AC-10: a bad todos.json stays the one error, nothing on stdout, even with note todos.
+    [Fact]
+    public void Todos_BadTodosJson_IsTheErrorOnly()
+    {
+        NoteTodoFixture();
+        File.WriteAllText(Path.Combine(root, TodoStore.FileName), "{ bad");
+
+        AssertError(Run("todos"), 1, "Can't read todos.json.");
+        AssertError(Run("todos", "--json"), 1, "Can't read todos.json.");
+    }
+
+    // AC-11, AC-6: todo done picks a note todo and ticks only its box, keeping CRLF and the BOM.
+    [Fact]
+    public void TodoDone_NoteTodo_TicksItsLine()
+    {
+        Directory.CreateDirectory(root);
+        string path = Path.Combine(root, "Meeting.md");
+        byte[] bom = [0xEF, 0xBB, 0xBF];
+        File.WriteAllBytes(path, [.. bom, .. Encoding.UTF8.GetBytes("# Meeting\r\n- [ ] call Anna due:2026-11-20\r\n- [ ] other\r\n")]);
+        Run("todo", "add", "2026-11-01", "Buy milk");
+
+        Result result = Run("todo", "done", "CALL anna");
+
+        Assert.Equal((0, "Done: call Anna\n", string.Empty), (result.Code, result.Out, result.Err));
+        Assert.Equal(
+            [.. bom, .. Encoding.UTF8.GetBytes("# Meeting\r\n- [x] call Anna due:2026-11-20\r\n- [ ] other\r\n")],
+            File.ReadAllBytes(path));
+        Assert.Equal("2026-11-01\tBuy milk\n-\tother\tMeeting\n", Run("todos").Out);
+    }
+
+    // AC-11, AC-7: a line that changed since it was indexed is refused and the file bytes stay.
+    [Fact]
+    public void TodoDone_NoteTodo_ChangedLine_WritesNothing()
+    {
+        WriteNote("Meeting", "- [ ] call Anna\n");
+        string path = Path.Combine(root, "Meeting.md");
+        Assert.Equal("-\tcall Anna\tMeeting\n", Run("todos").Out);
+        // Same length and the same last-write time, so the index keeps the old line.
+        DateTime modified = File.GetLastWriteTimeUtc(path);
+        File.WriteAllText(path, "- [ ] call Bnna\n");
+        File.SetLastWriteTimeUtc(path, modified);
+        Dictionary<string, string> before = Snapshot();
+
+        AssertError(
+            Run("todo", "done", "call anna"), 1, "The todo's line in Meeting changed. Open the note and tick it there.");
+        Assert.Equal(before, Snapshot());
+    }
+
+    // AC-11: no todos in either list; only ticked lines in notes count as none.
+    [Fact]
+    public void TodoDone_NoOpenTodoAnywhere_IsNoTodos()
+    {
+        WriteNote("Meeting", "- [x] call Anna\n");
+
+        AssertError(Run("todo", "done", "call"), 1, "There are no todos to mark done.");
+        Assert.Equal("- [x] call Anna\n", Read("Meeting.md"));
+    }
+
+    // AC-11: a bad context.db is the error and nothing is written.
+    [Fact]
+    public void TodoDone_BadDb_IsErrorAndWritesNothing()
+    {
+        NoteTodoFixture();
+        BreakDb();
+        Dictionary<string, string> before = Snapshot();
+
+        AssertError(Run("todo", "done", "stored one"), 1, "Can't read context.db.");
+        AssertError(Run("todo", "done", "call Anna"), 1, "Can't read context.db.");
+        Assert.Equal(before, Snapshot());
+    }
+
+    // AC-11: a query matching a stored todo and a note todo is several matches, nothing written.
+    [Fact]
+    public void TodoDone_MatchesInBothLists_IsSeveral()
+    {
+        Run("todo", "add", "2026-11-01", "call Ben");
+        WriteNote("Meeting", "- [ ] call Anna\n");
+        Dictionary<string, string> before = SnapshotWithoutDb();
+
+        AssertError(Run("todo", "done", "call"), 1, "2 todos match \"call\". Type more of the todo's text.");
+        Assert.Equal(before, SnapshotWithoutDb());
     }
 }

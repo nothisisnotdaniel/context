@@ -132,7 +132,7 @@ public sealed class CliJsonTests : IDisposable
         Result result = Run(args);
 
         Assert.Equal(string.Empty, result.Err);
-        Assert.Equal("{\"todos\":[{\"due\":\"2026-10-28\",\"time\":null,\"text\":\"late #work\"},{\"due\":\"2026-10-30\",\"time\":null,\"text\":\"later\"}]}\n", result.Out);
+        Assert.Equal("{\"todos\":[{\"due\":\"2026-10-28\",\"time\":null,\"text\":\"late #work\",\"note\":null},{\"due\":\"2026-10-30\",\"time\":null,\"text\":\"later\",\"note\":null}]}\n", result.Out);
     }
 
     [Fact]
@@ -216,7 +216,7 @@ public sealed class CliJsonTests : IDisposable
 
         JsonElement todo = AssertDocument(Run("todos", "--json")).GetProperty("todos")[0];
 
-        Assert.Equal(["due", "time", "text"], todo.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(["due", "time", "text", "note"], todo.EnumerateObject().Select(p => p.Name));
     }
 
     // AC-5 ---------------------------------------------------------------------------------------

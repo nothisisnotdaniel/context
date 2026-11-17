@@ -36,7 +36,7 @@ internal sealed class Cli
         ("help", "Show this list."),
         ("version", "Show the version."),
         ("capture <text...>", "Append a dated line to the inbox note."),
-        ("todos", "List todos: date, text."),
+        ("todos", "List todos: date, text, and the note for todos inside notes."),
         ("todo add <yyyy-MM-dd|today|tomorrow> [HH:mm] <text...>", "Add a todo, with a time to be reminded at."),
         ("todo add every <weekday|day|month> <text...>", "Add a todo that comes back when it is done."),
         ("todo done <text...>", "Mark the todo with that text done."),
@@ -498,30 +498,72 @@ internal sealed class Cli
             return Error(TodosUnreadable);
         }
 
+        // A bad context.db still lists the todos.json todos, then says so.
+        IReadOnlyList<NoteTodo> noteTodos;
+        bool indexFailed = false;
+        try
+        {
+            noteTodos = NoteTodos.Load(session.Notes, session.Index);
+        }
+        catch (TagIndexException)
+        {
+            noteTodos = [];
+            indexFailed = true;
+        }
+
+        IReadOnlyList<TodoEntry> entries = NoteTodos.Merge(todos, noteTodos);
         if (session.Json)
         {
-            return Json(w =>
+            Json(w =>
             {
                 w.WriteStartArray("todos");
-                foreach (TodoItem todo in todos)
+                foreach (TodoEntry entry in entries)
                 {
                     w.WriteStartObject();
-                    w.WriteString("due", Date(todo.Due));
-                    CliJson.WriteTime(w, "time", todo.Time);
-                    w.WriteString("text", OneLine(todo.Text));
+                    if (entry.Due is { } due)
+                    {
+                        w.WriteString("due", Date(due));
+                    }
+                    else
+                    {
+                        w.WriteNull("due");
+                    }
+
+                    CliJson.WriteTime(w, "time", entry.Stored?.Time);
+                    w.WriteString("text", OneLine(entry.Text));
+                    if (entry.Note is { } note)
+                    {
+                        w.WriteString("note", OneLine(note.Note));
+                    }
+                    else
+                    {
+                        w.WriteNull("note");
+                    }
+
                     w.WriteEndObject();
                 }
 
                 w.WriteEndArray();
             });
         }
-
-        foreach (TodoItem todo in todos)
+        else
         {
-            Out($"{When(todo)}\t{OneLine(todo.Text)}");
+            foreach (TodoEntry entry in entries)
+            {
+                if (entry.Stored is { } todo)
+                {
+                    Out($"{When(todo)}\t{OneLine(todo.Text)}");
+                }
+                else
+                {
+                    NoteTodo note = entry.Note!;
+                    string when = note.Due is { } due ? Date(due) : "-";
+                    Out($"{when}\t{OneLine(note.Text)}\t{OneLine(note.Note)}");
+                }
+            }
         }
 
-        return ExitOk;
+        return indexFailed ? Error(IndexUnreadable) : ExitOk;
     }
 
     private int AddTodo(Session session, string text, DateOnly due, TodoRepeat? repeat, TimeOnly? time)
@@ -548,20 +590,36 @@ internal sealed class Cli
         try
         {
             IReadOnlyList<TodoItem> todos = session.Todos.List();
-            if (todos.Count == 0)
+            IReadOnlyList<NoteTodo> noteTodos;
+            try
+            {
+                noteTodos = NoteTodos.Load(session.Notes, session.Index);
+            }
+            catch (TagIndexException)
+            {
+                return Error(IndexUnreadable);
+            }
+
+            IReadOnlyList<TodoEntry> entries = NoteTodos.Merge(todos, noteTodos);
+            if (entries.Count == 0)
             {
                 return Error(TodoPicker.NoTodosText);
             }
 
-            TodoPick pick = TodoPicker.Pick(todos, query);
-            if (pick.Todo is null)
+            TodoPick pick = TodoPicker.PickEntry(entries, query);
+            if (pick.Entry is null)
             {
                 return Error(TodoPicker.NoPickText(pick, OneLine(query)));
             }
 
+            if (pick.Entry.Note is { } noteTodo)
+            {
+                return DoneNoteTodo(session, noteTodo);
+            }
+
             // The text only picks the todo; it is removed by its id, so a list that changed in between can't
             // make another todo go away.
-            done = session.Todos.Complete(pick.Todo.Id, today(), out next);
+            done = session.Todos.Complete(pick.Entry.Stored!.Id, today(), out next);
         }
         catch (TodoStoreException)
         {
@@ -580,6 +638,19 @@ internal sealed class Cli
 
         Out($"Done: {OneLine(done.Text)}");
         return Done($"Next: {Date(next.Due)}");
+    }
+
+    // Ticks a todo inside a note, only when its line is still as indexed.
+    private int DoneNoteTodo(Session session, NoteTodo todo)
+    {
+        string note = OneLine(todo.Note);
+        return NoteTodos.Complete(session.Notes, todo) switch
+        {
+            NoteTodoResult.Done => Done($"Done: {OneLine(todo.Text)}"),
+            NoteTodoResult.Missing => Error(NoteTodos.MissingText(note)),
+            NoteTodoResult.Failed => Error(NoteTodos.FailedText(note)),
+            _ => Error(NoteTodos.ChangedText(note)),
+        };
     }
 
     private int Notes(Session session)

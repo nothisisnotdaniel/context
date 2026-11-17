@@ -12,6 +12,13 @@ internal sealed record TodoPick
         Matches = matches;
     }
 
+    public TodoPick(TodoEntry? entry, int matches)
+    {
+        Entry = entry;
+        Todo = entry?.Stored;
+        Matches = matches;
+    }
+
     /// <summary>
     /// Returns only the type name: the todo's text is raw outside text, so formatting this record must never
     /// print it.
@@ -20,6 +27,12 @@ internal sealed record TodoPick
 
     /// <summary>The picked todo, or <c>null</c> when the query matched no todo or more than one.</summary>
     public TodoItem? Todo { get; }
+
+    /// <summary>
+    /// The picked row of a merged list (<see cref="TodoPicker.PickEntry"/>), or
+    /// <c>null</c>; <see cref="Todo"/> is then its stored todo (<c>null</c> for a note todo).
+    /// </summary>
+    public TodoEntry? Entry { get; }
 
     /// <summary>1 with a picked todo; else the number of todos whose text contains the query (0, or 2 and more).</summary>
     public int Matches { get; }
@@ -50,25 +63,42 @@ internal static class TodoPicker
     /// </summary>
     public static TodoPick Pick(IReadOnlyList<TodoItem> todos, string query)
     {
+        (TodoItem? todo, int matches) = PickBy(todos, t => t.Text, query);
+        return new TodoPick(todo, matches);
+    }
+
+    /// <summary>
+    /// The same rules over a merged list (<see cref="NoteTodos.Merge"/>, todos.json todos and note todos alike), in
+    /// its order; the pick is in <see cref="TodoPick.Entry"/>.
+    /// </summary>
+    public static TodoPick PickEntry(IReadOnlyList<TodoEntry> entries, string query)
+    {
+        (TodoEntry? entry, int matches) = PickBy(entries, e => e.Text, query);
+        return new TodoPick(entry, matches);
+    }
+
+    private static (T? Item, int Matches) PickBy<T>(IReadOnlyList<T> items, Func<T, string> textOf, string query)
+        where T : class
+    {
         string wanted = query.Trim();
-        TodoItem? only = null;
+        T? only = null;
         int containing = 0;
-        foreach (TodoItem todo in todos)
+        foreach (T item in items)
         {
-            string text = OneLine(todo.Text);
+            string text = OneLine(textOf(item));
             if (text.Equals(wanted, StringComparison.OrdinalIgnoreCase))
             {
-                return new TodoPick(todo, 1);
+                return (item, 1);
             }
 
             if (text.Contains(wanted, StringComparison.OrdinalIgnoreCase))
             {
-                only ??= todo;
+                only ??= item;
                 containing++;
             }
         }
 
-        return containing == 1 ? new TodoPick(only, 1) : new TodoPick(null, containing);
+        return containing == 1 ? (only, 1) : (null, containing);
     }
 
     /// <summary>A todo's text as every front end shows it on one line: <see cref="SafeText.Clean"/>, then line breaks become spaces.</summary>

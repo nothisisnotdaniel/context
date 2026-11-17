@@ -4,60 +4,73 @@
     <h2>Todos</h2>
     @if (Snapshot is { } snapshot)
     {
+        IReadOnlyList<TodoEntry> entries = NoteTodos.Merge(snapshot.Todos, snapshot.NoteTodos);
+        bool busy = asking is not null || askingNote is not null || running || adding;
         @if (snapshot.TodosUnreadable)
         {
             <p class="red">Can't read todos.json</p>
         }
-        else if (snapshot.Todos.Count == 0)
+        @if (snapshot.NoteTodosUnreadable)
         {
-            <p class="grey">No todos yet</p>
+            <p class="red note-todos-unreadable">Can't read the note todos.</p>
+        }
+        @if (entries.Count == 0)
+        {
+            @if (!snapshot.TodosUnreadable && !snapshot.NoteTodosUnreadable)
+            {
+                <p class="grey">No todos yet</p>
+            }
         }
         else
         {
             <ul class="todo-list">
-                @foreach (TodoItem todo in snapshot.Todos)
+                @foreach (TodoEntry entry in entries)
                 {
-                    string text = DesktopText.OneLine(todo.Text);
-                    IReadOnlyList<PersonSegment> segments = PersonParser.Segments(text);
-                    string when = todo.Due < snapshot.Today ? "overdue" : todo.Due == snapshot.Today ? "today" : "later";
-                    <li class="todo">
-                        <label class="todo-line">
-                            <input type="checkbox" class="done" checked="@(asking?.Id == todo.Id)"
-                                   disabled="@(asking is not null || running || adding)" @onchange="() => Ask(todo)" />
-                            <span class="date @when">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
-                            @if (todo.Time is { } time)
-                            {
-                                @(" ")<span class="time">@time.ToString(TodoStore.StoredTimeFormat, CultureInfo.InvariantCulture)</span>
-                            }
-                            @* A code block drops the whitespace around it, so the space before the text is written out. *@
-                            @(" ")
-                            @* A mention opens the person's page; its click stops there, so the checkbox never ticks. *@
-                            <span class="text cut" title="@text">@if (segments.Any(s => s.IsMention))
+                    @if (entry.Stored is { } todo)
+                    {
+                        string text = DesktopText.OneLine(todo.Text);
+                        string when = DateClass(todo.Due, snapshot.Today);
+                        <li class="todo">
+                            <label class="todo-line">
+                                <input type="checkbox" class="done" checked="@(asking?.Id == todo.Id)"
+                                       disabled="@busy" @onchange="() => Ask(todo)" />
+                                <span class="date @when">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                                @if (todo.Time is { } time)
                                 {
-                                    @foreach (PersonSegment segment in segments)
-                                    {
-                                        @if (segment.Name is { } mentioned)
-                                        {
-                                            <button type="button" class="mention" title="@segment.Text"
-                                                    @onclick="() => OnPerson.InvokeAsync(mentioned)"
-                                                    @onclick:preventDefault="true" @onclick:stopPropagation="true">@segment.Text</button>
-                                        }
-                                        else
-                                        {
-                                            <span class="plain">@segment.Text</span>
-                                        }
-                                    }
+                                    @(" ")<span class="time">@time.ToString(TodoStore.StoredTimeFormat, CultureInfo.InvariantCulture)</span>
                                 }
-                                else
+                                @* A code block drops the whitespace around it, so the space before the text is written out. *@
+                                @(" ")
+                                @TodoText(text)
+                                @if (todo.Repeat is { } repeat)
                                 {
-                                    @text
-                                }</span>
-                            @if (todo.Repeat is { } repeat)
-                            {
-                                <span class="repeat" title="@repeat.Label">@repeat.Label</span>
-                            }
-                        </label>
-                    </li>
+                                    <span class="repeat" title="@repeat.Label">@repeat.Label</span>
+                                }
+                            </label>
+                        </li>
+                    }
+                    else if (entry.Note is { } noteTodo)
+                    {
+                        string text = DesktopText.OneLine(noteTodo.Text);
+                        string noteName = DesktopText.OneLine(noteTodo.Note);
+                        <li class="todo note-todo">
+                            <label class="todo-line">
+                                <input type="checkbox" class="done" checked="@(askingNote == noteTodo)"
+                                       disabled="@busy" @onchange="() => AskNote(noteTodo)" />
+                                @if (noteTodo.Due is { } noteDue)
+                                {
+                                    <span class="date @DateClass(noteDue, snapshot.Today)">@noteDue.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                                    @(" ")
+                                }
+                                @TodoText(text)
+                                @(" ")
+                                @* The note's name opens it (with the editor's discard check); its click never ticks the checkbox. *@
+                                <button type="button" class="todo-note" title="@noteName"
+                                        @onclick="() => OnOpen.InvokeAsync(noteTodo.Note)"
+                                        @onclick:preventDefault="true" @onclick:stopPropagation="true">@noteName</button>
+                            </label>
+                        </li>
+                    }
                 }
             </ul>
         }
@@ -115,6 +128,11 @@
         <ConfirmDialog Question="@($"Mark this todo done? {todoAsked.Text}")" ConfirmLabel="Mark done"
                        Busy="running" OnConfirm="CompleteAsked" OnCancel="CloseDialog" />
     }
+    else if (askingNote is { } noteAsked)
+    {
+        <ConfirmDialog Question="@($"Mark this todo done? {noteAsked.Text}")" ConfirmLabel="Mark done"
+                       Busy="running" OnConfirm="CompleteNoteAsked" OnCancel="CloseDialog" />
+    }
 </section>
 
 @code {
@@ -123,6 +141,12 @@
     /// <summary>Called with the normalized name of a person mention clicked in a todo's text.</summary>
     [Parameter]
     public EventCallback<string> OnPerson { get; set; }
+
+    /// <summary>Called with the full name of the note whose name was clicked on a todo inside a note.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    private NoteTodo? askingNote;
 
     private bool running;
     private ActionResult? result;
@@ -206,10 +230,18 @@
     /// </summary>
     internal void AskDone(TodoItem todo)
     {
-        if (!running && asking is null)
+        if (!running && asking is null && askingNote is null)
         {
             asking = todo;
             StateHasChanged();
+        }
+    }
+
+    private void AskNote(NoteTodo todo)
+    {
+        if (!running)
+        {
+            askingNote = todo;
         }
     }
 
@@ -218,8 +250,57 @@
         if (!running)
         {
             asking = null;
+            askingNote = null;
         }
     }
+
+    private async Task CompleteNoteAsked(Confirmation confirmed)
+    {
+        if (askingNote is not { } todoAsked || running)
+        {
+            return;
+        }
+
+        running = true;
+        try
+        {
+            result = await Actions.CompleteNoteTodo(todoAsked, confirmed);
+        }
+        finally
+        {
+            running = false;
+            askingNote = null;
+        }
+    }
+
+    private static string DateClass(DateOnly day, DateOnly today) =>
+        day < today ? "overdue" : day == today ? "today" : "later";
+
+    // A todo's one-line text; a mention opens the person's page and its click stops there, so the checkbox never ticks.
+    private RenderFragment TodoText(string text) => __builder =>
+    {
+        IReadOnlyList<PersonSegment> segments = PersonParser.Segments(text);
+        <span class="text cut" title="@text">@if (segments.Any(s => s.IsMention))
+            {
+                @foreach (PersonSegment segment in segments)
+                {
+                    @if (segment.Name is { } mentioned)
+                    {
+                        <button type="button" class="mention" title="@segment.Text"
+                                @onclick="() => OnPerson.InvokeAsync(mentioned)"
+                                @onclick:preventDefault="true" @onclick:stopPropagation="true">@segment.Text</button>
+                    }
+                    else
+                    {
+                        <span class="plain">@segment.Text</span>
+                    }
+                }
+            }
+            else
+            {
+                @text
+            }</span>
+    };
 
     private async Task CompleteAsked(Confirmation confirmed)
     {

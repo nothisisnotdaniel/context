@@ -21,11 +21,11 @@ Every factory agent reads this file before working on Context. Keep it short and
     `#[Work]` are one tag. `TagParser.Format` shows a tag as `#tag`, or `#[tag]` when it has a space; all tag
     output uses it. `TagIndex.NormalizeTag` (for a typed tag, as in `context tags <tag>`) accepts `work`, `#work`, `[a b]`, `#[a b]`. `TagIndex` keeps the index in SQLite at `<root>/context.db` (`Microsoft.Data.Sqlite`,
     `Pooling=False`, parameterized SQL only): `notes(name, modified)` (last-write UTC ticks, NULL for a
-    note that couldn't be read so it is retried), `note_tags(note, tag)`, `note_links(note, target)`, `note_people(note, person, spelling)`, `note_decisions(note, line, text)` (job 180, primary key `(note, line)`; one row per `DecisionParser` line, written and pruned with the note's other rows) and `note_attributes(note, key, value_key, value)` (job 157, primary key `(note, key, value_key)`, index on `(key, value_key)`) and `note_text` (job 170: FTS5 `fts5(note UNINDEXED, body, tokenize='trigram')` with FTS5 `secure-delete` on, set once in `Sync` after checking `note_text_config`; one row per plain note with its whole text, none for a note that can't be read or is over `NoteStore.MaxEditBytes`; sensitive notes are never listed, so never indexed; every connection sets `PRAGMA secure_delete = ON`, so a deleted note's text doesn't linger in free pages of `context.db`; the rollback journal `context.db-journal` briefly holds the old pages and is unlinked, not zeroed, after each commit, which is outside this guarantee). `Sync(NoteStore)` updates it
+    note that couldn't be read so it is retried), `note_tags(note, tag)`, `note_links(note, target)`, `note_people(note, person, spelling)`, `note_decisions(note, line, text)` (job 180, primary key `(note, line)`; one row per `DecisionParser` line, written and pruned with the note's other rows), `note_todos(note, line, due, text, raw)` (job 201, primary key `(note, line)`; one row per open `NoteTodoParser` line, `due` `yyyy-MM-dd` or NULL, written and pruned like `note_decisions`) and `note_attributes(note, key, value_key, value)` (job 157, primary key `(note, key, value_key)`, index on `(key, value_key)`) and `note_text` (job 170: FTS5 `fts5(note UNINDEXED, body, tokenize='trigram')` with FTS5 `secure-delete` on, set once in `Sync` after checking `note_text_config`; one row per plain note with its whole text, none for a note that can't be read or is over `NoteStore.MaxEditBytes`; sensitive notes are never listed, so never indexed; every connection sets `PRAGMA secure_delete = ON`, so a deleted note's text doesn't linger in free pages of `context.db`; the rollback journal `context.db-journal` briefly holds the old pages and is unlinked, not zeroed, after each commit, which is outside this guarantee). `Sync(NoteStore)` updates it
     in one transaction and only re-parses files whose time changed. `PRAGMA user_version` holds the parser
-    version (`TagIndex.ParserVersion`, now 8: `Decision:` lines in `note_decisions`; 7 was note text in `note_text`; 6 was a link target that runs into a code span is no link); when it is lower, `Sync` clears every stored time and empties `note_text` in the same
+    version (`TagIndex.ParserVersion`, now 9: open `- [ ]` lines in `note_todos`; 8 was `Decision:` lines in `note_decisions`; 7 was note text in `note_text`; 6 was a link target that runs into a code span is no link); when it is lower, `Sync` clears every stored time and empties `note_text` in the same
     transaction (so all notes are re-parsed and their text written once) and then sets it. Bump it whenever parsing changes. Queries: `Tags()`, `NotesWithTag`,
-    `NoteTags()`, `FindNote`, `Links`, `People()`, `NotesMentioning`, `NotesWithAttribute(key, value)` (by `AttributeParser.ValueKey`), `NotesWithoutAttribute(key)`, `Search(text)` (`(Note, Body)` rows for `note_text MATCH $q`, `$q` the text as one FTS5 phrase: `"` + text with `"` doubled + `"`, always a parameter, so FTS syntax is literal), `Decisions(tag?)` (`(Note, Line, Text, Modified)` rows of `note_decisions` joined to `notes` with a stored time, `Modified` UTC; a tag keeps the notes with that `note_tags` row). A database that can't be opened or isn't valid throws `TagIndexException` (an
+    `NoteTags()`, `FindNote`, `Links`, `People()`, `NotesMentioning`, `NotesWithAttribute(key, value)` (by `AttributeParser.ValueKey`), `NotesWithoutAttribute(key)`, `Search(text)` (`(Note, Body)` rows for `note_text MATCH $q`, `$q` the text as one FTS5 phrase: `"` + text with `"` doubled + `"`, always a parameter, so FTS syntax is literal), `Decisions(tag?)` (`(Note, Line, Text, Modified)` rows of `note_decisions` joined to `notes` with a stored time, `Modified` UTC; a tag keeps the notes with that `note_tags` row), `NoteTodos()` (`NoteTodo` rows of `note_todos` joined to `notes` with a stored time). A database that can't be opened or isn't valid throws `TagIndexException` (an
     `IOException`) and is never deleted or overwritten. The file database waits up to `TagIndex.BusyTimeout` (5 s; an
     internal constructor argument shortens it for tests) for another process's lock, and `Sync` starts with
     `BEGIN IMMEDIATE`, so the desktop app and a command-line run can share it. `TagsView.Build`, `LinksView.Build`
@@ -449,6 +449,25 @@ Every factory agent reads this file before working on Context. Keep it short and
     and repeat, new id, `created` from the clock, `NextDue` as due) in the same write; `Complete(id)` delegates with
     `DateOnly.MinValue`. An older build ignores `repeat` and drops it on its next write. `TodoPicker.NoTodosText` and
     `NoPickText(pick, shown)` are the picker's red lines for `context todo done` and `/done`.
+    **Todos inside notes** (job 201, `NoteTodoParser.cs`, `NoteTodo.cs`): `NoteTodoParser.Parse(markdown)` gives a
+    `ParsedNoteTodo(Line, Text, Due?, Raw)` for each line outside fences (`TagParser.NumberedLinesOutsideFences`) that is
+    optional spaces/tabs, `-`/`*`/`+`, one space, `[ ]`, one space, then text; the first whitespace-delimited token
+    `due:yyyy-MM-dd` (ASCII digits, a real date, not in a code span) sets `Due` and leaves the text, which is collapsed
+    (`TagParser.Collapse`) and cut to `MaxTextLength` (1000, never inside a surrogate pair); an empty text is no todo.
+    `TagIndex` stores them per plain note (`note_todos`); the note stays the only source. `NoteTodos.Load(store, index)`
+    syncs and returns them; `NoteTodos.Merge(stored, notes)` gives the `TodoEntry` list both front ends show: by due date,
+    on one date the `todos.json` todos first (`List()` order), then note todos by note name ignoring case, then ordinal,
+    then line; undated note todos last. `TodoPicker.PickEntry(entries, query)` applies the `Pick` rules to that list.
+    `NoteTodos.Complete(store, todo, history?)` (a Core write) re-reads the note (`ReadForEdit`), and only when line
+    `Line` still parses to the same todo with `Raw` equal (ordinal) turns its first `[ ]` into `[x]` and saves through
+    `SaveIfUnchanged` (CRLF, BOM and every other byte kept; a change in between is `Changed`); results `Done`, `Changed`,
+    `Missing`, `Failed`, texts `NoteTodos.ChangedText`/`MissingText`/`FailedText(note)`. Desktop:
+    `DesktopSnapshot.NoteTodos`/`NoteTodosUnreadable` (filled by `DesktopState.Build` under the index lock after the
+    current view), `DesktopActions.CompleteNoteTodo(todo, confirmation)` (passes `HistoryStore`), `TodoPanel` shows the
+    merged list (a note todo has no date span when undated and a `button.todo-note` with the note name that calls
+    `OnOpen`, which `Main` binds to `RequestOpen`), the red `Can't read the note todos.` line for a bad `context.db`, and
+    `No todos yet` only when both lists are empty and readable. Out of scope: the current view's `Due`, the review,
+    person pages, the day's end, reminders, the palette's `/done`; sensitive notes are never read.
     **Timed reminders** (job 178): `TodoItem.Time` (`TimeOnly?`, stored as the optional `time` string, exactly
     `HH:mm` (`TodoStore.StoredTimeFormat`), ASCII, at most `23:59`) and `TodoItem.Notified` (`DateTime?`, UTC, stored as
     `notified` like `done`); both written after `repeat` only when set, so a file without them keeps its bytes; not
@@ -472,7 +491,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     usage error, `todos.json` not read), an empty list (`There are no todos to mark done.`), `No todo
     matches "<query>".`, `<n> todos match "<query>". Type more of the todo's text.` (query cleaned;
     nothing removed), then `Complete(id)`: `Done: <text>`, or `The todo list changed. Nothing was done.` when
-    the todo went away in between.
+    the todo went away in between. Job 201: it picks over the merged list (`PickEntry`; a bad `context.db` is
+    `Can't read context.db.`, exit 1, before any pick); a picked note todo goes through `NoteTodos.Complete`
+    (`Done: <text>`, else the `NoteTodos` texts on stderr, exit 1).
     `today` is injected as `Func<DateOnly>` (and `TodoStore` takes an optional UTC clock), so tests never
     use the real clock.
 - **New features are desktop-only.** Don't add a CLI command (or a new CLI option) for a new feature unless
@@ -489,7 +510,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   folder), `capture <text...>`
   (`Inbox.Capture`: controls to spaces, trimmed, 1-1000 chars, appends `- yyyy-MM-dd HH:mm <text>` to `inbox.md` via
   `ReadForEdit` + `SaveIfUnchanged`, retries 3 times on a change on disk; a missing inbox is created as `# inbox\n` +
-  the line through `NoteStore.CreateWithText`, temp file + no-overwrite move), `todos` (`<date>\t<text>` or `<date> <HH:mm>\t<text>`, no number),
+  the line through `NoteStore.CreateWithText`, temp file + no-overwrite move), `todos` (`<date>\t<text>` or `<date> <HH:mm>\t<text>`, no number; job 201: the merged list with note todos as `<date or ->\t<text>\t<note>`; a bad `context.db` still prints the `todos.json` todos, then `Can't read context.db.`, exit 1; `--json` adds `note` to every todo),
   `todo add <date> [HH:mm] <text...>` (`TodoInput` rules; prints `Added: <date>[ <HH:mm>] <text>`), `todo add every <weekday|day|month> <text...>` (job 168,
   `TryParseRepeat`; prints `Added: <due> <text>`; a bad unit is the usage error `That repeat isn't valid. Type: context
   todo add every <weekday|day|month> <text>.`, no text `A repeating todo needs a repeat and text. ...`),
@@ -686,7 +707,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Context.Desktop` and `Context.Desktop.Tests`, each by name and `PublicKey` (`Key="$(ContextPublicKey)"`; every
     assembly is public-signed with the committed `Context.snk`, see **Strong name**). `Context` grants only
     `Context.Tests` and `Context.Desktop` only `Context.Desktop.Tests`, the same way; no `InternalsVisibleTo` is name-only.
-    It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, picking a todo by its text in `TodoPicker.cs`, tag parsing in `TagParser.cs`,
+    It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, picking a todo by its text in `TodoPicker.cs`, todos inside notes in `NoteTodoParser.cs` and `NoteTodo.cs`, tag parsing in `TagParser.cs`,
     `[[note link]]` parsing in `NoteLinkParser.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
@@ -1054,7 +1075,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     means Windows, installed by `Setup.exe` and not the portable copy. There is no update UI.
     `wwwroot/index.html` (CSP meta tag, `img-src 'self' blob:` for attachment images, only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
     and `wwwroot/editor/editor.css`.
-  - **Desktop rules:** the Core writing calls (`Create`, `Save`, `SaveIfUnchanged`, `Add`, `Complete`, `Set`, `Clear`, `Delete`,
+  - **Desktop rules:** the Core writing calls (`Create`, `Save`, `SaveIfUnchanged`, `Add`, `Complete` (also `NoteTodos.Complete`), `Set`, `Clear`, `Delete`,
     `Rename`, `CreateChild`, `Move`, `MoveWithNote`, `RemoveUnlinked` (`NoteAttachments`), `ClearCache`, `Capture` (`Inbox.Capture`), `MarkNotified` (named only in `TodoStore.cs` and `DesktopActions.cs`), `Snooze` (`InboxTriage.Snooze`; `InboxTriage.Remove` is checked on its own, since components remove from their own lists), `Ensure` (`DailyNote.Ensure`, `MeetingNote.Ensure`, `Briefing.Ensure`), the note history (`Keep`, `RemoveHistory`, `RestoreVersion`; only the call `Actions.RestoreVersion(` in a `.razor` file is allowed), `CreateWithText` (`CreateNoteFromTemplate`), the day's end (`CloseDay`, `RefreshWorked`, `MoveTodos`, `AutoClose`, `MoveDue`, `SaveDayEnd`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
     `StoreRecoveryPublicKey`) appear only in `DesktopActions.cs` (exemptions: `DotNetObjectReference.Create(` once in
     `EditorInterop.cs`, `ECDiffieHellman.Create(` in `SealedNote.cs`, and `WindowsKeyStore.cs`, whose .NET calls change

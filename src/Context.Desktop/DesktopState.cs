@@ -696,9 +696,21 @@ internal sealed class DesktopState
             }
 
             CurrentView current;
+            IReadOnlyList<NoteTodo> noteTodos;
+            bool noteTodosUnreadable = false;
             lock (indexGate)
             {
                 current = CurrentView.Build(todos, index, notes, calendar, feed, day);
+                try
+                {
+                    // Syncs first: the current view skips the sync when nothing needs the index.
+                    noteTodos = NoteTodos.Load(notes, index);
+                }
+                catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+                {
+                    noteTodos = [];
+                    noteTodosUnreadable = true;
+                }
             }
 
             IReadOnlyList<NoteInfo> sensitive = [];
@@ -716,7 +728,7 @@ internal sealed class DesktopState
 
             return new DesktopSnapshot(
                 false, day, current, todoList, todosUnreadable, noteList, notesUnreadable, folder, sensitive,
-                KeyStore.Supported, RecoveryReady());
+                KeyStore.Supported, RecoveryReady(), noteTodos, noteTodosUnreadable);
         }
         catch (Exception)
         {

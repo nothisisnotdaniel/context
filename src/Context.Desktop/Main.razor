@@ -114,7 +114,7 @@
                 </div>
             </main>
             <aside class="todos-region">
-                <TodoPanel @ref="todoPanel" OnPerson="OpenMention" />
+                <TodoPanel @ref="todoPanel" OnPerson="OpenMention" OnOpen="RequestOpen" />
             </aside>
         </div>
         @if (discarding)

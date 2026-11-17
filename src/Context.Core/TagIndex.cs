@@ -159,6 +159,8 @@ internal sealed class TagIndex
     /// <summary>The file name of the database inside the root.</summary>
     public const string FileName = "context.db";
 
+    private const string DueFormat = "yyyy-MM-dd";
+
     private const string Schema = """
         CREATE TABLE IF NOT EXISTS notes(name TEXT NOT NULL PRIMARY KEY, modified INTEGER);
         CREATE TABLE IF NOT EXISTS note_tags(
@@ -188,6 +190,13 @@ internal sealed class TagIndex
             line INTEGER NOT NULL,
             text TEXT NOT NULL,
             PRIMARY KEY(note, line));
+        CREATE TABLE IF NOT EXISTS note_todos(
+            note TEXT NOT NULL,
+            line INTEGER NOT NULL,
+            due TEXT,
+            text TEXT NOT NULL,
+            raw TEXT NOT NULL,
+            PRIMARY KEY(note, line));
         CREATE VIRTUAL TABLE IF NOT EXISTS note_text USING fts5(note UNINDEXED, body, tokenize='trigram');
         """;
 
@@ -197,9 +206,9 @@ internal sealed class TagIndex
     /// 2: <c>[[note links]]</c>. 3: subpages (full names, link targets up to <see cref="NoteLinkParser.MaxTargetLength"/>).
     /// 4: <c>@[person]</c> mentions (and <c>@[[x]]</c> is no link). 5: <c>key:: value</c> attributes. 6: a link target
     /// that runs into a code span is no link. 7: note text (the full-text table <c>note_text</c>). 8: <c>Decision:</c> lines
-    /// (<c>note_decisions</c>).
+    /// (<c>note_decisions</c>). 9: open <c>- [ ]</c> todos (<c>note_todos</c>).
     /// </summary>
-    public const int ParserVersion = 8;
+    public const int ParserVersion = 9;
 
     /// <summary>
     /// How long opening <c>context.db</c> and starting <see cref="Sync"/>'s write transaction wait while another
@@ -291,6 +300,7 @@ internal sealed class TagIndex
                 IReadOnlyList<string> people;
                 IReadOnlyList<PageAttribute> attributes;
                 IReadOnlyList<ParsedDecision> decisions;
+                IReadOnlyList<ParsedNoteTodo> noteTodos;
                 string? body;
                 long? newModified = modified;
                 try
@@ -303,6 +313,7 @@ internal sealed class TagIndex
                     people = PersonParser.Parse(text);
                     attributes = AttributeParser.Parse(text);
                     decisions = DecisionParser.Parse(text);
+                    noteTodos = NoteTodoParser.Parse(text);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
@@ -311,6 +322,7 @@ internal sealed class TagIndex
                     people = [];
                     attributes = [];
                     decisions = [];
+                    noteTodos = [];
                     body = null;
                     newModified = null;
                 }
@@ -374,6 +386,20 @@ internal sealed class TagIndex
                         ("$text", decision.Text));
                 }
 
+                Execute(connection, transaction, "DELETE FROM note_todos WHERE note = $note", ("$note", note.Name));
+                foreach (ParsedNoteTodo todo in noteTodos)
+                {
+                    Execute(
+                        connection,
+                        transaction,
+                        "INSERT INTO note_todos(note, line, due, text, raw) VALUES($note, $line, $due, $text, $raw)",
+                        ("$note", note.Name),
+                        ("$line", todo.Line),
+                        ("$due", todo.Due?.ToString(DueFormat, System.Globalization.CultureInfo.InvariantCulture)),
+                        ("$text", todo.Text),
+                        ("$raw", todo.Raw));
+                }
+
                 if (!upgrade)
                 {
                     Execute(connection, transaction, "DELETE FROM note_text WHERE note = $note", ("$note", note.Name));
@@ -405,6 +431,7 @@ internal sealed class TagIndex
                 Execute(connection, transaction, "DELETE FROM note_people WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_attributes WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_decisions WHERE note = $note", ("$note", gone));
+                Execute(connection, transaction, "DELETE FROM note_todos WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_text WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM notes WHERE name = $note", ("$note", gone));
             }
@@ -415,6 +442,7 @@ internal sealed class TagIndex
             Execute(connection, transaction, "DELETE FROM note_people WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_attributes WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_decisions WHERE note NOT IN (SELECT name FROM notes)");
+            Execute(connection, transaction, "DELETE FROM note_todos WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_text WHERE note NOT IN (SELECT name FROM notes)");
             if (upgrade)
             {
@@ -492,6 +520,49 @@ internal sealed class TagIndex
             return (IReadOnlyList<(string Note, int Line, string Text, DateTime Modified)>)rows;
         });
     }
+
+    /// <summary>
+    /// Every row of <c>note_todos</c> of a note with a stored time, unsorted (<see cref="NoteTodos.Merge"/> orders
+    /// them). A row edited by hand out of range (line, a due that is no <c>yyyy-MM-dd</c> date) is skipped.
+    /// </summary>
+    public IReadOnlyList<NoteTodo> NoteTodos() => Run(connection =>
+    {
+        List<NoteTodo> rows = [];
+        using SqliteCommand command = Command(
+            connection,
+            null,
+            "SELECT t.note, t.line, t.due, t.text, t.raw FROM note_todos t "
+                + "JOIN notes n ON n.name = t.note WHERE n.modified IS NOT NULL");
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            long line = reader.GetInt64(1);
+            if (line < 1 || line > int.MaxValue)
+            {
+                continue;
+            }
+
+            DateOnly? due = null;
+            if (!reader.IsDBNull(2))
+            {
+                if (!DateOnly.TryParseExact(
+                    reader.GetString(2),
+                    DueFormat,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None,
+                    out DateOnly parsed))
+                {
+                    continue;
+                }
+
+                due = parsed;
+            }
+
+            rows.Add(new NoteTodo(reader.GetString(0), (int)line, reader.GetString(3), due, reader.GetString(4)));
+        }
+
+        return (IReadOnlyList<NoteTodo>)rows;
+    });
 
     /// <summary>Every tag with the number of notes that have it, sorted by tag (ordinal).</summary>
     public IReadOnlyList<TagCount> Tags() => Run(connection =>

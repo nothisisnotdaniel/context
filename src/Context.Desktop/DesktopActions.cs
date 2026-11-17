@@ -568,6 +568,16 @@ internal sealed class DesktopActions
         Run(() => CompleteTodoNow(todo, confirmed));
 
     /// <summary>
+    /// Ticks the todo inside a note, only when the user <paramref name="confirmed"/> it, through
+    /// <see cref="NoteTodos.Complete(NoteStore, NoteTodo, NoteHistory?)"/>: only when the note's line is still the
+    /// todo's line as indexed, its first <c>[ ]</c> becomes <c>[x]</c> (every other byte kept, the previous bytes kept
+    /// as a version). A changed line is refused as <see cref="ActionReason.Changed"/>, a gone note as
+    /// <see cref="ActionReason.Missing"/>; nothing is written then. The result's text is the todo's text when done.
+    /// </summary>
+    public Task<ActionResult> CompleteNoteTodo(NoteTodo todo, Confirmation? confirmed) =>
+        Run(() => CompleteNoteTodoNow(todo, confirmed));
+
+    /// <summary>
     /// Saves <paramref name="text"/> over the note <paramref name="opened"/> came from through
     /// <see cref="NoteStore.SaveIfUnchanged"/>, keeping its line endings and BOM. Writes nothing when the text is
     /// unchanged (<see cref="ActionReason.Unchanged"/>, done, no refresh), when the file changed on disk or is gone,
@@ -964,6 +974,22 @@ internal sealed class DesktopActions
         {
             return Failed(ActionReason.WriteFailed, TodosWriteFailedText);
         }
+    }
+
+    private ActionResult CompleteNoteTodoNow(NoteTodo todo, Confirmation? confirmed)
+    {
+        if (confirmed is null)
+        {
+            return Refused(ActionReason.NotConfirmed, NotConfirmedText);
+        }
+
+        return NoteTodos.Complete(notes, todo, state.HistoryStore) switch
+        {
+            NoteTodoResult.Done => new ActionResult(ActionKind.Done, ActionReason.None, todo.Text),
+            NoteTodoResult.Missing => Refused(ActionReason.Missing, NoteTodos.MissingText(todo.Note)),
+            NoteTodoResult.Failed => Failed(ActionReason.WriteFailed, NoteTodos.FailedText(todo.Note)),
+            _ => Refused(ActionReason.Changed, NoteTodos.ChangedText(todo.Note)),
+        };
     }
 
     private ActionResult SaveNoteNow(EditableNote opened, string text)
