@@ -983,12 +983,14 @@ internal sealed class DesktopActions
             return Refused(ActionReason.NotConfirmed, NotConfirmedText);
         }
 
+        // The note name comes from a file name: one safe line, as the CLI shows it.
+        string note = DesktopText.OneLine(todo.Note);
         return NoteTodos.Complete(notes, todo, state.HistoryStore) switch
         {
             NoteTodoResult.Done => new ActionResult(ActionKind.Done, ActionReason.None, todo.Text),
-            NoteTodoResult.Missing => Refused(ActionReason.Missing, NoteTodos.MissingText(todo.Note)),
-            NoteTodoResult.Failed => Failed(ActionReason.WriteFailed, NoteTodos.FailedText(todo.Note)),
-            _ => Refused(ActionReason.Changed, NoteTodos.ChangedText(todo.Note)),
+            NoteTodoResult.Missing => Refused(ActionReason.Missing, NoteTodos.MissingText(note)),
+            NoteTodoResult.Failed => Failed(ActionReason.WriteFailed, NoteTodos.FailedText(note)),
+            _ => Refused(ActionReason.Changed, NoteTodos.ChangedText(note)),
         };
     }
 
