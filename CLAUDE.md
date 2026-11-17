@@ -212,8 +212,8 @@ Every factory agent reads this file before working on Context. Keep it short and
   name, marked `locked`.
   - **Top-level only** (job 152): a `.ctxs` below the top level is never listed. `MarkSensitive` is Refused/`Invalid`
     with no key call for a subpage (`Only top-level notes can be sensitive.`) and for a note with subpages (`A note
-    with subpages can't be sensitive.`). A sensitive name blocks only top-level titles; a sensitive note's toolbar has
-    no `New subpage` and no `Move`.
+    with subpages can't be sensitive.`). A sensitive name blocks only top-level titles; a sensitive note's More actions
+    menu has no `New subpage` and no `Move`.
   - **Core (managed, no crypto):** `NoteStore.SensitiveExtension` (`.ctxs`), `ListSensitive()` (top-level `*.ctxs` as
     `NoteInfo`), `TryFindSensitive(name, out NoteInfo?)` (matched against `ListSensitive()` only, exact then ignoring
     case, never turned into a path) and `DeleteSensitive(name)`. `List()`, `TryFind` and `Delete` stay `.md`-only;
@@ -283,7 +283,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   - **UI:** `NotesPanel` lists sensitive notes with plain ones by name, with the visible word `locked`, and has
     `Set up sensitive notes` (until recovery is set up) and `Restore from recovery file`, which open `SensitiveSetup`
     (password fields without a value, the loss warning, the OS file dialog through `IFileDialog` /
-    `PhotinoFileDialog`; `The passwords don't match.`). The toolbar of a plain note has `Mark sensitive`, of a
+    `PhotinoFileDialog`; `The passwords don't match.`). The More actions menu of a plain note has `Mark sensitive`, of a
     sensitive note `Make plain` and `Lock` instead of `Open in default editor`; both mark and make-plain ask in a
     `ConfirmDialog` and need a saved note.
   - **Rules (tests):** no file in `src/Context.Core/` or `src/Context/` mentions `AesGcm`, `ECDiffieHellman`,
@@ -318,7 +318,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   removed.`) removes the sealed ones. `DesktopState.History(name)` (`HistoryView`) and `ReadVersion(name, id)` (a
   sealed version only while the note is open, one `Agree` with its `<sealed title>` as AAD) read only.
   `TextDiff.Lines(old, current)` is a Myers line diff (`\n` split, trailing `\r` dropped) bounded at
-  `MaxChangedLines` (1000, else `TooDifferent`). `HistoryPanel` (the `History` toolbar button, under `NoteEditor`)
+  `MaxChangedLines` (1000, else `TooDifferent`). `HistoryPanel` (the `History` menu item, a `menuitemcheckbox`, under `NoteEditor`)
   lists versions in local `yyyy-MM-dd HH:mm:ss` and the chosen one's diff (`-` red, `+` accent, unchanged grey);
   `Restore this version` asks in `ConfirmDialog` (`Restore <name> to the version from <time>? The current text is kept
   as a version.`, dirty editor `Save <name> first.`) and `DesktopActions.RestoreVersion` saves through `SaveNote`, then
@@ -829,8 +829,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     overwritten and stops the run) records each step before it runs: catch-up for yesterday (left, not yet moved),
     today's Worked refresh once per new leaving that is not later than `now`, and today's move once at a leaving at or
     after `EveningCutoff` (17:00) when tomorrow is not sensitive. Manual runs (`CloseDay`, the CLI, the button) never
-    touch `settings.json`. `CurrentPanel` has `End the day` (`DesktopActions.EndDay(view.Today)`, one `role="status"`
-    line: grey `Day closed. Moved <n> todo(s) to <D+1>.`, else red); `Program.cs` calls `DesktopActions.AutoDayEnd()`
+    touch `settings.json`. End the day is the only item of the More actions menu on today's view (job 200; `Main.RunPageAction("end-day")`
+    calls `DesktopActions.EndDay(Snapshot.Today)` and shows the result in `p.main-status`: grey on Done/Unchanged
+    (`Day closed. Moved <n> todo(s) to <D+1>.`), else red; `CurrentPanel` has no button and no status line of its own); `Program.cs` calls `DesktopActions.AutoDayEnd()`
     at start and every `DayEndInterval` (30 s) from its own timer (Busy: Refused, skipped), followed by `AutoBriefing()`.
     **Corrections and balance** (job 172): `TimesDay.Corrections` reads Times' `"corrections":[{"minutes":<int>,
     "reason":<string>}]` (exactly those two properties; minutes never 0, at most `MaxCorrectionMinutes` 59999 either
@@ -942,10 +943,10 @@ Every factory agent reads this file before working on Context. Keep it short and
     files.`), one line per file in the chosen order in a `role="status"` region that is always in the page (accent Done, red otherwise, cut by
     CSS with the full text in `title`); files that would replace a note are written only after one `ConfirmDialog`
     (`Replace <name>?` or `Replace <n> notes? <names>`, confirm label `Replace`), and Cancel or Esc leaves grey `Not
-    replaced: <name>`. The toolbar of a plain note has `Export` (or `/export`; argument ignored; no note open: red
-    `Open a note first.`; a sensitive note has no button and `/export` shows the sensitive text without a dialog):
+    replaced: <name>`. The More actions menu of a plain note has `Export` (or `/export`; argument ignored; no note open: red
+    `Open a note first.`; a sensitive note has no item and `/export` shows the sensitive text without a dialog):
     a dirty editor is refused with `Save <name> first.`, else `SaveExportFile("<name>.md")` and `ExportNote`'s text
-    in the toolbar's status line. Rules (`DesktopSourceTests`): `WritePlainCopy` and `ReadImport` are named in
+    in the main status line. Rules (`DesktopSourceTests`): `WritePlainCopy` and `ReadImport` are named in
     `Context.Desktop` only in `DesktopActions.cs`, and no `.razor` file matches `\b(File|Directory|Path)\.`.
     **Sidebar bar (job 197):** `NotesPanel`'s bar holds only the icon buttons (`.notes-bar-buttons`: triage, tags, settings), right-aligned (`justify-content: flex-end`); no logo and no visible "Notes" heading, the top-level `ul.note-list` carries `aria-label="Notes"`. **Placeholders:** a box's placeholder says only what it is for (`New todo`, `Capture to inbox`), never a `Return to …` hint; Return still submits and there are no submit buttons.
     **Tidy layout (job 192):** the Triage, Tags and Settings buttons in `NotesPanel`'s bar are icon-only (inline `svg`, `aria-hidden`, `currentColor`; `aria-label` and `title` carry the name), note rows show no modified date, and `.top-bar` is a band (`--panel` background, `--line` bottom border).
@@ -959,7 +960,19 @@ Every factory agent reads this file before working on Context. Keep it short and
     day waits in `pendingDay` until it resolves and becomes `shownDay`, which any other open resets). `CurrentPanel`
     gets `Day`: another day than `Snapshot.Today` loads `DesktopState.DayView(day)` (`CurrentView.Build(...,
     dueOnDayOnly: true)`: only todos due that day, none overdue; read-only, reloaded after each `State.Changed`), shows
-    the date as title, no End the day, and `No appointments on <day>.` / `Nothing due on <day>.`.
+    the date as title, no More actions button, and `No appointments on <day>.` / `Nothing due on <day>.`.
+    **More actions menu (job 200):** the last top-bar button `button.page-menu-open` (three dots, `aria-label`/`title`
+    `More actions`, `aria-haspopup="menu"`, `aria-expanded`) opens `div.page-menu[role=menu]` with a
+    `.page-menu-backdrop`; it is one of the three mutually exclusive popovers. `TopBar` gets `[Parameter]
+    IReadOnlyList<PageAction> PageActions` (empty: no button), `PageActionsDisabled` (`running` or an open
+    Rename/New subpage/Move form) and `EventCallback<string> OnPageAction`. `PageAction(id, label, checked)` is a
+    public record (a parameter type must be public); its id is the item's class, `checked` non-null makes a
+    `menuitemcheckbox` with `aria-checked`. `Main.PageActionsFor(snapshot)` builds the list: none while a page
+    (Triage, Tags, Settings) is shown or another day is picked; `end-day` on today's view; for a plain note `rename`,
+    `delete`, `history`, `new-subpage`, `move`, `open-external`, `export`, `mark-sensitive` (when supported); for a
+    sensitive note `rename`, `delete`, `history`, `make-plain`, `lock`. `Main.RunPageAction(id)` (the bound handler)
+    runs the chosen one. Keys in the menu (default prevented): opening focuses the first item, ArrowDown/ArrowUp
+    move and wrap, Return or Space runs the focused item, Esc or Tab closes the menu and focuses the … button.
     **Quick capture:** the capture box is gone (job 198); capture is the palette's `/capture <text>` or the top bar's
     Capture popover (job 199). Both run `Main.CaptureAsync(string text)` (`Task<bool>`, true when Done; the only
     `Actions.CaptureText(` call in `Main.razor`): `CaptureHeld`, the `running` gate, `CaptureText`, the main status line
@@ -1005,8 +1018,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     `TodoPanel` has an entry row (`DesktopActions.AddTodo`). `NotesPanel` has a new-note entry row (text field + `New
     note`; Enter or the button calls `CreateNote`; on Done the field clears, the note opens through `Main`'s `RequestOpen`
     (a dirty editor asks first) and a `role="status"` line shows `Created <name>` (accent), else the red text). While a
-    note is open `Main` shows a toolbar above it (also when the note can't be read): `Rename` swaps in a prefilled name
-    field (Enter or `Save name` renames and reopens the note under the new name; Esc or `Cancel` restores the toolbar;
+    note is open its actions are in the top bar's More actions menu (also when the note can't be read; job 200), and
+    `.note-toolbar` above it exists only while a form is open: `Rename` swaps in a prefilled name
+    field (Enter or `Save name` renames and reopens the note under the new name; Esc or `Cancel` closes the form;
     a dirty editor is refused with red `Save <name> first.`), `Delete` asks `Delete <name>? This can't be undone.`
     (`ConfirmDialog`, confirm label `Delete`; on confirm the main region returns to the current view) and `Open in
     default editor` calls `OpenExternally` (red text on failure). Subpages (job 152): `NotesPanel` draws the notes
@@ -1014,8 +1028,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     `title`, and a toggle `<button>` (`aria-expanded`, `aria-label` `Expand <name>`/`Collapse <name>`) for a note with
     subpages; notes start collapsed, `Main` passes `OpenName` so opening a note expands its ancestors, and the
     expanded set survives `State.Changed`. An open subpage shows `<nav class="breadcrumb" aria-label="Breadcrumb">`
-    above the toolbar: each ancestor a `button.crumb` opening it through `RequestOpen`, the last item a span with
-    `aria-current="page"`. The plain-note toolbar also has `New subpage` (field `Subpage title`, `Create subpage` /
+    as the first child of `.note-area`: each ancestor a `button.crumb` opening it through `RequestOpen`, the last item a span with
+    `aria-current="page"`. The plain-note menu also has `New subpage` (field `Subpage title`, `Create subpage` /
     `Cancel`, Enter/Esc; Done opens the page and shows `Created <full name>`) and `Move` (field `New parent`, prefilled
     with the parent, empty = top level, `Move here` / `Cancel`; Done reopens the note and shows `Moved to <name>`);
     both, like Rename, refuse a dirty editor with `Save <name> first.`. Rename prefills `Title`, Export suggests

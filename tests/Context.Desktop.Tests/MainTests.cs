@@ -201,7 +201,8 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal("Fresh", cut.Find(".note-title").TextContent), Wait);
     }
 
-    // 134 AC-8: the toolbar shows only while a note is open, with its buttons (136: plus Mark sensitive).
+    // 134 AC-8, 200 AC-2: a plain note's actions are the More actions items, in order (136: plus Mark sensitive);
+    // the toolbar holds no action button and is absent while no form is open.
     [Fact]
     public async Task Toolbar_OnlyWithAnOpenNote()
     {
@@ -212,10 +213,17 @@ public sealed class MainTests : IDisposable
 
         await Open(cut, js, "Plan");
 
-        IReadOnlyList<IElement> buttons = cut.FindAll(".note-toolbar button");
+        Assert.Empty(cut.FindAll(".note-toolbar"));
+        await OpenMenuAsync(cut);
+        IReadOnlyList<IElement> items = cut.FindAll(".page-menu button");
         Assert.Equal(
-            ["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export", "Mark sensitive"], buttons.Select(b => b.TextContent).ToArray());
-        Assert.All(buttons, b => Assert.Equal("button", b.GetAttribute("type")));
+            ["rename", "delete", "history", "new-subpage", "move", "open-external", "export", "mark-sensitive"],
+            items.Select(b => b.ClassName ?? string.Empty).ToArray());
+        Assert.Equal(
+            ["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export", "Mark sensitive"], items.Select(b => b.TextContent).ToArray());
+        Assert.All(items, b => Assert.Equal("button", b.GetAttribute("type")));
+        Assert.Equal("menuitemcheckbox", cut.Find(".page-menu button.history").GetAttribute("role"));
+        Assert.All(items.Where(b => b.ClassName != "history"), b => Assert.Equal("menuitem", b.GetAttribute("role")));
     }
 
     // 134 AC-8: the toolbar also shows when the note can't be read, and Delete still works there.
@@ -230,7 +238,8 @@ public sealed class MainTests : IDisposable
         await NameButton(cut, "Big").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Equal("Can't read Big.", cut.Find(".unreadable").TextContent), Wait);
-        Assert.Equal(8, cut.FindAll(".note-toolbar button").Count);
+        await OpenMenuAsync(cut);
+        Assert.Equal(8, cut.FindAll(".page-menu button").Count);
     }
 
     // 134 AC-8: Rename swaps in a prefilled field; Enter or Save name renames and the editor shows the new name.
@@ -244,9 +253,12 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
 
-        await cut.Find(".note-toolbar button.rename").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "rename");
         cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-toolbar .rename-title").GetAttribute("value")), Wait);
         Assert.Equal("text", cut.Find(".rename-title").GetAttribute("type"));
+        Assert.Empty(cut.FindAll(".page-menu"));
+        Assert.True(cut.Find("button.page-menu-open").HasAttribute("disabled"));
+        AssertFocused(cut, ".rename-title");
         await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
         if (enter)
         {
@@ -276,7 +288,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        await cut.Find(".note-toolbar button.rename").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "rename");
         await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
 
         if (esc)
@@ -289,7 +301,8 @@ public sealed class MainTests : IDisposable
         }
 
         Assert.Empty(cut.FindAll(".rename-title"));
-        Assert.Single(cut.FindAll(".note-toolbar button.rename"));
+        Assert.Empty(cut.FindAll(".note-toolbar"));
+        Assert.False(cut.Find("button.page-menu-open").HasAttribute("disabled"));
         Assert.True(File.Exists(Path.Combine(data.Root, "Plan.md")));
         Assert.False(File.Exists(Path.Combine(data.Root, "Project.md")));
     }
@@ -305,7 +318,7 @@ public sealed class MainTests : IDisposable
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
         js.Edit("# Plan\n\nUnsaved\n");
 
-        await cut.Find(".note-toolbar button.rename").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "rename");
 
         Assert.Equal("Save Plan first.", cut.Find(".main-status").TextContent);
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
@@ -321,7 +334,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        await cut.Find(".note-toolbar button.rename").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "rename");
         await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
         js.Edit("# Plan\n\nUnsaved\n");
 
@@ -342,7 +355,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        await cut.Find(".note-toolbar button.rename").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "rename");
         await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "other" });
 
         await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
@@ -362,7 +375,7 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
 
-        await cut.Find(".note-toolbar button.delete").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "delete");
 
         Assert.Equal("Delete Plan? This can't be undone.", cut.Find("[role=dialog] .question").TextContent);
         Assert.Equal("Delete", cut.Find("[role=dialog] button.confirm").TextContent);
@@ -382,10 +395,12 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
 
-        await cut.Find(".note-toolbar button.delete").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "delete");
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        Assert.False(File.Exists(Path.Combine(data.Root, "Plan.md")));
+        cut.WaitForAssertion(() => Assert.False(File.Exists(Path.Combine(data.Root, "Plan.md"))), Wait);
+        cut.WaitForAssertion(() => Assert.DoesNotContain(
+            cut.FindAll(".notes-region button.name"), b => b.TextContent == "Plan"), Wait);
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".current-region .current")), Wait);
         Assert.Empty(cut.FindAll(".note-editor"));
         Assert.Empty(cut.FindAll(".note-toolbar"));
@@ -401,12 +416,12 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
 
-        await cut.Find(".note-toolbar button.open-external").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "open-external");
         Assert.Equal([Path.Combine(data.Root, "Plan.md")], data.Launcher.Launched);
         Assert.Equal(string.Empty, cut.Find(".main-status").TextContent);
 
         data.Launcher.Throws = new InvalidOperationException("boom");
-        await cut.Find(".note-toolbar button.open-external").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "open-external");
 
         Assert.Equal("Can't open Plan in another app.", cut.Find(".main-status").TextContent);
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
@@ -483,7 +498,7 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(
             ["Third"], cut.FindAll(".links-panel .link-row .name").Select(n => n.TextContent).ToArray()), Wait);
 
-        await cut.Find(".note-toolbar button.rename").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "rename");
         await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
         await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
@@ -601,9 +616,11 @@ public sealed class MainTests : IDisposable
         Assert.False(cut.Find(".note-area").HasAttribute("hidden"));
         await Open(cut, js, "Plan");
 
+        Assert.Single(cut.FindAll("button.page-menu-open"));
         await cut.Find("button." + button).ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(page).TextContent, StringComparison.Ordinal), Wait);
 
+        Assert.Empty(cut.FindAll("button.page-menu-open"));
         Assert.True(cut.Find(".note-area").HasAttribute("hidden"));
         Assert.Single(cut.FindAll(".page"));
         IElement close = cut.Find(".page > .panel-bar button.close");
@@ -619,6 +636,25 @@ public sealed class MainTests : IDisposable
         Assert.Empty(cut.FindAll(".page"));
         Assert.False(cut.Find(".note-area").HasAttribute("hidden"));
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        Assert.Single(cut.FindAll("button.page-menu-open"));
+    }
+
+    // 200 AC-7: Triage has no … button; its choices and × stay on the page.
+    [Fact]
+    public async Task Page_Triage_NoMenuButton_ChoicesStay()
+    {
+        data.WriteNote("inbox", "# inbox\n- call Anna\n");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        Assert.Single(cut.FindAll("button.page-menu-open"));
+
+        await cut.Find("button.triage-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".triage-panel .triage-item")), Wait);
+
+        Assert.Empty(cut.FindAll("button.page-menu-open"));
+        Assert.Equal(
+            ["triage-note", "triage-todo", "triage-append", "triage-drop", "triage-later"],
+            cut.FindAll(".triage-panel .triage-buttons > button").Select(b => b.ClassName ?? string.Empty).ToArray());
+        Assert.Single(cut.FindAll(".triage-panel > .panel-bar button.close"));
     }
 
     // 193 AC-1: with the current view shown, the view hides and returns.
@@ -777,7 +813,8 @@ public sealed class MainTests : IDisposable
         }
         else
         {
-            IElement button = cut.Find(".note-toolbar button.export");
+            await OpenMenuAsync(cut);
+            IElement button = cut.Find(".page-menu button.export");
             Assert.Equal("Export", button.TextContent);
             Assert.Equal("button", button.GetAttribute("type"));
             await button.ClickAsync(new MouseEventArgs());
@@ -803,7 +840,7 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
 
-        await cut.Find("button.export").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "export");
 
         Assert.Equal(1, data.Dialog.ExportSaves);
         Assert.Equal(string.Empty, cut.Find(".main-status").TextContent);
@@ -811,7 +848,7 @@ public sealed class MainTests : IDisposable
         string target = data.Outside("Taken.md");
         File.WriteAllText(target, "theirs\n");
         data.Dialog.ExportPath = target;
-        await cut.Find("button.export").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "export");
 
         Assert.Equal(2, data.Dialog.ExportSaves);
         Assert.Equal("That file already exists; choose a new name: " + target, cut.Find(".main-status").TextContent);
@@ -838,7 +875,7 @@ public sealed class MainTests : IDisposable
         }
         else
         {
-            await cut.Find("button.export").ClickAsync(new MouseEventArgs());
+            await ChooseAsync(cut, "export");
         }
 
         Assert.Equal("Save Plan first.", cut.Find(".main-status").TextContent);
@@ -996,6 +1033,18 @@ public sealed class MainTests : IDisposable
         data.WriteNote("Archive", "# Archive\n");
     }
 
+    // Waits until the element the selector finds (read in the render that created it) was given the focus.
+    private void AssertFocused(IRenderedComponent<Main> cut, string selector)
+    {
+        string? id = cut.Find(selector).GetAttribute("blazor:elementReference");
+        Assert.False(string.IsNullOrEmpty(id));
+        cut.WaitForAssertion(
+            () => Assert.Contains(
+                data.Bunit.JSInterop.Invocations.Where(i => i.Identifier == "Blazor._internal.domWrapper.focus"),
+                i => i.Arguments[0] is ElementReference r && r.Id == id),
+            Wait);
+    }
+
     // Opens a note by its full name: expands its ancestors in the tree, then clicks its row.
     private static async Task OpenFull(IRenderedComponent<Main> cut, EditorJs js, string name)
     {
@@ -1043,7 +1092,8 @@ public sealed class MainTests : IDisposable
         IElement current = nav.QuerySelector("[aria-current=page]")!;
         Assert.Equal("Notes", current.TextContent);
         Assert.Equal("SPAN", current.TagName);
-        Assert.Equal(nav, cut.Find(".note-toolbar").PreviousElementSibling);
+        Assert.Equal(nav, cut.Find(".note-area").FirstElementChild);
+        Assert.Empty(cut.FindAll(".note-toolbar"));
 
         await cut.Find("nav.breadcrumb button.crumb[title='Meetings/Meeting 1']").ClickAsync(new MouseEventArgs());
 
@@ -1078,8 +1128,10 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Meetings");
 
-        await cut.Find(".note-toolbar button.new-subpage").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "new-subpage");
         IElement field = cut.Find(".note-toolbar input.subpage-title");
+        AssertFocused(cut, "input.subpage-title");
+        Assert.True(cut.Find("button.page-menu-open").HasAttribute("disabled"));
         Assert.Equal("Subpage title", field.GetAttribute("aria-label"));
         Assert.Equal("Subpage title", field.GetAttribute("placeholder"));
         Assert.Equal(string.Empty, field.GetAttribute("value"));
@@ -1113,7 +1165,7 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Meetings");
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
-        await cut.Find(".note-toolbar button.new-subpage").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "new-subpage");
         await cut.Find(".subpage-title").InputAsync(new ChangeEventArgs { Value = "meeting 1" });
 
         await cut.Find(".note-toolbar .subpage-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
@@ -1132,7 +1184,8 @@ public sealed class MainTests : IDisposable
         }
 
         Assert.Empty(cut.FindAll(".subpage-title"));
-        Assert.Single(cut.FindAll(".note-toolbar button.new-subpage"));
+        Assert.Empty(cut.FindAll(".note-toolbar"));
+        Assert.False(cut.Find("button.page-menu-open").HasAttribute("disabled"));
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
     }
 
@@ -1149,7 +1202,7 @@ public sealed class MainTests : IDisposable
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
         js.Edit("# Meeting 1\n\nUnsaved\n");
 
-        await cut.Find($".note-toolbar button.{button}").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, button);
 
         Assert.Equal("Save Meetings/Meeting 1 first.", cut.Find(".main-status").TextContent);
         Assert.Empty(cut.FindAll(".note-toolbar input"));
@@ -1167,8 +1220,10 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await OpenFull(cut, js, "Meetings/Meeting 1");
 
-        await cut.Find(".note-toolbar button.move").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "move");
         IElement field = cut.Find(".note-toolbar input.move-parent");
+        AssertFocused(cut, "input.move-parent");
+        Assert.True(cut.Find("button.page-menu-open").HasAttribute("disabled"));
         Assert.Equal("New parent", field.GetAttribute("aria-label"));
         Assert.Equal("Meetings", field.GetAttribute("value"));
         Assert.Equal(["Cancel"], cut.FindAll(".note-toolbar button").Select(b => b.TextContent).ToArray());
@@ -1196,7 +1251,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await OpenFull(cut, js, "Meetings/Meeting 1");
-        await cut.Find(".note-toolbar button.move").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "move");
         await cut.Find(".move-parent").InputAsync(new ChangeEventArgs { Value = "" });
 
         await cut.Find(".note-toolbar .move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
@@ -1204,7 +1259,7 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal("Meeting 1", cut.Find(".note-title").TextContent), Wait);
         Assert.True(File.Exists(Path.Combine(data.Root, "Meeting 1.md")));
         Assert.Empty(cut.FindAll("nav.breadcrumb"));
-        await cut.Find(".note-toolbar button.move").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "move");
         Assert.Equal(string.Empty, cut.Find(".move-parent").GetAttribute("value"));
     }
 
@@ -1219,7 +1274,7 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Archive");
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
-        await cut.Find(".note-toolbar button.move").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "move");
         await cut.Find(".move-parent").InputAsync(new ChangeEventArgs { Value = "Nowhere" });
 
         await cut.Find(".note-toolbar .move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
@@ -1249,7 +1304,7 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await OpenFull(cut, js, "Meetings/Meeting 1");
 
-        await cut.Find(".note-toolbar button.rename").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "rename");
         cut.WaitForAssertion(() => Assert.Equal("Meeting 1", cut.Find(".rename-title").GetAttribute("value")), Wait);
         await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Kickoff" });
         await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
@@ -1274,7 +1329,7 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Meetings");
 
-        await cut.Find(".note-toolbar button.delete").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "delete");
 
         Assert.Equal(question, cut.Find("[role=dialog] .question").TextContent);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
@@ -1285,7 +1340,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal(["Archive"], data.State!.Snapshot!.Notes.Select(n => n.Name).ToArray());
     }
 
-    // 152 AC-12: a sensitive note's toolbar has no New subpage and no Move.
+    // 152 AC-12, 200 AC-2: a sensitive note's menu has exactly its items: no New subpage and no Move.
     [Fact]
     public async Task SensitiveNote_NoNewSubpageOrMove()
     {
@@ -1296,9 +1351,9 @@ public sealed class MainTests : IDisposable
 
         await NameButton(cut, "Secret").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".note-toolbar")), Wait);
-        Assert.Empty(cut.FindAll(".note-toolbar button.new-subpage"));
-        Assert.Empty(cut.FindAll(".note-toolbar button.move"));
+        cut.WaitForAssertion(() => Assert.Contains(cut.FindAll(".links-panel p"), p => p.TextContent == "Sensitive notes have no links."), Wait);
+        Assert.Empty(cut.FindAll(".note-toolbar"));
+        Assert.Equal(["rename", "delete", "history", "make-plain", "lock"], await MenuIdsAsync(cut));
     }
 
     // 152 AC-14 / AC-16: Export of a subpage suggests its title as the file name.
@@ -1311,7 +1366,7 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await OpenFull(cut, js, "Meetings/Meeting 1");
 
-        await cut.Find(".note-toolbar button.export").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "export");
 
         Assert.Equal("Meeting 1.md", data.Dialog.SuggestedName);
         Assert.Equal("# Meeting 1\n", File.ReadAllText(data.Outside("m1.md")));
@@ -1329,14 +1384,19 @@ public sealed class MainTests : IDisposable
         await Open(cut, js, "Plan");
         Assert.Empty(cut.FindAll(".history-panel"));
 
-        await cut.Find("button.history").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "history");
 
         cut.WaitForAssertion(() => Assert.Equal(["2026-10-29 10:00:00"], cut.FindAll(".history-row button").Select(b => b.TextContent)), Wait);
-        Assert.Equal("true", cut.Find("button.history").GetAttribute("aria-pressed"));
-        await cut.Find("button.history").ClickAsync(new MouseEventArgs());
+        await OpenMenuAsync(cut);
+        Assert.Equal("true", cut.Find(".page-menu button.history").GetAttribute("aria-checked"));
+        await cut.Find(".page-menu button.history").ClickAsync(new MouseEventArgs());
         Assert.Empty(cut.FindAll(".history-panel"));
+        Assert.Empty(cut.FindAll(".page-menu"));
+        await OpenMenuAsync(cut);
+        Assert.Equal("false", cut.Find(".page-menu button.history").GetAttribute("aria-checked"));
+        await cut.Find(".page-menu-backdrop").ClickAsync(new MouseEventArgs());
 
-        await cut.Find("button.history").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "history");
         await Open(cut, js, "Other");
         Assert.Empty(cut.FindAll(".history-panel"));
     }
@@ -1398,7 +1458,7 @@ public sealed class MainTests : IDisposable
 
     private static async Task ChooseFirstVersion(IRenderedComponent<Main> cut)
     {
-        await cut.Find("button.history").ClickAsync(new MouseEventArgs());
+        await ChooseAsync(cut, "history");
         cut.WaitForAssertion(() => Assert.NotEmpty(cut.FindAll(".history-row button")), Wait);
         await cut.Find(".history-row button").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.NotEmpty(cut.FindAll("button.restore-version")), Wait);
@@ -1417,6 +1477,32 @@ public sealed class MainTests : IDisposable
         await NameButton(cut, name).ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
+
+        // 200: the links panel loads behind Task.Run; wait until it is in before the menu is opened or compared.
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);
+    }
+
+    // 200: opens the top bar's More actions menu.
+    internal static async Task OpenMenuAsync(IRenderedComponent<Main> cut)
+    {
+        await cut.Find("button.page-menu-open").ClickAsync(new MouseEventArgs());
+        Assert.Single(cut.FindAll(".page-menu[role=menu]"));
+    }
+
+    // 200: chooses a page action through the More actions menu (the item's class is the action's id).
+    internal static async Task ChooseAsync(IRenderedComponent<Main> cut, string id)
+    {
+        await OpenMenuAsync(cut);
+        await cut.Find(".page-menu button." + id).ClickAsync(new MouseEventArgs());
+    }
+
+    // 200: the ids of the menu's items; the menu is closed again afterwards.
+    private static async Task<string[]> MenuIdsAsync(IRenderedComponent<Main> cut)
+    {
+        await OpenMenuAsync(cut);
+        string[] ids = cut.FindAll(".page-menu button").Select(b => b.ClassName ?? string.Empty).ToArray();
+        await cut.Find(".page-menu-backdrop").ClickAsync(new MouseEventArgs());
+        return ids;
     }
 
     // 198 AC-1: the top bar is the first thing in the main region, whatever else is shown there.
@@ -2366,6 +2452,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal(["Launch plan"], cut.FindAll("li.linked-note .name").Select(e => e.TextContent).ToArray());
         Assert.Empty(cut.FindAll("button.end-day"));
         Assert.Empty(cut.FindAll(".day-end-status"));
+        Assert.Empty(cut.FindAll("button.page-menu-open"));
     }
 
     // 198 AC-6: empty states name the day.
@@ -2388,13 +2475,62 @@ public sealed class MainTests : IDisposable
 
         await PickDate(cut, "2026-10-29");
         Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent);
-        Assert.Single(cut.FindAll("button.end-day"));
+        Assert.Equal(["end-day"], await MenuIdsAsync(cut));
 
         await PickDate(cut, "2026-11-20");
         cut.WaitForAssertion(() => Assert.Equal("2026-11-20", cut.Find("h1.title").TextContent), Wait);
         await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent), Wait);
-        Assert.Single(cut.FindAll("button.end-day"));
+        Assert.Equal(["end-day"], await MenuIdsAsync(cut));
+    }
+
+    // 200 AC-6 (171 AC-13 moved here): End the day in the menu closes today; the result is grey in the main status line.
+    [Fact]
+    public async Task EndDay_FromTheMenu_ClosesTheDay_GreyStatus()
+    {
+        Directory.CreateDirectory(data.TimesFolder);
+        File.WriteAllText(
+            Path.Combine(data.TimesFolder, "2026-10-29.json"),
+            "{\"entries\":[{\"kind\":\"arrival\",\"time\":\"08:00\"},{\"kind\":\"leaving\",\"time\":\"16:00\"}]}");
+        data.AddTodo("call Anna", DesktopFixture.Today);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        Assert.Equal(string.Empty, cut.Find("p.main-status").TextContent);
+
+        await OpenMenuAsync(cut);
+        IElement item = cut.Find(".page-menu button.end-day");
+        Assert.Equal("End the day", item.TextContent);
+        Assert.Equal("menuitem", item.GetAttribute("role"));
+        await item.ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.NotEqual(string.Empty, cut.Find("p.main-status").TextContent), Wait);
+        IElement line = cut.Find("p.main-status");
+        Assert.Equal("Day closed. Moved 1 todo(s) to 2026-10-30.", line.TextContent);
+        Assert.Equal("status", line.GetAttribute("role"));
+        Assert.Equal(line.TextContent, line.GetAttribute("title"));
+        Assert.True(line.ClassList.Contains("grey"));
+        Assert.Contains(
+            "## Worked\n- Arrived 08:00, left 16:00, worked 8:00\n",
+            File.ReadAllText(Path.Combine(data.Root, "2026-10-29.md")),
+            StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(data.Root, SettingsStore.FileName)));
+        Assert.Empty(cut.FindAll(".page-menu"));
+        Assert.Empty(cut.FindAll(".day-end-status"));
+    }
+
+    // 200 AC-6 (171 AC-13 moved here): a refusal shows the red main status line.
+    [Fact]
+    public async Task EndDay_FromTheMenu_Sensitive_RedStatus()
+    {
+        data.WriteFile("2026-10-29.ctxs", "{\"v\":1,\"text\":\"c2VhbGVk\"}");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await ChooseAsync(cut, "end-day");
+
+        cut.WaitForAssertion(() => Assert.NotEqual(string.Empty, cut.Find("p.main-status").TextContent), Wait);
+        IElement line = cut.Find("p.main-status");
+        Assert.Equal("2026-10-29 is sensitive. Nothing was written to it.", line.TextContent);
+        Assert.True(line.ClassList.Contains("red"));
+        Assert.Equal(0, data.Keys.Agrees);
     }
 
     // 198 AC-8: a dirty note asks first; Keep keeps it and no day shows; Discard shows the day. Bad values are ignored.
@@ -2491,7 +2627,7 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
         Assert.Equal(
-            ["capture-open", "today-open", "day-pick-open"],
+            ["capture-open", "today-open", "day-pick-open", "page-menu-open"],
             cut.FindAll(".top-bar-buttons > button").Select(b => b.ClassName ?? string.Empty).ToArray());
         IElement button = cut.Find("button.capture-open");
         Assert.Equal("Capture", button.GetAttribute("aria-label"));

@@ -627,6 +627,13 @@ input[type="password"]:disabled {
     z-index: 2;
 }
 
+.page-menu-backdrop {
+    background: transparent;
+    inset: 0;
+    position: fixed;
+    z-index: 2;
+}
+
 .day-pick,
 .capture-pop {
     background: var(--panel);
@@ -643,22 +650,54 @@ input[type="password"]:disabled {
     max-width: calc(100vw - 48px);
 }
 
-/* Day's end: the End the day button under the current view's title, with its result line beside it. */
-.day-end {
-    align-items: baseline;
+/* More actions: the shown page's actions as a menu under the three dots, anchored to the right edge. */
+.page-menu {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
     display: flex;
-    gap: 8px;
-    margin-bottom: 12px;
+    flex-direction: column;
+    max-width: calc(100vw - 48px);
+    min-width: 200px;
+    padding: 4px;
+    position: absolute;
+    right: 8px;
+    top: 100%;
+    z-index: 3;
 }
 
-.day-end .end-day {
-    flex: none;
+.page-menu button {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--text);
+    padding: 5px 10px;
+    text-align: left;
+    white-space: nowrap;
 }
 
-.day-end-status {
-    flex: 1 1 0;
-    margin: 0;
-    min-width: 0;
+.page-menu button:hover:not(:disabled),
+.page-menu button:focus {
+    background: var(--background);
+    border-color: var(--line);
+    color: var(--accent-strong);
+}
+
+.page-menu button:focus-visible {
+    outline: 2px solid var(--accent-strong);
+    outline-offset: -2px;
+}
+
+.page-menu button[aria-checked="true"]::after {
+    content: " \2713";
+    color: var(--accent-strong);
+}
+
+.page-menu .delete,
+.page-menu .delete:hover:not(:disabled),
+.page-menu .delete:focus {
+    color: var(--red);
 }
 
 /* Import: the button under the new-note row and one result line per chosen file. */
@@ -680,7 +719,7 @@ input[type="password"]:disabled {
     margin-top: 6px;
 }
 
-/* The open note's toolbar (Rename, Delete, Open in default editor, Export) and its inline rename field. */
+/* The open note's toolbar: only while Rename, Move or New subpage is open, with its field and Cancel. */
 .note-toolbar {
     align-items: center;
     display: flex;
@@ -703,10 +742,6 @@ input[type="password"]:disabled {
     background: var(--accent-strong);
     border-color: var(--accent-strong);
     color: var(--on-accent);
-}
-
-.note-toolbar .delete {
-    color: var(--red);
 }
 
 /* The command palette: near the top, with a visible selected row. */
