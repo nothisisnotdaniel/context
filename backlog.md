@@ -83,6 +83,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#250](backlog/250-top-bar-with-home-and-calendar.md) Top bar with Home and Calendar in place of the capture box → 198-top-bar-home-calendar
 - [ ] [#253](backlog/253-capture-through-an-icon-in-the.md) Capture through an icon in the top bar
 - [ ] [#251](backlog/251-page-actions-behind-a-menu-in.md) Page actions behind a … menu in the top bar (after: #250)
+- [ ] [#65](backlog/065-todos-inside-notes.md) Todos inside notes
 - [x] [#252](backlog/252-remove-the-sidebar-logo-and-the.md) Remove the sidebar logo and the Return hints → 197-no-logo-no-hints
 - [ ] [#244](backlog/244-edit-a-note-in-place-no.md) Edit a note in place: no repeated title
 - [ ] [#245](backlog/245-auto-save-in-the-note-editor.md) Auto save in the note editor
@@ -176,7 +177,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#33](backlog/033-sturdier-calendar-parsing.md) Sturdier calendar parsing
 - [ ] [#38](backlog/038-core-dependency-test-tidy-ups.md) Core dependency test tidy-ups
 - [ ] [#61](backlog/061-resurfacing.md) Resurfacing
-- [ ] [#65](backlog/065-todos-inside-notes.md) Todos inside notes
 - [ ] [#77](backlog/077-quick-switcher.md) Quick switcher
 - [ ] [#106](backlog/106-claude-code-mcp-server.md) Claude Code MCP server (after: #101; #17; Times#37; #108)
 - [ ] [#107](backlog/107-own-cloud-sync-spike.md) Own-cloud sync spike
