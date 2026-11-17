@@ -607,6 +607,93 @@ public sealed class NoteEditorTests : IDisposable
         ((Microsoft.JSInterop.DotNetObjectReference<EditorInterop>)data.Bunit.JSInterop.Invocations
             .Last(i => i.Identifier == "ContextEditor.mount").Arguments[2]!).Value;
 
+    // 202 AC-7: the page editor gets the note's name, as mount's 5th argument and as isLossless's 2nd.
+    [Fact]
+    public async Task Open_PassesNameToMountAndIsLossless()
+    {
+        data.WriteNote("Ideas", "# Ideas\n\nText\n");
+        EditorJs js = new EditorJs(data.Bunit);
+
+        await Render("Ideas");
+
+        Assert.Equal("# Ideas\n\nText\n", js.MountedText());
+        Assert.Equal("Ideas", js.MountedName());
+        Assert.Equal(new object?[] { "# Ideas\n\nText\n", "Ideas" }, js.LosslessArguments());
+    }
+
+    // 202 AC-7: a subpage passes its full name; the page editor matches the title on its last segment.
+    [Fact]
+    public async Task Open_Subpage_PassesFullName()
+    {
+        data.WriteNote("people", "# people\n");
+        data.WriteFile(Path.Combine("people", "Anna.md"), "# Anna\n");
+        EditorJs js = new EditorJs(data.Bunit);
+
+        await Render("people/Anna");
+
+        Assert.Equal("people/Anna", js.MountedName());
+        Assert.Equal(new object?[] { "# Anna\n", "people/Anna" }, js.LosslessArguments());
+    }
+
+    // 202 AC-7: a reload and a save pass the name again, so the title line stays hidden and kept.
+    [Fact]
+    public async Task ReloadAndSave_PassName()
+    {
+        data.WriteNote("inbox", "# inbox\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<NoteEditor> cut = await Render("inbox");
+        data.WriteNote("inbox", "# inbox\n- captured\n");
+
+        await cut.InvokeAsync(() => cut.Instance.ReloadAsync());
+
+        Assert.Equal(2, js.Calls("ContextEditor.mount").Count);
+        Assert.Equal("inbox", js.MountedName());
+        Assert.Equal(new object?[] { "# inbox\n- captured\n", "inbox" }, js.LosslessArguments());
+
+        js.Edit("# inbox\n- captured\n- more\n");
+        await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal("Saved inbox.", cut.Find(".status").TextContent);
+        Assert.Equal(new object?[] { "# inbox\n- captured\n- more\n", "inbox" }, js.LosslessArguments());
+    }
+
+    // 202 AC-7: saving a note that starts with "# <Name>" without an edit writes nothing, even when the page hands
+    // back its whole text (the bundle's head + body round trip for that name).
+    [Theory]
+    [InlineData("# Plan\n\nText #work\n")]
+    [InlineData("# Plan\n\n\nBody after two blank lines\n")]
+    [InlineData("# plan  \n")]
+    public async Task Save_UneditedTitledNote_WritesNothing(string text)
+    {
+        data.WriteNote("Plan", text);
+        string page = new EditorBundle().Json($"ContextEditor.roundTrip({System.Text.Json.JsonSerializer.Serialize(text)}, \"Plan\")");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+        Assert.Equal("Plan", js.MountedName());
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        js.Edit(System.Text.Json.JsonSerializer.Deserialize<string>(page)!);
+
+        await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal("Saved Plan.", cut.Find(".status").TextContent);
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    // 202 AC-8: the page title is the only heading in the markup that shows the note's name.
+    [Fact]
+    public async Task Title_IsTheOnlyHeadingWithTheName()
+    {
+        data.WriteNote("Ideas", "# Ideas\n\nText\n");
+        _ = new EditorJs(data.Bunit);
+
+        IRenderedComponent<NoteEditor> cut = await Render("Ideas");
+
+        IElement title = Assert.Single(cut.FindAll("h1, h2, h3, h4, h5, h6"), h => h.TextContent.Contains("Ideas", StringComparison.Ordinal));
+        Assert.Equal("H2", title.TagName);
+        Assert.True(title.ClassList.Contains("note-title"));
+        Assert.Empty(cut.FindAll("h1"));
+    }
+
     private async Task<IRenderedComponent<NoteEditor>> RenderPlan(bool sensitive)
     {
         if (!sensitive)

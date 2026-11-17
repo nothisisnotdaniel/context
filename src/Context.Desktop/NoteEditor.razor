@@ -127,7 +127,7 @@
             if (result.Note is { } saved)
             {
                 opened = saved;
-                lossy = !await Interop.IsLosslessAsync(saved.Text);
+                lossy = !await Interop.IsLosslessAsync(saved.Text, Name);
             }
 
             await Interop.MarkCleanAsync(host);
@@ -200,8 +200,8 @@
 
         try
         {
-            lossy = !await Interop.IsLosslessAsync(note.Text);
-            await Interop.MountAsync(host, note.Text, await State.InlineImages(Name, note.Text));
+            lossy = !await Interop.IsLosslessAsync(note.Text, Name);
+            await Interop.MountAsync(host, note.Text, await State.InlineImages(Name, note.Text), Name);
             opened = note;
             dirty = false;
         }
@@ -226,8 +226,8 @@
 
         try
         {
-            lossy = !await Interop.IsLosslessAsync(saved.Text);
-            await Interop.MountAsync(host, saved.Text, Sensitive ? [] : await State.InlineImages(Name, saved.Text));
+            lossy = !await Interop.IsLosslessAsync(saved.Text, Name);
+            await Interop.MountAsync(host, saved.Text, Sensitive ? [] : await State.InlineImages(Name, saved.Text), Name);
             opened = saved;
             dirty = false;
             ShowStatus(string.Empty, string.Empty);
@@ -283,7 +283,7 @@
 
         try
         {
-            lossy = !await Interop.IsLosslessAsync(note.Text);
+            lossy = !await Interop.IsLosslessAsync(note.Text, Name);
             Interop.TagClicked += TagClicked;
             Interop.LinkClicked += LinkClicked;
             Interop.PersonClicked += PersonClicked;
@@ -293,7 +293,7 @@
 
             // A sensitive note shows no images: nothing next to it is read.
             IReadOnlyList<InlineImage> images = Sensitive ? [] : await State.InlineImages(Name, note.Text);
-            await Interop.MountAsync(host, note.Text, images);
+            await Interop.MountAsync(host, note.Text, images, Name);
             opened = note;
             mounted = true;
         }

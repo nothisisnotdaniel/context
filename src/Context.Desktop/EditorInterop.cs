@@ -107,13 +107,14 @@ internal sealed class EditorInterop
 
     /// <summary>
     /// Opens <paramref name="markdown"/> in a new editor inside <paramref name="element"/>, showing the
-    /// <paramref name="images"/> (already checked by <see cref="NoteAttachments.TryResolve"/>) inline.
+    /// <paramref name="images"/> (already checked by <see cref="NoteAttachments.TryResolve"/>) inline. A first line
+    /// <c># &lt;title&gt;</c> matching <paramref name="name"/> is not shown and is saved back unchanged.
     /// </summary>
-    public async Task MountAsync(ElementReference element, string markdown, IReadOnlyList<InlineImage>? images = null)
+    public async Task MountAsync(ElementReference element, string markdown, IReadOnlyList<InlineImage> images, string name)
     {
         self ??= DotNetObjectReference.Create(this);
         host = element;
-        await js.InvokeVoidAsync("ContextEditor.mount", element, markdown, self, images ?? []);
+        await js.InvokeVoidAsync("ContextEditor.mount", element, markdown, self, images, name);
     }
 
     /// <summary>
@@ -124,8 +125,12 @@ internal sealed class EditorInterop
         ElementReference element, string src, string name, bool isImage, string mime, string? base64) =>
         js.InvokeVoidAsync("ContextEditor.insertAttachment", element, src, name, isImage, mime, base64);
 
-    /// <summary>True when the editor's Markdown round-trips <paramref name="markdown"/> byte for byte.</summary>
-    public ValueTask<bool> IsLosslessAsync(string markdown) => js.InvokeAsync<bool>("ContextEditor.isLossless", markdown);
+    /// <summary>
+    /// True when the editor's Markdown round-trips <paramref name="markdown"/> byte for byte, with the title line of
+    /// the note <paramref name="name"/> kept as it is.
+    /// </summary>
+    public ValueTask<bool> IsLosslessAsync(string markdown, string name) =>
+        js.InvokeAsync<bool>("ContextEditor.isLossless", markdown, name);
 
     /// <summary>The editor's text as Markdown.</summary>
     public ValueTask<string> GetMarkdownAsync(ElementReference element) =>

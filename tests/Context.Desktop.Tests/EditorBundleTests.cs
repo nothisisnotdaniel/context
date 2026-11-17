@@ -350,6 +350,213 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
         Assert.Equal(expected ? "true" : "false", bundle.Json($"ContextEditor.opensChip({keyEvent})"));
     }
 
+    // 202 AC-1: the first line "# <name>" (case and surrounding spaces ignored, or the name's last segment) is the
+    // head, with its newline and the blank lines straight after it; head + body is the input.
+    [Theory]
+    [InlineData("# Ideas\n\nText\n", "Ideas", "# Ideas\n\n", "Text\n")]
+    [InlineData("# ideas\nText\n", "Ideas", "# ideas\n", "Text\n")]
+    [InlineData("#   Ideas  \n\n \t\nText\n", "IDEAS", "#   Ideas  \n\n \t\n", "Text\n")]
+    [InlineData("# Anna\n\nNotes\n", "people/Anna", "# Anna\n\n", "Notes\n")]
+    [InlineData("# people/Anna\n", "people/Anna", "# people/Anna\n", "")]
+    [InlineData("# T", "T", "# T", "")]
+    [InlineData("# T\n\n", "T", "# T\n\n", "")]
+    [InlineData("# T\n\n\nBody\n", "T", "# T\n\n\n", "Body\n")]
+    [InlineData("## Ideas\n\nText\n", "Ideas", "", "## Ideas\n\nText\n")]
+    [InlineData("# Other\n\nText\n", "Ideas", "", "# Other\n\nText\n")]
+    [InlineData("Ideas\n===\n\nText\n", "Ideas", "", "Ideas\n===\n\nText\n")]
+    [InlineData("Ideas\n\n# Ideas\n", "Ideas", "", "Ideas\n\n# Ideas\n")]
+    [InlineData("#Ideas\n", "Ideas", "", "#Ideas\n")]
+    [InlineData("# Anna\n", "people/Ann", "", "# Anna\n")]
+    [InlineData("\n# Ideas\n", "Ideas", "", "\n# Ideas\n")]
+    [InlineData("", "Ideas", "", "")]
+    public void SplitTitle_HidesOnlyAMatchingFirstLine(string markdown, string name, string head, string body)
+    {
+        using JsonDocument split = JsonDocument.Parse(SplitTitle(markdown, name));
+
+        Assert.Equal(head, split.RootElement.GetProperty("head").GetString());
+        Assert.Equal(body, split.RootElement.GetProperty("body").GetString());
+    }
+
+    public static TheoryData<string> LosslessWithTitles() => new(FixtureFiles("lossless").Select(Read).Concat(
+        ["# T\n", "# T", "# T\n\n\nBody\n", "# T\n\n", "# T\n\n# T\n\nText\n", "# t\n- [ ] todo\n"]));
+
+    // 202 AC-2: with the name T, every lossless fixture and every titled note round-trips byte for byte.
+    [Theory]
+    [MemberData(nameof(LosslessWithTitles))]
+    public void TitleName_RoundTripsByteForByte(string markdown)
+    {
+        Assert.Equal(markdown, RoundTrip(markdown, "T"));
+        Assert.Equal("true", bundle.Json($"ContextEditor.isLossless({Js(markdown)}, {Js("T")})"));
+    }
+
+    // 202 AC-2: a fixture with its own title as the name keeps its bytes too, and the title fixture hides its title.
+    [Theory]
+    [MemberData(nameof(Lossless))]
+    public void OwnTitleName_RoundTripsByteForByte(string file)
+    {
+        string markdown = Read(file);
+        string name = OwnTitle(markdown) ?? "T";
+
+        Assert.Equal(markdown, RoundTrip(markdown, name));
+        Assert.Equal("true", bundle.Json($"ContextEditor.isLossless({Js(markdown)}, {Js(name)})"));
+    }
+
+    // 202 AC-2: without a name nothing changes: "# T\n\n\nBody\n" is still lossy and keeps today's result.
+    [Fact]
+    public void NoName_BehavesAsBefore()
+    {
+        string markdown = "# T\n\n\nBody\n";
+
+        Assert.Equal("false", bundle.Call("isLossless", markdown));
+        Assert.Equal("true", bundle.Json($"ContextEditor.isLossless({Js(markdown)}, {Js("T")})"));
+    }
+
+    // 202 AC-3: the body the editor mounts never holds the hidden title.
+    [Theory]
+    [InlineData("# Ideas\n\nText\n", "Ideas")]
+    [InlineData("# Title line\n\nText\n", "title line")]
+    [InlineData("# Anna\n\nAnna notes\n", "people/Anna")]
+    [InlineData("# T", "T")]
+    public void MountedBody_HasNoHiddenTitle(string markdown, string name)
+    {
+        using JsonDocument split = JsonDocument.Parse(SplitTitle(markdown, name));
+        string head = split.RootElement.GetProperty("head").GetString()!;
+        string body = split.RootElement.GetProperty("body").GetString()!;
+        Assert.NotEqual(string.Empty, head);
+
+        using JsonDocument doc = JsonDocument.Parse(bundle.Call("docJson", body));
+
+        Assert.DoesNotContain(Nodes(doc.RootElement), n => Type(n) == "heading" && n.GetProperty("attrs").GetProperty("level").GetInt32() == 1);
+        Assert.DoesNotContain(head.TrimEnd('\n'), body, StringComparison.Ordinal);
+    }
+
+    // 202 AC-3: the title fixture's mounted body starts with its text, not its title.
+    [Fact]
+    public void TitleFixture_BodyStartsAfterTheTitle()
+    {
+        string markdown = Read("lossless/title-line.md");
+        using JsonDocument split = JsonDocument.Parse(SplitTitle(markdown, "Title line"));
+        using JsonDocument doc = JsonDocument.Parse(bundle.Call("docJson", split.RootElement.GetProperty("body").GetString()!));
+
+        JsonElement first = doc.RootElement.GetProperty("content")[0];
+        Assert.Equal("paragraph", Type(first));
+        Assert.DoesNotContain(Nodes(doc.RootElement), n => Type(n) == "heading" && string.Concat(Nodes(n).Select(Text)) == "Title line");
+    }
+
+    // 202 AC-4: a level-1 heading that is not hidden keeps level 1, is drawn as h2 and is saved as "# ".
+    [Theory]
+    [InlineData("Other")]
+    [InlineData(null)]
+    public void UnhiddenLevelOne_KeptAndDrawnAsH2(string? name)
+    {
+        string markdown = Read("lossless/headings.md");
+        string nameArgument = name is null ? "undefined" : Js(name);
+        using JsonDocument split = JsonDocument.Parse(bundle.Json($"JSON.parse(ContextEditor.splitTitle({Js(markdown)}, {nameArgument}))"));
+        Assert.Equal(string.Empty, split.RootElement.GetProperty("head").GetString());
+        using JsonDocument doc = JsonDocument.Parse(bundle.Call("docJson", markdown));
+
+        JsonElement heading = doc.RootElement.GetProperty("content")[0];
+        Assert.Equal("heading", Type(heading));
+        Assert.Equal(1, heading.GetProperty("attrs").GetProperty("level").GetInt32());
+        Assert.Equal("[\"h2\",0]", bundle.Json("ContextEditor.headingDom(1)"));
+        string saved = JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.roundTrip({Js(markdown)}, {nameArgument})"))!;
+        Assert.StartsWith("# Project notes\n", saved, StringComparison.Ordinal);
+        Assert.Equal(markdown, saved);
+    }
+
+    // 202 AC-4: a level-1 heading below a hidden title stays level 1 in the doc and is saved as "# ".
+    [Fact]
+    public void LevelOneBelowTitle_StaysLevelOne()
+    {
+        string markdown = Read("lossless/title-line.md");
+        using JsonDocument split = JsonDocument.Parse(SplitTitle(markdown, "Title line"));
+        using JsonDocument doc = JsonDocument.Parse(bundle.Call("docJson", split.RootElement.GetProperty("body").GetString()!));
+
+        JsonElement heading = Assert.Single(Nodes(doc.RootElement), n => Type(n) == "heading");
+        Assert.Equal(1, heading.GetProperty("attrs").GetProperty("level").GetInt32());
+        Assert.Contains("\n# Another level one\n", RoundTrip(markdown, "Title line"), StringComparison.Ordinal);
+    }
+
+    // 202 AC-4: every heading level is drawn at h2 or below.
+    [Theory]
+    [InlineData(1, "h2")]
+    [InlineData(2, "h2")]
+    [InlineData(3, "h3")]
+    [InlineData(6, "h6")]
+    public void HeadingDom_NeverH1(int level, string tag)
+    {
+        Assert.Equal($"[\"{tag}\",0]", bundle.Json($"ContextEditor.headingDom({level})"));
+    }
+
+    // 202 AC-5: typing "# " or "## " makes a level-2 heading, "### " level 3; no typed input gives level 1.
+    [Theory]
+    [InlineData("# ", 2)]
+    [InlineData("## ", 2)]
+    [InlineData("### ", 3)]
+    [InlineData("#### ", 4)]
+    [InlineData("###### ", 6)]
+    [InlineData("# Title", 2)]
+    public void TypedBlock_HeadingLevels(string typed, int level)
+    {
+        using JsonDocument doc = JsonDocument.Parse(TypedBlock(typed));
+
+        JsonElement heading = Assert.Single(doc.RootElement.GetProperty("content").EnumerateArray());
+        Assert.Equal("heading", Type(heading));
+        Assert.Equal(level, heading.GetProperty("attrs").GetProperty("level").GetInt32());
+    }
+
+    // 202 AC-5: other input stays a paragraph or another block, never a level-1 heading.
+    [Theory]
+    [InlineData("#")]
+    [InlineData("####### ")]
+    [InlineData("#tag ")]
+    [InlineData("text # ")]
+    [InlineData("- # ")]
+    [InlineData("> # ")]
+    [InlineData("Ideas")]
+    public void TypedBlock_NeverLevelOne(string typed)
+    {
+        using JsonDocument doc = JsonDocument.Parse(TypedBlock(typed));
+
+        Assert.DoesNotContain(Nodes(doc.RootElement), n => Type(n) == "heading" && n.GetProperty("attrs").GetProperty("level").GetInt32() < 2);
+    }
+
+    // 202 AC-6: no keymap, input rule or command in the editor sources sets a heading to level 1.
+    [Fact]
+    public void Sources_NeverSetLevelOne()
+    {
+        string folder = Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "editor", "src");
+        string[] files = ["index.js", "markdown.js", "schema.js", "view.js"];
+        Assert.Equal(files, Directory.EnumerateFiles(folder, "*.js").Select(f => Path.GetFileName(f)).Order(StringComparer.Ordinal).ToArray());
+
+        foreach (string file in files)
+        {
+            string text = File.ReadAllText(Path.Combine(folder, file));
+            Assert.DoesNotContain("level: 1", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("{ level: m[1].length }", text, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("level: { default: 1 }", File.ReadAllText(Path.Combine(folder, "schema.js")), StringComparison.Ordinal);
+        Assert.Contains("Math.max(m[1].length, 2)", File.ReadAllText(Path.Combine(folder, "view.js")), StringComparison.Ordinal);
+    }
+
+    private string SplitTitle(string markdown, string name) =>
+        JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.splitTitle({Js(markdown)}, {Js(name)})"))!;
+
+    private string RoundTrip(string markdown, string name) =>
+        JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.roundTrip({Js(markdown)}, {Js(name)})"))!;
+
+    private string TypedBlock(string text) =>
+        JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.typedBlock({Js(text)})"))!;
+
+    private static string Js(string text) => JsonSerializer.Serialize(text);
+
+    private static string? OwnTitle(string markdown)
+    {
+        string first = markdown.Split('\n')[0];
+        return first.StartsWith("# ", StringComparison.Ordinal) ? first[2..].Trim() : null;
+    }
+
     private static string Read(string file)
     {
         byte[] bytes = File.ReadAllBytes(Path.Combine(RepoFiles.Root(), "tests", "Context.Desktop.Tests", "RoundTrip", file));
