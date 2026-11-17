@@ -210,6 +210,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#254](backlog/254-month-calendar-in-the-day-picker.md) Month calendar in the day picker
 - [ ] [#255](backlog/255-decisions-longer-than-one-line-a.md) Numbered #!d decisions: a marked paragraph, referenced as #!d1234
 - [ ] [#256](backlog/256-no-prerelease-for-backlog-only-pushes.md) No prerelease for backlog-only pushes
+- [ ] [#257](backlog/257-web-links-work-in-the-note.md) Web links work in the note editor
 
 ## Dropped with the terminal UI
 
