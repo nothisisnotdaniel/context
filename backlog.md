@@ -209,6 +209,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#243](backlog/243-open-triage-tags-and-settings-as.md) Open Triage, Tags and Settings as their own pages with an × close → 193-page-views-close-x
 - [ ] [#254](backlog/254-month-calendar-in-the-day-picker.md) Month calendar in the day picker
 - [ ] [#255](backlog/255-decisions-longer-than-one-line-a.md) Numbered #!d decisions: a marked paragraph, referenced as #!d1234
+- [ ] [#256](backlog/256-no-prerelease-for-backlog-only-pushes.md) No prerelease for backlog-only pushes
 
 ## Dropped with the terminal UI
 
