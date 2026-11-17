@@ -214,6 +214,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#258](backlog/258-no-accent-bar-left-of-the.md) No accent bar left of the editor while editing
 - [?] [#259](backlog/259-check-the-capture-popover-in-a.md) Check the Capture popover in a narrow window
 - [?] [#260](backlog/260-return-focus-to-the-button-after.md) Return focus to the … button after a menu item or outside click
+- [?] [#261](backlog/261-check-context-db-in-the-todo.md) Check context.db in the todo done tests for note todos
 
 ## Dropped with the terminal UI
 
