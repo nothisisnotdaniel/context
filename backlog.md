@@ -85,7 +85,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#251](backlog/251-page-actions-behind-a-menu-in.md) Page actions behind a … menu in the top bar (after: #250) → 200-page-actions-menu
 - [x] [#65](backlog/065-todos-inside-notes.md) Todos inside notes → 201-todos-inside-notes
 - [x] [#252](backlog/252-remove-the-sidebar-logo-and-the.md) Remove the sidebar logo and the Return hints → 197-no-logo-no-hints
-- [ ] [#244](backlog/244-edit-a-note-in-place-no.md) Edit a note in place: no repeated title
+- [x] [#244](backlog/244-edit-a-note-in-place-no.md) Edit a note in place: no repeated title → 202-note-title-once
 - [ ] [#245](backlog/245-auto-save-in-the-note-editor.md) Auto save in the note editor
 - [x] [#246](backlog/246-capture-bar-at-the-very-top.md) Capture bar at the very top, Enter instead of buttons next to inputs → 194-capture-bar-enter-submit
 - [x] [#247](backlog/247-small-logo-at-the-top-of.md) Small logo at the top of the sidebar → 195-sidebar-logo
