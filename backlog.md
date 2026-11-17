@@ -211,6 +211,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#255](backlog/255-decisions-longer-than-one-line-a.md) Numbered #!d decisions: a marked paragraph, referenced as #!d1234
 - [ ] [#256](backlog/256-no-prerelease-for-backlog-only-pushes.md) No prerelease for backlog-only pushes
 - [ ] [#257](backlog/257-web-links-work-in-the-note.md) Web links work in the note editor
+- [ ] [#258](backlog/258-no-accent-bar-left-of-the.md) No accent bar left of the editor while editing
 
 ## Dropped with the terminal UI
 
