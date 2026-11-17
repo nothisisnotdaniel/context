@@ -2483,4 +2483,246 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Contains("Can't read todos.json.", cut.Find(".current").TextContent), Wait);
         Assert.Contains("Can't read calendar/bad.ics", cut.Find(".current").TextContent);
     }
+
+    // 199 AC-1: Capture is the first icon button, before Today and Pick a day; no popover at first.
+    [Fact]
+    public async Task TopBar_CaptureButtonFirst_NoPopoverAtFirst()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        Assert.Equal(
+            ["capture-open", "today-open", "day-pick-open"],
+            cut.FindAll(".top-bar-buttons > button").Select(b => b.ClassName ?? string.Empty).ToArray());
+        IElement button = cut.Find("button.capture-open");
+        Assert.Equal("Capture", button.GetAttribute("aria-label"));
+        Assert.Equal("Capture", button.GetAttribute("title"));
+        Assert.Equal("false", button.GetAttribute("aria-expanded"));
+        IElement svg = Assert.Single(button.QuerySelectorAll("svg"));
+        Assert.Equal("true", svg.GetAttribute("aria-hidden"));
+        Assert.Equal("currentColor", svg.GetAttribute("stroke"));
+        Assert.Equal("18", svg.GetAttribute("width"));
+        Assert.Equal("18", svg.GetAttribute("height"));
+        Assert.Empty(cut.FindAll(".capture-pop"));
+        Assert.Empty(cut.FindAll(".capture-pop-backdrop"));
+    }
+
+    // 199 AC-2: Capture opens the popover with its text field, which takes the focus.
+    [Fact]
+    public async Task TopBar_Capture_OpensPopoverAndFocusesTheField()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await cut.Find("button.capture-open").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".capture-pop")), Wait);
+        Assert.Single(cut.FindAll(".capture-pop-backdrop"));
+        IElement input = cut.Find(".capture-pop input[aria-label=Capture]");
+        Assert.Equal("text", input.GetAttribute("type"));
+        Assert.Equal("Capture to inbox", input.GetAttribute("placeholder"));
+        Assert.Equal("1000", input.GetAttribute("maxlength"));
+        Assert.Equal("true", cut.Find("button.capture-open").GetAttribute("aria-expanded"));
+        cut.WaitForAssertion(
+            () => Assert.Contains(
+                data.Bunit.JSInterop.Invocations.Where(i => i.Identifier == "Blazor._internal.domWrapper.focus"),
+                i => i.Arguments[0] is ElementReference r && r.Id == input.GetAttribute("blazor:elementReference")),
+            Wait);
+    }
+
+    // 199 AC-3: Esc, the backdrop and a second click each close the popover; nothing is written.
+    [Fact]
+    public async Task TopBar_Capture_ClosesByEscBackdropAndButton_NothingWritten()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await cut.Find("button.capture-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".capture-pop")), Wait);
+        await cut.Find(".capture-pop input").InputAsync(new ChangeEventArgs { Value = "buy milk" });
+        await cut.Find(".capture-pop input").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".capture-pop")), Wait);
+        Assert.Equal("false", cut.Find("button.capture-open").GetAttribute("aria-expanded"));
+
+        await cut.Find("button.capture-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".capture-pop")), Wait);
+        await cut.Find(".capture-pop-backdrop").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".capture-pop-backdrop")), Wait);
+
+        await cut.Find("button.capture-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".capture-pop")), Wait);
+        await cut.Find("button.capture-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".capture-pop")), Wait);
+
+        Assert.False(File.Exists(Path.Combine(data.Root, "inbox.md")));
+    }
+
+    // 199 AC-4: opening one popover closes the other; at most one exists at any time.
+    [Fact]
+    public async Task TopBar_CaptureAndDayPick_OnlyOneOpen()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".day-pick")), Wait);
+        await cut.Find("button.capture-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".capture-pop")), Wait);
+        Assert.Empty(cut.FindAll(".day-pick"));
+        Assert.Empty(cut.FindAll(".day-pick-backdrop"));
+
+        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".day-pick")), Wait);
+        Assert.Empty(cut.FindAll(".capture-pop"));
+        Assert.Empty(cut.FindAll(".capture-pop-backdrop"));
+        Assert.Equal("false", cut.Find("button.capture-open").GetAttribute("aria-expanded"));
+    }
+
+    private static async Task CaptureByIcon(IRenderedComponent<Main> cut, string text)
+    {
+        if (cut.FindAll(".capture-pop").Count == 0)
+        {
+            await cut.Find("button.capture-open").ClickAsync(new MouseEventArgs());
+            cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".capture-pop")), Wait);
+        }
+
+        await cut.Find(".capture-pop input").InputAsync(new ChangeEventArgs { Value = text });
+        await cut.Find(".capture-pop input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+    }
+
+    // 199 AC-5: Return captures to a new inbox, says Captured., closes the popover and empties the field.
+    [Fact]
+    public async Task TopBar_Capture_Return_WritesClosesAndEmpties()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await CaptureByIcon(cut, "buy milk");
+
+        cut.WaitForAssertion(() => Assert.Equal("Captured.", cut.Find(".main-status").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".capture-pop")), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
+        Assert.Equal("# inbox\n- 2026-10-29 10:05 buy milk\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
+
+        await cut.Find("button.capture-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".capture-pop")), Wait);
+        Assert.Equal(string.Empty, cut.Find(".capture-pop input").GetAttribute("value") ?? string.Empty);
+    }
+
+    // 199 AC-6: a dirty open inbox refuses, writes nothing and keeps the popover and the text.
+    [Fact]
+    public async Task TopBar_Capture_DirtyOpenInbox_RefusedPopoverKept()
+    {
+        data.WriteNote("inbox", "# inbox\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "inbox");
+        js.Edit("# inbox\n\nUnsaved\n");
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+
+        await CaptureByIcon(cut, "buy milk");
+
+        cut.WaitForAssertion(() => Assert.Equal("Save inbox first.", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Single(cut.FindAll(".capture-pop"));
+        Assert.Equal("buy milk", cut.Find(".capture-pop input").GetAttribute("value"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    // 199 AC-6: a clean open inbox is reloaded after the capture and shows the new line.
+    [Fact]
+    public async Task TopBar_Capture_CleanOpenInbox_Reloads()
+    {
+        data.WriteNote("inbox", "# inbox\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "inbox");
+        int mounts = js.Calls("ContextEditor.mount").Count;
+
+        await CaptureByIcon(cut, "buy milk");
+
+        cut.WaitForAssertion(() => Assert.Equal("Captured.", cut.Find(".main-status").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".capture-pop")), Wait);
+        Assert.Equal("# inbox\n- 2026-10-29 10:05 buy milk\n", js.MountedText());
+    }
+
+    // 199 AC-7: an empty field is refused by CaptureText; a dirty inbox is reported first; popover and text kept.
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task TopBar_Capture_Empty_RefusedPopoverKept(string text)
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await CaptureByIcon(cut, text);
+
+        cut.WaitForAssertion(() => Assert.Equal("Type something to capture.", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Single(cut.FindAll(".capture-pop"));
+        Assert.Equal(text, cut.Find(".capture-pop input").GetAttribute("value") ?? string.Empty);
+        Assert.False(File.Exists(Path.Combine(data.Root, "inbox.md")));
+    }
+
+    // 199 AC-7: with a dirty inbox open, an empty Return reports the unsaved inbox (CaptureHeld runs first).
+    [Fact]
+    public async Task TopBar_Capture_EmptyWithDirtyInbox_SaveFirst()
+    {
+        data.WriteNote("inbox", "# inbox\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "inbox");
+        js.Edit("# inbox\n\nUnsaved\n");
+
+        await CaptureByIcon(cut, " ");
+
+        cut.WaitForAssertion(() => Assert.Equal("Save inbox first.", cut.Find(".main-status").TextContent), Wait);
+        Assert.Single(cut.FindAll(".capture-pop"));
+    }
+
+    // 199 AC-7: a sensitive inbox is refused without any key-store call; popover and text kept.
+    [Fact]
+    public async Task TopBar_Capture_SensitiveInbox_RefusedNoKeyStore()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("inbox", "# inbox\n");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+
+        await CaptureByIcon(cut, "buy milk");
+
+        cut.WaitForAssertion(() => Assert.Equal("inbox is sensitive. Nothing was captured.", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Equal(0, data.Keys.Agrees);
+        Assert.Single(cut.FindAll(".capture-pop"));
+        Assert.Equal("buy milk", cut.Find(".capture-pop input").GetAttribute("value"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    // 199 AC-7: a failed save is a red line; popover and text kept.
+    [Fact]
+    public async Task TopBar_Capture_SaveFails_RedLinePopoverKept()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        data.Actions!.BeforeCaptureSave = () => throw new IOException("disk full");
+
+        await CaptureByIcon(cut, "buy milk");
+
+        cut.WaitForAssertion(() => Assert.Equal("Can't write inbox. Nothing was captured.", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Single(cut.FindAll(".capture-pop"));
+        Assert.Equal("buy milk", cut.Find(".capture-pop input").GetAttribute("value"));
+        Assert.DoesNotContain("disk full", cut.Markup);
+    }
+
+    // 199 AC-8: the palette's /capture x still captures through the same flow.
+    [Fact]
+    public async Task PaletteCapture_StillCaptures_AfterTopBarCapture()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await CaptureByIcon(cut, "first");
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".capture-pop")), Wait);
+        await RunPalette(cut, "/capture x");
+
+        cut.WaitForAssertion(
+            () => Assert.Equal("# inbox\n- 2026-10-29 10:05 first\n- 2026-10-29 10:05 x\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md"))),
+            Wait);
+        Assert.Equal("Captured.", cut.Find(".main-status").TextContent);
+    }
 }

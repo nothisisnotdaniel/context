@@ -431,6 +431,7 @@ public sealed class DesktopSourceTests
     [InlineData("<button type=\"button\" @onclick=\"Go\">x</button>\n@code {\n private async Task Go() { await Actions.CompleteTodo(1, t, c); }\n}")]
     [InlineData("<button type=\"button\" @onclick=\"() => Go(1)\">x</button>\n@code {\n private Task Go(int n) => Actions.CompleteTodo(n, t, c);\n}")]
     [InlineData("<ConfirmDialog OnConfirm=\"Go\" />\n@code {\n private async Task Go(Confirmation c)\n {\n if (x) { await Actions.CompleteTodo(1, t, c); }\n }\n}")]
+    [InlineData("<Bar OnRun=\"Run\" OnGo=\"Go\" />\n@code {\n private Task Run() => Go();\n private Task Go() => Actions.CompleteTodo(1, t, c);\n}")]
     public void ActionCall_Pattern_AllowsEventHandlers(string razor)
     {
         Assert.Single(ActionCallers(razor));
@@ -445,6 +446,7 @@ public sealed class DesktopSourceTests
     [InlineData("<p @onclick=\"OnAfterRenderAsync\">x</p>\n@code {\n protected override async Task OnAfterRenderAsync(bool first) { await Actions.CompleteTodo(1, t, c); }\n}")]
     [InlineData("@code {\n protected override Task OnParametersSetAsync() => Actions.CompleteTodo(1, t, c);\n}")]
     [InlineData("<button type=\"button\" @onclick=\"Go\">x</button>\n@code {\n protected override void OnInitialized() { Go(); }\n private void Go() { Actions.CompleteTodo(1, t, c); }\n}")]
+    [InlineData("<button type=\"button\" @onclick=\"Go\">x</button>\n@code {\n private void Helper() { Go(); }\n private void Go() { Actions.CompleteTodo(1, t, c); }\n}")]
     public void ActionCall_Pattern_FlagsOtherCallers(string razor)
     {
         Assert.NotEmpty(ActionCallProblems(razor));
@@ -1685,13 +1687,22 @@ public sealed class DesktopSourceTests
                 problems.Add(name + " is bound by no event attribute");
             }
 
-            if (methods.Any(m => m.Name != name && word.IsMatch(m.Body)))
+            // 199: a helper shared by handlers (Main's CaptureAsync, run by the palette's RunCommand and bound to the
+            // top bar's OnCapture) may be called by another method only when that caller is itself a bound,
+            // non-lifecycle event handler.
+            if (methods.Any(m => m.Name != name && word.IsMatch(m.Body) && !IsBoundHandler(m.Name, bindings)))
             {
                 problems.Add(name + " is called by another method");
             }
         }
 
         return problems;
+    }
+
+    private static bool IsBoundHandler(string name, List<string> bindings)
+    {
+        Regex word = new Regex(@"\b" + Regex.Escape(name) + @"\b", RegexOptions.CultureInvariant);
+        return !Lifecycle.Any(l => name.StartsWith(l, StringComparison.Ordinal)) && bindings.Any(b => word.IsMatch(b));
     }
 
     // 136 round 2 (ui 1): the focus and disabled looks of a field apply only in that state, for every input type.
@@ -1797,6 +1808,43 @@ public sealed class DesktopSourceTests
         Assert.Contains("width: 18px;", svg);
         Assert.Contains("height: 18px;", svg);
         Assert.DoesNotContain("http", razor, StringComparison.Ordinal);
-        Assert.Equal(2, Regex.Matches(razor, "stroke=\"currentColor\"").Count);
+        Assert.Equal(3, Regex.Matches(razor, "stroke=\"currentColor\"").Count);
+    }
+
+    // 199 AC-1, AC-8, AC-9: the Capture icon is inline (no URL, no img), the popover is styled like the day pick, and
+    // Main captures in one place.
+    [Fact]
+    public void TopBar_CaptureIconPopoverAndOneCaptureCall()
+    {
+        string root = RepoFiles.Root();
+        string css = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+        string razor = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "TopBar.razor"));
+        string main = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "Main.razor"));
+
+        Assert.DoesNotContain("http", razor, StringComparison.Ordinal);
+        Assert.DoesNotContain("<img", razor, StringComparison.Ordinal);
+        Assert.Contains("class=\"capture-open\"", razor, StringComparison.Ordinal);
+        Assert.Contains("Func<string, Task<bool>>", razor, StringComparison.Ordinal);
+
+        string backdrop = css[css.IndexOf(".capture-pop-backdrop {", StringComparison.Ordinal)..];
+        backdrop = backdrop[..backdrop.IndexOf('}')];
+        Assert.Contains("position: fixed;", backdrop);
+        Assert.Contains("inset: 0;", backdrop);
+        string pop = css[css.IndexOf(".capture-pop {", StringComparison.Ordinal)..];
+        pop = pop[..pop.IndexOf('}')];
+        Assert.Contains("top: 100%;", pop);
+        Assert.Contains("background: var(--panel);", pop);
+        Assert.Contains("border: 1px solid var(--line);", pop);
+        Assert.Contains(".capture-pop input {", css, StringComparison.Ordinal);
+        string button = css[css.IndexOf(".top-bar-buttons button {", StringComparison.Ordinal)..];
+        button = button[..button.IndexOf('}')];
+        Assert.Contains("width: 30px;", button);
+        Assert.Contains("color: var(--text);", button);
+        Assert.Contains(".top-bar-buttons button:hover {\n    color: var(--accent-strong);", css.ReplaceLineEndings("\n"), StringComparison.Ordinal);
+        Assert.Contains(".top-bar-buttons button:focus-visible {", css, StringComparison.Ordinal);
+
+        Assert.Single(Regex.Matches(main, Regex.Escape("Actions.CaptureText(")));
+        Assert.Contains("OnCapture=\"CaptureAsync\"", main, StringComparison.Ordinal);
+        Assert.Contains("Task<bool> CaptureAsync(string text)", main, StringComparison.Ordinal);
     }
 }

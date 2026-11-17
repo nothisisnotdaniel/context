@@ -951,14 +951,22 @@ Every factory agent reads this file before working on Context. Keep it short and
     **Tidy layout (job 192):** the Triage, Tags and Settings buttons in `NotesPanel`'s bar are icon-only (inline `svg`, `aria-hidden`, `currentColor`; `aria-label` and `title` carry the name), note rows show no modified date, and `.top-bar` is a band (`--panel` background, `--line` bottom border).
     **Top bar (job 198):** `TopBar` replaces the capture box as the first child of `Main`'s `main.current-region` (not with
     `Can't read the data folder.`): an empty `.top-bar-start` and right-aligned `.top-bar-buttons` with icon buttons
-    `button.today-open` (`Today`) and `button.day-pick-open` (`Pick a day`; a popover with `input[type=date]`
-    `aria-label="Day"`, min 1900-01-01, max 2100-12-31, and a `.day-pick-backdrop`; Esc, backdrop or the button closes
-    it). `Main.ShowToday` and `PickDay(DateOnly)` go through `RequestOpen(null)` (the unsaved-changes guard; the picked
+    `button.capture-open` (`Capture`, job 199: a hand-drawn "T" with an I-beam caret; a `.capture-pop` popover with one
+    `input[type=text]` `aria-label="Capture"`, placeholder `Capture to inbox`, maxlength 1000, focused on open, and a
+    `.capture-pop-backdrop`), `button.today-open` (`Today`) and `button.day-pick-open` (`Pick a day`; a popover with `input[type=date]`
+    `aria-label="Day"`, min 1900-01-01, max 2100-12-31, and a `.day-pick-backdrop`). Esc, the backdrop or the button
+    closes a popover; opening one closes the other, so at most one is open. `Main.ShowToday` and `PickDay(DateOnly)` go through `RequestOpen(null)` (the unsaved-changes guard; the picked
     day waits in `pendingDay` until it resolves and becomes `shownDay`, which any other open resets). `CurrentPanel`
     gets `Day`: another day than `Snapshot.Today` loads `DesktopState.DayView(day)` (`CurrentView.Build(...,
     dueOnDayOnly: true)`: only todos due that day, none overdue; read-only, reloaded after each `State.Changed`), shows
     the date as title, no End the day, and `No appointments on <day>.` / `Nothing due on <day>.`.
-    **Quick capture:** the capture box is gone (job 198); capture is the palette's `/capture <text>`. It calls
+    **Quick capture:** the capture box is gone (job 198); capture is the palette's `/capture <text>` or the top bar's
+    Capture popover (job 199). Both run `Main.CaptureAsync(string text)` (`Task<bool>`, true when Done; the only
+    `Actions.CaptureText(` call in `Main.razor`): `CaptureHeld`, the `running` gate, `CaptureText`, the main status line
+    and `Captured()`. `TopBar` gets it as `[Parameter] Func<string, Task<bool>> OnCapture` (a plain `Func`, so
+    `CaptureAsync` calls `StateHasChanged` itself); Return in the popover awaits it and closes the popover and clears the
+    field only on true, otherwise text and popover stay. The source rule "Actions only from event handlers" lets a method
+    that calls `Actions` be called by another method only when that caller is itself a bound handler. It calls
     `DesktopActions.CaptureText(text)` once and answers in the main status line:
     `CaptureText` cleans the text with `Inbox.Clean` (empty: Refused `Type something to capture.`; over 1000: `A
     capture can be at most 1000 characters.`), refuses a sensitive inbox without any key-store call (`inbox is
