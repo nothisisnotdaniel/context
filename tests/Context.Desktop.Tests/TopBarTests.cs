@@ -120,6 +120,26 @@ public sealed class TopBarTests : IDisposable
         Assert.Empty(chosen);
     }
 
+    // A menu hidden by an empty list or by disabling stays closed when the actions come back.
+    [Fact]
+    public void HiddenMenu_StaysClosed_WhenActionsReturn()
+    {
+        IRenderedComponent<TopBar> cut = Render(Actions());
+
+        cut.Find("button.page-menu-open").Click();
+        cut.Render(p => p.Add(c => c.PageActions, []));
+        Assert.Empty(cut.FindAll("button.page-menu-open"));
+        cut.Render(p => p.Add(c => c.PageActions, Actions()));
+        Assert.Empty(cut.FindAll(".page-menu"));
+        Assert.Equal("false", cut.Find("button.page-menu-open").GetAttribute("aria-expanded"));
+
+        cut.Find("button.page-menu-open").Click();
+        cut.Render(p => p.Add(c => c.PageActionsDisabled, true));
+        cut.Render(p => p.Add(c => c.PageActionsDisabled, false));
+        Assert.Empty(cut.FindAll(".page-menu"));
+        Assert.Empty(chosen);
+    }
+
     // AC-9: opening focuses the first item; arrows move and wrap; Return runs the focused item and closes the menu.
     [Fact]
     public void Keys_ArrowsWrap_EnterRunsFocusedItem()

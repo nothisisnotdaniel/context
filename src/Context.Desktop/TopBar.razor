@@ -114,6 +114,13 @@
         {
             items = new ElementReference[PageActions.Count];
         }
+
+        // A menu hidden because the list emptied or the actions were disabled stays closed when they come back.
+        if (PageActions.Count == 0 || PageActionsDisabled)
+        {
+            menuOpen = false;
+            focusItem = -1;
+        }
     }
 
     /// <summary>Called when Today is clicked.</summary>
