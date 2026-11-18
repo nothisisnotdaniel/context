@@ -526,11 +526,6 @@ input[type="password"]:disabled {
     display: none;
 }
 
-/* No box: a thin accent bar to the left of the text, drawn as an inset shadow so nothing shifts. */
-.editor-host:focus-within {
-    box-shadow: -3px 0 0 0 var(--accent-strong);
-}
-
 /* The todo entry row under the list. */
 .todo-entry {
     border-top: 1px solid var(--line);
