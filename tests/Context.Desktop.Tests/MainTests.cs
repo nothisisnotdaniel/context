@@ -2528,19 +2528,103 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".search-panel")), Wait);
     }
 
-    // 170 AC-10: /search alone shows the panel with the red usage line.
+    // 170 AC-10, 207 AC-4: /search alone shows the panel with the grey hint line.
     [Theory]
     [InlineData("/search")]
     [InlineData("/search    ")]
-    public async Task Search_Blank_RedUsage(string line)
+    public async Task Search_Blank_GreyHint(string line)
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
         await RunPalette(cut, line);
 
         cut.WaitForAssertion(() => Assert.Equal(
-            "Type /search <text>.", cut.Find(".search-panel p[role=status]").TextContent), Wait);
-        Assert.True(cut.Find(".search-panel p[role=status]").ClassList.Contains("red"));
+            "Type text or a tag filter like #project and not #done.", cut.Find(".search-panel p[role=status]").TextContent), Wait);
+        Assert.True(cut.Find(".search-panel p[role=status]").ClassList.Contains("grey"));
+    }
+
+    // 207 AC-3: the sidebar's Search button shows the panel with an empty, focused input and the grey hint.
+    [Fact]
+    public async Task SearchButton_ShowsPanel_EmptyInputFocused()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await cut.Find(".notes-bar-buttons button.search-open").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".search-panel")), Wait);
+        IElement input = cut.Find(".search-panel input.search-input");
+        Assert.Equal(string.Empty, input.GetAttribute("value"));
+        Assert.Equal("Search", cut.Find(".search-panel h2").TextContent);
+        Assert.Equal(
+            "Type text or a tag filter like #project and not #done.", cut.Find(".search-panel p[role=status]").TextContent);
+        JSRuntimeInvocation focus = data.Bunit.JSInterop.VerifyFocusAsyncInvoke();
+        Assert.Equal(
+            input.GetAttribute("blazor:elementReference"), ((ElementReference)focus.Arguments[0]!).Id);
+    }
+
+    // 207 AC-4: Return in the panel's input shows the typed text's results, as /search would.
+    [Fact]
+    public async Task SearchInput_Return_ShowsResults()
+    {
+        data.WriteNote("Anna", "# Anna\nBudget 2027\n#work\n");
+        data.WriteNote("Plan", "x\n");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await cut.Find(".notes-bar-buttons button.search-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".search-panel")), Wait);
+
+        await cut.Find(".search-input").InputAsync(new ChangeEventArgs { Value = "budget" });
+        await cut.Find(".search-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Anna"], cut.FindAll(".search-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
+        Assert.Equal("Search: budget", cut.Find(".search-panel h2").TextContent);
+
+        await cut.Find(".search-input").InputAsync(new ChangeEventArgs { Value = "#work" });
+        await cut.Find(".search-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+
+        cut.WaitForAssertion(() => Assert.Equal("Search: #work", cut.Find(".search-panel h2").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".search-panel .line")), Wait);
+        Assert.Equal(["Anna"], cut.FindAll(".search-panel .note-button").Select(b => b.TextContent).ToArray());
+    }
+
+    // 207 AC-8, AC-9: a saved search from settings.json shows in the sidebar; clicking it shows its current results,
+    // which follow a note edited to add #done; removing it takes it out of the sidebar and the file.
+    [Fact]
+    public async Task SavedSearch_ShowsCurrentResults_ThenRemoved()
+    {
+        data.WriteNote("Alpha", "# Alpha\n#job1234\n");
+        data.WriteNote("Beta", "# Beta\n#job1234\n");
+        data.WriteNote("Gamma", "# Gamma\n#job1234 #done\n");
+        data.WriteFile(
+            SettingsStore.FileName,
+            "{\"dayEnd\":{},\"savedSearches\":[{\"name\":\"Open job1234\",\"query\":\"#job1234 and not #done\"}]}");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Open job1234"], cut.FindAll("nav.saved-searches button.saved-search").Select(b => b.TextContent).ToArray()), Wait);
+        await cut.Find("nav.saved-searches button.saved-search").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".search-panel")), Wait);
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".search-panel").TextContent), Wait);
+        Assert.Equal("#job1234 and not #done", cut.Find(".search-panel .search-input").GetAttribute("value"));
+        Assert.Equal(["Alpha", "Beta"], cut.FindAll(".search-panel .note-button").Select(b => b.TextContent).ToArray());
+
+        EditableNote? opened = await data.State!.ReadForEdit("Alpha");
+        Assert.NotNull(opened);
+        ActionResult saved = await data.Actions!.SaveNote(opened, "# Alpha\n#job1234 #done\n");
+        Assert.Equal(ActionKind.Done, saved.Kind);
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Beta"], cut.FindAll(".search-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
+
+        await cut.Find("nav.saved-searches button.saved-search-remove").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("nav.saved-searches")), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(
+            "Removed saved search Open job1234.", cut.Find("p.saved-search-result").TextContent), Wait);
+        Assert.True(cut.Find("p.saved-search-result").ClassList.Contains("grey"));
+        Assert.Empty(new SettingsStore(data.Root).ReadSavedSearches());
+        Assert.Contains("dayEnd", File.ReadAllText(Path.Combine(data.Root, SettingsStore.FileName)), StringComparison.Ordinal);
     }
 
     // 180 AC-8: the palette lists /decisions with its usage.

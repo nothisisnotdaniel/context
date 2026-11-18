@@ -85,12 +85,14 @@ public sealed class NotesPanelTests : IDisposable
     private static void AssertBarButtons(IElement bar)
     {
         IElement[] buttons = bar.QuerySelectorAll(".notes-bar-buttons button").ToArray();
-        Assert.Equal(["triage-open", "tags-open", "settings-open"], buttons.Select(b => b.ClassList.First()).ToArray());
-        Assert.Equal(["Triage", "Tags", "Settings"], buttons.Select(b => b.GetAttribute("aria-label")!).ToArray());
+        Assert.Equal(
+            ["search-open", "triage-open", "tags-open", "settings-open"], buttons.Select(b => b.ClassList.First()).ToArray());
+        Assert.Equal(["Search", "Triage", "Tags", "Settings"], buttons.Select(b => b.GetAttribute("aria-label")!).ToArray());
     }
 
     // 192 AC-1, AC-2: icon buttons with names, typed, svg child, no visible text, safe decorative svg.
     [Theory]
+    [InlineData("search-open", "Search")]
     [InlineData("triage-open", "Triage")]
     [InlineData("tags-open", "Tags")]
     [InlineData("settings-open", "Settings")]
@@ -112,6 +114,123 @@ public sealed class NotesPanelTests : IDisposable
         }
         Assert.Contains("currentColor", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("#", markup, StringComparison.Ordinal);
+    }
+
+    // 207 AC-3: the Search button asks for the search panel with an empty text.
+    [Fact]
+    public async Task SearchButton_RaisesOnSearch_Empty()
+    {
+        List<string> searched = [];
+        await data.RefreshAsync();
+        IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OnSearch, (string text) => searched.Add(text)));
+
+        await cut.Find(".notes-bar-buttons button.search-open").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal([string.Empty], searched);
+    }
+
+    // 207 AC-8: the saved searches sit between the bar and the note list: a cut name with the query as title, and an
+    // icon remove button; clicking an entry asks for its query.
+    [Fact]
+    public async Task SavedSearches_BetweenBarAndList_ClickAsksForQuery()
+    {
+        data.WriteNote("Plan", "p");
+        data.WriteFile(
+            SettingsStore.FileName,
+            "{\"x\":1,\"savedSearches\":[{\"name\":\"Open  job1234\",\"query\":\"#job1234 and not #done\"},"
+            + "{\"name\":\"<b>Budget</b>\",\"query\":\"budget\"}]}");
+        List<string> searched = [];
+        await data.RefreshAsync();
+        IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OnSearch, (string text) => searched.Add(text)));
+
+        IElement nav = cut.Find("nav.saved-searches");
+        Assert.Equal("Saved searches", nav.GetAttribute("aria-label"));
+        IElement[] order = cut.Find("section.notes").Children.ToArray();
+        int navAt = Array.FindIndex(order, e => e.ClassList.Contains("saved-searches"));
+        Assert.Equal(1, navAt);
+        Assert.True(order[0].ClassList.Contains("notes-bar"));
+        Assert.True(order[2].ClassList.Contains("note-list"));
+        IElement[] entries = nav.QuerySelectorAll("button.saved-search").ToArray();
+        Assert.Equal(["Open job1234", "<b>Budget</b>"], entries.Select(b => b.TextContent).ToArray());
+        Assert.Empty(nav.QuerySelectorAll("b"));
+        Assert.Equal(["#job1234 and not #done", "budget"], entries.Select(b => b.GetAttribute("title")!).ToArray());
+        Assert.All(entries, b => Assert.True(b.ClassList.Contains("cut")));
+        IElement[] removes = nav.QuerySelectorAll("button.saved-search-remove").ToArray();
+        Assert.Equal(["Remove Open job1234", "Remove <b>Budget</b>"], removes.Select(b => b.GetAttribute("aria-label")!).ToArray());
+        Assert.Equal(["Remove Open job1234", "Remove <b>Budget</b>"], removes.Select(b => b.GetAttribute("title")!).ToArray());
+        Assert.All(removes, b => Assert.Equal("×", b.TextContent));
+        Assert.All(nav.QuerySelectorAll("button"), b => Assert.Equal("button", b.GetAttribute("type")));
+
+        await entries[0].ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(["#job1234 and not #done"], searched);
+    }
+
+    // 207 AC-8: no entries (no file, no property, an empty list) shows no nav.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("{\"dayEnd\":{}}")]
+    [InlineData("{\"savedSearches\":[]}")]
+    public async Task SavedSearches_None_NoNav(string? json)
+    {
+        data.WriteNote("Plan", "p");
+        if (json is not null)
+        {
+            data.WriteFile(SettingsStore.FileName, json);
+        }
+
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        Assert.Empty(cut.FindAll("nav.saved-searches"));
+        Assert.Empty(cut.FindAll(".saved-searches-unreadable"));
+    }
+
+    // 207 AC-8: an unreadable settings.json shows the red line instead of the list.
+    [Theory]
+    [InlineData("{")]
+    [InlineData("{\"savedSearches\":{}}")]
+    [InlineData("{\"savedSearches\":[{\"name\":\"a\"}]}")]
+    public async Task SavedSearches_Unreadable_RedLine(string json)
+    {
+        data.WriteNote("Plan", "p");
+        data.WriteFile(SettingsStore.FileName, json);
+
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        Assert.Empty(cut.FindAll("nav.saved-searches"));
+        IElement line = cut.Find(".notes > p.saved-searches-unreadable");
+        Assert.Equal("Can't read saved searches.", line.TextContent);
+        Assert.True(line.ClassList.Contains("red"));
+        Assert.Single(cut.FindAll("ul.note-list"));
+    }
+
+    // 207 AC-9: remove takes the entry out (grey line); a name no longer stored is refused in red.
+    [Fact]
+    public async Task SavedSearches_Remove_GreyLine_GoneIsRed()
+    {
+        data.WriteNote("Plan", "p");
+        data.WriteFile(
+            SettingsStore.FileName,
+            "{\"savedSearches\":[{\"name\":\"Work\",\"query\":\"#work\"},{\"name\":\"Home\",\"query\":\"#home\"}]}");
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        await cut.Find("button.saved-search-remove[aria-label='Remove Work']").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Home"], cut.FindAll("button.saved-search").Select(b => b.TextContent).ToArray()), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(
+            "Removed saved search Work.", cut.Find("p.saved-search-result").TextContent), Wait);
+        Assert.True(cut.Find("p.saved-search-result").ClassList.Contains("grey"));
+        Assert.Equal("status", cut.Find("p.saved-search-result").GetAttribute("role"));
+        Assert.Null(cut.Find("p.saved-search-result").Closest("nav"));
+
+        // Removed outside the app, not yet refreshed: the button is still shown.
+        data.WriteFile(SettingsStore.FileName, "{\"savedSearches\":[]}");
+        await cut.Find("button.saved-search-remove[aria-label='Remove Home']").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            "That saved search is gone. Nothing was done.", cut.Find("p.saved-search-result").TextContent), Wait);
+        Assert.True(cut.Find("p.saved-search-result").ClassList.Contains("red"));
     }
 
     // AC-4: an empty folder shows the empty state.

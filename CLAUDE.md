@@ -120,6 +120,15 @@ Every factory agent reads this file before working on Context. Keep it short and
     `TagIndexException` gives `IndexUnreadable`; kinds `Found`, `NoMatches`. The command line has `context search
     <text...>`, the desktop `/search` (`SearchPanel`). Out of scope: sensitive notes, todos, calendar, ranking,
     highlighting, fuzzy/stemmed search, diacritic folding.
+    **Tag filters** (job 207, `TagFilter.cs`): `TagFilter.IsTagFilter(text)` is true when the trimmed text starts with
+    `#` or with `not` + whitespace + `#` (ignoring case); `TagFilter.TryParse` reads `term (and term)*`, a term an
+    optional `not` and one tag written as in notes (`#tag` or `#[tag with spaces]`, letter first, so `#1234` is not a
+    tag; normalized by `TagIndex.NormalizeTag`), `and`/`not` ignoring case, at least one term without `not`; `or`,
+    parentheses, bare words and invalid tags fail. `TagFilterView.Build(index, store, text)`: over 200 chars (trimmed)
+    `TooLong`, then `Invalid`, both without opening the index; else `Sync` and `NoteTags()` matched in memory (every
+    included tag, no excluded one; no user text reaches SQL), notes sorted ignoring case then ordinal; kinds `Found`,
+    `NoMatches`, `IndexUnreadable` (a `TagIndexException`). Sensitive notes are never indexed, so never listed. Desktop
+    only (`SearchPanel`, saved searches).
   - **Decision log** (job 180, `DecisionParser.cs`, `DecisionsView.cs`): `DecisionParser.Parse(markdown)` finds lines
     outside fences (`TagParser.NumberedLinesOutsideFences`, 1-based numbers counting every line) that are optional
     spaces or tabs, an optional `-`, `*` or `+` and one space, then `Decision:` ignoring case; the rest is trimmed and
@@ -727,7 +736,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
     `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs`, note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs` (its triage queue, remove and snooze in `InboxTriage.cs`), the day's end in `DayEnd.cs` (Times' day file in `TimesDay.cs`, `settings.json` in `SettingsStore.cs`), the morning briefing in `Briefing.cs` (Times' flexitime balance in `TimesBalance.cs`), the todo input rules (`TryParseDate`,
-    `MaxTextLength`, `TryParseRepeat`, `NextDue`) in `TodoInput.cs`, the todo repeat in `TodoRepeat.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`), `SearchView.cs` (`search`), `DecisionsView.cs` (`decisions`, with `DecisionParser.cs`), `ReviewView.cs` (the weekly review) and `CalendarLinkView.cs`
+    `MaxTextLength`, `TryParseRepeat`, `NextDue`) in `TodoInput.cs`, the todo repeat in `TodoRepeat.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`), `SearchView.cs` (`search`), `TagFilter.cs` (tag filters), `DecisionsView.cs` (`decisions`, with `DecisionParser.cs`), `ReviewView.cs` (the weekly review) and `CalendarLinkView.cs`
     (the calendar link), and the command ranking for the desktop palette in `CommandMatcher.cs`; the notes list is `NoteStore.List()` itself.
   - **Data step in Core, drawing in the front end:** a view's Core data step returns plain types (a kind plus raw
     text, never markup, never cleaned or escaped, no exception messages). The front ends (`Cli`, and the desktop
@@ -749,7 +758,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Todos`, `Notes`, unreadable flags, `Folder`) off the UI thread with `Refresh()` (one at a time; requests during a run
     coalesce into one more run) and raises `Changed`; `Tick()` refreshes when the day changed or 5 min passed.
     `DataWatcher` (one `FileSystemWatcher` with subfolders, `IsRelevant` filter: the top-level files as before, plus
-    a `.md` at any depth except under a folder starting with `.` or under the top-level `calendar/`; 300 ms
+    a `.md` at any depth except under a folder starting with `.` or under the top-level `calendar/`, and the top-level
+    `settings.json` (job 207: saved searches edited outside the app; any case, not in a subfolder); 300 ms
     debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `CurrentPanel`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `LinksPanel`, `OutlinePanel`, `PersonPanel`, `ReviewPanel`, `TriagePanel`)
     inherit `StateComponent`, which injects the state and `DesktopActions` (internal types can't be
     public parameters). `DesktopActions` (with `ActionResult`: `ActionKind` `Done`/`Refused`/`Failed`, `ActionReason`,
@@ -893,7 +903,19 @@ Every factory agent reads this file before working on Context. Keep it short and
     overwritten and stops the run) records each step before it runs: catch-up for yesterday (left, not yet moved),
     today's Worked refresh once per new leaving that is not later than `now`, and today's move once at a leaving at or
     after `EveningCutoff` (17:00) when tomorrow is not sensitive. Manual runs (`CloseDay`, the CLI, the button) never
-    touch `settings.json`. End the day is the only item of the More actions menu on today's view (job 200; `Main.RunPageAction("end-day")`
+    touch `settings.json`. **Saved searches** (job 207) live in the same file: `"savedSearches":[{"name":"…","query":"…"}]`
+    in saved order (`SettingsStore.ReadSavedSearches`/`SaveSavedSearches`, `SavedSearch(Name, Query)`; rules in
+    `SavedSearches`: name trimmed with whitespace runs collapsed, 1 to `MaxNameLength` (50) chars, no control
+    or format characters (bidi marks, zero-width) or lone surrogates, unique ignoring case; query a valid tag filter of at most 200 chars or a full-text text of 3 to 200;
+    at most `MaxCount` (50)). A non-array, an item that isn't an object with exactly string `name` and `query`, or a
+    broken rule throws `SettingsStoreException`; a saved-search write re-checks `dayEnd` and `savedSearches` and never
+    overwrites a broken file. Every write uses relaxed JSON escaping (non-ASCII as is) and throws
+    `SettingsTooLargeException` (an `IOException`), writing nothing, when the file would be over 64 KiB. `ReadDayEnd`/`SaveDayEnd` ignore and keep `savedSearches`. `DesktopActions.SaveSearch(name,
+    query)` (texts `Type a name for the search.`, `A search name can be at most 50 characters, without control
+    characters.`, `Can't save that search.`, `A saved search named <name> already exists.`, `Can't save more than 50
+    searches.`, `settings.json would be over 64 KiB. Nothing was saved.`, Failed `Can't read settings.json. Nothing was saved.`, Done `Saved search <name>.`) and
+    `RemoveSavedSearch(name)` (ignoring case; a name that can't be normalized is gone; Refused/`Missing` `That saved search is gone. Nothing was done.`, Done
+    `Removed saved search <name>.`) are the only writers. End the day is the only item of the More actions menu on today's view (job 200; `Main.RunPageAction("end-day")`
     calls `DesktopActions.EndDay(Snapshot.Today)` and shows the result in `p.main-status`: grey on Done/Unchanged
     (`Day closed. Moved <n> todo(s) to <D+1>.`), else red; `CurrentPanel` has no button and no status line of its own); `Program.cs` calls `DesktopActions.AutoDayEnd()`
     at start and every `DayEndInterval` (30 s) from its own timer (Busy: Refused, skipped), followed by `AutoBriefing()`.
@@ -973,13 +995,22 @@ Every factory agent reads this file before working on Context. Keep it short and
     and a Close button, and lists `DesktopState.Find(key, value)` as note buttons (through `OnOpen`); grey
     `Loading…`, grey `No notes have <key>:: <value>.`, red `Can't read the attributes.` (red usage line for an `InvalidQuery`); same read-only,
     `indexGate`, reload and stale-result rules. Opening a note closes it.
-    `SearchPanel` (job 170, `/search <text>`; `Main`'s `searchShown`, after `FindPanel`) has the heading
-    `Search: <text>` and `Close`, and lists `DesktopState.Search(text)` (`SearchView.Build` under `indexGate`, never
+    `SearchPanel` (job 170, `/search <text>`, the sidebar's Search button and saved searches through
+    `Main.ShowSearch(text)`, which bumps `searchRequest` so the same text starts over; `Main`'s `searchShown`, after
+    `FindPanel`) has the heading `Search: <text>` (`Search` when blank) and `Close`, then `input[type=text].search-input`
+    (job 207; `aria-label="Search"`, placeholder `Search notes`, maxlength 200, focused on every request; Return searches
+    the typed text, Esc closes). A tag filter (`TagFilter.IsTagFilter`) lists `DesktopState.TagFilter(text)` (under
+    `indexGate`, never throws) as `note-button`s with no line: grey `No notes match <filter>.`, red `Type a tag filter
+    like #project and not #done.` for `Invalid`, red `Search text can be at most 200 characters.` for `TooLong`. Other
+    text lists `DesktopState.Search(text)` (`SearchView.Build` under `indexGate`, never
     throws): per hit a `note-button` (through `OnOpen`, full name in `title`) and the grey one-line `span.line` (cut by
-    CSS, full text in `title`); at most `MaxRows` (100), then grey `… <n> more`. Grey `Loading…`, grey `No notes contain
-    <text>.`, red `Can't read the search index.`, red `Type /search <text>.` for blank (nothing read), red `Type at least
-    3 characters to search.` and `Search text can be at most 200 characters.`; same read-only (no `Actions.`), reload and
-    stale-result rules. Opening a note or the current view closes it.
+    CSS, full text in `title`); at most `MaxRows` (100), then grey `… <n> more` (both kinds). Grey `Loading…`, grey `No notes contain
+    <text>.`, red `Can't read the search index.`, grey `Type text or a tag filter like #project and not #done.` for blank (nothing read), red `Type at least
+    3 characters to search.` and `Search text can be at most 200 characters.`. When results show (`Found`/`NoMatches`
+    of either kind) `button.search-save` `Save search` opens `input.search-save-name` (`aria-label`/placeholder `Search
+    name`, maxlength 50, focused): Return calls `Actions.SaveSearch(name, trimmed query)` (its only action), Esc hides
+    it; the result is `p.search-save-result` (`role=status`, accent on Done, else red). Reload and stale-result rules as
+    the other panels. Opening a note or the current view closes it.
     `DecisionsPanel` (job 180, `/decisions [tag]`; `Main`'s `decisionsShown`, after `SearchPanel`) has the heading
     `Decisions` (with a tag `Decisions: #tag`) and `Close`, and lists `DesktopState.Decisions(tag)` (`DecisionsView.Build`
     under `indexGate`, never throws): per decision a grey `span.date`, a `note-button` (through `OnOpen`, full name in
@@ -1012,7 +1043,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     a dirty editor is refused with `Save <name> first.`, else `SaveExportFile("<name>.md")` and `ExportNote`'s text
     in the main status line. Rules (`DesktopSourceTests`): `WritePlainCopy` and `ReadImport` are named in
     `Context.Desktop` only in `DesktopActions.cs`, and no `.razor` file matches `\b(File|Directory|Path)\.`.
-    **Sidebar bar (job 197):** `NotesPanel`'s bar holds only the icon buttons (`.notes-bar-buttons`: triage, tags, settings), right-aligned (`justify-content: flex-end`); no logo and no visible "Notes" heading, the top-level `ul.note-list` carries `aria-label="Notes"`. **Placeholders:** a box's placeholder says only what it is for (`New todo`, `Capture to inbox`), never a `Return to …` hint; Return still submits and there are no submit buttons.
+    **Sidebar bar (job 197):** `NotesPanel`'s bar holds only the icon buttons (`.notes-bar-buttons`: search (job 207, magnifying glass, `OnSearch("")`), triage, tags, settings), right-aligned (`justify-content: flex-end`); no logo and no visible "Notes" heading, the top-level `ul.note-list` carries `aria-label="Notes"`. Between the bar and the list, `nav.saved-searches` (job 207, `aria-label="Saved searches"`, only with entries; `DesktopSnapshot.SavedSearches`) has per entry `button.saved-search` (name through `OneLine`, cut, `title` the query; `OnSearch(query)`) and `button.saved-search-remove` (`×`, `aria-label`/`title` `Remove <name>`; `Actions.RemoveSavedSearch`, result in grey/red `p.saved-search-result`); `SavedSearchesUnreadable` shows red `Can't read saved searches.` instead. **Placeholders:** a box's placeholder says only what it is for (`New todo`, `Capture to inbox`), never a `Return to …` hint; Return still submits and there are no submit buttons.
     **Tidy layout (job 192):** the Triage, Tags and Settings buttons in `NotesPanel`'s bar are icon-only (inline `svg`, `aria-hidden`, `currentColor`; `aria-label` and `title` carry the name), note rows show no modified date, and `.top-bar` is a band (`--panel` background, `--line` bottom border).
     **Top bar (job 198):** `TopBar` replaces the capture box as the first child of `Main`'s `main.current-region` (not with
     `Can't read the data folder.`): an empty `.top-bar-start` and right-aligned `.top-bar-buttons` with icon buttons

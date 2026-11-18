@@ -1,55 +1,118 @@
 @using System.Globalization
 @inherits StateComponent
-@* The notes whose text contains the typed text (DesktopState.Search), each with its first matching line; clicking a
-   note opens it. It reads only, and reloads whenever the state changes. *@
+@* The notes whose text contains the typed text (DesktopState.Search), each with its first matching line, or the notes
+   that match a tag filter (DesktopState.TagFilter); clicking a note opens it. The input runs another search on
+   Return; the shown search can be saved under a name (DesktopActions.SaveSearch). It reloads whenever the state
+   changes. *@
 
 <section class="search-panel" aria-label="Notes containing this text">
     <div class="panel-bar">
         <h2 class="cut" title="@Heading">@Heading</h2>
         <button type="button" class="close" @onclick="() => OnClose.InvokeAsync()">Close</button>
     </div>
-    @if (Text.Trim().Length == 0)
+    <input type="text" class="search-input" value="@typed" maxlength="200" aria-label="Search"
+           placeholder="Search notes" @ref="input" @oninput="SearchTyped" @onkeydown="SearchKey" />
+    @if (current.Trim().Length == 0)
     {
-        <p class="red" role="status">Type /search &lt;text&gt;.</p>
+        <p class="grey" role="status">Type text or a tag filter like #project and not #done.</p>
     }
-    else if (view is null)
+    else if (filter is null && view is null)
     {
         <p class="grey" role="status">Loading…</p>
     }
-    else if (view.Kind is SearchViewKind.TooShort)
+    else if (filter is { } tagView)
     {
-        <p class="red" role="status">Type at least @(SearchView.MinQueryLength.ToString(CultureInfo.InvariantCulture)) characters to search.</p>
-    }
-    else if (view.Kind is SearchViewKind.TooLong)
-    {
-        <p class="red" role="status">Search text can be at most @(SearchView.MaxQueryLength.ToString(CultureInfo.InvariantCulture)) characters.</p>
-    }
-    else if (view.Kind is SearchViewKind.IndexUnreadable)
-    {
-        <p class="red" role="status">Can't read the search index.</p>
-    }
-    else if (view.Hits.Count == 0)
-    {
-        <p class="grey" role="status">No notes contain @DesktopText.OneLine(Text.Trim()).</p>
-    }
-    else
-    {
-        <ul class="search-hits">
-            @foreach (SearchHit hit in view.Hits.Take(MaxRows))
-            {
-                string name = hit.Note;
-                string shown = DesktopText.OneLine(name);
-                string line = DesktopText.OneLine(hit.Line);
-                <li>
-                    <button type="button" class="note-button cut" title="@shown" @onclick="() => OnOpen.InvokeAsync(name)">@shown</button>
-                    <span class="line grey cut" title="@line">@line</span>
-                </li>
-            }
-        </ul>
-        @if (view.Hits.Count > MaxRows)
+        @if (tagView.Kind is TagFilterViewKind.TooLong)
         {
-            <p class="grey more">@More(view.Hits.Count)</p>
+            <p class="red" role="status">Search text can be at most @(TagFilterView.MaxQueryLength.ToString(CultureInfo.InvariantCulture)) characters.</p>
         }
+        else if (tagView.Kind is TagFilterViewKind.Invalid)
+        {
+            <p class="red" role="status">Type a tag filter like #project and not #done.</p>
+        }
+        else if (tagView.Kind is TagFilterViewKind.IndexUnreadable)
+        {
+            <p class="red" role="status">Can't read the search index.</p>
+        }
+        else if (tagView.Notes.Count == 0)
+        {
+            <p class="grey" role="status">No notes match @DesktopText.OneLine(current.Trim()).</p>
+        }
+        else
+        {
+            <ul class="search-hits">
+                @foreach (string note in tagView.Notes.Take(MaxRows))
+                {
+                    string name = note;
+                    string shown = DesktopText.OneLine(name);
+                    <li>
+                        <button type="button" class="note-button cut" title="@shown" @onclick="() => OnOpen.InvokeAsync(name)">@shown</button>
+                    </li>
+                }
+            </ul>
+            @if (tagView.Notes.Count > MaxRows)
+            {
+                <p class="grey more">@More(tagView.Notes.Count)</p>
+            }
+        }
+    }
+    else if (view is { } textView)
+    {
+        @if (textView.Kind is SearchViewKind.TooShort)
+        {
+            <p class="red" role="status">Type at least @(SearchView.MinQueryLength.ToString(CultureInfo.InvariantCulture)) characters to search.</p>
+        }
+        else if (textView.Kind is SearchViewKind.TooLong)
+        {
+            <p class="red" role="status">Search text can be at most @(SearchView.MaxQueryLength.ToString(CultureInfo.InvariantCulture)) characters.</p>
+        }
+        else if (textView.Kind is SearchViewKind.IndexUnreadable)
+        {
+            <p class="red" role="status">Can't read the search index.</p>
+        }
+        else if (textView.Hits.Count == 0)
+        {
+            <p class="grey" role="status">No notes contain @DesktopText.OneLine(current.Trim()).</p>
+        }
+        else
+        {
+            <ul class="search-hits">
+                @foreach (SearchHit hit in textView.Hits.Take(MaxRows))
+                {
+                    string name = hit.Note;
+                    string shown = DesktopText.OneLine(name);
+                    string line = DesktopText.OneLine(hit.Line);
+                    <li>
+                        <button type="button" class="note-button cut" title="@shown" @onclick="() => OnOpen.InvokeAsync(name)">@shown</button>
+                        <span class="line grey cut" title="@line">@line</span>
+                    </li>
+                }
+            </ul>
+            @if (textView.Hits.Count > MaxRows)
+            {
+                <p class="grey more">@More(textView.Hits.Count)</p>
+            }
+        }
+    }
+    @if (Saveable)
+    {
+        <div class="search-save-bar">
+            @if (saveOpen)
+            {
+                <input type="text" class="search-save-name" value="@saveName" maxlength="50" aria-label="Search name"
+                       placeholder="Search name" disabled="@saving" @ref="saveInput" @oninput="SaveNameTyped"
+                       @onkeydown="e => SaveKey(e)" />
+            }
+            else
+            {
+                <button type="button" class="search-save" @onclick="OpenSave">Save search</button>
+            }
+        </div>
+    }
+    @if (saved is { } savedResult)
+    {
+        string savedText = DesktopText.OneLine(savedResult.Text);
+        <p class="search-save-result cut @(savedResult.Kind == ActionKind.Done ? "accent" : "red")" role="status" title="@savedText">@savedText</p>
     }
 </section>
 
@@ -58,13 +121,35 @@
     internal const int MaxRows = 100;
 
     private SearchView? view;
+    private TagFilterView? filter;
     private string? loaded;
+    private int? loadedRequest;
     private int request;
 
-    /// <summary>The text as typed after <c>/search</c>.</summary>
+    // The text whose results are shown (Text, then whatever was searched with Return) and the input's text.
+    private string current = string.Empty;
+    private string typed = string.Empty;
+
+    private ElementReference input;
+    private ElementReference saveInput;
+    private bool focusInput;
+    private bool focusSave;
+    private bool saveOpen;
+    private bool saving;
+    private string saveName = string.Empty;
+    private ActionResult? saved;
+
+    /// <summary>The text to search first: as typed after <c>/search</c>, a saved search's query, or empty.</summary>
     [Parameter]
     [EditorRequired]
     public string Text { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Bumped by the caller each time the panel is asked for again, so the same <see cref="Text"/> starts over (the
+    /// input shows it, the save form is gone and the input has the focus).
+    /// </summary>
+    [Parameter]
+    public int Request { get; set; }
 
     /// <summary>Called with a note's name when it is clicked.</summary>
     [Parameter]
@@ -76,19 +161,45 @@
     private static string More(int count) =>
         $"{CurrentView.Outside} {(count - MaxRows).ToString(CultureInfo.InvariantCulture)} more";
 
-    private string Heading => $"Search: {DesktopText.OneLine(Text.Trim())}";
+    private string Heading => current.Trim().Length == 0 ? "Search" : $"Search: {DesktopText.OneLine(current.Trim())}";
+
+    // Results are shown: found or none found, for either kind of search.
+    private bool Saveable => current.Trim().Length > 0
+        && ((filter is { } f && f.Kind is TagFilterViewKind.Found or TagFilterViewKind.NoMatches)
+            || (filter is null && view is { } v && v.Kind is SearchViewKind.Found or SearchViewKind.NoMatches));
 
     protected override Task OnParametersSetAsync()
     {
-        if (string.Equals(loaded, Text, StringComparison.Ordinal))
+        if (string.Equals(loaded, Text, StringComparison.Ordinal) && loadedRequest == Request)
         {
             return Task.CompletedTask;
         }
 
         // Another query: its rows are not known yet, so the old ones go.
         loaded = Text;
-        view = null;
-        return Load();
+        loadedRequest = Request;
+        current = Text;
+        typed = Text;
+        saveOpen = false;
+        saveName = string.Empty;
+        saved = null;
+        focusInput = true;
+        return Start();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusInput)
+        {
+            focusInput = false;
+            await input.FocusAsync();
+        }
+
+        if (focusSave && saveOpen)
+        {
+            focusSave = false;
+            await saveInput.FocusAsync();
+        }
     }
 
     protected override async Task OnStateChangedAsync()
@@ -97,21 +208,115 @@
         StateHasChanged();
     }
 
+    private void SearchTyped(ChangeEventArgs e)
+    {
+        typed = e.Value?.ToString() ?? string.Empty;
+    }
+
+    private async Task SearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            await OnClose.InvokeAsync();
+            return;
+        }
+
+        if (e.Key != "Enter")
+        {
+            return;
+        }
+
+        current = typed;
+        saveOpen = false;
+        saveName = string.Empty;
+        saved = null;
+        await Start();
+    }
+
+    private void OpenSave()
+    {
+        saveOpen = true;
+        saveName = string.Empty;
+        focusSave = true;
+    }
+
+    private void SaveNameTyped(ChangeEventArgs e)
+    {
+        saveName = e.Value?.ToString() ?? string.Empty;
+    }
+
+    // Return saves the shown search under the typed name; Esc hides the form and saves nothing.
+    private async Task SaveKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            saveOpen = false;
+            saveName = string.Empty;
+            return;
+        }
+
+        if (e.Key != "Enter" || saving)
+        {
+            return;
+        }
+
+        saving = true;
+        try
+        {
+            saved = await Actions.SaveSearch(saveName, current.Trim());
+        }
+        finally
+        {
+            saving = false;
+        }
+
+        if (saved.Kind == ActionKind.Done)
+        {
+            saveOpen = false;
+            saveName = string.Empty;
+        }
+        else
+        {
+            focusSave = true;
+        }
+    }
+
+    // A new query: the old rows go until its own arrive.
+    private Task Start()
+    {
+        view = null;
+        filter = null;
+        return Load();
+    }
+
     // Keeps the shown rows while it reloads. A result for another query, or an older request's result, is dropped. A
     // blank query reads nothing.
     private async Task Load()
     {
         int mine = ++request;
-        string text = Text;
+        string text = current;
         if (text.Trim().Length == 0)
         {
             return;
         }
 
-        SearchView result = await State.Search(text);
-        if (mine == request && string.Equals(text, Text, StringComparison.Ordinal))
+        if (TagFilter.IsTagFilter(text))
         {
-            view = result;
+            TagFilterView result = await State.TagFilter(text);
+            if (mine == request && string.Equals(text, current, StringComparison.Ordinal))
+            {
+                filter = result;
+                view = null;
+            }
+        }
+        else
+        {
+            SearchView result = await State.Search(text);
+            if (mine == request && string.Equals(text, current, StringComparison.Ordinal))
+            {
+                view = result;
+                filter = null;
+            }
         }
     }
 }

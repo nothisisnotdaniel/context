@@ -1,5 +1,7 @@
 using System.Reflection;
+using System.Text.RegularExpressions;
 using Bunit;
+using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 
 namespace Context.Tests;
@@ -122,22 +124,48 @@ public sealed class SearchPanelTests : IDisposable
         Assert.Equal(before, FileSnapshot.Take(data.Root));
     }
 
-    // AC-10: blank, too short and too long texts are red lines, and nothing is read or written.
+    // AC-10, 207 AC-4: a blank text is the grey hint line, and nothing is read or written.
     [Theory]
-    [InlineData("", "Type /search <text>.")]
-    [InlineData("   ", "Type /search <text>.")]
-    [InlineData(" ab ", "Type at least 3 characters to search.")]
-    [InlineData(null, "Search text can be at most 200 characters.")]
-    public async Task Render_BadText_RedLine_NothingRead(string? text, string expected)
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Render_Blank_GreyHint_NothingRead(string text)
     {
         data.WriteNote("Plan", "budget\n");
         await data.RefreshAsync();
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
 
-        IRenderedComponent<SearchPanel> cut = Render(text ?? new string('x', 201));
+        IRenderedComponent<SearchPanel> cut = Render(text);
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            "Type text or a tag filter like #project and not #done.", cut.Find("p[role=status]").TextContent), Wait);
+        Assert.True(cut.Find("p[role=status]").ClassList.Contains("grey"));
+        Assert.Equal("Search", cut.Find("h2").TextContent);
+        Assert.Empty(cut.FindAll("button.search-save"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root));
+    }
+
+    // AC-10, 207 AC-1: too short and too long texts (a tag filter too) are red lines, and nothing is read or written.
+    [Theory]
+    [InlineData(" ab ", "Type at least 3 characters to search.")]
+    [InlineData(null, "Search text can be at most 200 characters.")]
+    [InlineData("#tag-long", "Search text can be at most 200 characters.")]
+    public async Task Render_BadText_RedLine_NothingRead(string? text, string expected)
+    {
+        data.WriteNote("Plan", "budget\n");
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
+        string shown = text switch
+        {
+            null => new string('x', 201),
+            "#tag-long" => "#a" + string.Concat(Enumerable.Repeat(" and #a", 29)),
+            _ => text,
+        };
+
+        IRenderedComponent<SearchPanel> cut = Render(shown);
 
         cut.WaitForAssertion(() => Assert.Equal(expected, cut.Find("p[role=status]").TextContent), Wait);
         Assert.True(cut.Find("p[role=status]").ClassList.Contains("red"));
+        Assert.Empty(cut.FindAll("button.search-save"));
         Assert.Equal(before, FileSnapshot.Take(data.Root));
     }
 
@@ -201,15 +229,227 @@ public sealed class SearchPanelTests : IDisposable
         Assert.DoesNotContain("\u0007", cut.Markup, StringComparison.Ordinal);
     }
 
-    // AC-10: the panel only reads: it calls no Actions.
+    // AC-10, 207 AC-5: the panel reads through the state; its only action is SaveSearch.
     [Fact]
-    public void Source_CallsNoActions()
+    public void Source_CallsOnlySaveSearch()
     {
         string root = RepoFiles.Root();
         string source = File.ReadAllText(Path.Combine(root, "src", "Context.Desktop", "SearchPanel.razor"));
 
-        Assert.DoesNotContain("Actions.", source, StringComparison.Ordinal);
+        Assert.Equal(
+            ["Actions.SaveSearch("],
+            Regex.Matches(source, @"\bActions\.\w+\(").Select(m => m.Value).Distinct().ToArray());
         Assert.Contains("State.Search(", source, StringComparison.Ordinal);
+        Assert.Contains("State.TagFilter(", source, StringComparison.Ordinal);
+    }
+
+    // 207 AC-4: the input: text, labelled, placeholder, at most 200 characters, holding the current text.
+    [Fact]
+    public async Task Input_Attributes_HoldText()
+    {
+        await data.RefreshAsync();
+
+        IRenderedComponent<SearchPanel> cut = Render("budget");
+
+        cut.WaitForAssertion(() => Assert.Equal("No notes contain budget.", cut.Find("p[role=status]").TextContent), Wait);
+        AngleSharp.Dom.IElement input = cut.Find("input.search-input");
+        Assert.Equal("text", input.GetAttribute("type"));
+        Assert.Equal("Search", input.GetAttribute("aria-label"));
+        Assert.Equal("Search notes", input.GetAttribute("placeholder"));
+        Assert.Equal("200", input.GetAttribute("maxlength"));
+        Assert.Equal("budget", input.GetAttribute("value"));
+    }
+
+    // 207 AC-4: Return shows the typed text's results; Esc closes the panel.
+    [Fact]
+    public async Task Input_Return_Searches_Escape_Closes()
+    {
+        data.WriteNote("Plan", "the budget\n");
+        data.WriteNote("Tagged", "#work\n");
+        await data.RefreshAsync();
+        int closed = 0;
+        IRenderedComponent<SearchPanel> cut = data.Bunit.Render<SearchPanel>(p => p
+            .Add(c => c.Text, string.Empty)
+            .Add(c => c.OnClose, () => closed++));
+
+        await cut.Find(".search-input").InputAsync(new ChangeEventArgs { Value = "budget" });
+        await cut.Find(".search-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        cut.WaitForAssertion(() => Assert.Equal(["Plan"], NoteNames(cut)), Wait);
+        Assert.Equal("Search: budget", cut.Find("h2").TextContent);
+
+        await cut.Find(".search-input").InputAsync(new ChangeEventArgs { Value = "#WORK" });
+        await cut.Find(".search-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        cut.WaitForAssertion(() => Assert.Equal(["Tagged"], NoteNames(cut)), Wait);
+        Assert.Equal(0, closed);
+
+        await cut.Find(".search-input").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        Assert.Equal(1, closed);
+    }
+
+    // 207 AC-4: a tag filter lists the matching notes as note buttons, without lines; the save button shows.
+    [Fact]
+    public async Task Render_TagFilter_ListsMatchingNotes()
+    {
+        data.WriteNote("beta", "#job1234\n");
+        data.WriteNote("Alpha", "#job1234 and more\n");
+        data.WriteNote("Done", "#job1234 #done\n");
+        data.WriteNote("Other", "#5678\n");
+        await data.RefreshAsync();
+        List<string> opened = [];
+        IRenderedComponent<SearchPanel> cut = data.Bunit.Render<SearchPanel>(p => p
+            .Add(c => c.Text, " #job1234 AND NOT #Done ")
+            .Add(c => c.OnOpen, (string name) => opened.Add(name)));
+
+        cut.WaitForAssertion(() => Assert.Equal(["Alpha", "beta"], NoteNames(cut)), Wait);
+        Assert.Equal("Search: #job1234 AND NOT #Done", cut.Find("h2").TextContent);
+        Assert.Empty(cut.FindAll(".search-hits .line"));
+        Assert.All(cut.FindAll(".search-hits button"), b => Assert.True(b.ClassList.Contains("note-button")));
+        Assert.Equal("Save search", cut.Find("button.search-save").TextContent);
+
+        await cut.FindAll(".search-hits button")[1].ClickAsync(new MouseEventArgs());
+        Assert.Equal(["beta"], opened);
+    }
+
+    // 207 AC-4: a tag filter shows at most 100 notes, then the grey "… n more" line.
+    [Fact]
+    public async Task Render_TagFilter_ManyNotes_CappedWithMoreLine()
+    {
+        for (int i = 0; i < SearchPanel.MaxRows + 2; i++)
+        {
+            data.WriteNote($"n{i:D3}", "#shared\n");
+        }
+
+        await data.RefreshAsync();
+
+        IRenderedComponent<SearchPanel> cut = Render("#shared");
+
+        cut.WaitForAssertion(() => Assert.Equal(100, NoteNames(cut).Length), Wait);
+        Assert.Equal("n099", NoteNames(cut)[^1]);
+        Assert.Equal("… 2 more", cut.Find("p.more").TextContent);
+    }
+
+    // 207 AC-4: no match is grey with the filter; an invalid filter is red, with no save button.
+    [Theory]
+    [InlineData("#nothing", "No notes match #nothing.", "grey", true)]
+    [InlineData("#a or #b", "Type a tag filter like #project and not #done.", "red", false)]
+    [InlineData("not #a", "Type a tag filter like #project and not #done.", "red", false)]
+    [InlineData("#a and (#b)", "Type a tag filter like #project and not #done.", "red", false)]
+    public async Task Render_TagFilter_StatusLines(string text, string expected, string css, bool saveable)
+    {
+        data.WriteNote("Plan", "#a #b\n");
+        await data.RefreshAsync();
+
+        IRenderedComponent<SearchPanel> cut = Render(text);
+
+        cut.WaitForAssertion(() => Assert.Equal(expected, cut.Find("p[role=status]").TextContent), Wait);
+        Assert.True(cut.Find("p[role=status]").ClassList.Contains(css));
+        Assert.Empty(cut.FindAll("ul"));
+        Assert.Equal(saveable, cut.FindAll("button.search-save").Count == 1);
+    }
+
+    // 207 AC-4: a tag filter over a context.db that is not a database shows the red line.
+    [Fact]
+    public async Task Render_TagFilter_BadIndex_RedLine()
+    {
+        data.WriteNote("Plan", "#a\n");
+        data.WriteFile(TagIndex.FileName, NotADatabase);
+        await data.RefreshAsync();
+
+        IRenderedComponent<SearchPanel> cut = Render("#a");
+
+        cut.WaitForAssertion(() => Assert.Equal("Can't read the search index.", cut.Find("p[role=status]").TextContent), Wait);
+        Assert.True(cut.Find("p[role=status]").ClassList.Contains("red"));
+        Assert.Empty(cut.FindAll("button.search-save"));
+    }
+
+    // 207 AC-5: Save search opens the focused name form; Return saves the trimmed query and shows the accent line.
+    [Fact]
+    public async Task Save_Return_SavesTrimmedQuery_AccentLine()
+    {
+        data.WriteNote("Plan", "budget\n");
+        await data.RefreshAsync();
+        IRenderedComponent<SearchPanel> cut = Render("  budget  ");
+        cut.WaitForAssertion(() => Assert.Equal(["Plan"], NoteNames(cut)), Wait);
+
+        await cut.Find("button.search-save").ClickAsync(new MouseEventArgs());
+
+        AngleSharp.Dom.IElement name = cut.Find("input.search-save-name");
+        Assert.Equal("text", name.GetAttribute("type"));
+        Assert.Equal("Search name", name.GetAttribute("aria-label"));
+        Assert.Equal("Search name", name.GetAttribute("placeholder"));
+        Assert.Equal("50", name.GetAttribute("maxlength"));
+        Assert.Empty(cut.FindAll("button.search-save"));
+        cut.WaitForAssertion(() => Assert.Equal(
+            name.GetAttribute("blazor:elementReference"),
+            ((ElementReference)data.Bunit.JSInterop.Invocations["Blazor._internal.domWrapper.focus"][^1].Arguments[0]!).Id), Wait);
+
+        await cut.Find("input.search-save-name").InputAsync(new ChangeEventArgs { Value = "  My   budget " });
+        await cut.Find("input.search-save-name").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+
+        cut.WaitForAssertion(() => Assert.Equal("Saved search My budget.", cut.Find("p.search-save-result").TextContent), Wait);
+        AngleSharp.Dom.IElement result = cut.Find("p.search-save-result");
+        Assert.True(result.ClassList.Contains("accent"));
+        Assert.Equal("status", result.GetAttribute("role"));
+        Assert.Empty(cut.FindAll("input.search-save-name"));
+        SavedSearch saved = Assert.Single(new SettingsStore(data.Root).ReadSavedSearches());
+        Assert.Equal("My budget", saved.Name);
+        Assert.Equal("budget", saved.Query);
+    }
+
+    // 207 AC-5: Esc hides the form and saves nothing.
+    [Fact]
+    public async Task Save_Escape_HidesForm_SavesNothing()
+    {
+        data.WriteNote("Plan", "#a\n");
+        await data.RefreshAsync();
+        IRenderedComponent<SearchPanel> cut = Render("#a");
+        cut.WaitForAssertion(() => Assert.Equal(["Plan"], NoteNames(cut)), Wait);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+
+        await cut.Find("button.search-save").ClickAsync(new MouseEventArgs());
+        await cut.Find("input.search-save-name").InputAsync(new ChangeEventArgs { Value = "Mine" });
+        await cut.Find("input.search-save-name").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+
+        Assert.Empty(cut.FindAll("input.search-save-name"));
+        Assert.Single(cut.FindAll("button.search-save"));
+        Assert.Empty(cut.FindAll("p.search-save-result"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    // 207 AC-5: a refusal shows the action's text in red and keeps the form.
+    [Fact]
+    public async Task Save_Refused_RedLine_FormKept()
+    {
+        data.WriteNote("Plan", "#a\n");
+        await data.RefreshAsync();
+        IRenderedComponent<SearchPanel> cut = Render("#a");
+        cut.WaitForAssertion(() => Assert.Equal(["Plan"], NoteNames(cut)), Wait);
+
+        await cut.Find("button.search-save").ClickAsync(new MouseEventArgs());
+        await cut.Find("input.search-save-name").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            DesktopActions.SearchNameBlankText, cut.Find("p.search-save-result").TextContent), Wait);
+        Assert.True(cut.Find("p.search-save-result").ClassList.Contains("red"));
+        Assert.Single(cut.FindAll("input.search-save-name"));
+        Assert.False(File.Exists(Path.Combine(data.Root, SettingsStore.FileName)));
+    }
+
+    // 207 AC-9: a tag filter reloads after State.Changed, so a note given #done leaves it.
+    [Fact]
+    public async Task TagFilter_StateChanged_Reloads()
+    {
+        data.WriteNote("Plan", "#job1234\n");
+        data.WriteNote("Review", "#job1234\n");
+        await data.RefreshAsync();
+        IRenderedComponent<SearchPanel> cut = Render("#job1234 and not #done");
+        cut.WaitForAssertion(() => Assert.Equal(["Plan", "Review"], NoteNames(cut)), Wait);
+
+        data.WriteNote("Plan", "#job1234 #done\n");
+        File.SetLastWriteTimeUtc(Path.Combine(data.Root, "Plan.md"), DateTime.UtcNow.AddSeconds(5));
+        await data.State!.Refresh();
+
+        cut.WaitForAssertion(() => Assert.Equal(["Review"], NoteNames(cut)), Wait);
     }
 
     private IRenderedComponent<SearchPanel> Render(string text) =>
