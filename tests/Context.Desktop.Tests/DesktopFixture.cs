@@ -26,7 +26,7 @@ internal sealed class DesktopFixture : IDisposable
         Root = Path.Combine(parent, "Context");
         Directory.CreateDirectory(parent);
         Bunit = new BunitContext();
-        Guard = new CloseGuard(() => Interlocked.Increment(ref closeCalls));
+        Guard = new CloseGuard(Close);
     }
 
     /// <summary>The data folder; it does not exist until something is written.</summary>
@@ -70,7 +70,38 @@ internal sealed class DesktopFixture : IDisposable
     /// <summary>How often the close guard closed the window.</summary>
     public int CloseCalls => closeCalls;
 
+    /// <summary>
+    /// Completes on the first close (off the renderer, and no render follows it), so a test awaits it with its
+    /// <c>Wait</c> instead of a render-driven wait on <see cref="CloseCalls"/>.
+    /// </summary>
+    public Task Closed => closed.Task;
+
+    /// <summary>
+    /// When set, the close action calls it and counts the close (and completes <see cref="Closed"/>) only once the task
+    /// it returns completes, on the thread pool: a test can hold the close until after the page's last render.
+    /// </summary>
+    public Func<Task>? CloseAfter { get; set; }
+
+    private readonly TaskCompletionSource closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     private int closeCalls;
+
+    private void Close()
+    {
+        if (CloseAfter is { } after)
+        {
+            _ = after().ContinueWith(_ => CountClose(), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+            return;
+        }
+
+        CountClose();
+    }
+
+    private void CountClose()
+    {
+        Interlocked.Increment(ref closeCalls);
+        closed.TrySetResult();
+    }
 
     /// <summary>The session of the open sensitive note, on the <see cref="UtcNow"/> clock (set by <see cref="CreateState"/>).</summary>
     public SensitiveSession? Session { get; private set; }

@@ -1631,11 +1631,47 @@ public sealed class MainTests : IDisposable
 
         Assert.True(data.Guard.Closing());
 
-        cut.WaitForAssertion(() => Assert.Equal(1, data.CloseCalls), Wait);
+        // 204: the close is counted off the renderer after the last render, so await it rather than a render.
+        await data.Closed.WaitAsync(Wait);
+        Assert.Equal(1, data.CloseCalls);
         Assert.Equal("# Plan\n\nClosing\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.False(data.Guard.Closing());
         Assert.Equal(1, data.CloseCalls);
+    }
+
+    // 204 AC-1/AC-3: the close counted only after the save's last render (status Saved.), with no render after it,
+    // is still seen; a render-driven wait on the count timed out here (CI run 44204937842).
+    [Fact]
+    public async Task WindowClose_ClosedAfterLastRender_IsStillSeen()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        await js.Change(cut, "# Plan\n\nClosing\n");
+        TaskCompletionSource asked = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        data.CloseAfter = () =>
+        {
+            asked.TrySetResult();
+            return gate.Task;
+        };
+
+        Assert.True(data.Guard.Closing());
+
+        await asked.Task.WaitAsync(Wait);
+        Assert.Equal("Saved.", cut.Find(".note-editor .status").TextContent);
+        Assert.Equal(0, data.CloseCalls);
+        int renders = cut.RenderCount;
+        gate.SetResult();
+
+        await data.Closed.WaitAsync(Wait);
+        Assert.Equal(1, data.CloseCalls);
+        Assert.Equal(renders, cut.RenderCount);
+        Assert.Equal("# Plan\n\nClosing\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.False(data.Guard.Closing());
     }
 
     // 203 AC-9: when the save before closing fails, the Discard question is shown; Cancel keeps the window open and

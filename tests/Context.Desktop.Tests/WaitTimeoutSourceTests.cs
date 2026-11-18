@@ -10,6 +10,8 @@ namespace Context.Tests;
 // 174: HistoryPanelTests waits on the history and version loads behind Task.Run and follows it too.
 // 175: SettingsPanelTests waits on the settings load (two Task.Run hops) and follows it too.
 // 176: the guard finds every test file that waits, so a new file needs no registration.
+// 204: the window close is counted off the renderer with no render after it, so no wait lambda reads the close count;
+// a test awaits DesktopFixture.Closed instead.
 public sealed class WaitTimeoutSourceTests
 {
     private const string TestsFolder = "tests/Context.Desktop.Tests";
@@ -142,6 +144,62 @@ public sealed class WaitTimeoutSourceTests
         return problems;
     }
 
+    [Theory]
+    [MemberData(nameof(WaitingFiles))]
+    public void NoWait_ReadsTheCloseCount(string file)
+    {
+        string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), file));
+
+        Assert.Empty(CloseCountWaits(source).Select(p => $"{file}: {p}"));
+    }
+
+    [Fact]
+    public void CloseCountWaits_FlagsAWaitOnTheCloseCount()
+    {
+        string source = "private static readonly TimeSpan Wait = TimeSpan.FromSeconds(20);\n"
+            + "Assert.Equal(0, data.CloseCalls);\n"
+            + "cut.WaitForAssertion(() => Assert.Equal(1, data.CloseCalls), Wait);\n"
+            + "cut.WaitForState(() => data.CloseCalls == 1, Wait);\n";
+
+        List<string> problems = CloseCountWaits(source);
+
+        Assert.Equal(2, problems.Count);
+        Assert.Contains("line 3", problems[0], StringComparison.Ordinal);
+        Assert.Contains("line 4", problems[1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CloseCountWaits_AcceptsAReadOutsideTheWait()
+    {
+        string source = "cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(\"[role=dialog]\")), Wait);\n"
+            + "await data.Closed.WaitAsync(Wait);\n"
+            + "Assert.Equal(1, data.CloseCalls);\n";
+
+        Assert.Empty(CloseCountWaits(source));
+    }
+
+    // Every wait call whose arguments read the close count, which no render drives.
+    private static List<string> CloseCountWaits(string source)
+    {
+        List<string> problems = [];
+        foreach (string call in CallNames)
+        {
+            for (int start = source.IndexOf(call, StringComparison.Ordinal); start >= 0;
+                 start = source.IndexOf(call, start + call.Length, StringComparison.Ordinal))
+            {
+                int open = start + call.Length;
+                string arguments = source[open..ArgumentsEnd(source, open)];
+                if (arguments.Contains("CloseCalls", StringComparison.Ordinal))
+                {
+                    int line = source.AsSpan(0, start).Count('\n') + 1;
+                    problems.Add($"line {line}: {call} reads CloseCalls; await DesktopFixture.Closed instead");
+                }
+            }
+        }
+
+        return problems;
+    }
+
     [Fact]
     public void DesktopTests_NeverAssignTheDefaultWaitTimeout()
     {
@@ -156,8 +214,17 @@ public sealed class WaitTimeoutSourceTests
     // The text of the last top-level argument of the call whose argument list starts at open (just after '(').
     private static string LastArgument(string source, int open)
     {
+        int end = ArgumentsEnd(source, open, out int lastStart);
+        return lastStart == open ? string.Empty : source[lastStart..end].Trim();
+    }
+
+    // The index of the ')' that closes the argument list starting at open (or the end of the source).
+    private static int ArgumentsEnd(string source, int open) => ArgumentsEnd(source, open, out _);
+
+    private static int ArgumentsEnd(string source, int open, out int lastStart)
+    {
         int depth = 1;
-        int lastStart = open;
+        lastStart = open;
         char quote = '\0';
         int i = open;
         for (; i < source.Length; i++)
@@ -196,6 +263,6 @@ public sealed class WaitTimeoutSourceTests
             }
         }
 
-        return lastStart == open ? string.Empty : source[lastStart..i].Trim();
+        return Math.Min(i, source.Length);
     }
 }
