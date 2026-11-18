@@ -274,6 +274,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#318](backlog/318-attribute-values-show-bidi-controls-as.md) Attribute values show bidi controls as placeholders
 - [?] [#319](backlog/319-crash-hint-bar-doesn-t-cover.md) Crash hint bar doesn't cover the header
 - [?] [#320](backlog/320-crash-log-link-checks-close-the.md) Crash log link checks: close the check-then-act window
+- [?] [#321](backlog/321-fix-flaky-palettemeeting-privateappointment-notnum.md) Fix flaky PaletteMeeting_PrivateAppointment_NotNumbered test
 
 ## Dropped with the terminal UI
 
