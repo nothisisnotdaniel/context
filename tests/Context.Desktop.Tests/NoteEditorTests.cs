@@ -773,6 +773,119 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Empty(cut.FindAll("h1"));
     }
 
+    // 235 AC-1: a subpage's title shows only its own name; the tooltip holds the full name.
+    [Fact]
+    public async Task Title_Subpage_ShowsLastSegment_TooltipFullName()
+    {
+        WriteSubpage("c", "# c\n");
+        _ = new EditorJs(data.Bunit);
+
+        IRenderedComponent<NoteEditor> cut = await Render("a/b/c");
+
+        IElement title = cut.Find("h2.note-title");
+        Assert.Equal("c", title.TextContent);
+        Assert.Equal("a/b/c", title.GetAttribute("title"));
+    }
+
+    // 235 AC-2: a top-level note shows its whole name in both, and the bar is still the title, then the dirty dot.
+    [Fact]
+    public async Task Title_TopLevel_ShowsWholeName_BarUnchanged()
+    {
+        IRenderedComponent<NoteEditor> cut = await RenderPlan(false);
+
+        IElement title = cut.Find("h2.note-title");
+        Assert.Equal("Plan", title.TextContent);
+        Assert.Equal("Plan", title.GetAttribute("title"));
+        Assert.Equal(
+            ["H2.note-title cut"],
+            cut.Find(".editor-bar").Children.Select(c => c.TagName + "." + c.ClassName).ToArray());
+
+        await cut.InvokeAsync(() => PageOf(cut).OnDirty(true));
+
+        Assert.Equal(
+            ["H2.note-title cut", "SPAN.dirty-dot"],
+            cut.Find(".editor-bar").Children.Select(c => c.TagName + "." + c.ClassName).ToArray());
+    }
+
+    // 235 AC-3: a last segment with control characters (no such note can be on disk, so it shows Can't read) is
+    // cleaned like the full name: no raw control character reaches the title or its tooltip.
+    [Fact]
+    public async Task Title_Subpage_ControlCharsInSegment_AreCleaned()
+    {
+        const string Segment = "c\u0007evil\u001b\u0085x";
+        _ = new EditorJs(data.Bunit);
+
+        await data.RefreshAsync();
+        IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p.Add(e => e.Name, "a/b/" + Segment));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".unreadable")), Wait);
+
+        IElement title = cut.Find("h2.note-title");
+        Assert.Equal("c\uFFFDevil\uFFFD\uFFFDx", title.TextContent);
+        Assert.Equal(DesktopText.OneLine("a/b/" + Segment), title.GetAttribute("title"));
+        Assert.DoesNotContain(title.TextContent, char.IsControl);
+        Assert.DoesNotContain(title.GetAttribute("title")!, char.IsControl);
+    }
+
+    // 235 AC-3: a last segment with a bidi override goes through the same cleaning as the full name (DesktopText.OneLine).
+    [Fact]
+    public async Task Title_Subpage_BidiSegment_CleanedLikeFullName()
+    {
+        const string Segment = "c\u202Eevil";
+        WriteSubpage(Segment, "text\n");
+        _ = new EditorJs(data.Bunit);
+
+        IRenderedComponent<NoteEditor> cut = await Render("a/b/" + Segment);
+
+        IElement title = cut.Find("h2.note-title");
+        Assert.Equal(DesktopText.OneLine(Segment), title.TextContent);
+        Assert.Equal(DesktopText.OneLine("a/b/" + Segment), title.GetAttribute("title"));
+        Assert.DoesNotContain("a/b", title.TextContent, StringComparison.Ordinal);
+    }
+
+    // 235 AC-4: an unreadable subpage names the full name in its red line.
+    [Fact]
+    public async Task Open_SubpageUnreadable_LineNamesFullName()
+    {
+        WriteSubpage("c", "text");
+        _ = new EditorJs(data.Bunit);
+
+        await data.RefreshAsync();
+        using FileStream held = new FileStream(
+            Path.Combine(data.Root, "a", "b", "c.md"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p.Add(e => e.Name, "a/b/c"));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".unreadable")), Wait);
+
+        Assert.Equal("Can't read a/b/c.", cut.Find(".unreadable").TextContent);
+    }
+
+    // 235 AC-4: an editor start failure on a subpage names the full name.
+    [Fact]
+    public async Task Open_SubpageMountThrows_LineNamesFullName()
+    {
+        WriteSubpage("c", "# c\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.Fail("ContextEditor.mount", new JSException("boom-235"));
+
+        IRenderedComponent<NoteEditor> cut = await RenderFailed("a/b/c");
+
+        AssertFailedLine(cut, "a/b/c");
+    }
+
+    // 235 AC-7 (202 AC-8): for a subpage, the title is still the only heading with the shown name, and there is no h1.
+    [Fact]
+    public async Task Title_Subpage_IsTheOnlyHeadingWithTheName()
+    {
+        WriteSubpage("c", "# c\n\nText\n");
+        _ = new EditorJs(data.Bunit);
+
+        IRenderedComponent<NoteEditor> cut = await Render("a/b/c");
+
+        IElement title = Assert.Single(cut.FindAll("h1, h2, h3, h4, h5, h6"), h => h.TextContent.Contains('c', StringComparison.Ordinal));
+        Assert.Equal("H2", title.TagName);
+        Assert.True(title.ClassList.Contains("note-title"));
+        Assert.Empty(cut.FindAll("h1"));
+    }
+
     // 203 AC-1: after a change, nothing is saved until the pause elapses; a change before then starts the pause again,
     // and the one save that follows writes the latest text, hides the dot and says grey "Saved.".
     [Fact]
@@ -1083,6 +1196,14 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Equal("alert", line.GetAttribute("role"));
         Assert.Equal($"The editor couldn't start. {name} was not changed.", line.TextContent);
         Assert.Empty(cut.FindAll(".unreadable"));
+    }
+
+    // The pages a, a/b and a/b/<last> on disk.
+    private void WriteSubpage(string last, string text)
+    {
+        data.WriteNote("a", "# a\n");
+        data.WriteFile(Path.Combine("a", "b.md"), "# b\n");
+        data.WriteFile(Path.Combine("a", "b", last + ".md"), text);
     }
 
     private async Task<IRenderedComponent<NoteEditor>> Render(string name)

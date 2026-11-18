@@ -1246,7 +1246,7 @@ public sealed class MainTests : IDisposable
 
         await OpenFull(cut, js, "Meetings/Meeting 1/Notes");
 
-        cut.WaitForAssertion(() => Assert.Equal("Meetings/Meeting 1/Notes", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Notes", cut.Find(".note-title").TextContent), Wait);
         IElement nav = cut.Find("nav[aria-label=Breadcrumb]");
         IReadOnlyList<IElement> crumbs = nav.QuerySelectorAll("button.crumb").ToList();
         Assert.Equal(["Meetings", "Meeting 1"], crumbs.Select(c => c.TextContent).ToArray());
@@ -1260,7 +1260,31 @@ public sealed class MainTests : IDisposable
 
         await cut.Find("nav.breadcrumb button.crumb[title='Meetings/Meeting 1']").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Meetings/Meeting 1", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Meeting 1", cut.Find(".note-title").TextContent), Wait);
+    }
+
+    // 235 AC-6: an open subpage's title shows only its own name, with the full name as its tooltip, under the
+    // breadcrumb of its ancestors; a crumb opens the ancestor, whose title shows its own name.
+    [Fact]
+    public async Task Breadcrumb_Subpage_TitleShowsPageName_TooltipFullName()
+    {
+        WriteMeetings();
+        data.WriteFile(Path.Combine("Meetings", "Meeting 1", "Notes.md"), "# Notes\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await OpenFull(cut, js, "Meetings/Meeting 1/Notes");
+
+        cut.WaitForAssertion(() => Assert.Equal("Notes", cut.Find(".note-title").TextContent), Wait);
+        Assert.Equal("Meetings/Meeting 1/Notes", cut.Find(".note-title").GetAttribute("title"));
+        IElement nav = cut.Find("nav.breadcrumb");
+        Assert.Equal(["Meetings", "Meeting 1"], nav.QuerySelectorAll("button.crumb").Select(c => c.TextContent).ToArray());
+        Assert.Equal("Notes", nav.QuerySelector("[aria-current=page]")!.TextContent);
+
+        await cut.Find("nav.breadcrumb button.crumb[title='Meetings/Meeting 1']").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Meeting 1", cut.Find(".note-title").TextContent), Wait);
+        Assert.Equal("Meetings/Meeting 1", cut.Find(".note-title").GetAttribute("title"));
     }
 
     // 152 AC-14: an ancestor crumb opens through RequestOpen, so a dirty editor asks first.
@@ -1310,7 +1334,7 @@ public sealed class MainTests : IDisposable
         }
 
         Assert.Equal("# Meeting 2\n", File.ReadAllText(Path.Combine(data.Root, "Meetings", "Meeting 2.md")));
-        cut.WaitForAssertion(() => Assert.Equal("Meetings/Meeting 2", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Meeting 2", cut.Find(".note-title").TextContent), Wait);
         Assert.Equal("Created Meetings/Meeting 2", cut.Find(".main-status").TextContent);
         Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
         Assert.Empty(cut.FindAll(".subpage-title"));
@@ -1401,7 +1425,7 @@ public sealed class MainTests : IDisposable
         }
 
         Assert.Equal("# Meeting 1\n", File.ReadAllText(Path.Combine(data.Root, "Archive", "Meeting 1.md")));
-        cut.WaitForAssertion(() => Assert.Equal("Archive/Meeting 1", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Meeting 1", cut.Find(".note-title").TextContent), Wait);
         Assert.Equal("Moved to Archive/Meeting 1", cut.Find(".main-status").TextContent);
         Assert.Empty(cut.FindAll(".move-parent"));
     }
@@ -1473,7 +1497,7 @@ public sealed class MainTests : IDisposable
         await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         Assert.True(File.Exists(Path.Combine(data.Root, "Meetings", "Kickoff.md")));
-        cut.WaitForAssertion(() => Assert.Equal("Meetings/Kickoff", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Kickoff", cut.Find(".note-title").TextContent), Wait);
     }
 
     // 152 AC-17: a note with subpages asks with their count; on confirm the whole subtree is gone.
@@ -2439,7 +2463,7 @@ public sealed class MainTests : IDisposable
 
         await cut.InvokeAsync(() => js.Page().OnPerson("@[Anna]"));
 
-        cut.WaitForAssertion(() => Assert.Equal("people/Anna", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Anna", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         Assert.Equal("# people\n", File.ReadAllText(Path.Combine(data.Root, "people.md")));
         Assert.Equal("# Anna\n\naliases::\naffiliation::\nrole::\n", File.ReadAllText(Path.Combine(data.Root, "people", "Anna.md")));
@@ -2479,7 +2503,7 @@ public sealed class MainTests : IDisposable
         await cut.InvokeAsync(() => js.Page().OnPerson("@[Anna]"));
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("people/Anna", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Anna", cut.Find(".note-title").TextContent), Wait);
         Assert.Equal("# Anna\n\naliases::\naffiliation::\nrole::\n", File.ReadAllText(Path.Combine(data.Root, "people", "Anna.md")));
     }
 
@@ -2565,7 +2589,7 @@ public sealed class MainTests : IDisposable
 
         await cut.Find(".todos-region button.mention").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("people/Anna", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Anna", cut.Find(".note-title").TextContent), Wait);
         Assert.Equal("# Anna\n\naliases::\naffiliation::\nrole::\n", File.ReadAllText(Path.Combine(data.Root, "people", "Anna.md")));
         Assert.Empty(cut.FindAll(".todos-region input[type=checkbox][checked]"));
         cut.WaitForAssertion(() => Assert.Equal(
@@ -2589,7 +2613,7 @@ public sealed class MainTests : IDisposable
         Assert.False(File.Exists(Path.Combine(data.Root, "people.md")));
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("people/Anna", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Anna", cut.Find(".note-title").TextContent), Wait);
     }
 
     // 156 AC-10: a sensitive people note gives the red refusal; the open note stays and nothing is written.
@@ -2636,7 +2660,7 @@ public sealed class MainTests : IDisposable
 
         await cut.InvokeAsync(() => js.Page().OnPerson("@[AS]"));
 
-        cut.WaitForAssertion(() => Assert.Equal("people/Anna Schmidt", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Anna Schmidt", cut.Find(".note-title").TextContent), Wait);
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
     }
 
@@ -3313,7 +3337,7 @@ public sealed class MainTests : IDisposable
     {
         int mounts = js.Calls("ContextEditor.mount").Count;
         await PickDate(cut, value);
-        cut.WaitForAssertion(() => Assert.Equal(name, cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(name, cut.Find(".note-title").GetAttribute("title")), Wait);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);
