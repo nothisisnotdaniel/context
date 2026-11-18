@@ -4,11 +4,12 @@
    opens through OnOpen; with none, a link asks Main for the meeting note of the first such appointment. It reads only,
    and reloads whenever the state changes, keeping the shown rows. *@
 
-<section class="appointment-page" aria-label="Appointment">
+<section class="page appointment-page" aria-label="Appointment">
     <div class="panel-bar">
         <h2 class="cut" title="@Heading">@Heading</h2>
-        <button type="button" class="close" @onclick="() => OnClose.InvokeAsync()">Close</button>
+        <button type="button" class="close" aria-label="Close" title="Close" @onclick="() => OnClose.InvokeAsync()"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" /></svg></button>
     </div>
+    <h3 id="appointment-notes-heading">Notes</h3>
     @if (view is null)
     {
         <p class="grey" role="status">Loading…</p>
@@ -30,7 +31,7 @@
     }
     else
     {
-        <ul class="appointment-notes">
+        <ul class="appointment-notes" aria-labelledby="appointment-notes-heading">
             @foreach (RelatedNote note in view.Related)
             {
                 string name = note.Name;

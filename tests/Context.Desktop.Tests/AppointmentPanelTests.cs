@@ -42,7 +42,8 @@ public sealed class AppointmentPanelTests : IDisposable
         data.WriteNote("Other", "# Other\n");
     }
 
-    // AC-5: a click shows the page in the main region with the title and Close; Close hides it again.
+    // AC-5, 219 AC-1/AC-2/AC-5: a click shows the page in the main region with the title and the icon-only ×; the ×
+    // hides it again.
     [Fact]
     public async Task Click_ShowsPage_CloseHidesIt()
     {
@@ -54,16 +55,113 @@ public sealed class AppointmentPanelTests : IDisposable
         WaitForPage(cut);
 
         IElement page = cut.Find(".current-region section.appointment-page");
+        Assert.Contains("page", page.ClassList);
+        Assert.Equal("Appointment", page.GetAttribute("aria-label"));
         Assert.Equal("Budget", page.QuerySelector("h2")!.TextContent);
         Assert.True(cut.Find(".note-area").HasAttribute("hidden"));
-        IElement close = page.QuerySelectorAll("button").Single(b => b.TextContent == "Close");
+        Assert.DoesNotContain(page.QuerySelectorAll("button"), b => b.TextContent.Trim() == "Close");
+        IElement close = Assert.Single(cut.FindAll("section.appointment-page.page > .panel-bar button.close"));
         Assert.Equal("button", close.GetAttribute("type"));
+        Assert.Equal("Close", close.GetAttribute("aria-label"));
+        Assert.Equal("Close", close.GetAttribute("title"));
+        Assert.Equal(string.Empty, close.TextContent);
+        IElement svg = close.QuerySelector("svg")!;
+        Assert.Equal("true", svg.GetAttribute("aria-hidden"));
+        Assert.Equal("false", svg.GetAttribute("focusable"));
+        Assert.Same(close, page.QuerySelector(".panel-bar")!.LastElementChild);
 
         await close.ClickAsync(new MouseEventArgs());
 
         Assert.Empty(cut.FindAll(".appointment-page"));
         Assert.False(cut.Find(".note-area").HasAttribute("hidden"));
         Assert.Single(cut.FindAll(".current-region p.no-note"));
+    }
+
+    // 219 AC-3: one h3 Notes sits between the panel bar and the list, and labels the list.
+    [Fact]
+    public async Task Related_NotesHeading_LabelsTheList()
+    {
+        WriteDay();
+        WriteNotes();
+        IRenderedComponent<Main> cut = await RenderMain();
+
+        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        WaitForPage(cut);
+
+        IElement heading = Assert.Single(cut.FindAll(".appointment-page h3"));
+        Assert.Equal("Notes", heading.TextContent);
+        IElement list = cut.Find(".appointment-page ul.appointment-notes");
+        Assert.True(Before(cut.Find(".appointment-page .panel-bar"), heading));
+        Assert.True(Before(heading, list));
+        Assert.False(string.IsNullOrEmpty(heading.Id));
+        Assert.Equal(heading.Id, list.GetAttribute("aria-labelledby"));
+    }
+
+    // 219 AC-4: with no related note, the heading shows before the create link.
+    [Fact]
+    public async Task NoRelated_NotesHeading_BeforeCreateLink()
+    {
+        WriteDay();
+        IRenderedComponent<Main> cut = await RenderMain();
+
+        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        WaitForPage(cut);
+
+        IElement heading = Assert.Single(cut.FindAll(".appointment-page h3"));
+        Assert.Equal("Notes", heading.TextContent);
+        Assert.True(Before(heading, cut.Find(".appointment-page button.create-note-link")));
+    }
+
+    // 219 AC-4: with no related note and nothing to create from (no appointment of the day has the title), the heading
+    // shows before the grey line.
+    [Fact]
+    public async Task NoRelated_NothingToCreateFrom_NotesHeading_BeforeGreyLine()
+    {
+        WriteDay();
+        await data.RefreshAsync();
+
+        IRenderedComponent<AppointmentPanel> cut = data.Bunit.Render<AppointmentPanel>(p => p
+            .Add(c => c.Title, "Nothing")
+            .Add(c => c.Day, new DateOnly(2026, 10, 29)));
+        cut.WaitForAssertion(() =>
+            Assert.DoesNotContain("Loading…", cut.Find(".appointment-page").TextContent, StringComparison.Ordinal), Wait);
+
+        IElement line = cut.Find(".appointment-page p.grey");
+        Assert.Equal("No related notes.", line.TextContent);
+        IElement heading = Assert.Single(cut.FindAll(".appointment-page h3"));
+        Assert.Equal("Notes", heading.TextContent);
+        Assert.True(Before(heading, line));
+    }
+
+    // 219 AC-4: with an unreadable index, the heading shows before the red line.
+    [Fact]
+    public async Task CorruptIndex_NotesHeading_BeforeRedLine()
+    {
+        WriteDay();
+        data.WriteFile(TagIndex.FileName, NotADatabase);
+        IRenderedComponent<Main> cut = await RenderMain();
+
+        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        WaitForPage(cut);
+
+        IElement line = cut.Find(".appointment-page p.red");
+        Assert.Equal("Can't read the related notes.", line.TextContent);
+        IElement heading = Assert.Single(cut.FindAll(".appointment-page h3"));
+        Assert.Equal("Notes", heading.TextContent);
+        Assert.True(Before(heading, line));
+    }
+
+    // 219 AC-6: the heading rule exists and uses no colour literal.
+    [Fact]
+    public void AppCss_HeadingRule_ExistsWithoutColourLiterals()
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+
+        int at = css.IndexOf("\n.appointment-page h3 {", StringComparison.Ordinal);
+        Assert.True(at >= 0);
+        string block = css[at..css.IndexOf('}', at)];
+        Assert.Contains("margin: 12px 0 4px;", block, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"#[0-9a-fA-F]{3,8}\b|\b(rgb|rgba|hsl|hsla)\(|\b(white|black|red|green|blue|gray|grey|transparent|orange|yellow|purple|silver)\b", block);
     }
 
     // AC-5: the outline is hidden while the page is shown, and opening a note from the page closes it.
@@ -229,6 +327,18 @@ public sealed class AppointmentPanelTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         WaitForSidebar(cut);
         return cut;
+    }
+
+    // True when a and b are children of the same element and a comes first (bUnit wraps found elements, so the
+    // index among the parent's children is found by outer HTML, not CompareDocumentPosition).
+    private static bool Before(IElement a, IElement b)
+    {
+        IElement parent = a.ParentElement!;
+        List<string> children = parent.Children.Select(c => c.OuterHtml).ToList();
+        Assert.Equal(parent.OuterHtml, b.ParentElement!.OuterHtml);
+        int first = children.IndexOf(a.OuterHtml);
+        int second = children.IndexOf(b.OuterHtml);
+        return first >= 0 && second >= 0 && first < second;
     }
 
     private static IElement Item(IRenderedComponent<Main> cut, int index) =>
