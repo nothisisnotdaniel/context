@@ -100,6 +100,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#254](backlog/254-month-calendar-in-the-day-picker.md) Month calendar in the day picker → 213-month-calendar-picker
 - [x] [#279](backlog/279-today-s-appointments-in-the-right.md) Today's appointments in the right sidebar → 214-sidebar-today-appointments
 - [ ] [#278](backlog/278-today-and-home-open-today-s.md) Today and Home open today's note in the editor
+- [ ] [#25](backlog/025-outlook-as-a-source.md) Outlook as a source
 - [ ] [#271](backlog/271-search-icon-in-the-top-bar.md) Search icon in the top bar, opens like Capture
 - [ ] [#69](backlog/069-board-view-for-a-tag.md) Board view for a tag
 - [ ] [#74](backlog/074-waiting-for-list.md) Waiting-for list
@@ -127,7 +128,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#76](backlog/076-done-log.md) Done log
 - [ ] [#23](backlog/023-voice-capture-spike.md) Voice capture spike
 - [ ] [#24](backlog/024-voice-notes.md) Voice notes (after: #23)
-- [ ] [#25](backlog/025-outlook-as-a-source.md) Outlook as a source
 - [ ] [#27](backlog/027-todo-dates-with-years.md) Todo dates with years
 - [ ] [#232](backlog/232-search-index-limits-and-accessibility.md) Search index limits and accessibility
 - [ ] [#37](backlog/037-note-store-cleanup.md) Note store cleanup
