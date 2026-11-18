@@ -265,6 +265,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#309](backlog/309-check-the-narrower-pick-a-day.md) Check the narrower Pick a day popover in light and dark mode
 - [ ] [#310](backlog/310-choose-light-dark-or-system-theme.md) Choose light, dark or system theme in Settings
 - [?] [#311](backlog/311-skip-one-outlook-item-when-its.md) Skip one Outlook item when its Sensitivity can't be read
+- [?] [#312](backlog/312-ask-before-a-link-with-creates.md) Ask before a link with # creates a note
 
 ## Dropped with the terminal UI
 
