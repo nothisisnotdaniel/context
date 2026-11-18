@@ -1,4 +1,3 @@
-using System.Globalization;
 
 namespace Context;
 
@@ -102,13 +101,13 @@ internal enum OutlookStatus
     TimedOut,
 }
 
-/// <summary>The status line the appointments and mail panels show for an Outlook read.</summary>
+/// <summary>The status line the appointments panel shows for an Outlook read.</summary>
 internal static class OutlookStatusLine
 {
     /// <summary>The fixed text of the line, or <c>null</c> when there is none (off or read).</summary>
     public static string? Text(OutlookStatus status) => status switch
     {
-        OutlookStatus.NotRunning => "Outlook isn't running. Start it to see its appointments and mail.",
+        OutlookStatus.NotRunning => "Outlook isn't running. Start it to see its appointments.",
         OutlookStatus.Denied => "Can't read Outlook (access denied).",
         OutlookStatus.Failed => "Can't read Outlook (error).",
         OutlookStatus.TimedOut => "Can't read Outlook (timed out).",
@@ -117,46 +116,4 @@ internal static class OutlookStatusLine
 
     /// <summary>The line's colour class: grey for not running, red for the failures.</summary>
     public static string Css(OutlookStatus status) => status == OutlookStatus.NotRunning ? "grey" : "red";
-}
-
-/// <summary>
-/// The last day's Inbox mail for the sidebar (<see cref="DesktopState.RecentMail"/>): at most
-/// <see cref="DesktopState.MaxMails"/> mails received in the last 24 hours, newest first, how reading Outlook went, and
-/// the state's clock in the calendar's zone. All text is raw: clean it before showing it.
-/// </summary>
-internal sealed record RecentMailView
-{
-    public RecentMailView(OutlookStatus status, IReadOnlyList<MailSummary> mails, DateTime localNow, TimeZoneInfo zone)
-    {
-        Status = status;
-        Mails = mails;
-        LocalNow = localNow;
-        Zone = zone;
-    }
-
-    public OutlookStatus Status { get; }
-
-    /// <summary>The mails, newest first; empty unless <see cref="Status"/> is <see cref="OutlookStatus.Ok"/>.</summary>
-    public IReadOnlyList<MailSummary> Mails { get; }
-
-    /// <summary>Now, in <see cref="Zone"/>.</summary>
-    public DateTime LocalNow { get; }
-
-    /// <summary>The calendar's zone, which the mail times are shown in.</summary>
-    public TimeZoneInfo Zone { get; }
-
-    /// <summary>
-    /// When <paramref name="mail"/> came in, in <see cref="Zone"/>: <c>HH:mm</c> when that is today, else
-    /// <c>ddd HH:mm</c> (invariant).
-    /// </summary>
-    public string Time(MailSummary mail)
-    {
-        DateTime local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(mail.ReceivedUtc, DateTimeKind.Utc), Zone);
-        return local.Date == LocalNow.Date
-            ? local.ToString("HH:mm", CultureInfo.InvariantCulture)
-            : local.ToString("ddd HH:mm", CultureInfo.InvariantCulture);
-    }
-
-    /// <summary>Returns only the type name, so formatting the view never prints mail text.</summary>
-    public override string ToString() => nameof(RecentMailView);
 }

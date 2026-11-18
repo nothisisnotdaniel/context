@@ -10,17 +10,11 @@ internal sealed class DesktopState
     /// <summary><see cref="Tick"/> refreshes when the last refresh is at least this old.</summary>
     public static readonly TimeSpan MaxAge = TimeSpan.FromMinutes(5);
 
-    /// <summary>How long an Outlook read (appointments of one day, or the mail) is kept, by the state's UTC clock.</summary>
+    /// <summary>How long an Outlook read (the appointments of one day) is kept, by the state's UTC clock.</summary>
     public static readonly TimeSpan OutlookCacheAge = TimeSpan.FromMinutes(5);
 
     /// <summary>The default <see cref="OutlookTimeout"/>.</summary>
     public static readonly TimeSpan DefaultOutlookTimeout = TimeSpan.FromSeconds(10);
-
-    /// <summary>The most mails <see cref="RecentMail"/> lists.</summary>
-    public const int MaxMails = 10;
-
-    /// <summary>How far back <see cref="RecentMail"/> lists mail.</summary>
-    public static readonly TimeSpan MailWindow = TimeSpan.FromHours(24);
 
     private readonly object gate = new();
 
@@ -36,10 +30,9 @@ internal sealed class DesktopState
     private readonly Func<DateTime> utcNow;
     private readonly IOutlookSource outlook;
 
-    // Guards the Outlook cache: one call per day (appointments) and one for the mail, each with its start time.
+    // Guards the Outlook cache: one call per day (appointments), each with its start time.
     private readonly object outlookGate = new();
     private Dictionary<DateOnly, OutlookCall<Appointment>> outlookDays = new();
-    private OutlookCall<MailSummary>? outlookMail;
 
     private Task<DesktopSnapshot>? running;
     private bool pending;
@@ -568,50 +561,6 @@ internal sealed class DesktopState
     }
 
     /// <summary>
-    /// The last day's Inbox mail from Outlook (at most <see cref="MaxMails"/>, received at or after the state's clock
-    /// minus <see cref="MailWindow"/>, newest first), off the calling thread. With Outlook off it asks the source
-    /// nothing and gives <see cref="OutlookStatus.Off"/>. Reads only, stores nothing on disk, and never throws.
-    /// </summary>
-    public Task<RecentMailView> RecentMail() => Task.Run(() =>
-    {
-        DateTime nowUtc = default;
-        DateTime localNow = default;
-        try
-        {
-            nowUtc = DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc);
-            localNow = TimeZoneInfo.ConvertTimeFromUtc(nowUtc, calendar.Zone);
-            if (!OutlookOn())
-            {
-                return new RecentMailView(OutlookStatus.Off, [], localNow, calendar.Zone);
-            }
-
-            DateTime since = nowUtc - MailWindow;
-            OutlookCall<MailSummary> call;
-            lock (outlookGate)
-            {
-                if (outlookMail is null || !outlookMail.Usable(nowUtc))
-                {
-                    outlookMail = Start(nowUtc, () => outlook.RecentMail(since, MaxMails));
-                }
-
-                call = outlookMail;
-            }
-
-            (OutlookStatus status, IReadOnlyList<MailSummary> items) = Finish(call);
-            List<MailSummary> mails = items
-                .Where(m => m.ReceivedUtc >= since)
-                .OrderByDescending(m => m.ReceivedUtc)
-                .Take(MaxMails)
-                .ToList();
-            return new RecentMailView(status, mails, localNow, calendar.Zone);
-        }
-        catch (Exception)
-        {
-            return new RecentMailView(OutlookStatus.Failed, [], localNow, calendar.Zone);
-        }
-    });
-
-    /// <summary>
     /// Forgets every cached Outlook read, so the next read asks the source again. Called when the Outlook setting
     /// changes.
     /// </summary>
@@ -620,7 +569,6 @@ internal sealed class DesktopState
         lock (outlookGate)
         {
             outlookDays = new Dictionary<DateOnly, OutlookCall<Appointment>>();
-            outlookMail = null;
         }
     }
 
@@ -642,7 +590,7 @@ internal sealed class DesktopState
         }
     });
 
-    /// <summary>Whether Outlook can be read here; reads no mail or calendar data and never throws.</summary>
+    /// <summary>Whether Outlook can be read here; reads no calendar data and never throws.</summary>
     public OutlookAvailability ReadOutlookAvailability()
     {
         try

@@ -761,7 +761,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `DataWatcher` (one `FileSystemWatcher` with subfolders, `IsRelevant` filter: the top-level files as before, plus
     a `.md` at any depth except under a folder starting with `.` or under the top-level `calendar/`, and the top-level
     `settings.json` (job 207: saved searches edited outside the app; any case, not in a subfolder); 300 ms
-    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `LinksPanel`, `OutlinePanel`, `DayAppointmentsPanel`, `RecentMailPanel`, `AppointmentPanel`, `PersonPanel`, `ReviewPanel`, `TriagePanel`)
+    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `LinksPanel`, `OutlinePanel`, `DayAppointmentsPanel`, `AppointmentPanel`, `PersonPanel`, `ReviewPanel`, `TriagePanel`)
     inherit `StateComponent`, which injects the state and `DesktopActions` (internal types can't be
     public parameters). `DesktopActions` (with `ActionResult`: `ActionKind` `Done`/`Refused`/`Failed`, `ActionReason`,
     raw text) is the only write path: it never throws, runs one action at a time (`Busy`), refreshes the state after a change and has the test
@@ -1221,33 +1221,29 @@ Every factory agent reads this file before working on Context. Keep it short and
     search panel is shown, and `OnJump` calls `NoteEditor.JumpToIndexAsync`. An editor that didn't start, an unreadable
     note or failing `headings` shows none, and a locked sensitive note's outline goes with its editor (its headings are only ever read from the unlocked editor, never indexed).
     **Outlook** (job 217, Windows with classic Outlook only): `IOutlookSource` (`Availability()` `Unsupported`/
-    `NotInstalled`/`Available`; `Appointments(day, zone)`, `RecentMail(sinceUtc, max)` give `OutlookRead<T>` with a
-    kind `Ok`/`NotRunning`/`Denied`/`Failed` and the items, never an exception text; `MailSummary(ReceivedUtc, Sender,
-    Subject)`). `Program.cs` is the only file naming `OutlookComSource` (Windows; elsewhere `UnsupportedOutlookSource`),
+    `NotInstalled`/`Available`; `Appointments(day, zone)` gives `OutlookRead<T>` with a
+    kind `Ok`/`NotRunning`/`Denied`/`Failed` and the items, never an exception text; job 223 removed the mail read, so
+    Context never reads the Inbox). `Program.cs` is the only file naming `OutlookComSource` (Windows; elsewhere `UnsupportedOutlookSource`),
     and no test does (tests use `FakeOutlookSource`: availability, kind and items per call, call counts, `Throws`, a
     `ManualResetEventSlim` gate released on dispose). `OutlookComSource` is late-bound (`dynamic`, no interop package),
     attaches only through `ole32!CLSIDFromProgID` + `oleaut32!GetActiveObject` (never `Activator.CreateInstance`, never
-    starts Outlook), reads only `Subject`, `Location`, `Start`, `End`, `AllDayEvent`, `ReceivedTime`, `SenderName` of the
+    starts Outlook), reads only `Subject`, `Location`, `Start`, `End`, `AllDayEvent` of the
     default Calendar (9; `Sort("[Start]")`, `IncludeRecurrences`, `Restrict` built only from the day in current-culture
-    `g`) and Inbox (6), walks `GetFirst`/`GetNext` (never `Count`; 500 items, 10 mails), converts machine time to the
+    `g`), walks `GetFirst`/`GetNext` (never `Count`; 500 items), converts machine time to the
     calendar zone and `FinalReleaseComObject`s every COM object; it writes nothing (no `.Save(`/`.Send(`/`.Delete(`/
     `.Move(`/`.Display(`) and reads no `Body`/`HTMLBody`/`Recipients`/`RequiredAttendees`/`SenderEmailAddress`, and has
     no exemption from any other source scan. On = `SettingsStore.ReadOutlook()` (exactly `"outlook":{"enabled":true}`;
     anything else or a broken file is off) and `Available`; off asks the source nothing. `DesktopState` caches each
-    day's appointments and the mail (one `OutlookCall` with its start time under `outlookGate`; a running call is shared,
+    day's appointments (one `OutlookCall` with its start time under `outlookGate`; a running call is shared,
     a finished one kept `OutlookCacheAge` = 5 min by the UTC clock), waits at most `OutlookTimeout` (10 s, ctor
     parameter) and maps the result to `OutlookStatus` (`Off`, `Ok`, `NotRunning`, `Denied`, `Failed` incl. a throwing
     call, `TimedOut`). Outlook's appointments join the feed's through `CurrentView.Build(..., extra)` /
     `CalendarStore.Day(d, extra)` in the snapshot, `DayAppointments` and `AppointmentPage`; `DayAppointmentsPanel`
-    shows `p.outlook-status` (`OutlookStatusLine`: grey `Outlook isn't running. Start it to see its appointments and
-    mail.`, red `Can't read Outlook (access denied).`/`(error).`/`(timed out).`). `RecentMailPanel`
-    (`section.recent-mail`, `aria-label="Mail"`, `h2` `Mail`) follows `DayAppointmentsPanel` in `aside.todos-region`
-    and renders nothing while loading or off; `DesktopState.RecentMail()` asks `sinceUtc` = clock − 24 h, `max` 10 and
-    lists those newest first as `div.mail-item` (time `HH:mm` today else `ddd HH:mm` in the calendar zone, `OneLine`
-    sender/subject or `(no sender)`/`(no subject)`, no click), grey `No mail in the last day.`; it reloads on
-    `State.Changed` keeping the rows. Settings: `h3` `Outlook` between the calendar and the key (grey `Outlook is only
+    shows `p.outlook-status` (`OutlookStatusLine`: grey `Outlook isn't running. Start it to see its
+    appointments.`, red `Can't read Outlook (access denied).`/`(error).`/`(timed out).`); it is the last Outlook panel in
+    `aside.todos-region` (the Mail panel was removed in job 223). Settings: `h3` `Outlook` between the calendar and the key (grey `Outlook is only
     available on Windows.` / `Classic Outlook isn't installed. The new Outlook can't be read; use a calendar link
-    instead.`, else the checkbox `input.outlook-enabled` `Read calendar and mail from Outlook` and grey `Outlook may ask
+    instead.`, else the checkbox `input.outlook-enabled` `Read calendar from Outlook` and grey `Outlook may ask
     whether Context may access it.`); `DesktopActions.SetOutlookEnabled(on)` (`SaveOutlook`, then `ForgetOutlook`; Done
     `Outlook on.`/`Outlook off.`, Refused when turning on without `Available`, Failed `Can't read settings.json. Nothing
     was saved.` for a broken file). Nothing from Outlook is stored on disk; the CLI, `review` and the briefing don't

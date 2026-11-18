@@ -1743,44 +1743,6 @@ nav.saved-searches ul {
     text-decoration: underline;
 }
 
-/* The last day's Inbox mail (RecentMailPanel), below the appointments while Outlook is on: one plain row per mail
-   (grey time, then the cut sender and subject); rows are not clickable. */
-.todos-region .recent-mail {
-    border-bottom: 1px solid var(--line);
-    margin-bottom: 16px;
-    padding-bottom: 8px;
-}
-
-.recent-mail .recent-mail-heading {
-    margin: 0 0 6px;
-}
-
-.recent-mail p {
-    margin: 4px 0;
-}
-
-.mail-item {
-    display: flex;
-    gap: 8px;
-    padding: 2px 4px;
-}
-
-.mail-item .time {
-    color: var(--grey);
-    flex: none;
-    font-variant-numeric: tabular-nums;
-}
-
-.mail-item .mail-sender {
-    flex: none;
-    max-width: 40%;
-}
-
-.mail-item .mail-subject {
-    flex: 1;
-    min-width: 0;
-}
-
 /* The settings page's Outlook checkbox line. */
 .settings-panel .outlook-line {
     align-items: center;

@@ -3946,4 +3946,31 @@ public sealed class MainTests : IDisposable
             Wait);
         Assert.Equal("Captured.", cut.Find(".main-status").TextContent);
     }
+
+    // 223 AC-1: with Outlook on, the right sidebar shows the Outlook appointment and has no Mail section.
+    [Fact]
+    public async Task Outlook_On_SidebarShowsAppointments_AndNoMail()
+    {
+        new SettingsStore(data.Root).SaveOutlook(true);
+        data.Outlook.Days[DesktopFixture.Today] =
+        [
+            new Appointment("From Outlook", null, new DateTime(2026, 10, 29, 10, 30, 0), new DateTime(2026, 10, 29, 11, 0, 0), false),
+        ];
+
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        cut.WaitForAssertion(() =>
+        {
+            IElement day = cut.Find(".todos-region .day-appointments");
+            Assert.DoesNotContain("Loading…", day.TextContent, StringComparison.Ordinal);
+            Assert.Equal(
+                ["From Outlook"],
+                day.QuerySelectorAll(".appointment-item .appointment-title").Select(t => t.TextContent).ToArray());
+        }, Wait);
+        IElement aside = cut.Find("aside.todos-region");
+        Assert.Empty(aside.QuerySelectorAll("section.recent-mail"));
+        Assert.Empty(aside.QuerySelectorAll(".mail-item"));
+        Assert.Empty(aside.QuerySelectorAll("[aria-label=Mail]"));
+        Assert.Empty(cut.FindAll(".recent-mail, .mail-item"));
+    }
 }

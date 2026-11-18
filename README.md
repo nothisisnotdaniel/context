@@ -194,15 +194,14 @@ opens `context.db`. In the desktop app, `/review` in the command palette shows t
 ### Outlook
 
 On Windows with classic Outlook, the desktop app can show the day's Outlook appointments next to the ones from
-`calendar/*.ics` and the Exchange calendar, and the last day's Inbox mail (at most ten, newest first) in the sidebar
-below the appointments. Turn it on in Settings, under *Outlook*: `Read calendar and mail from Outlook`. It is off by
-default and stored as `"outlook":{"enabled":true}` in `settings.json`. Context reads the Outlook that is already
-running, with the profile you are signed in with: no app registration, no token, and it never starts Outlook, never
-changes anything in it and stores nothing from it on disk. It reads only the default Calendar (title, location,
-start, end, all day) and the default Inbox (time, sender name, subject), at most every five minutes. Outlook may ask
-whether Context may access it; if you deny it, the panels show `Can't read Outlook (access denied).`. With Outlook
-closed they show `Outlook isn't running.`. The new Outlook and other systems can't be read; the section says so, and
-a calendar link works instead. The command-line tool doesn't read Outlook.
+`calendar/*.ics` and the Exchange calendar. Turn it on in Settings, under *Outlook*: `Read calendar from Outlook`. It
+is off by default and stored as `"outlook":{"enabled":true}` in `settings.json`. Context reads the Outlook that is
+already running, with the profile you are signed in with: no app registration, no token, and it never starts Outlook,
+never changes anything in it and stores nothing from it on disk. It reads only the default Calendar (title, location,
+start, end, all day), at most every five minutes. Outlook may ask whether Context may access it; if you deny it, the
+appointments panel shows `Can't read Outlook (access denied).`. With Outlook closed it shows `Outlook isn't running.
+Start it to see its appointments.`. The new Outlook and other systems can't be read; the section says so, and a
+calendar link works instead. The command-line tool doesn't read Outlook.
 
 ### Note templates
 

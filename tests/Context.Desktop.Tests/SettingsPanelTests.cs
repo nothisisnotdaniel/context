@@ -576,12 +576,12 @@ public sealed class SettingsPanelTests : IDisposable
         IElement box = cut.Find("label.outlook-line input.outlook-enabled");
         Assert.Equal("checkbox", box.GetAttribute("type"));
         Assert.Equal(expected, box.HasAttribute("checked"));
-        Assert.Equal("Read calendar and mail from Outlook", cut.Find("label.outlook-line").TextContent.Trim());
+        Assert.Equal("Read calendar from Outlook", cut.Find("label.outlook-line").TextContent.Trim());
         IElement hint = cut.Find(".outlook-hint");
         Assert.Equal("Outlook may ask whether Context may access it.", hint.TextContent);
         Assert.Contains("grey", hint.ClassList);
         Assert.Empty(cut.FindAll(".outlook-state"));
-        Assert.Equal(0, data.Outlook.AppointmentCalls + data.Outlook.MailCalls);
+        Assert.Equal(0, data.Outlook.AppointmentCalls);
     }
 
     // 217 AC-2: toggling calls SetOutlookEnabled; Done shows Outlook on./off. in the accent colour and the box follows.
