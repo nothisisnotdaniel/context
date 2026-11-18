@@ -1754,6 +1754,7 @@ nav.saved-searches ul {
 }
 
 .mail-item .mail-subject {
+    flex: 1;
     min-width: 0;
 }
 
