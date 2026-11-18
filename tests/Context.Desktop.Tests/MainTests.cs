@@ -16,7 +16,7 @@ public sealed class MainTests : IDisposable
 
     public void Dispose() => data.Dispose();
 
-    // AC-4 layout: notes on the left, /current in the middle, todos on the right.
+    // AC-4 layout: notes on the left, the main region in the middle, todos on the right.
     [Fact]
     public async Task Render_ThreeRegions()
     {
@@ -522,9 +522,9 @@ public sealed class MainTests : IDisposable
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
     }
 
-    // 134 AC-8: confirmed, the note is deleted and the main region shows the current view again.
+    // 134 AC-8, 216 AC-5: confirmed, the note is deleted and the main region shows the no-note placeholder.
     [Fact]
-    public async Task Delete_Confirm_DeletesAndShowsCurrent()
+    public async Task Delete_Confirm_DeletesAndShowsThePlaceholder()
     {
         data.WriteNote("Plan", "# Plan\n");
         EditorJs js = new EditorJs(data.Bunit);
@@ -537,7 +537,7 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.False(File.Exists(Path.Combine(data.Root, "Plan.md"))), Wait);
         cut.WaitForAssertion(() => Assert.DoesNotContain(
             cut.FindAll(".notes-region button.name"), b => b.TextContent == "Plan"), Wait);
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".current-region .current")), Wait);
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".current-region p.no-note")), Wait);
         Assert.Empty(cut.FindAll(".note-editor"));
         Assert.Empty(cut.FindAll(".note-toolbar"));
         Assert.Empty(cut.FindAll("[role=dialog]"));
@@ -782,7 +782,10 @@ public sealed class MainTests : IDisposable
     public async Task Page_Triage_NoMenuButton_ChoicesStay()
     {
         data.WriteNote("inbox", "# inbox\n- call Anna\n");
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
         Assert.Single(cut.FindAll("button.page-menu-open"));
 
         await cut.Find("button.triage-open").ClickAsync(new MouseEventArgs());
@@ -795,9 +798,9 @@ public sealed class MainTests : IDisposable
         Assert.Single(cut.FindAll(".triage-panel > .panel-bar button.close"));
     }
 
-    // 193 AC-1: with the current view shown, the view hides and returns.
+    // 193 AC-1, 216 AC-5: with no note open (the placeholder shown), the note area hides and returns.
     [Fact]
-    public async Task Page_OverTheCurrentView_HidesAndRestoresIt()
+    public async Task Page_OverThePlaceholder_HidesAndRestoresIt()
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
@@ -875,9 +878,9 @@ public sealed class MainTests : IDisposable
         Assert.Empty(cut.FindAll(".page"));
     }
 
-    // 138 AC-1: opening a note or the current view hides the settings.
+    // 138 AC-1, 216 AC-2: opening a note or Today hides the settings.
     [Fact]
-    public async Task Settings_OpeningANoteOrTheCurrentView_HidesThem()
+    public async Task Settings_OpeningANoteOrToday_HidesThem()
     {
         data.WriteNote("Plan", "# Plan\n");
         EditorJs js = new EditorJs(data.Bunit);
@@ -896,7 +899,7 @@ public sealed class MainTests : IDisposable
 
         await RunPalette(cut, "/settings");
         Assert.Single(cut.FindAll(".settings-panel"));
-        await RunPalette(cut, "/current");
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".settings-panel")), Wait);
     }
 
@@ -1474,7 +1477,7 @@ public sealed class MainTests : IDisposable
 
         Assert.False(File.Exists(Path.Combine(data.Root, "Meetings.md")));
         Assert.False(Directory.Exists(Path.Combine(data.Root, "Meetings")));
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".current-region .current")), Wait);
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".current-region p.no-note")), Wait);
         Assert.Equal(["Archive"], data.State!.Snapshot!.Notes.Select(n => n.Name).ToArray());
     }
 
@@ -2290,6 +2293,106 @@ public sealed class MainTests : IDisposable
         Assert.Empty(cut.FindAll("[role=dialog]"));
     }
 
+    // 216 AC-4: today's note offered at start (before Main renders) opens in the editor on the first snapshot.
+    [Fact]
+    public async Task StartNote_OfferedBeforeRender_OpensTodaysNote()
+    {
+        EditorJs js = new EditorJs(data.Bunit);
+        await data.RefreshAsync();
+        await data.Actions!.AutoOpenToday();
+
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        cut.WaitForAssertion(() => Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
+        Assert.Equal(File.ReadAllText(Path.Combine(data.Root, "2026-10-29.md")), js.MountedText());
+        Assert.Empty(cut.FindAll("p.no-note"));
+        Assert.Null(data.State!.TakeStartNote());
+    }
+
+    // 216 AC-4: an offer raised after Main rendered (the existing note: the refresh tells Main) opens it too.
+    [Fact]
+    public async Task StartNote_OfferedAfterRender_Opens()
+    {
+        data.WriteNote("2026-10-29", "# mine\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        Assert.Single(cut.FindAll("p.no-note"));
+
+        await data.Actions!.AutoOpenToday();
+
+        cut.WaitForAssertion(() => Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("# mine\n", js.MountedText()), Wait);
+        Assert.Null(data.State!.TakeStartNote());
+    }
+
+    // 216 AC-4: with another note open, the offer is dropped and that note stays open.
+    [Fact]
+    public async Task StartNote_AnotherNoteOpen_OfferDropped()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+
+        await data.Actions!.AutoOpenToday();
+
+        cut.WaitForAssertion(() => Assert.Null(data.State!.TakeStartNote()), Wait);
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        Assert.Single(js.Calls("ContextEditor.mount"));
+        Assert.True(File.Exists(Path.Combine(data.Root, "2026-10-29.md")));
+    }
+
+    // 216 AC-4: with a page shown and no note open, the offer is dropped and the page stays.
+    [Fact]
+    public async Task StartNote_PageShown_OfferDropped()
+    {
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".settings-panel")), Wait);
+
+        await data.Actions!.AutoOpenToday();
+
+        cut.WaitForAssertion(() => Assert.Null(data.State!.TakeStartNote()), Wait);
+        Assert.Single(cut.FindAll(".settings-panel"));
+        Assert.Empty(js.Calls("ContextEditor.mount"));
+    }
+
+    // 216 AC-4: a failed start write offers nothing; the placeholder stays.
+    [Fact]
+    public async Task StartNote_WriteFails_NothingOpens()
+    {
+        EditorJs js = new EditorJs(data.Bunit);
+        await data.RefreshAsync();
+        data.Actions!.BeforeWrite = () => Directory.CreateDirectory(Path.Combine(data.Root, "2026-10-29.md"));
+        ActionResult result = await data.Actions.AutoOpenToday();
+        Assert.Equal(ActionKind.Failed, result.Kind);
+
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll("p.no-note")), Wait);
+        Assert.Empty(js.Calls("ContextEditor.mount"));
+    }
+
+    // 216 AC-4: a briefing offered after today's note opened at start still opens as before.
+    [Fact]
+    public async Task StartNote_ThenBriefing_BriefingOpens()
+    {
+        EditorJs js = new EditorJs(data.Bunit);
+        await data.RefreshAsync();
+        await data.Actions!.AutoOpenToday();
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        cut.WaitForAssertion(() => Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
+
+        ActionResult briefing = await data.Actions.AutoBriefing();
+
+        Assert.Equal(ActionReason.None, briefing.Reason);
+        cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.mount").Count), Wait);
+        Assert.Equal("briefings/2026-10-29", js.MountedName());
+    }
+
     private static async Task RunPalette(IRenderedComponent<Main> cut, string line)
     {
         await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
@@ -2471,7 +2574,7 @@ public sealed class MainTests : IDisposable
 
         await RunPalette(cut, "/find role nobody");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".find-panel")), Wait);
-        await RunPalette(cut, "/current");
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".find-panel")), Wait);
     }
 
@@ -2501,7 +2604,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal("/search <text>", search.Usage);
     }
 
-    // 170 AC-10: /search shows SearchPanel; its button opens the note, which hides the panel; /current hides it too.
+    // 170 AC-10: /search shows SearchPanel; its button opens the note, which hides the panel; Today hides it too.
     [Fact]
     public async Task Search_ShowsSearchPanel_OpenHidesIt()
     {
@@ -2525,7 +2628,7 @@ public sealed class MainTests : IDisposable
         await RunPalette(cut, "/search nobody");
         cut.WaitForAssertion(() => Assert.Equal(
             "No notes contain nobody.", cut.Find(".search-panel p[role=status]").TextContent), Wait);
-        await RunPalette(cut, "/current");
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".search-panel")), Wait);
     }
 
@@ -2636,7 +2739,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal("/decisions [tag]", decisions.Usage);
     }
 
-    // 180 AC-8: /decisions shows DecisionsPanel; its note button opens the note, which hides the panel; /current hides
+    // 180 AC-8: /decisions shows DecisionsPanel; its note button opens the note, which hides the panel; Today hides
     // it too; a tag filters.
     [Fact]
     public async Task Decisions_ShowsDecisionsPanel_OpenHidesIt()
@@ -2661,7 +2764,7 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(
             ["2026-11-10 Anna"], cut.FindAll(".decisions-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
         Assert.Equal("Decisions: #work", cut.Find(".decisions-panel h2").TextContent);
-        await RunPalette(cut, "/current");
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".decisions-panel")), Wait);
     }
 
@@ -2712,9 +2815,9 @@ public sealed class MainTests : IDisposable
         Assert.Empty(cut.FindAll(".review-panel"));
     }
 
-    // 169 AC-9: opening a note (also the one already open) or /current hides the review.
+    // 169 AC-9: opening a note (also the one already open) or Today hides the review.
     [Fact]
-    public async Task Review_OpeningANoteOrTheCurrentView_HidesIt()
+    public async Task Review_OpeningANoteOrToday_HidesIt()
     {
         data.WriteNote("Plan", "# Plan\n");
         EditorJs js = new EditorJs(data.Bunit);
@@ -2732,7 +2835,7 @@ public sealed class MainTests : IDisposable
 
         await RunPalette(cut, "/review");
         Assert.Single(cut.FindAll(".review-panel"));
-        await RunPalette(cut, "/current");
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".review-panel")), Wait);
     }
 
@@ -2794,38 +2897,132 @@ public sealed class MainTests : IDisposable
         }
     }
 
-    // 198 AC-3: Today closes an open note, a page and the review panel and shows today's view.
+    // 216: clicks Today and waits until today's note is in the editor, mounted and ready, with its links panel loaded.
+    private static async Task TodayAndOpen(IRenderedComponent<Main> cut, EditorJs js)
+    {
+        int mounts = js.Calls("ContextEditor.mount").Count;
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);
+    }
+
+    // 216 AC-1: with no note open, Today creates today's note (DailyNote.Compose) and opens it in the page editor.
     [Fact]
-    public async Task TopBar_Today_ClosesNotePagesAndReview()
+    public async Task TopBar_Today_NoNote_CreatesAndOpensTodaysNote()
+    {
+        data.AddTodo("call Anna", DesktopFixture.Today);
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        Assert.Single(cut.FindAll(".current-region p.no-note"));
+
+        await TodayAndOpen(cut, js);
+
+        Assert.Equal("Created 2026-10-29", cut.Find(".main-status").TextContent);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
+        Assert.Equal(
+            "# 2026-10-29\n\n## Appointments\n- No appointments.\n\n## Todos\n- call Anna\n",
+            File.ReadAllText(Path.Combine(data.Root, "2026-10-29.md")));
+        Assert.Equal("2026-10-29", js.MountedName());
+        Assert.Single(cut.FindAll(".note-editor"));
+        Assert.Empty(cut.FindAll("p.no-note"));
+        Assert.Empty(cut.FindAll("section.current"));
+    }
+
+    // 216 AC-1: with another clean note open, an existing today's note opens unchanged, with no status.
+    [Fact]
+    public async Task TopBar_Today_OtherCleanNote_OpensExistingUnchanged()
     {
         data.WriteNote("Plan", "# Plan\n");
+        data.WriteNote("2026-10-29", "# mine\n");
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
 
+        await TodayAndOpen(cut, js);
+
+        Assert.Equal("# mine\n", js.MountedText());
+        Assert.Equal(string.Empty, cut.Find(".main-status").TextContent);
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    // 216 AC-2: with today's note open (clean or dirty), Today keeps the editor and its unsaved text, and closes a
+    // shown Appointment, Settings, Tags or Triage page.
+    [Fact]
+    public async Task TopBar_Today_TodaysNoteOpen_KeepsEditorClosesPages()
+    {
+        data.WriteCalendar("work.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("Budget", "20261029T140000", "20261029T150000")));
+        data.WriteNote("Tagged", "#work\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await TodayAndOpen(cut, js);
+        int mounts = js.Calls("ContextEditor.mount").Count;
+
+        // The appointment page saves a dirty editor first, so it is shown over the clean note.
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".day-appointments button.appointment-item")), Wait);
+        await cut.Find(".day-appointments button.appointment-item").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".appointment-page")), Wait);
         await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".appointment-page")), Wait);
+        Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
+        js.EditUnsavable("# 2026-10-29\n\nUnsaved\n");
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
 
-        cut.WaitForAssertion(() => Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent), Wait);
-        Assert.Empty(cut.FindAll(".note-editor"));
         await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".settings-panel")), Wait);
         await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
-        Assert.Empty(cut.FindAll(".settings-panel"));
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".settings-panel")), Wait);
+        Assert.False(cut.Find(".note-area").HasAttribute("hidden"));
+
         await RunPalette(cut, "/tags");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tags-panel")), Wait);
         await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
-        Assert.Empty(cut.FindAll(".tags-panel"));
-        Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent);
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".tags-panel")), Wait);
+
+        await RunPalette(cut, "/triage");
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".triage-panel")), Wait);
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".triage-panel")), Wait);
+
+
+        Assert.False(cut.Find(".note-area").HasAttribute("hidden"));
+        Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent);
+        Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
+        Assert.True(js.Dirty);
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
     }
 
-    // 198 AC-4: Today with unsaved changes asks; Keep leaves the note, Discard shows today's view.
+    // 216 AC-2: another dirty note is saved first, then today's note opens.
     [Fact]
-    public async Task TopBar_Today_DirtyEditor_KeepOrDiscard()
+    public async Task TopBar_Today_OtherDirtyNote_SavedFirst()
     {
         data.WriteNote("Plan", "# Plan\n");
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
+        js.Edit("# Plan\n\nTyped\n");
+
+        await TodayAndOpen(cut, js);
+
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Equal("# Plan\n\nTyped\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.Equal("Created 2026-10-29", cut.Find(".main-status").TextContent);
+    }
+
+    // 216 AC-2 (198 AC-4): when that save fails Today asks: Cancel keeps the note and writes nothing, Discard opens
+    // today's note.
+    [Fact]
+    public async Task TopBar_Today_SaveFails_CancelOrDiscard()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        int mounts = js.Calls("ContextEditor.mount").Count;
         js.EditUnsavable("# Plan\n\nUnsaved\n");
 
         await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
@@ -2834,10 +3031,81 @@ public sealed class MainTests : IDisposable
         await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
+        Assert.True(js.Dirty);
+        Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.False(File.Exists(Path.Combine(data.Root, "2026-10-29.md")));
+
         await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("[role=dialog]")), Wait);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        Assert.Equal("Created 2026-10-29", cut.Find(".main-status").TextContent);
+        Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+    }
+
+    // 216 AC-3: a sensitive today's note opens through the unlock flow and is never rewritten.
+    [Fact]
+    public async Task TopBar_Today_SensitiveNote_OpensThroughUnlock()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("2026-10-29", "# secret day\n");
+        data.Keys.AgreeThrows = true;
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        byte[] before = File.ReadAllBytes(Path.Combine(data.Root, "2026-10-29.ctxs"));
+
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Can't unlock 2026-10-29.", cut.Find(".unreadable").TextContent), Wait);
+        Assert.Equal(1, data.Keys.Agrees);
+        Assert.Equal(before, File.ReadAllBytes(Path.Combine(data.Root, "2026-10-29.ctxs")));
+        Assert.False(File.Exists(Path.Combine(data.Root, "2026-10-29.md")));
+        Assert.DoesNotContain("Created", cut.Find(".main-status").TextContent, StringComparison.Ordinal);
+    }
+
+    // 216 AC-3: a failed write shows the red line and opens nothing; an open note stays.
+    [Fact]
+    public async Task TopBar_Today_WriteFails_RedLineOpensNothing()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        string path = Path.Combine(data.Root, "2026-10-29.md");
+        data.Actions!.BeforeWrite = () => Directory.CreateDirectory(path);
+
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(
+            () => Assert.Equal(DesktopActions.DailyNoteFailedText("2026-10-29"), cut.Find(".main-status").TextContent), Wait);
+        Assert.Equal("Can't write 2026-10-29. Nothing was done.", cut.Find(".main-status").TextContent);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Empty(js.Calls("ContextEditor.mount"));
+        Assert.Single(cut.FindAll(".current-region p.no-note"));
+
+        await Open(cut, js, "Plan");
+        int mounts = js.Calls("ContextEditor.mount").Count;
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(
+            () => Assert.Equal("Can't write 2026-10-29. Nothing was done.", cut.Find(".main-status").TextContent), Wait);
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
+        Assert.False(File.Exists(path));
+    }
+
+    // 216 AC-5: with no note open and no page shown, the note area holds only the grey placeholder.
+    [Fact]
+    public async Task NoNote_NoteAreaHoldsOnlyThePlaceholder()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        IElement area = cut.Find(".current-region .note-area");
+        IElement only = Assert.Single(area.Children);
+        Assert.Equal("P", only.TagName);
+        Assert.Equal(["grey", "no-note"], only.ClassList.ToArray());
+        Assert.Equal("No note open. Click Today to open today's note.", only.TextContent);
+        Assert.Empty(cut.FindAll("section.current"));
+        Assert.Empty(cut.FindAll("button.page-menu-open"));
     }
 
     // 198 AC-5: the popover opens and closes by button, Esc and backdrop; the view and the open note stay.
@@ -2933,8 +3201,8 @@ public sealed class MainTests : IDisposable
             "# 2026-11-20\n\n## Appointments\n- 10:00-10:30 Planning\n\n## Todos\n- Ship\n",
             File.ReadAllText(Path.Combine(data.Root, "2026-11-20.md")));
         Assert.Single(cut.FindAll(".note-editor"));
-        Assert.Empty(cut.FindAll("h1.title"));
-        Assert.Empty(cut.FindAll(".current"));
+        Assert.Empty(cut.FindAll("p.no-note"));
+        Assert.Empty(cut.FindAll("section.current"));
     }
 
     // 212 AC-2: the story's test: typing into a picked day's note is saved by auto save.
@@ -2994,62 +3262,155 @@ public sealed class MainTests : IDisposable
 
         await PickAndOpen(cut, js, "2026-10-29", "2026-10-29");
 
-        Assert.Empty(cut.FindAll("h1.title"));
+        Assert.Empty(cut.FindAll("p.no-note"));
         Assert.Equal("Created 2026-10-29", cut.Find(".main-status").TextContent);
         await TypeAndAutoSave(cut, js, "# 2026-10-29\n\nToday typed\n");
         Assert.Equal("# 2026-10-29\n\nToday typed\n", File.ReadAllText(Path.Combine(data.Root, "2026-10-29.md")));
+        int mounts = js.Calls("ContextEditor.mount").Count;
+        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".settings-panel")), Wait);
         await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent), Wait);
-        Assert.Equal(["end-day"], await MenuIdsAsync(cut));
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".settings-panel")), Wait);
+        Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent);
+        Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
+        Assert.Equal("end-day", (await MenuIdsAsync(cut))[0]);
     }
 
-    // 200 AC-6 (171 AC-13 moved here): End the day in the menu closes today; the result is grey in the main status line.
-    [Fact]
-    public async Task EndDay_FromTheMenu_ClosesTheDay_GreyStatus()
+    // 216: Times' worked hours for today, so End the day writes a ## Worked section.
+    private void WriteTodaysTimes()
     {
         Directory.CreateDirectory(data.TimesFolder);
         File.WriteAllText(
             Path.Combine(data.TimesFolder, "2026-10-29.json"),
             "{\"entries\":[{\"kind\":\"arrival\",\"time\":\"08:00\"},{\"kind\":\"leaving\",\"time\":\"16:00\"}]}");
-        data.AddTodo("call Anna", DesktopFixture.Today);
-        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        Assert.Equal(string.Empty, cut.Find("p.main-status").TextContent);
+    }
 
+    // 216 AC-7: End the day is the first More actions item on today's daily note only: not with no note open, not on
+    // another note, not while a page is shown.
+    [Fact]
+    public async Task EndDay_InTheMenuOnlyOnTodaysNote()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        Assert.Empty(cut.FindAll("button.page-menu-open"));
+
+        await Open(cut, js, "Plan");
+        string[] plan = await MenuIdsAsync(cut);
+        Assert.DoesNotContain("end-day", plan);
+
+        await TodayAndOpen(cut, js);
+        string[] today = await MenuIdsAsync(cut);
+        Assert.Equal(["end-day", .. plan], today);
         await OpenMenuAsync(cut);
         IElement item = cut.Find(".page-menu button.end-day");
         Assert.Equal("End the day", item.TextContent);
         Assert.Equal("menuitem", item.GetAttribute("role"));
-        await item.ClickAsync(new MouseEventArgs());
+        await cut.Find(".page-menu-backdrop").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.NotEqual(string.Empty, cut.Find("p.main-status").TextContent), Wait);
+        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".settings-panel")), Wait);
+        Assert.Empty(cut.FindAll("button.page-menu-open"));
+    }
+
+    // 216 AC-8 (200 AC-6, 171 AC-13): End the day on today's clean note closes the day, shows the grey result in the
+    // main status line and reloads the editor, so the new sections show and a later save is not refused.
+    [Fact]
+    public async Task EndDay_FromTheMenu_ClosesTheDay_GreyStatus_Reloads()
+    {
+        WriteTodaysTimes();
+        data.AddTodo("call Anna", DesktopFixture.Today);
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await TodayAndOpen(cut, js);
+        int mounts = js.Calls("ContextEditor.mount").Count;
+
+        await ChooseAsync(cut, "end-day");
+
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         IElement line = cut.Find("p.main-status");
         Assert.Equal("Day closed. Moved 1 todo(s) to 2026-10-30.", line.TextContent);
         Assert.Equal("status", line.GetAttribute("role"));
         Assert.Equal(line.TextContent, line.GetAttribute("title"));
         Assert.True(line.ClassList.Contains("grey"));
-        Assert.Contains(
-            "## Worked\n- Arrived 08:00, left 16:00, worked 8:00\n",
-            File.ReadAllText(Path.Combine(data.Root, "2026-10-29.md")),
-            StringComparison.Ordinal);
+        string closed = File.ReadAllText(Path.Combine(data.Root, "2026-10-29.md"));
+        Assert.Contains("## Worked\n- Arrived 08:00, left 16:00, worked 8:00\n", closed, StringComparison.Ordinal);
+        Assert.Contains("## Moved to tomorrow\n", closed, StringComparison.Ordinal);
+        Assert.Equal(closed, js.MountedText());
         Assert.False(File.Exists(Path.Combine(data.Root, SettingsStore.FileName)));
         Assert.Empty(cut.FindAll(".page-menu"));
         Assert.Empty(cut.FindAll(".day-end-status"));
+        cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
+
+        await TypeAndAutoSave(cut, js, closed + "\nAfter the day\n");
+        Assert.Equal(closed + "\nAfter the day\n", File.ReadAllText(Path.Combine(data.Root, "2026-10-29.md")));
     }
 
-    // 200 AC-6 (171 AC-13 moved here): a refusal shows the red main status line.
+    // 216 AC-8: unsaved text in today's note is saved first, then the day is closed on top of it.
     [Fact]
-    public async Task EndDay_FromTheMenu_Sensitive_RedStatus()
+    public async Task EndDay_DirtyEditor_SavesFirst()
     {
-        data.WriteFile("2026-10-29.ctxs", "{\"v\":1,\"text\":\"c2VhbGVk\"}");
+        WriteTodaysTimes();
+        EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await TodayAndOpen(cut, js);
+        int mounts = js.Calls("ContextEditor.mount").Count;
+        js.Edit("# 2026-10-29\n\nTyped first\n");
 
         await ChooseAsync(cut, "end-day");
 
-        cut.WaitForAssertion(() => Assert.NotEqual(string.Empty, cut.Find("p.main-status").TextContent), Wait);
-        IElement line = cut.Find("p.main-status");
-        Assert.Equal("2026-10-29 is sensitive. Nothing was written to it.", line.TextContent);
-        Assert.True(line.ClassList.Contains("red"));
-        Assert.Equal(0, data.Keys.Agrees);
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        string closed = File.ReadAllText(Path.Combine(data.Root, "2026-10-29.md"));
+        Assert.StartsWith("# 2026-10-29\n\nTyped first\n", closed, StringComparison.Ordinal);
+        Assert.Contains("## Worked\n", closed, StringComparison.Ordinal);
+        Assert.Equal(closed, js.MountedText());
+        Assert.True(cut.Find("p.main-status").ClassList.Contains("grey"));
+    }
+
+    // 216 AC-8: when that save fails, the red line asks to save first and nothing is written.
+    [Fact]
+    public async Task EndDay_SaveFails_RedLine_NothingWritten()
+    {
+        WriteTodaysTimes();
+        data.AddTodo("call Anna", DesktopFixture.Today);
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await TodayAndOpen(cut, js);
+        int mounts = js.Calls("ContextEditor.mount").Count;
+        js.EditUnsavable("# 2026-10-29\n\nUnsaved\n");
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+
+        await ChooseAsync(cut, "end-day");
+
+        cut.WaitForAssertion(() => Assert.Equal("Save 2026-10-29 first.", cut.Find("p.main-status").TextContent), Wait);
+        Assert.True(cut.Find("p.main-status").ClassList.Contains("red"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
+        Assert.True(js.Dirty);
+    }
+
+    // 216 AC-7, AC-8 (200 AC-6): a sensitive today's note has End the day first in its menu; the refusal shows the red
+    // main status line and no key-store call is made for it.
+    [Fact]
+    public async Task EndDay_FromTheMenu_Sensitive_RedStatus()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("2026-10-29", "# secret day\n");
+        data.Keys.AgreeThrows = true;
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("Can't unlock 2026-10-29.", cut.Find(".unreadable").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Contains(cut.FindAll(".links-panel p"), p => p.TextContent == "Sensitive notes have no links."), Wait);
+        Assert.Equal(["end-day", "rename", "delete", "history", "make-plain", "lock"], await MenuIdsAsync(cut));
+        int agrees = data.Keys.Agrees;
+        byte[] bytes = File.ReadAllBytes(Path.Combine(data.Root, "2026-10-29.ctxs"));
+
+        await ChooseAsync(cut, "end-day");
+
+        cut.WaitForAssertion(() => Assert.Equal("2026-10-29 is sensitive. Nothing was written to it.", cut.Find("p.main-status").TextContent), Wait);
+        Assert.True(cut.Find("p.main-status").ClassList.Contains("red"));
+        Assert.Equal(agrees, data.Keys.Agrees);
+        Assert.Equal(bytes, File.ReadAllBytes(Path.Combine(data.Root, "2026-10-29.ctxs")));
     }
 
     // 212 AC-5: another note's unsaved changes are saved first, then the picked day's note opens.
@@ -3143,7 +3504,7 @@ public sealed class MainTests : IDisposable
             () => Assert.Equal("Can't write 2026-11-20. Nothing was done.", cut.Find(".main-status").TextContent), Wait);
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
         Assert.Empty(js.Calls("ContextEditor.mount"));
-        Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent);
+        Assert.Equal("No note open. Click Today to open today's note.", cut.Find(".note-area p.no-note").TextContent);
         Assert.False(File.Exists(first));
 
         await Open(cut, js, "Plan");
@@ -3156,8 +3517,8 @@ public sealed class MainTests : IDisposable
         Assert.False(File.Exists(second));
     }
 
-    // 213 AC-7 (replaces 198 AC-8, the typed date input): Main passes Today and Selected: today's view selects today, a
-    // daily note selects its day, another note or a page selects nothing and the calendar opens on today's month.
+    // 216 AC-10 (213 AC-7, replaces 198 AC-8, the typed date input): Main passes Today and Selected: a daily note selects
+    // its day (also behind a page), no note or another note selects nothing and the calendar opens on today's month.
     [Fact]
     public async Task TopBar_Calendar_SelectedFollowsTheShownDay()
     {
@@ -3168,7 +3529,8 @@ public sealed class MainTests : IDisposable
 
         await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
         Assert.Equal("October 2026", cut.Find(".day-pick table[role=grid]").GetAttribute("aria-label"));
-        Assert.Equal("Thursday, 29 October 2026", cut.Find(".day-pick button.day.today.selected").GetAttribute("aria-label"));
+        Assert.Empty(cut.FindAll(".day-pick button.day.selected"));
+        Assert.Single(cut.FindAll(".day-pick button.day.today"));
         Assert.Equal("Thursday, 29 October 2026", cut.Find(".day-pick button.day[tabindex='0']").GetAttribute("aria-label"));
         await cut.Find(".day-pick-backdrop").ClickAsync(new MouseEventArgs());
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
@@ -3188,13 +3550,16 @@ public sealed class MainTests : IDisposable
         Assert.Contains("outside", cut.Find(".day-pick button.day.today").ClassList);
         await cut.Find(".day-pick-backdrop").ClickAsync(new MouseEventArgs());
 
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent), Wait);
+        await TodayAndOpen(cut, js);
+        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        Assert.Equal("October 2026", cut.Find(".day-pick table[role=grid]").GetAttribute("aria-label"));
+        Assert.Equal("Thursday, 29 October 2026", cut.Find(".day-pick button.day.today.selected").GetAttribute("aria-label"));
+        await cut.Find(".day-pick-backdrop").ClickAsync(new MouseEventArgs());
         await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".settings-panel")), Wait);
         await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
-        Assert.Empty(cut.FindAll(".day-pick button.day.selected"));
-        Assert.Equal("October 2026", cut.Find(".day-pick table[role=grid]").GetAttribute("aria-label"));
+        Assert.Equal("Thursday, 29 October 2026", cut.Find(".day-pick button.day.today.selected").GetAttribute("aria-label"));
+        await cut.Find(".day-pick-backdrop").ClickAsync(new MouseEventArgs());
     }
 
     // 212 AC-7: Today then a note name, and Today then /today, end in an editor whose change auto save saves.
@@ -3205,17 +3570,16 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        await TodayAndOpen(cut, js);
         await Open(cut, js, "Plan");
         await TypeAndAutoSave(cut, js, "# Plan\n\nFrom a name\n");
         Assert.Equal("# Plan\n\nFrom a name\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
 
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent), Wait);
+        await TodayAndOpen(cut, js);
         int mounts = js.Calls("ContextEditor.mount").Count;
         await RunPalette(cut, "/today");
         cut.WaitForAssertion(() => Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent), Wait);
-        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
         cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
         await TypeAndAutoSave(cut, js, "# 2026-10-29\n\nFrom today\n");
         Assert.Equal("# 2026-10-29\n\nFrom today\n", File.ReadAllText(Path.Combine(data.Root, "2026-10-29.md")));
@@ -3262,14 +3626,15 @@ public sealed class MainTests : IDisposable
         Assert.Equal(["rename", "delete", "history", "make-plain", "lock"], await MenuIdsAsync(cut));
     }
 
-    // 199 AC-1: Capture is the first icon button, before Today and Pick a day; no popover at first.
+    // 199 AC-1: Capture is the first icon button, before Today and Pick a day; no popover at first. (216: with no note
+    // open the menu has no items, so there is no … button.)
     [Fact]
     public async Task TopBar_CaptureButtonFirst_NoPopoverAtFirst()
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
         Assert.Equal(
-            ["capture-open", "today-open", "day-pick-open", "page-menu-open"],
+            ["capture-open", "today-open", "day-pick-open"],
             cut.FindAll(".top-bar-buttons > button").Select(b => b.ClassName ?? string.Empty).ToArray());
         IElement button = cut.Find("button.capture-open");
         Assert.Equal("Capture", button.GetAttribute("aria-label"));

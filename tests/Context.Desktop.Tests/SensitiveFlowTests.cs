@@ -186,7 +186,7 @@ public sealed class SensitiveFlowTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.destroy")), Wait);
         Assert.Empty(cut.FindAll(".note-editor"));
-        Assert.Single(cut.FindAll(".current-region .current"));
+        Assert.Single(cut.FindAll(".current-region p.no-note"));
         Assert.Equal("Locked Plan.", cut.Find(".main-status").TextContent);
         Assert.Contains("grey", cut.Find(".main-status").ClassList);
         Assert.Null(data.Session!.Note);

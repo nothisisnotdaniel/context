@@ -90,15 +90,16 @@ is and never changed. In the desktop app, `/today` in the command palette opens 
 `context current` numbers today's appointments (`1`, `2`, ...). `context meeting 2` prints the note for appointment 2,
 named after its date and title (for example `2026-10-29 Review Q4 plan`). When it doesn't exist yet it is created first,
 tagged `#meeting`, with the appointment's title, time, location and attendees; an existing note is printed as it is and
-never changed. In the desktop app, the current view shows the same numbers and `/meeting 2` in the command palette
-opens the same note.
+never changed. In the desktop app, `/meeting 2` in the command palette opens the same note (numbered as
+`context current` numbers them).
 
 ### Day's end
 
 `context dayend` writes the day's worked hours from the Times app into today's daily note (a `## Worked` section) and
 moves the todos due today or earlier to tomorrow, listing them in both daily notes. `context dayend 2026-11-14` closes
 that day instead. Times' data folder is `TIMES_DATA_DIR` when set (an absolute path), else `Times` in the app data
-folder; it is only read. The desktop app has an `End the day` button in the current view, and it closes the day by
+folder; it is only read. In the desktop app, `End the day` is the first item of the More actions menu (the three dots)
+while today's note is open, and the app closes the day by
 itself after you book your leaving in Times (the todos move once, at a leaving at 17:00 or later).
 
 ### Saving

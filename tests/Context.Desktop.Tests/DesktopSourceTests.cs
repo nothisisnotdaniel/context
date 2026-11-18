@@ -136,7 +136,7 @@ public sealed class DesktopSourceTests
     {
         string root = RepoFiles.Root();
         List<string> files = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor");
-        Assert.Contains("src/Context.Desktop/CurrentPanel.razor", files);
+        Assert.Contains("src/Context.Desktop/Main.razor", files);
 
         List<string> found = [];
         foreach (string file in files)
@@ -1499,7 +1499,7 @@ public sealed class DesktopSourceTests
         string[] calls = Regex.Matches(program, @"\bactions\s*\.\s*(\w+)\s*\(")
             .Select(m => m.Groups[1].Value)
             .ToArray();
-        Assert.Equal(["AutoDayEnd", "AutoBriefing", "AutoReminders", "AutoReminders"], calls);
+        Assert.Equal(["AutoDayEnd", "AutoBriefing", "AutoReminders", "AutoOpenToday", "AutoReminders"], calls);
         Assert.Contains(
             "static Task AutoWrites(DesktopActions actions) =>\n            actions.AutoDayEnd().ContinueWith("
             + "_ => actions.AutoBriefing(), TaskScheduler.Default).Unwrap();\n",
@@ -1507,10 +1507,14 @@ public sealed class DesktopSourceTests
             StringComparison.Ordinal);
 
         // 178 AC-6, AC-7: the reminders run once at start before the automatic writes, then on their own timer.
+        // 216 AC-4: today's note is made sure of and offered once at start, after the reminders and before the writes.
         Assert.Contains(
-            "        _ = actions.AutoReminders().ContinueWith(_ => AutoWrites(actions), TaskScheduler.Default).Unwrap();\n",
+            "        _ = actions.AutoReminders()\n"
+            + "            .ContinueWith(_ => actions.AutoOpenToday(), TaskScheduler.Default).Unwrap()\n"
+            + "            .ContinueWith(_ => AutoWrites(actions), TaskScheduler.Default).Unwrap();\n",
             program,
             StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(program, @"\bAutoOpenToday\b"));
         Assert.Contains(
             "using Timer reminders = new Timer(\n            _ => _ = actions.AutoReminders(), null, "
             + "DesktopActions.ReminderInterval / 2, DesktopActions.ReminderInterval);",
@@ -1525,9 +1529,9 @@ public sealed class DesktopSourceTests
         Assert.Equal(3, Regex.Matches(program, @"\bAutoWrites\s*\(").Count);
         Assert.Equal(
             2, Regex.Matches(program, @"\bDesktopActions\s*\.\s*DayEndInterval\b").Count);
-        Assert.DoesNotMatch(@"\bDesktopActions\s*\.\s*(AutoDayEnd|EndDay|AutoBriefing|OpenBriefing|AutoReminders)\b", program);
+        Assert.DoesNotMatch(@"\bDesktopActions\s*\.\s*(AutoDayEnd|EndDay|AutoBriefing|OpenBriefing|AutoReminders|AutoOpenToday)\b", program);
 
-        foreach (string name in new[] { "AutoDayEnd", "AutoBriefing", "AutoReminders" })
+        foreach (string name in new[] { "AutoDayEnd", "AutoBriefing", "AutoReminders", "AutoOpenToday" })
         {
             List<string> others = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
                 .Where(f => f != ProgramFile && f != ActionsFile)
@@ -1541,6 +1545,7 @@ public sealed class DesktopSourceTests
     [Theory]
     [InlineData(@"\bBriefing\s*\.\s*Ensure\s*\(")]
     [InlineData(@"\.\s*OfferBriefing\s*\(")]
+    [InlineData(@"\.\s*OfferStartNote\s*\(")]
     public void Sources_CallBriefingWritesOnlyInDesktopActions(string pattern)
     {
         string root = RepoFiles.Root();
@@ -2232,9 +2237,9 @@ public sealed class DesktopSourceTests
         Assert.Contains("Task<bool> CaptureAsync(string text)", main, StringComparison.Ordinal);
     }
 
-    // 212 AC-8: the read-only day view is gone; no desktop source names it, and CurrentPanel takes no Day.
+    // 212 AC-8: the read-only day view is gone; no desktop source names it.
     [Fact]
-    public void NoDayView_NoShownDay_CurrentPanelHasNoDay()
+    public void NoDayView_NoShownDay()
     {
         string root = RepoFiles.Root();
         foreach (string file in RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".razor", ".cs"))
@@ -2243,7 +2248,33 @@ public sealed class DesktopSourceTests
             Assert.False(text.Contains("DayView", StringComparison.Ordinal), file + " mentions DayView");
             Assert.False(text.Contains("shownDay", StringComparison.Ordinal), file + " mentions shownDay");
         }
+    }
 
-        Assert.Null(typeof(CurrentPanel).GetProperty("Day"));
+    // 216 AC-5: the dashboard is gone: no desktop source names CurrentPanel, and its file and styles are removed.
+    [Fact]
+    public void NoCurrentPanel()
+    {
+        string root = RepoFiles.Root();
+        foreach (string file in RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".razor", ".cs", ".css", ".html"))
+        {
+            string text = File.ReadAllText(Path.Combine(root, file));
+            Assert.False(text.Contains("CurrentPanel", StringComparison.Ordinal), file + " mentions CurrentPanel");
+        }
+
+        Assert.False(File.Exists(Path.Combine(root, RepoFiles.DesktopFolder, "CurrentPanel.razor")));
+        Assert.Null(typeof(Main).Assembly.GetType("Context.CurrentPanel"));
+        string css = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+        Assert.DoesNotMatch(@"(^|[\s,}])\.current\b(?!-)", css);
+    }
+
+    // 216 AC-11: the start offer is made only by the actions, and no lifecycle method of Main calls the actions.
+    [Fact]
+    public void Main_TakesTheStartNoteWithoutCallingActionsInLifecycle()
+    {
+        string root = RepoFiles.Root();
+        string main = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "Main.razor")).ReplaceLineEndings("\n");
+        Assert.Contains("State.TakeStartNote()", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("OfferStartNote", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("AutoOpenToday", main, StringComparison.Ordinal);
     }
 }

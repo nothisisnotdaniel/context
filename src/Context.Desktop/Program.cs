@@ -111,8 +111,12 @@ internal static class Program
 
         // The timed-todo reminders, also through DesktopActions: once now, before the automatic writes (so a todo whose
         // time passed while the app was closed shows at start), then on their own timer, half an interval after the
-        // day-end timer so the two rarely meet (a call refused as busy is retried on the next tick).
-        _ = actions.AutoReminders().ContinueWith(_ => AutoWrites(actions), TaskScheduler.Default).Unwrap();
+        // day-end timer so the two rarely meet (a call refused as busy is retried on the next tick). Between them, once
+        // at start only, today's daily note is made sure of (created when missing) and offered to Main, which opens it
+        // while nothing else is shown.
+        _ = actions.AutoReminders()
+            .ContinueWith(_ => actions.AutoOpenToday(), TaskScheduler.Default).Unwrap()
+            .ContinueWith(_ => AutoWrites(actions), TaskScheduler.Default).Unwrap();
         using Timer dayEnd = new Timer(
             _ => _ = AutoWrites(actions), null, DesktopActions.DayEndInterval, DesktopActions.DayEndInterval);
         using Timer reminders = new Timer(

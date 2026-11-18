@@ -185,6 +185,67 @@ public sealed class DayAppointmentsPanelTests : IDisposable
         Assert.Contains("day-appointments", cut.Find("aside.todos-region").Children[0].ClassList);
     }
 
+    // 216 AC-9: a Stale feed shows the grey offline line with the cache time in the view's zone, below the list, on
+    // today and on another day alike.
+    [Fact]
+    public async Task Feed_Stale_GreyLineBelowTheList_OnEveryDay()
+    {
+        data.SaveLink(FakeHttpHandler.Link);
+        data.WriteCache(
+            DesktopFixture.Calendar(DesktopFixture.Event("Sync", "20261029T140000Z", "20261029T150000Z")),
+            new DateTime(2026, 10, 29, 7, 30, 0, DateTimeKind.Utc));
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        WaitForItems(cut, 1);
+
+        IElement line = cut.Find(".day-appointments p.feed");
+        Assert.Equal("Exchange calendar offline, showing the copy from 2026-10-29 08:30.", line.TextContent);
+        Assert.True(line.ClassList.Contains("grey"));
+        Assert.Equal(["15:00-16:00 Sync"], Items(cut));
+        Assert.Equal(line, cut.Find(".day-appointments").Children[^1]);
+
+        await cut.Find(".day-appointments button.day-next").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("Friday, 30 October 2026", Heading(cut)), Wait);
+        WaitForEmpty(cut);
+        Assert.Equal(
+            "Exchange calendar offline, showing the copy from 2026-10-29 08:30.",
+            cut.Find(".day-appointments p.feed.grey").TextContent);
+    }
+
+    // 216 AC-9: a Failed feed shows the red line with the fixed reason; the link never shows.
+    [Fact]
+    public async Task Feed_Failed_RedLineWithReason()
+    {
+        data.SaveLink(FakeHttpHandler.Link);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        WaitForEmpty(cut);
+
+        IElement line = cut.Find(".day-appointments p.feed");
+        Assert.Equal("Can't download the Exchange calendar (HTTP 500).", line.TextContent);
+        Assert.True(line.ClassList.Contains("red"));
+        Assert.DoesNotContain(FakeHttpHandler.PathToken, cut.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain(FakeHttpHandler.Host, cut.Markup, StringComparison.Ordinal);
+    }
+
+    // 216 AC-9: no line when no feed is set up, or when the download worked.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Feed_NotConfiguredOrFresh_NoLine(bool fresh)
+    {
+        if (fresh)
+        {
+            data.SaveLink(FakeHttpHandler.Link);
+            data.Http = FakeHttpHandler.Ok(
+                DesktopFixture.Calendar(DesktopFixture.Event("Sync", "20261029T140000Z", "20261029T150000Z")));
+        }
+
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        WaitForItems(cut, fresh ? 1 : 0);
+
+        Assert.Empty(cut.FindAll("p.feed"));
+        Assert.Equal(fresh ? CalendarFeedStatus.Fresh : CalendarFeedStatus.NotConfigured, data.State!.Snapshot!.Current!.Status);
+    }
+
     private static string Heading(IRenderedComponent<Main> cut) => cut.Find(".day-appointments h2.day-appointments-day").TextContent;
 
     private static string[] Items(IRenderedComponent<Main> cut) =>

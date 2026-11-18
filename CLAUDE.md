@@ -153,8 +153,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     draws it.
   - **Current view:** all relevant information for now: today's appointments, due todos and linked notes.
     `CurrentView.Build` in Core reads the data (including the untruncated appointments, the time text and the
-    calendar's `Zone`, in which a front end shows the cache time); `context current` prints it as text and the
-    desktop's `CurrentPanel` draws it. It holds the day (`Today`), the appointments, a `Due` list of every todo with
+    calendar's `Zone`, in which a front end shows the cache time); `context current` prints it as text; the desktop
+    has no dashboard for it any more (job 216: `DesktopSnapshot.Current` feeds `/meeting <n>`'s numbering and the feed
+    line in `DayAppointmentsPanel`). It holds the day (`Today`), the appointments, a `Due` list of every todo with
     `Due <= today` (date, text and `Overdue`; `DueTodo` has no number) and the linked notes. A todo links to notes
     through tags: `TagParser.Parse` on the text of each due todo (at run time, not stored), then
     `TagIndex.NotesWithTag` after `Sync`; each note once, sorted by name ignoring case, with its matching
@@ -173,10 +174,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     plus `NoteStore.List()`, matching in memory (`TagIndex.Reads`, internal, counts `Run` calls for tests); only
     listed `.md` notes count, so sealed notes never appear. A bad `context.db` also empties every `Related` list.
     `context current` writes `related\t<name>\t<#tags then words>` after each appointment line and, with appointments,
-    `Can't read context.db.` once on stderr (exit 1, after `Can't read todos.json.` when both). `CurrentPanel`
-    (`OnOpen`, from `Main.RequestOpen`) starts each appointment row with its grey 1-based number (`td.number`, job 167), draws a `tr.related` row with one `note-button` per note (`Title`, full name
-    in `title`) and grey `.matches` under each shown appointment (not counted toward `MaxAppointmentRows`), and red
-    `Can't read the related notes.` after the table when the index is unreadable.
+    `Can't read context.db.` once on stderr (exit 1, after `Can't read todos.json.` when both). On the desktop the
+    related notes show on the appointment page (job 214); the dashboard `CurrentPanel` that drew the rows, numbers
+    and linked notes was removed in job 216.
   - **Calendar:** the user puts iCalendar files in `<root>/calendar/`. `CalendarStore(root, TimeZoneInfo)`
     reads only the top-level `*.ics` files (case-insensitive, no subfolders, never writes anything); a file over
     5 MB (`MaxFileBytes`) is not read. `Day(d)` returns a `CalendarDay`: the events whose local span overlaps
@@ -761,7 +761,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `DataWatcher` (one `FileSystemWatcher` with subfolders, `IsRelevant` filter: the top-level files as before, plus
     a `.md` at any depth except under a folder starting with `.` or under the top-level `calendar/`, and the top-level
     `settings.json` (job 207: saved searches edited outside the app; any case, not in a subfolder); 300 ms
-    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `CurrentPanel`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `LinksPanel`, `OutlinePanel`, `DayAppointmentsPanel`, `AppointmentPanel`, `PersonPanel`, `ReviewPanel`, `TriagePanel`)
+    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `LinksPanel`, `OutlinePanel`, `DayAppointmentsPanel`, `AppointmentPanel`, `PersonPanel`, `ReviewPanel`, `TriagePanel`)
     inherit `StateComponent`, which injects the state and `DesktopActions` (internal types can't be
     public parameters). `DesktopActions` (with `ActionResult`: `ActionKind` `Done`/`Refused`/`Failed`, `ActionReason`,
     raw text) is the only write path: it never throws, runs one action at a time (`Busy`), refreshes the state after a change and has the test
@@ -847,7 +847,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     file bytes, read through `BoundedFile`): a bigger or non-seekable note can't be opened (`Can't read <name>.`), a save
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
-    `/briefing`, `/capture`, `/current`, `/decisions`, `/done`, `/export`, `/find`, `/import`, `/meeting`, `/new`, `/open`, `/review`, `/save`, `/search`, `/settings`, `/tags`, `/today`, `/todo`, `/triage` with `CommandMatcher` (in Core; ties
+    `/briefing`, `/capture`, `/decisions`, `/done`, `/export`, `/find`, `/import`, `/meeting`, `/new`, `/open`, `/review`, `/save`, `/search`, `/settings`, `/tags`, `/today`, `/todo`, `/triage` (no `/current` since job 216) with `CommandMatcher` (in Core; ties
     in Levenshtein score are ordered by `SwapDistance`, which counts an adjacent swap as one edit, so `/opne` runs `/open`).
     `/todo every <weekday|day|month> <text>` (job 168) adds a recurring todo (`TryParseRepeat`, then `AddTodo`), accent
     `Added: <text>`; a missing or bad unit or missing text is red `Type /todo every <weekday|day|month> <text>.`; a bad
@@ -859,12 +859,13 @@ Every factory agent reads this file before working on Context. Keep it short and
     template)` (`NoteTemplates.Prepare` with the injected local clock, then `CreateWithText`; the Templates texts, no
     key-store call); Done opens the note through `RequestOpen` with accent `Created <name>`, else the red text; a blank
     title or template is red `Type /new <title> --template <template>.`; without the token `/new` is unchanged.
-    `/today` (argument ignored) asks `Discard changes to <name>?` first when another note has unsaved changes (not
+    `/today` (argument ignored; the top bar's `Today` button runs the same `Main.ShowToday`, job 216) asks `Discard changes to <name>?` first when another note has unsaved changes (not
     when the open note is today's note itself: the editor stays as it is, unsaved text included), then
     calls `DesktopActions.OpenDailyNote()` and opens the note (a sensitive one through the unlock flow), with the
-    accent `Created <name>` after a create and the red failure text otherwise.
-    `/meeting <number>` (job 167) picks the appointment from the shown `Snapshot.Current` (the `#` column of
-    `CurrentPanel`, which counts the rows hidden behind `… N more` too) and works like `/today` through
+    accent `Created <name>` after a create and the red failure text otherwise. With today's note already open it keeps
+    the editor and only closes a shown page (Triage, Tags, Settings, Appointment).
+    `/meeting <number>` (job 167) picks the appointment from the shown `Snapshot.Current` (numbered as `context current`
+    numbers them; the desktop no longer shows the numbers, job 216) and works like `/today` through
     `DesktopActions.OpenMeetingNote(appointment)`; a blank or invalid number is red `Type /meeting <number>.`, no
     appointments or a number beyond them the CLI's texts in red, a failed write red `Can't write <name>.`.
     `/briefing` (job 172, hint `Open today's briefing`, argument ignored) works like `/today` through
@@ -917,9 +918,12 @@ Every factory agent reads this file before working on Context. Keep it short and
     characters.`, `Can't save that search.`, `A saved search named <name> already exists.`, `Can't save more than 50
     searches.`, `settings.json would be over 64 KiB. Nothing was saved.`, Failed `Can't read settings.json. Nothing was saved.`, Done `Saved search <name>.`) and
     `RemoveSavedSearch(name)` (ignoring case; a name that can't be normalized is gone; Refused/`Missing` `That saved search is gone. Nothing was done.`, Done
-    `Removed saved search <name>.`) are the only writers. End the day is the only item of the More actions menu on today's view (job 200; `Main.RunPageAction("end-day")`
-    calls `DesktopActions.EndDay(Snapshot.Today)` and shows the result in `p.main-status`: grey on Done/Unchanged
-    (`Day closed. Moved <n> todo(s) to <D+1>.`), else red; `CurrentPanel` has no button and no status line of its own); `Program.cs` calls `DesktopActions.AutoDayEnd()`
+    `Removed saved search <name>.`) are the only writers. End the day (`end-day`) is the first item of the More actions menu while today's daily note is open (job 216, plain
+    and sensitive alike; job 200 had it on the dashboard). `Main.RunPageAction("end-day")` saves unsaved editor text
+    first (a failed save is red `Save <name> first.` and nothing is written), calls
+    `DesktopActions.EndDay(Snapshot.Today)`, shows the result in `p.main-status` (grey on Done/Unchanged, `Day closed.
+    Moved <n> todo(s) to <D+1>.`, else red) and then reloads the editor (`NoteEditor.ReloadAsync`) so the new
+    `## Worked` and `## Moved to tomorrow` sections show and a later save is not refused as changed on disk; `Program.cs` calls `DesktopActions.AutoDayEnd()`
     at start and every `DayEndInterval` (30 s) from its own timer (Busy: Refused, skipped), followed by `AutoBriefing()`.
     **Corrections and balance** (job 172): `TimesDay.Corrections` reads Times' `"corrections":[{"minutes":<int>,
     "reason":<string>}]` (exactly those two properties; minutes never 0, at most `MaxCorrectionMinutes` 59999 either
@@ -949,11 +953,12 @@ Every factory agent reads this file before working on Context. Keep it short and
     editor is left alone and the accent status reads `Today's briefing is ready: briefings/<day>. Type /briefing to open
     it.`. The page is a snapshot, never refreshed.
     **Pages (job 193):** `Main` holds one `page` (none, triage, tags, settings); opening one replaces another. The note area
-    (`div.note-area`: breadcrumb to `LinksPanel`) or `CurrentPanel` gets `hidden` while a page shows, but stays mounted so
+    (`div.note-area`: breadcrumb to `LinksPanel`, or with no note open only the grey `p.no-note` `No note open. Click
+    Today to open today's note.`, job 216) gets `hidden` while a page shows, but stays mounted so
     unsaved editor text survives. Each page's root has class `page` and an icon-only `button.close` (aria-label and title
     `Close`) last in `.panel-bar`; `TagPanel` keeps its text `Close`.
     **Settings:** `SettingsPanel` (the `Settings` button in `NotesPanel`, or `/settings`; `Main`'s `page`;
-    a page in place of the note area; the × (job 193), opening a note or the current view hides it) has two sections, both
+    a page in place of the note area; the × (job 193), opening a note or `Today` hides it) has two sections, both
     reloaded after every `State.Changed`. *Exchange calendar* shows `DesktopState.CalendarLinkSetting()`
     (`CalendarLinkView.Show`: grey `No calendar link set.`, the masked link with the last download in the calendar's
     zone, or red `Can't read calendar-link.txt. …`), one `<input type="password">` (no `value`, no `@bind`,
@@ -973,12 +978,12 @@ Every factory agent reads this file before working on Context. Keep it short and
     `note-button` through `RequestOpen`), `Done todos`, `Overdue` (`overdue` dates), `Next week` (an `h4` per day with
     appointments: time, title, location), the grey empty texts (`No notes changed.`, `No todos done.`,
     `Nothing overdue.`, `No appointments next week.`), red `Can't read todos.json.` in both todo sections and the
-    `CurrentPanel` calendar texts. It reloads on `State.Changed` keeping the shown rows; `Close`, opening a note or the
-    current view hides it.
+    calendar texts (as `DayAppointmentsPanel`'s feed line). It reloads on `State.Changed` keeping the shown rows;
+    `Close`, opening a note or `Today` hides it.
     **Tags and links:** `TagsPanel` (the `Tags` button in `NotesPanel`, or `/tags` without an argument; `Main`'s
     `page`) lists `DesktopState.Tags()` (`TagsView.Build`): one button per tag with its grey note count; a click
     shows `TagPanel` for it below the list (`aria-pressed` on that button); its × hides both, `TagPanel`'s only
-    itself, and opening a note or the current view hides both. `/tags <tag>` opens `TagPanel` directly. `LinksPanel`
+    itself, and opening a note or `Today` hides both. `/tags <tag>` opens `TagPanel` directly. `LinksPanel`
     sits under `NoteEditor` and lists `DesktopState.Links(name)` (`LinksView.Build`): per `NoteLink` the name (a button
     through `RequestOpen`; a missing target is grey text), the link text (see Note links) and the shared tags as buttons
     (`TagPanel`); grey `<name> has no linked notes.`, red `Can't read the links.`, and for a sensitive note only grey
@@ -1012,14 +1017,14 @@ Every factory agent reads this file before working on Context. Keep it short and
     of either kind) `button.search-save` `Save search` opens `input.search-save-name` (`aria-label`/placeholder `Search
     name`, maxlength 50, focused): Return calls `Actions.SaveSearch(name, trimmed query)` (its only action), Esc hides
     it; the result is `p.search-save-result` (`role=status`, accent on Done, else red). Reload and stale-result rules as
-    the other panels. Opening a note or the current view closes it.
+    the other panels. Opening a note or `Today` closes it.
     `DecisionsPanel` (job 180, `/decisions [tag]`; `Main`'s `decisionsShown`, after `SearchPanel`) has the heading
     `Decisions` (with a tag `Decisions: #tag`) and `Close`, and lists `DesktopState.Decisions(tag)` (`DecisionsView.Build`
     under `indexGate`, never throws): per decision a grey `span.date`, a `note-button` (through `OnOpen`, full name in
     `title`), grey `span.people` (only with people) and the one-line `span.text` (cut by CSS, full text in `title`); at
     most `MaxRows` (100), then grey `… <n> more`. Grey `Loading…`, grey `No decisions yet.` / `No decisions in notes
     tagged #<tag>.`, red `Can't read the decisions.`, red `Type /decisions [tag].` for an invalid tag (nothing read);
-    same read-only (no `Actions.`), reload and stale-result rules. Opening a note or the current view closes it.
+    same read-only (no `Actions.`), reload and stale-result rules. Opening a note or `Today` closes it.
     **Import and export:** the only paths the desktop reads or writes outside the data folder come from the OS
     dialog (`IFileDialog.OpenMarkdownFiles()`: several `*.md`, empty when cancelled or failed;
     `SaveExportFile(suggestedName)`: `null` when cancelled, adds `.md` to a name without extension; Photino's save
@@ -1059,19 +1064,24 @@ Every factory agent reads this file before working on Context. Keep it short and
     `td[role=gridcell]` > `button.day` (`aria-label` `dddd, d MMMM yyyy`; `outside` for other months, still clickable;
     disabled outside 1900-01-01..2100-12-31); `TopBar` parameters `Today` (`today`, `aria-current="date"`) and
     `Selected` (`selected`, gridcell `aria-selected="true"`; `Main.SelectedDay`: the open note's day when its name is
-    exactly `yyyy-MM-dd`, today with no note and no Triage/Tags/Settings/search/review page, else null). Each opening
+    exactly `yyyy-MM-dd`, else null, job 216). Each opening
     starts on `Selected ?? Today` with that day as the one `tabindex="0"` day (roving tabindex) and focuses it; arrows
     move ±1/±7 days, PageUp/PageDown ±1 month (day clamped), never outside the range, the shown month follows; a click or
     Enter calls `OnPick` once and closes (a later event finds it closed). Date maths in `MonthGrid.cs`; styles only
     theme variables, `.day.today.selected` keeps an inner ring). Esc, the backdrop or the button
-    closes a popover; opening one closes the other, so at most one is open. `Main.ShowToday` goes through `RequestOpen(null)` (the unsaved-changes guard) to today's current view.
+    closes a popover; opening one closes the other, so at most one is open. `Main.ShowToday` (the `Today` button and `/today`, job 216) opens today's daily note in the page editor as
+    `/today` describes (created when missing; another dirty note saved first, else the discard dialog; today's note
+    itself stays as it is and a shown page closes). At start `Program.cs` calls `DesktopActions.AutoOpenToday()`, which
+    ensures today's note like `OpenDailyNote()` and offers it through `DesktopState.OfferStartNote(name)` (a failure
+    offers nothing); `Main` takes it (`TakeStartNote`) in `OnInitialized` and after every `State.Changed` once a snapshot
+    exists, and opens it only while no note is open and no page, dialog or edit field is shown, else drops it.
     `PickDay(DateOnly)` (job 212) works like `/today` for that day: it opens the day's daily note (`yyyy-MM-dd`) in the
     page editor through `Actions.OpenDailyNote(day)` (`DailyNote.Ensure` with `DailyNote.Compose` for that day; the
     no-argument `OpenDailyNote()`/`DailyNoteName()` use the local clock's day), the `running` gate and `ShowDaily`
     (accent `Created <name>`, red failure text, the unlock flow for a sensitive note). The open note of that day stays
     as it is; another dirty note is saved first (`KeptUnsaved`), and when that fails the day waits in
-    `pendingPickedDay` behind the `Discard changes to <name>?` dialog. There is no read-only day view: `CurrentPanel`
-    only shows today's current view.
+    `pendingPickedDay` behind the `Discard changes to <name>?` dialog. There is no read-only day view and no dashboard: `CurrentPanel` was
+    removed in job 216.
     **More actions menu (job 200):** the last top-bar button `button.page-menu-open` (three dots, `aria-label`/`title`
     `More actions`, `aria-haspopup="menu"`, `aria-expanded`) opens `div.page-menu[role=menu]` with a
     `.page-menu-backdrop`; it is one of the three mutually exclusive popovers. `TopBar` gets `[Parameter]
@@ -1079,7 +1089,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     Rename/New subpage/Move form) and `EventCallback<string> OnPageAction`. `PageAction(id, label, checked)` is a
     public record (a parameter type must be public); its id is the item's class, `checked` non-null makes a
     `menuitemcheckbox` with `aria-checked`. `Main.PageActionsFor(snapshot)` builds the list: none while a page
-    (Triage, Tags, Settings) is shown or another day is picked; `end-day` on today's view; for a plain note `rename`,
+    (Triage, Tags, Settings, Appointment) is shown and with no note open; `end-day` first on today's daily note (`DailyNote.NameFor(Snapshot.Today)`); for a plain note `rename`,
     `delete`, `history`, `new-subpage`, `move`, `open-external`, `export`, `mark-sensitive` (when supported); for a
     sensitive note `rename`, `delete`, `history`, `make-plain`, `lock`. `Main.RunPageAction(id)` (the bound handler)
     runs the chosen one. Keys in the menu (default prevented): opening focuses the first item, ArrowDown/ArrowUp
@@ -1133,7 +1143,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `.note-toolbar` above it exists only while a form is open: `Rename` swaps in a prefilled name
     field (Enter or `Save name` renames and reopens the note under the new name; Esc or `Cancel` closes the form;
     a dirty editor is refused with red `Save <name> first.`), `Delete` asks `Delete <name>? This can't be undone.`
-    (`ConfirmDialog`, confirm label `Delete`; on confirm the main region returns to the current view) and `Open in
+    (`ConfirmDialog`, confirm label `Delete`; on confirm the main region shows the `p.no-note` placeholder) and `Open in
     default editor` calls `OpenExternally` (red text on failure). Subpages (job 152): `NotesPanel` draws the notes
     as nested `ul.note-list` lists (`note-children` below the top), each row showing `Title` with the full name in
     `title`, and a toggle `<button>` (`aria-expanded`, `aria-label` `Expand <name>`/`Collapse <name>`) for a note with
@@ -1184,7 +1194,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     (`CurrentView.Time` for that day, `OneLine` title or `(no title)`); grey `No appointments.`, red
     `Can't read calendar/<file>`; it reloads on `State.Changed` keeping the rows, a day change shows `Loading…`. A click
     goes to `Main.OpenAppointment` (save first, else `Discard changes to <name>?`; Discard drops the note and shows the page
-    over the current view): `Page.Appointment` shows `AppointmentPanel` (`section.appointment-page`, `h2` title, `Close`;
+    over the placeholder): `Page.Appointment` shows `AppointmentPanel` (`section.appointment-page`, `h2` title, `Close`;
     the outline is hidden, opening any note closes it). Same-titled appointments (ordinal) on the day share one page (a
     second click keeps it, no reload). It lists `DesktopState.AppointmentPage(title, day)` (`MeetingPrep.Related(...,
     max: null)` over the title and the union of the attendees of those appointments; `Sync`, `NoteTags()`, `List()`
@@ -1221,11 +1231,14 @@ Every factory agent reads this file before working on Context. Keep it short and
     `.razor` files, `Program.cs` and `StateComponent`, never by `DesktopState`, `DataWatcher` or `DesktopSnapshot`, so
     nothing writes on render, refresh, the watcher or the tick. The named exception (jobs 171 and 172): `Program.cs`'s
     `AutoWrites` (once at start and in the day-end timer) calls `DesktopActions.AutoDayEnd()` and then
-    `DesktopActions.AutoBriefing()`, and (job 178) `DesktopActions.AutoReminders()` runs once at start before
+    `DesktopActions.AutoBriefing()`, (job 178) `DesktopActions.AutoReminders()` runs once at start before
     `AutoWrites` and on its own timer every `ReminderInterval` (30 s, first after half of it, so it doesn't collide
-    with the day-end timer), the only methods `Program.cs` calls on the actions and named by no other `.cs` or
-    `.razor` file, so both automatic writes (the day's end and the morning briefing) still write only through
-    `DesktopActions.cs`; `Briefing.Ensure` and `DesktopState.OfferBriefing` are called only there. In `.razor` files every `@code` method that calls
+    with the day-end timer), and (job 216) `DesktopActions.AutoOpenToday()` runs once at start after the first
+    `AutoReminders()` and before the first `AutoWrites` (it creates today's daily note when missing); these are the
+    only methods `Program.cs` calls on the actions and named by no other `.cs` or `.razor` file, so the automatic
+    writes (the day's end, the morning briefing and today's note at start) still write only through
+    `DesktopActions.cs`; `Briefing.Ensure`, `DesktopState.OfferBriefing` and `DesktopState.OfferStartNote` are called
+    only there. In `.razor` files every `@code` method that calls
     `Actions.` is bound by an event attribute in the same file (`@on<event>=` on an element or an `On<Event>=`
     callback parameter on a component), is no lifecycle method (`OnInitialized*`, `OnParametersSet*`,
     `OnAfterRender*`, `SetParametersAsync`, `BuildRenderTree`) and is called by no other method; no `.cs` file calls
@@ -1270,7 +1283,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `ReviewPanelTests`, `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `ReviewPanelTests`, `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
     CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules, the transfer calls and no file system class in `.razor`), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),

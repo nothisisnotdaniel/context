@@ -49,7 +49,7 @@ internal sealed record DesktopSnapshot
     /// <summary>The day the snapshot is for (todo date classes compare against it).</summary>
     public DateOnly Today { get; }
 
-    /// <summary>The <c>/current</c> view, or <c>null</c> when <see cref="Failed"/>.</summary>
+    /// <summary>Today's current view (as <c>context current</c>: the <c>/meeting</c> numbers and the feed status), or <c>null</c> when <see cref="Failed"/>.</summary>
     public CurrentView? Current { get; }
 
     /// <summary>Every todo in <see cref="TodoStore.List"/> order.</summary>

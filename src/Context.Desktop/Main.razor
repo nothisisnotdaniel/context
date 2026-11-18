@@ -14,7 +14,7 @@
                 <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" OnTriage="ShowTriage" OnSearch="ShowSearch" />
             </aside>
             <main class="current-region">
-                <TopBar Today="@snapshot.Today" Selected="@SelectedDay(snapshot)" OnToday="ShowToday" OnPick="PickDay" OnCapture="CaptureAsync" PageActions="@PageActionsFor(snapshot)"
+                <TopBar Today="@snapshot.Today" Selected="@SelectedDay()" OnToday="ShowToday" OnPick="PickDay" OnCapture="CaptureAsync" PageActions="@PageActionsFor(snapshot)"
                         PageActionsDisabled="@(running || renaming || subpaging || moving)" OnPageAction="RunPageAction" />
                 @if (page == Page.Triage)
                 {
@@ -116,7 +116,7 @@
                     }
                     else
                     {
-                        <CurrentPanel OnOpen="RequestOpen" />
+                        <p class="grey no-note">No note open. Click Today to open today's note.</p>
                     }
                 </div>
             </main>
@@ -263,18 +263,49 @@ else
             () => editor?.HasUnsaved ?? false,
             SaveFirstForCloseAsync,
             () => InvokeAsync(AskDiscardForClose));
+        TakeStartNote();
         if (State.TakeBriefing() is { } offered)
         {
             ShowNote(offered);
         }
     }
 
-    // A briefing the automatic write offered opens when no note has unsaved changes and nothing is being asked or
-    // typed; otherwise the editor is left alone and the status line points to /briefing.
+    // Today's note offered at start opens only while no note is open and no page, dialog or edit field is shown;
+    // otherwise the offer is dropped. Before the first snapshot the offer waits (a sensitive note must be known as
+    // one before its editor opens). True when the note was opened.
+    private bool TakeStartNote()
+    {
+        if (Snapshot is null || State.TakeStartNote() is not { } start)
+        {
+            return false;
+        }
+
+        bool shown = openName is not null || page != Page.None || reviewShown || tagShown is not null
+            || findShown is not null || searchShown is not null || decisionsShown is not null || paletteOpen
+            || discarding || renaming || subpaging || moving || deleting || renameAsk is not null || marking
+            || unsealing || restoring is not null || running;
+        if (shown)
+        {
+            return false;
+        }
+
+        ShowNote(start);
+        return true;
+    }
+
+    // Today's note offered at start opens as in TakeStartNote. A briefing the automatic write offered opens when no
+    // note has unsaved changes and nothing is being asked or typed; otherwise the editor is left alone and the status
+    // line points to /briefing.
     protected override async Task OnStateChangedAsync()
     {
+        bool started = TakeStartNote();
         if (State.TakeBriefing() is not { } offered || string.Equals(offered, openName, StringComparison.Ordinal))
         {
+            if (started)
+            {
+                StateHasChanged();
+            }
+
             return;
         }
 
@@ -349,7 +380,7 @@ else
         tagShown = null;
     }
 
-    // Triage, Tags and Settings are pages: one at a time, in place of the note area or the current view.
+    // Triage, Tags and Settings are pages: one at a time, in place of the note area.
     private void OpenPage(Page next)
     {
         if (page == Page.Tags && next != Page.Tags)
@@ -360,17 +391,17 @@ else
         page = next;
     }
 
-    // The weekly review: shown at the top of the main region until closed or until a note or the current view opens.
+    // The weekly review: shown at the top of the main region until closed or until a note opens.
     private void ShowReview() => reviewShown = true;
 
     private void CloseReview() => reviewShown = false;
 
-    // Inbox triage: shown under the capture box until closed or until a note or the current view opens.
+    // Inbox triage: shown under the capture box until closed or until a note opens.
     private void ShowTriage() => OpenPage(Page.Triage);
 
     private void CloseTriage() => page = Page.None;
 
-    // The settings: shown at the top of the main region until closed or until a note or the current view opens.
+    // The settings: shown at the top of the main region until closed or until a note opens.
     private void ShowSettings() => OpenPage(Page.Settings);
 
     private void CloseSettings() => page = Page.None;
@@ -470,27 +501,51 @@ else
         appointmentShown = null;
     }
 
-    // The Today button: the current view of today, asking first when the open note has unsaved changes.
-    private Task ShowToday() => RequestOpen(null);
-
-    // The day the top bar's calendar marks and opens on: the open note's day when its name is exactly yyyy-MM-dd, today
-    // on today's view (no note and no page shown), else none.
-    private DateOnly? SelectedDay(DesktopSnapshot snapshot)
+    // The Today button and /today: today's daily note in the page editor (created when missing). Today's note itself
+    // stays as it is, unsaved text included; another dirty note is saved first, or the discard dialog asks.
+    private async Task ShowToday()
     {
-        if (openName is { } name)
+        if (editor is not null && openName is not null
+            && !string.Equals(openName, Actions.DailyNoteName(), StringComparison.Ordinal)
+            && await KeptUnsaved())
         {
-            return DateOnly.TryParseExact(name, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly day)
-                ? day
-                : null;
+            pendingName = null;
+            pendingPerson = null;
+            pendingToday = true;
+            pendingPickedDay = null;
+            pendingBriefing = false;
+            pendingMeeting = null;
+            pendingAppointment = null;
+            discarding = true;
+            return;
         }
 
-        if (page == Page.None && searchShown is null && !reviewShown)
+        if (running)
         {
-            return snapshot.Today;
+            return;
         }
 
-        return null;
+        running = true;
+        ActionResult daily;
+        try
+        {
+            daily = await Actions.OpenDailyNote();
+        }
+        finally
+        {
+            running = false;
+        }
+
+        ShowDaily(daily);
     }
+
+    // The day the top bar's calendar marks and opens on: the open note's day when its name is exactly yyyy-MM-dd, else
+    // none.
+    private DateOnly? SelectedDay() =>
+        openName is { } name
+            && DateOnly.TryParseExact(name, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly day)
+            ? day
+            : null;
 
     // A day picked in the top bar: that day's daily note in the page editor, like /today for that day (job 212). The
     // open note of that day stays as it is; another dirty note is saved first, or the discard dialog asks.
@@ -530,13 +585,13 @@ else
         ShowDaily(daily);
     }
 
-    // Opens the note called name (null: the current view), asking first when the open note has unsaved changes.
+    // Opens the note called name (null: no note), asking first when the open note has unsaved changes.
     private Task RequestOpen(string? name) => RequestOpen(name, null);
 
     // A [[Note#Heading]] link clicked in the editor: opens that note at the heading.
     private Task OpenHeading((string Name, string Heading) link) => RequestOpen(link.Name, link.Heading);
 
-    // Opens the note called name (null: the current view) at heading (null: at the top), asking first when the open
+    // Opens the note called name (null: no note) at heading (null: at the top), asking first when the open
     // note has unsaved changes. The open note itself only jumps to the heading, keeping what is typed.
     private async Task RequestOpen(string? name, string? heading)
     {
@@ -723,7 +778,7 @@ else
 
         if (pendingAppointment is { } appointment)
         {
-            // The unsaved changes go with the editor; the page shows over the current view.
+            // The unsaved changes go with the editor; the page shows with no note open.
             ShowNote(null);
             ShowAppointment(appointment);
             return;
@@ -795,7 +850,9 @@ else
 
         if (string.Equals(daily.Text, openName, StringComparison.Ordinal))
         {
-            page = Page.None;
+            // The editor stays, unsaved text included; a shown page (Triage, Tags, Settings, an appointment) closes.
+            OpenPage(Page.None);
+            appointmentShown = null;
         }
         else
         {
@@ -874,9 +931,6 @@ else
                     await CaptureAsync(rest);
                 }
 
-                break;
-            case "/current":
-                await RequestOpen(null);
                 break;
             case "/open":
                 string? found = rest.Length == 0 ? null : State.ResolveNote(rest);
@@ -1058,41 +1112,11 @@ else
 
                 break;
             case "/today":
-                // The argument is ignored. A dirty editor asks first, unless it already shows today's note.
-                if (editor is not null && openName is not null
-                    && !string.Equals(openName, Actions.DailyNoteName(), StringComparison.Ordinal)
-                    && await KeptUnsaved())
-                {
-                    pendingName = null;
-                    pendingPerson = null;
-                    pendingToday = true;
-                    pendingPickedDay = null;
-                    pendingBriefing = false;
-                    pendingMeeting = null;
-                    pendingAppointment = null;
-                    discarding = true;
-                    break;
-                }
-
-                if (!running)
-                {
-                    running = true;
-                    ActionResult daily;
-                    try
-                    {
-                        daily = await Actions.OpenDailyNote();
-                    }
-                    finally
-                    {
-                        running = false;
-                    }
-
-                    ShowDaily(daily);
-                }
-
+                // The argument is ignored; the same as the Today button.
+                await ShowToday();
                 break;
             case "/meeting":
-                // The number of today's appointment in the shown current view, counting the ones behind "… N more".
+                // The number of today's appointment in the snapshot's current view, numbered as `context current`.
                 if (!MeetingNote.TryParseNumber(rest, out int meetingNumber))
                 {
                     ShowStatus("Type /meeting <number>.", "red");
@@ -1682,7 +1706,7 @@ else
         }
     }
 
-    // Confirmed in the dialog: deletes the open note and shows the current view again.
+    // Confirmed in the dialog: deletes the open note; no note is open afterwards.
     private async Task DeleteConfirmed(Confirmation confirmed)
     {
         if (openName is not { } name || running)
@@ -1824,7 +1848,7 @@ else
         }
     }
 
-    // Confirmed in the dialog: seals the open note and shows the current view; the note is then locked.
+    // Confirmed in the dialog: seals the open note and closes it; the note is then locked.
     private async Task MarkConfirmed(Confirmation confirmed)
     {
         if (openName is not { } name || running)
@@ -1995,19 +2019,24 @@ else
         }
     }
 
-    // The shown page's actions for the top bar's More actions menu: a plain or sensitive note's, End the day on the
-    // current view, none on a page (Triage, Tags, Settings).
+    // The shown page's actions for the top bar's More actions menu: a plain or sensitive note's, with End the day
+    // first on today's daily note; none with no note open or on a page (Triage, Tags, Settings, an appointment).
     private IReadOnlyList<PageAction> PageActionsFor(DesktopSnapshot snapshot)
     {
-        if (page != Page.None)
+        if (page != Page.None || openName is not { } name)
         {
             return [];
         }
 
-        if (openName is null)
-        {
-            return [new PageAction("end-day", "End the day")];
-        }
+        IReadOnlyList<PageAction> actions = NoteActionsFor(snapshot);
+        return string.Equals(name, DailyNote.NameFor(snapshot.Today), StringComparison.Ordinal)
+            ? [new PageAction("end-day", "End the day"), .. actions]
+            : actions;
+    }
+
+    // A plain or sensitive note's More actions.
+    private IReadOnlyList<PageAction> NoteActionsFor(DesktopSnapshot snapshot)
+    {
 
         PageAction[] common =
         [
@@ -2031,8 +2060,8 @@ else
         return snapshot.SensitiveSupported ? [.. plain, new PageAction("mark-sensitive", "Mark sensitive")] : plain;
     }
 
-    // A More actions item: the same handlers the toolbar buttons and End the day used to call. Open in default editor,
-    // Export and End the day call the actions here, so every Actions call stays in a bound handler.
+    // A More actions item: the same handlers the toolbar buttons used to call. Open in default editor, Export and End
+    // the day call the actions here, so every Actions call stays in a bound handler.
     private async Task RunPageAction(string id)
     {
         switch (id)
@@ -2111,7 +2140,21 @@ else
             }
             case "end-day":
             {
-                if (running || openName is not null || Snapshot is not { } snapshot)
+                // Today's daily note only. Unsaved text is saved first, so the day's end never meets a changed note on
+                // disk; afterwards the editor shows the new sections and a later save is not refused as changed.
+                if (running || page != Page.None || openName is not { } name || Snapshot is not { } snapshot
+                    || !string.Equals(name, DailyNote.NameFor(snapshot.Today), StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                if (await KeptUnsaved())
+                {
+                    ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
+                    return;
+                }
+
+                if (running || !string.Equals(openName, name, StringComparison.Ordinal))
                 {
                     return;
                 }
@@ -2129,6 +2172,11 @@ else
 
                 bool ok = ended.Kind == ActionKind.Done && ended.Reason is ActionReason.None or ActionReason.Unchanged;
                 ShowStatus(DesktopText.OneLine(ended.Text), ok ? "grey" : "red");
+                if (editor is not null && string.Equals(openName, name, StringComparison.Ordinal))
+                {
+                    await editor.ReloadAsync();
+                }
+
                 break;
             }
         }

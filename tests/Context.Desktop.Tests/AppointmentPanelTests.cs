@@ -63,7 +63,7 @@ public sealed class AppointmentPanelTests : IDisposable
 
         Assert.Empty(cut.FindAll(".appointment-page"));
         Assert.False(cut.Find(".note-area").HasAttribute("hidden"));
-        Assert.Single(cut.FindAll(".current-region .current"));
+        Assert.Single(cut.FindAll(".current-region p.no-note"));
     }
 
     // AC-5: the outline is hidden while the page is shown, and opening a note from the page closes it.

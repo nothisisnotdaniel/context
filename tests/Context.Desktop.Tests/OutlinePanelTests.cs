@@ -167,7 +167,7 @@ public sealed class OutlinePanelTests : IDisposable
         Assert.Empty(cut.FindAll(".editor-failed"));
     }
 
-    // 210 AC-3: with no note open (the current view), an editor that didn't start, or a note that can't be read, the
+    // 210 AC-3: with no note open (the placeholder), an editor that didn't start, or a note that can't be read, the
     // sidebar has no outline and the todos still render; no headings are asked for.
     [Fact]
     public async Task Main_NoNoteFailedOrUnreadable_NoOutline()
@@ -202,7 +202,7 @@ public sealed class OutlinePanelTests : IDisposable
         Assert.Empty(js.Calls("ContextEditor.headings"));
     }
 
-    // 210 AC-4: opening note B after note A (three headings, B none) leaves no outline; closing to the current view
+    // 210 AC-4: opening note B after note A (three headings, B none) leaves no outline; closing the note (deleting it)
     // removes it too.
     [Fact]
     public async Task Main_OpenOtherNoteOrClose_OutlineGone()
@@ -225,8 +225,11 @@ public sealed class OutlinePanelTests : IDisposable
         await Open(cut, js, "Alpha");
         cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("aside.todos-region nav.outline-panel button").Count), Wait);
 
-        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        // 216: no note is open after the open note is deleted (Today opens today's note now).
+        await MainTests.ChooseAsync(cut, "delete");
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".note-editor")), Wait);
+        Assert.Single(cut.FindAll(".current-region p.no-note"));
         Assert.Empty(cut.FindAll("nav.outline-panel"));
         Assert.Single(cut.FindAll("aside.todos-region section.todos"));
     }

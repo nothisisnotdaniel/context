@@ -766,6 +766,41 @@ internal sealed class DesktopActions
     public Task<ActionResult> OpenDailyNote(DateOnly day) => Run(() => OpenDailyNoteNow(day));
 
     /// <summary>
+    /// Today's note at start, called only by <c>Program.cs</c> (once, after <see cref="AutoReminders"/> and before the
+    /// first automatic writes): makes sure today's daily note exists like <see cref="OpenDailyNote()"/> (the day from
+    /// the injected local clock; an existing plain or sensitive note is left as it is, no key-store call) and then
+    /// offers it through <see cref="DesktopState.OfferStartNote"/>, for <c>Main</c> to open while nothing else is
+    /// shown. A failed or refused write offers nothing. The state is refreshed after the offer, so <c>Main</c> sees it
+    /// also when nothing was written. Never throws and never asks anything.
+    /// </summary>
+    public async Task<ActionResult> AutoOpenToday()
+    {
+        ActionResult result = await Run(() =>
+        {
+            ActionResult daily = OpenDailyNoteNow(DateOnly.FromDateTime(localNow()));
+            if (daily.Kind == ActionKind.Done)
+            {
+                state.OfferStartNote(daily.Text);
+            }
+
+            return daily;
+        });
+        if (result.Kind == ActionKind.Done && result.Reason == ActionReason.Unchanged)
+        {
+            try
+            {
+                await state.Refresh();
+            }
+            catch (Exception)
+            {
+                // The offer stays; the watcher or the next tick shows it.
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Closes <paramref name="day"/> through <see cref="DayEnd.CloseDay"/>: Times' worked hours into its daily note,
     /// then its due todos moved to the next day and listed in both notes. Never reads or writes
     /// <c>settings.json</c>. The text is <see cref="DayClosedText"/> when done, else a fixed red text.
