@@ -289,6 +289,11 @@ public sealed class RecentNotesActionsTests : IDisposable
             return; // Unix permissions only; Windows ACLs would need their own setup.
         }
 
+        if (Environment.IsPrivilegedProcess)
+        {
+            return; // Root ignores the read-only mode, so the write would succeed.
+        }
+
         data.WriteNote("Plan", "# Plan\n");
         data.WriteNote("Other", "# Other\n");
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();

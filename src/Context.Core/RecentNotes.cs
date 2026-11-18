@@ -154,9 +154,17 @@ internal sealed class RecentNotesStore
         }
         finally
         {
-            if (File.Exists(temp))
+            // A failed clean-up must not hide the write's own exception.
+            try
             {
-                File.Delete(temp);
+                if (File.Exists(temp))
+                {
+                    File.Delete(temp);
+                }
+            }
+            catch (Exception)
+            {
+                // The temp file stays; it is not a note and the next write uses another name.
             }
         }
     }
