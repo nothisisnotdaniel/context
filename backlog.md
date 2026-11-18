@@ -105,7 +105,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#282](backlog/282-bigger-level-1-and-2-headings.md) Bigger level 1 and 2 headings in the note editor → 215-bigger-editor-headings
 - [x] [#289](backlog/289-appointment-page-close-button-and-a.md) Appointment page: × close button and a Notes heading → 219-appointment-close-notes-heading
 - [x] [#290](backlog/290-meeting-notes-go-under-meetings-appointment.md) Meeting notes go under Meetings/<appointment>/<date> → 220-meeting-notes-hierarchy
-- [ ] [#272](backlog/272-steady-maintests-windowclose-closedafterlastrender.md) Steady MainTests.WindowClose_ClosedAfterLastRender_IsStillSeen
+- [x] [#272](backlog/272-steady-maintests-windowclose-closedafterlastrender.md) Steady MainTests.WindowClose_ClosedAfterLastRender_IsStillSeen → 221-steady-windowclose-test
 - [ ] [#291](backlog/291-remove-the-mail-panel-from-the.md) Remove the Mail panel from the right sidebar
 - [ ] [#292](backlog/292-no-browser-context-menu-on-right.md) No browser context menu on right click in the desktop app
 - [ ] [#293](backlog/293-narrower-pick-a-day-calendar-popover.md) Narrower Pick a day calendar popover
