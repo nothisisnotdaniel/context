@@ -1648,6 +1648,7 @@ else
             return;
         }
 
+        // ShowNote(null) also drops openHeading and pendingHeading: no heading text of the locked note stays here.
         ShowNote(null);
         ShowStatus($"Locked {DesktopText.OneLine(name)}.", "grey");
     }
