@@ -115,7 +115,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#296](backlog/296-clicking-a-link-to-a-missing.md) Clicking a link to a missing note creates the note → 233-link-creates-missing-note
 - [x] [#297](backlog/297-note-title-shows-only-the-page.md) Note title shows only the page's own name → 235-title-shows-page-name
 - [x] [#298](backlog/298-attributes-in-a-collapsed-box-below.md) Attributes in a collapsed box below the note title → 236-attributes-collapsed-box
-- [ ] [#299](backlog/299-crash-log-and-a-hint-on.md) Crash log and a hint on the next start
+- [x] [#299](backlog/299-crash-log-and-a-hint-on.md) Crash log and a hint on the next start → 237-crash-log-hint
 - [ ] [#300](backlog/300-parent-notes-show-links-to-their.md) Parent notes show links to their subpages
 - [ ] [#305](backlog/305-people-page-opened-from-a-person.md) People page opened from a person icon in the left sidebar
 - [ ] [#306](backlog/306-left-sidebar-shows-the-10-most.md) Left sidebar shows the 10 most recently opened notes instead of the hierarchy (after: #305)
