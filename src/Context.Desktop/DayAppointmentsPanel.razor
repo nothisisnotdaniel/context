@@ -1,0 +1,137 @@
+@inherits StateComponent
+@* The shown day's appointments at the top of the right sidebar (DesktopState.DayAppointments: the calendar files and
+   the feed's cached copy, never a download). On today it lists the last past appointment and every one not yet past
+   (AppointmentList.Shown), on any other day all of them. The arrows step the day; a click on an appointment asks Main
+   to show its appointment page. It reads only, and reloads whenever the state changes, keeping the shown rows. *@
+
+<section class="day-appointments" aria-label="Appointments">
+    <div class="day-appointments-bar">
+        <button type="button" class="day-prev" aria-label="Previous day" title="Previous day" disabled="@(Shown <= First)" @onclick="Previous"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 18l-6-6 6-6"/></svg></button>
+        <h2 class="day-appointments-day cut" title="@Heading">@Heading</h2>
+        <button type="button" class="day-next" aria-label="Next day" title="Next day" disabled="@(Shown >= Last)" @onclick="Next"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 18l6-6-6-6"/></svg></button>
+    </div>
+    @if (view is null)
+    {
+        <p class="grey" role="status">Loading…</p>
+    }
+    else
+    {
+        IReadOnlyList<Appointment> shown = AppointmentList.Shown(view.Appointments, view.LocalNow, view.Day == Today);
+        DateTime from = view.Day.ToDateTime(TimeOnly.MinValue);
+        @if (view.Failed)
+        {
+            <p class="red">Can't read the calendar.</p>
+        }
+        else if (shown.Count == 0)
+        {
+            <p class="grey">No appointments.</p>
+        }
+        else
+        {
+            <ul class="appointment-items">
+                @foreach (Appointment appointment in shown)
+                {
+                    string rawTitle = appointment.Title;
+                    string title = DesktopText.OneLine(rawTitle.Length == 0 ? "(no title)" : rawTitle);
+                    string time = CurrentView.Time(appointment, from, from.AddDays(1));
+                    DateOnly day = view.Day;
+                    <li>
+                        <button type="button" class="appointment-item" title="@title" @onclick="() => OnOpen.InvokeAsync((rawTitle, day))">
+                            <span class="time">@time</span>
+                            <span class="appointment-title cut">@title</span>
+                        </button>
+                    </li>
+                }
+            </ul>
+        }
+        @foreach (string name in view.Unreadable)
+        {
+            <p class="red">Can't read @CalendarStore.FolderName/@DesktopText.OneLine(name)</p>
+        }
+    }
+</section>
+
+@code {
+    /// <summary>The earliest day the arrows reach.</summary>
+    internal static readonly DateOnly First = new(1900, 1, 1);
+
+    /// <summary>The latest day the arrows reach.</summary>
+    internal static readonly DateOnly Last = new(2100, 12, 31);
+
+    private DayAppointmentsView? view;
+    private DateOnly? loaded;
+    private int request;
+
+    // The day the arrows chose; null follows the snapshot's today.
+    private DateOnly? chosen;
+
+    /// <summary>Called with an appointment's raw title and the shown day when it is clicked.</summary>
+    [Parameter]
+    public EventCallback<(string Title, DateOnly Day)> OnOpen { get; set; }
+
+    private DateOnly Today => Snapshot?.Today ?? First;
+
+    private DateOnly Shown => chosen ?? Today;
+
+    private string Heading => Shown == Today
+        ? "Today"
+        : Shown.ToString("dddd, d MMMM yyyy", CultureInfo.InvariantCulture);
+
+    protected override Task OnParametersSetAsync() => LoadIfMoved();
+
+    protected override async Task OnStateChangedAsync()
+    {
+        if (loaded != Shown)
+        {
+            await LoadIfMoved();
+        }
+        else
+        {
+            await Load();
+        }
+
+        StateHasChanged();
+    }
+
+    private Task Previous() => Step(-1);
+
+    private Task Next() => Step(1);
+
+    private Task Step(int days)
+    {
+        DateOnly shown = Shown;
+        if ((days < 0 && shown <= First) || (days > 0 && shown >= Last))
+        {
+            return Task.CompletedTask;
+        }
+
+        DateOnly next = shown.AddDays(days);
+        chosen = next == Today ? null : next;
+        return LoadIfMoved();
+    }
+
+    // Another day: its rows are not known yet, so the old ones go.
+    private Task LoadIfMoved()
+    {
+        if (loaded == Shown)
+        {
+            return Task.CompletedTask;
+        }
+
+        loaded = Shown;
+        view = null;
+        return Load();
+    }
+
+    // Keeps the shown rows while it reloads. A result for another day, or an older request's result, is dropped.
+    private async Task Load()
+    {
+        int mine = ++request;
+        DateOnly day = Shown;
+        DayAppointmentsView result = await State.DayAppointments(day);
+        if (mine == request && result.Day == Shown)
+        {
+            view = result;
+        }
+    }
+}

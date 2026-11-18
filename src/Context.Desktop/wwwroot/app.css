@@ -1699,3 +1699,136 @@ nav.saved-searches ul {
 .outline-item.level-6 {
     padding-left: 40px;
 }
+
+/* The shown day's appointments (DayAppointmentsPanel), at the very top of the right sidebar: the arrows around the
+   day, then one link-like button per appointment (accent time, cut title with the full text in its title). Only the
+   theme's variables, so light and dark mode both work. */
+.todos-region .day-appointments {
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+}
+
+.day-appointments .day-appointments-bar {
+    align-items: center;
+    display: flex;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.day-appointments .day-appointments-day {
+    flex: 1;
+    margin: 0;
+    min-width: 0;
+    text-align: center;
+}
+
+.day-appointments .day-prev,
+.day-appointments .day-next {
+    align-items: center;
+    background: none;
+    border: 1px solid var(--panel);
+    border-radius: 4px;
+    color: var(--text);
+    display: inline-flex;
+    flex: none;
+    padding: 2px;
+}
+
+.day-appointments .day-prev:hover:not(:disabled),
+.day-appointments .day-next:hover:not(:disabled) {
+    background: var(--background);
+    border-color: var(--line);
+}
+
+.day-appointments .day-prev:disabled,
+.day-appointments .day-next:disabled {
+    color: var(--grey);
+}
+
+.day-appointments .appointment-items {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.day-appointments p {
+    margin: 4px 0;
+}
+
+.appointment-item {
+    background: none;
+    border: none;
+    color: var(--accent-strong);
+    cursor: pointer;
+    display: flex;
+    font: inherit;
+    gap: 8px;
+    max-width: 100%;
+    padding: 2px 4px;
+    text-align: left;
+    width: 100%;
+}
+
+.appointment-item .time {
+    color: var(--grey);
+    flex: none;
+    font-variant-numeric: tabular-nums;
+}
+
+.appointment-item .appointment-title {
+    min-width: 0;
+}
+
+.appointment-item:hover .appointment-title {
+    text-decoration: underline;
+}
+
+/* The appointment page (AppointmentPanel) in the main region: the related notes as note buttons with their grey
+   matches, or a text link that creates the meeting note. */
+.appointment-page {
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+}
+
+.appointment-page .appointment-notes {
+    list-style: none;
+    padding: 0;
+}
+
+.appointment-page .appointment-notes li {
+    display: flex;
+    gap: 8px;
+    padding: 3px 0;
+}
+
+.appointment-page .note-button {
+    background: none;
+    border: none;
+    border-radius: 3px;
+    color: var(--accent-strong);
+    flex: none;
+    max-width: 60%;
+    padding: 0;
+    text-align: left;
+}
+
+.appointment-page .note-button:hover:not(:disabled) {
+    text-decoration: underline;
+}
+
+.appointment-page .matches {
+    min-width: 0;
+}
+
+.create-note-link {
+    background: none;
+    border: none;
+    color: var(--accent-strong);
+    cursor: pointer;
+    font: inherit;
+    margin: 8px 0;
+    padding: 0;
+    text-decoration: underline;
+}

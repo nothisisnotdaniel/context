@@ -91,7 +91,17 @@ internal static class MeetingPrep
     /// name ignoring case, then ordinally; at most <see cref="MaxRelated"/>.
     /// </summary>
     public static IReadOnlyList<RelatedNote> Related(
-        Appointment appointment, IReadOnlyList<NoteInfo> notes, IReadOnlyList<(string Note, string Tag)> noteTags)
+        Appointment appointment, IReadOnlyList<NoteInfo> notes, IReadOnlyList<(string Note, string Tag)> noteTags) =>
+        Related(appointment, notes, noteTags, MaxRelated);
+
+    /// <summary>
+    /// Like the three-argument form (which keeps <see cref="MaxRelated"/>), with at most <paramref name="max"/> notes; <c>null</c> keeps every match (the desktop's appointment page).
+    /// </summary>
+    public static IReadOnlyList<RelatedNote> Related(
+        Appointment appointment,
+        IReadOnlyList<NoteInfo> notes,
+        IReadOnlyList<(string Note, string Tag)> noteTags,
+        int? max)
     {
         HashSet<string> words = new(Words(appointment.Title), StringComparer.Ordinal);
         foreach (string attendee in appointment.Attendees)
@@ -132,11 +142,16 @@ internal static class MeetingPrep
             }
         }
 
-        return found
+        IEnumerable<KeyValuePair<string, (SortedSet<string> Tags, SortedSet<string> Words)>> ranked = found
             .OrderByDescending(f => f.Value.Tags.Count + f.Value.Words.Count)
             .ThenBy(f => f.Key, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(f => f.Key, StringComparer.Ordinal)
-            .Take(MaxRelated)
+            .ThenBy(f => f.Key, StringComparer.Ordinal);
+        if (max is { } most)
+        {
+            ranked = ranked.Take(most);
+        }
+
+        return ranked
             .Select(f => new RelatedNote(f.Key, f.Value.Tags.ToList(), f.Value.Words.ToList()))
             .ToList();
     }

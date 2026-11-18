@@ -279,6 +279,31 @@ public sealed class DesktopSourceTests
         Assert.Contains(colours, c => c.Contains("var(--accent-strong)", StringComparison.Ordinal));
     }
 
+    // 214 AC-10: the sidebar appointments, the appointment page and its create link are styled with only the theme's
+    // variables: no hex, rgb( or named colour, so light and dark mode both work.
+    [Theory]
+    [InlineData("day-appointments")]
+    [InlineData("appointment-item")]
+    [InlineData("appointment-page")]
+    [InlineData("create-note-link")]
+    public void AppCss_AppointmentRules_UseOnlyThemeVariables(string name)
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"))
+            .ReplaceLineEndings("\n");
+
+        string[] rules = Regex.Matches(css, @"(?m)^([^\n{}]*\." + Regex.Escape(name) + @"\b[^{]*)\{([^}]*)\}")
+            .Select(m => m.Groups[2].Value)
+            .ToArray();
+        Assert.NotEmpty(rules);
+        Assert.All(rules, r => Assert.DoesNotMatch(@"#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(", r));
+        string[] colours = rules
+            .SelectMany(r => Regex.Matches(r, @"(?m)^\s*(color|background(?:-color)?|border(?:-(?:top|right|bottom|left))?(?:-color)?|outline|fill|stroke):\s*([^;]+);")
+                .Select(m => m.Groups[2].Value.Trim()))
+            .ToArray();
+        Assert.NotEmpty(colours);
+        Assert.All(colours, c => Assert.Matches(@"^(none|(\d+px solid )?var\(--[a-z-]+\))$", c));
+    }
+
     // 143 AC-9: the editor-failed line shares the margin rule of the unreadable line and has no rule of its own.
     [Fact]
     public void AppCss_EditorFailed_OnlyInTheUnreadableRule()

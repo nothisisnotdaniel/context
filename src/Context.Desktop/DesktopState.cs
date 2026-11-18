@@ -416,6 +416,76 @@ internal sealed class DesktopState
     });
 
     /// <summary>
+    /// The appointments of <paramref name="day"/> (<see cref="CalendarStore.Day(DateOnly, IReadOnlyList{Appointment})"/>
+    /// over the calendar files and the feed's cached copy) for the sidebar, with the unreadable files and the state's
+    /// clock in the calendar's zone, off the calling thread. Reads only, never downloads and never throws: any failure
+    /// gives an empty view with <see cref="DayAppointmentsView.Failed"/> set.
+    /// </summary>
+    public Task<DayAppointmentsView> DayAppointments(DateOnly day) => Task.Run(() =>
+    {
+        DateTime localNow = default;
+        try
+        {
+            localNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc), calendar.Zone);
+            CalendarDay found = ReadDay(day);
+            return new DayAppointmentsView(day, found.Appointments, found.Unreadable, localNow);
+        }
+        catch (Exception)
+        {
+            return new DayAppointmentsView(day, [], [], localNow, failed: true);
+        }
+    });
+
+    /// <summary>
+    /// The notes related to the appointments of <paramref name="day"/> whose title is ordinally
+    /// <paramref name="title"/> (<see cref="MeetingPrep"/> with no cap, over the title and the union of their
+    /// attendees), off the calling thread. Syncs the index under its lock, then reads
+    /// <see cref="TagIndex.NoteTags"/> and <see cref="NoteStore.List"/>. Reads only and never throws: an unreadable
+    /// index (or note list) gives <see cref="AppointmentPageView.IndexUnreadable"/>.
+    /// </summary>
+    public Task<AppointmentPageView> AppointmentPage(string title, DateOnly day) => Task.Run(() =>
+    {
+        Appointment? first = null;
+        try
+        {
+            List<Appointment> same = ReadDay(day).Appointments
+                .Where(a => string.Equals(a.Title, title, StringComparison.Ordinal))
+                .ToList();
+            first = same.FirstOrDefault();
+            List<string> attendees = same.SelectMany(a => a.Attendees).Distinct(StringComparer.Ordinal).ToList();
+            Appointment merged = first is null
+                ? new Appointment(title, null, day.ToDateTime(TimeOnly.MinValue), day.ToDateTime(TimeOnly.MinValue), false, attendees)
+                : new Appointment(title, first.Location, first.Start, first.End, first.AllDay, attendees);
+
+            IReadOnlyList<(string Note, string Tag)> noteTags;
+            IReadOnlyList<NoteInfo> listed;
+            lock (indexGate)
+            {
+                index.Sync(notes);
+                noteTags = index.NoteTags();
+                listed = notes.List();
+            }
+
+            return new AppointmentPageView(title, day, MeetingPrep.Related(merged, listed, noteTags, null), first, false);
+        }
+        catch (Exception)
+        {
+            // TagIndexException for a bad context.db; any other failure reads the same, with no exception text shown.
+            return new AppointmentPageView(title, day, [], first, true);
+        }
+    });
+
+    // The day's appointments from the calendar files and the feed's cached copy; never downloads.
+    private CalendarDay ReadDay(DateOnly day)
+    {
+        string? cached = feed?.ReadCache();
+        IReadOnlyList<Appointment> extra = cached is null
+            ? []
+            : CurrentView.FeedEvents(new CalendarFeedResult(CalendarFeedStatus.Stale, cached), calendar.Zone, day);
+        return calendar.Day(day, extra);
+    }
+
+    /// <summary>
     /// The inbox lines to triage for today (<see cref="InboxTriage.Items"/> over the plain <c>inbox</c> note read through
     /// <see cref="NoteStore.ReadForEdit"/>), off the calling thread. A missing inbox is an empty queue; a sensitive inbox
     /// is <see cref="TriageKind.Sensitive"/> without any key-store call. Reads only and never throws.

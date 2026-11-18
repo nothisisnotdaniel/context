@@ -162,7 +162,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     still there) and `IndexUnreadable` for a bad `context.db` (the due todos are still there). With no appointment
     and nothing due the index is not synced. Order in both front ends: day, appointments, due todos, linked notes.
     **Meeting prep** (job 160, `MeetingPrep.cs`): `Related` (parallel to `Appointments`, same count and order) holds
-    up to `MeetingPrep.MaxRelated` (3) `RelatedNote(Name, Tags, Words)` per appointment. `MeetingPrep.Words(text)`:
+    up to `MeetingPrep.MaxRelated` (3) `RelatedNote(Name, Tags, Words)` per appointment (the 3-argument `Related`; the
+    overload with `int? max`, `null` uncapped, serves the desktop's appointment page, job 214). `MeetingPrep.Words(text)`:
     maximal `char.IsLetterOrDigit` runs, lower-cased invariant, without runs under 3 chars, digit-only runs and
     `StopWords` (English and German fillers such as `the`, `meeting`, `weekly`, `und`, `für`), each once. An
     appointment's words come from its `Title` and `Attendees` (never `Location`). A note matches through a tag when
@@ -760,7 +761,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `DataWatcher` (one `FileSystemWatcher` with subfolders, `IsRelevant` filter: the top-level files as before, plus
     a `.md` at any depth except under a folder starting with `.` or under the top-level `calendar/`, and the top-level
     `settings.json` (job 207: saved searches edited outside the app; any case, not in a subfolder); 300 ms
-    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `CurrentPanel`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `LinksPanel`, `OutlinePanel`, `PersonPanel`, `ReviewPanel`, `TriagePanel`)
+    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `CurrentPanel`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `LinksPanel`, `OutlinePanel`, `DayAppointmentsPanel`, `AppointmentPanel`, `PersonPanel`, `ReviewPanel`, `TriagePanel`)
     inherit `StateComponent`, which injects the state and `DesktopActions` (internal types can't be
     public parameters). `DesktopActions` (with `ActionResult`: `ActionKind` `Done`/`Refused`/`Failed`, `ActionReason`,
     raw text) is the only write path: it never throws, runs one action at a time (`Busy`), refreshes the state after a change and has the test
@@ -1169,9 +1170,28 @@ Every factory agent reads this file before working on Context. Keep it short and
     text matches (`OutlineHeading.IndexOf`: trimmed, whitespace runs as one space, case ignored); none: the note stays
     at the top and grey `<name> has no heading <heading>.` (both through `DesktopText.OneLine`); a missing note is still
     `No note named <target>.`. `OutlinePanel` (`nav.outline-panel`, `aria-label="Outline"`) sits in `Main`'s right sidebar
-    as the first child of `aside.todos-region`, before `TodoPanel` (job 210; `.todos-region .outline-panel`: own 40vh
+    after `DayAppointmentsPanel` in `aside.todos-region`, before `TodoPanel` (job 210; `.todos-region .outline-panel`: own 40vh
     scroll, `--line` border), and shows one `button type="button"` (`outline-item level-<n>`, plain text) per heading from
     `OutlinePanel.MinHeadings` (3) on; a click calls `scrollToHeading` with its index and never takes focus by itself.
+    **Sidebar appointments** (job 214): `DayAppointmentsPanel` (`section.day-appointments`, `aria-label="Appointments"`)
+    is the first child of `aside.todos-region` in every state. Its `h2.day-appointments-day` reads `Today` for
+    `Snapshot.Today`, else `dddd, d MMMM yyyy` (invariant); icon-only `button.day-prev`/`day-next` (`Previous day`/`Next day`)
+    step the day, disabled at 1900-01-01/2100-12-31 (the chosen day is in memory only; back on today it follows the
+    snapshot). It lists `DesktopState.DayAppointments(day)` (calendar files plus the feed's cached copy through
+    `ReadCache` + `CurrentView.FeedEvents`, never a download; `Task.Run`, never throws, with the state's UTC clock in
+    `Zone` as `LocalNow`) through `AppointmentList.Shown` (Core, pure: on today the last past appointment, `End <= now`,
+    last in `CalendarStore.Day` order, plus every one not yet past; other days all) as `button.appointment-item`
+    (`CurrentView.Time` for that day, `OneLine` title or `(no title)`); grey `No appointments.`, red
+    `Can't read calendar/<file>`; it reloads on `State.Changed` keeping the rows, a day change shows `Loading…`. A click
+    goes to `Main.OpenAppointment` (save first, else `Discard changes to <name>?`; Discard drops the note and shows the page
+    over the current view): `Page.Appointment` shows `AppointmentPanel` (`section.appointment-page`, `h2` title, `Close`;
+    the outline is hidden, opening any note closes it). Same-titled appointments (ordinal) on the day share one page (a
+    second click keeps it, no reload). It lists `DesktopState.AppointmentPage(title, day)` (`MeetingPrep.Related(...,
+    max: null)` over the title and the union of the attendees of those appointments; `Sync`, `NoteTags()`, `List()`
+    under `indexGate`; any failure gives `IndexUnreadable`, red `Can't read the related notes.`) as `note-button`s
+    (title, full name in `title`, grey `.matches`) through `RequestOpen`; with none, `button.create-note-link`
+    `Create a new note` runs the `/meeting` steps (`Main.CreateAppointmentNote`, the first such appointment re-read
+    through `DayAppointments`) and opens the meeting note with accent `Created <name>`.
     `NoteEditor` renders none: it reloads the list after the mount, after every `Done` save (auto or explicit),
     `ReloadAsync` and `ShowSavedAsync` and reports each through `OnOutline` (empty when disposed or locked); `Main` keeps
     the current editor's latest list (each editor's callback carries the generation it was rendered with, so a report
