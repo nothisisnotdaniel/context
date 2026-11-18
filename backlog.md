@@ -108,7 +108,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#272](backlog/272-steady-maintests-windowclose-closedafterlastrender.md) Steady MainTests.WindowClose_ClosedAfterLastRender_IsStillSeen → 221-steady-windowclose-test
 - [x] [#303](backlog/303-steady-reviewpaneltests-render-filled-rowsandbutto.md) Steady ReviewPanelTests.Render_Filled_RowsAndButtons → 222-steady-reviewpanel-test
 - [x] [#291](backlog/291-remove-the-mail-panel-from-the.md) Remove the Mail panel from the right sidebar → 223-remove-mail-panel
-- [ ] [#292](backlog/292-no-browser-context-menu-on-right.md) No browser context menu on right click in the desktop app
+- [x] [#292](backlog/292-no-browser-context-menu-on-right.md) No browser context menu on right click in the desktop app → 224-no-context-menu
 - [ ] [#293](backlog/293-narrower-pick-a-day-calendar-popover.md) Narrower Pick a day calendar popover
 - [ ] [#294](backlog/294-hide-private-appointments.md) Hide private appointments
 - [ ] [#295](backlog/295-typing-name-makes-a-person-mention.md) Typing @[Name] makes a person mention chip right away
