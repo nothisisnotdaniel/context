@@ -133,13 +133,13 @@
     [Parameter]
     public EventCallback<IReadOnlyList<OutlineHeading>> OnOutline { get; set; }
 
-    private string DisplayName => DesktopText.OneLine(Name);
+    private string DisplayName => DesktopText.NoteName(Name);
 
     /// <summary>
     /// The title text: only the page's own name (the part of <see cref="Name"/> after its last <c>/</c>), cleaned like
     /// <see cref="DisplayName"/>. The breadcrumb above shows the ancestors, and the full name stays in the tooltip.
     /// </summary>
-    private string ShownTitle => DesktopText.OneLine(Name[(Name.LastIndexOf('/') + 1)..]);
+    private string ShownTitle => DesktopText.NoteName(Name[(Name.LastIndexOf('/') + 1)..]);
 
     /// <summary>True when the text changed since it was opened or last saved.</summary>
     public async Task<bool> IsDirtyAsync() => mounted && !disposed && await Interop.IsDirtyAsync(host);

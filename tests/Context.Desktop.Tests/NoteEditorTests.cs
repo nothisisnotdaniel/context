@@ -826,20 +826,23 @@ public sealed class NoteEditorTests : IDisposable
         Assert.DoesNotContain(title.GetAttribute("title")!, char.IsControl);
     }
 
-    // 235 AC-3: a last segment with a bidi override goes through the same cleaning as the full name (DesktopText.OneLine).
+    // 235 AC-3: a last segment with bidi controls shows them as placeholders; no raw bidi character reaches the title or
+    // its tooltip.
     [Fact]
-    public async Task Title_Subpage_BidiSegment_CleanedLikeFullName()
+    public async Task Title_Subpage_BidiSegment_NoRawBidi()
     {
-        const string Segment = "c\u202Eevil";
+        const string Segment = "c\u202Eevil\u2066x";
         WriteSubpage(Segment, "text\n");
         _ = new EditorJs(data.Bunit);
 
         IRenderedComponent<NoteEditor> cut = await Render("a/b/" + Segment);
 
         IElement title = cut.Find("h2.note-title");
-        Assert.Equal(DesktopText.OneLine(Segment), title.TextContent);
-        Assert.Equal(DesktopText.OneLine("a/b/" + Segment), title.GetAttribute("title"));
-        Assert.DoesNotContain("a/b", title.TextContent, StringComparison.Ordinal);
+        Assert.Equal("c\uFFFDevil\uFFFDx", title.TextContent);
+        Assert.Equal("a/b/c\uFFFDevil\uFFFDx", title.GetAttribute("title"));
+        Assert.DoesNotContain(title.TextContent, IsBidiControl);
+        Assert.DoesNotContain(title.GetAttribute("title")!, IsBidiControl);
+        Assert.DoesNotContain(cut.Markup, IsBidiControl);
     }
 
     // 235 AC-4: an unreadable subpage names the full name in its red line.
@@ -1197,6 +1200,8 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Equal($"The editor couldn't start. {name} was not changed.", line.TextContent);
         Assert.Empty(cut.FindAll(".unreadable"));
     }
+
+    private static bool IsBidiControl(char c) => c is >= '\u202A' and <= '\u202E' or >= '\u2066' and <= '\u2069';
 
     // The pages a, a/b and a/b/<last> on disk.
     private void WriteSubpage(string last, string text)
