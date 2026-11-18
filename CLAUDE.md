@@ -872,14 +872,21 @@ Every factory agent reads this file before working on Context. Keep it short and
     `DesktopActions.OpenBriefing()` (`BriefingName()` for the unsaved-changes check): accent `Created <name>` after a
     create, red `briefings is sensitive, so no briefing can be written.` (`BriefingSensitiveText`) or
     `Can't write <name>.` (`BriefingFailedText`).
-    **Meeting note:** `MeetingNote` (Core) names the note `yyyy-MM-dd <title>` (local start date, invariant; the
-    one-line title with `/ \ : * ? " < > |` and control characters as spaces, collapsed, trimmed, cut to
-    `MaxTitlePart` without splitting a surrogate pair, trailing `.md`, dots and spaces stripped, `Meeting` when empty;
-    always valid for `ValidateTitle` and equal to `NormalizeTitle`). `Format` writes `# <name>`, `#meeting`, `- Title:`,
-    `- Time:` (`MeetingNote.Time`), `- Location:` (only when set) and `- Attendees:` (`@[name]` mentions, or `none`).
-    `Ensure(notes, appointment)` returns `Existing` or `Sensitive` without writing, else creates the top-level note
-    through `CreateWithText` (a race counts as existing). `Today(calendar, feed, day)` gives the numbered list
-    (`CurrentView` order: files plus feed).
+    **Meeting note:** `MeetingNote` (Core) names the note `Meetings/<title part>/yyyy-MM-dd` (job 220; local start
+    date, invariant). `TitlePartFor`: the one-line title with `/ \ : * ? " < > |` and control characters as spaces,
+    collapsed, trimmed, cut to `MaxTitlePart` (100) without splitting a surrogate pair, trailing `.md`, dots and spaces
+    stripped, then leading dots and spaces; a part `ValidateTitle` still refuses (a Windows-reserved stem) becomes
+    `Meeting <part>` (cut and trimmed again), an empty one `Meeting`; always valid and equal to `NormalizeTitle`.
+    `LegacyNameFor` keeps the old top-level `yyyy-MM-dd <title>` rule (89-character cut, leading dots kept);
+    `IsNoteOf(appointment, name)` is true for either name, ignoring case (the desktop's unsaved-changes checks for
+    `/meeting` and `Create a new note`). `Format` writes `# yyyy-MM-dd`, `#meeting`, `- Title:`, `- Time:`
+    (`MeetingNote.Time`), `- Location:` (only when set) and `- Attendees:` (`@[name]` mentions, or `none`).
+    `Ensure(notes, appointment)` returns `Existing` for an existing new-style note (any case), else `Existing` or
+    `Sensitive` for a top-level legacy note, all without writing; else it creates the missing `Meetings`
+    (`# Meetings\n`) and `Meetings/<part>` (`# <part>\n`) through `Create`/`CreateChild` (existing ones in any case are
+    reused, their spelling kept) and the note through `CreateChild` (a race counts as existing). A sensitive
+    top-level `Meetings` throws a plain `IOException` (the `Can't write <name>.` line). Existing legacy notes are
+    never moved. `Today(calendar, feed, day)` gives the numbered list (`CurrentView` order: files plus feed).
     **Daily note:** `DailyNote` (Core) names the note `yyyy-MM-dd` (invariant) for the local day. `Ensure(notes, day,
     compose)` returns `Existing` or `Sensitive` for a note of that name without calling `compose` or writing, else
     creates the top-level note through `CreateWithText` (a `NoteExistsException` race counts as existing).

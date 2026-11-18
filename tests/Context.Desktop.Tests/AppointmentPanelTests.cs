@@ -277,7 +277,8 @@ public sealed class AppointmentPanelTests : IDisposable
         Assert.Equal([("Retro board", "projects/Retro board", "retro")], Notes(cut));
     }
 
-    // AC-8: with no related note, the create link makes the meeting note and opens it with an accent Created line.
+    // AC-8, 220 AC-10: with no related note, the create link makes Meetings/Budget/2026-10-29 and opens it with an
+    // accent Created line.
     [Fact]
     public async Task NoRelated_CreateLink_MakesAndOpensMeetingNote()
     {
@@ -294,12 +295,14 @@ public sealed class AppointmentPanelTests : IDisposable
 
         await link.ClickAsync(new MouseEventArgs());
 
-        const string Name = "2026-10-29 Budget";
+        const string Name = "Meetings/Budget/2026-10-29";
         cut.WaitForAssertion(() => Assert.Equal(Name, cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
-        Assert.Equal("Created " + Name, cut.Find(".main-status").TextContent);
+        Assert.Equal("Created Meetings/Budget/2026-10-29", cut.Find(".main-status").TextContent);
         Assert.Contains("accent", cut.Find(".main-status").ClassList);
-        Assert.Contains("11:00", File.ReadAllText(Path.Combine(data.Root, Name + ".md")), StringComparison.Ordinal);
+        Assert.Contains(
+            "11:00", File.ReadAllText(Path.Combine(data.Root, "Meetings", "Budget", "2026-10-29.md")), StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(data.Root, "2026-10-29 Budget.md")));
         Assert.Empty(cut.FindAll(".appointment-page"));
     }
 

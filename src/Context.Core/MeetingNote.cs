@@ -30,14 +30,18 @@ internal sealed record MeetingNoteResult
 
     public MeetingNoteKind Kind { get; }
 
-    /// <summary>The meeting note's name (<c>yyyy-MM-dd &lt;title&gt;</c>).</summary>
+    /// <summary>
+    /// The meeting note's name: <c>Meetings/&lt;title&gt;/yyyy-MM-dd</c> in the existing spelling, or a legacy
+    /// top-level <c>yyyy-MM-dd &lt;title&gt;</c>.
+    /// </summary>
     public string Name { get; }
 }
 
 /// <summary>
-/// The meeting note: the top-level note <c>yyyy-MM-dd &lt;title&gt;</c> for one appointment, tagged <c>#meeting</c>
-/// and filled with the appointment's title, time, location and attendees. An existing one (plain or sensitive) is
-/// never read, changed or replaced, so each meeting keeps one note.
+/// The meeting note: the subpage <c>Meetings/&lt;title&gt;/yyyy-MM-dd</c> for one appointment, tagged <c>#meeting</c>
+/// and filled with the appointment's title, time, location and attendees. An existing one, or a legacy top-level
+/// <c>yyyy-MM-dd &lt;title&gt;</c> note (plain or sensitive), is never read, changed or replaced, so each meeting keeps
+/// one note.
 /// </summary>
 internal static class MeetingNote
 {
@@ -47,11 +51,17 @@ internal static class MeetingNote
     /// <summary>The title used when nothing of the appointment's title is left.</summary>
     public const string FallbackTitle = "Meeting";
 
+    /// <summary>The top-level note that holds one page per appointment title.</summary>
+    public const string FolderName = "Meetings";
+
+    /// <summary>The longest title part: it is a segment of its own, so <see cref="NoteStore.MaxTitleLength"/>.</summary>
+    public const int MaxTitlePart = NoteStore.MaxTitleLength;
+
     /// <summary>
-    /// The longest title part of the name: <c>yyyy-MM-dd</c> and a space take 11 of
+    /// The longest title part of a legacy name: <c>yyyy-MM-dd</c> and a space take 11 of
     /// <see cref="NoteStore.MaxTitleLength"/>.
     /// </summary>
-    public const int MaxTitlePart = NoteStore.MaxTitleLength - 11;
+    public const int LegacyMaxTitlePart = NoteStore.MaxTitleLength - 11;
 
     /// <summary>The error when there is no appointment today.</summary>
     public const string NoAppointmentsText = "There are no appointments today.";
@@ -119,28 +129,61 @@ internal static class MeetingNote
     }
 
     /// <summary>
-    /// The meeting note's name: <c>yyyy-MM-dd &lt;title&gt;</c> (invariant), the date being the local start date. The
-    /// title is the one-line cleaned title with each <c>/ \ : * ? " &lt; &gt; |</c> and control character turned into
-    /// a space, whitespace runs collapsed, trimmed, cut to <see cref="MaxTitlePart"/> characters (never inside a
-    /// surrogate pair), then trailing <c>.md</c>, dots and spaces removed until none is left; an empty one is
+    /// The title part of the name, one segment: the one-line cleaned title with each <c>/ \ : * ? " &lt; &gt; |</c> and
+    /// control character turned into a space, whitespace runs collapsed, trimmed, cut to <see cref="MaxTitlePart"/>
+    /// characters (never inside a surrogate pair), trailing <c>.md</c>, dots and spaces removed until none is left,
+    /// then leading dots and spaces removed. A part that still fails <see cref="NoteStore.ValidateTitle"/> (a
+    /// Windows-reserved stem) becomes <c>Meeting &lt;part&gt;</c>, cut and trimmed again; an empty one is
     /// <see cref="FallbackTitle"/>. The result always passes <see cref="NoteStore.ValidateTitle"/> and equals its own
     /// <see cref="NoteStore.NormalizeTitle"/>.
     /// </summary>
-    public static string NameFor(Appointment appointment)
+    public static string TitlePartFor(Appointment appointment)
     {
-        string date = Date(appointment.Start);
-        return $"{date} {TitlePart(appointment.Title)}";
+        string part = Clean(appointment.Title, MaxTitlePart).TrimStart('.', ' ');
+        if (part.Length > 0 && NoteStore.ValidateTitle(part) is not null)
+        {
+            part = TrimEnd(Cut(FallbackTitle + " " + part, MaxTitlePart));
+        }
+
+        return part.Length == 0 ? FallbackTitle : part;
     }
 
     /// <summary>
-    /// The text of a new meeting note, with <c>\n</c> line ends and ending in <c>\n</c>: <c># &lt;name&gt;</c>, a blank
+    /// The meeting note's name: <c>Meetings/&lt;title part&gt;/yyyy-MM-dd</c> (<see cref="TitlePartFor"/>; the date
+    /// is the local start date, invariant).
+    /// </summary>
+    public static string NameFor(Appointment appointment) =>
+        $"{FolderName}/{TitlePartFor(appointment)}/{Date(appointment.Start)}";
+
+    /// <summary>
+    /// The name meeting notes had before job 220: <c>yyyy-MM-dd &lt;title&gt;</c> (invariant), the date being the local
+    /// start date. The title is cleaned like <see cref="TitlePartFor"/> but cut to <see cref="LegacyMaxTitlePart"/>
+    /// characters, leading dots stay and an empty one is <see cref="FallbackTitle"/>. The result always passes
+    /// <see cref="NoteStore.ValidateTitle"/> and equals its own <see cref="NoteStore.NormalizeTitle"/>.
+    /// </summary>
+    public static string LegacyNameFor(Appointment appointment)
+    {
+        string part = Clean(appointment.Title, LegacyMaxTitlePart);
+        return $"{Date(appointment.Start)} {(part.Length == 0 ? FallbackTitle : part)}";
+    }
+
+    /// <summary>
+    /// Whether <paramref name="name"/> is the meeting note of <paramref name="appointment"/>: its
+    /// <see cref="NameFor"/> or <see cref="LegacyNameFor"/>, ignoring case.
+    /// </summary>
+    public static bool IsNoteOf(Appointment appointment, string name) =>
+        string.Equals(name, NameFor(appointment), StringComparison.OrdinalIgnoreCase)
+        || string.Equals(name, LegacyNameFor(appointment), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The text of a new meeting note, with <c>\n</c> line ends and ending in <c>\n</c>: <c># yyyy-MM-dd</c>, a blank
     /// line, <c>#meeting</c>, a blank line, then <c>- Title:</c>, <c>- Time:</c>, <c>- Location:</c> (only when set)
     /// and <c>- Attendees:</c> lines. Every inserted value is one line.
     /// </summary>
     public static string Format(Appointment appointment)
     {
         StringBuilder text = new StringBuilder();
-        text.Append("# ").Append(NameFor(appointment)).Append('\n');
+        text.Append("# ").Append(Date(appointment.Start)).Append('\n');
         text.Append('\n');
         text.Append('#').Append(Tag).Append('\n');
         text.Append('\n');
@@ -159,31 +202,60 @@ internal static class MeetingNote
     }
 
     /// <summary>
-    /// Makes sure the meeting note for <paramref name="appointment"/> exists. An existing plain note (ignoring case)
-    /// gives <see cref="MeetingNoteKind.Existing"/> and a sensitive one <see cref="MeetingNoteKind.Sensitive"/>, both
-    /// without writing anything. Otherwise the top-level note is created with <see cref="Format"/>'s text through
-    /// <see cref="NoteStore.CreateWithText"/> (temp file and a move that never overwrites); a note that appeared in
-    /// between counts as existing. Throws <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> when
-    /// the folder can't be read or written. <paramref name="beforeCreate"/> (tests only) runs after the check, just
-    /// before the create.
+    /// Makes sure the meeting note for <paramref name="appointment"/> exists. An existing
+    /// <c>Meetings/&lt;part&gt;/yyyy-MM-dd</c> (ignoring case) gives <see cref="MeetingNoteKind.Existing"/>; otherwise a
+    /// top-level <see cref="LegacyNameFor"/> note gives <see cref="MeetingNoteKind.Existing"/> (plain) or
+    /// <see cref="MeetingNoteKind.Sensitive"/> (sealed); all without writing anything. Otherwise the missing parents
+    /// <c>Meetings</c> (<c># Meetings\n</c>) and <c>Meetings/&lt;part&gt;</c> (<c># &lt;part&gt;\n</c>) are created
+    /// through <see cref="NoteStore.Create"/> and <see cref="NoteStore.CreateChild(string, string)"/>, existing ones (in
+    /// any case) are reused unchanged, then the note through
+    /// <see cref="NoteStore.CreateChild(string, string, string)"/> with <see cref="Format"/>'s text; a note or parent
+    /// that appeared in between counts as existing. Throws <see cref="IOException"/> when a sensitive top-level
+    /// <c>Meetings</c> is in the way, and <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> when
+    /// the folder can't be read or written. <paramref name="beforeCreate"/> (tests only) runs after the checks, just
+    /// before the first create.
     /// </summary>
     public static MeetingNoteResult Ensure(NoteStore notes, Appointment appointment, Action? beforeCreate = null)
     {
-        string name = NameFor(appointment);
-        if (Existing(notes, name) is { } found)
+        string part = TitlePartFor(appointment);
+        string date = Date(appointment.Start);
+        string name = $"{FolderName}/{part}/{date}";
+        if (notes.TryFind(name, out NoteInfo? current) && current is not null)
         {
-            return found;
+            return new MeetingNoteResult(MeetingNoteKind.Existing, current.Name);
         }
 
+        if (Existing(notes, LegacyNameFor(appointment)) is { } legacy)
+        {
+            return legacy;
+        }
+
+        CheckFolderNotSensitive(notes);
+        beforeCreate?.Invoke();
+        string heading = "# " + date + "\n";
+        string text = Format(appointment);
+        string body = text.StartsWith(heading, StringComparison.Ordinal) ? text[heading.Length..] : text;
         try
         {
-            beforeCreate?.Invoke();
-            NoteInfo created = notes.CreateWithText(name, Format(appointment));
-            return new MeetingNoteResult(MeetingNoteKind.Created, created.Name);
+            NoteInfo folder = Parent(notes, null, FolderName);
+            NoteInfo meeting = Parent(notes, folder.Name, part);
+            try
+            {
+                NoteInfo created = notes.CreateChild(meeting.Name, date, body);
+                return new MeetingNoteResult(MeetingNoteKind.Created, created.Name);
+            }
+            catch (NoteExistsException)
+            {
+                string wanted = meeting.Name + "/" + date;
+                return new MeetingNoteResult(
+                    MeetingNoteKind.Existing,
+                    notes.TryFind(wanted, out NoteInfo? found) && found is not null ? found.Name : wanted);
+            }
         }
-        catch (NoteExistsException)
+        catch (ArgumentException ex)
         {
-            return Existing(notes, name) ?? new MeetingNoteResult(MeetingNoteKind.Existing, name);
+            // A parent that went away in between or can't hold subpages: the note can't be written.
+            throw new IOException("The meeting note can't be created.", ex);
         }
     }
 
@@ -217,8 +289,9 @@ internal static class MeetingNote
             : $"{Date(start)} {from} to {Date(end)} {to}";
     }
 
-    // The title part of the name (see NameFor).
-    private static string TitlePart(string title)
+    // The title cleaned to one line of at most max chars with no path or control character and no trailing ".md",
+    // dot or space; may be empty.
+    private static string Clean(string title, int max)
     {
         string cleaned = SafeText.Clean(title);
         StringBuilder spaced = new StringBuilder(cleaned.Length);
@@ -227,18 +300,29 @@ internal static class MeetingNote
             spaced.Append(char.IsControl(c) || PathChars.Contains(c, StringComparison.Ordinal) ? ' ' : c);
         }
 
-        string part = TagParser.CollapseWhitespace(spaced.ToString());
-        if (part.Length > MaxTitlePart)
-        {
-            int cut = MaxTitlePart;
-            if (char.IsHighSurrogate(part[cut - 1]))
-            {
-                cut--;
-            }
+        return TrimEnd(Cut(TagParser.CollapseWhitespace(spaced.ToString()), max));
+    }
 
-            part = part[..cut];
+    // At most max chars, never ending in a lone high surrogate.
+    private static string Cut(string part, int max)
+    {
+        if (part.Length <= max)
+        {
+            return part;
         }
 
+        int cut = max;
+        if (char.IsHighSurrogate(part[cut - 1]))
+        {
+            cut--;
+        }
+
+        return part[..cut];
+    }
+
+    // Removes trailing ".md", dots and spaces until none is left.
+    private static string TrimEnd(string part)
+    {
         string before;
         do
         {
@@ -251,7 +335,46 @@ internal static class MeetingNote
         }
         while (part.Length != before.Length);
 
-        return part.Length == 0 ? FallbackTitle : part;
+        return part;
+    }
+
+    // A sensitive top-level Meetings can't hold subpages: a plain IOException, not NoteExistsException.
+    private static void CheckFolderNotSensitive(NoteStore notes)
+    {
+        if (notes.TryFindSensitive(FolderName, out _))
+        {
+            throw new IOException("The meetings note is sensitive.");
+        }
+    }
+
+    // The page parent/title (top level when parent is null), reused in any case or created as "# title\n".
+    private static NoteInfo Parent(NoteStore notes, string? parent, string title)
+    {
+        string wanted = parent is null ? title : parent + "/" + title;
+        if (notes.TryFind(wanted, out NoteInfo? found) && found is not null)
+        {
+            return found;
+        }
+
+        try
+        {
+            return parent is null ? notes.Create(title) : notes.CreateChild(parent, title);
+        }
+        catch (NoteExistsException)
+        {
+            // Created by someone else between the check and the write.
+            if (parent is null)
+            {
+                CheckFolderNotSensitive(notes);
+            }
+
+            if (notes.TryFind(wanted, out found) && found is not null)
+            {
+                return found;
+            }
+
+            throw new IOException("The meetings page can't be found.");
+        }
     }
 
     // An attendee as a mention when the mention parser reads exactly that name back, else as one-line plain text.

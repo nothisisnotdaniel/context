@@ -1813,8 +1813,8 @@ public sealed class CliTests : IDisposable
         new CalendarLink(root).Set(FakeHttpHandler.Link);
     }
 
-    // 167 AC-1/AC-5: meeting <n> numbers the appointments as current lists them (feed included), creates the note
-    // and prints it like note show; a second run prints the same and writes nothing.
+    // 167 AC-1/AC-5, 220 AC-9: meeting <n> numbers the appointments as current lists them (feed included), creates
+    // Meetings/<title>/<date> and prints it like note show; a second run prints the same and writes nothing.
     [Fact]
     public void Meeting_CreatesThenPrintsLikeNoteShow()
     {
@@ -1823,16 +1823,21 @@ public sealed class CliTests : IDisposable
         Result first = Run("meeting", "2");
 
         const string Expected =
-            "# 2026-10-29 Review Q4 plan\n\n#meeting\n\n- Title: Review: Q4/plan\n- Time: 2026-10-29 10:00-11:00\n"
+            "# 2026-10-29\n\n#meeting\n\n- Title: Review: Q4/plan\n- Time: 2026-10-29 10:00-11:00\n"
             + "- Location: Room 1\n- Attendees: @[Anna Schmidt], @[Bob]\n";
+        string file = Path.Combine("Meetings", "Review Q4 plan", "2026-10-29.md");
         Assert.Equal((0, Expected, string.Empty), (first.Code, first.Out, first.Err));
-        Assert.Equal(Expected, Read("2026-10-29 Review Q4 plan.md"));
-        Assert.Equal(Run("note", "show", "2026-10-29 Review Q4 plan").Out, first.Out);
-        Assert.DoesNotContain("example.org", Read("2026-10-29 Review Q4 plan.md"), StringComparison.Ordinal);
+        Assert.Equal(Expected, Read(file));
+        Assert.Equal("# Meetings\n", Read("Meetings.md"));
+        Assert.Equal("# Review Q4 plan\n", Read(Path.Combine("Meetings", "Review Q4 plan.md")));
+        Assert.False(File.Exists(Path.Combine(root, "2026-10-29 Review Q4 plan.md")));
+        Assert.Equal(Run("note", "show", "Meetings/Review Q4 plan/2026-10-29").Out, first.Out);
+        Assert.DoesNotContain("example.org", Read(file), StringComparison.Ordinal);
 
         Result standup = Run("MEETING", "01");
         Assert.Equal(0, standup.Code);
-        Assert.StartsWith("# 2026-10-29 Standup\n\n#meeting\n\n- Title: Standup\n- Time: 2026-10-29 08:00-08:15\n", standup.Out, StringComparison.Ordinal);
+        Assert.StartsWith("# 2026-10-29\n\n#meeting\n\n- Title: Standup\n- Time: 2026-10-29 08:00-08:15\n", standup.Out, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(root, "Meetings", "Standup", "2026-10-29.md")));
 
         Dictionary<string, string> before = Snapshot();
         Result second = Run("meeting", "2");
@@ -1841,7 +1846,7 @@ public sealed class CliTests : IDisposable
         Assert.Equal(before, Snapshot());
     }
 
-    // 167 AC-5: an existing note (another case, other bytes) is printed as it is and never changed.
+    // 167 AC-5, 220 AC-6: an existing legacy note (another case, other bytes) is printed as it is and never changed.
     [Fact]
     public void Meeting_ExistingNote_PrintedUnchanged()
     {
@@ -1887,9 +1892,23 @@ public sealed class CliTests : IDisposable
     public void Meeting_WriteFails_FixedLine()
     {
         WriteIcs("work.ics", MeetingIcs);
-        Directory.CreateDirectory(Path.Combine(root, "2026-10-29 Review Q4 plan.md"));
+        WriteNested("Meetings", "# Meetings\n");
+        WriteNested("Meetings/Review Q4 plan", "# Review Q4 plan\n");
+        Directory.CreateDirectory(Path.Combine(root, "Meetings", "Review Q4 plan", "2026-10-29.md"));
 
-        AssertError(Run("meeting", "1"), 1, "Can't write 2026-10-29 Review Q4 plan.");
+        AssertError(Run("meeting", "1"), 1, "Can't write Meetings/Review Q4 plan/2026-10-29.");
+    }
+
+    // 220 AC-8: a sensitive top-level Meetings is in the way: the fixed write line, nothing written.
+    [Fact]
+    public void Meeting_SensitiveMeetingsFolder_FixedLineNothingWritten()
+    {
+        WriteIcs("work.ics", MeetingIcs);
+        WriteSealed("Meetings");
+        Dictionary<string, string> before = Snapshot();
+
+        AssertError(Run("meeting", "1"), 1, "Can't write Meetings/Review Q4 plan/2026-10-29.");
+        Assert.Equal(before, Snapshot());
     }
 
     // 167 AC-5/AC-7: a missing, extra, non-digit, zero or overflowing number, or --json, is a usage error before the

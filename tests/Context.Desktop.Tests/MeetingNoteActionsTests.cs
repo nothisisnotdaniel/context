@@ -12,13 +12,17 @@ public sealed class MeetingNoteActionsTests : IDisposable
     // Opening a note reads it on Task.Run; every wait passes this bounded timeout.
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
 
-    private const string Review = "2026-10-29 Review Q4 plan";
+    private const string Review = "Meetings/Review Q4 plan/2026-10-29";
+
+    // The name meeting notes had before job 220.
+    private const string LegacyReview = "2026-10-29 Review Q4 plan";
 
     private readonly DesktopFixture data = new();
 
     public void Dispose() => data.Dispose();
 
-    private string PathOf(string name, string extension = ".md") => Path.Combine(data.Root, name + extension);
+    private string PathOf(string name, string extension = ".md") =>
+        Path.Combine([data.Root, .. name.Split('/')]) + extension;
 
     // Two appointments: 1 Standup (09:00 floating), 2 "Review: Q4/plan" (11:00 floating, room, attendee).
     private void WriteDay()
@@ -35,7 +39,8 @@ public sealed class MeetingNoteActionsTests : IDisposable
         return snapshot.Current!.Appointments[number - 1];
     }
 
-    // A missing note is created with MeetingNote.Format's bytes, then the state is refreshed.
+    // 220 AC-10: a missing note is created as Meetings/<title>/<date> with MeetingNote.Format's bytes, then the state
+    // is refreshed.
     [Fact]
     public async Task OpenMeetingNote_Missing_CreatesItAndRefreshes()
     {
@@ -47,27 +52,38 @@ public sealed class MeetingNoteActionsTests : IDisposable
         Assert.Equal((ActionKind.Done, ActionReason.None, Review), (result.Kind, result.Reason, result.Text));
         Assert.Equal(
             Encoding.UTF8.GetBytes(
-                "# 2026-10-29 Review Q4 plan\n\n#meeting\n\n- Title: Review: Q4/plan\n- Time: 2026-10-29 11:00-12:00\n"
+                "# 2026-10-29\n\n#meeting\n\n- Title: Review: Q4/plan\n- Time: 2026-10-29 11:00-12:00\n"
                 + "- Location: Room 1\n- Attendees: @[Anna Schmidt]\n"),
             File.ReadAllBytes(PathOf(Review)));
         Assert.Contains(data.State!.Snapshot!.Notes, n => n.Name == Review);
+        Assert.Equal("# Meetings\n", File.ReadAllText(PathOf("Meetings")));
+        Assert.Equal("# Review Q4 plan\n", File.ReadAllText(PathOf("Meetings/Review Q4 plan")));
+        Assert.False(File.Exists(PathOf(LegacyReview)));
     }
 
-    // An existing plain or sensitive note: Done/Unchanged with its name, nothing written, no key call, no refresh.
+    // An existing new-style note, or a legacy plain or sensitive one: Done/Unchanged with its name, nothing written,
+    // no key call, no refresh.
     [Theory]
-    [InlineData(".md")]
-    [InlineData(".ctxs")]
-    public async Task OpenMeetingNote_Existing_Unchanged(string extension)
+    [InlineData(Review, ".md")]
+    [InlineData(LegacyReview, ".md")]
+    [InlineData(LegacyReview, ".ctxs")]
+    public async Task OpenMeetingNote_Existing_Unchanged(string name, string extension)
     {
         WriteDay();
-        data.WriteFile(Review + extension, "kept\r\n");
+        if (name == Review)
+        {
+            data.WriteNote("Meetings", "# Meetings\n");
+            data.WriteFile(Path.Combine("Meetings", "Review Q4 plan.md"), "# Review Q4 plan\n");
+        }
+
+        data.WriteFile(Path.Combine(name.Split('/')) + extension, "kept\r\n");
         Appointment review = await AppointmentAsync(2);
         DesktopSnapshot snapshot = await data.RefreshAsync();
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
 
         ActionResult result = await data.Actions!.OpenMeetingNote(review);
 
-        Assert.Equal((ActionKind.Done, ActionReason.Unchanged, Review), (result.Kind, result.Reason, result.Text));
+        Assert.Equal((ActionKind.Done, ActionReason.Unchanged, name), (result.Kind, result.Reason, result.Text));
         Assert.Equal(before, FileSnapshot.Take(data.Root));
         Assert.Equal(0, data.Keys.Agrees);
         Assert.Same(snapshot, data.State!.Snapshot);
@@ -84,9 +100,26 @@ public sealed class MeetingNoteActionsTests : IDisposable
         ActionResult result = await data.Actions.OpenMeetingNote(review);
 
         Assert.Equal(
-            (ActionKind.Failed, ActionReason.WriteFailed, "Can't write 2026-10-29 Review Q4 plan."),
+            (ActionKind.Failed, ActionReason.WriteFailed, "Can't write Meetings/Review Q4 plan/2026-10-29."),
             (result.Kind, result.Reason, result.Text));
         Assert.False(File.Exists(PathOf(Review)));
+    }
+
+    // 220 AC-8: a sensitive top-level Meetings: WriteFailed with the fixed text, nothing written.
+    [Fact]
+    public async Task OpenMeetingNote_SensitiveMeetings_WriteFailed()
+    {
+        WriteDay();
+        data.WriteFile("Meetings.ctxs", "sealed");
+        Appointment review = await AppointmentAsync(2);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
+
+        ActionResult result = await data.Actions!.OpenMeetingNote(review);
+
+        Assert.Equal(
+            (ActionKind.Failed, ActionReason.WriteFailed, "Can't write Meetings/Review Q4 plan/2026-10-29."),
+            (result.Kind, result.Reason, result.Text));
+        Assert.Equal(before, FileSnapshot.Take(data.Root));
     }
 
     // Busy-guarded: a call while another action runs is refused and creates nothing.
@@ -129,7 +162,7 @@ public sealed class MeetingNoteActionsTests : IDisposable
         Assert.Equal("Created " + Review, cut.Find(".main-status").TextContent);
         Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
         cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
-        Assert.StartsWith("# 2026-10-29 Review Q4 plan\n\n#meeting\n", File.ReadAllText(PathOf(Review)), StringComparison.Ordinal);
+        Assert.StartsWith("# 2026-10-29\n\n#meeting\n", File.ReadAllText(PathOf(Review)), StringComparison.Ordinal);
     }
 
     // AC-1: the number counts every appointment of today, as `context current` does (216: no dashboard shows them).
@@ -145,8 +178,8 @@ public sealed class MeetingNoteActionsTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await RunPalette(cut, "/meeting 20");
 
-        cut.WaitForAssertion(() => Assert.Equal("2026-10-29 M19", cut.Find(".note-title").TextContent), Wait);
-        Assert.True(File.Exists(PathOf("2026-10-29 M19")));
+        cut.WaitForAssertion(() => Assert.Equal("Meetings/M19/2026-10-29", cut.Find(".note-title").TextContent), Wait);
+        Assert.True(File.Exists(PathOf("Meetings/M19/2026-10-29")));
     }
 
     // The appointment comes from the shown snapshot, not from a new read of the calendar.
@@ -161,8 +194,8 @@ public sealed class MeetingNoteActionsTests : IDisposable
 
         await RunPalette(cut, "/meeting 1");
 
-        cut.WaitForAssertion(() => Assert.Equal("2026-10-29 Standup", cut.Find(".note-title").TextContent), Wait);
-        Assert.False(File.Exists(PathOf("2026-10-29 Early")));
+        cut.WaitForAssertion(() => Assert.Equal("Meetings/Standup/2026-10-29", cut.Find(".note-title").TextContent), Wait);
+        Assert.False(Directory.Exists(PathOf("Meetings/Early", string.Empty)));
     }
 
     // A blank or invalid number: red usage line, nothing written.
@@ -208,20 +241,21 @@ public sealed class MeetingNoteActionsTests : IDisposable
         Assert.Equal(before, FileSnapshot.Take(data.Root));
     }
 
-    // An existing note opens as it is, with no "Created" line.
+    // 220 AC-6: an existing legacy note opens as it is, with no "Created" line and no new-style note.
     [Fact]
     public async Task PaletteMeeting_Existing_OpensUnchanged()
     {
         WriteDay();
-        data.WriteNote(Review, "# mine\n");
+        data.WriteNote(LegacyReview, "# mine\n");
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
         await RunPalette(cut, "/meeting 2");
 
-        cut.WaitForAssertion(() => Assert.Equal(Review, cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(LegacyReview, cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
-        Assert.Equal("# mine\n", File.ReadAllText(PathOf(Review)));
+        Assert.Equal("# mine\n", File.ReadAllText(PathOf(LegacyReview)));
+        Assert.False(File.Exists(PathOf("Meetings")));
         Assert.DoesNotContain("Created", cut.Find(".main-status").TextContent, StringComparison.Ordinal);
     }
 
@@ -286,23 +320,33 @@ public sealed class MeetingNoteActionsTests : IDisposable
         Assert.False(File.Exists(PathOf(Review)));
     }
 
-    // The open meeting note itself with unsaved changes: no question, the editor stays as it is.
-    [Fact]
-    public async Task PaletteMeeting_DirtySameNote_NoQuestion()
+    // 220 AC-11: the open meeting note itself (legacy or new-style, any case) with unsaved changes: no question, the
+    // editor stays as it is.
+    [Theory]
+    [InlineData(LegacyReview)]
+    [InlineData("2026-10-29 REVIEW Q4 PLAN")]
+    [InlineData(Review)]
+    public async Task PaletteMeeting_DirtySameNote_NoQuestion(string name)
     {
         WriteDay();
-        data.WriteNote(Review, "# mine\n");
+        if (name.Contains('/', StringComparison.Ordinal))
+        {
+            data.WriteNote("Meetings", "# Meetings\n");
+            data.WriteFile(Path.Combine("Meetings", "Review Q4 plan.md"), "# Review Q4 plan\n");
+        }
+
+        data.WriteFile(Path.Combine(name.Split('/')) + ".md", "# mine\n");
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        await Open(cut, js, Review);
-        js.Edit("# mine\n\nUnsaved\n");
+        await OpenByPalette(cut, js, name);
+        js.EditUnsavable("# mine\n\nUnsaved\n");
 
         await RunPalette(cut, "/meeting 2");
 
         Assert.Empty(cut.FindAll("[role=dialog]"));
-        Assert.Equal(Review, cut.Find(".note-title").TextContent);
+        Assert.Equal(name, cut.Find(".note-title").TextContent);
         Assert.Single(js.Calls("ContextEditor.mount"));
-        Assert.Equal("# mine\n", File.ReadAllText(PathOf(Review)));
+        Assert.Equal("# mine\n", File.ReadAllText(PathOf(name)));
     }
 
     // A write failure shows the fixed red line and opens nothing.
@@ -317,27 +361,28 @@ public sealed class MeetingNoteActionsTests : IDisposable
         await RunPalette(cut, "/meeting 2");
 
         cut.WaitForAssertion(
-            () => Assert.Equal("Can't write 2026-10-29 Review Q4 plan.", cut.Find(".main-status").TextContent), Wait);
+            () => Assert.Equal("Can't write Meetings/Review Q4 plan/2026-10-29.", cut.Find(".main-status").TextContent), Wait);
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
         Assert.Empty(js.Calls("ContextEditor.mount"));
     }
 
-    // A sensitive meeting note opens through the unlock flow, never rewritten.
+    // 220 AC-6: a sensitive legacy meeting note opens through the unlock flow, never rewritten.
     [Fact]
     public async Task PaletteMeeting_SensitiveNote_OpensThroughUnlock()
     {
         WriteDay();
         data.Keys = FakeKeyStore.Ready();
-        data.WriteSensitive(Review, "# secret\n");
+        data.WriteSensitive(LegacyReview, "# secret\n");
         data.Keys.AgreeThrows = true;
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        byte[] before = File.ReadAllBytes(PathOf(Review, ".ctxs"));
+        byte[] before = File.ReadAllBytes(PathOf(LegacyReview, ".ctxs"));
 
         await RunPalette(cut, "/meeting 2");
 
-        cut.WaitForAssertion(() => Assert.Equal("Can't unlock " + Review + ".", cut.Find(".unreadable").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Can't unlock " + LegacyReview + ".", cut.Find(".unreadable").TextContent), Wait);
         Assert.Equal(1, data.Keys.Agrees);
-        Assert.Equal(before, File.ReadAllBytes(PathOf(Review, ".ctxs")));
+        Assert.Equal(before, File.ReadAllBytes(PathOf(LegacyReview, ".ctxs")));
+        Assert.False(File.Exists(PathOf(LegacyReview)));
         Assert.False(File.Exists(PathOf(Review)));
     }
 
@@ -346,6 +391,16 @@ public sealed class MeetingNoteActionsTests : IDisposable
         await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
         await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = line });
         await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+    }
+
+    // Opens a note by its full name through /open: the editor is mounted and ready and shows that name.
+    private static async Task OpenByPalette(IRenderedComponent<Main> cut, EditorJs js, string name)
+    {
+        int mounts = js.Calls("ContextEditor.mount").Count;
+        await RunPalette(cut, "/open " + name);
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(name, cut.Find(".note-title").TextContent), Wait);
     }
 
     private static async Task Open(IRenderedComponent<Main> cut, EditorJs js, string name)

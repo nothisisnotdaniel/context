@@ -183,6 +183,28 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal("Fresh", cut.Find(".note-title").TextContent), Wait);
     }
 
+    // 220 AC-11: a dirty editor on the meeting's legacy note (yyyy-MM-dd <title>) is that meeting's note: /meeting
+    // asks nothing and creates no Meetings/<title>/<date> note.
+    [Fact]
+    public async Task PaletteMeeting_DirtyLegacyNote_NoQuestion()
+    {
+        data.WriteCalendar("work.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("Weekly sync", "20261029T110000", "20261029T120000")));
+        data.WriteNote("2026-10-29 Weekly sync", "# mine\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "2026-10-29 Weekly sync");
+        js.EditUnsavable("# mine\n\nUnsaved\n");
+
+        await RunPalette(cut, "/meeting 1");
+
+        cut.WaitForAssertion(() => Assert.Equal("2026-10-29 Weekly sync", cut.Find(".note-title").TextContent), Wait);
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Single(js.Calls("ContextEditor.mount"));
+        Assert.Equal("# mine\n", File.ReadAllText(Path.Combine(data.Root, "2026-10-29 Weekly sync.md")));
+        Assert.False(File.Exists(Path.Combine(data.Root, "Meetings.md")));
+    }
+
     // 201 AC-5: a note todo's note button opens the note, after the "Discard changes" check for unsaved edits.
     [Fact]
     public async Task TodoNoteButton_DirtyEditor_AsksThenOpensTheNote()
