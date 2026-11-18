@@ -97,7 +97,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#269](backlog/269-outline-in-the-right-sidebar-no.md) Outline in the right sidebar, no reformat notice → 210-outline-right-sidebar
 - [x] [#258](backlog/258-no-accent-bar-left-of-the.md) No accent bar left of the editor while editing → 211-no-editor-accent-bar
 - [x] [#270](backlog/270-editor-works-on-a-day-opened.md) Editor works on a day opened from the calendar → 212-calendar-day-editor
-- [ ] [#254](backlog/254-month-calendar-in-the-day-picker.md) Month calendar in the day picker
+- [x] [#254](backlog/254-month-calendar-in-the-day-picker.md) Month calendar in the day picker → 213-month-calendar-picker
 - [ ] [#271](backlog/271-search-icon-in-the-top-bar.md) Search icon in the top bar, opens like Capture
 - [ ] [#69](backlog/069-board-view-for-a-tag.md) Board view for a tag
 - [ ] [#74](backlog/074-waiting-for-list.md) Waiting-for list
