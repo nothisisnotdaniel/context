@@ -237,6 +237,11 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#280](backlog/280-keep-the-old-appointment-rows-dimmed.md) Keep the old appointment rows dimmed while stepping days
 - [?] [#281](backlog/281-one-reset-helper-for-the-pending.md) One reset helper for the pending state in Main.razor
 - [?] [#283](backlog/283-spacing-for-the-no-note-placeholder.md) Spacing for the no-note placeholder in the note area
+- [?] [#284](backlog/284-cap-the-length-of-each-text.md) Cap the length of each text field read from Outlook
+- [?] [#285](backlog/285-don-t-start-a-new-outlook.md) Don't start a new Outlook read while an earlier one hangs
+- [?] [#286](backlog/286-culture-safe-dates-in-the-outlook.md) Culture-safe dates in the Outlook Restrict filter
+- [?] [#287](backlog/287-show-loading-in-the-mail-panel.md) Show Loading in the mail panel during the first read
+- [?] [#288](backlog/288-don-t-let-a-blocked-outlook.md) Don't let a blocked Outlook delay every refresh
 
 ## Dropped with the terminal UI
 
