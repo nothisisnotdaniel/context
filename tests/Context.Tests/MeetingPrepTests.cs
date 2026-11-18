@@ -187,4 +187,31 @@ public sealed class MeetingPrepTests : IDisposable
         Assert.Equal("RelatedNote", note.ToString());
         Assert.Equal("RelatedNote", $"{note}");
     }
+
+    // 214 AC-6: max null keeps every match, ranked as before.
+    [Fact]
+    public void Related_NoCap_ReturnsEveryMatch()
+    {
+        string[] notes = ["acme a", "acme b", "acme c", "acme d", "acme e", "other"];
+
+        IReadOnlyList<RelatedNote> related = MeetingPrep.Related(
+            Meeting("ACME review"), notes.Select(Note).ToList(), [("acme e", "review")], null);
+
+        Assert.Equal(["acme e", "acme a", "acme b", "acme c", "acme d"], related.Select(r => r.Name).ToArray());
+        Assert.Equal(["review"], related[0].Tags);
+    }
+
+    // 214: the three-argument form keeps MaxRelated, and an explicit cap of 3 gives the same notes.
+    [Fact]
+    public void Related_ThreeArguments_KeepsMaxRelated()
+    {
+        string[] notes = ["acme a", "acme b", "acme c", "acme d", "acme e"];
+        List<NoteInfo> listed = notes.Select(Note).ToList();
+
+        IReadOnlyList<RelatedNote> capped = MeetingPrep.Related(Meeting("ACME"), listed, []);
+        IReadOnlyList<RelatedNote> three = MeetingPrep.Related(Meeting("ACME"), listed, [], MeetingPrep.MaxRelated);
+
+        Assert.Equal(["acme a", "acme b", "acme c"], capped.Select(r => r.Name).ToArray());
+        Assert.Equal(capped.Select(r => r.Name), three.Select(r => r.Name));
+    }
 }

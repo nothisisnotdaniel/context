@@ -24,6 +24,10 @@
                 {
                     <SettingsPanel OnClose="CloseSettings" />
                 }
+                @if (page == Page.Appointment && appointmentShown is { } shownAppointment)
+                {
+                    <AppointmentPanel Title="@shownAppointment.Title" Day="@shownAppointment.Day" OnOpen="RequestOpen" OnCreate="CreateAppointmentNote" OnClose="CloseAppointment" />
+                }
                 @if (reviewShown)
                 {
                     <ReviewPanel OnOpen="RequestOpen" OnClose="CloseReview" />
@@ -117,6 +121,7 @@
                 </div>
             </main>
             <aside class="todos-region">
+                <DayAppointmentsPanel OnOpen="OpenAppointment" />
                 @if (openName is not null && page == Page.None && searchShown is null)
                 {
                     <OutlinePanel Headings="outline" OnJump="JumpToOutline" />
@@ -187,7 +192,13 @@ else
     // Bumped each time the search panel is asked for, so asking again for the same text starts it over.
     private int searchRequest;
     private string? decisionsShown;
-    private enum Page { None, Triage, Tags, Settings }
+    private enum Page { None, Triage, Tags, Settings, Appointment }
+
+    // The appointment page's title (raw) and day while Page.Appointment is shown.
+    private (string Title, DateOnly Day)? appointmentShown;
+
+    // An appointment page that opens once the unsaved-changes dialog is confirmed.
+    private (string Title, DateOnly Day)? pendingAppointment;
     private bool discarding;
     private bool pendingClose;
     private string? pendingName;
@@ -364,6 +375,101 @@ else
 
     private void CloseSettings() => page = Page.None;
 
+    // A sidebar appointment: its page in the main region (job 214), saving the open note first or asking to discard it
+    // like RequestOpen. Another appointment with the same title and day keeps the shown page as it is.
+    private async Task OpenAppointment((string Title, DateOnly Day) appointment)
+    {
+        if (page == Page.Appointment && appointmentShown is { } shown
+            && string.Equals(shown.Title, appointment.Title, StringComparison.Ordinal) && shown.Day == appointment.Day)
+        {
+            return;
+        }
+
+        if (await KeptUnsaved())
+        {
+            pendingName = null;
+            pendingPerson = null;
+            pendingToday = false;
+            pendingPickedDay = null;
+            pendingBriefing = false;
+            pendingMeeting = null;
+            pendingAppointment = appointment;
+            discarding = true;
+            return;
+        }
+
+        ShowAppointment(appointment);
+    }
+
+    private void ShowAppointment((string Title, DateOnly Day) appointment)
+    {
+        tagShown = null;
+        reviewShown = false;
+        findShown = null;
+        searchShown = null;
+        decisionsShown = null;
+        OpenPage(Page.Appointment);
+        appointmentShown = appointment;
+        ShowStatus(string.Empty, string.Empty);
+    }
+
+    // The appointment page's create link: the /meeting flow for the first appointment of the shown day with its title
+    // (read again from the calendar files and the cached feed, never downloaded).
+    private async Task CreateAppointmentNote()
+    {
+        if (appointmentShown is not { } shown)
+        {
+            return;
+        }
+
+        DayAppointmentsView day = await State.DayAppointments(shown.Day);
+        Appointment? first = day.Appointments.FirstOrDefault(a => string.Equals(a.Title, shown.Title, StringComparison.Ordinal));
+        if (first is null)
+        {
+            return;
+        }
+
+        // The same steps as /meeting: a dirty editor is saved first or asks, unless it shows this meeting's note.
+        if (editor is not null && openName is not null
+            && !string.Equals(openName, MeetingNote.NameFor(first), StringComparison.Ordinal)
+            && await KeptUnsaved())
+        {
+            pendingName = null;
+            pendingPerson = null;
+            pendingToday = false;
+            pendingPickedDay = null;
+            pendingBriefing = false;
+            pendingAppointment = null;
+            pendingMeeting = first;
+            discarding = true;
+            return;
+        }
+
+        if (running)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult meetingNote;
+        try
+        {
+            meetingNote = await Actions.OpenMeetingNote(first);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        ShowDaily(meetingNote);
+    }
+
+    private void CloseAppointment()
+    {
+        page = Page.None;
+        appointmentShown = null;
+    }
+
     // The Today button: the current view of today, asking first when the open note has unsaved changes.
     private Task ShowToday() => RequestOpen(null);
 
@@ -400,6 +506,7 @@ else
             pendingPickedDay = day;
             pendingBriefing = false;
             pendingMeeting = null;
+            pendingAppointment = null;
             discarding = true;
             return;
         }
@@ -450,6 +557,7 @@ else
             pendingName = name;
             pendingHeading = heading;
             pendingPerson = null;
+            pendingAppointment = null;
             discarding = true;
             return;
         }
@@ -469,6 +577,7 @@ else
         {
             pendingName = null;
             pendingPerson = person;
+            pendingAppointment = null;
             discarding = true;
             return;
         }
@@ -591,6 +700,7 @@ else
         if (pendingMeeting is { } meeting)
         {
             pendingMeeting = null;
+            pendingAppointment = null;
             if (running)
             {
                 return;
@@ -608,6 +718,14 @@ else
             }
 
             ShowDaily(meetingNote);
+            return;
+        }
+
+        if (pendingAppointment is { } appointment)
+        {
+            // The unsaved changes go with the editor; the page shows over the current view.
+            ShowNote(null);
+            ShowAppointment(appointment);
             return;
         }
 
@@ -648,6 +766,7 @@ else
         pendingToday = false;
         pendingBriefing = false;
         pendingMeeting = null;
+        pendingAppointment = null;
     }
 
     // Opens the person page Actions gave, or shows why there is none.
@@ -710,6 +829,8 @@ else
         pendingPickedDay = null;
         pendingBriefing = false;
         pendingMeeting = null;
+        pendingAppointment = null;
+        appointmentShown = null;
         tagShown = null;
         page = Page.None;
         reviewShown = false;
@@ -913,6 +1034,7 @@ else
                     pendingToday = false;
                     pendingPickedDay = null;
                     pendingMeeting = null;
+                    pendingAppointment = null;
                     pendingBriefing = true;
                     discarding = true;
                     break;
@@ -947,6 +1069,7 @@ else
                     pendingPickedDay = null;
                     pendingBriefing = false;
                     pendingMeeting = null;
+                    pendingAppointment = null;
                     discarding = true;
                     break;
                 }
@@ -994,6 +1117,7 @@ else
                     pendingToday = false;
                     pendingPickedDay = null;
                     pendingBriefing = false;
+                    pendingAppointment = null;
                     pendingMeeting = appointment;
                     discarding = true;
                     break;
