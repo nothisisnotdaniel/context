@@ -92,7 +92,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#249](backlog/249-show-the-note-editor-without-its.md) Show the note editor without its own box → 196-editor-no-box
 - [x] [#62](backlog/062-links-to-headings.md) Links to headings → 205-heading-links
 - [x] [#66](backlog/066-rename-with-link-update.md) Rename with link update → 206-rename-link-update
-- [ ] [#68](backlog/068-saved-searches.md) Saved searches
+- [x] [#68](backlog/068-saved-searches.md) Saved searches → 207-saved-searches
 - [ ] [#69](backlog/069-board-view-for-a-tag.md) Board view for a tag
 - [ ] [#74](backlog/074-waiting-for-list.md) Waiting-for list
 - [ ] [#78](backlog/078-smart-paste.md) Smart paste
