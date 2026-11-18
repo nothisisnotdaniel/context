@@ -507,7 +507,6 @@ input[type="password"]:disabled {
     padding-bottom: 12px;
 }
 
-.note-editor .lossy,
 .note-editor .unreadable,
 .note-editor .editor-failed,
 .note-editor .status {
@@ -1554,14 +1553,15 @@ nav.saved-searches ul {
     display: none;
 }
 
-/* The open note's outline (OutlinePanel), above the editor: one link-like button per heading, indented by level; a long
-   heading is cut, the full text is in its title. */
-.outline-panel {
+/* The open note's outline (OutlinePanel), in the right sidebar above the todos: one link-like button per heading,
+   indented by level; a long heading is cut, the full text is in its title. It scrolls on its own past 40vh, so the
+   todos below stay in reach; the sidebar keeps its fixed column at every window width. */
+.todos-region .outline-panel {
     border-bottom: 1px solid var(--line);
     display: flex;
     flex-direction: column;
-    margin-bottom: 12px;
-    max-height: 30vh;
+    margin-bottom: 16px;
+    max-height: 40vh;
     overflow-y: auto;
     padding-bottom: 8px;
 }

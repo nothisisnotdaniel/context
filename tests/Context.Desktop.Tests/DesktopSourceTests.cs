@@ -251,6 +251,35 @@ public sealed class DesktopSourceTests
         Assert.DoesNotContain(".note .time", css, StringComparison.Ordinal);
     }
 
+    // 210 AC-7, AC-8: the outline is styled for the right sidebar (its own 40vh scroll, a --line border and margin
+    // above the todos, only the theme's colour variables); no 30vh rule tied to the note area, no .lossy rule, and the
+    // sidebar keeps its fixed column.
+    [Fact]
+    public void AppCss_OutlineInSidebar_NoLossyRule()
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+
+        string panel = RuleBody(css, ".todos-region .outline-panel");
+        Assert.Contains("max-height: 40vh;", panel, StringComparison.Ordinal);
+        Assert.Contains("overflow-y: auto;", panel, StringComparison.Ordinal);
+        Assert.Contains("border-bottom: 1px solid var(--line);", panel, StringComparison.Ordinal);
+        Assert.Matches(@"margin-bottom: \d+px;", panel);
+        Assert.DoesNotContain(".lossy", css, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"(?m)^\.outline-panel\s*\{", css);
+        Assert.Contains("grid-template-columns: 240px minmax(0, 1fr) 280px;", css, StringComparison.Ordinal);
+
+        string[] outlineRules = System.Text.RegularExpressions.Regex.Matches(css.ReplaceLineEndings("\n"), @"(?m)^([^\n{}]*outline-(?:panel|item)[^\n{]*)\{([^}]*)\}")
+            .Select(m => m.Groups[2].Value)
+            .ToArray();
+        Assert.NotEmpty(outlineRules);
+        Assert.All(outlineRules, r => Assert.DoesNotContain("30vh", r, StringComparison.Ordinal));
+        string[] colours = outlineRules
+            .SelectMany(r => System.Text.RegularExpressions.Regex.Matches(r, @"(?m)^\s*(?:color|background|border[a-z-]*):\s*([^;]+);").Select(m => m.Groups[1].Value))
+            .ToArray();
+        Assert.All(colours, c => Assert.Matches(@"^(none|1px solid var\(--line\)|var\(--(accent-strong|line|text|grey)\))$", c.Trim()));
+        Assert.Contains(colours, c => c.Contains("var(--accent-strong)", StringComparison.Ordinal));
+    }
+
     // 143 AC-9: the editor-failed line shares the margin rule of the unreadable line and has no rule of its own.
     [Fact]
     public void AppCss_EditorFailed_OnlyInTheUnreadableRule()

@@ -1133,12 +1133,13 @@ Every factory agent reads this file before working on Context. Keep it short and
     (`1 subpage` for one). The palette's `/new <title>` does what the entry row
     does (`/new` alone: red `Type /new <title>.`). The page editor is `wwwroot/editor/editor.js`
     (`globalThis.ContextEditor`), built from `editor/src/` (`schema.js`, `markdown.js` with markdown-it `html: false`,
-    `view.js`, `index.js`); `isLossless` false shows the grey `Saving will reformat parts of this note.`
-    Job 202: `NoteEditor` passes `Name` to `mount` (5th argument) and `isLossless`; `splitTitle(markdown, name)` keeps a
+    `view.js`, `index.js`); the JS `isLossless` stays for the bundle tests, but the desktop never calls it (job 210: no
+    reformat line, no `.lossy`, no `EditorInterop.IsLosslessAsync`).
+    Job 202: `NoteEditor` passes `Name` to `mount` (5th argument); `splitTitle(markdown, name)` keeps a
     first line `# <name>` (ignoring case and surrounding spaces, or the name's last segment) and the blank lines after
     it as a hidden head that is never parsed and that `getMarkdown`/`roundTrip` put back byte for byte, and inside the
     editor a level-1 heading keeps `level` 1 (saved as `# `) but is drawn as `h2` (`headingDom`), while typing `# ` makes level 2 (`typedBlock` tests the input rules without a view).
-    A note that was read (or unlocked) but whose page editor didn't start (`isLossless` or `mount` threw) shows red
+    A note that was read (or unlocked) but whose page editor didn't start (`mount` threw) shows red
     `The editor couldn't start. <name> was not changed.` (`p.editor-failed`, never together with `.unreadable`) and
     can't be saved, while a failed `focus` after a mount shows nothing.
     **Heading links and the outline** (job 205): `outline(markdown, name)` (no DOM) and `headings(element)` (the live
@@ -1153,12 +1154,17 @@ Every factory agent reads this file before working on Context. Keep it short and
     heading of the open note jumps in place (no remount, unsaved text kept). The jump picks the first heading whose
     text matches (`OutlineHeading.IndexOf`: trimmed, whitespace runs as one space, case ignored); none: the note stays
     at the top and grey `<name> has no heading <heading>.` (both through `DesktopText.OneLine`); a missing note is still
-    `No note named <target>.`. `OutlinePanel` (`nav.outline-panel`, `aria-label="Outline"`) sits in `NoteEditor` above
-    the editor host and shows one `button type="button"` (`outline-item level-<n>`, plain text) per heading from
+    `No note named <target>.`. `OutlinePanel` (`nav.outline-panel`, `aria-label="Outline"`) sits in `Main`'s right sidebar
+    as the first child of `aside.todos-region`, before `TodoPanel` (job 210; `.todos-region .outline-panel`: own 40vh
+    scroll, `--line` border), and shows one `button type="button"` (`outline-item level-<n>`, plain text) per heading from
     `OutlinePanel.MinHeadings` (3) on; a click calls `scrollToHeading` with its index and never takes focus by itself.
-    The list is reloaded after the mount, after every `Done` save (auto or explicit), `ReloadAsync` and `ShowSavedAsync`;
-    an editor that didn't start, an unreadable note or failing `headings` shows none, and a locked sensitive note's
-    outline goes with its editor (its headings are only ever read from the unlocked editor, never indexed).
+    `NoteEditor` renders none: it reloads the list after the mount, after every `Done` save (auto or explicit),
+    `ReloadAsync` and `ShowSavedAsync` and reports each through `OnOutline` (empty when disposed or locked); `Main` keeps
+    the current editor's latest list (each editor's callback carries the generation it was rendered with, so a report
+    from an older editor is ignored; its receiver is no component, so only a changed list renders `Main`; opening
+    another note, closing or locking clears it), hides it while a page or the
+    search panel is shown, and `OnJump` calls `NoteEditor.JumpToIndexAsync`. An editor that didn't start, an unreadable
+    note or failing `headings` shows none, and a locked sensitive note's outline goes with its editor (its headings are only ever read from the unlocked editor, never indexed).
     **Update:** `Program.Main` starts with `VelopackApp.Build().Run()` (Velopack's install/update hooks), and before
     the window opens `StartupUpdate(IUpdateSource).Start()` runs the silent update on a pool thread: it returns at once
     and never throws. Not `IsInstalled`: nothing is called. Otherwise `CheckAsync`; when a newer version is found,

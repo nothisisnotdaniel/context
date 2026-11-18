@@ -95,9 +95,11 @@
                                 }
                             </div>
                         }
+                        int shownEditor = editorGeneration;
                         <NoteEditor @key="(name, openSensitive)" @ref="editor" Name="@name" Sensitive="openSensitive"
                                     OnTag="ShowTag" OnOpenNote="RequestOpen" OnOpenHeading="OpenHeading" Heading="@openHeading" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked"
-                                    OnAttach="AttachDropped" OnOpenAttachment="OpenAttachment" />
+                                    OnAttach="AttachDropped" OnOpenAttachment="OpenAttachment"
+                                    OnOutline="OutlineReport(shownEditor)" />
                         @if (historyShown)
                         {
                             <HistoryPanel Name="@name" Sensitive="openSensitive" OnRestore="AskRestore" OnClose="CloseHistory" />
@@ -115,6 +117,10 @@
                 </div>
             </main>
             <aside class="todos-region">
+                @if (openName is not null && page == Page.None && searchShown is null)
+                {
+                    <OutlinePanel Headings="outline" OnJump="JumpToOutline" />
+                }
                 <TodoPanel @ref="todoPanel" OnPerson="OpenMention" OnOpen="RequestOpen" />
             </aside>
         </div>
@@ -162,6 +168,16 @@ else
 @code {
     private string? openName;
     private NoteEditor? editor;
+
+    // The open note's outline, as the current editor last reported it (shown in the right sidebar). Each editor is
+    // handed the generation it was rendered with; a report from an older editor (another note opened, the note closed
+    // or locked) carries an older one and is ignored. Bumped, and the list cleared, whenever the editor changes.
+    private IReadOnlyList<OutlineHeading> outline = [];
+    private int editorGeneration;
+
+    // The receiver of the editors' outline reports: not a component, so a report renders this page only when it
+    // changes what the sidebar shows (ShowOutline), not after every save.
+    private readonly object outlineReceiver = new();
     private string? tagShown;
     private Page page;
     private bool reviewShown;
@@ -609,12 +625,19 @@ else
     {
         shownDay = name is null ? pendingDay : null;
         pendingDay = null;
+        (string? Name, bool Sensitive) before = (openName, openSensitive);
         openName = name;
         openHeading = name is null ? null : heading;
         pendingHeading = null;
         openSensitive = name is not null
             && Snapshot is { } snapshot
             && snapshot.Sensitive.Any(n => string.Equals(n.Name, name, StringComparison.Ordinal));
+        if (name is null || before != (openName, openSensitive))
+        {
+            // A new editor (or none): the old one's outline goes, and its later reports are ignored.
+            editorGeneration++;
+            outline = [];
+        }
         pendingName = null;
         pendingPerson = null;
         pendingToday = false;
@@ -1705,6 +1728,26 @@ else
         State.Session.Lock();
         Locked();
     }
+
+    // The callback handed to the editor rendered with <paramref name="generation"/>.
+    private EventCallback<IReadOnlyList<OutlineHeading>> OutlineReport(int generation) =>
+        EventCallback.Factory.Create<IReadOnlyList<OutlineHeading>>(outlineReceiver, headings => ShowOutline(generation, headings));
+
+    // The current editor's headings for the sidebar outline; a report from an editor that is no longer shown is
+    // ignored, and an unchanged list renders nothing.
+    private void ShowOutline(int generation, IReadOnlyList<OutlineHeading> headings)
+    {
+        if (generation != editorGeneration || openName is null || outline.SequenceEqual(headings))
+        {
+            return;
+        }
+
+        outline = headings;
+        StateHasChanged();
+    }
+
+    // A sidebar outline button: the current editor jumps to that heading, by index only.
+    private Task JumpToOutline(int index) => editor?.JumpToIndexAsync(index) ?? Task.CompletedTask;
 
     // The session locked (Lock, idle, the window closing): the editor is taken down, and with it the note's text.
     private void Locked()

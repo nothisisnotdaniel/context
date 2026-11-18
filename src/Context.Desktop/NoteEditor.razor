@@ -25,10 +25,6 @@
     {
         <p class="red editor-failed" role="alert">The editor couldn't start. @DisplayName was not changed.</p>
     }
-    @if (lossy)
-    {
-        <p class="grey lossy">Saving will reformat parts of this note.</p>
-    }
     <p class="status @statusClass" role="status">
         @if (statusLines.Count > 0)
         {
@@ -42,7 +38,6 @@
             @statusText
         }
     </p>
-    <OutlinePanel Headings="outline" OnJump="JumpToIndexAsync" />
     <div class="editor-host" @ref="host"></div>
 </section>
 
@@ -52,7 +47,6 @@
     private bool mounted;
     private bool unreadable;
     private bool editorFailed;
-    private bool lossy;
     private bool saving;
     private bool dirty;
     private string statusText = string.Empty;
@@ -63,7 +57,8 @@
     private bool disposed;
 
     // The open document's headings, read from the mounted editor only (a sensitive note's never leave its memory but
-    // as this list); empty until mounted, and gone with this editor when the note closes or locks.
+    // as this list, reported through OnOutline); empty until mounted, and reported empty when this editor goes away or
+    // locks.
     private IReadOnlyList<OutlineHeading> outline = [];
 
     /// <summary>The bridge to the page's editor; one per editor.</summary>
@@ -121,6 +116,14 @@
     /// <summary>Called when the open sensitive note was locked; the parent takes this editor down.</summary>
     [Parameter]
     public EventCallback OnLocked { get; set; }
+
+    /// <summary>
+    /// Called with the open note's headings (in document order) each time they are read from the mounted editor: after
+    /// the mount, every Done save, a reload and a shown restore; an empty list when there are none or they can't be
+    /// read, and when this editor is disposed or its sensitive note locks. The parent shows them as the outline.
+    /// </summary>
+    [Parameter]
+    public EventCallback<IReadOnlyList<OutlineHeading>> OnOutline { get; set; }
 
     private string DisplayName => DesktopText.OneLine(Name);
 
@@ -193,7 +196,6 @@
                 if (result.Note is { } saved)
                 {
                     opened = saved;
-                    lossy = !await Interop.IsLosslessAsync(saved.Text, Name);
                 }
 
                 if (edited)
@@ -306,7 +308,6 @@
 
         try
         {
-            lossy = !await Interop.IsLosslessAsync(note.Text, Name);
             await Interop.MountAsync(host, note.Text, await State.InlineImages(Name, note.Text), Name);
             opened = note;
             dirty = false;
@@ -334,7 +335,6 @@
         CancelPause();
         try
         {
-            lossy = !await Interop.IsLosslessAsync(saved.Text, Name);
             await Interop.MountAsync(host, saved.Text, Sensitive ? [] : await State.InlineImages(Name, saved.Text), Name);
             opened = saved;
             dirty = false;
@@ -353,6 +353,7 @@
     {
         disposed = true;
         CancelPause();
+        await ClearOutlineAsync();
         Dispose();
         if (Sensitive)
         {
@@ -395,7 +396,6 @@
 
         try
         {
-            lossy = !await Interop.IsLosslessAsync(note.Text, Name);
             Interop.TagClicked += TagClicked;
             Interop.LinkClicked += LinkClicked;
             Interop.PersonClicked += PersonClicked;
@@ -414,7 +414,6 @@
         {
             // The note was read; only the page's editor didn't start. Nothing is open, so nothing can be saved.
             editorFailed = true;
-            lossy = false;
         }
 
         if (mounted)
@@ -455,6 +454,25 @@
         {
             outline = [];
         }
+
+        if (!disposed)
+        {
+            await OnOutline.InvokeAsync(outline);
+        }
+    }
+
+    // Drops the outline and tells the parent: this editor is going away or its note locked.
+    private async Task ClearOutlineAsync()
+    {
+        outline = [];
+        try
+        {
+            await OnOutline.InvokeAsync(outline);
+        }
+        catch (ObjectDisposedException)
+        {
+            // The parent is gone too; nothing shows the outline any more.
+        }
     }
 
     /// <summary>
@@ -486,8 +504,11 @@
         }
     }
 
-    // An outline button: the index-th heading of the editor, by index only.
-    private async Task JumpToIndexAsync(int index)
+    /// <summary>
+    /// An outline button: moves to the <paramref name="index"/>-th heading of the mounted editor (by index only) and
+    /// scrolls to it, keeping unsaved text and the focus; nothing when the editor isn't mounted or is gone.
+    /// </summary>
+    public async Task JumpToIndexAsync(int index)
     {
         if (!mounted || disposed)
         {
@@ -569,7 +590,11 @@
         }
     }
 
-    private void SessionLocked() => _ = InvokeAsync(() => OnLocked.InvokeAsync());
+    private void SessionLocked() => _ = InvokeAsync(async () =>
+    {
+        await ClearOutlineAsync();
+        await OnLocked.InvokeAsync();
+    });
 
     private void SessionIdle() => _ = InvokeAsync(() => OnIdle.InvokeAsync());
 
