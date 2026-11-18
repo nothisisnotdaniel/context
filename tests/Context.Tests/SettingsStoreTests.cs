@@ -277,6 +277,20 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal([SettingsStore.FileName], Directory.GetFiles(root).Select(f => Path.GetFileName(f)!).ToArray());
     }
 
+    // 207 security: a lone surrogate makes a name invalid; a pair is fine. Built here because xUnit replaces lone
+    // surrogates in InlineData.
+    [Fact]
+    public void NormalizeName_LoneSurrogate_GivesNull()
+    {
+        string high = char.ConvertFromUtf32(0x1F600)[..1];
+        string low = char.ConvertFromUtf32(0x1F600)[1..];
+
+        Assert.Null(SavedSearches.NormalizeName("a" + high + "b"));
+        Assert.Null(SavedSearches.NormalizeName("a" + low));
+        Assert.Null(SavedSearches.NormalizeName(low + high));
+        Assert.Equal("a" + high + low, SavedSearches.NormalizeName("a" + high + low));
+    }
+
     // 207 AC-6: name normalizing and the query rules.
     [Theory]
     [InlineData("  My \t  search  ", "My search")]

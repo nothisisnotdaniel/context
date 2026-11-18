@@ -906,7 +906,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     touch `settings.json`. **Saved searches** (job 207) live in the same file: `"savedSearches":[{"name":"…","query":"…"}]`
     in saved order (`SettingsStore.ReadSavedSearches`/`SaveSavedSearches`, `SavedSearch(Name, Query)`; rules in
     `SavedSearches`: name trimmed with whitespace runs collapsed, 1 to `MaxNameLength` (50) chars, no control
-    or format characters (bidi marks, zero-width), unique ignoring case; query a valid tag filter of at most 200 chars or a full-text text of 3 to 200;
+    or format characters (bidi marks, zero-width) or lone surrogates, unique ignoring case; query a valid tag filter of at most 200 chars or a full-text text of 3 to 200;
     at most `MaxCount` (50)). A non-array, an item that isn't an object with exactly string `name` and `query`, or a
     broken rule throws `SettingsStoreException`; a saved-search write re-checks `dayEnd` and `savedSearches` and never
     overwrites a broken file. Every write uses relaxed JSON escaping (non-ASCII as is) and throws

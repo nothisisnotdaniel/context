@@ -92,17 +92,36 @@ internal static class SavedSearches
 
     /// <summary>
     /// The name trimmed with whitespace runs collapsed to one space; <c>null</c> when that is empty, longer than
-    /// <see cref="MaxNameLength"/> or holds a control or format character (bidi marks, zero-width characters).
+    /// <see cref="MaxNameLength"/> or holds a control or format character (bidi marks, zero-width characters) or a lone surrogate.
     /// </summary>
     public static string? NormalizeName(string name)
     {
         string normalized = TagParser.CollapseWhitespace(name);
-        if (normalized.Length == 0 || normalized.Length > MaxNameLength || normalized.Any(c => char.IsControl(c) || char.GetUnicodeCategory(c) == UnicodeCategory.Format))
+        if (normalized.Length == 0 || normalized.Length > MaxNameLength || normalized.Any(c => char.IsControl(c) || char.GetUnicodeCategory(c) == UnicodeCategory.Format)
+            || HasLoneSurrogate(normalized))
         {
             return null;
         }
 
         return normalized;
+    }
+
+    // A lone surrogate isn't text and would be written as a six-byte escape.
+    private static bool HasLoneSurrogate(string text)
+    {
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+            {
+                i++;
+            }
+            else if (char.IsSurrogate(text[i]))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
