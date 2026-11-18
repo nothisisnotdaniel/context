@@ -254,6 +254,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#286](backlog/286-culture-safe-dates-in-the-outlook.md) Culture-safe dates in the Outlook Restrict filter
 - [?] [#287](backlog/287-show-loading-in-the-mail-panel.md) Show Loading in the mail panel during the first read
 - [?] [#288](backlog/288-don-t-let-a-blocked-outlook.md) Don't let a blocked Outlook delay every refresh
+- [?] [#301](backlog/301-meeting-note-title-shows-the-meeting.md) Meeting note title shows the meeting name, not only the date
+- [?] [#302](backlog/302-find-the-desktop-test-that-failed.md) Find the desktop test that failed once in job 220
 
 ## Dropped with the terminal UI
 
