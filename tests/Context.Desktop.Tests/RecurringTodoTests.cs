@@ -222,7 +222,7 @@ public sealed class RecurringTodoTests : IDisposable
     private static string Line(IElement item) =>
         string.Join(" ", item.QuerySelectorAll(".date, .text, .repeat").Select(c => c.TextContent));
 
-    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName);
+    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
     private static async Task RunPalette(IRenderedComponent<Main> cut, string line)
     {

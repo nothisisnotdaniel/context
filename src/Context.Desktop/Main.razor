@@ -959,9 +959,16 @@ else
         }
     }
 
-    private void ShowNote(string? name, string? heading = null)
+    // record false: the open note was just renamed or moved, and the action already changed its recent entry in place.
+    private void ShowNote(string? name, string? heading = null, bool record = true)
     {
         (string? Name, bool Sensitive) before = (openName, openSensitive);
+        if (record && name is not null && !string.Equals(name, openName, StringComparison.Ordinal))
+        {
+            // Never throws, never Busy; the sidebar lists the note first (job 240).
+            _ = Actions.RecordOpened(name);
+        }
+
         openName = name;
         openHeading = name is null ? null : heading;
         pendingHeading = null;
@@ -1606,7 +1613,7 @@ else
             return;
         }
 
-        ShowNote(renamed.Name ?? renamed.Text);
+        ShowNote(renamed.Name ?? renamed.Text, record: false);
         ShowStatus(DesktopText.OneLine(renamed.Text), renamed.Reason == ActionReason.LinksLeft ? "red" : "accent");
     }
 
@@ -1808,7 +1815,7 @@ else
             return;
         }
 
-        ShowNote(moved.Text);
+        ShowNote(moved.Text, record: false);
         ShowStatus($"Moved to {DesktopText.OneLine(moved.Text)}", "accent");
     }
 

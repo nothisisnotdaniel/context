@@ -132,13 +132,13 @@ public sealed class TodoEntryTests : IDisposable
     public async Task Add_Empty_WritesNothing()
     {
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         await cut.Find(".todo-entry .todo-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Equal("Write the todo first.", cut.Find(".add-result").TextContent);
         Assert.True(cut.Find(".add-result").ClassList.Contains("red"));
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 178 AC-9: the entry row has an empty time field between the date and Today.

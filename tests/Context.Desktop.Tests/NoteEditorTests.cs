@@ -277,11 +277,11 @@ public sealed class NoteEditorTests : IDisposable
             Path.Combine(data.Root, "Plan.md"), [0xEF, 0xBB, 0xBF, .. Encoding.UTF8.GetBytes("* star\r\n__b__\r\n")]);
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<NoteEditor> cut = await Render("Plan");
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
         Assert.Empty(js.Calls("ContextEditor.getMarkdown"));
         Assert.Equal("Saved Plan.", cut.Find(".status").TextContent);
     }
@@ -622,7 +622,7 @@ public sealed class NoteEditorTests : IDisposable
         data.WriteNote("Plan", "# Plan\n");
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<NoteEditor> cut = await Render("Plan");
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         int calls = data.Bunit.JSInterop.Invocations.Count;
         List<bool> raised = [];
         js.Page().DirtyChanged += value =>
@@ -635,7 +635,7 @@ public sealed class NoteEditorTests : IDisposable
 
         Assert.Equal([true], raised);
         Assert.Equal(calls, data.Bunit.JSInterop.Invocations.Count);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
         Assert.Single(cut.FindAll(".dirty-dot"));
         Assert.False(await cut.InvokeAsync(() => cut.Instance.IsDirtyAsync()));
         Assert.Single(js.Calls("ContextEditor.isDirty"));
@@ -750,13 +750,13 @@ public sealed class NoteEditorTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<NoteEditor> cut = await Render("Plan");
         Assert.Equal("Plan", js.MountedName());
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         js.Edit(System.Text.Json.JsonSerializer.Deserialize<string>(page)!);
 
         await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         Assert.Equal("Saved Plan.", cut.Find(".status").TextContent);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 202 AC-8: the page title is the only heading in the markup that shows the note's name.

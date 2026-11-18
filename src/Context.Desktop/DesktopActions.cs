@@ -260,6 +260,10 @@ internal sealed class DesktopActions
     private readonly CalendarStore calendar;
     private readonly DayEnd dayEnd;
     private readonly SettingsStore settings;
+    private readonly RecentNotesStore recentStore;
+
+    // One write of recent.json at a time; each writes the list as it is when the write starts, so the last one wins.
+    private readonly object recentWriteGate = new();
     private readonly string? timesFolder;
     private readonly INotifier? notifier;
     private int running;
@@ -287,6 +291,7 @@ internal sealed class DesktopActions
         this.localNow = localNow ?? (() => DateTime.Now);
         this.calendar = calendar ?? new CalendarStore(notes.Root, TimeZoneInfo.Local);
         settings = new SettingsStore(notes.Root);
+        recentStore = new RecentNotesStore(notes.Root);
         dayEnd = new DayEnd(notes, todos, this.calendar, calendarFeed, timesFolder, settings);
         this.timesFolder = timesFolder;
         this.calendarLink = calendarLink;
@@ -882,6 +887,66 @@ internal sealed class DesktopActions
     /// done.
     /// </summary>
     public Task<ActionResult> DeleteNote(string name, Confirmation? confirmed) => Run(() => DeleteNoteNow(name, confirmed));
+
+    /// <summary>
+    /// Records that the note <paramref name="name"/> (a full name) was opened (job 240): it moves to the front of
+    /// <see cref="DesktopState.Recent"/> right away, then, off the calling thread, <see cref="DesktopState.Changed"/> is
+    /// raised and <c>recent.json</c> is written. Runs outside the one-at-a-time gate, so it is never refused as Busy;
+    /// never refreshes, never rescans the notes folder and never throws. A name that could not name a note is ignored.
+    /// A failed write is swallowed and the in-memory list stays. The task ends after the write.
+    /// </summary>
+    public Task RecordOpened(string name)
+    {
+        try
+        {
+            if (!RecentNotes.IsValidName(name))
+            {
+                return Task.CompletedTask;
+            }
+
+            state.ChangeRecent(list => RecentNotes.Touch(list, name));
+            return Task.Run(() =>
+            {
+                state.RaiseChanged();
+                WriteRecent();
+            });
+        }
+        catch (Exception)
+        {
+            return Task.CompletedTask;
+        }
+    }
+
+    // Changes the recent list after a rename, move or delete (on the action's worker thread) and writes it. Never throws.
+    private void ChangeRecent(Func<IReadOnlyList<string>, IReadOnlyList<string>> step)
+    {
+        try
+        {
+            state.ChangeRecent(step);
+        }
+        catch (Exception)
+        {
+            return;
+        }
+
+        WriteRecent();
+    }
+
+    // Writes the current recent list; a failure is swallowed (the list is only a cache, the next write tries again).
+    private void WriteRecent()
+    {
+        lock (recentWriteGate)
+        {
+            try
+            {
+                recentStore.Write(state.Recent);
+            }
+            catch (Exception)
+            {
+                // The in-memory list stays; the sidebar keeps showing it.
+            }
+        }
+    }
 
     /// <summary>
     /// Opens the note <paramref name="name"/> in the OS default app through the <see cref="INoteLauncher"/>. Only a path
@@ -1944,6 +2009,12 @@ internal sealed class DesktopActions
                 renamedName = sealedResult.Text;
             }
 
+            if (!string.Equals(source.Name, renamedName, StringComparison.Ordinal))
+            {
+                string oldName = source.Name;
+                ChangeRecent(list => RecentNotes.Renamed(list, oldName, renamedName));
+            }
+
             return UpdateLinks(plan, renamedName);
         }
         catch (NoteExistsException e)
@@ -2290,9 +2361,18 @@ internal sealed class DesktopActions
             }
 
             NoteInfo? moved = attachments.MoveWithNote(source.Name, owner?.Name);
-            return moved is null
-                ? Refused(ActionReason.Missing, NoteMissingText(name))
-                : new ActionResult(ActionKind.Done, ActionReason.None, moved.Name);
+            if (moved is null)
+            {
+                return Refused(ActionReason.Missing, NoteMissingText(name));
+            }
+
+            if (!string.Equals(source.Name, moved.Name, StringComparison.Ordinal))
+            {
+                string oldName = source.Name;
+                ChangeRecent(list => RecentNotes.Renamed(list, oldName, moved.Name));
+            }
+
+            return new ActionResult(ActionKind.Done, ActionReason.None, moved.Name);
         }
         catch (NoteExistsException e)
         {
@@ -2331,6 +2411,7 @@ internal sealed class DesktopActions
                 {
                     // Never throws; a file it can't remove stays and the delete is still done.
                     attachments.RemoveUnlinked(plain, linked);
+                    ChangeRecent(list => RecentNotes.Removed(list, plain.Name));
                 }
 
                 return new ActionResult(ActionKind.Done, ActionReason.None, name);
@@ -2340,6 +2421,7 @@ internal sealed class DesktopActions
             if (notes.TryFindSensitive(name, out NoteInfo? locked) && locked is not null && notes.DeleteSensitive(locked.Name, removeHistory: true))
             {
                 state.Session.Close(locked.Name);
+                ChangeRecent(list => RecentNotes.Removed(list, locked.Name));
                 return new ActionResult(ActionKind.Done, ActionReason.None, name);
             }
 

@@ -183,7 +183,7 @@ public sealed class OutlinePanelTests : IDisposable
         Assert.Single(cut.FindAll("aside.todos-region section.todos"));
 
         js.Fail("ContextEditor.mount", new JSException("no page"));
-        await cut.FindAll(".notes-region button.name").Single(b => b.GetAttribute("title") == "Plan").ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, "Plan");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".editor-failed")), Wait);
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);
         Assert.Empty(cut.FindAll("nav.outline-panel"));
@@ -192,7 +192,7 @@ public sealed class OutlinePanelTests : IDisposable
         using (FileStream held = new FileStream(
             Path.Combine(data.Root, "Bad.md"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
         {
-            await cut.FindAll(".notes-region button.name").Single(b => b.GetAttribute("title") == "Bad").ClickAsync(new MouseEventArgs());
+            await NoteOpener.OpenAsync(cut, "Bad");
             cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".unreadable")), Wait);
         }
 
@@ -361,7 +361,7 @@ public sealed class OutlinePanelTests : IDisposable
         js.SetHeadings("""[{"level":1,"text":"Secret A"},{"level":2,"text":"Secret B"},{"level":2,"text":"Secret C"}]""");
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         int mounts = js.Calls("ContextEditor.mount").Count;
-        await cut.FindAll(".notes-region button.name").Single(b => b.TextContent == "Plan").ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, "Plan");
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("aside.todos-region nav.outline-panel button").Count), Wait);
         Assert.Empty(cut.FindAll(".note-area nav.outline-panel"));
@@ -408,7 +408,7 @@ public sealed class OutlinePanelTests : IDisposable
     private static async Task Open(IRenderedComponent<Main> cut, EditorJs js, string name)
     {
         int mounts = js.Calls("ContextEditor.mount").Count;
-        await cut.FindAll(".notes-region button.name").Single(b => b.GetAttribute("title") == name).ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, name);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);

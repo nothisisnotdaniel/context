@@ -198,5 +198,5 @@ public sealed class DesktopActionsTests : IDisposable
     }
 
     // context.db* is the tag index the state's refresh keeps; it is not user data.
-    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName);
+    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 }

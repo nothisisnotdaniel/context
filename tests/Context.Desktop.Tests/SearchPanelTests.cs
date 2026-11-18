@@ -28,7 +28,7 @@ public sealed class SearchPanelTests : IDisposable
         data.WriteNote("bob", "budget\n");
         data.WriteNote("Carl", "nothing\n");
         await data.RefreshAsync();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         List<string> opened = [];
         int closed = 0;
 
@@ -54,7 +54,7 @@ public sealed class SearchPanelTests : IDisposable
 
         Assert.Equal(["projects/Plan"], opened);
         Assert.Equal(1, closed);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // AC-10: at most 100 rows, then the grey "… n more" line.
@@ -404,7 +404,7 @@ public sealed class SearchPanelTests : IDisposable
         await data.RefreshAsync();
         IRenderedComponent<SearchPanel> cut = Render("#a");
         cut.WaitForAssertion(() => Assert.Equal(["Plan"], NoteNames(cut)), Wait);
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         await cut.Find("button.search-save").ClickAsync(new MouseEventArgs());
         await cut.Find("input.search-save-name").InputAsync(new ChangeEventArgs { Value = "Mine" });
@@ -413,7 +413,7 @@ public sealed class SearchPanelTests : IDisposable
         Assert.Empty(cut.FindAll("input.search-save-name"));
         Assert.Single(cut.FindAll("button.search-save"));
         Assert.Empty(cut.FindAll("p.search-save-result"));
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 207 AC-5: a refusal shows the action's text in red and keeps the form.

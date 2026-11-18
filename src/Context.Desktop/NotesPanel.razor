@@ -1,5 +1,4 @@
 @inherits StateComponent
-@using Microsoft.AspNetCore.Components.Rendering
 
 <section class="notes">
     <div class="notes-bar">
@@ -47,9 +46,29 @@
         {
             <p class="grey">No notes yet</p>
         }
+        else if (RecentRows(snapshot) is { Count: > 0 } rows)
+        {
+            <ul class="note-list recent-notes" aria-label="Recent notes">
+                @foreach ((NoteInfo note, bool locked) in rows)
+                {
+                    string name = DesktopText.OneLine(note.Name);
+                    string? parent = note.Parent is { } rawParent ? DesktopText.OneLine(rawParent) : null;
+                    bool open = string.Equals(note.Name, OpenName, StringComparison.Ordinal);
+                    <li class="note" @key="note.Name">
+                        <button type="button" class="name cut" title="@name" aria-current="@(open ? "page" : null)"
+                                @onclick="() => OnOpen.InvokeAsync(note.Name)">@DesktopText.NoteName(note.Title)@if (parent is not null)
+                            {<span class="note-parent">@parent</span>}</button>
+                        @if (locked)
+                        {
+                            <span class="locked grey">locked</span>
+                        }
+                    </li>
+                }
+            </ul>
+        }
         else
         {
-            RenderTree(__builder, Tree(snapshot), top: true);
+            <p class="recent-empty grey">No recently opened notes.</p>
         }
         <div class="note-entry">
             <input type="text" class="note-new-title" value="@newTitle" maxlength="200" disabled="@creating"
@@ -131,7 +150,7 @@
     [Parameter]
     public EventCallback<string> OnOpen { get; set; }
 
-    /// <summary>The open note's full name, or null; its ancestors are expanded when it changes.</summary>
+    /// <summary>The open note's full name, or null; its row in the recent list gets <c>aria-current="page"</c>.</summary>
     [Parameter]
     public string? OpenName { get; set; }
 
@@ -176,104 +195,27 @@
         }
     }
 
-    // The full names of the notes whose subpages are shown. Kept across State.Changed; a name that no longer has
-    // subpages simply shows no toggle.
-    private readonly HashSet<string> expanded = new(StringComparer.Ordinal);
-    private string? expandedFor;
-
-    // Opening a note shows it in the tree: every ancestor is expanded (once per newly opened note, so the user can
-    // still collapse them afterwards).
-    protected override void OnParametersSet()
+    // The stored recent entries that name an existing plain or sensitive note (exact, ordinal), newest first, each
+    // with whether it is sensitive (job 240). Nothing is read from disk.
+    private List<(NoteInfo Note, bool Locked)> RecentRows(DesktopSnapshot snapshot)
     {
-        if (OpenName is { } open && !string.Equals(open, expandedFor, StringComparison.Ordinal))
+        Dictionary<string, (NoteInfo Note, bool Locked)> known = new(StringComparer.Ordinal);
+        foreach (NoteInfo note in snapshot.Notes)
         {
-            expanded.UnionWith(Enumerable.Range(1, Math.Max(0, open.Length - 1))
-                .Where(i => open[i] == '/')
-                .Select(i => open[..i]));
+            known.TryAdd(note.Name, (note, false));
         }
 
-        expandedFor = OpenName;
-    }
-
-    private void Toggle(string name)
-    {
-        if (!expanded.Remove(name))
+        foreach (NoteInfo note in snapshot.Sensitive)
         {
-            expanded.UnionWith([name]);
+            known.TryAdd(note.Name, (note, true));
         }
-    }
 
-    // Plain notes as a tree (List() order: siblings by title, each note followed by its subpages), with the sensitive
-    // notes, which are top-level only and marked locked, sorted among the top-level notes by name.
-    private static List<TreeNode> Tree(DesktopSnapshot snapshot)
-    {
-        ILookup<string, NoteInfo> byParent = snapshot.Notes
-            .Where(n => n.Parent is not null)
-            .ToLookup(n => n.Parent!, StringComparer.Ordinal);
-        TreeNode Build(NoteInfo note) => new TreeNode(note, locked: false, byParent[note.Name].Select(Build).ToList());
-        return snapshot.Notes
-            .Where(n => n.Parent is null)
-            .Select(Build)
-            .Concat(snapshot.Sensitive.Select(n => new TreeNode(n, locked: true, [])))
-            .OrderBy(n => n.Note.Name, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(n => n.Note.Name, StringComparer.Ordinal)
+        return State.Recent
+            .Where(known.ContainsKey)
+            .Distinct(StringComparer.Ordinal)
+            .Take(RecentNotes.MaxCount)
+            .Select(name => known[name])
             .ToList();
-    }
-
-    // One level of the tree: a row per note (toggle when it has subpages, its title, locked, time) and, when expanded,
-    // its subpages as a nested list.
-    private void RenderTree(RenderTreeBuilder __builder, List<TreeNode> nodes, bool top)
-    {
-        <ul class="@(top ? "note-list" : "note-list note-children")" aria-label="@(top ? "Notes" : null)">
-            @foreach (TreeNode node in nodes)
-            {
-                NoteInfo note = node.Note;
-                string name = DesktopText.OneLine(note.Name);
-                string title = DesktopText.OneLine(note.Title);
-                bool open = node.Children.Count > 0 && expanded.Contains(note.Name);
-                string toggleLabel = (open ? "Collapse " : "Expand ") + name;
-                string toggleMark = open ? "▾" : "▸";
-                <li class="note" @key="note.Name">
-                    <div class="note-row">
-                        @if (node.Children.Count > 0)
-                        {
-                            <button type="button" class="toggle" aria-expanded="@(open ? "true" : "false")"
-                                    aria-label="@toggleLabel" @onclick="() => Toggle(note.Name)">@toggleMark</button>
-                        }
-                        else
-                        {
-                            <span class="toggle-space"></span>
-                        }
-                        <button type="button" class="name cut" title="@name" @onclick="() => OnOpen.InvokeAsync(note.Name)">@title</button>
-                        @if (node.Locked)
-                        {
-                            <span class="locked grey">locked</span>
-                        }
-                    </div>
-                    @if (open)
-                    {
-                        RenderTree(__builder, node.Children, top: false);
-                    }
-                </li>
-            }
-        </ul>
-    }
-
-    // A note in the tree with its subpages.
-    private sealed class TreeNode
-    {
-        public TreeNode(NoteInfo note, bool locked, List<TreeNode> children)
-        {
-            Note = note;
-            Locked = locked;
-            Children = children;
-        }
-
-        public NoteInfo Note { get; }
-
-        public bool Locked { get; }
-
-        public List<TreeNode> Children { get; }
     }
 
     private void OpenSetup()

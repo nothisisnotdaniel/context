@@ -2009,6 +2009,25 @@ public sealed class DesktopSourceTests
         Assert.True(found.Count == 0, "Components name a file system class: " + string.Join(", ", found));
     }
 
+    // 240 AC-8: the recently opened list belongs to the desktop app; the command-line tool never names it.
+    [Fact]
+    public void Cli_NamesNoRecentNotes()
+    {
+        string root = RepoFiles.Root();
+        List<string> files = RepoFiles.Sources(root, "src/Context", ".cs", ".csproj", ".json");
+        Assert.Contains("src/Context/Cli.cs", files);
+        List<string> found = files
+            .Where(file =>
+            {
+                string text = File.ReadAllText(Path.Combine(root, file));
+                return text.Contains("recent.json", StringComparison.OrdinalIgnoreCase)
+                    || text.Contains("RecentNotes", StringComparison.Ordinal);
+            })
+            .ToList();
+
+        Assert.True(found.Count == 0, "The CLI names the recent notes: " + string.Join(", ", found));
+    }
+
     // 139 AC-10 (control): whole words only, so RecoveryFile. does not count.
     [Theory]
     [InlineData("File.Exists(path)", true)]
@@ -2275,7 +2294,9 @@ public sealed class DesktopSourceTests
         List<(string Name, string Body)> methods = CodeMethods(razor);
         List<string> bindings = EventBinding.Matches(MarkupOf(razor)).Select(m => m.Groups[1].Value).ToList();
         List<string> problems = [];
-        foreach ((string name, string body) in methods.Where(m => ActionsCall.IsMatch(m.Body)))
+        // 240: recording an open (Actions.RecordOpened, run by Main.ShowNote on every route that opens a note) changes
+        // no note or other user data, is never refused as Busy and never refreshes, so it is the one call let through.
+        foreach ((string name, string body) in methods.Where(m => ActionsCall.IsMatch(m.Body.Replace(RecordOpenedCall, string.Empty, StringComparison.Ordinal))))
         {
             Regex word = new Regex(@"\b" + Regex.Escape(name) + @"\b", RegexOptions.CultureInvariant);
             if (Lifecycle.Any(l => name.StartsWith(l, StringComparison.Ordinal)))
@@ -2307,6 +2328,8 @@ public sealed class DesktopSourceTests
 
         return problems;
     }
+
+    private const string RecordOpenedCall = "Actions.RecordOpened(";
 
     private static readonly HashSet<(string Caller, string Callee)> SaveCallers =
         [("SaveFirstAsync", "SaveAsync"), ("AutoSaveAsync", "SaveAsync")];

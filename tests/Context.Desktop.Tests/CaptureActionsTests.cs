@@ -258,7 +258,7 @@ public sealed class CaptureActionsTests : IDisposable
         Assert.Equal(text, result.Text);
     }
 
-    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName);
+    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
     // Every file but the index and the inbox note.
     private SortedDictionary<string, string> Others() => FileSnapshot.Take(data.Root, TagIndex.FileName, "Inbox.md");

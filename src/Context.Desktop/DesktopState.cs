@@ -43,6 +43,10 @@ internal sealed class DesktopState
     private string? offeredBriefing;
     private string? offeredStartNote;
 
+    // The recently opened notes (job 240): read once from recent.json at start, then changed only through ChangeRecent.
+    private readonly object recentGate = new();
+    private IReadOnlyList<string> recent;
+
     // Counts the Changed handlers' reloads that are still running (StateComponent), for tests to wait on.
     private readonly object reloadGate = new();
     private int reloads;
@@ -75,6 +79,32 @@ internal sealed class DesktopState
         KeyStore = keyStore ?? new UnsupportedKeyStore();
         Session = session ?? new SensitiveSession(utcNow);
         HistoryStore = new NoteHistory(notes, utcNow);
+        recent = new RecentNotesStore(notes.Root).Read();
+    }
+
+    /// <summary>
+    /// The full names of the notes opened most recently, newest first (<see cref="RecentNotes"/>), as read once from
+    /// <c>recent.json</c> at start and changed by the actions since. Raw names; they may name notes that are gone.
+    /// </summary>
+    public IReadOnlyList<string> Recent
+    {
+        get
+        {
+            lock (recentGate)
+            {
+                return recent;
+            }
+        }
+    }
+
+    /// <summary>Applies <paramref name="step"/> to <see cref="Recent"/> in memory (nothing is written) and returns the new list.</summary>
+    internal IReadOnlyList<string> ChangeRecent(Func<IReadOnlyList<string>, IReadOnlyList<string>> step)
+    {
+        lock (recentGate)
+        {
+            recent = step(recent);
+            return recent;
+        }
     }
 
     /// <summary>How long one Outlook source call may take before it counts as timed out.</summary>
@@ -951,7 +981,11 @@ internal sealed class DesktopState
         }
     }
 
-    private void RaiseChanged()
+    /// <summary>
+    /// Raises <see cref="Changed"/> once per listener, swallowing a listener's exception. Also used without a refresh
+    /// (the snapshot stays as it is) after <see cref="Recent"/> changed.
+    /// </summary>
+    internal void RaiseChanged()
     {
         Action? handlers = Changed;
         if (handlers is null)

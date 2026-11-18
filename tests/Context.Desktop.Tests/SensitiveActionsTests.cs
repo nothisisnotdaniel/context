@@ -179,7 +179,7 @@ public sealed class SensitiveActionsTests : IDisposable
         using System.Security.Cryptography.ECDiffieHellman key = RecoveryFile.Read(File.ReadAllBytes(data.RecoveryPath), Password);
         Assert.Equal(data.Keys.RecoveryPublicKey(), key.ExportSubjectPublicKeyInfo());
         AssertPrivate(data.RecoveryPath);
-        Assert.Empty(FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Empty(FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
         Assert.Equal(["recovery.pfx"], FileSnapshot.Take(Parent(), "Context/").Keys.ToArray());
         Assert.DoesNotContain(Password, result.ToString(), StringComparison.Ordinal);
         Assert.True((await data.RefreshAsync()).RecoveryReady);
@@ -758,9 +758,9 @@ public sealed class SensitiveActionsTests : IDisposable
         Assert.Equal(ActionKind.Refused, top.Kind);
     }
 
-    private string[] RootFiles() => FileSnapshot.Take(data.Root, TagIndex.FileName).Keys.ToArray();
+    private string[] RootFiles() => FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName).Keys.ToArray();
 
-    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName);
+    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
     // Every base64 value of a sealed file.
     private static List<string> SealedValues(byte[] file)

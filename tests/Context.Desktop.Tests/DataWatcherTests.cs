@@ -43,6 +43,8 @@ public sealed class DataWatcherTests : IDisposable
     [InlineData("calendar/notes.md")]
     [InlineData("calendar")]
     [InlineData("other.json")]
+    [InlineData(RecentNotesStore.FileName)] // 240 AC-8: recording an open never triggers a rescan.
+    [InlineData(".recent.json.0123456789abcdef.tmp")]
     [InlineData(RemovedFeature.KeyFileName)]
     [InlineData(".md")]
     [InlineData("")]

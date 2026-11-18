@@ -47,14 +47,14 @@ public sealed class PersonActionsTests : IDisposable
         await data.RefreshAsync();
         await data.Actions!.OpenPerson("Anna");
         File.WriteAllText(Path.Combine(data.Root, "people", "Anna.md"), "# Anna\n\nNotes about Anna.\n");
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         ActionResult again = await data.Actions.OpenPerson("anna");
 
         Assert.Equal(ActionKind.Done, again.Kind);
         Assert.Equal(ActionReason.Unchanged, again.Reason);
         Assert.Equal("people/Anna", again.Text);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // AC-10: a sensitive top-level people note is refused with the fixed text: nothing written, no key-store call.
@@ -64,13 +64,13 @@ public sealed class PersonActionsTests : IDisposable
         data.Keys = FakeKeyStore.Ready();
         data.WriteSensitive("people", "# people\n");
         await data.RefreshAsync();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         ActionResult result = await data.Actions!.OpenPerson("Anna");
 
         Assert.Equal(ActionKind.Refused, result.Kind);
         Assert.Equal("Can't make a page for Anna. Nothing was done.", result.Text);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
         Assert.Equal(0, data.Keys.Agrees);
     }
 
@@ -86,13 +86,13 @@ public sealed class PersonActionsTests : IDisposable
     public async Task OpenPerson_InvalidName_RefusedNothingWritten(string name)
     {
         await data.RefreshAsync();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         ActionResult result = await data.Actions!.OpenPerson(name);
 
         Assert.Equal(ActionKind.Refused, result.Kind);
         Assert.EndsWith(". Nothing was done.", result.Text, StringComparison.Ordinal);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 157 AC-9: a types/person page sets the template's attribute lines, in its order.
@@ -134,12 +134,12 @@ public sealed class PersonActionsTests : IDisposable
         Directory.CreateDirectory(Path.Combine(data.Root, "people"));
         File.WriteAllText(Path.Combine(data.Root, "people", "Anna.md"), "# Anna\n");
         await data.RefreshAsync();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         ActionResult result = await data.Actions!.OpenPerson("Anna");
 
         Assert.Equal(ActionReason.Unchanged, result.Reason);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     private void WriteAliasPages()
@@ -159,14 +159,14 @@ public sealed class PersonActionsTests : IDisposable
     {
         WriteAliasPages();
         await data.RefreshAsync();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         ActionResult result = await data.Actions!.OpenPerson(name);
 
         Assert.Equal(ActionKind.Done, result.Kind);
         Assert.Equal(ActionReason.Unchanged, result.Reason);
         Assert.Equal("people/Anna Schmidt", result.Text);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
         Assert.False(File.Exists(Path.Combine(data.Root, "people", "AS.md")));
     }
 
@@ -176,14 +176,14 @@ public sealed class PersonActionsTests : IDisposable
     {
         WriteAliasPages();
         await data.RefreshAsync();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         ActionResult result = await data.Actions!.OpenPerson("@[Anna]");
 
         Assert.Equal(ActionKind.Refused, result.Kind);
         Assert.Equal(ActionReason.Ambiguous, result.Reason);
         Assert.Equal("@[Anna] is an alias of more than one person: Anna Berg, Anna Schmidt.", result.Text);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 158 AC-8: an alias on a note that is no person page is no alias: the mention gets its own page.

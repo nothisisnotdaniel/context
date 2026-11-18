@@ -104,7 +104,7 @@ public sealed class SensitiveSetupTests : IDisposable
         Assert.True(File.Exists(data.RecoveryPath));
         Assert.NotNull(data.Keys.RecoveryPublicKey());
         Assert.NotNull(data.Keys.MachinePublicKey());
-        Assert.Empty(FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Empty(FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // Round 2 (security 1): the two entries are compared in Unicode form C, so the same visible password typed

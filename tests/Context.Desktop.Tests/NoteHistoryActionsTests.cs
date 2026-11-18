@@ -526,9 +526,9 @@ public sealed class NoteHistoryActionsTests : IDisposable
     private string Unseal(string path, string title) =>
         SealedNote.Open(title, File.ReadAllBytes(path), data.Keys.MachinePublicKey()!, data.Keys.Agree);
 
-    private string[] RootFiles() => FileSnapshot.Take(data.Root, TagIndex.FileName).Keys.ToArray();
+    private string[] RootFiles() => FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName).Keys.ToArray();
 
-    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName);
+    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
     private static void AssertPrivate(string path)
     {
