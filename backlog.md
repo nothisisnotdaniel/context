@@ -105,6 +105,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#282](backlog/282-bigger-level-1-and-2-headings.md) Bigger level 1 and 2 headings in the note editor → 215-bigger-editor-headings
 - [x] [#289](backlog/289-appointment-page-close-button-and-a.md) Appointment page: × close button and a Notes heading → 219-appointment-close-notes-heading
 - [x] [#290](backlog/290-meeting-notes-go-under-meetings-appointment.md) Meeting notes go under Meetings/<appointment>/<date> → 220-meeting-notes-hierarchy
+- [ ] [#272](backlog/272-steady-maintests-windowclose-closedafterlastrender.md) Steady MainTests.WindowClose_ClosedAfterLastRender_IsStillSeen
 - [ ] [#291](backlog/291-remove-the-mail-panel-from-the.md) Remove the Mail panel from the right sidebar
 - [ ] [#292](backlog/292-no-browser-context-menu-on-right.md) No browser context menu on right click in the desktop app
 - [ ] [#293](backlog/293-narrower-pick-a-day-calendar-popover.md) Narrower Pick a day calendar popover
@@ -240,7 +241,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#265](backlog/265-rename-ask-again-when-the-link.md) Rename: ask again when the link count changed before Confirm
 - [?] [#266](backlog/266-tag-filters-decide-on-number-tags.md) Tag filters: decide on number tags like #1234
 - [?] [#267](backlog/267-saved-searches-icon-for-the-remove.md) Saved searches: icon for the × remove button
-- [?] [#272](backlog/272-steady-maintests-windowclose-closedafterlastrender.md) Steady MainTests.WindowClose_ClosedAfterLastRender_IsStillSeen
 - [?] [#273](backlog/273-check-outline-link-contrast-in-the.md) Check outline link contrast in the right sidebar
 - [?] [#274](backlog/274-visible-heading-for-the-sidebar-outline.md) Visible heading for the sidebar outline
 - [?] [#275](backlog/275-one-helper-for-opening-a-daily.md) One helper for opening a daily note in Main.razor
@@ -255,7 +255,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#287](backlog/287-show-loading-in-the-mail-panel.md) Show Loading in the mail panel during the first read
 - [?] [#288](backlog/288-don-t-let-a-blocked-outlook.md) Don't let a blocked Outlook delay every refresh
 - [?] [#301](backlog/301-meeting-note-title-shows-the-meeting.md) Meeting note title shows the meeting name, not only the date
-- [?] [#302](backlog/302-find-the-desktop-test-that-failed.md) Find the desktop test that failed once in job 220
 
 ## Dropped with the terminal UI
 
