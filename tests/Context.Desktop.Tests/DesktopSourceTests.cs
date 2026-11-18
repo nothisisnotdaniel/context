@@ -299,6 +299,35 @@ public sealed class DesktopSourceTests
         Assert.Contains("outline: none;", RuleBody(editorCss, ".note-editor-body"), StringComparison.Ordinal);
     }
 
+    // 209 AC-8: no rule styles a Save button in the editor bar; the shared bar rule stays and a later editor-bar rule
+    // keeps the dirty dot right after the title.
+    [Fact]
+    public void AppCss_EditorBar_HasNoSaveRule_AndKeepsTheDotAfterTheTitle()
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"))
+            .ReplaceLineEndings("\n");
+
+        Assert.DoesNotContain(".editor-bar .save", css, StringComparison.Ordinal);
+        Assert.Contains("justify-content: space-between;", RuleBody(css, ".editor-bar,\n.panel-bar"), StringComparison.Ordinal);
+        Assert.Contains("justify-content: flex-start;", RuleBody(css, ".editor-bar"), StringComparison.Ordinal);
+        Assert.True(
+            css.IndexOf(".editor-bar {", StringComparison.Ordinal) > css.IndexOf(".editor-bar,\n.panel-bar {", StringComparison.Ordinal));
+        Assert.Contains("flex: none;", RuleBody(css, "\n.panel-bar .close"), StringComparison.Ordinal);
+    }
+
+    // 209 AC-9: README and CLAUDE.md mention no Save button in the note editor, and still name Ctrl/Cmd+S and /save.
+    [Theory]
+    [InlineData("README.md")]
+    [InlineData("CLAUDE.md")]
+    public void Docs_NameNoEditorSaveButton_ButKeepTheKeyboardSaves(string file)
+    {
+        string text = File.ReadAllText(Path.Combine(RepoFiles.Root(), file));
+
+        Assert.DoesNotContain("Save button", text, StringComparison.Ordinal);
+        Assert.Contains("`/save`", text, StringComparison.Ordinal);
+        Assert.Matches(@"Ctrl/Cmd\+S|Ctrl\+S \(Cmd\+S", text);
+    }
+
     private static string RuleBody(string css, string selector)
     {
         css = css.ReplaceLineEndings("\n");
@@ -433,6 +462,7 @@ public sealed class DesktopSourceTests
     [InlineData("<ConfirmDialog OnConfirm=\"Go\" />\n@code {\n private async Task Go(Confirmation c)\n {\n if (x) { await Actions.CompleteTodo(1, t, c); }\n }\n}")]
     [InlineData("<Bar OnRun=\"Run\" OnGo=\"Go\" />\n@code {\n private Task Run() => Go();\n private Task Go() => Actions.CompleteTodo(1, t, c);\n}")]
     [InlineData("<button type=\"button\" @onclick=\"() => SaveAsync(false)\">x</button>\n@code {\n public Task SaveFirstAsync() => SaveAsync(true);\n private Task AutoSaveAsync() => SaveAsync(true);\n private Task SaveAsync(bool a) => Actions.CompleteTodo(1, t, c);\n}")]
+    [InlineData("<section @onkeydown=\"e => Save(e)\"></section>\n@code {\n public Task SaveFirstAsync() => SaveAsync(true);\n private Task Save(KeyboardEventArgs k) => SaveAsync(false);\n private Task SaveAsync(bool a) => Actions.CompleteTodo(1, t, c);\n}")]
     public void ActionCall_Pattern_AllowsEventHandlers(string razor)
     {
         Assert.Single(ActionCallers(razor));
@@ -450,6 +480,8 @@ public sealed class DesktopSourceTests
     [InlineData("<button type=\"button\" @onclick=\"Go\">x</button>\n@code {\n private void Helper() { Go(); }\n private void Go() { Actions.CompleteTodo(1, t, c); }\n}")]
     [InlineData("<button type=\"button\" @onclick=\"Go\">x</button>\n@code {\n private void SaveFirstAsync() { Go(); }\n private void Go() { Actions.CompleteTodo(1, t, c); }\n}")]
     [InlineData("<button type=\"button\" @onclick=\"SaveAsync\">x</button>\n@code {\n private void Helper() { SaveAsync(); }\n private void SaveAsync() { Actions.CompleteTodo(1, t, c); }\n}")]
+    [InlineData("<section></section>\n@code {\n private Task Save(KeyboardEventArgs k) => SaveAsync(false);\n private Task SaveAsync(bool a) => Actions.CompleteTodo(1, t, c);\n}")]
+    [InlineData("<section @onkeydown=\"e => Keys(e)\"></section>\n@code {\n private Task Keys(KeyboardEventArgs k) => SaveAsync(false);\n private Task SaveAsync(bool a) => Actions.CompleteTodo(1, t, c);\n}")]
     public void ActionCall_Pattern_FlagsOtherCallers(string razor)
     {
         Assert.NotEmpty(ActionCallProblems(razor));
@@ -1688,7 +1720,11 @@ public sealed class DesktopSourceTests
                 problems.Add(name + " is a lifecycle method");
             }
 
-            if (!bindings.Any(b => word.IsMatch(b)))
+            // 209: with the Save button gone, the note editor's SaveAsync is bound only through the bound key handler
+            // Save (Ctrl/Cmd+S); only this pair counts as bound through its caller.
+            bool boundThrough = methods.Any(m => KeyCallers.Contains((m.Name, name)) && word.IsMatch(m.Body)
+                && IsBoundHandler(m.Name, bindings));
+            if (!bindings.Any(b => word.IsMatch(b)) && !boundThrough)
             {
                 problems.Add(name + " is bound by no event attribute");
             }
@@ -1696,7 +1732,7 @@ public sealed class DesktopSourceTests
             // 199: a helper shared by handlers (Main's CaptureAsync, run by the palette's RunCommand and bound to the
             // top bar's OnCapture) may be called by another method only when that caller is itself a bound,
             // non-lifecycle event handler.
-            // 203: the note editor's one save path (SaveAsync, bound to the Save button) is also run by the pause after
+            // 203: the note editor's one save path (SaveAsync, run by Ctrl/Cmd+S and /save) is also run by the pause after
             // the last edit (AutoSaveAsync) and by the parent before it leaves the note (SaveFirstAsync); only these
             // two pairs are exempt.
             if (methods.Any(m => m.Name != name && word.IsMatch(m.Body) && !IsBoundHandler(m.Name, bindings)
@@ -1711,6 +1747,8 @@ public sealed class DesktopSourceTests
 
     private static readonly HashSet<(string Caller, string Callee)> SaveCallers =
         [("SaveFirstAsync", "SaveAsync"), ("AutoSaveAsync", "SaveAsync")];
+
+    private static readonly HashSet<(string Caller, string Callee)> KeyCallers = [("Save", "SaveAsync")];
 
     private static bool IsBoundHandler(string name, List<string> bindings)
     {

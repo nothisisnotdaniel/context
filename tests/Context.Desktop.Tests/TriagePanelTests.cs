@@ -475,7 +475,7 @@ public sealed class TriagePanelTests : IDisposable
         Assert.Equal("# Plan\n- call Anna\n", js.MountedText());
 
         js.Edit("# Plan\n- call Anna\nMore\n");
-        await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
         cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".note-editor .status").TextContent), Wait);
         Assert.Equal("# Plan\n- call Anna\nMore\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
     }
@@ -513,6 +513,6 @@ public sealed class TriagePanelTests : IDisposable
         int mounts = js.Calls("ContextEditor.mount").Count;
         await cut.FindAll(".note-list button.name").Single(b => b.TextContent == name).ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
-        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
     }
 }

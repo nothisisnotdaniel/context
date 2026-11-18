@@ -202,7 +202,7 @@ public sealed class HeadingLinkTests : IDisposable
         await cut.InvokeAsync(() => js.Page().OnLink("[[Other]]"));
 
         cut.WaitForAssertion(() => Assert.Equal(mounts + 2, js.Calls("ContextEditor.mount").Count), Wait);
-        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
         Assert.Equal("Other", cut.Find(".note-title").TextContent);
         Assert.Equal([1], js.Jumps());
     }
@@ -216,7 +216,7 @@ public sealed class HeadingLinkTests : IDisposable
             p.Add(e => e.Name, name);
             parameters(p);
         });
-        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.Instance.IsReady), Wait);
         return cut;
     }
 
@@ -225,7 +225,7 @@ public sealed class HeadingLinkTests : IDisposable
         int mounts = js.Calls("ContextEditor.mount").Count;
         await cut.FindAll(".notes-region button.name").Single(b => b.TextContent == name).ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
-        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);
     }
 }

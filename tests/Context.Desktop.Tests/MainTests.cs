@@ -1200,7 +1200,7 @@ public sealed class MainTests : IDisposable
         int mounts = js.Calls("ContextEditor.mount").Count;
         await cut.FindAll(".notes-region button.name").Single(b => b.GetAttribute("title") == name).ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
-        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
 
         // 175: the links panel loads behind Task.Run on its own schedule; its render re-parses the whole markup, so
         // a test that reads the page before it lands can compare elements from two renders. Wait until it is in.
@@ -1841,7 +1841,7 @@ public sealed class MainTests : IDisposable
         int mounts = js.Calls("ContextEditor.mount").Count;
         await NameButton(cut, name).ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
-        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
 
         // 200: the links panel loads behind Task.Run; wait until it is in before the menu is opened or compared.
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);
@@ -1961,7 +1961,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal(focuses, js.Calls("ContextEditor.focus").Count);
 
         js.Edit(captured + "\nMore\n");
-        await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         cut.WaitForAssertion(() => Assert.Equal("Saved inbox.", cut.Find(".note-editor .status").TextContent), Wait);
         Assert.Equal(captured + "\nMore\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
@@ -1989,7 +1989,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
         Assert.Empty(js.Calls("ContextEditor.destroy"));
 
-        await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".note-editor .status").TextContent), Wait);
         Assert.Equal("# Plan\n\nUnsaved\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));

@@ -356,6 +356,6 @@ public sealed class MeetingNoteActionsTests : IDisposable
         IElement button = cut.FindAll(".notes-region button.name").Single(b => b.TextContent == name);
         await button.ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
-        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
     }
 }

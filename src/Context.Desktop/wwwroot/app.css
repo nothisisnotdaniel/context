@@ -481,14 +481,13 @@ input[type="password"]:disabled {
     text-transform: none;
 }
 
-.editor-bar .save,
 .panel-bar .close {
     flex: none;
 }
 
-/* The dot sits right after the name; the Save button keeps the right edge whether it shows or not. */
-.editor-bar .save {
-    margin-left: auto;
+/* The dot sits right after the name; space-between would push a lone dot to the right edge. */
+.editor-bar {
+    justify-content: flex-start;
 }
 
 .dirty-dot {

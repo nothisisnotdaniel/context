@@ -1,8 +1,8 @@
 @inherits StateComponent
 @implements IAsyncDisposable
-@* The note editor: the bundled ProseMirror editor (EditorInterop) in a host element, a Save button and a status
-   line. Every save goes through one serialized path to DesktopActions.SaveNote: on its own after the pause that
-   follows the last edit (IAutoSavePause), from the Save button and Ctrl/Cmd+S, and from the parent before it leaves
+@* The note editor: the bundled ProseMirror editor (EditorInterop) in a host element and a status line; no Save
+   button. Every save goes through one serialized path to DesktopActions.SaveNote: on its own after the pause that
+   follows the last edit (IAutoSavePause), from Ctrl/Cmd+S and /save, and from the parent before it leaves
    the note (SaveFirstAsync). Tag and link clicks
    come back from the page as events and only open things; the page's dirty flips only show or hide the dot next
    to the name (every decision still asks IsDirtyAsync). A sensitive note is read through DesktopState.ReadSensitive
@@ -16,7 +16,6 @@
         {
             <span class="dirty-dot" role="img" aria-label="Unsaved changes" title="Unsaved changes"></span>
         }
-        <button type="button" class="save" disabled="@(opened is null || saving)" @onclick="() => SaveAsync(false)">Save</button>
     </div>
     @if (unreadable)
     {
@@ -133,6 +132,9 @@
     /// pending: the window close asks this from its own thread.
     /// </summary>
     internal bool HasUnsaved => mounted && !disposed && (dirty || saving || pause is not null);
+
+    /// <summary>True when a note is open in the mounted editor and no save runs: a save can start at once.</summary>
+    internal bool IsReady => opened is not null && mounted && !saving;
 
     /// <summary>
     /// Before the parent leaves the note: waits for a running save, then saves what is still unsaved. True when
