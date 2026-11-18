@@ -545,6 +545,7 @@ public sealed class DesktopSourceTests
         [
             "h1", "h2", ".notes-region h2", ".todos-region h2", ".panel-bar h2", ".settings-panel h3", ".person-panel h2",
             ".links-panel h2", ".review-panel h3", ".review-panel h4.review-day", ".history-bar h2", ".appointment-page h3",
+            ".subpages h2",
         ];
         Assert.Equal(expected.Order(StringComparer.Ordinal), headings);
     }

@@ -105,6 +105,25 @@
                                     OnTag="ShowTag" OnOpenNote="RequestOpen" OnOpenHeading="OpenHeading" OnCreateNote="CreateLinked" Heading="@openHeading" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked"
                                     OnAttach="AttachDropped" OnOpenAttachment="OpenAttachment"
                                     OnOutline="OutlineReport(shownEditor)" />
+                        @if (Children(Snapshot, name) is { Count: > 0 } children)
+                        {
+                            <nav class="subpages" aria-label="Subpages">
+                                <h2>Subpages</h2>
+                                <ul>
+                                    @foreach ((NoteInfo child, int below) in children)
+                                    {
+                                        string childName = child.Name;
+                                        <li>
+                                            <button type="button" class="subpage-link cut" title="@DesktopText.OneLine(childName)" @onclick="() => RequestOpen(childName)">@DesktopText.NoteName(child.Title)</button>
+                                            @if (below > 0)
+                                            {
+                                                <span class="subpage-count">@(below == 1 ? "1 subpage" : $"{below} subpages")</span>
+                                            }
+                                        </li>
+                                    }
+                                </ul>
+                            </nav>
+                        }
                         @if (historyShown)
                         {
                             <HistoryPanel Name="@name" Sensitive="openSensitive" OnRestore="AskRestore" OnClose="CloseHistory" />
@@ -1591,6 +1610,23 @@ else
             moving = false;
             deleting = true;
         }
+    }
+
+    // 238: the open note's direct children from the in-memory snapshot (no disk access), ordered like NoteStore.List()
+    // siblings (Title ignoring case, then ordinal), each with the count of its own direct children.
+    private static IReadOnlyList<(NoteInfo Child, int Below)> Children(DesktopSnapshot? snapshot, string name)
+    {
+        if (snapshot is null)
+        {
+            return [];
+        }
+
+        return snapshot.Notes
+            .Where(n => string.Equals(n.Parent, name, StringComparison.Ordinal))
+            .OrderBy(n => n.Title, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(n => n.Title, StringComparer.Ordinal)
+            .Select(n => (n, snapshot.Notes.Count(g => string.Equals(g.Parent, n.Name, StringComparison.Ordinal))))
+            .ToList();
     }
 
     // Each ancestor of a subpage, from the top: its full name and its own title.

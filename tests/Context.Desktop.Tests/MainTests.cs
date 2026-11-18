@@ -1304,6 +1304,211 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal("Meetings", cut.Find(".note-title").TextContent), Wait);
     }
 
+    // 238: Projects with two children (written out of order and case) and a grandchild below Beta.
+    private void WriteProjects()
+    {
+        data.WriteNote("Projects", "# Projects\n");
+        data.WriteFile(Path.Combine("Projects", "Beta.md"), "# Beta\n");
+        data.WriteFile(Path.Combine("Projects", "alpha.md"), "# alpha\n");
+        data.WriteFile(Path.Combine("Projects", "Beta", "Gamma.md"), "# Gamma\n");
+    }
+
+    // 238 AC-1, AC-2, AC-6: the direct children in order, with the full name as tooltip, a count for a child with
+    // subpages, and plain buttons that Tab reaches.
+    [Fact]
+    public async Task Subpages_ListsDirectChildren_InOrder_WithCounts()
+    {
+        WriteProjects();
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await OpenFull(cut, js, "Projects");
+
+        IElement nav = cut.Find("nav.subpages[aria-label=Subpages]");
+        Assert.Equal("Subpages", nav.QuerySelector("h2")!.TextContent);
+        IReadOnlyList<IElement> links = nav.QuerySelectorAll("button.subpage-link").ToList();
+        Assert.Equal(["alpha", "Beta"], links.Select(l => l.TextContent).ToArray());
+        Assert.Equal(["Projects/alpha", "Projects/Beta"], links.Select(l => l.GetAttribute("title") ?? string.Empty).ToArray());
+        Assert.DoesNotContain("Gamma", nav.TextContent, StringComparison.Ordinal);
+        Assert.All(links, l =>
+        {
+            Assert.Equal("button", l.GetAttribute("type"));
+            Assert.False(l.HasAttribute("tabindex"));
+            Assert.False(l.HasAttribute("disabled"));
+            Assert.True(l.ClassList.Contains("cut"));
+        });
+        IReadOnlyList<IElement> rows = nav.QuerySelectorAll("li").ToList();
+        Assert.Empty(rows[0].QuerySelectorAll("span.subpage-count"));
+        Assert.Equal("1 subpage", rows[1].QuerySelector("span.subpage-count")!.TextContent);
+
+        // The list sits right after the editor, before the links panel.
+        IElement area = cut.Find(".note-area");
+        IElement[] children = area.Children.ToArray();
+        int at = Array.FindIndex(children, c => c.ClassList.Contains("subpages"));
+        Assert.True(at > 0);
+        Assert.True(Array.FindIndex(children, c => c.ClassList.Contains("links-panel")) > at);
+    }
+
+    // 238 AC-2: a child with two children reads "2 subpages".
+    [Fact]
+    public async Task Subpages_ChildWithTwoChildren_ReadsPlural()
+    {
+        WriteProjects();
+        data.WriteFile(Path.Combine("Projects", "Beta", "Delta.md"), "# Delta\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await OpenFull(cut, js, "Projects");
+
+        IElement row = cut.FindAll("nav.subpages li").Single(li => li.QuerySelector("button.subpage-link")!.TextContent == "Beta");
+        Assert.Equal("2 subpages", row.QuerySelector("span.subpage-count")!.TextContent);
+    }
+
+    // 238 AC-3: a leaf note and the No note open placeholder show no subpages list.
+    [Fact]
+    public async Task Subpages_LeafNoteAndPlaceholder_ShowNone()
+    {
+        WriteProjects();
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        Assert.Single(cut.FindAll("p.no-note"));
+        Assert.Empty(cut.FindAll("nav.subpages"));
+
+        await OpenFull(cut, js, "Plan");
+        Assert.Empty(cut.FindAll("nav.subpages"));
+
+        await OpenFull(cut, js, "Projects/alpha");
+        Assert.Empty(cut.FindAll("nav.subpages"));
+    }
+
+    // 238 AC-3: a sensitive note shows no subpages list.
+    [Fact]
+    public async Task Subpages_SensitiveNote_ShowsNone()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("Secret", "# Secret\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await Open(cut, js, "Secret");
+
+        Assert.Equal("Secret", cut.Find(".note-title").TextContent);
+        Assert.Empty(cut.FindAll("nav.subpages"));
+    }
+
+    // 238 AC-3: today's daily note without children shows no subpages list.
+    [Fact]
+    public async Task Subpages_DailyNoteWithoutChildren_ShowsNone()
+    {
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await TodayAndOpen(cut, js);
+
+        Assert.Empty(cut.FindAll("nav.subpages"));
+    }
+
+    // 238 AC-4: a subpage link opens the child; its title and the breadcrumb's last item show its own name.
+    [Fact]
+    public async Task Subpages_Click_OpensChild()
+    {
+        WriteProjects();
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await OpenFull(cut, js, "Projects");
+
+        await cut.Find("nav.subpages button.subpage-link[title='Projects/Beta']").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Beta", cut.Find(".note-title").TextContent), Wait);
+        Assert.Equal("Projects/Beta", cut.Find(".note-title").GetAttribute("title"));
+        Assert.Equal("Beta", cut.Find("nav.breadcrumb [aria-current=page]").TextContent);
+        cut.WaitForAssertion(() => Assert.Equal(["Gamma"], cut.FindAll("nav.subpages button.subpage-link").Select(b => b.TextContent).ToArray()), Wait);
+    }
+
+    // 238 AC-5: with unsavable changes a subpage link asks first, naming the parent, and opens the child on confirm.
+    [Fact]
+    public async Task Subpages_DirtyEditor_AsksFirst()
+    {
+        WriteProjects();
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await OpenFull(cut, js, "Projects");
+        js.EditUnsavable("# Projects\n\nUnsaved\n");
+
+        await cut.Find("nav.subpages button.subpage-link[title='Projects/alpha']").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal("Discard changes to Projects?", cut.Find("[role=dialog] .question").TextContent);
+        Assert.Equal("Projects", cut.Find(".note-title").TextContent);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("alpha", cut.Find(".note-title").TextContent), Wait);
+        Assert.Equal("alpha", cut.Find("nav.breadcrumb [aria-current=page]").TextContent);
+    }
+
+    // 238 AC-7: the list follows a new file on disk, a rename and the deletion of the last child.
+    [Fact]
+    public async Task Subpages_FollowRefresh_NewRenameDelete()
+    {
+        data.WriteNote("Projects", "# Projects\n");
+        data.WriteFile(Path.Combine("Projects", "Beta.md"), "# Beta\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await OpenFull(cut, js, "Projects");
+        Assert.Equal(["Beta"], cut.FindAll("nav.subpages button.subpage-link").Select(b => b.TextContent).ToArray());
+
+        data.WriteFile(Path.Combine("Projects", "Alpha.md"), "# Alpha\n");
+        await data.State!.Refresh();
+        cut.WaitForAssertion(() => Assert.Equal(["Alpha", "Beta"], cut.FindAll("nav.subpages button.subpage-link").Select(b => b.TextContent).ToArray()), Wait);
+
+        ActionResult renamed = await data.Actions!.RenameNote("Projects/Beta", "Delta", new Confirmation());
+        Assert.Equal(ActionKind.Done, renamed.Kind);
+        await data.State.Refresh();
+        cut.WaitForAssertion(() => Assert.Equal(["Alpha", "Delta"], cut.FindAll("nav.subpages button.subpage-link").Select(b => b.TextContent).ToArray()), Wait);
+        Assert.Equal("Projects/Delta", cut.FindAll("nav.subpages button.subpage-link")[1].GetAttribute("title"));
+
+        Assert.Equal(ActionKind.Done, (await data.Actions.DeleteNote("Projects/Alpha", new Confirmation())).Kind);
+        Assert.Equal(ActionKind.Done, (await data.Actions.DeleteNote("Projects/Delta", new Confirmation())).Kind);
+        await data.State.Refresh();
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("nav.subpages")), Wait);
+        Assert.Equal("Projects", cut.Find(".note-title").TextContent);
+    }
+
+    // 238 AC-8: a bidi control in a child's title shows as U+FFFD in the link text; the tooltip is OneLine of the name.
+    [Fact]
+    public async Task Subpages_BidiControlInTitle_Replaced()
+    {
+        data.WriteNote("Projects", "# Projects\n");
+        data.WriteFile(Path.Combine("Projects", "ab‮cd.md"), "# x\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await OpenFull(cut, js, "Projects");
+
+        IElement link = cut.Find("nav.subpages button.subpage-link");
+        Assert.Equal("ab�cd", link.TextContent);
+        Assert.Equal(DesktopText.OneLine("Projects/ab‮cd"), link.GetAttribute("title"));
+    }
+
+    // 238 AC-9: the subpages rules use only theme variables, no literal colour.
+    [Fact]
+    public void AppCss_SubpagesRules_UseOnlyVariables()
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+
+        List<string> blocks = [];
+        for (int at = css.IndexOf("\n.subpages", StringComparison.Ordinal); at >= 0; at = css.IndexOf("\n.subpages", at + 1, StringComparison.Ordinal))
+        {
+            blocks.Add(css[at..css.IndexOf('}', at)]);
+        }
+
+        Assert.True(blocks.Count >= 3);
+        Assert.Contains(blocks, b => b.Contains(".subpage-link {", StringComparison.Ordinal) && b.Contains("color: var(--accent-strong);", StringComparison.Ordinal));
+        Assert.Contains(blocks, b => b.Contains(".subpage-count {", StringComparison.Ordinal) && b.Contains("color: var(--grey);", StringComparison.Ordinal));
+        Assert.Contains(blocks, b => b.Contains(":hover", StringComparison.Ordinal) && b.Contains("text-decoration: underline;", StringComparison.Ordinal));
+        Assert.All(blocks, b => Assert.DoesNotMatch(@"#[0-9a-fA-F]{3,8}\b|\b(rgb|rgba|hsl|hsla)\(", b));
+    }
+
     // 152 AC-15: New subpage swaps in the title field; Enter or Create subpage creates and opens it.
     [Theory]
     [InlineData(true)]
