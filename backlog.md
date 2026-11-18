@@ -91,7 +91,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#247](backlog/247-small-logo-at-the-top-of.md) Small logo at the top of the sidebar → 195-sidebar-logo
 - [x] [#249](backlog/249-show-the-note-editor-without-its.md) Show the note editor without its own box → 196-editor-no-box
 - [x] [#62](backlog/062-links-to-headings.md) Links to headings → 205-heading-links
-- [ ] [#66](backlog/066-rename-with-link-update.md) Rename with link update
+- [x] [#66](backlog/066-rename-with-link-update.md) Rename with link update → 206-rename-link-update
 - [ ] [#68](backlog/068-saved-searches.md) Saved searches
 - [ ] [#69](backlog/069-board-view-for-a-tag.md) Board view for a tag
 - [ ] [#74](backlog/074-waiting-for-list.md) Waiting-for list
