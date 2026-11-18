@@ -1804,6 +1804,8 @@ public sealed class MainTests : IDisposable
         Assert.True(data.Guard.Closing());
 
         await asked.Task.WaitAsync(Wait);
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        await cut.InvokeAsync(() => { });
         Assert.Equal("Saved.", cut.Find(".note-editor .status").TextContent);
         Assert.Equal(0, data.CloseCalls);
         int renders = cut.RenderCount;

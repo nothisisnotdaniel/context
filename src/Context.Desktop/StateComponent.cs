@@ -33,11 +33,55 @@ public abstract class StateComponent : ComponentBase, IDisposable
     /// </summary>
     protected virtual Task OnStateChangedAsync() => Task.CompletedTask;
 
-    private void OnChanged() => _ = InvokeAsync(Reload);
-
-    private Task Reload()
+    // Counts the reload on the state before it is dispatched; it is ended exactly once, whether the reload runs (its
+    // finally), the dispatch throws, or the dispatched task ends without running it.
+    private void OnChanged()
     {
-        StateHasChanged();
-        return OnStateChangedAsync();
+        State.BeginReload();
+        ReloadEnd end = new(State);
+        Task dispatched;
+        try
+        {
+            dispatched = InvokeAsync(() => Reload(end));
+        }
+        catch
+        {
+            end.Run();
+            throw;
+        }
+
+        _ = dispatched.ContinueWith(
+            static (_, e) => ((ReloadEnd)e!).Run(),
+            end,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
+
+    private async Task Reload(ReloadEnd end)
+    {
+        try
+        {
+            StateHasChanged();
+            await OnStateChangedAsync();
+        }
+        finally
+        {
+            end.Run();
+        }
+    }
+
+    // Ends one reload's count on the state at most once.
+    private sealed class ReloadEnd(DesktopState state)
+    {
+        private int ended;
+
+        public void Run()
+        {
+            if (Interlocked.Exchange(ref ended, 1) == 0)
+            {
+                state.EndReload();
+            }
+        }
     }
 }
