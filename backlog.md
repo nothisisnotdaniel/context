@@ -103,7 +103,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#25](backlog/025-outlook-as-a-source.md) Outlook as a source → 217-outlook-com-source
 - [x] [#271](backlog/271-search-icon-in-the-top-bar.md) Search icon in the top bar, opens like Capture → 218-topbar-search-popover
 - [x] [#282](backlog/282-bigger-level-1-and-2-headings.md) Bigger level 1 and 2 headings in the note editor → 215-bigger-editor-headings
-- [ ] [#289](backlog/289-appointment-page-close-button-and-a.md) Appointment page: × close button and a Notes heading
+- [x] [#289](backlog/289-appointment-page-close-button-and-a.md) Appointment page: × close button and a Notes heading → 219-appointment-close-notes-heading
 - [ ] [#290](backlog/290-meeting-notes-go-under-meetings-appointment.md) Meeting notes go under Meetings/<appointment>/<date>
 - [ ] [#291](backlog/291-remove-the-mail-panel-from-the.md) Remove the Mail panel from the right sidebar
 - [ ] [#292](backlog/292-no-browser-context-menu-on-right.md) No browser context menu on right click in the desktop app
