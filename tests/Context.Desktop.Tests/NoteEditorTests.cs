@@ -62,8 +62,9 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Equal("Can't read Bad.", line.TextContent);
         Assert.True(line.ClassList.Contains("red"));
         Assert.Empty(js.Calls("ContextEditor.mount"));
-        Assert.True(cut.Find("button.save").HasAttribute("disabled"));
+        Assert.False(cut.Instance.IsReady);
         Assert.Empty(cut.FindAll(".editor-failed"));
+        AssertNoSaveButton(cut);
     }
 
     // A note over 5 MB is not sent to the page editor: the red line, nothing mounted.
@@ -80,6 +81,8 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Equal("Can't read Big.", cut.Find(".unreadable").TextContent);
         Assert.Empty(js.Calls("ContextEditor.mount"));
         Assert.Empty(cut.FindAll(".editor-failed"));
+        AssertNoSaveButton(cut);
+        Assert.False(cut.Instance.IsReady);
     }
 
     // 143 AC-1, AC-5: the note was read but the page editor's mount failed: its own red line, not "Can't read",
@@ -168,7 +171,7 @@ public sealed class NoteEditorTests : IDisposable
 
         IRenderedComponent<NoteEditor> cut = await RenderFailed("Plan");
 
-        Assert.True(cut.Find("button.save").HasAttribute("disabled"));
+        Assert.False(cut.Instance.IsReady);
         Assert.Null(await cut.InvokeAsync(() => cut.Instance.PrepareSaveAsync()));
         Assert.False(await cut.InvokeAsync(() => cut.Instance.IsDirtyAsync()));
         await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
@@ -190,7 +193,7 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Single(js.Calls("ContextEditor.focus"));
         Assert.Empty(cut.FindAll(".editor-failed"));
         Assert.Empty(cut.FindAll(".unreadable"));
-        Assert.False(cut.Find("button.save").HasAttribute("disabled"));
+        Assert.True(cut.Instance.IsReady);
         SaveRequest? request = await cut.InvokeAsync(() => cut.Instance.PrepareSaveAsync());
         Assert.NotNull(request);
         Assert.Equal("Plan", request.Note.Name);
@@ -208,16 +211,16 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Equal(0, cut.Find(".status").ChildNodes.Length);
     }
 
-    // AC-8: the Save button saves the editor's Markdown and says so.
+    // AC-8: an explicit save (Ctrl+S) saves the editor's Markdown and says so.
     [Fact]
-    public async Task SaveButton_SavesMarkdown()
+    public async Task ExplicitSave_SavesMarkdown()
     {
         data.WriteNote("Plan", "# Plan\n");
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<NoteEditor> cut = await Render("Plan");
         js.Edit("# Plan\n\nMore #new\n");
 
-        await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         Assert.Equal("# Plan\n\nMore #new\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         IElement status = cut.Find(".status");
@@ -247,6 +250,7 @@ public sealed class NoteEditorTests : IDisposable
 
         Assert.Equal("# Plan\n\nSaved by key\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         Assert.Equal("Saved Plan.", cut.Find(".status").TextContent);
+        Assert.Contains("accent", cut.Find(".status").ClassList);
     }
 
     // AC-5: saving without an edit writes nothing, even for a lossy CRLF + BOM note, and never asks for Markdown.
@@ -260,7 +264,7 @@ public sealed class NoteEditorTests : IDisposable
         IRenderedComponent<NoteEditor> cut = await Render("Plan");
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
 
-        await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
         Assert.Empty(js.Calls("ContextEditor.getMarkdown"));
@@ -277,7 +281,7 @@ public sealed class NoteEditorTests : IDisposable
         js.Edit("# Plan\n\nMine\n");
         data.WriteNote("Plan", "# Theirs\n");
 
-        await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         Assert.Equal("# Theirs\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         IElement status = cut.Find(".status");
@@ -298,7 +302,7 @@ public sealed class NoteEditorTests : IDisposable
         js.Edit("# Plan\n\nMine\n");
         File.Delete(Path.Combine(data.Root, "Plan.md"));
 
-        await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         Assert.False(File.Exists(Path.Combine(data.Root, "Plan.md")));
         Assert.Equal("Plan no longer exists. Nothing was saved.", cut.Find(".status").TextContent);
@@ -401,6 +405,64 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Empty(cut.FindAll(".dirty-dot"));
     }
 
+    // 209 AC-1, AC-2: an open note, plain or sensitive, has no Save button; a clean editor bar holds only the title.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Open_NoSaveButton_CleanBarHoldsOnlyTheTitle(bool sensitive)
+    {
+        IRenderedComponent<NoteEditor> cut = await RenderPlan(sensitive);
+
+        AssertNoSaveButton(cut);
+        Assert.Equal(
+            ["H2.note-title cut"],
+            cut.Find(".editor-bar").Children.Select(c => c.TagName + "." + c.ClassName).ToArray());
+    }
+
+    // 209 AC-7: IsReady is false until the page's mount ends, true once a readable note is mounted and false while a
+    // save runs.
+    [Fact]
+    public async Task IsReady_FalseBeforeMountAndWhileSaving()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        TaskCompletionSource mountAsked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        JSRuntimeInvocationHandler mount = data.Bunit.JSInterop.SetupVoid("ContextEditor.mount", _ =>
+        {
+            mountAsked.TrySetResult();
+            return true;
+        });
+        await data.RefreshAsync();
+        IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p.Add(e => e.Name, "Plan"));
+
+        Assert.False(cut.Instance.IsReady);
+        await mountAsked.Task.WaitAsync(Wait);
+        Assert.False(cut.Instance.IsReady);
+
+        await cut.InvokeAsync(() => mount.SetVoidResult());
+
+        cut.WaitForAssertion(() => Assert.True(cut.Instance.IsReady), Wait);
+        js.Edit("# Plan\n\nHeld\n");
+        using ManualResetEventSlim entered = new ManualResetEventSlim();
+        using ManualResetEventSlim release = new ManualResetEventSlim();
+        data.Actions!.BeforeWrite = () =>
+        {
+            entered.Set();
+            release.Wait(Wait);
+        };
+        Task key = cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        Assert.True(entered.Wait(Wait));
+        cut.WaitForAssertion(() => Assert.Equal("Saving…", cut.Find(".status").TextContent), Wait);
+
+        Assert.False(cut.Instance.IsReady);
+
+        data.Actions.BeforeWrite = null;
+        release.Set();
+        await key;
+        cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".status").TextContent), Wait);
+        Assert.True(cut.Instance.IsReady);
+    }
+
     // 141 AC-2: the page's OnDirty(true) shows one labelled dot right after the title, not inside it.
     [Theory]
     [InlineData(false)]
@@ -418,15 +480,17 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Equal("Unsaved changes", dot.GetAttribute("aria-label"));
         Assert.Equal("Unsaved changes", dot.GetAttribute("title"));
         IElement title = cut.Find(".editor-bar h2.note-title");
+        AssertNoSaveButton(cut);
         Assert.Equal(
-            ["H2.note-title cut", "SPAN.dirty-dot", "BUTTON.save"],
+            ["H2.note-title cut", "SPAN.dirty-dot"],
             cut.Find(".editor-bar").Children.Select(c => c.TagName + "." + c.ClassName).ToArray());
         Assert.Empty(title.QuerySelectorAll(".dirty-dot"));
         Assert.Equal("Plan", title.TextContent);
         Assert.Equal("Plan", title.GetAttribute("title"));
     }
 
-    // 141 AC-3: a successful save (button or Ctrl/Cmd+S) removes the dot at once; the mocked page never calls back.
+    // 141 AC-3: a successful save (SaveAsync, as /save, or Ctrl/Cmd+S) removes the dot at once; the mocked page never
+    // calls back.
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
@@ -446,7 +510,7 @@ public sealed class NoteEditorTests : IDisposable
         }
         else
         {
-            await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+            await cut.InvokeAsync(() => cut.Instance.SaveAsync(false));
         }
 
         Assert.Equal("Saved Plan.", cut.Find(".status").TextContent);
@@ -474,7 +538,7 @@ public sealed class NoteEditorTests : IDisposable
             data.WriteNote("Plan", "# Theirs\n");
         }
 
-        await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         IElement status = cut.Find(".status");
         Assert.Equal(expected, status.TextContent);
@@ -592,7 +656,7 @@ public sealed class NoteEditorTests : IDisposable
         IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p
             .Add(e => e.Name, "Plan")
             .Add(e => e.OnAttach, (DroppedFiles d) => raised.Insert(raised.Count, d)));
-        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.Instance.IsReady), Wait);
         DroppedFile file = new DroppedFile("big.png", NoteAttachments.MaxBytes + 1, null);
 
         await cut.InvokeAsync(() => js.Page().OnDrop(3, [file]));
@@ -651,7 +715,7 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Equal(new object?[] { "# inbox\n- captured\n", "inbox" }, js.LosslessArguments());
 
         js.Edit("# inbox\n- captured\n- more\n");
-        await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         Assert.Equal("Saved inbox.", cut.Find(".status").TextContent);
         Assert.Equal(new object?[] { "# inbox\n- captured\n- more\n", "inbox" }, js.LosslessArguments());
@@ -673,7 +737,7 @@ public sealed class NoteEditorTests : IDisposable
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
         js.Edit(System.Text.Json.JsonSerializer.Deserialize<string>(page)!);
 
-        await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         Assert.Equal("Saved Plan.", cut.Find(".status").TextContent);
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
@@ -836,7 +900,7 @@ public sealed class NoteEditorTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<NoteEditor> cut = await Render("Plan");
         js.Edit("# Plan\n\nFirst\n");
-        await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
         Assert.Equal("Saved Plan.", cut.Find(".status").TextContent);
         using ManualResetEventSlim entered = new ManualResetEventSlim();
         using ManualResetEventSlim release = new ManualResetEventSlim();
@@ -867,10 +931,10 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Empty(cut.FindAll("span.dirty-dot"));
     }
 
-    // 203 AC-6: the Save button, Ctrl+S and Cmd+S save at once with the accent text and cancel the pending pause, so
+    // 203 AC-6: an explicit SaveAsync (as /save), Ctrl+S and Cmd+S save at once with the accent text and cancel the pending pause, so
     // no second save follows.
     [Theory]
-    [InlineData("button")]
+    [InlineData("explicit")]
     [InlineData("ctrl")]
     [InlineData("meta")]
     public async Task ExplicitSave_SavesAtOnceAndCancelsThePause(string how)
@@ -881,9 +945,9 @@ public sealed class NoteEditorTests : IDisposable
         await js.Change(cut, "# Plan\n\nNow\n");
         cut.WaitForAssertion(() => Assert.Equal(1, data.AutoSave.Pending), Wait);
 
-        if (how == "button")
+        if (how == "explicit")
         {
-            await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+            await cut.InvokeAsync(() => cut.Instance.SaveAsync(false));
         }
         else
         {
@@ -978,8 +1042,15 @@ public sealed class NoteEditorTests : IDisposable
         IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p
             .Add(e => e.Name, "Plan")
             .Add(e => e.Sensitive, true));
-        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.Instance.IsReady), Wait);
         return cut;
+    }
+
+    // 209 AC-1: neither a .save button nor any button whose text is Save.
+    private static void AssertNoSaveButton(IRenderedComponent<NoteEditor> cut)
+    {
+        Assert.Empty(cut.FindAll("button.save"));
+        Assert.DoesNotContain(cut.FindAll("button"), b => b.TextContent.Trim() == "Save");
     }
 
     private async Task<IRenderedComponent<NoteEditor>> RenderFailed(string name)
@@ -1004,7 +1075,7 @@ public sealed class NoteEditorTests : IDisposable
         await data.RefreshAsync();
         IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p.Add(e => e.Name, name));
         cut.WaitForAssertion(() => Assert.NotEmpty(cut.FindAll(".editor-host")), Wait);
-        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.Instance.IsReady), Wait);
         return cut;
     }
 }

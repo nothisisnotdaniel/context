@@ -230,6 +230,26 @@ public sealed class EditingFlowTests : IDisposable
 
         Assert.Equal("# Plan\n\nFrom the palette\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         Assert.Equal("Saved Plan.", cut.Find(".note-editor .status").TextContent);
+        Assert.Contains("accent", cut.Find(".note-editor .status").ClassList);
+        Assert.Empty(cut.FindAll("button.save"));
+    }
+
+    // 209 AC-4: /save stays in the palette with its description, and with no note open it says so in grey.
+    [Fact]
+    public async Task Palette_Save_ListedAndNoNoteOpen()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "k", CtrlKey = true });
+
+        IElement row = Assert.Single(cut.FindAll(".palette-row"), r => r.QuerySelector(".usage")!.TextContent == "/save");
+        Assert.Equal("Save the open note", row.QuerySelector(".description")!.TextContent);
+        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+
+        await RunPalette(cut, "/save");
+
+        IElement status = cut.Find(".main-status");
+        Assert.Equal("No note is open.", status.TextContent);
+        Assert.Contains("grey", status.ClassList);
     }
 
     // AC-11: /tags <tag> shows the tag panel.
@@ -443,7 +463,7 @@ public sealed class EditingFlowTests : IDisposable
         int mounts = js.Calls("ContextEditor.mount").Count;
         await NameButton(cut, name).ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
-        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
     }
 
     private static async Task RunPalette(IRenderedComponent<Main> cut, string line)

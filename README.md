@@ -104,7 +104,7 @@ itself after you book your leaving in Times (the todos move once, at a leaving a
 ### Saving
 
 The desktop app saves the open note by itself one second after you stop typing; the line under the note says
-`Saving…` and then `Saved.` in grey. The Save button, Ctrl+S (Cmd+S on macOS) and `/save` still save at once. Opening
+`Saving…` and then `Saved.` in grey. Ctrl+S (Cmd+S on macOS) and `/save` save at once. Opening
 another note, the person behind a mention, `/today`, `/briefing` or `/meeting`, and closing the window save first, so
 `Discard changes to <name>?` only appears when that save failed; its red reason stays under the note, and your text
 stays in the editor. Rename, New subpage, Move, Mark sensitive, Make plain, Restore this version, Export, a capture

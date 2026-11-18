@@ -206,7 +206,7 @@ public sealed class OutlinePanelTests : IDisposable
 
         js.SetHeadings(ThreeHeadings);
         js.Edit("# Plan\n\nmore\n");
-        await cut.Find("button.save").ClickAsync(new MouseEventArgs());
+        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("nav.outline-panel button").Count), Wait);
         Assert.Equal(reads + 1, js.Calls("ContextEditor.headings").Count);
@@ -256,7 +256,7 @@ public sealed class OutlinePanelTests : IDisposable
     {
         await data.RefreshAsync();
         IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p.Add(e => e.Name, name));
-        cut.WaitForAssertion(() => Assert.False(cut.Find("button.save").HasAttribute("disabled")), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.Instance.IsReady), Wait);
         return cut;
     }
 }
