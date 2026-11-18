@@ -18,7 +18,7 @@ function isTagChar(c) { return c !== undefined && c.length === 1 && (LetterOrDig
 function isWhite(c) { return c !== undefined && WhiteRe.test(c); }
 
 // .NET's char.IsWhiteSpace, which PersonParser uses: JavaScript's \s without U+FEFF, plus U+0085.
-function isNetWhite(c) { return c !== undefined && (c === "\u0085" || (c !== "\ufeff" && WhiteRe.test(c))); }
+export function isNetWhite(c) { return c !== undefined && (c === "\u0085" || (c !== "\ufeff" && WhiteRe.test(c))); }
 
 // .NET's char.IsControl: U+0000-U+001F and U+007F-U+009F.
 function isControl(c) { const code = c.charCodeAt(0); return code <= 0x1f || (code >= 0x7f && code <= 0x9f); }

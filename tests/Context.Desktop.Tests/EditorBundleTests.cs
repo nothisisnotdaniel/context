@@ -641,6 +641,150 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
             "[typeof ContextEditor.outline, typeof ContextEditor.headings, typeof ContextEditor.scrollToHeading]"));
     }
 
+    // 232 AC-1: a typed @[Name] is the same mention node the parser makes.
+    [Fact]
+    public void TypedBlock_Mention_SameAsParsed()
+    {
+        string typed = "@[Anna Schmidt]";
+
+        Assert.Equal(["mention|@[Anna Schmidt]|Anna Schmidt"], Children(TypedBlock(typed)));
+        using JsonDocument typedDoc = JsonDocument.Parse(TypedBlock(typed));
+        using JsonDocument parsedDoc = JsonDocument.Parse(bundle.Call("docJson", typed));
+        JsonElement typedNode = Nodes(typedDoc.RootElement).Single(n => Type(n) == "mention");
+        JsonElement parsedNode = Nodes(parsedDoc.RootElement).Single(n => Type(n) == "mention");
+        Assert.Equal(parsedNode.GetRawText(), typedNode.GetRawText());
+    }
+
+    // 232 AC-2, AC-3: the chip appears on ']', between the text around it; the name is normalized, raw kept.
+    [Theory]
+    [InlineData("@[Anna", new[] { "text|@[Anna" })]
+    [InlineData("Met @[Anna] today", new[] { "text|Met ", "mention|@[Anna]|Anna", "text| today" })]
+    [InlineData("@[  Anna   Schmidt ]", new[] { "mention|@[  Anna   Schmidt ]|Anna Schmidt" })]
+    [InlineData("a\t@[Anna]", new[] { "text|a\t", "mention|@[Anna]|Anna" })]
+    public void TypedBlock_Mention_Children(string typed, string[] children)
+    {
+        Assert.Equal(children, Children(TypedBlock(typed)));
+    }
+
+    public static TheoryData<string> NoMentionTyped() => new()
+    {
+        "a@[Anna]",
+        "@[]",
+        "@[ ]",
+        "@[a/b]",
+        "@[.Anna]",
+        "@[Anna.]",
+        "@[CON]",
+        "@[" + new string('a', 101) + "]",
+    };
+
+    // 232 AC-4: what the parser refuses stays plain text.
+    [Theory]
+    [MemberData(nameof(NoMentionTyped))]
+    public void TypedBlock_NoMention_PlainText(string typed)
+    {
+        using JsonDocument doc = JsonDocument.Parse(TypedBlock(typed));
+
+        Assert.DoesNotContain(Nodes(doc.RootElement), n => Type(n) == "mention");
+        Assert.Equal(typed, string.Concat(Nodes(doc.RootElement).Select(Text)));
+    }
+
+    // 232 AC-4: no chip in a code block.
+    [Fact]
+    public void TypedBlock_NoMention_InCodeBlock()
+    {
+        using JsonDocument doc = JsonDocument.Parse(TypedBlock("```\n@[Anna]"));
+
+        Assert.Equal("code_block", Type(Assert.Single(doc.RootElement.GetProperty("content").EnumerateArray())));
+        Assert.DoesNotContain(Nodes(doc.RootElement), n => Type(n) == "mention");
+        Assert.Equal("\n@[Anna]", string.Concat(Nodes(doc.RootElement).Select(Text)));
+    }
+
+    // 232 AC-5: '(' straight after the chip turns it back into text; any other character keeps it.
+    [Theory]
+    [InlineData("@[Anna](", new[] { "text|@[Anna](" })]
+    [InlineData("Met @[Anna](", new[] { "text|Met @[Anna](" })]
+    [InlineData("@[Anna] ", new[] { "mention|@[Anna]|Anna", "text| " })]
+    [InlineData("@[Anna].", new[] { "mention|@[Anna]|Anna", "text|." })]
+    [InlineData("@[Anna] (", new[] { "mention|@[Anna]|Anna", "text| (" })]
+    [InlineData("#tag(", new[] { "text|#tag(" })]
+    [InlineData("[[Plan]](", new[] { "noteLink|[[Plan]]", "text|(" })]
+    public void TypedBlock_Mention_Paren(string typed, string[] children)
+    {
+        Assert.Equal(children, Children(TypedBlock(typed)));
+    }
+
+    public static TheoryData<string> MentionTyped()
+    {
+        TheoryData<string> data = new()
+        {
+            // "@[Anna] x", not "@[Anna] ": the parser drops a paragraph's trailing space whatever comes before it.
+            "@[Anna Schmidt]", "@[Anna", "Met @[Anna] today", "@[  Anna   Schmidt ]", "@[Anna](", "@[Anna] x", "@[Anna].",
+            "@[Anna] (",
+        };
+        foreach (string typed in NoMentionTyped())
+        {
+            data.Add(typed);
+        }
+
+        return data;
+    }
+
+    // 232 AC-6: saving a typed note writes what a saved and reopened note gives (a saved note ends with "\n").
+    [Theory]
+    [MemberData(nameof(MentionTyped))]
+    public void TypedMarkdown_EqualsRoundTrip(string typed)
+    {
+        Assert.Equal(bundle.Call("roundTrip", typed + "\n"), TypedMarkdown(typed));
+    }
+
+    // 232 AC-6: in a code block the typed text is saved as code (typedBlock types "\n" as text inside the block).
+    [Fact]
+    public void TypedMarkdown_CodeBlock_AsTyped()
+    {
+        Assert.Equal("```\n\n@[Anna]\n```\n", TypedMarkdown("```\n@[Anna]"));
+        Assert.Equal("```\n\n@[Anna]\n```\n", bundle.Call("roundTrip", "```\n\n@[Anna]\n```\n"));
+    }
+
+    // 232 AC-6: the typed text is saved as typed.
+    [Theory]
+    [InlineData("@[Anna Schmidt]")]
+    [InlineData("Met @[Anna] today")]
+    public void TypedMarkdown_AsTyped(string typed)
+    {
+        Assert.Equal(typed + "\n", TypedMarkdown(typed));
+    }
+
+    // 232 AC-7: the saved text lists the person as a mention.
+    [Fact]
+    public void TypedMarkdown_ListsMention()
+    {
+        using JsonDocument doc = JsonDocument.Parse(bundle.Call("inlineNodes", TypedMarkdown("@[Anna Schmidt]")));
+
+        Assert.Equal(["Anna Schmidt"], doc.RootElement.GetProperty("mentions").EnumerateArray().Select(m => m.GetString()!).ToArray());
+    }
+
+    private string TypedMarkdown(string text) =>
+        JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.typedMarkdown({Js(text)})"))!;
+
+    // The first block's children as "type|text" or "type|raw|name" (mention) or "type|raw" (other chips).
+    private static string[] Children(string json)
+    {
+        using JsonDocument doc = JsonDocument.Parse(json);
+        JsonElement block = Assert.Single(doc.RootElement.GetProperty("content").EnumerateArray());
+        if (!block.TryGetProperty("content", out JsonElement content))
+        {
+            return [];
+        }
+
+        return content.EnumerateArray().Select(n => Type(n) switch
+        {
+            "text" => "text|" + Text(n),
+            "mention" => $"mention|{n.GetProperty("attrs").GetProperty("raw").GetString()}|{n.GetProperty("attrs").GetProperty("name").GetString()}",
+            _ => $"{Type(n)}|{n.GetProperty("attrs").GetProperty("raw").GetString()}",
+        }).ToArray();
+    }
+
     private string TypedBlock(string text) =>
         JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.typedBlock({Js(text)})"))!;
 
