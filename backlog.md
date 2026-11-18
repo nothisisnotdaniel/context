@@ -111,6 +111,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#294](backlog/294-hide-private-appointments.md) Hide private appointments
 - [ ] [#295](backlog/295-typing-name-makes-a-person-mention.md) Typing @[Name] makes a person mention chip right away
 - [ ] [#296](backlog/296-clicking-a-link-to-a-missing.md) Clicking a link to a missing note creates the note
+- [ ] [#297](backlog/297-note-title-shows-only-the-page.md) Note title shows only the page's own name
+- [ ] [#298](backlog/298-attributes-in-a-collapsed-box-below.md) Attributes in a collapsed box below the note title
 - [ ] [#69](backlog/069-board-view-for-a-tag.md) Board view for a tag
 - [ ] [#74](backlog/074-waiting-for-list.md) Waiting-for list
 - [ ] [#78](backlog/078-smart-paste.md) Smart paste
@@ -250,8 +252,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#286](backlog/286-culture-safe-dates-in-the-outlook.md) Culture-safe dates in the Outlook Restrict filter
 - [?] [#287](backlog/287-show-loading-in-the-mail-panel.md) Show Loading in the mail panel during the first read
 - [?] [#288](backlog/288-don-t-let-a-blocked-outlook.md) Don't let a blocked Outlook delay every refresh
-- [ ] [#297](backlog/297-note-title-shows-only-the-page.md) Note title shows only the page's own name
-- [ ] [#298](backlog/298-attributes-in-a-collapsed-box-below.md) Attributes in a collapsed box below the note title
 
 ## Dropped with the terminal UI
 
