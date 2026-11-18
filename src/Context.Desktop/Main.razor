@@ -101,7 +101,7 @@
                         }
                         int shownEditor = editorGeneration;
                         <NoteEditor @key="(name, openSensitive)" @ref="editor" Name="@name" Sensitive="openSensitive"
-                                    OnTag="ShowTag" OnOpenNote="RequestOpen" OnOpenHeading="OpenHeading" Heading="@openHeading" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked"
+                                    OnTag="ShowTag" OnOpenNote="RequestOpen" OnOpenHeading="OpenHeading" OnCreateNote="CreateLinked" Heading="@openHeading" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked"
                                     OnAttach="AttachDropped" OnOpenAttachment="OpenAttachment"
                                     OnOutline="OutlineReport(shownEditor)" />
                         @if (historyShown)
@@ -206,6 +206,7 @@ else
     // The heading a [[Note#Heading]] link opened the note at; the new editor jumps there once, after its mount.
     private string? openHeading;
     private string? pendingPerson;
+    private string? pendingLink;
     private bool pendingToday;
     // A day picked in the top bar whose daily note opens once the unsaved-changes dialog is confirmed.
     private DateOnly? pendingPickedDay;
@@ -420,6 +421,7 @@ else
         {
             pendingName = null;
             pendingPerson = null;
+            pendingLink = null;
             pendingToday = false;
             pendingPickedDay = null;
             pendingBriefing = false;
@@ -467,6 +469,7 @@ else
         {
             pendingName = null;
             pendingPerson = null;
+            pendingLink = null;
             pendingToday = false;
             pendingPickedDay = null;
             pendingBriefing = false;
@@ -511,6 +514,7 @@ else
         {
             pendingName = null;
             pendingPerson = null;
+            pendingLink = null;
             pendingToday = true;
             pendingPickedDay = null;
             pendingBriefing = false;
@@ -557,6 +561,7 @@ else
         {
             pendingName = null;
             pendingPerson = null;
+            pendingLink = null;
             pendingToday = false;
             pendingPickedDay = day;
             pendingBriefing = false;
@@ -612,6 +617,7 @@ else
             pendingName = name;
             pendingHeading = heading;
             pendingPerson = null;
+            pendingLink = null;
             pendingAppointment = null;
             discarding = true;
             return;
@@ -632,6 +638,7 @@ else
         {
             pendingName = null;
             pendingPerson = person;
+            pendingLink = null;
             pendingAppointment = null;
             discarding = true;
             return;
@@ -654,6 +661,39 @@ else
         }
 
         ShowPerson(opened);
+    }
+
+    // A link to a missing note was clicked in the editor: saves first, then creates the note (and its missing parents)
+    // on this click only and opens it. Asks first when the open note's save failed, like OpenMention.
+    private async Task CreateLinked(string target)
+    {
+        if (await KeptUnsaved())
+        {
+            pendingName = null;
+            pendingPerson = null;
+            pendingLink = target;
+            pendingAppointment = null;
+            discarding = true;
+            return;
+        }
+
+        if (running)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult created;
+        try
+        {
+            created = await Actions.CreateLinkedNote(target);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        ShowDaily(created);
     }
 
     // The window is closing with unsaved changes: saves first on the renderer's thread. True when nothing is left.
@@ -784,6 +824,29 @@ else
             return;
         }
 
+        if (pendingLink is { } link)
+        {
+            pendingLink = null;
+            if (running)
+            {
+                return;
+            }
+
+            running = true;
+            ActionResult created;
+            try
+            {
+                created = await Actions.CreateLinkedNote(link);
+            }
+            finally
+            {
+                running = false;
+            }
+
+            ShowDaily(created);
+            return;
+        }
+
         if (pendingPerson is not { } person)
         {
             ShowNote(pendingName, pendingHeading);
@@ -791,6 +854,7 @@ else
         }
 
         pendingPerson = null;
+        pendingLink = null;
         if (running)
         {
             return;
@@ -818,6 +882,7 @@ else
         pendingName = null;
         pendingHeading = null;
         pendingPerson = null;
+        pendingLink = null;
         pendingToday = false;
         pendingBriefing = false;
         pendingMeeting = null;
@@ -839,7 +904,7 @@ else
         }
     }
 
-    // Opens the daily or meeting note Actions gave (Created after a create), or shows why there is none.
+    // Opens the daily, meeting or linked note Actions gave (Created after a create), or shows why there is none.
     private void ShowDaily(ActionResult daily)
     {
         if (daily.Kind != ActionKind.Done)
@@ -882,6 +947,7 @@ else
         }
         pendingName = null;
         pendingPerson = null;
+        pendingLink = null;
         pendingToday = false;
         pendingPickedDay = null;
         pendingBriefing = false;
@@ -1085,6 +1151,7 @@ else
                 {
                     pendingName = null;
                     pendingPerson = null;
+                    pendingLink = null;
                     pendingToday = false;
                     pendingPickedDay = null;
                     pendingMeeting = null;
@@ -1138,6 +1205,7 @@ else
                 {
                     pendingName = null;
                     pendingPerson = null;
+                    pendingLink = null;
                     pendingToday = false;
                     pendingPickedDay = null;
                     pendingBriefing = false;

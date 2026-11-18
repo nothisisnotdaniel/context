@@ -2483,6 +2483,78 @@ public sealed class MainTests : IDisposable
         Assert.Equal("# Anna\n\naliases::\naffiliation::\nrole::\n", File.ReadAllText(Path.Combine(data.Root, "people", "Anna.md")));
     }
 
+    // 233 AC-8: a click on a link to a missing note saves the open note first, then creates the note and opens it
+    // with the accent "Created <name>".
+    [Fact]
+    public async Task MissingLink_SavesFirst_CreatesAndOpens()
+    {
+        data.WriteNote("Plan", "# Plan\n\nSee [[New topic]]\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        await js.Change(cut, "# Plan\n\nSee [[New topic]] soon\n");
+
+        await cut.InvokeAsync(() => js.Page().OnLink("[[New topic]]"));
+
+        cut.WaitForAssertion(() => Assert.Equal("New topic", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("New topic", cut.FindComponent<NoteEditor>().Instance.Name), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Created New topic", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
+        Assert.Equal("# Plan\n\nSee [[New topic]] soon\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.Equal("# New topic\n", File.ReadAllText(Path.Combine(data.Root, "New topic.md")));
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+    }
+
+    // 233 AC-9: a refused creation shows the red one-line refusal, keeps Plan open and writes no file.
+    [Fact]
+    public async Task MissingLink_Invalid_RedLineKeepsPlan()
+    {
+        data.WriteNote("Plan", "# Plan\n\nSee [[a:b]]\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        int mounts = js.Calls("ContextEditor.mount").Count;
+
+        await cut.InvokeAsync(() => js.Page().OnLink("[[a:b]]"));
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            "A note title can't contain / \\ : or control characters.", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    // 233 AC-10: when the open note's save fails the click asks to discard first; Keep editing creates nothing and
+    // Discard creates and opens the note.
+    [Fact]
+    public async Task MissingLink_SaveFails_AsksFirst()
+    {
+        data.WriteNote("Plan", "# Plan\n\nSee [[New topic]]\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        js.EditUnsavable("# Plan\n\nUnsaved\n");
+
+        await cut.InvokeAsync(() => js.Page().OnLink("[[New topic]]"));
+
+        cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
+        Assert.False(File.Exists(Path.Combine(data.Root, "New topic.md")));
+        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        Assert.False(File.Exists(Path.Combine(data.Root, "New topic.md")));
+
+        await cut.InvokeAsync(() => js.Page().OnLink("[[New topic]]"));
+        cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("New topic", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Created New topic", cut.Find(".main-status").TextContent), Wait);
+        Assert.Equal("# New topic\n", File.ReadAllText(Path.Combine(data.Root, "New topic.md")));
+        Assert.Equal("# Plan\n\nSee [[New topic]]\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+    }
+
     // 159 AC-8: a mention in the todo list opens the person page through OpenMention (creating it on this click).
     [Fact]
     public async Task TodoMention_OpensPersonPage()

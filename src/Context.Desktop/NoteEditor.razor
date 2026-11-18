@@ -89,6 +89,14 @@
     [Parameter]
     public EventCallback<(string Name, string Heading)> OnOpenHeading { get; set; }
 
+    /// <summary>
+    /// Called with the link's target as written (no brackets, e.g. <c>Ghost#Goals</c>) when a link to a note that
+    /// doesn't exist is clicked and the target has a note part; without a delegate the editor shows
+    /// <c>No note named &lt;target&gt;.</c>
+    /// </summary>
+    [Parameter]
+    public EventCallback<string> OnCreateNote { get; set; }
+
     /// <summary>The heading (raw link text) to jump to once the note is mounted; read on the first mount only.</summary>
     [Parameter]
     public string? Heading { get; set; }
@@ -629,6 +637,13 @@
             // "[[#Goals]]", or a heading of this note: a jump in place, unsaved text kept.
             await JumpToHeadingAsync(heading);
             StateHasChanged();
+            return;
+        }
+
+        if (link is null && OnCreateNote.HasDelegate && NoteLinkParser.Split(targets[0]).Note.Length > 0)
+        {
+            // A link to a missing note: the parent saves this note first, then creates and opens the new one.
+            await OnCreateNote.InvokeAsync(targets[0]);
             return;
         }
 

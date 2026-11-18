@@ -89,7 +89,8 @@ public sealed class HeadingLinkTests : IDisposable
         Assert.Empty(js.Jumps());
     }
 
-    // AC-7: a heading link to a missing note still names the whole target.
+    // AC-7 (205), 233 AC-7: without an OnCreateNote delegate a heading link to a missing note still names the whole
+    // target in grey.
     [Fact]
     public async Task Editor_HeadingLinkToMissingNote_NoNoteNamed()
     {
@@ -100,7 +101,56 @@ public sealed class HeadingLinkTests : IDisposable
         await cut.InvokeAsync(() => js.Page().OnLink("[[Ghost#Goals]]"));
 
         Assert.Equal("No note named Ghost#Goals.", cut.Find(".status").TextContent);
+        Assert.Equal(["status", "grey"], cut.Find(".status").ClassList.ToArray());
         Assert.Empty(js.Jumps());
+    }
+
+    // 233 AC-7: with an OnCreateNote delegate a link to a missing note calls it with the target as written (no
+    // brackets); nothing is opened and no "No note named" line shows.
+    [Theory]
+    [InlineData("[[Ghost]]", "Ghost")]
+    [InlineData("[[Ghost#Goals]]", "Ghost#Goals")]
+    public async Task Editor_LinkToMissingNote_CallsOnCreateNote(string raw, string target)
+    {
+        data.WriteNote("Plan", "See " + raw + "\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        List<string> created = [];
+        List<string> opened = [];
+        List<(string Name, string Heading)> headings = [];
+        IRenderedComponent<NoteEditor> cut = await Render("Plan", p => p
+            .Add(e => e.OnCreateNote, (string t) => created.Add(t))
+            .Add(e => e.OnOpenHeading, ((string Name, string Heading) link) => headings.Add(link))
+            .Add(e => e.OnOpenNote, (string name) => opened.Add(name)));
+
+        await cut.InvokeAsync(() => js.Page().OnLink(raw));
+
+        Assert.Equal([target], created);
+        Assert.Empty(opened);
+        Assert.Empty(headings);
+        Assert.DoesNotContain("No note named", cut.Markup, StringComparison.Ordinal);
+        Assert.Empty(js.Jumps());
+    }
+
+    // 233 AC-7: [[#Goals]] and a link to an existing note behave as before, even with an OnCreateNote delegate.
+    [Fact]
+    public async Task Editor_OwnHeadingOrExistingNote_NoOnCreateNote()
+    {
+        data.WriteNote("Plan", "See [[#next goals]] and [[Other]]\n");
+        data.WriteNote("Other", "x\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.SetHeadings(PlanHeadings);
+        List<string> created = [];
+        List<string> opened = [];
+        IRenderedComponent<NoteEditor> cut = await Render("Plan", p => p
+            .Add(e => e.OnCreateNote, (string t) => created.Add(t))
+            .Add(e => e.OnOpenNote, (string name) => opened.Add(name)));
+
+        await cut.InvokeAsync(() => js.Page().OnLink("[[#next goals]]"));
+        await cut.InvokeAsync(() => js.Page().OnLink("[[Other]]"));
+
+        Assert.Empty(created);
+        Assert.Equal([1], js.Jumps());
+        Assert.Equal(["Other"], opened);
     }
 
     // AC-8: [[#Heading]] and a heading link to the open note itself jump in place: no remount, unsaved text kept.

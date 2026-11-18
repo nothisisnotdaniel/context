@@ -803,7 +803,14 @@ Every factory agent reads this file before working on Context. Keep it short and
     confirmation: `NotConfirmed`; `NoteStore.Delete`, the whole subtree), `CreateSubpage(parent, title)`
     (`NoteStore.CreateChild`; Done text is the full name; the `CreateNote` texts, a missing parent `<parent> no longer
     exists. Nothing was done.`, too long `A note's full name can be at most 400 characters.`, below `calendar`
-    `<parent> can't have subpages. Nothing was done.`), `MoveNote(name, newParent)` (`NoteStore.Move`; the parent is
+    `<parent> can't have subpages. Nothing was done.`), `CreateLinkedNote(target)` (job 233: the note part of
+    `NoteLinkParser.Split(target)`, trimmed, one trailing `.md` dropped, split at `/`, each segment trimmed and normalized;
+    every segment through `ValidateTitle` and the 400-character full name, else Refused/`Invalid` with that text; a
+    top-level `calendar` parent Refused/`Invalid` and a sensitive top-level parent Refused/`Locked`, both
+    `<parent> can't have subpages. Nothing was done.`, checked before any write, no key-store call; an existing note,
+    any case, Done/`Unchanged` with its name; else each missing parent through `Create`/`CreateChild` (`# <title>\n`,
+    existing ones reused with their spelling) and the note; a failed write Failed `Can't create that note. Nothing was
+    done.`, parents made before it stay; Done text is the full name), `MoveNote(name, newParent)` (`NoteStore.Move`; the parent is
     matched through `TryFind` only, unknown: Refused/`Missing` `No note called <parent>. Nothing was moved.`; under
     itself: `A note can't move under itself or one of its subpages. Nothing was moved.`; already there:
     Done/`Unchanged`; Done text is the new full name) and `OpenExternally(name)`, which never writes or refreshes: it
@@ -1196,8 +1203,12 @@ Every factory agent reads this file before working on Context. Keep it short and
     (saves first like any link; the new editor gets `Heading` and jumps once after its mount), while `[[#Goals]]` or a
     heading of the open note jumps in place (no remount, unsaved text kept). The jump picks the first heading whose
     text matches (`OutlineHeading.IndexOf`: trimmed, whitespace runs as one space, case ignored); none: the note stays
-    at the top and grey `<name> has no heading <heading>.` (both through `DesktopText.OneLine`); a missing note is still
-    `No note named <target>.`. `OutlinePanel` (`nav.outline-panel`, `aria-label="Outline"`) sits in `Main`'s right sidebar
+    at the top and grey `<name> has no heading <heading>.` (both through `DesktopText.OneLine`). **A link to a missing note**
+    (job 233) with a non-empty note part goes to `NoteEditor.OnCreateNote` with the target as written (no brackets);
+    `Main.CreateLinked` saves first (`KeptUnsaved`; a failed save asks `Discard changes to <name>?` with the target in
+    `pendingLink`), keeps the `running` gate, calls `DesktopActions.CreateLinkedNote` and opens the note through
+    `ShowDaily` (accent `Created <name>`, else the red one-line refusal). Without an `OnCreateNote` delegate the editor
+    still shows grey `No note named <target>.`. `OutlinePanel` (`nav.outline-panel`, `aria-label="Outline"`) sits in `Main`'s right sidebar
     after `DayAppointmentsPanel` in `aside.todos-region`, before `TodoPanel` (job 210; `.todos-region .outline-panel`: own 40vh
     scroll, `--line` border), and shows one `button type="button"` (`outline-item level-<n>`, plain text) per heading from
     `OutlinePanel.MinHeadings` (3) on; a click calls `scrollToHeading` with its index and never takes focus by itself.
@@ -1332,7 +1343,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `ReviewPanelTests`, `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `LinkCreateActionsTests` (`CreateLinkedNote`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `ReviewPanelTests`, `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
     CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules, the transfer calls and no file system class in `.razor`), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),
