@@ -2474,4 +2474,38 @@ public sealed class DesktopSourceTests
         Assert.DoesNotContain("OfferStartNote", main, StringComparison.Ordinal);
         Assert.DoesNotContain("AutoOpenToday", main, StringComparison.Ordinal);
     }
+
+    // 224 AC-5: the editor source registers the contextmenu listener and the committed bundle was rebuilt with it.
+    [Fact]
+    public void Editor_RegistersContextMenuListener()
+    {
+        string root = RepoFiles.Root();
+        string index = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "editor", "src", "index.js"));
+        string bundle = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "editor", "editor.js"));
+
+        Assert.Contains("globalThis.addEventListener(\"contextmenu\"", index, StringComparison.Ordinal);
+        Assert.Contains("contextmenu", bundle, StringComparison.Ordinal);
+    }
+
+    // 224 AC-6: dev tools only in Debug, set only through SetDevToolsEnabled(DevTools); no source names the platform
+    // context-menu switch, in code or comments.
+    [Fact]
+    public void Program_DevToolsOnlyInDebug_NoContextMenuSwitch()
+    {
+        string root = RepoFiles.Root();
+        string program = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "Program.cs")).ReplaceLineEndings("\n");
+
+        Assert.Matches(@"#if DEBUG\s*\n\s*const bool DevTools = true;\s*\n\s*#else\s*\n\s*const bool DevTools = false;\s*\n\s*#endif", program);
+        Assert.Single(Regex.Matches(program, @"SetDevToolsEnabled\s*\("));
+        Assert.Contains(".SetDevToolsEnabled(DevTools)", program, StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(program, @"const bool DevTools = true;"));
+
+        IEnumerable<string> files = Directory.EnumerateDirectories(Path.Combine(root, "src"))
+            .SelectMany(d => RepoFiles.Sources(root, RepoFiles.Relative(root, d), ".cs", ".razor", ".js", ".mjs", ".html", ".css", ".csproj", ".json"));
+        foreach (string file in files)
+        {
+            string text = File.ReadAllText(Path.Combine(root, file));
+            Assert.False(text.Contains("ContextMenuEnabled", StringComparison.Ordinal), file + " names the context-menu switch");
+        }
+    }
 }

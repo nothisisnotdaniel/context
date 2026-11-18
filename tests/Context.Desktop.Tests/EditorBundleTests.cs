@@ -285,21 +285,67 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
         Assert.Equal(markdown, bundle.Call("roundTrip", markdown));
     }
 
-    // 177 AC-10: at load the bundle blocks dragover and drop for the whole window, so a dropped file never navigates.
+    // 177 AC-10, 224 AC-1/AC-4: at load the bundle registers dragover, drop and contextmenu on the window, one listener
+    // each, and dragover and drop are still blocked, so a dropped file never navigates.
     [Fact]
-    public void Bundle_BlocksWindowDragAndDrop()
+    public void Bundle_RegistersWindowListeners_AndBlocksDragAndDrop()
+    {
+        Engine engine = LoadWithRecordedListeners();
+
+        string types = engine.Evaluate("JSON.stringify(added.map(function (a) { return a[0]; }))").AsString();
+        string drag = engine.Evaluate(
+            "JSON.stringify(added.filter(function (a) { return a[0] !== 'contextmenu'; }).map(function (a) {"
+            + " var e = { prevented: 0, preventDefault: function () { this.prevented++; } }; a[1](e); return [a[0], e.prevented]; }))")
+            .AsString();
+
+        Assert.Equal("[\"dragover\",\"drop\",\"contextmenu\"]", types);
+        Assert.Equal("[[\"dragover\",1],[\"drop\",1]]", drag);
+    }
+
+    // 224 AC-2: a right click on a plain element, on a target without closest, or with no target shows no menu.
+    [Theory]
+    [InlineData("{ closest: function (s) { seen = s; return null; } }")]
+    [InlineData("{}")]
+    [InlineData("null")]
+    [InlineData("undefined")]
+    public void ContextMenu_PreventedOutsideTextEditing(string target)
+    {
+        Engine engine = LoadWithRecordedListeners();
+
+        double prevented = engine.Evaluate(ContextMenuCall(target)).AsNumber();
+
+        Assert.Equal(1, prevented);
+    }
+
+    // 224 AC-3: in an input or inside the ProseMirror editor the platform's text menu stays, and the selector is exact.
+    [Theory]
+    [InlineData("{ tagName: 'INPUT' }")]
+    [InlineData("{ className: 'ProseMirror', contentEditable: 'true' }")]
+    public void ContextMenu_AllowedInTextEditing(string match)
+    {
+        Engine engine = LoadWithRecordedListeners();
+
+        double prevented = engine.Evaluate(
+            ContextMenuCall("{ closest: function (s) { seen = s; return " + match + "; } }")).AsNumber();
+
+        Assert.Equal(0, prevented);
+        Assert.Equal("input, [contenteditable=\"true\"]", engine.Evaluate("seen").AsString());
+    }
+
+    // A fresh engine per test with a recording globalThis.addEventListener, then the committed bundle.
+    private static Engine LoadWithRecordedListeners()
     {
         string path = Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "editor", "editor.js");
         Engine engine = new Engine(options => options.TimeoutInterval(TimeSpan.FromSeconds(30)));
-        engine.Execute("var added = []; globalThis.addEventListener = function (type, handler) { added.push([type, handler]); };");
+        engine.Execute("var seen = null; var added = []; globalThis.addEventListener = function (type, handler) { added.push([type, handler]); };");
         engine.Execute(File.ReadAllText(path));
-
-        string result = engine.Evaluate(
-            "JSON.stringify(added.map(function (a) { var e = { prevented: 0, preventDefault: function () { this.prevented++; } };"
-            + " a[1](e); return [a[0], e.prevented]; }))").AsString();
-
-        Assert.Equal("[[\"dragover\",1],[\"drop\",1]]", result);
+        return engine;
     }
+
+    // Calls every recorded contextmenu listener with a fake event for the target; gives the preventDefault count.
+    private static string ContextMenuCall(string target) =>
+        "(function () { var e = { target: " + target + ", prevented: 0, preventDefault: function () { this.prevented++; } };"
+        + " added.filter(function (a) { return a[0] === 'contextmenu'; }).forEach(function (a) { a[1](e); }); return e.prevented; })()";
 
     private static List<string> FixtureFiles(string kind)
     {

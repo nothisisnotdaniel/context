@@ -10,6 +10,15 @@ if (typeof globalThis.addEventListener === "function") {
   };
   globalThis.addEventListener("dragover", block);
   globalThis.addEventListener("drop", block);
+  // A right click shows no browser menu (Back, Reload, Inspect) on the app's own surface; text inputs and the note
+  // editor keep the platform's text menu (Cut, Copy, Paste).
+  globalThis.addEventListener("contextmenu", event => {
+    const target = event.target;
+    if (target && typeof target.closest === "function" && target.closest('input, [contenteditable="true"]') !== null) {
+      return;
+    }
+    event.preventDefault();
+  });
 }
 
 globalThis.ContextEditor = Object.freeze({

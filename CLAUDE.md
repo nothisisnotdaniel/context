@@ -437,7 +437,11 @@ Every factory agent reads this file before working on Context. Keep it short and
     call) and `OpenAttachment(name, src)` (a `TryResolve` PDF to the launcher, else `Can't open <name>.`). The page
     makes one `OnDrop(count, files)` call per drop, gets `insertAttachment` per stored file and shows images from
     `blob:` URLs built from the bytes `NoteEditor` passes to `mount` (none for a sensitive note); the bundle blocks
-    window `dragover`/`drop` at load.
+    window `dragover`/`drop` at load. At load it also registers one window `contextmenu` listener that calls
+    `preventDefault` unless the target's `closest('input, [contenteditable="true"]')` is non-null (job 224), so app
+    surfaces show no browser menu while inputs and the editor keep the text menu; `Program.cs` never uses the
+    platform's context-menu switch (it would remove the text-field menu too), and `DevTools` is `true` only under
+    `#if DEBUG`, so Release builds never offer Inspect or dev tools.
   - **Todos:** `TodoStore` keeps the list in `<root>/todos.json` (same root as notes; System.Text.Json,
     camelCase, UTF-8 no BOM). `List()` gives the **open** todos sorted by `Due`, then untimed before timed, then `Time`, then `Created`
     (UTC), then file order. A done todo (job 159) stays in the file with `done` (UTC date-time, an offset converted and no zone taken as UTC on read; `TodoItem.Done`, written only when set,

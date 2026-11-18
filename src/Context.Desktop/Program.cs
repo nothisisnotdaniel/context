@@ -81,6 +81,8 @@ internal static class Program
         builder.RootComponents.Add<App>("app");
         PhotinoBlazorApp app = builder.Build();
 
+        // Release builds never offer Inspect or dev tools. Right-click menus are handled by the page: the page's
+        // contextmenu listener is the only mechanism; the platform switch would also remove the text-field menu.
 #if DEBUG
         const bool DevTools = true;
 #else
