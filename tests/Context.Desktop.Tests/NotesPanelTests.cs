@@ -86,13 +86,14 @@ public sealed class NotesPanelTests : IDisposable
     {
         IElement[] buttons = bar.QuerySelectorAll(".notes-bar-buttons button").ToArray();
         Assert.Equal(
-            ["triage-open", "tags-open", "settings-open"], buttons.Select(b => b.ClassList.First()).ToArray());
-        Assert.Equal(["Triage", "Tags", "Settings"], buttons.Select(b => b.GetAttribute("aria-label")!).ToArray());
+            ["triage-open", "people-open", "tags-open", "settings-open"], buttons.Select(b => b.ClassList.First()).ToArray());
+        Assert.Equal(["Triage", "People", "Tags", "Settings"], buttons.Select(b => b.GetAttribute("aria-label")!).ToArray());
     }
 
     // 192 AC-1, AC-2: icon buttons with names, typed, svg child, no visible text, safe decorative svg.
     [Theory]
     [InlineData("triage-open", "Triage")]
+    [InlineData("people-open", "People")]
     [InlineData("tags-open", "Tags")]
     [InlineData("settings-open", "Settings")]
     public async Task BarButtons_AreIconOnly_WithSafeSvg(string cls, string label)
@@ -362,6 +363,25 @@ public sealed class NotesPanelTests : IDisposable
         await cut.Find(".note-new-title").InputAsync(new ChangeEventArgs { Value = "x" });
         Assert.Empty(cut.FindAll(".note-entry-result"));
         Assert.Equal("a", File.ReadAllText(Path.Combine(data.Root, "Alpha.md")));
+    }
+
+    // 239 AC-3: the People button calls OnPeople once; it changes nothing.
+    [Fact]
+    public async Task PeopleButton_CallsOnPeople()
+    {
+        data.WriteNote("people", "# people\n");
+        data.WriteFile(Path.Combine("people", "Anna.md"), "# Anna\n");
+        int asked = 0;
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
+        IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OnPeople, () => asked++));
+
+        IElement button = cut.Find(".notes button.people-open");
+        Assert.Equal("button", button.GetAttribute("type"));
+        await button.ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(1, asked);
+        Assert.Equal(before, FileSnapshot.Take(data.Root));
     }
 
     // 137 AC-1: the Tags button is a typed button that calls OnTags; it changes nothing.

@@ -768,7 +768,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `DataWatcher` (one `FileSystemWatcher` with subfolders, `IsRelevant` filter: the top-level files as before, plus
     a `.md` at any depth except under a folder starting with `.` or under the top-level `calendar/`, and the top-level
     `settings.json` (job 207: saved searches edited outside the app; any case, not in a subfolder); 300 ms
-    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `LinksPanel`, `OutlinePanel`, `DayAppointmentsPanel`, `AppointmentPanel`, `PersonPanel`, `ReviewPanel`, `TriagePanel`)
+    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `PeoplePanel`, `LinksPanel`, `OutlinePanel`, `DayAppointmentsPanel`, `AppointmentPanel`, `PersonPanel`, `ReviewPanel`, `TriagePanel`)
     inherit `StateComponent`, which injects the state and `DesktopActions` (internal types can't be
     public parameters). `DesktopActions` (with `ActionResult`: `ActionKind` `Done`/`Refused`/`Failed`, `ActionReason`,
     raw text) is the only write path: it never throws, runs one action at a time (`Busy`), refreshes the state after a change and has the test
@@ -877,7 +877,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     when the open note is today's note itself: the editor stays as it is, unsaved text included), then
     calls `DesktopActions.OpenDailyNote()` and opens the note (a sensitive one through the unlock flow), with the
     accent `Created <name>` after a create and the red failure text otherwise. With today's note already open it keeps
-    the editor and only closes a shown page (Triage, Tags, Settings, Appointment).
+    the editor and only closes a shown page (Triage, People, Tags, Settings, Appointment).
     `/meeting <number>` (job 167) picks the appointment from the shown `Snapshot.Current` (numbered as `context current`
     numbers them; the desktop no longer shows the numbers, job 216) and works like `/today` through
     `DesktopActions.OpenMeetingNote(appointment)`; a blank or invalid number is red `Type /meeting <number>.`, no
@@ -973,7 +973,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     state change) and opens the page when no note has unsaved changes and no dialog or edit field is open; otherwise the
     editor is left alone and the accent status reads `Today's briefing is ready: briefings/<day>. Type /briefing to open
     it.`. The page is a snapshot, never refreshed.
-    **Pages (job 193):** `Main` holds one `page` (none, triage, tags, settings); opening one replaces another. The note area
+    **Pages (job 193):** `Main` holds one `page` (none, triage, people, tags, settings, appointment); opening one replaces another. The note area
     (`div.note-area`: breadcrumb to `LinksPanel`, or with no note open only the grey `p.no-note` `No note open. Click
     Today to open today's note.`, job 216) gets `hidden` while a page shows, but stays mounted so
     unsaved editor text survives. Each page's root has class `page` and an icon-only `button.close` (aria-label and title
@@ -1001,6 +1001,12 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Nothing overdue.`, `No appointments next week.`), red `Can't read todos.json.` in both todo sections and the
     calendar texts (as `DayAppointmentsPanel`'s feed line). It reloads on `State.Changed` keeping the shown rows;
     `Close`, opening a note or `Today` hides it.
+    **People (job 239):** `PeoplePanel` (`section.page.people-panel`, the person icon `button.people-open` in `NotesPanel`'s
+    bar between Triage and Tags, `OnPeople`; `Main`'s `page`, `Page.People`) lists the person pages (`People.PersonOf`)
+    of `Snapshot.Notes` only (no index, no file read), sorted by `Title` ignoring case, then ordinal, in
+    `ul.people-list` (`aria-label="People"`): one `button.person-open.cut` per page, text `DesktopText.NoteName(Title)`,
+    `title` through `OneLine`, opening it through `RequestOpen`; none: grey `p[role=status]` `No people yet. Mention
+    someone as @[Name] and open the mention to add their page.`. Sensitive notes are not listed. Its × closes it.
     **Tags and links:** `TagsPanel` (the `Tags` button in `NotesPanel`, or `/tags` without an argument; `Main`'s
     `page`) lists `DesktopState.Tags()` (`TagsView.Build`): one button per tag with its grey note count; a click
     shows `TagPanel` for it below the list (`aria-pressed` on that button); its × hides both, `TagPanel`'s only
@@ -1071,8 +1077,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     a dirty editor is refused with `Save <name> first.`, else `SaveExportFile("<name>.md")` and `ExportNote`'s text
     in the main status line. Rules (`DesktopSourceTests`): `WritePlainCopy` and `ReadImport` are named in
     `Context.Desktop` only in `DesktopActions.cs`, and no `.razor` file matches `\b(File|Directory|Path)\.`.
-    **Sidebar bar (job 197):** `NotesPanel`'s bar holds only the icon buttons (`.notes-bar-buttons`: triage, tags, settings; Search moved to the top bar in job 218, `NotesPanel.OnSearch` stays for saved searches), right-aligned (`justify-content: flex-end`); no logo and no visible "Notes" heading, the top-level `ul.note-list` carries `aria-label="Notes"`. Between the bar and the list, `nav.saved-searches` (job 207, `aria-label="Saved searches"`, only with entries; `DesktopSnapshot.SavedSearches`) has per entry `button.saved-search` (name through `OneLine`, cut, `title` the query; `OnSearch(query)`) and `button.saved-search-remove` (`×`, `aria-label`/`title` `Remove <name>`; `Actions.RemoveSavedSearch`, result in grey/red `p.saved-search-result`); `SavedSearchesUnreadable` shows red `Can't read saved searches.` instead. **Placeholders:** a box's placeholder says only what it is for (`New todo`, `Capture to inbox`), never a `Return to …` hint; Return still submits and there are no submit buttons.
-    **Tidy layout (job 192):** the Triage, Tags and Settings buttons in `NotesPanel`'s bar are icon-only (inline `svg`, `aria-hidden`, `currentColor`; `aria-label` and `title` carry the name), note rows show no modified date, and `.top-bar` is a band (`--panel` background, `--line` bottom border).
+    **Sidebar bar (job 197):** `NotesPanel`'s bar holds only the icon buttons (`.notes-bar-buttons`: triage, people, tags, settings; Search moved to the top bar in job 218, `NotesPanel.OnSearch` stays for saved searches), right-aligned (`justify-content: flex-end`); no logo and no visible "Notes" heading, the top-level `ul.note-list` carries `aria-label="Notes"`. Between the bar and the list, `nav.saved-searches` (job 207, `aria-label="Saved searches"`, only with entries; `DesktopSnapshot.SavedSearches`) has per entry `button.saved-search` (name through `OneLine`, cut, `title` the query; `OnSearch(query)`) and `button.saved-search-remove` (`×`, `aria-label`/`title` `Remove <name>`; `Actions.RemoveSavedSearch`, result in grey/red `p.saved-search-result`); `SavedSearchesUnreadable` shows red `Can't read saved searches.` instead. **Placeholders:** a box's placeholder says only what it is for (`New todo`, `Capture to inbox`), never a `Return to …` hint; Return still submits and there are no submit buttons.
+    **Tidy layout (job 192):** the Triage, People (job 239), Tags and Settings buttons in `NotesPanel`'s bar are icon-only (inline `svg`, `aria-hidden`, `currentColor`; `aria-label` and `title` carry the name), note rows show no modified date, and `.top-bar` is a band (`--panel` background, `--line` bottom border).
     **Top bar (job 198):** `TopBar` replaces the capture box as the first child of `Main`'s `main.current-region` (not with
     `Can't read the data folder.`): an empty `.top-bar-start` and right-aligned `.top-bar-buttons` with icon buttons
     `button.capture-open` (`Capture`, job 199: a hand-drawn "T" with an I-beam caret; a `.capture-pop` popover with one
@@ -1114,7 +1120,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     Rename/New subpage/Move form) and `EventCallback<string> OnPageAction`. `PageAction(id, label, checked)` is a
     public record (a parameter type must be public); its id is the item's class, `checked` non-null makes a
     `menuitemcheckbox` with `aria-checked`. `Main.PageActionsFor(snapshot)` builds the list: none while a page
-    (Triage, Tags, Settings, Appointment) is shown and with no note open; `end-day` first on today's daily note (`DailyNote.NameFor(Snapshot.Today)`); for a plain note `rename`,
+    (Triage, People, Tags, Settings, Appointment) is shown and with no note open; `end-day` first on today's daily note (`DailyNote.NameFor(Snapshot.Today)`); for a plain note `rename`,
     `delete`, `history`, `new-subpage`, `move`, `open-external`, `export`, `mark-sensitive` (when supported); for a
     sensitive note `rename`, `delete`, `history`, `make-plain`, `lock`. `Main.RunPageAction(id)` (the bound handler)
     runs the chosen one. Keys in the menu (default prevented): opening focuses the first item, ArrowDown/ArrowUp
@@ -1393,7 +1399,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `LinkCreateActionsTests` (`CreateLinkedNote`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `ReviewPanelTests`, `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `LinkCreateActionsTests` (`CreateLinkedNote`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `PeoplePanelTests`, `ReviewPanelTests`, `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
     CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules, the transfer calls and no file system class in `.razor`), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),

@@ -766,6 +766,7 @@ public sealed class MainTests : IDisposable
     // 193 AC-1, AC-2, AC-3, AC-8: each page replaces the note area and the others; the x closes it.
     [Theory]
     [InlineData("triage-open", ".triage-panel")]
+    [InlineData("people-open", ".people-panel")]
     [InlineData("tags-open", ".tags-panel")]
     [InlineData("settings-open", ".settings-panel")]
     public async Task Page_OpensInPlaceOfTheNoteArea_CloseShowsItAgain(string button, string page)
@@ -855,6 +856,69 @@ public sealed class MainTests : IDisposable
         await RunPalette(cut, "/triage");
         Assert.Single(cut.FindAll(".page"));
         Assert.Single(cut.FindAll(".triage-panel"));
+    }
+
+    // 239 AC-7: People replaces Tags and Settings, and Tags replaces People; the note area stays hidden meanwhile.
+    [Fact]
+    public async Task Page_People_ReplacesTagsAndSettings_TagsReplacesPeople()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await cut.Find("button.people-open").ClickAsync(new MouseEventArgs());
+        Assert.Single(cut.FindAll(".page"));
+        Assert.Single(cut.FindAll("section.people-panel"));
+        Assert.True(cut.Find("div.note-area").HasAttribute("hidden"));
+
+        await cut.Find("button.tags-open").ClickAsync(new MouseEventArgs());
+        Assert.Single(cut.FindAll(".page"));
+        Assert.Single(cut.FindAll(".tags-panel"));
+        Assert.Empty(cut.FindAll(".people-panel"));
+
+        await cut.Find("button.people-open").ClickAsync(new MouseEventArgs());
+        Assert.Single(cut.FindAll(".page"));
+        Assert.Single(cut.FindAll(".people-panel"));
+        Assert.Empty(cut.FindAll(".tags-panel"));
+
+        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        Assert.Single(cut.FindAll(".page"));
+        Assert.Single(cut.FindAll(".settings-panel"));
+        Assert.Empty(cut.FindAll(".people-panel"));
+
+        await cut.Find("button.people-open").ClickAsync(new MouseEventArgs());
+        Assert.Single(cut.FindAll(".page"));
+        Assert.Single(cut.FindAll(".people-panel"));
+        Assert.Empty(cut.FindAll(".settings-panel"));
+        Assert.True(cut.Find("div.note-area").HasAttribute("hidden"));
+    }
+
+    // 239 AC-8: a row opens the person's page (breadcrumb and PersonPanel) and the People page goes away.
+    [Fact]
+    public async Task Page_People_RowOpensPersonPage()
+    {
+        data.WriteNote("people", "# people\n");
+        data.WriteFile(Path.Combine("people", "Anna.md"), "# Anna\n");
+        data.WriteNote("Plan", "# Plan\nmeet @[Anna]\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        int mounts = js.Calls("ContextEditor.mount").Count;
+
+        await cut.Find("button.people-open").ClickAsync(new MouseEventArgs());
+        await cut.FindAll(".people-panel button.person-open").Single(b => b.TextContent == "Anna").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
+        cut.WaitForAssertion(() =>
+        {
+            Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal);
+            Assert.NotNull(cut.Find(".person-panel"));
+        }, Wait);
+        Assert.Empty(cut.FindAll(".people-panel"));
+        Assert.Empty(cut.FindAll(".page"));
+        Assert.False(cut.Find("div.note-area").HasAttribute("hidden"));
+        IElement nav = cut.Find("nav.breadcrumb");
+        Assert.Equal("people", nav.QuerySelector("button.crumb")!.TextContent);
+        Assert.Equal("Anna", nav.QuerySelector("[aria-current=page]")!.TextContent);
+        Assert.Equal("Anna", cut.Find(".note-title").TextContent);
     }
 
     // 193 AC-4: opening and closing a page keeps unsaved text, writes nothing and asks nothing; another note still asks.
