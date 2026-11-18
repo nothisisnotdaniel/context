@@ -1777,6 +1777,24 @@ public sealed class DesktopSourceTests
         Assert.DoesNotContain(forbidden, source, StringComparison.Ordinal);
     }
 
+    // 227 AC-6: the Outlook source reads each item's Sensitivity and skips private ones before reading its Subject.
+    [Fact]
+    public void OutlookSource_ReadsSensitivityBeforeSubject()
+    {
+        string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), RealOutlookFile));
+        int method = source.IndexOf("Appointment? ReadAppointment(", StringComparison.Ordinal);
+        Assert.True(method >= 0);
+        string body = source[method..];
+
+        Assert.Contains("item.Sensitivity", source, StringComparison.Ordinal);
+        Assert.Contains("OutlookSensitivity.IsPrivate(", source, StringComparison.Ordinal);
+        int sensitivity = body.IndexOf("item.Sensitivity", StringComparison.Ordinal);
+        int check = body.IndexOf("OutlookSensitivity.IsPrivate(", StringComparison.Ordinal);
+        int subject = body.IndexOf("item.Subject", StringComparison.Ordinal);
+        Assert.True(sensitivity >= 0 && check > sensitivity && subject > check);
+        Assert.True(body.IndexOf("item.", StringComparison.Ordinal) == sensitivity);
+    }
+
     // 223 AC-2: the Mail panel is gone, and no source names the mail read or its view.
     [Fact]
     public void Sources_HaveNoMailPanel()

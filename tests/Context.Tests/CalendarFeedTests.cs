@@ -151,6 +151,23 @@ public sealed class CalendarFeedTests : IDisposable
         AssertNoSecretInFiles();
     }
 
+    // Job 227 AC-3: a feed whose only events are private is still a calendar: Fresh, cached byte-for-byte.
+    [Fact]
+    public void Fetch_OnlyPrivateEvents_Fresh()
+    {
+        const string privateOnly =
+            "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Secret\r\nCLASS:PRIVATE\r\nDTSTART:20261029T080000Z\r\n"
+            + "END:VEVENT\r\nEND:VCALENDAR\r\n";
+        FakeHttpHandler handler = FakeHttpHandler.Ok(privateOnly);
+
+        CalendarFeedResult result = Feed(handler).Fetch();
+
+        Assert.Equal(CalendarFeedStatus.Fresh, result.Status);
+        Assert.Null(result.Reason);
+        Assert.Equal(privateOnly, result.Text);
+        Assert.Equal(Encoding.UTF8.GetBytes(privateOnly), File.ReadAllBytes(CachePath));
+    }
+
     // AC-2: the cache is written with the user's permissions only.
     [Fact]
     public void Fetch_Success_CacheMode0600_OnUnix()

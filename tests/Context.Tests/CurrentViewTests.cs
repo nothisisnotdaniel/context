@@ -638,4 +638,27 @@ public sealed class CurrentViewTests : IDisposable
         Assert.Equal(CalendarFeedStatus.Stale, view.Status);
         Assert.Equal([new Appointment("Daily cached", null, At(29, 8), At(29, 8, 30), false)], view.Appointments);
     }
+
+    // Job 227 AC-4: context current lists only the non-private appointments of the files and the feed, and
+    // Related has one list per shown appointment.
+    [Fact]
+    public void Build_PrivateAppointments_LeftOut_RelatedMatches()
+    {
+        WriteCalendar("work.ics", Calendar(
+            Event("Standup", ":20261029T080000Z", ":20261029T081500Z"),
+            "BEGIN:VEVENT\r\nSUMMARY:Doctor\r\nCLASS:PRIVATE\r\nDTSTART:20261029T090000Z\r\nDTEND:20261029T100000Z\r\nEND:VEVENT\r\n"));
+        string feedText = Calendar(
+            Event("Review", ":20261029T130000Z", ":20261029T140000Z"),
+            "BEGIN:VEVENT\r\nSUMMARY:Interview\r\nCLASS:CONFIDENTIAL\r\nDTSTART:20261029T110000Z\r\nDTEND:20261029T120000Z\r\nEND:VEVENT\r\n");
+        CalendarLink link = new CalendarLink(root);
+        link.Set(FakeHttpHandler.Link);
+        FakeHttpHandler handler = FakeHttpHandler.Ok(feedText);
+        CalendarFeed feed = new CalendarFeed(root, link, handler, () => Now, CalendarFeedTests.TimeoutFor(handler));
+
+        CurrentView view = Build(feed);
+
+        Assert.Equal(CalendarFeedStatus.Fresh, view.Status);
+        Assert.Equal(["Standup", "Review"], view.Appointments.Select(a => a.Title).ToArray());
+        Assert.Equal(view.Appointments.Count, view.Related.Count);
+    }
 }
