@@ -1285,6 +1285,34 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Outlook on.`/`Outlook off.`, Refused when turning on without `Available`, Failed `Can't read settings.json. Nothing
     was saved.` for a broken file). Nothing from Outlook is stored on disk; the CLI, `review` and the briefing don't
     read it.
+    **Crash log** (job 237, `CrashLog.cs`, desktop only): `CrashLog(root, utcNow, version, os, home)` writes into
+    `<root>/.logs/` (a dot folder, so `List()` and `DataWatcher` ignore it). `Write(source, e)` writes
+    `crash-yyyyMMdd-HHmmss-fff.log` (UTC; `-2`..`-99` on a clash, `FileMode.CreateNew`) holding only the UTC time, the
+    version, the OS, the source and per exception (depth first, `InnerException` and every
+    `AggregateException.InnerExceptions` entry, at most `MaxDepth` 10 levels) the full type name, the message and the
+    stack trace, each through `SafeText.Clean`, the home folder replaced by `~` (ignoring case) and cut to `MaxText`
+    (2000; only the home folder becomes `~`, other absolute paths in messages and stacks stay); never `Data`, environment, arguments or a machine/user field; below `MaxBytes` (64 KiB, later entries left
+    out). It then keeps the newest `MaxLogs` (10) regular files named exactly like a log (no link; `File.Delete`, its only
+    writing call besides `File.WriteAllText` and the `CreateNew` stream) and returns the path, or `null`; it never throws.
+    The session file `.logs/session` holds `running <ISO-8601 UTC start>` or `clean <start>` (written in place).
+    `Begin()` reads it (missing, unreadable, over 200 bytes or malformed: no session, no hint), returns a
+    `CrashHint(LogPath, Folder)` for the newest log whose name time is at or after the previous start, or after a
+    `running` session with none writes an `unclean-exit` log (`No exception was caught; the app was killed or the web
+    view stopped. Previous start: <S>.`) and returns that; then writes `running <now>`, where now is read after that
+    write and is at least 1 ms after the newest log's name time (so a shown log never shows again on the next start).
+    `End()` writes `clean <start>`. Nothing is written through a link: when `.logs` is a link, a reparse point or not a
+    folder (`CrashLog.IsPlainFolder`), or `session` is a link, a folder or a reparse point, the write is skipped.
+    `Program.cs` builds it right after `VelopackApp.Build().Run()` (`NoteStore.DefaultFolder()`, OS description +
+    architecture, `StartupUpdate.CurrentVersion`, the user profile), hooks `AppDomain.UnhandledException` (`unhandled`)
+    and `TaskScheduler.UnobservedTaskException` (`unobserved-task`, then `SetObserved()`), calls `Begin()`, registers the
+    log and the hint (when there is one) as singletons, and calls `End()` after `app.Run()`. `App.razor` wraps `<Main />`
+    in `CrashBoundary` (`ErrorBoundaryBase`; `OnErrorAsync` writes source `component`; shows red `p.crash-boundary`
+    `Something went wrong. Crash log: <path>. Close and reopen Context.`). `Main` renders `CrashHintBar` first: with a
+    hint `.crash-hint` (fixed at the top, theme colours) reads `Context closed unexpectedly last time. Crash log: <path>`
+    (path in `title`) with `Open folder` (`DesktopActions.OpenCrashFolder(hint)`, the launcher with `CrashHint.Folder`,
+    only when it is a plain folder at click time; otherwise, or on a throw, red `Can't open the folder.`) and `Dismiss`. Both components get the optional services through
+    `IServiceProvider.GetService`. `CrashLog.cs` names no `NoteStore`, `DesktopActions` or `Console.` (`DesktopSourceTests`).
+    Not covered: a web-view render crash while the app keeps running (only the next start's `unclean-exit` sees it).
     **Update:** `Program.Main` starts with `VelopackApp.Build().Run()` (Velopack's install/update hooks), and before
     the window opens `StartupUpdate(IUpdateSource).Start()` runs the silent update on a pool thread: it returns at once
     and never throws. Not `IsInstalled`: nothing is called. Otherwise `CheckAsync`; when a newer version is found,
@@ -1328,7 +1356,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     `SystemNotifier.cs`, each named only in itself and in `Program.cs`; no test names `SystemNotifier` (tests use
     `FakeNotifier`, which records `(title, body)` and can throw), and the notifier passes the text only as arguments or
     environment values. The only path `ShellNoteLauncher` ever gets is a checked note or attachment path (a note from `List()`, or an
-    attachment PDF `NoteAttachments.TryResolve` accepted; no user text becomes a path or an argument); no test references `ShellNoteLauncher` (tests use `FakeNoteLauncher`, which records paths and can throw).
+    attachment PDF `NoteAttachments.TryResolve` accepted), and the only folder it gets is the fixed crash folder
+    `<root>/.logs` (`CrashHint.Folder`, job 237); no user text becomes a path or an argument; no test references `ShellNoteLauncher` (tests use `FakeNoteLauncher`, which records paths and can throw).
     Outside text goes through `DesktopText.OneLine` and Blazor's default encoding: never `MarkupString`,
     `AddMarkupContent` or `@((` raw markup; no `style=`, `<a `, `<form` or `<script` in `.razor` files; every
     `<button` has `type="button"`; no plain HTML event attributes (`on<event>=` without `@`); only `EditorInterop.cs`

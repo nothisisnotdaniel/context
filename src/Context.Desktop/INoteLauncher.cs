@@ -3,7 +3,8 @@ namespace Context;
 /// <summary>
 /// Opens a note file or an attachment in the app the OS uses for it. The desktop write path is the only caller and
 /// passes only a checked note or attachment path (a regular <c>.md</c> file inside the data folder, found through the
-/// note list, or an attachment PDF that <c>NoteAttachments.TryResolve</c> accepted).
+/// note list, or an attachment PDF that <c>NoteAttachments.TryResolve</c> accepted), or the fixed crash folder
+/// <c>&lt;root&gt;/.logs</c> (<see cref="CrashHint.Folder"/>), which opens in the OS file manager.
 /// </summary>
 internal interface INoteLauncher
 {
