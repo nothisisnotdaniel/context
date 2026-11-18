@@ -159,6 +159,24 @@ internal sealed class DesktopState
     });
 
     /// <summary>
+    /// How many plain notes would get their <c>[[links]]</c> rewritten when <paramref name="name"/> is renamed to
+    /// <paramref name="newTitle"/> (<see cref="LinkRenamePlan"/>; the renamed note itself counts for a self-link), off
+    /// the calling thread. Reads only, writes nothing; 0 for the same name, a case-only rename, a title the rename
+    /// refuses, and on any error.
+    /// </summary>
+    public Task<int> LinkUpdateCount(string name, string newTitle) => Task.Run(() =>
+    {
+        try
+        {
+            return LinkRenamePlan.For(notes, name, newTitle).Notes.Count;
+        }
+        catch (Exception)
+        {
+            return 0;
+        }
+    });
+
+    /// <summary>
     /// The images the plain note <paramref name="name"/> shows inline, off the calling thread: each source of
     /// <see cref="NoteAttachments.ImageSources"/> in <paramref name="text"/> that <see cref="NoteAttachments.TryResolve"/>
     /// accepts as an image, with its MIME type and base64 bytes. Empty on any error. Reads only.

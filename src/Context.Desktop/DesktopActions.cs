@@ -57,6 +57,9 @@ internal enum ActionReason
 
     /// <summary>A triage action saved its target, but the line is still in the inbox (the target is kept).</summary>
     LineKept,
+
+    /// <summary>A note was renamed, but the links in some other notes could not be updated.</summary>
+    LinksLeft,
 }
 
 /// <summary>
@@ -73,8 +76,10 @@ internal sealed record ActionResult
         string text,
         EditableNote? note = null,
         DateOnly? nextDue = null,
-        IReadOnlyList<AttachmentLine>? attached = null)
+        IReadOnlyList<AttachmentLine>? attached = null,
+        string? name = null)
     {
+        Name = name;
         Kind = kind;
         Reason = reason;
         Text = text;
@@ -82,6 +87,9 @@ internal sealed record ActionResult
         NextDue = nextDue;
         Attached = attached;
     }
+
+    /// <summary>For <see cref="DesktopActions.RenameNote"/> when done: the note's new full name; else <c>null</c>.</summary>
+    public string? Name { get; }
 
     /// <summary>For <see cref="DesktopActions.AttachFiles"/>: one line per dropped file, in drop order; else <c>null</c>.</summary>
     public IReadOnlyList<AttachmentLine>? Attached { get; }
@@ -495,6 +503,50 @@ internal sealed class DesktopActions
     /// <summary>The red line when a capture's text is too long.</summary>
     public static string CaptureTooLongText => $"A capture can be at most {Inbox.MaxTextLength} characters.";
 
+    /// <summary>The Done text of a rename that changed no other note.</summary>
+    public static string RenamedText(string name) => $"Renamed to {name}.";
+
+    /// <summary>The Done text of a rename that updated the links in <paramref name="count"/> notes.</summary>
+    public static string RenamedLinksText(string name, int count) =>
+        $"Renamed to {name}. Updated links in {NotesText(count)}.";
+
+    /// <summary>
+    /// The Done/<see cref="ActionReason.LinksLeft"/> text: the note was renamed, but the links in
+    /// <paramref name="left"/> couldn't be updated (at most 3 names, then <c>and &lt;m&gt; more</c>).
+    /// </summary>
+    public static string LinksLeftText(string name, IReadOnlyList<string> left)
+    {
+        string shown = string.Join(", ", left.Take(MaxLinksLeftNames));
+        string more = left.Count > MaxLinksLeftNames
+            ? $" and {(left.Count - MaxLinksLeftNames).ToString(CultureInfo.InvariantCulture)} more"
+            : string.Empty;
+        return $"Renamed to {name}, but links in {NotesText(left.Count)} couldn't be updated: {shown}{more}.";
+    }
+
+    /// <summary>The Refused/<see cref="ActionReason.Invalid"/> text when a rewritten link would not read back.</summary>
+    public static string LinksInvalidText(string oldName, string newName) =>
+        $"Links to {oldName} can't be written with the name {newName}. Nothing was renamed.";
+
+    /// <summary>The rename question when links in <paramref name="count"/> notes will change.</summary>
+    public static string RenameQuestion(string oldName, string newName, int count) =>
+        $"Rename {DesktopText.OneLine(oldName)} to {DesktopText.OneLine(newName)}? Links in {NotesText(count)} will be updated.";
+
+    /// <summary><c>1 note</c> or <c>&lt;n&gt; notes</c>.</summary>
+    public static string NotesText(int count) =>
+        count == 1 ? "1 note" : $"{count.ToString(CultureInfo.InvariantCulture)} notes";
+
+    /// <summary>The most note names <see cref="LinksLeftText"/> lists.</summary>
+    public const int MaxLinksLeftNames = 3;
+
+    /// <summary>How often a link update reads a note again when it changed on disk in between (tries in total).</summary>
+    public const int LinkUpdateTries = 3;
+
+    /// <summary>
+    /// Test hook: runs before every save attempt of a link update in <see cref="RenameNote"/>, with the note's name
+    /// (after the rename), after the note was read.
+    /// </summary>
+    internal Action<string>? BeforeLinkSave { get; set; }
+
     /// <summary>Test hook: runs on the worker thread right before an action's checks and write.</summary>
     internal Action? BeforeWrite { get; set; }
 
@@ -631,10 +683,19 @@ internal sealed class DesktopActions
 
     /// <summary>
     /// Renames the note <paramref name="name"/> to <paramref name="newTitle"/> through <see cref="NoteStore.Rename"/>
-    /// (the file is moved, its bytes are kept). The same name gives <see cref="ActionReason.Unchanged"/> (done, nothing
-    /// written, no refresh). The result's text is the new name when done.
+    /// (the file is moved, its bytes are kept) and then rewrites the <c>[[links]]</c> to it and its subpages in the
+    /// plain notes (<see cref="LinkRenamePlan"/>, <see cref="NoteLinkRewriter"/>). The same name gives
+    /// <see cref="ActionReason.Unchanged"/> (done, nothing written, no refresh). When a rewritten link would not read
+    /// back, Refused/<see cref="ActionReason.Invalid"/> <see cref="LinksInvalidText"/>; when links in other notes would
+    /// change and <paramref name="confirmed"/> is null, Refused/<see cref="ActionReason.NotConfirmed"/>; both write
+    /// nothing. Otherwise the note is renamed first (a refused or failed rename touches no other note), then every
+    /// affected note is read, rewritten and saved through <see cref="NoteStore.SaveIfUnchanged"/> with the history (its
+    /// previous bytes kept as a version), up to <see cref="LinkUpdateTries"/> tries when it changed on disk. Done
+    /// texts: <see cref="RenamedText"/>, <see cref="RenamedLinksText"/>, or <see cref="ActionReason.LinksLeft"/> with
+    /// <see cref="LinksLeftText"/>. The result's <see cref="ActionResult.Name"/> is the new full name when done.
     /// </summary>
-    public Task<ActionResult> RenameNote(string name, string newTitle) => Run(() => RenameNoteNow(name, newTitle));
+    public Task<ActionResult> RenameNote(string name, string newTitle, Confirmation? confirmed) =>
+        Run(() => RenameNoteNow(name, newTitle, confirmed));
 
     /// <summary>
     /// Creates the subpage <paramref name="title"/> of the note <paramref name="parent"/> through
@@ -1564,7 +1625,7 @@ internal sealed class DesktopActions
         }
     }
 
-    private ActionResult RenameNoteNow(string name, string newTitle)
+    private ActionResult RenameNoteNow(string name, string newTitle, Confirmation? confirmed)
     {
         string title = NoteStore.NormalizeTitle(newTitle);
         string? invalid = NoteStore.ValidateTitle(title);
@@ -1575,22 +1636,51 @@ internal sealed class DesktopActions
 
         try
         {
-            if (!notes.TryFind(name, out NoteInfo? source) || source is null)
+            bool plain = notes.TryFind(name, out NoteInfo? source) && source is not null;
+            if (!plain && (!notes.TryFindSensitive(name, out source) || source is null))
             {
-                return notes.TryFindSensitive(name, out NoteInfo? sealedSource) && sealedSource is not null
-                    ? RenameSensitiveNow(sealedSource, title)
-                    : Refused(ActionReason.Missing, NoteMissingText(name));
+                return Refused(ActionReason.Missing, NoteMissingText(name));
             }
 
-            if (string.Equals(source.Title, title, StringComparison.Ordinal))
+            if (string.Equals(source!.Title, title, StringComparison.Ordinal))
             {
                 return new ActionResult(ActionKind.Done, ActionReason.Unchanged, source.Name);
             }
 
-            NoteInfo? renamed = notes.Rename(source.Name, title);
-            return renamed is null
-                ? Refused(ActionReason.Missing, NoteMissingText(name))
-                : new ActionResult(ActionKind.Done, ActionReason.None, renamed.Name);
+            LinkRenamePlan plan = LinkRenamePlan.For(notes, source.Name, title);
+            if (plan.Invalid)
+            {
+                return Refused(ActionReason.Invalid, LinksInvalidText(plan.OldName, plan.NewName));
+            }
+
+            if (plan.Notes.Count > 0 && confirmed is null)
+            {
+                return Refused(ActionReason.NotConfirmed, NotConfirmedText);
+            }
+
+            string renamedName;
+            if (plain)
+            {
+                NoteInfo? renamed = notes.Rename(source.Name, title);
+                if (renamed is null)
+                {
+                    return Refused(ActionReason.Missing, NoteMissingText(name));
+                }
+
+                renamedName = renamed.Name;
+            }
+            else
+            {
+                ActionResult sealedResult = RenameSensitiveNow(source, title);
+                if (sealedResult.Kind != ActionKind.Done || sealedResult.Reason == ActionReason.Unchanged)
+                {
+                    return sealedResult;
+                }
+
+                renamedName = sealedResult.Text;
+            }
+
+            return UpdateLinks(plan, renamedName);
         }
         catch (NoteExistsException e)
         {
@@ -1605,6 +1695,79 @@ internal sealed class DesktopActions
         catch (Exception)
         {
             return Failed(ActionReason.WriteFailed, RenameFailedText(name));
+        }
+    }
+
+    // After the rename: rewrites the links in every planned note (each under its name after the rename). Never throws;
+    // a note that can't be updated is named in the LinksLeft text and the others are still updated.
+    private ActionResult UpdateLinks(LinkRenamePlan plan, string renamedName)
+    {
+        int updated = 0;
+        List<string> left = [];
+        foreach (string planned in plan.Notes)
+        {
+            string current = NoteLinkRewriter.Moved(planned, plan.OldName, plan.NewName) ?? planned;
+            switch (UpdateLinksIn(plan, current))
+            {
+                case NoteSaveResult.Saved:
+                    updated++;
+                    break;
+                case NoteSaveResult.Unchanged:
+                    break;
+                default:
+                    left.Add(current);
+                    break;
+            }
+        }
+
+        if (left.Count > 0)
+        {
+            return new ActionResult(
+                ActionKind.Done, ActionReason.LinksLeft, LinksLeftText(renamedName, left), name: renamedName);
+        }
+
+        string text = updated == 0 ? RenamedText(renamedName) : RenamedLinksText(renamedName, updated);
+        return new ActionResult(ActionKind.Done, ActionReason.None, text, name: renamedName);
+    }
+
+    // One note's link update: read, rewrite, save with the history; read again when it changed on disk in between.
+    // Saved or Unchanged when done; any other value (a failed check counts as Missing) means the links are left.
+    private NoteSaveResult UpdateLinksIn(LinkRenamePlan plan, string current)
+    {
+        try
+        {
+            for (int attempt = 0; attempt < LinkUpdateTries; attempt++)
+            {
+                if (!notes.TryFind(current, out NoteInfo? found) || found is null)
+                {
+                    return NoteSaveResult.Missing;
+                }
+
+                EditableNote opened = notes.ReadForEdit(found);
+                if (!NoteLinkRewriter.TryRewrite(
+                    opened.Text, plan.Before, plan.After, plan.OldName, plan.NewName, out string rewritten))
+                {
+                    return NoteSaveResult.Missing;
+                }
+
+                if (ReferenceEquals(rewritten, opened.Text))
+                {
+                    return NoteSaveResult.Unchanged;
+                }
+
+                BeforeLinkSave?.Invoke(current);
+                NoteSaveResult result = notes.SaveIfUnchanged(opened, rewritten, out _, state.HistoryStore);
+                if (result != NoteSaveResult.ChangedOnDisk)
+                {
+                    return result;
+                }
+            }
+
+            return NoteSaveResult.ChangedOnDisk;
+        }
+        catch (Exception)
+        {
+            return NoteSaveResult.Missing;
         }
     }
 

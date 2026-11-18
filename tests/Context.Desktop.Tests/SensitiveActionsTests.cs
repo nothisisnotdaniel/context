@@ -458,10 +458,11 @@ public sealed class SensitiveActionsTests : IDisposable
         await Sealed("Plan", "﻿# Plan\r\n" + Marker + "\r\n");
         await data.State!.ReadSensitive("Plan");
 
-        ActionResult result = await data.Actions!.RenameNote("Plan", "Project");
+        ActionResult result = await data.Actions!.RenameNote("Plan", "Project", null);
 
         Assert.Equal(ActionKind.Done, result.Kind);
-        Assert.Equal("Project", result.Text);
+        Assert.Equal("Renamed to Project.", result.Text);
+        Assert.Equal("Project", result.Name);
         Assert.Equal(["Project.ctxs"], RootFiles());
         Assert.Equal(1, data.Keys.Agrees);
         Assert.Equal("Project", data.Session!.Note!.Name);
@@ -500,7 +501,7 @@ public sealed class SensitiveActionsTests : IDisposable
         SortedDictionary<string, string> before = Files();
         int agrees = data.Keys.Agrees;
 
-        ActionResult result = await data.Actions!.RenameNote("Plan", title);
+        ActionResult result = await data.Actions!.RenameNote("Plan", title, null);
 
         Assert.Equal(ActionKind.Refused, result.Kind);
         Assert.Equal(reason, result.Reason.ToString());
@@ -519,7 +520,7 @@ public sealed class SensitiveActionsTests : IDisposable
         SortedDictionary<string, string> before = Files();
 
         ActionResult created = await data.Actions!.CreateNote("PLAN");
-        ActionResult renamed = await data.Actions.RenameNote("Other", "Plan");
+        ActionResult renamed = await data.Actions.RenameNote("Other", "Plan", null);
 
         Assert.Equal((ActionKind.Refused, ActionReason.Exists), (created.Kind, created.Reason));
         Assert.Equal((ActionKind.Refused, ActionReason.Exists), (renamed.Kind, renamed.Reason));

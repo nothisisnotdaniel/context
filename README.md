@@ -121,6 +121,13 @@ version` puts one back after asking (the current text is kept as a version too).
 history along; deleting the note removes it. Captures, the day's end, the briefing, imports and the command line keep
 no versions. A sensitive note's versions stay sealed; making it plain removes them.
 
+Renaming a note in the desktop app also updates every `[[link]]` to it, and to its subpages, in your other plain notes:
+the `#heading` and `|alias` parts stay, and links in code are left alone. When links change, it first asks `Rename
+<old> to <new>? Links in <n> notes will be updated.`; each changed note keeps its previous text as a version, so any
+link update can be undone from History. A new name that links can't be written with (one with `#`, `|`, `[`, `]` or a
+backtick) is refused before anything changes. When some notes can't be updated, the line in red names them. Links
+inside sensitive notes are not updated.
+
 - After a sensitive note is renamed, its old title stays readable in the file names of its older versions
   (`.history/<new>/<id>~<old>.ctxs`) until they are pruned or the note is deleted, just as a sensitive note's own file
   name is readable.

@@ -384,11 +384,12 @@ public sealed class NoteActionsTests : IDisposable
         Assert.Equal(["Plan"], await data.State!.NotesWithTag("work"));
         int builds = data.State.Builds;
 
-        ActionResult result = await data.Actions!.RenameNote("Plan", "Project");
+        ActionResult result = await data.Actions!.RenameNote("Plan", "Project", null);
 
         Assert.Equal(ActionKind.Done, result.Kind);
         Assert.Equal(ActionReason.None, result.Reason);
-        Assert.Equal("Project", result.Text);
+        Assert.Equal("Renamed to Project.", result.Text);
+        Assert.Equal("Project", result.Name);
         Assert.Equal("# Plan\n#work\n", File.ReadAllText(Path.Combine(data.Root, "Project.md")));
         Assert.Equal(builds + 1, data.State.Builds);
         Assert.Equal(["Project"], data.State.Snapshot!.Notes.Select(n => n.Name).ToArray());
@@ -404,7 +405,7 @@ public sealed class NoteActionsTests : IDisposable
         SortedDictionary<string, string> before = Files();
         int builds = data.State!.Builds;
 
-        ActionResult result = await data.Actions!.RenameNote("Plan", " Plan ");
+        ActionResult result = await data.Actions!.RenameNote("Plan", " Plan ", null);
 
         Assert.Equal(ActionKind.Done, result.Kind);
         Assert.Equal(ActionReason.Unchanged, result.Reason);
@@ -424,7 +425,7 @@ public sealed class NoteActionsTests : IDisposable
         await data.RefreshAsync();
         SortedDictionary<string, string> before = Files();
 
-        ActionResult result = await data.Actions!.RenameNote(name, title);
+        ActionResult result = await data.Actions!.RenameNote(name, title, null);
 
         Assert.Equal(ActionKind.Refused, result.Kind);
         Assert.Equal(reason, result.Reason.ToString());
@@ -703,10 +704,11 @@ public sealed class NoteActionsTests : IDisposable
         WriteChild("Meetings/Meeting 1", "one");
         await data.RefreshAsync();
 
-        ActionResult result = await data.Actions!.RenameNote("Meetings/Meeting 1", "Kickoff");
+        ActionResult result = await data.Actions!.RenameNote("Meetings/Meeting 1", "Kickoff", null);
 
         Assert.Equal(ActionKind.Done, result.Kind);
-        Assert.Equal("Meetings/Kickoff", result.Text);
+        Assert.Equal("Renamed to Meetings/Kickoff.", result.Text);
+        Assert.Equal("Meetings/Kickoff", result.Name);
         Assert.Equal("one", File.ReadAllText(Path.Combine(data.Root, "Meetings", "Kickoff.md")));
         Assert.Equal(["Meetings", "Meetings/Kickoff"], data.State!.Snapshot!.Notes.Select(n => n.Name).ToArray());
     }
