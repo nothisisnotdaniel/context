@@ -750,7 +750,8 @@ input[type="password"]:disabled {
 }
 
 .day-pick .day:disabled {
-    color: var(--line);
+    color: var(--grey);
+    opacity: 0.5;
 }
 
 .day-pick .day.today {

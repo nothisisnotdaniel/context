@@ -354,13 +354,13 @@
 
     private void ShowMonth(int months)
     {
-        DateOnly month = MonthGrid.AddMonths(shownMonth, months);
+        DateOnly month = MonthGrid.MonthOf(MonthGrid.AddMonths(shownMonth, months));
         if (month == shownMonth)
         {
             return;
         }
 
-        shownMonth = MonthGrid.MonthOf(month);
+        shownMonth = month;
         focusDay = MonthGrid.AddMonths(focusDay, months);
     }
 
