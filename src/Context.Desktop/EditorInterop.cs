@@ -131,13 +131,6 @@ internal sealed class EditorInterop
         ElementReference element, string src, string name, bool isImage, string mime, string? base64) =>
         js.InvokeVoidAsync("ContextEditor.insertAttachment", element, src, name, isImage, mime, base64);
 
-    /// <summary>
-    /// True when the editor's Markdown round-trips <paramref name="markdown"/> byte for byte, with the title line of
-    /// the note <paramref name="name"/> kept as it is.
-    /// </summary>
-    public ValueTask<bool> IsLosslessAsync(string markdown, string name) =>
-        js.InvokeAsync<bool>("ContextEditor.isLossless", markdown, name);
-
     /// <summary>The editor's text as Markdown.</summary>
     public ValueTask<string> GetMarkdownAsync(ElementReference element) =>
         js.InvokeAsync<string>("ContextEditor.getMarkdown", element);

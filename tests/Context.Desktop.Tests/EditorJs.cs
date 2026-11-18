@@ -6,14 +6,15 @@ namespace Context.Tests;
 /// <summary>
 /// Plans bunit's strict JS interop for the bundled editor (<c>ContextEditor.*</c>): mount, focus, markClean,
 /// insertAttachment and destroy do nothing; headings returns <c>[]</c> (or what <see cref="SetHeadings"/> sets) and
-/// scrollToHeading true; isLossless, isDirty and getMarkdown return what the test sets. markClean
+/// scrollToHeading true; isDirty and getMarkdown return what the test sets; isLossless (no longer called by
+/// the desktop since job 210) returns true, so a test can check it is never asked. markClean
 /// makes the editor clean; markCleanIf does so only when its Markdown is the editor's current one, and returns that.
 /// </summary>
 internal sealed class EditorJs
 {
     private readonly BunitJSInterop js;
 
-    public EditorJs(BunitContext context, bool lossless = true, bool dirty = false, string markdown = "")
+    public EditorJs(BunitContext context, bool dirty = false, string markdown = "")
     {
         js = context.JSInterop;
         js.SetupVoid("ContextEditor.mount", _ => true).SetVoidResult();
@@ -23,10 +24,9 @@ internal sealed class EditorJs
         js.Setup<bool>("ContextEditor.markCleanIf", i => !Same(i)).SetResult(false);
         js.SetupVoid("ContextEditor.destroy", _ => true).SetVoidResult();
         js.SetupVoid("ContextEditor.insertAttachment", _ => true).SetVoidResult();
-        Lossless = lossless;
         Dirty = dirty;
         Markdown = markdown;
-        js.Setup<bool>("ContextEditor.isLossless", _ => true).SetResult(lossless);
+        js.Setup<bool>("ContextEditor.isLossless", _ => true).SetResult(true);
         js.Setup<bool>("ContextEditor.isDirty", _ => Dirty).SetResult(true);
         js.Setup<bool>("ContextEditor.isDirty", _ => !Dirty).SetResult(false);
         js.Setup<string>("ContextEditor.getMarkdown", _ => true).SetResult(markdown);
@@ -37,10 +37,23 @@ internal sealed class EditorJs
     /// <summary>Makes every later <c>ContextEditor.headings</c> call return <paramref name="json"/>.</summary>
     public void SetHeadings(string json) => js.Setup<string>("ContextEditor.headings", _ => true).SetResult(json);
 
+    /// <summary>
+    /// Holds every later <c>ContextEditor.headings</c> call until the returned plan's <c>SetResult</c> (a newer
+    /// <see cref="SetHeadings"/> answers the calls after it); <c>Asked</c> completes once such a call came in.
+    /// </summary>
+    public (JSRuntimeInvocationHandler<string> Plan, Task Asked) HoldHeadings()
+    {
+        TaskCompletionSource asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        JSRuntimeInvocationHandler<string> plan = js.Setup<string>("ContextEditor.headings", _ =>
+        {
+            asked.TrySetResult();
+            return true;
+        });
+        return (plan, asked.Task);
+    }
+
     /// <summary>The heading indexes passed to <c>ContextEditor.scrollToHeading</c> so far, in order.</summary>
     public IReadOnlyList<int> Jumps() => Calls("ContextEditor.scrollToHeading").Select(c => (int)c.Arguments[1]!).ToList();
-
-    public bool Lossless { get; }
 
     public bool Dirty { get; private set; }
 
@@ -77,11 +90,11 @@ internal sealed class EditorJs
         });
     }
 
-    /// <summary>Makes every later <paramref name="identifier"/> call (<c>ContextEditor.mount</c>, <c>focus</c> or
-    /// <c>isLossless</c>) fail with <paramref name="exception"/>.</summary>
+    /// <summary>Makes every later <paramref name="identifier"/> call (<c>ContextEditor.mount</c>, <c>focus</c>,
+    /// <c>headings</c> or <c>scrollToHeading</c>) fail with <paramref name="exception"/>.</summary>
     public void Fail(string identifier, Exception exception)
     {
-        if (identifier == "ContextEditor.isLossless" || identifier == "ContextEditor.scrollToHeading")
+        if (identifier == "ContextEditor.scrollToHeading")
         {
             js.Setup<bool>(identifier, _ => true).SetException(exception);
         }
@@ -127,9 +140,6 @@ internal sealed class EditorJs
 
     /// <summary>The note name passed to the latest mount (its 5th argument).</summary>
     public string MountedName() => (string)Calls("ContextEditor.mount")[^1].Arguments[4]!;
-
-    /// <summary>The arguments of the latest isLossless call.</summary>
-    public IReadOnlyList<object?> LosslessArguments() => Calls("ContextEditor.isLossless")[^1].Arguments;
 
     /// <summary>The .NET object the latest mount handed to the page (what the editor calls back).</summary>
     public EditorInterop Page() =>

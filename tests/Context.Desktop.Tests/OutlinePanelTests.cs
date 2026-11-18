@@ -5,8 +5,8 @@ using Microsoft.JSInterop;
 
 namespace Context.Tests;
 
-// 205 AC-9 and AC-10: the outline of the open note, alone and in the editor, with the page's editor mocked: headings
-// returns canned JSON and every scrollToHeading call is recorded.
+// 205 AC-9 and AC-10, 210 AC-1 to AC-6: the outline of the open note, alone and in Main's right sidebar, with the page's
+// editor mocked: headings returns canned JSON (or a held answer) and every scrollToHeading call is recorded.
 public sealed class OutlinePanelTests : IDisposable
 {
     // Opening a note reads it on Task.Run; every wait passes this bounded timeout, a real failure still fails within it.
@@ -102,134 +102,251 @@ public sealed class OutlinePanelTests : IDisposable
         Assert.Equal([2, 0], jumps);
     }
 
-    // AC-9/10: in the editor, the outline comes from headings after the mount, before the editor host, and a click
-    // calls scrollToHeading with the editor's element and the index; the focus stays where the mount put it.
+    // 210 AC-1, AC-2: the outline shows in the right sidebar before the todos, not in the note area; a click jumps the
+    // mounted editor by index without a remount, keeping unsaved text, and moves no focus.
     [Fact]
-    public async Task Editor_OutlineAfterMount_ClickScrolls()
+    public async Task Main_OutlineInSidebar_ClickScrolls()
     {
         data.WriteNote("Plan", "# Plan\n");
         EditorJs js = new EditorJs(data.Bunit);
         js.SetHeadings(ThreeHeadings);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        IRenderedComponent<NoteEditor> cut = await Render("Plan");
-        cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("nav.outline-panel button").Count), Wait);
+        await Open(cut, js, "Plan");
+        cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("aside.todos-region nav.outline-panel button").Count), Wait);
 
-        Assert.Equal("editor-host", cut.Find("nav.outline-panel").NextElementSibling?.ClassName);
-        Assert.Single(js.Calls("ContextEditor.focus"));
-        await cut.FindAll("nav.outline-panel button")[1].ClickAsync(new MouseEventArgs());
+        IElement nav = cut.Find("aside.todos-region nav.outline-panel");
+        Assert.Equal("Outline", nav.GetAttribute("aria-label"));
+        Assert.Equal("todos-region", nav.ParentElement?.ClassName);
+        Assert.Equal("todos", nav.NextElementSibling?.ClassName);
+        Assert.Equal("SECTION", nav.NextElementSibling?.TagName);
+        Assert.Empty(cut.FindAll(".note-area nav.outline-panel"));
+        IReadOnlyList<IElement> buttons = cut.FindAll("aside.todos-region nav.outline-panel button");
+        Assert.Equal(["Top", "<b>Goals</b>", "Deep line"], buttons.Select(b => b.TextContent));
+        Assert.Equal(["Top", "<b>Goals</b>", "Deep line"], buttons.Select(b => b.GetAttribute("title")));
+        Assert.Equal(["level-1", "level-2", "level-6"], buttons.Select(b => b.ClassList.Single(c => c.StartsWith("level-", StringComparison.Ordinal))));
+        Assert.All(buttons, b => Assert.Contains("cut", b.ClassList));
+
+        js.Edit("# Plan\n\nunsaved\n");
+        int mounts = js.Calls("ContextEditor.mount").Count;
+        int focuses = js.Calls("ContextEditor.focus").Count;
+        await cut.FindAll("aside.todos-region nav.outline-panel button")[1].ClickAsync(new MouseEventArgs());
 
         JSRuntimeInvocation jump = Assert.Single(js.Calls("ContextEditor.scrollToHeading"));
         Assert.Equal(js.Calls("ContextEditor.mount")[^1].Arguments[0], jump.Arguments[0]);
         Assert.Equal([1], js.Jumps());
+        Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
+        Assert.Equal(focuses, js.Calls("ContextEditor.focus").Count);
+        Assert.True(await cut.InvokeAsync(() => cut.FindComponent<NoteEditor>().Instance.IsDirtyAsync()));
+        Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
     }
 
-    // AC-9: fewer than three headings in the editor show no outline.
-    [Fact]
-    public async Task Editor_TwoHeadings_NoOutline()
+    // 210 AC-3: fewer than three headings, or headings that fail in the page, show no outline; the todos still do.
+    [Theory]
+    [InlineData("two")]
+    [InlineData("fail")]
+    public async Task Main_FewOrFailingHeadings_NoOutline(string kind)
     {
         data.WriteNote("Plan", "# Plan\n");
         EditorJs js = new EditorJs(data.Bunit);
-        js.SetHeadings("""[{"level":2,"text":"A"},{"level":2,"text":"B"}]""");
+        if (kind == "two")
+        {
+            js.SetHeadings("""[{"level":2,"text":"A"},{"level":2,"text":"B"}]""");
+        }
+        else
+        {
+            js.Fail("ContextEditor.headings", new JSException("gone"));
+        }
 
-        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
 
         Assert.NotEmpty(js.Calls("ContextEditor.headings"));
         Assert.Empty(cut.FindAll("nav.outline-panel"));
+        Assert.Single(cut.FindAll("aside.todos-region section.todos"));
+        Assert.Empty(cut.FindAll(".editor-failed"));
     }
 
-    // AC-9: an editor that didn't start, or a note that can't be read, has no outline and asks for no headings.
+    // 210 AC-3: with no note open (the current view), an editor that didn't start, or a note that can't be read, the
+    // sidebar has no outline and the todos still render; no headings are asked for.
     [Fact]
-    public async Task Editor_FailedOrUnreadable_NoOutline()
+    public async Task Main_NoNoteFailedOrUnreadable_NoOutline()
     {
         data.WriteNote("Plan", "# Plan\n");
         data.WriteNote("Bad", "x\n");
         EditorJs js = new EditorJs(data.Bunit);
         js.SetHeadings(ThreeHeadings);
-        js.Fail("ContextEditor.mount", new JSException("no page"));
-        await data.RefreshAsync();
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        IRenderedComponent<NoteEditor> failed = data.Bunit.Render<NoteEditor>(p => p.Add(e => e.Name, "Plan"));
-        failed.WaitForAssertion(() => Assert.Single(failed.FindAll(".editor-failed")), Wait);
-        IRenderedComponent<NoteEditor> unreadable;
+        Assert.Empty(cut.FindAll(".note-editor"));
+        Assert.Empty(cut.FindAll("nav.outline-panel"));
+        Assert.Single(cut.FindAll("aside.todos-region section.todos"));
+
+        js.Fail("ContextEditor.mount", new JSException("no page"));
+        await cut.FindAll(".notes-region button.name").Single(b => b.GetAttribute("title") == "Plan").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".editor-failed")), Wait);
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);
+        Assert.Empty(cut.FindAll("nav.outline-panel"));
+        Assert.Single(cut.FindAll("aside.todos-region section.todos"));
+
         using (FileStream held = new FileStream(
             Path.Combine(data.Root, "Bad.md"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
         {
-            unreadable = data.Bunit.Render<NoteEditor>(p => p.Add(e => e.Name, "Bad"));
-            unreadable.WaitForAssertion(() => Assert.Single(unreadable.FindAll(".unreadable")), Wait);
+            await cut.FindAll(".notes-region button.name").Single(b => b.GetAttribute("title") == "Bad").ClickAsync(new MouseEventArgs());
+            cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".unreadable")), Wait);
         }
 
-        Assert.Empty(failed.FindAll("nav.outline-panel"));
-        Assert.Empty(unreadable.FindAll("nav.outline-panel"));
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);
+        Assert.Empty(cut.FindAll("nav.outline-panel"));
+        Assert.Single(cut.FindAll("aside.todos-region section.todos"));
         Assert.Empty(js.Calls("ContextEditor.headings"));
     }
 
-    // AC-9: headings that fail in the page show no outline; the editor still works.
+    // 210 AC-4: opening note B after note A (three headings, B none) leaves no outline; closing to the current view
+    // removes it too.
     [Fact]
-    public async Task Editor_HeadingsFail_NoOutline()
+    public async Task Main_OpenOtherNoteOrClose_OutlineGone()
     {
-        data.WriteNote("Plan", "# Plan\n");
+        data.WriteNote("Alpha", "# Alpha\n");
+        data.WriteNote("Beta", "# Beta\n");
         EditorJs js = new EditorJs(data.Bunit);
-        js.Fail("ContextEditor.headings", new JSException("gone"));
+        js.SetHeadings(ThreeHeadings);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Alpha");
+        cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("aside.todos-region nav.outline-panel button").Count), Wait);
 
-        IRenderedComponent<NoteEditor> cut = await Render("Plan");
-
+        js.SetHeadings("[]");
+        int reads = js.Calls("ContextEditor.headings").Count;
+        await Open(cut, js, "Beta");
+        cut.WaitForAssertion(() => Assert.Equal(reads + 1, js.Calls("ContextEditor.headings").Count), Wait);
         Assert.Empty(cut.FindAll("nav.outline-panel"));
-        Assert.Empty(cut.FindAll(".editor-failed"));
+
+        js.SetHeadings(ThreeHeadings);
+        await Open(cut, js, "Alpha");
+        cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("aside.todos-region nav.outline-panel button").Count), Wait);
+
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".note-editor")), Wait);
+        Assert.Empty(cut.FindAll("nav.outline-panel"));
+        Assert.Single(cut.FindAll("aside.todos-region section.todos"));
     }
 
-    // AC-10: an automatic save that is Done reloads the outline.
+    // 210 AC-4: a heading list note A's editor reports after note B is open never shows.
     [Fact]
-    public async Task Editor_AutoSave_ReloadsOutline()
+    public async Task Main_StaleReportFromOldEditor_Ignored()
+    {
+        data.WriteNote("Alpha", "# Alpha\n");
+        data.WriteNote("Beta", "# Beta\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Alpha");
+        Assert.Empty(cut.FindAll("nav.outline-panel"));
+
+        // A reload of A asks for its headings again; that answer is held until B is open.
+        (JSRuntimeInvocationHandler<string> held, Task asked) = js.HoldHeadings();
+        int reads = js.Calls("ContextEditor.headings").Count;
+        NoteEditor alpha = cut.FindComponent<NoteEditor>().Instance;
+        Task reload = cut.InvokeAsync(() => alpha.ReloadAsync());
+        await asked.WaitAsync(Wait);
+
+        js.SetHeadings("[]");
+        await Open(cut, js, "Beta");
+        cut.WaitForAssertion(() => Assert.Equal(reads + 2, js.Calls("ContextEditor.headings").Count), Wait);
+        held.SetResult(ThreeHeadings);
+        await reload.WaitAsync(Wait);
+
+        Assert.Equal("Beta", js.MountedName());
+        Assert.Empty(cut.FindAll("nav.outline-panel"));
+        Assert.DoesNotContain("Goals", cut.Markup, StringComparison.Ordinal);
+    }
+
+    // 210 AC-5: an automatic save that is Done and changes the headings shows the new list in the sidebar.
+    [Fact]
+    public async Task Main_AutoSave_SidebarShowsNewHeadings()
     {
         data.WriteNote("Plan", "# Plan\n");
         EditorJs js = new EditorJs(data.Bunit);
-        IRenderedComponent<NoteEditor> cut = await Render("Plan");
-        Assert.Empty(cut.FindAll("nav.outline-panel"));
+        js.SetHeadings("""[{"level":2,"text":"Old A"},{"level":2,"text":"Old B"},{"level":2,"text":"Old C"}]""");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("aside.todos-region nav.outline-panel button").Count), Wait);
 
         js.SetHeadings(ThreeHeadings);
         await js.Change(cut, "# Plan\n\n# Top\n\n## Goals\n\n###### Deep\n");
         cut.WaitForAssertion(() => Assert.Equal(1, data.AutoSave.Pending), Wait);
         data.AutoSave.Elapse();
 
-        cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("nav.outline-panel button").Count), Wait);
-        Assert.Equal("Saved.", cut.Find(".status").TextContent);
+        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".note-editor .status").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Top", "<b>Goals</b>", "Deep line"],
+            cut.FindAll("aside.todos-region nav.outline-panel button").Select(b => b.TextContent)), Wait);
     }
 
-    // AC-10: an explicit save that is Done reloads the outline; a refused one doesn't.
+    // 210 AC-5: an explicit save that is Done reloads the sidebar outline.
     [Fact]
-    public async Task Editor_ExplicitSave_ReloadsOutline()
+    public async Task Main_ExplicitSave_SidebarShowsNewHeadings()
     {
         data.WriteNote("Plan", "# Plan\n");
         EditorJs js = new EditorJs(data.Bunit);
-        IRenderedComponent<NoteEditor> cut = await Render("Plan");
-        int reads = js.Calls("ContextEditor.headings").Count;
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        Assert.Empty(cut.FindAll("nav.outline-panel"));
 
         js.SetHeadings(ThreeHeadings);
         js.Edit("# Plan\n\nmore\n");
         await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
-        cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("nav.outline-panel button").Count), Wait);
-        Assert.Equal(reads + 1, js.Calls("ContextEditor.headings").Count);
+        cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("aside.todos-region nav.outline-panel button").Count), Wait);
+        Assert.Equal("Saved Plan.", cut.Find(".note-editor .status").TextContent);
     }
 
-    // AC-10: a reload (the note written elsewhere) mounts again and reloads the outline.
+    // 205 AC-10: a reload (the note written elsewhere) mounts again and reloads the outline.
     [Fact]
-    public async Task Editor_Reload_ReloadsOutline()
+    public async Task Main_Reload_SidebarShowsNewHeadings()
     {
         data.WriteNote("Plan", "# Plan\n");
         EditorJs js = new EditorJs(data.Bunit);
-        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
         Assert.Empty(cut.FindAll("nav.outline-panel"));
 
         js.SetHeadings(ThreeHeadings);
         data.WriteNote("Plan", "# Plan\n\n# Top\n");
-        await cut.InvokeAsync(() => cut.Instance.ReloadAsync());
+        NoteEditor editor = cut.FindComponent<NoteEditor>().Instance;
+        await cut.InvokeAsync(() => editor.ReloadAsync());
 
-        cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("nav.outline-panel button").Count), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("aside.todos-region nav.outline-panel button").Count), Wait);
         Assert.Equal(2, js.Calls("ContextEditor.mount").Count);
     }
 
-    // AC-9: locking a sensitive note takes its outline down with the editor.
+    // 210 AC-6: while a page (settings, search) is shown the sidebar has no outline; it returns when the page closes
+    // over the same note, without a remount.
+    [Fact]
+    public async Task Main_PageShown_OutlineHiddenThenBack()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.SetHeadings(ThreeHeadings);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("aside.todos-region nav.outline-panel button").Count), Wait);
+        int mounts = js.Calls("ContextEditor.mount").Count;
+
+        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".page")), Wait);
+        Assert.Empty(cut.FindAll("nav.outline-panel"));
+        await cut.Find(".page > .panel-bar button.close").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("aside.todos-region nav.outline-panel button").Count), Wait);
+
+        await cut.Find("button.search-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".search-panel")), Wait);
+        Assert.Empty(cut.FindAll("nav.outline-panel"));
+        await cut.Find(".search-panel button.close").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("aside.todos-region nav.outline-panel button").Count), Wait);
+        Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
+    }
+
+    // 205 AC-9, 210 AC-6: locking a sensitive note takes its sidebar outline down with the editor; no heading text stays.
     [Fact]
     public async Task Main_SensitiveLocked_OutlineGone()
     {
@@ -241,9 +358,8 @@ public sealed class OutlinePanelTests : IDisposable
         int mounts = js.Calls("ContextEditor.mount").Count;
         await cut.FindAll(".notes-region button.name").Single(b => b.TextContent == "Plan").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
-        cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("nav.outline-panel button").Count), Wait);
-        Assert.Equal("note-editor", cut.Find("nav.outline-panel").ParentElement?.ClassName);
-        Assert.NotNull(cut.Find("nav.outline-panel").Closest(".note-area"));
+        cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("aside.todos-region nav.outline-panel button").Count), Wait);
+        Assert.Empty(cut.FindAll(".note-area nav.outline-panel"));
 
         data.Session!.Lock();
 
@@ -252,11 +368,44 @@ public sealed class OutlinePanelTests : IDisposable
         Assert.DoesNotContain("Secret", cut.Markup, StringComparison.Ordinal);
     }
 
-    private async Task<IRenderedComponent<NoteEditor>> Render(string name)
+    // 210: the editor itself renders no outline; it reports each list through OnOutline, and an empty one when it goes.
+    [Fact]
+    public async Task Editor_ReportsOutline_NoPanel_EmptyOnDispose()
     {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.SetHeadings(ThreeHeadings);
+        List<IReadOnlyList<OutlineHeading>> reports = [];
+        TaskCompletionSource reported = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await data.RefreshAsync();
-        IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p.Add(e => e.Name, name));
-        cut.WaitForAssertion(() => Assert.True(cut.Instance.IsReady), Wait);
-        return cut;
+        IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p
+            .Add(e => e.Name, "Plan")
+            .Add(e => e.OnOutline, (IReadOnlyList<OutlineHeading> list) =>
+            {
+                reports.Add(list);
+                reported.TrySetResult();
+            }));
+        await reported.Task.WaitAsync(Wait);
+
+        Assert.Empty(cut.FindAll("nav.outline-panel"));
+        IReadOnlyList<OutlineHeading> first = Assert.Single(reports);
+        Assert.Equal(["Top", "<b>Goals</b>", "Deep\nline"], first.Select(h => h.Text));
+
+        await cut.InvokeAsync(() => cut.Instance.JumpToIndexAsync(2));
+        Assert.Equal([2], js.Jumps());
+
+        await data.Bunit.DisposeComponentsAsync();
+        Assert.Equal(2, reports.Count);
+        Assert.Empty(reports[^1]);
+    }
+
+    // Opens a note from the notes panel, waits for its mount and ready editor, and for the links panel to land.
+    private static async Task Open(IRenderedComponent<Main> cut, EditorJs js, string name)
+    {
+        int mounts = js.Calls("ContextEditor.mount").Count;
+        await cut.FindAll(".notes-region button.name").Single(b => b.GetAttribute("title") == name).ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);
     }
 }

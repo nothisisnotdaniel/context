@@ -31,18 +31,29 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Empty(cut.FindAll(".unreadable"));
     }
 
-    // AC-4: a note the editor would reformat shows the grey line.
+    // 210 AC-8: a note the editor would reformat (CRLF + BOM, "* list") shows no reformat line, and the page is never
+    // asked whether it is lossless.
     [Fact]
-    public async Task Open_Lossy_GreyLine()
+    public async Task Open_LossyNote_NoReformatLine()
     {
-        data.WriteNote("Plan", "* star\n");
-        _ = new EditorJs(data.Bunit, lossless: false);
+        Directory.CreateDirectory(data.Root);
+        File.WriteAllBytes(
+            Path.Combine(data.Root, "Plan.md"), [0xEF, 0xBB, 0xBF, .. Encoding.UTF8.GetBytes("* star\r\n__b__\r\n")]);
+        EditorJs js = new EditorJs(data.Bunit);
 
         IRenderedComponent<NoteEditor> cut = await Render("Plan");
 
-        IElement line = cut.Find(".lossy");
-        Assert.Equal("Saving will reformat parts of this note.", line.TextContent);
-        Assert.True(line.ClassList.Contains("grey"));
+        Assert.Empty(cut.FindAll(".lossy"));
+        Assert.DoesNotContain("Saving will reformat", cut.Markup, StringComparison.Ordinal);
+        Assert.Empty(js.Calls("ContextEditor.isLossless"));
+
+        await cut.InvokeAsync(() => cut.Instance.ReloadAsync());
+        js.Edit("* star\n\n__b__ more\n");
+        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+
+        Assert.Equal("Saved Plan.", cut.Find(".status").TextContent);
+        Assert.Empty(cut.FindAll(".lossy"));
+        Assert.Empty(js.Calls("ContextEditor.isLossless"));
     }
 
     // AC-7: a note that can't be read shows the red line and mounts nothing.
@@ -119,19 +130,22 @@ public sealed class NoteEditorTests : IDisposable
             cut.Find(".editor-failed").TextContent);
     }
 
-    // 143 AC-2, AC-5: a failed isLossless shows the same line; nothing is mounted and no lossy line shows.
+    // 143 AC-2, AC-5, 210 AC-9: a failed mount of a note the editor would reformat shows the red line, no reformat line,
+    // never asks isLossless, and nothing can be saved.
     [Fact]
-    public async Task Open_IsLosslessThrows_EditorFailedLineNoMount()
+    public async Task Open_LossyNoteMountThrows_EditorFailedLineNoLossy()
     {
-        data.WriteNote("Plan", "* star\n");
-        EditorJs js = new EditorJs(data.Bunit, lossless: false);
-        js.Fail("ContextEditor.isLossless", new JSException("boom-143"));
+        data.WriteNote("Plan", "* star\r\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.Fail("ContextEditor.mount", new JSException("boom-143"));
 
         IRenderedComponent<NoteEditor> cut = await RenderFailed("Plan");
 
         AssertFailedLine(cut, "Plan");
-        Assert.Empty(js.Calls("ContextEditor.mount"));
         Assert.Empty(cut.FindAll(".lossy"));
+        Assert.Empty(js.Calls("ContextEditor.isLossless"));
+        Assert.False(cut.Instance.IsReady);
+        Assert.Null(await cut.InvokeAsync(() => cut.Instance.SaveAsync(false)));
         Assert.DoesNotContain("boom-143", cut.Markup, StringComparison.Ordinal);
     }
 
@@ -143,7 +157,7 @@ public sealed class NoteEditorTests : IDisposable
     public async Task Open_MountThrows_AnyPageException_EditorFailedLine(string kind)
     {
         data.WriteNote("Plan", "* star\n");
-        EditorJs js = new EditorJs(data.Bunit, lossless: false);
+        EditorJs js = new EditorJs(data.Bunit);
         Exception thrown = kind switch
         {
             "js" => new JSException("boom-143"),
@@ -260,7 +274,7 @@ public sealed class NoteEditorTests : IDisposable
         Directory.CreateDirectory(data.Root);
         File.WriteAllBytes(
             Path.Combine(data.Root, "Plan.md"), [0xEF, 0xBB, 0xBF, .. Encoding.UTF8.GetBytes("* star\r\n__b__\r\n")]);
-        EditorJs js = new EditorJs(data.Bunit, lossless: false);
+        EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<NoteEditor> cut = await Render("Plan");
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
 
@@ -671,9 +685,9 @@ public sealed class NoteEditorTests : IDisposable
         ((Microsoft.JSInterop.DotNetObjectReference<EditorInterop>)data.Bunit.JSInterop.Invocations
             .Last(i => i.Identifier == "ContextEditor.mount").Arguments[2]!).Value;
 
-    // 202 AC-7: the page editor gets the note's name, as mount's 5th argument and as isLossless's 2nd.
+    // 202 AC-7: the page editor gets the note's name as mount's 5th argument (210: isLossless is never asked).
     [Fact]
-    public async Task Open_PassesNameToMountAndIsLossless()
+    public async Task Open_PassesNameToMount()
     {
         data.WriteNote("Ideas", "# Ideas\n\nText\n");
         EditorJs js = new EditorJs(data.Bunit);
@@ -682,7 +696,7 @@ public sealed class NoteEditorTests : IDisposable
 
         Assert.Equal("# Ideas\n\nText\n", js.MountedText());
         Assert.Equal("Ideas", js.MountedName());
-        Assert.Equal(new object?[] { "# Ideas\n\nText\n", "Ideas" }, js.LosslessArguments());
+        Assert.Empty(js.Calls("ContextEditor.isLossless"));
     }
 
     // 202 AC-7: a subpage passes its full name; the page editor matches the title on its last segment.
@@ -696,7 +710,7 @@ public sealed class NoteEditorTests : IDisposable
         await Render("people/Anna");
 
         Assert.Equal("people/Anna", js.MountedName());
-        Assert.Equal(new object?[] { "# Anna\n", "people/Anna" }, js.LosslessArguments());
+        Assert.Empty(js.Calls("ContextEditor.isLossless"));
     }
 
     // 202 AC-7: a reload and a save pass the name again, so the title line stays hidden and kept.
@@ -712,13 +726,14 @@ public sealed class NoteEditorTests : IDisposable
 
         Assert.Equal(2, js.Calls("ContextEditor.mount").Count);
         Assert.Equal("inbox", js.MountedName());
-        Assert.Equal(new object?[] { "# inbox\n- captured\n", "inbox" }, js.LosslessArguments());
+        Assert.Equal("# inbox\n- captured\n", js.MountedText());
 
         js.Edit("# inbox\n- captured\n- more\n");
         await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         Assert.Equal("Saved inbox.", cut.Find(".status").TextContent);
-        Assert.Equal(new object?[] { "# inbox\n- captured\n- more\n", "inbox" }, js.LosslessArguments());
+        Assert.Equal("# inbox\n- captured\n- more\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
+        Assert.Empty(js.Calls("ContextEditor.isLossless"));
     }
 
     // 202 AC-7: saving a note that starts with "# <Name>" without an edit writes nothing, even when the page hands
@@ -971,7 +986,7 @@ public sealed class NoteEditorTests : IDisposable
     {
         data.WriteNote("Plan", "* star\r\n");
         byte[] before = File.ReadAllBytes(PlanPath);
-        EditorJs js = new EditorJs(data.Bunit, lossless: false);
+        EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<NoteEditor> cut = await Render("Plan");
         EditorInterop page = js.Page();
         data.AutoSave.Elapse();
