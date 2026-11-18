@@ -1,0 +1,54 @@
+@inherits StateComponent
+@* Every person page (People.PersonOf: a direct child of the top-level people note) by name, from the snapshot's note
+   list only; clicking one opens it. It reads no index and no file, and re-renders whenever the state changes. *@
+
+<section class="page people-panel" aria-label="People">
+    <div class="panel-bar">
+        <h2>People</h2>
+        <button type="button" class="close" aria-label="Close" title="Close" @onclick="() => OnClose.InvokeAsync()"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" /></svg></button>
+    </div>
+    @if (Snapshot is { } snapshot)
+    {
+        IReadOnlyList<NoteInfo> people = PeopleIn(snapshot.Notes);
+        @if (people.Count == 0)
+        {
+            <p class="grey" role="status">No people yet. Mention someone as @("@[Name]") and open the mention to add their page.</p>
+        }
+        else
+        {
+            <ul class="people-list" aria-label="People">
+                @foreach (NoteInfo person in people)
+                {
+                    string name = person.Name;
+                    <li>
+                        <button type="button" class="person-open cut" title="@ShownTitle(person.Title)"
+                                @onclick="() => OnOpen.InvokeAsync(name)">@ShownName(person.Title)</button>
+                    </li>
+                }
+            </ul>
+        }
+    }
+</section>
+
+@code {
+    /// <summary>Called with a person page's full name (<c>people/&lt;Name&gt;</c>) when its button is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    // The person pages, sorted by title ignoring case, then ordinal so the order is the same on every OS.
+    internal static IReadOnlyList<NoteInfo> PeopleIn(IEnumerable<NoteInfo> notes) =>
+        notes
+            .Where(note => People.PersonOf(note.Name) is not null)
+            .OrderBy(note => note.Title, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(note => note.Title, StringComparer.Ordinal)
+            .ToList();
+
+    // A row's text: the person's name with control and bidi characters replaced (job 235's note-name rule).
+    internal static string ShownName(string title) => DesktopText.NoteName(title);
+
+    // A row's title attribute: the name on one line, control characters replaced.
+    internal static string ShownTitle(string title) => DesktopText.OneLine(title);
+}

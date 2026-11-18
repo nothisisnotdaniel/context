@@ -12,7 +12,7 @@
     {
         <div class="layout" @onkeydown="OpenPalette">
             <aside class="notes-region">
-                <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" OnTriage="ShowTriage" OnSearch="ShowSearch" />
+                <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" OnTriage="ShowTriage" OnPeople="ShowPeople" OnSearch="ShowSearch" />
             </aside>
             <main class="current-region">
                 <TopBar Today="@snapshot.Today" Selected="@SelectedDay()" OnToday="ShowToday" OnPick="PickDay" OnCapture="CaptureAsync" OnSearch="ShowSearch" PageActions="@PageActionsFor(snapshot)"
@@ -32,6 +32,10 @@
                 @if (reviewShown)
                 {
                     <ReviewPanel OnOpen="RequestOpen" OnClose="CloseReview" />
+                }
+                @if (page == Page.People)
+                {
+                    <PeoplePanel OnOpen="RequestOpen" OnClose="ClosePeople" />
                 }
                 @if (page == Page.Tags)
                 {
@@ -212,7 +216,7 @@ else
     // Bumped each time the search panel is asked for, so asking again for the same text starts it over.
     private int searchRequest;
     private string? decisionsShown;
-    private enum Page { None, Triage, Tags, Settings, Appointment }
+    private enum Page { None, Triage, People, Tags, Settings, Appointment }
 
     // The appointment page's title (raw) and day while Page.Appointment is shown.
     private (string Title, DateOnly Day)? appointmentShown;
@@ -401,7 +405,7 @@ else
         tagShown = null;
     }
 
-    // Triage, Tags and Settings are pages: one at a time, in place of the note area.
+    // Triage, People, Tags and Settings are pages: one at a time, in place of the note area.
     private void OpenPage(Page next)
     {
         if (page == Page.Tags && next != Page.Tags)
@@ -421,6 +425,11 @@ else
     private void ShowTriage() => OpenPage(Page.Triage);
 
     private void CloseTriage() => page = Page.None;
+
+    // The people view (job 239): every person page by name; a click opens it through RequestOpen.
+    private void ShowPeople() => OpenPage(Page.People);
+
+    private void ClosePeople() => page = Page.None;
 
     // The settings: shown at the top of the main region until closed or until a note opens.
     private void ShowSettings() => OpenPage(Page.Settings);
@@ -935,7 +944,7 @@ else
 
         if (string.Equals(daily.Text, openName, StringComparison.Ordinal))
         {
-            // The editor stays, unsaved text included; a shown page (Triage, Tags, Settings, an appointment) closes.
+            // The editor stays, unsaved text included; a shown page (Triage, People, Tags, Settings, an appointment) closes.
             OpenPage(Page.None);
             appointmentShown = null;
         }
@@ -2125,7 +2134,7 @@ else
     }
 
     // The shown page's actions for the top bar's More actions menu: a plain or sensitive note's, with End the day
-    // first on today's daily note; none with no note open or on a page (Triage, Tags, Settings, an appointment).
+    // first on today's daily note; none with no note open or on a page (Triage, People, Tags, Settings, an appointment).
     private IReadOnlyList<PageAction> PageActionsFor(DesktopSnapshot snapshot)
     {
         if (page != Page.None || openName is not { } name)
