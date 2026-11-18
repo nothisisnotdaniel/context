@@ -394,6 +394,8 @@ public sealed class ReleaseWorkflowTests
         string header = workflow[..name];
 
         Assert.Contains("backlog.md", header, StringComparison.Ordinal);
+        Assert.Contains("backlog/**", header, StringComparison.Ordinal);
+        Assert.Contains("makes no prerelease", header, StringComparison.Ordinal);
         Assert.Contains("release vX.Y.Z", header, StringComparison.Ordinal);
         Assert.Contains("X.Y.(Z+1)-develop.<run number>", header, StringComparison.Ordinal);
         Assert.DoesNotContain("Times", workflow, StringComparison.Ordinal);
@@ -1049,6 +1051,7 @@ public sealed class ReleaseWorkflowTests
     [InlineData(".github/scripts/old-prereleases.sh")]
     [InlineData("merge commit")]
     [InlineData("`backlog.md`")]
+    [InlineData("`backlog/**`")]
     [InlineData("`paths-ignore`")]
     [InlineData("`Prune old prereleases`")]
     [InlineData("`Context.<version>.nupkg`")]
@@ -1112,6 +1115,7 @@ public sealed class ReleaseWorkflowTests
         Assert.DoesNotContain("console app only", text, StringComparison.Ordinal);
         Assert.DoesNotContain("leaves a release with fewer assets", Regex.Replace(text, @"\s+", " "), StringComparison.Ordinal);
         Assert.DoesNotContain("Three jobs", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("only the root `backlog.md` is skipped", Regex.Replace(text, @"\s+", " "), StringComparison.Ordinal);
         Assert.DoesNotContain("release-notes-header", text, StringComparison.Ordinal);
         Assert.DoesNotContain("builds are only ad-hoc signed", Regex.Replace(text, @"\s+", " "), StringComparison.Ordinal);
     }
@@ -2834,7 +2838,7 @@ public sealed class ReleaseWorkflowTests
         Assert.Equal(["branches", "paths-ignore", "tags"], Sorted(push.Keys));
         Assert.Equal(["develop"], Strings(push["branches"]));
         Assert.Equal(["v*"], Strings(push["tags"]));
-        Assert.Equal(["backlog.md"], Strings(push["paths-ignore"]));
+        Assert.Equal(["backlog.md", "backlog/**"], Strings(push["paths-ignore"]));
         YamlMapping pullRequest = Map(on["pull_request"]);
         Assert.Equal(["branches", "types"], Sorted(pullRequest.Keys));
         Assert.Equal(["closed"], Strings(pullRequest["types"]));
