@@ -226,6 +226,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#266](backlog/266-tag-filters-decide-on-number-tags.md) Tag filters: decide on number tags like #1234
 - [?] [#267](backlog/267-saved-searches-icon-for-the-remove.md) Saved searches: icon for the × remove button
 - [?] [#272](backlog/272-steady-maintests-windowclose-closedafterlastrender.md) Steady MainTests.WindowClose_ClosedAfterLastRender_IsStillSeen
+- [?] [#273](backlog/273-check-outline-link-contrast-in-the.md) Check outline link contrast in the right sidebar
+- [?] [#274](backlog/274-visible-heading-for-the-sidebar-outline.md) Visible heading for the sidebar outline
 
 ## Dropped with the terminal UI
 
