@@ -735,7 +735,10 @@ internal sealed class DesktopActions
     public Task<ActionResult> OpenPerson(string name) => Run(() => OpenPersonNow(name));
 
     /// <summary>The name of today's daily note (<see cref="DailyNote.NameFor"/>), by the injected local clock.</summary>
-    public string DailyNoteName() => DailyNote.NameFor(DateOnly.FromDateTime(localNow()));
+    public string DailyNoteName() => DailyNoteName(DateOnly.FromDateTime(localNow()));
+
+    /// <summary>The name of <paramref name="day"/>'s daily note (<see cref="DailyNote.NameFor"/>).</summary>
+    public string DailyNoteName(DateOnly day) => DailyNote.NameFor(day);
 
     /// <summary>
     /// Makes sure the meeting note for <paramref name="appointment"/> (<see cref="MeetingNote.NameFor"/>) exists
@@ -753,7 +756,14 @@ internal sealed class DesktopActions
     /// it is (<see cref="ActionReason.Unchanged"/>, done, nothing read or written, no key-store call, no refresh). The
     /// result's text is the note's name when done, else <see cref="DailyNoteFailedText"/>.
     /// </summary>
-    public Task<ActionResult> OpenDailyNote() => Run(OpenDailyNoteNow);
+    public Task<ActionResult> OpenDailyNote() => OpenDailyNote(DateOnly.FromDateTime(localNow()));
+
+    /// <summary>
+    /// Like <see cref="OpenDailyNote()"/> for <paramref name="day"/> (a day picked in the top bar): makes sure its
+    /// daily note (<see cref="DailyNoteName(DateOnly)"/>) exists, composed with <see cref="DailyNote.Compose"/> for that
+    /// day; an existing note is left as it is (<see cref="ActionReason.Unchanged"/>). Same texts and refresh rules.
+    /// </summary>
+    public Task<ActionResult> OpenDailyNote(DateOnly day) => Run(() => OpenDailyNoteNow(day));
 
     /// <summary>
     /// Closes <paramref name="day"/> through <see cref="DayEnd.CloseDay"/>: Times' worked hours into its daily note,
@@ -1521,9 +1531,8 @@ internal sealed class DesktopActions
     private static string Appended(string text, string line) =>
         (text.Length == 0 || text.EndsWith('\n') ? text : text + "\n") + "- " + line + "\n";
 
-    private ActionResult OpenDailyNoteNow()
+    private ActionResult OpenDailyNoteNow(DateOnly day)
     {
-        DateOnly day = DateOnly.FromDateTime(localNow());
         try
         {
             DailyNoteResult result = DailyNote.Ensure(notes, day, () => DailyNote.Compose(todos, calendar, calendarFeed, day));

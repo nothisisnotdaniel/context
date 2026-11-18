@@ -689,27 +689,6 @@ internal sealed class DesktopState
         }
     }
 
-    /// <summary>
-    /// The view of <paramref name="day"/> (appointments touching it, todos due exactly that day, their linked notes),
-    /// built like the snapshot's off the calling thread; nothing is written. Never throws: a failure gives a view
-    /// with no appointments and unreadable todos.
-    /// </summary>
-    public Task<CurrentView> DayView(DateOnly day) => Task.Run(() =>
-    {
-        try
-        {
-            lock (indexGate)
-            {
-                return CurrentView.Build(todos, index, notes, calendar, feed, day, dueOnDayOnly: true);
-            }
-        }
-        catch (Exception)
-        {
-            return new CurrentView(
-                day, calendar.Zone, [], calendar.Folder, [], CalendarFeedStatus.NotConfigured, null, null, true, [], [], false);
-        }
-    });
-
     // Never throws: any failure becomes the fixed failure snapshot, so no exception text reaches the page.
     private DesktopSnapshot Build()
     {

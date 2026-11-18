@@ -48,6 +48,46 @@ public sealed class DailyNoteActionsTests : IDisposable
         Assert.False(File.Exists(NotePath));
     }
 
+    // 212: a given day's note is composed for that day (its appointments, todos due by then), not the clock's day.
+    [Fact]
+    public async Task OpenDailyNote_ForADay_CreatesThatDaysNote()
+    {
+        data.AddTodo("ship it", new DateOnly(2026, 11, 20));
+        data.AddTodo("after", new DateOnly(2026, 11, 21));
+        data.WriteCalendar("work.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("Planning", "20261120T090000Z", "20261120T093000Z"),
+            DesktopFixture.Event("Standup", "20261029T090000Z", "20261029T093000Z")));
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.OpenDailyNote(new DateOnly(2026, 11, 20));
+
+        Assert.Equal((ActionKind.Done, ActionReason.None, "2026-11-20"), (result.Kind, result.Reason, result.Text));
+        Assert.Equal("2026-11-20", data.Actions.DailyNoteName(new DateOnly(2026, 11, 20)));
+        Assert.Equal(
+            "# 2026-11-20\n\n## Appointments\n- 10:00-10:30 Planning\n\n## Todos\n- ship it\n",
+            File.ReadAllText(Path.Combine(data.Root, "2026-11-20.md")));
+        Assert.False(File.Exists(NotePath));
+        Assert.Contains(data.State!.Snapshot!.Notes, n => n.Name == "2026-11-20");
+    }
+
+    // 212: an existing note for a given day, plain or sensitive, is left as it is.
+    [Theory]
+    [InlineData(".md")]
+    [InlineData(".ctxs")]
+    public async Task OpenDailyNote_ForADay_Existing_Unchanged(string extension)
+    {
+        data.WriteFile("2026-11-20" + extension, "kept\r\n");
+        DesktopSnapshot snapshot = await data.RefreshAsync();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
+
+        ActionResult result = await data.Actions!.OpenDailyNote(new DateOnly(2026, 11, 20));
+
+        Assert.Equal((ActionKind.Done, ActionReason.Unchanged, "2026-11-20"), (result.Kind, result.Reason, result.Text));
+        Assert.Equal(before, FileSnapshot.Take(data.Root));
+        Assert.Equal(0, data.Keys.Agrees);
+        Assert.Same(snapshot, data.State!.Snapshot);
+    }
+
     // An existing plain or sensitive note: Done/Unchanged with its name, nothing written, no key call, no refresh.
     [Theory]
     [InlineData(".md")]

@@ -1052,11 +1052,14 @@ Every factory agent reads this file before working on Context. Keep it short and
     `input[type=text]` `aria-label="Capture"`, placeholder `Capture to inbox`, maxlength 1000, focused on open, and a
     `.capture-pop-backdrop`), `button.today-open` (`Today`) and `button.day-pick-open` (`Pick a day`; a popover with `input[type=date]`
     `aria-label="Day"`, min 1900-01-01, max 2100-12-31, and a `.day-pick-backdrop`). Esc, the backdrop or the button
-    closes a popover; opening one closes the other, so at most one is open. `Main.ShowToday` and `PickDay(DateOnly)` go through `RequestOpen(null)` (the unsaved-changes guard; the picked
-    day waits in `pendingDay` until it resolves and becomes `shownDay`, which any other open resets). `CurrentPanel`
-    gets `Day`: another day than `Snapshot.Today` loads `DesktopState.DayView(day)` (`CurrentView.Build(...,
-    dueOnDayOnly: true)`: only todos due that day, none overdue; read-only, reloaded after each `State.Changed`), shows
-    the date as title, no More actions button, and `No appointments on <day>.` / `Nothing due on <day>.`.
+    closes a popover; opening one closes the other, so at most one is open. `Main.ShowToday` goes through `RequestOpen(null)` (the unsaved-changes guard) to today's current view.
+    `PickDay(DateOnly)` (job 212) works like `/today` for that day: it opens the day's daily note (`yyyy-MM-dd`) in the
+    page editor through `Actions.OpenDailyNote(day)` (`DailyNote.Ensure` with `DailyNote.Compose` for that day; the
+    no-argument `OpenDailyNote()`/`DailyNoteName()` use the local clock's day), the `running` gate and `ShowDaily`
+    (accent `Created <name>`, red failure text, the unlock flow for a sensitive note). The open note of that day stays
+    as it is; another dirty note is saved first (`KeptUnsaved`), and when that fails the day waits in
+    `pendingPickedDay` behind the `Discard changes to <name>?` dialog. There is no read-only day view: `CurrentPanel`
+    only shows today's current view.
     **More actions menu (job 200):** the last top-bar button `button.page-menu-open` (three dots, `aria-label`/`title`
     `More actions`, `aria-haspopup="menu"`, `aria-expanded`) opens `div.page-menu[role=menu]` with a
     `.page-menu-backdrop`; it is one of the three mutually exclusive popovers. `TopBar` gets `[Parameter]

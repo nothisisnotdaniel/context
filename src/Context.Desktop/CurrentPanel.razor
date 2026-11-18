@@ -1,28 +1,14 @@
 @inherits StateComponent
 
-@{
-    DateOnly? otherDay = OtherDay();
-}
-@if (otherDay is not null && dayView is null)
-{
-    <p class="grey">Loading…</p>
-}
-else if ((otherDay is null ? Snapshot?.Current : dayView) is { } view)
+@if (Snapshot?.Current is { } view)
 {
     string dayText = view.Today.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture);
     <section class="current">
-        @if (otherDay is null)
-        {
-            <h1 class="title">Today, @dayText</h1>
-        }
-        else
-        {
-            <h1 class="title">@dayText</h1>
-        }
+        <h1 class="title">Today, @dayText</h1>
 
         @if (view.Appointments.Count == 0)
         {
-            <p class="grey">No appointments @(otherDay is null ? "today" : "on " + dayText). Put .ics files in @DesktopText.OneLine(view.Folder) to see them here.</p>
+            <p class="grey">No appointments today. Put .ics files in @DesktopText.OneLine(view.Folder) to see them here.</p>
         }
         else
         {
@@ -103,7 +89,7 @@ else if ((otherDay is null ? Snapshot?.Current : dayView) is { } view)
         }
         else if (view.Due.Count == 0)
         {
-            <p class="grey">Nothing due @(otherDay is null ? "today" : "on " + dayText). Add one with /todo today &lt;text&gt;.</p>
+            <p class="grey">Nothing due today. Add one with /todo today &lt;text&gt;.</p>
         }
         else
         {
@@ -158,47 +144,6 @@ else if ((otherDay is null ? Snapshot?.Current : dayView) is { } view)
     /// <summary>Opens a related note (through <c>Main.RequestOpen</c>, which asks first when the editor is dirty).</summary>
     [Parameter]
     public EventCallback<string> OnOpen { get; set; }
-
-    /// <summary>The day to show; <c>null</c> or today's date shows the snapshot's current view.</summary>
-    [Parameter]
-    public DateOnly? Day { get; set; }
-
-    private CurrentView? dayView;
-    private DateOnly? dayViewFor;
-
-    // The shown day when it is not today, else null.
-    private DateOnly? OtherDay() => Day is { } d && Snapshot is { } s && d != s.Today ? d : null;
-
-    protected override Task OnParametersSetAsync()
-    {
-        if (OtherDay() is not { } d)
-        {
-            dayView = null;
-            dayViewFor = null;
-            return Task.CompletedTask;
-        }
-
-        if (dayViewFor != d)
-        {
-            dayView = null;
-            dayViewFor = d;
-        }
-
-        return LoadDay(d);
-    }
-
-    protected override Task OnStateChangedAsync() => OtherDay() is { } d ? LoadDay(d) : Task.CompletedTask;
-
-    // Reads the day's view off the UI thread; a result for a day that is no longer shown is dropped.
-    private async Task LoadDay(DateOnly d)
-    {
-        CurrentView loaded = await State.DayView(d);
-        if (OtherDay() == d)
-        {
-            dayView = loaded;
-            StateHasChanged();
-        }
-    }
 
     // The shown appointments with their related notes and their 1-based number (the one /meeting takes); the related
     // rows don't count toward MaxAppointmentRows.
