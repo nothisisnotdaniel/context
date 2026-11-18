@@ -232,6 +232,8 @@ internal static class MeetingNote
 
         CheckFolderNotSensitive(notes);
         beforeCreate?.Invoke();
+        // CreateChild writes "# <title>\n" itself and the title is the date, which is Format's first line, so only the
+        // rest goes in as the body. The whole-text fallback only guards a Format that stops starting with that heading.
         string heading = "# " + date + "\n";
         string text = Format(appointment);
         string body = text.StartsWith(heading, StringComparison.Ordinal) ? text[heading.Length..] : text;
