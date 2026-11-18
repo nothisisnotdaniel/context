@@ -258,6 +258,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#301](backlog/301-meeting-note-title-shows-the-meeting.md) Meeting note title shows the meeting name, not only the date
 - [?] [#302](backlog/302-one-path-to-endreload-in-statecomponent.md) One path to EndReload in StateComponent
 - [?] [#304](backlog/304-same-selector-for-the-re-found.md) Same selector for the re-found note button in ReviewPanelTests
+- [ ] [#305](backlog/305-people-page-opened-from-a-person.md) People page opened from a person icon in the left sidebar
 
 ## Dropped with the terminal UI
 
