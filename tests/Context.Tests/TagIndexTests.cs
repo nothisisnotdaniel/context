@@ -389,7 +389,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(9, TagIndex.ParserVersion);
+        Assert.Equal(10, TagIndex.ParserVersion);
     }
 
     // 024 AC-6
@@ -438,13 +438,13 @@ public sealed class TagIndexTests : IDisposable
         using (SqliteConnection connection = Open())
         {
             using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 10";
+            command.CommandText = "PRAGMA user_version = 11";
             command.ExecuteNonQuery();
         }
 
         index.Sync(store);
 
-        Assert.Equal(10, UserVersion());
+        Assert.Equal(11, UserVersion());
     }
 
     // 048 AC-4: the old constructor means a tag link only.
@@ -847,7 +847,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(9, TagIndex.ParserVersion);
+        Assert.Equal(10, TagIndex.ParserVersion);
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
         Assert.Equal(["A", "Beta"], NoteRows());
         Assert.Equal([("A", "work"), ("Beta", "home")], Rows());
@@ -1198,7 +1198,7 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal(["Anna|1", "AS|1"], index.People().Select(Describe));
         Assert.Empty(index.NotesMentioning("Anna Schmidt"));
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(9, TagIndex.ParserVersion);
+        Assert.Equal(10, TagIndex.ParserVersion);
     }
 
     // 170 ----------------------------------------------------------------------------------------
@@ -1489,7 +1489,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(["Plan|1|-|ship it|- [ ] ship it"], index.NoteTodos().Select(Describe));
-        Assert.Equal(9, UserVersion());
+        Assert.Equal(TagIndex.ParserVersion, UserVersion());
     }
 
     // 201 AC-3: a sensitive .ctxs note never has note todo rows.
@@ -1518,5 +1518,146 @@ public sealed class TagIndexTests : IDisposable
         File.WriteAllBytes(DbPath, garbage);
 
         Assert.Throws<TagIndexException>(() => index.NoteTodos());
+    }
+
+    /// <summary>Every (note, target, heading) row of <c>note_links</c>, read directly.</summary>
+    private List<(string Note, string Target, string? Heading)> HeadingRows()
+    {
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT note, target, heading FROM note_links ORDER BY note, target";
+        using SqliteDataReader reader = command.ExecuteReader();
+        List<(string, string, string?)> rows = [];
+        while (reader.Read())
+        {
+            rows.Add((reader.GetString(0), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2)));
+        }
+
+        return rows;
+    }
+
+    // 205 AC-2: the target is stored as written, the heading after the first # (NULL without one).
+    [Fact]
+    public void Sync_StoresLinkHeading()
+    {
+        WriteNote("Plan", "## Goals");
+        WriteNote("A", "[[Plan#Goals]] [[Plan]] [[Plan# ]]");
+
+        index.Sync(store);
+
+        Assert.Equal(
+            [("A", "Plan", null), ("A", "Plan#", null), ("A", "Plan#Goals", "Goals")],
+            HeadingRows());
+    }
+
+    // 205 AC-3: a version-9 database (note_links without heading) opens, gains the column and is re-parsed.
+    [Fact]
+    public void Sync_VersionNineDatabase_AddsHeading_ReparsesEveryNote()
+    {
+        WriteNote("Plan", "## Goals");
+        WriteNote("A", "[[Plan#Goals]]");
+        DateTime time = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), time);
+        File.SetLastWriteTimeUtc(Path.Combine(root, "A.md"), time);
+        index.Sync(store);
+
+        // Rebuild note_links the way ParserVersion 9 had it, with A's row but no heading.
+        using (SqliteConnection connection = Open())
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText =
+                "DROP TABLE note_links; " +
+                "CREATE TABLE note_links(note TEXT NOT NULL, target TEXT NOT NULL, PRIMARY KEY(note, target)); " +
+                "INSERT INTO note_links(note, target) VALUES('A', 'Old'); " +
+                "PRAGMA user_version = 9;";
+            command.ExecuteNonQuery();
+        }
+
+        Assert.Equal(9, UserVersion());
+
+        index.Sync(store);
+
+        Assert.Equal([("A", "Plan#Goals", "Goals")], HeadingRows());
+        Assert.Equal(10, UserVersion());
+        Assert.Equal(["Plan|To|False|"], index.Links("A").Select(Describe));
+    }
+
+    // 205 AC-3: opening for a read alone adds the column, without a Sync.
+    [Fact]
+    public void Links_VersionNineDatabase_OpensWithoutError()
+    {
+        WriteNote("A", "[[B]]");
+        index.Sync(store);
+        using (SqliteConnection connection = Open())
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText =
+                "DROP TABLE note_links; " +
+                "CREATE TABLE note_links(note TEXT NOT NULL, target TEXT NOT NULL, PRIMARY KEY(note, target)); " +
+                "INSERT INTO note_links(note, target) VALUES('A', 'B'); " +
+                "PRAGMA user_version = 9;";
+            command.ExecuteNonQuery();
+        }
+
+        Assert.Equal(["B|To|True|"], index.Links("A").Select(Describe));
+        Assert.Equal([("A", "B", null)], HeadingRows());
+    }
+
+    // 205 AC-4: a heading link counts as a link to the note, both ways, matched like any target.
+    [Fact]
+    public void Links_HeadingLink_ResolvesToTheNote()
+    {
+        WriteNote("Plan", "## Goals");
+        WriteNote("A", "[[plan#goals]]");
+
+        index.Sync(store);
+
+        Assert.Equal(["A|From|False|"], index.Links("Plan").Select(Describe));
+        Assert.Equal(["Plan|To|False|"], index.Links("A").Select(Describe));
+    }
+
+    // 205 AC-4: a note whose name has a # is found by the whole target first, with no heading.
+    [Fact]
+    public void Links_NameWithHash_WholeTargetFirst()
+    {
+        WriteNote("C# notes", "plain");
+        WriteNote("C", "plain");
+        WriteNote("A", "[[C# notes]]");
+
+        index.Sync(store);
+
+        Assert.Equal(["C# notes|To|False|"], index.Links("A").Select(Describe));
+        Assert.Empty(index.Links("C"));
+    }
+
+    // 205 AC-4
+    [Fact]
+    public void ResolveLink_WholeTarget_ThenNotePart()
+    {
+        NameLookup names = new NameLookup(["C# notes", "Plan", "C"]);
+
+        NoteLinkTarget? hash = names.ResolveLink("c# NOTES");
+        NoteLinkTarget? plan = names.ResolveLink("plan.md#Goals");
+        NoteLinkTarget? c = names.ResolveLink("C# other");
+
+        Assert.Equal("C# notes", hash?.Note);
+        Assert.Null(hash?.Heading);
+        Assert.Equal("Plan", plan?.Note);
+        Assert.Equal("Goals", plan?.Heading);
+        Assert.Equal("C", c?.Note);
+        Assert.Equal("other", c?.Heading);
+        Assert.Null(names.ResolveLink("#Plan"));
+        Assert.Null(names.ResolveLink("Nope#Plan"));
+    }
+
+    // 205 AC-5: one missing row per note part, shown as stored first; a link to a heading only gives no row.
+    [Fact]
+    public void Links_MissingHeadingLinks_OneRowByNotePart_NoRowForHeadingOnly()
+    {
+        WriteNote("A", "[[gamma]] [[Gamma#A]] [[#Intro]]");
+
+        index.Sync(store);
+
+        Assert.Equal(["Gamma|To|True|"], index.Links("A").Select(Describe));
     }
 }

@@ -1,5 +1,28 @@
 namespace Context;
 
+/// <summary>
+/// A <c>[[link]]</c> target split into the note part and the heading after the first <c>#</c> (both raw, trimmed);
+/// <see cref="Heading"/> is <c>null</c> when there is no <c>#</c> or nothing after it. From
+/// <see cref="NameLookup.ResolveLink"/>, <see cref="Note"/> is the resolved note's name.
+/// </summary>
+internal sealed record NoteLinkTarget
+{
+    public NoteLinkTarget(string note, string? heading)
+    {
+        Note = note;
+        Heading = heading;
+    }
+
+    /// <summary>The note part (raw): the text before the first <c>#</c>, trimmed; may be empty.</summary>
+    public string Note { get; }
+
+    /// <summary>The heading part (raw): the text after the first <c>#</c>, trimmed; <c>null</c> when empty or absent.</summary>
+    public string? Heading { get; }
+
+    /// <summary>Returns only the type name: both parts are raw note text, so formatting this record must never print them.</summary>
+    public override string ToString() => nameof(NoteLinkTarget);
+}
+
 /// <summary>Finds <c>[[Note name]]</c> links (the wiki-link syntax of Obsidian, Logseq and Foam) in Markdown text.</summary>
 internal static class NoteLinkParser
 {
@@ -30,6 +53,23 @@ internal static class NoteLinkParser
         }
 
         return targets;
+    }
+
+    /// <summary>
+    /// Splits a link target at its first <c>#</c> into the note and the heading (<c>[[Plan#Next steps]]</c>), both
+    /// trimmed. With no <c>#</c>, or nothing but spaces after it, the heading is <c>null</c>; the note part may be
+    /// empty (<c>[[#Intro]]</c>, a heading of the note the link is in).
+    /// </summary>
+    public static NoteLinkTarget Split(string target)
+    {
+        int hash = target.IndexOf('#', StringComparison.Ordinal);
+        if (hash < 0)
+        {
+            return new NoteLinkTarget(target.Trim(), null);
+        }
+
+        string heading = target[(hash + 1)..].Trim();
+        return new NoteLinkTarget(target[..hash].Trim(), heading.Length == 0 ? null : heading);
     }
 
     private static void ParseLine(string line, List<string> targets, HashSet<string> seen)

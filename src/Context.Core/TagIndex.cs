@@ -135,6 +135,28 @@ internal sealed class NameLookup
 
         return found;
     }
+
+    /// <summary>
+    /// The note and heading a <c>[[link]]</c> target names: the whole target through <see cref="Resolve"/> first (so a
+    /// title with a <c>#</c>, like <c>C# notes</c>, still works, with no heading), then the note part of
+    /// <see cref="NoteLinkParser.Split"/> with its heading. <see cref="NoteLinkTarget.Note"/> is the resolved name.
+    /// <c>null</c> if no note matches (an empty note part, as in <c>[[#Intro]]</c>, names none).
+    /// </summary>
+    public NoteLinkTarget? ResolveLink(string target)
+    {
+        if (Resolve(target) is { } whole)
+        {
+            return new NoteLinkTarget(whole, null);
+        }
+
+        NoteLinkTarget split = NoteLinkParser.Split(target);
+        if (split.Note.Length == 0)
+        {
+            return null;
+        }
+
+        return Resolve(split.Note) is { } name ? new NoteLinkTarget(name, split.Heading) : null;
+    }
 }
 
 /// <summary>
@@ -171,6 +193,7 @@ internal sealed class TagIndex
         CREATE TABLE IF NOT EXISTS note_links(
             note TEXT NOT NULL,
             target TEXT NOT NULL,
+            heading TEXT,
             PRIMARY KEY(note, target));
         CREATE TABLE IF NOT EXISTS note_people(
             note TEXT NOT NULL,
@@ -206,9 +229,10 @@ internal sealed class TagIndex
     /// 2: <c>[[note links]]</c>. 3: subpages (full names, link targets up to <see cref="NoteLinkParser.MaxTargetLength"/>).
     /// 4: <c>@[person]</c> mentions (and <c>@[[x]]</c> is no link). 5: <c>key:: value</c> attributes. 6: a link target
     /// that runs into a code span is no link. 7: note text (the full-text table <c>note_text</c>). 8: <c>Decision:</c> lines
-    /// (<c>note_decisions</c>). 9: open <c>- [ ]</c> todos (<c>note_todos</c>).
+    /// (<c>note_decisions</c>). 9: open <c>- [ ]</c> todos (<c>note_todos</c>). 10: the heading of a
+    /// <c>[[Note#Heading]]</c> link (<c>note_links.heading</c>).
     /// </summary>
-    public const int ParserVersion = 9;
+    public const int ParserVersion = 10;
 
     /// <summary>
     /// How long opening <c>context.db</c> and starting <see cref="Sync"/>'s write transaction wait while another
@@ -344,9 +368,10 @@ internal sealed class TagIndex
                     Execute(
                         connection,
                         transaction,
-                        "INSERT INTO note_links(note, target) VALUES($note, $target)",
+                        "INSERT INTO note_links(note, target, heading) VALUES($note, $target, $heading)",
                         ("$note", note.Name),
-                        ("$target", target));
+                        ("$target", target),
+                        ("$heading", NoteLinkParser.Split(target).Heading));
                 }
 
                 Execute(connection, transaction, "DELETE FROM note_people WHERE note = $note", ("$note", note.Name));
@@ -720,20 +745,26 @@ internal sealed class TagIndex
 
         Dictionary<string, NoteLinkDirection> directions = new(StringComparer.Ordinal);
         Dictionary<string, string> missing = new(StringComparer.OrdinalIgnoreCase);
-        using (SqliteCommand command = Command(connection, null, "SELECT note, target FROM note_links"))
+        // Sorted, so of two spellings of one missing note ("Gamma#A", "gamma") the first stored is the one shown.
+        using (SqliteCommand command = Command(connection, null, "SELECT note, target FROM note_links ORDER BY note, target"))
         using (SqliteDataReader reader = command.ExecuteReader())
         {
             while (reader.Read())
             {
                 string from = reader.GetString(0);
                 string target = reader.GetString(1);
-                string? to = names.Resolve(target);
+                string? to = names.ResolveLink(target)?.Note;
                 if (string.Equals(from, note, StringComparison.Ordinal))
                 {
                     if (to is null)
                     {
-                        // One row per missing note: "Gamma" and "gamma.md" would both become the same note.
-                        missing.TryAdd(StripMd(target), target);
+                        // One row per missing note, shown by its note part: "Gamma", "gamma.md" and "Gamma#A" are one
+                        // note. "[[#Intro]]" names no note at all, so it gives no row.
+                        string part = NoteLinkParser.Split(target).Note;
+                        if (part.Length > 0)
+                        {
+                            missing.TryAdd(StripMd(part), part);
+                        }
                     }
                     else if (!string.Equals(to, note, StringComparison.Ordinal))
                     {
@@ -1041,12 +1072,39 @@ internal sealed class TagIndex
             // Freed pages are zeroed, so the text of a deleted note (one just marked sensitive) doesn't linger in the file.
             Execute(connection, null, "PRAGMA secure_delete = ON");
             Execute(connection, null, Schema);
+            EnsureLinkHeading(connection);
             return work(connection);
         }
         catch (SqliteException ex)
         {
             throw new TagIndexException($"Can't read {FileName}.", ex);
         }
+    }
+
+    // A database from before ParserVersion 10 has note_links without the heading column: add it (NULL until the next
+    // Sync re-parses every note). Another process may add it at the same time; then its column is the one kept.
+    private static void EnsureLinkHeading(SqliteConnection connection)
+    {
+        if (LinksHaveHeading(connection))
+        {
+            return;
+        }
+
+        try
+        {
+            Execute(connection, null, "ALTER TABLE note_links ADD COLUMN heading TEXT");
+        }
+        catch (SqliteException) when (LinksHaveHeading(connection))
+        {
+            // Added by another process meanwhile.
+        }
+    }
+
+    private static bool LinksHaveHeading(SqliteConnection connection)
+    {
+        using SqliteCommand command = Command(
+            connection, null, "SELECT COUNT(*) FROM pragma_table_info('note_links') WHERE name = 'heading'");
+        return Convert.ToInt64(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) > 0;
     }
 
     private static SqliteCommand Command(SqliteConnection connection, SqliteTransaction? transaction, string sql)

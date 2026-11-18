@@ -43,6 +43,7 @@
             @statusText
         }
     </p>
+    <OutlinePanel Headings="outline" OnJump="JumpToIndexAsync" />
     <div class="editor-host" @ref="host"></div>
 </section>
 
@@ -61,6 +62,10 @@
     private readonly SemaphoreSlim saveGate = new(1, 1);
     private CancellationTokenSource? pause;
     private bool disposed;
+
+    // The open document's headings, read from the mounted editor only (a sensitive note's never leave its memory but
+    // as this list); empty until mounted, and gone with this editor when the note closes or locks.
+    private IReadOnlyList<OutlineHeading> outline = [];
 
     /// <summary>The bridge to the page's editor; one per editor.</summary>
     [Inject]
@@ -82,6 +87,17 @@
     /// <summary>Called with the note's name when a link to an existing note is clicked.</summary>
     [Parameter]
     public EventCallback<string> OnOpenNote { get; set; }
+
+    /// <summary>
+    /// Called with the note's name and the heading when a <c>[[Note#Heading]]</c> link to another existing note is
+    /// clicked; without a delegate such a link goes to <see cref="OnOpenNote"/>.
+    /// </summary>
+    [Parameter]
+    public EventCallback<(string Name, string Heading)> OnOpenHeading { get; set; }
+
+    /// <summary>The heading (raw link text) to jump to once the note is mounted; read on the first mount only.</summary>
+    [Parameter]
+    public string? Heading { get; set; }
 
     /// <summary>Called with the person's name (as found by PersonParser) when a mention in the text is clicked.</summary>
     [Parameter]
@@ -192,6 +208,7 @@
                 // this save ran stays unsaved and its own pause saves it.
 
                 ShowStatus(auto ? "Saved." : $"Saved {DesktopText.OneLine(result.Text)}.", auto ? "grey" : "accent");
+                await LoadOutlineAsync();
             }
             else
             {
@@ -291,6 +308,7 @@
             await Interop.MountAsync(host, note.Text, await State.InlineImages(Name, note.Text), Name);
             opened = note;
             dirty = false;
+            await LoadOutlineAsync();
         }
         catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
         {
@@ -319,6 +337,7 @@
             opened = saved;
             dirty = false;
             ShowStatus(string.Empty, string.Empty);
+            await LoadOutlineAsync();
         }
         catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
         {
@@ -406,9 +425,82 @@
             {
                 // The editor is mounted and works; it only didn't take the focus.
             }
+
+            await LoadOutlineAsync();
+            if (Heading is { } heading)
+            {
+                await JumpToHeadingAsync(heading);
+            }
         }
 
         StateHasChanged();
+    }
+
+    // Reads the mounted editor's headings for the outline; a page that is gone or a malformed list shows none.
+    private async Task LoadOutlineAsync()
+    {
+        if (!mounted || disposed)
+        {
+            outline = [];
+            return;
+        }
+
+        try
+        {
+            outline = OutlineHeading.Parse(await Interop.HeadingsAsync(host));
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            outline = [];
+        }
+    }
+
+    /// <summary>
+    /// Moves the cursor to the first heading of the open note whose text matches <paramref name="heading"/>
+    /// (<see cref="OutlineHeading.IndexOf"/>) and scrolls to it, keeping unsaved text; without such a heading, says so
+    /// in grey and stays where it is.
+    /// </summary>
+    internal async Task JumpToHeadingAsync(string heading)
+    {
+        if (!mounted || disposed)
+        {
+            return;
+        }
+
+        try
+        {
+            int index = OutlineHeading.IndexOf(OutlineHeading.Parse(await Interop.HeadingsAsync(host)), heading);
+            if (index < 0)
+            {
+                ShowStatus($"{DisplayName} has no heading {DesktopText.OneLine(heading)}.", "grey");
+                return;
+            }
+
+            await Interop.ScrollToHeadingAsync(host, index);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            // The page is gone; the editor stays where it is.
+        }
+    }
+
+    // An outline button: the index-th heading of the editor, by index only.
+    private async Task JumpToIndexAsync(int index)
+    {
+        if (!mounted || disposed)
+        {
+            return;
+        }
+
+        Used();
+        try
+        {
+            await Interop.ScrollToHeadingAsync(host, index);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            // The page is gone; the editor stays where it is.
+        }
     }
 
     // Ctrl/Cmd+S saves at once; every other key only counts as use.
@@ -496,15 +588,37 @@
             return;
         }
 
-        string? name = State.ResolveNote(targets[0]);
-        if (name is null)
+        // The whole target names a note first ("C# notes"), then the part before the first # with its heading.
+        NoteLinkTarget? link = State.ResolveLink(targets[0]);
+        string? heading = link?.Heading;
+        if (link is null)
+        {
+            NoteLinkTarget split = NoteLinkParser.Split(targets[0]);
+            heading = split.Note.Length == 0 ? split.Heading : null;
+        }
+
+        if (heading is not null && (link is null || string.Equals(link.Note, Name, StringComparison.Ordinal)))
+        {
+            // "[[#Goals]]", or a heading of this note: a jump in place, unsaved text kept.
+            await JumpToHeadingAsync(heading);
+            StateHasChanged();
+            return;
+        }
+
+        if (link is null)
         {
             ShowStatus($"No note named {DesktopText.OneLine(targets[0])}.", "grey");
             StateHasChanged();
             return;
         }
 
-        await OnOpenNote.InvokeAsync(name);
+        if (heading is not null && OnOpenHeading.HasDelegate)
+        {
+            await OnOpenHeading.InvokeAsync((link.Note, heading));
+            return;
+        }
+
+        await OnOpenNote.InvokeAsync(link.Note);
     });
 
     private Task PersonClicked(string raw) => InvokeAsync(async () =>

@@ -173,4 +173,34 @@ public sealed class NoteLinkParserTests
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), $"took {watch.Elapsed}");
         Assert.Equal(["x"], targets);
     }
+
+    // 205 AC-1: split at the first #, both parts trimmed; no heading without text after the #.
+    [Theory]
+    [InlineData("Plan#Next steps ", "Plan", "Next steps")]
+    [InlineData(" Plan # Next steps#2", "Plan", "Next steps#2")]
+    [InlineData("Plan", "Plan", null)]
+    [InlineData("Plan#", "Plan", null)]
+    [InlineData("Plan#   ", "Plan", null)]
+    [InlineData("#Intro", "", "Intro")]
+    public void Split_NoteAndHeading(string target, string note, string? heading)
+    {
+        NoteLinkTarget split = NoteLinkParser.Split(target);
+
+        Assert.Equal(note, split.Note);
+        Assert.Equal(heading, split.Heading);
+    }
+
+    // 205 AC-1: Parse keeps the target as written.
+    [Fact]
+    public void Parse_HeadingLink_KeepsTarget()
+    {
+        Assert.Equal(["Plan#Goals"], NoteLinkParser.Parse("see [[Plan#Goals]]"));
+    }
+
+    // 205: the record never prints raw note text.
+    [Fact]
+    public void Split_ToString_HidesRawText()
+    {
+        Assert.Equal(nameof(NoteLinkTarget), NoteLinkParser.Split("Secret#Goal").ToString());
+    }
 }

@@ -231,4 +231,22 @@ public sealed class LinksViewTests : IDisposable
         NoteLink from = Assert.Single(acme.Links);
         Assert.Equal(("people/Anna", NoteLinkDirection.From), (from.Note, from.Direction));
     }
+
+    // 205 AC-4/5: a heading link is a link to the note; a missing one shows its note part.
+    [Fact]
+    public void Build_HeadingLinks_LinkTheNote()
+    {
+        WriteNote("Plan", "## Goals");
+        WriteNote("Linker", "[[plan#goals]] [[Gamma#A]] [[gamma]] [[#Intro]]");
+
+        LinksView plan = Build("Plan");
+        LinksView linker = Build("Linker");
+
+        NoteLink from = Assert.Single(plan.Links);
+        Assert.Equal("Linker", from.Note);
+        Assert.Equal(NoteLinkDirection.From, from.Direction);
+        Assert.Equal(
+            ["Gamma|To|True", "Plan|To|False"],
+            linker.Links.Select(l => $"{l.Note}|{l.Direction}|{l.Missing}").Order(StringComparer.Ordinal));
+    }
 }
