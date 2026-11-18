@@ -1198,7 +1198,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     (`CurrentView.Time` for that day, `OneLine` title or `(no title)`); grey `No appointments.`, red
     `Can't read calendar/<file>`; it reloads on `State.Changed` keeping the rows, a day change shows `Loading…`. A click
     goes to `Main.OpenAppointment` (save first, else `Discard changes to <name>?`; Discard drops the note and shows the page
-    over the placeholder): `Page.Appointment` shows `AppointmentPanel` (`section.appointment-page`, `h2` title, `Close`;
+    over the placeholder): `Page.Appointment` shows `AppointmentPanel` (`section.page.appointment-page`, `h2` title, icon-only × `button.close`, `h3 Notes` above every state, the list `aria-labelledby` it;
     the outline is hidden, opening any note closes it). Same-titled appointments (ordinal) on the day share one page (a
     second click keeps it, no reload). It lists `DesktopState.AppointmentPage(title, day)` (`MeetingPrep.Related(...,
     max: null)` over the title and the union of the attendees of those appointments; `Sync`, `NoteTags()`, `List()`

@@ -1796,6 +1796,10 @@ nav.saved-searches ul {
     padding-bottom: 12px;
 }
 
+.appointment-page h3 {
+    margin: 12px 0 4px;
+}
+
 .appointment-page .appointment-notes {
     list-style: none;
     padding: 0;
