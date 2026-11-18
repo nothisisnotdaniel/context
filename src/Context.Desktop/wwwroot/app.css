@@ -1485,3 +1485,48 @@ input[type="password"]:disabled {
 .note-area[hidden] {
     display: none;
 }
+
+/* The open note's outline (OutlinePanel), above the editor: one link-like button per heading, indented by level; a long
+   heading is cut, the full text is in its title. */
+.outline-panel {
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 12px;
+    max-height: 30vh;
+    overflow-y: auto;
+    padding-bottom: 8px;
+}
+
+.outline-item {
+    background: none;
+    border: none;
+    color: var(--accent-strong);
+    cursor: pointer;
+    font: inherit;
+    max-width: 100%;
+    padding: 2px 4px;
+    text-align: left;
+}
+
+.outline-item:hover {
+    text-decoration: underline;
+}
+
+.outline-item.level-1 {
+    font-weight: 600;
+}
+
+.outline-item.level-2 {
+    padding-left: 16px;
+}
+
+.outline-item.level-3 {
+    padding-left: 28px;
+}
+
+.outline-item.level-4,
+.outline-item.level-5,
+.outline-item.level-6 {
+    padding-left: 40px;
+}

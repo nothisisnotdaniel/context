@@ -580,6 +580,22 @@ internal sealed class DesktopState
         return new NameLookup(current.Notes.Concat(current.Sensitive).Select(n => n.Name)).Resolve(target.Trim());
     }
 
+    /// <summary>
+    /// The note and heading a <c>[[link]]</c> target names (<see cref="NameLookup.ResolveLink"/>, trimmed: the whole
+    /// target first, then the part before the first <c>#</c>) against the notes in the latest snapshot, sensitive ones
+    /// included (by name only). <c>null</c> if no note matches.
+    /// </summary>
+    public NoteLinkTarget? ResolveLink(string target)
+    {
+        DesktopSnapshot? current = snapshot;
+        if (current is null)
+        {
+            return null;
+        }
+
+        return new NameLookup(current.Notes.Concat(current.Sensitive).Select(n => n.Name)).ResolveLink(target.Trim());
+    }
+
     private DesktopSnapshot Loop()
     {
         while (true)

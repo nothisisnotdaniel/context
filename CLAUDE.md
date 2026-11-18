@@ -21,9 +21,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     `#[Work]` are one tag. `TagParser.Format` shows a tag as `#tag`, or `#[tag]` when it has a space; all tag
     output uses it. `TagIndex.NormalizeTag` (for a typed tag, as in `context tags <tag>`) accepts `work`, `#work`, `[a b]`, `#[a b]`. `TagIndex` keeps the index in SQLite at `<root>/context.db` (`Microsoft.Data.Sqlite`,
     `Pooling=False`, parameterized SQL only): `notes(name, modified)` (last-write UTC ticks, NULL for a
-    note that couldn't be read so it is retried), `note_tags(note, tag)`, `note_links(note, target)`, `note_people(note, person, spelling)`, `note_decisions(note, line, text)` (job 180, primary key `(note, line)`; one row per `DecisionParser` line, written and pruned with the note's other rows), `note_todos(note, line, due, text, raw)` (job 201, primary key `(note, line)`; one row per open `NoteTodoParser` line, `due` `yyyy-MM-dd` or NULL, written and pruned like `note_decisions`) and `note_attributes(note, key, value_key, value)` (job 157, primary key `(note, key, value_key)`, index on `(key, value_key)`) and `note_text` (job 170: FTS5 `fts5(note UNINDEXED, body, tokenize='trigram')` with FTS5 `secure-delete` on, set once in `Sync` after checking `note_text_config`; one row per plain note with its whole text, none for a note that can't be read or is over `NoteStore.MaxEditBytes`; sensitive notes are never listed, so never indexed; every connection sets `PRAGMA secure_delete = ON`, so a deleted note's text doesn't linger in free pages of `context.db`; the rollback journal `context.db-journal` briefly holds the old pages and is unlinked, not zeroed, after each commit, which is outside this guarantee). `Sync(NoteStore)` updates it
+    note that couldn't be read so it is retried), `note_tags(note, tag)`, `note_links(note, target, heading)` (job 205: `heading` is the text after the first `#` or NULL; primary key stays `(note, target)`; a database without the column gets it through `ALTER TABLE` on every open, before any query), `note_people(note, person, spelling)`, `note_decisions(note, line, text)` (job 180, primary key `(note, line)`; one row per `DecisionParser` line, written and pruned with the note's other rows), `note_todos(note, line, due, text, raw)` (job 201, primary key `(note, line)`; one row per open `NoteTodoParser` line, `due` `yyyy-MM-dd` or NULL, written and pruned like `note_decisions`) and `note_attributes(note, key, value_key, value)` (job 157, primary key `(note, key, value_key)`, index on `(key, value_key)`) and `note_text` (job 170: FTS5 `fts5(note UNINDEXED, body, tokenize='trigram')` with FTS5 `secure-delete` on, set once in `Sync` after checking `note_text_config`; one row per plain note with its whole text, none for a note that can't be read or is over `NoteStore.MaxEditBytes`; sensitive notes are never listed, so never indexed; every connection sets `PRAGMA secure_delete = ON`, so a deleted note's text doesn't linger in free pages of `context.db`; the rollback journal `context.db-journal` briefly holds the old pages and is unlinked, not zeroed, after each commit, which is outside this guarantee). `Sync(NoteStore)` updates it
     in one transaction and only re-parses files whose time changed. `PRAGMA user_version` holds the parser
-    version (`TagIndex.ParserVersion`, now 9: open `- [ ]` lines in `note_todos`; 8 was `Decision:` lines in `note_decisions`; 7 was note text in `note_text`; 6 was a link target that runs into a code span is no link); when it is lower, `Sync` clears every stored time and empties `note_text` in the same
+    version (`TagIndex.ParserVersion`, now 10: the heading of a `[[Note#Heading]]` link in `note_links.heading`; 9 was open `- [ ]` lines in `note_todos`; 8 was `Decision:` lines in `note_decisions`; 7 was note text in `note_text`; 6 was a link target that runs into a code span is no link); when it is lower, `Sync` clears every stored time and empties `note_text` in the same
     transaction (so all notes are re-parsed and their text written once) and then sets it. Bump it whenever parsing changes. Queries: `Tags()`, `NotesWithTag`,
     `NoteTags()`, `FindNote`, `Links`, `People()`, `NotesMentioning`, `NotesWithAttribute(key, value)` (by `AttributeParser.ValueKey`), `NotesWithoutAttribute(key)`, `Search(text)` (`(Note, Body)` rows for `note_text MATCH $q`, `$q` the text as one FTS5 phrase: `"` + text with `"` doubled + `"`, always a parameter, so FTS syntax is literal), `Decisions(tag?)` (`(Note, Line, Text, Modified)` rows of `note_decisions` joined to `notes` with a stored time, `Modified` UTC; a tag keeps the notes with that `note_tags` row), `NoteTodos()` (`NoteTodo` rows of `note_todos` joined to `notes` with a stored time). A database that can't be opened or isn't valid throws `TagIndexException` (an
     `IOException`) and is never deleted or overwritten. The file database waits up to `TagIndex.BusyTimeout` (5 s; an
@@ -37,11 +37,15 @@ Every factory agent reads this file before working on Context. Keep it short and
     `CodeSpans` (shared, not copied). A backtick run that opens a matched code span between `[[` and that first `]`
     means no link, and the scan goes on at that span (job 163: ``[[a `b]] c` `` is no link; ``[[a`b]]`` links to ``a`b``). It scans
     each line once (cached next `]`, `[` and code-span start). `[[...]]` is never
-    a tag and `#[...]` never a link; `|alias` and `#heading` are part of the target. Targets are stored as written and
-    resolved only at query time by `NameLookup.Resolve` (like `context note show`: as written, then without one `.md`; exact, then
+    a tag and `#[...]` never a link; `|alias` is part of the target. **Heading links** (job 205): `NoteLinkParser.Split(target)`
+    gives `NoteLinkTarget(Note, Heading?)`, split at the first `#`, both trimmed, `Heading` null when nothing follows the `#`
+    (`[[#Intro]]` has an empty note part: a heading of the note it is in). Targets are stored as written and
+    resolved only at query time by `NameLookup.ResolveLink` (the whole target through `NameLookup.Resolve` first, with no heading, so
+    `[[C# notes]]` finds a note named `C# notes`; then the note part with its heading; `Resolve` is like `context note show`: as written, then without one `.md`; exact, then
     ignoring case), never turned into a path, so a link to a missing note starts working once the note exists. `Links`
     merges tag links and note links into one `NoteLink` per other note (`Direction` `None`/`To`/`From`/`Both`,
-    `Missing` = a `To` target that names no note, shown as written); never the note itself. The desktop shows
+    `Missing` = a `To` target that names no note, one row per note part (`Gamma#A` and `gamma` are one), shown as the
+    first stored spelling of that part (rows read `ORDER BY note, target`); `[[#Intro]]` gives no row); never the note itself. The desktop shows
     the direction as `links to`, `linked from`, `both ways` or `links to (missing)` (nothing for a link by shared
     tags only) in `LinksPanel`; the command line has no links command (removed in job 173).
   - **People:** (job 156) `PersonParser.Parse` finds `@[Name]` (`@[` at line start or after whitespace, up to the first
@@ -734,7 +738,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     coalesce into one more run) and raises `Changed`; `Tick()` refreshes when the day changed or 5 min passed.
     `DataWatcher` (one `FileSystemWatcher` with subfolders, `IsRelevant` filter: the top-level files as before, plus
     a `.md` at any depth except under a folder starting with `.` or under the top-level `calendar/`; 300 ms
-    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `CurrentPanel`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `LinksPanel`, `PersonPanel`, `ReviewPanel`, `TriagePanel`)
+    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `CurrentPanel`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `LinksPanel`, `OutlinePanel`, `PersonPanel`, `ReviewPanel`, `TriagePanel`)
     inherit `StateComponent`, which injects the state and `DesktopActions` (internal types can't be
     public parameters). `DesktopActions` (with `ActionResult`: `ActionKind` `Done`/`Refused`/`Failed`, `ActionReason`,
     raw text) is the only write path: it never throws, runs one action at a time (`Busy`), refreshes the state after a change and has the test
@@ -1084,6 +1088,24 @@ Every factory agent reads this file before working on Context. Keep it short and
     A note that was read (or unlocked) but whose page editor didn't start (`isLossless` or `mount` threw) shows red
     `The editor couldn't start. <name> was not changed.` (`p.editor-failed`, never together with `.unreadable`) and
     can't be saved, while a failed `focus` after a mount shows nothing.
+    **Heading links and the outline** (job 205): `outline(markdown, name)` (no DOM) and `headings(element)` (the live
+    document) return JSON `[{level,text}]` of the body's headings in document order (the hidden title left out; text is
+    the text nodes plus each chip's raw text, marks dropped, a line break as a space, trimmed); `scrollToHeading(element,
+    index)` puts the cursor at the start of the index-th heading, scrolls it into view and returns true (out of range:
+    false, nothing changes). `EditorInterop.HeadingsAsync`/`ScrollToHeadingAsync`; .NET reads the list with
+    `OutlineHeading.Parse` (all or nothing: a malformed entry, a level outside 1-6 or more than `MaxHeadings` (1000)
+    gives none) and sends JS only an integer index. A clicked `[[Plan#Goals]]` resolves through
+    `DesktopState.ResolveLink`; another note goes to `NoteEditor.OnOpenHeading` -> `Main.RequestOpen(name, heading)`
+    (saves first like any link; the new editor gets `Heading` and jumps once after its mount), while `[[#Goals]]` or a
+    heading of the open note jumps in place (no remount, unsaved text kept). The jump picks the first heading whose
+    text matches (`OutlineHeading.IndexOf`: trimmed, whitespace runs as one space, case ignored); none: the note stays
+    at the top and grey `<name> has no heading <heading>.` (both through `DesktopText.OneLine`); a missing note is still
+    `No note named <target>.`. `OutlinePanel` (`nav.outline-panel`, `aria-label="Outline"`) sits in `NoteEditor` above
+    the editor host and shows one `button type="button"` (`outline-item level-<n>`, plain text) per heading from
+    `OutlinePanel.MinHeadings` (3) on; a click calls `scrollToHeading` with its index and never takes focus by itself.
+    The list is reloaded after the mount, after every `Done` save (auto or explicit), `ReloadAsync` and `ShowSavedAsync`;
+    an editor that didn't start, an unreadable note or failing `headings` shows none, and a locked sensitive note's
+    outline goes with its editor (its headings are only ever read from the unlocked editor, never indexed).
     **Update:** `Program.Main` starts with `VelopackApp.Build().Run()` (Velopack's install/update hooks), and before
     the window opens `StartupUpdate(IUpdateSource).Start()` runs the silent update on a pool thread: it returns at once
     and never throws. Not `IsInstalled`: nothing is called. Otherwise `CheckAsync`; when a newer version is found,

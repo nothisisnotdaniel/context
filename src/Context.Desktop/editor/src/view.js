@@ -1,7 +1,7 @@
 // The editor in the page: one ProseMirror view per host element. DOM is built only through ProseMirror's
 // renderer and document.createElement; tag, link, mention and attachment PDF clicks (and Enter on a focused chip) and
 // dropped files are reported to .NET, which decides what to open or store.
-import { EditorState, Selection } from "prosemirror-state";
+import { EditorState, Selection, TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { keymap } from "prosemirror-keymap";
 import { history, undo, redo } from "prosemirror-history";
@@ -9,7 +9,7 @@ import { baseKeymap, toggleMark, setBlockType, chainCommands } from "prosemirror
 import { splitListItem, liftListItem, sinkListItem } from "prosemirror-schema-list";
 import { inputRules, wrappingInputRule, textblockTypeInputRule, InputRule } from "prosemirror-inputrules";
 import { schema } from "./schema.js";
-import { parse, serialize, splitTitle, joinTitle } from "./markdown.js";
+import { parse, serialize, splitTitle, joinTitle, headingList } from "./markdown.js";
 
 const editors = new WeakMap();
 
@@ -430,4 +430,48 @@ export function focus(element) {
   if (editor) {
     editor.view.focus();
   }
+}
+
+/** The headings of the live document, as JSON [{ level, text }] (see headingList); "[]" without an editor. */
+export function headings(element) {
+  const editor = editors.get(element);
+  return JSON.stringify(editor ? headingList(editor.view.state.doc) : []);
+}
+
+/**
+ * Puts the cursor at the start of the index-th heading (0-based, document order) and scrolls it into view. Returns
+ * false, changing nothing, for an index that is not a whole number in range or without an editor.
+ */
+export function scrollToHeading(element, index) {
+  const editor = editors.get(element);
+  if (!editor || !Number.isInteger(index) || index < 0) {
+    return false;
+  }
+  const doc = editor.view.state.doc;
+  let found = -1;
+  let seen = 0;
+  doc.descendants((node, pos) => {
+    if (found >= 0) {
+      return false;
+    }
+    if (node.type.name === "heading") {
+      if (seen === index) {
+        found = pos;
+      }
+      seen++;
+      return false;
+    }
+    return true;
+  });
+  if (found < 0) {
+    return false;
+  }
+  const view = editor.view;
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, found + 1)).scrollIntoView());
+  view.focus();
+  const dom = view.nodeDOM(found);
+  if (dom && typeof dom.scrollIntoView === "function") {
+    dom.scrollIntoView({ block: "start" });
+  }
+  return true;
 }

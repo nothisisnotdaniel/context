@@ -5,7 +5,8 @@ namespace Context.Tests;
 
 /// <summary>
 /// Plans bunit's strict JS interop for the bundled editor (<c>ContextEditor.*</c>): mount, focus, markClean,
-/// insertAttachment and destroy do nothing; isLossless, isDirty and getMarkdown return what the test sets. markClean
+/// insertAttachment and destroy do nothing; headings returns <c>[]</c> (or what <see cref="SetHeadings"/> sets) and
+/// scrollToHeading true; isLossless, isDirty and getMarkdown return what the test sets. markClean
 /// makes the editor clean; markCleanIf does so only when its Markdown is the editor's current one, and returns that.
 /// </summary>
 internal sealed class EditorJs
@@ -29,7 +30,15 @@ internal sealed class EditorJs
         js.Setup<bool>("ContextEditor.isDirty", _ => Dirty).SetResult(true);
         js.Setup<bool>("ContextEditor.isDirty", _ => !Dirty).SetResult(false);
         js.Setup<string>("ContextEditor.getMarkdown", _ => true).SetResult(markdown);
+        js.Setup<string>("ContextEditor.headings", _ => true).SetResult("[]");
+        js.Setup<bool>("ContextEditor.scrollToHeading", _ => true).SetResult(true);
     }
+
+    /// <summary>Makes every later <c>ContextEditor.headings</c> call return <paramref name="json"/>.</summary>
+    public void SetHeadings(string json) => js.Setup<string>("ContextEditor.headings", _ => true).SetResult(json);
+
+    /// <summary>The heading indexes passed to <c>ContextEditor.scrollToHeading</c> so far, in order.</summary>
+    public IReadOnlyList<int> Jumps() => Calls("ContextEditor.scrollToHeading").Select(c => (int)c.Arguments[1]!).ToList();
 
     public bool Lossless { get; }
 
@@ -72,9 +81,13 @@ internal sealed class EditorJs
     /// <c>isLossless</c>) fail with <paramref name="exception"/>.</summary>
     public void Fail(string identifier, Exception exception)
     {
-        if (identifier == "ContextEditor.isLossless")
+        if (identifier == "ContextEditor.isLossless" || identifier == "ContextEditor.scrollToHeading")
         {
             js.Setup<bool>(identifier, _ => true).SetException(exception);
+        }
+        else if (identifier == "ContextEditor.headings")
+        {
+            js.Setup<string>(identifier, _ => true).SetException(exception);
         }
         else
         {

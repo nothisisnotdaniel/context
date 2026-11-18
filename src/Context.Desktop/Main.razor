@@ -96,7 +96,7 @@
                             </div>
                         }
                         <NoteEditor @key="(name, openSensitive)" @ref="editor" Name="@name" Sensitive="openSensitive"
-                                    OnTag="ShowTag" OnOpenNote="RequestOpen" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked"
+                                    OnTag="ShowTag" OnOpenNote="RequestOpen" OnOpenHeading="OpenHeading" Heading="@openHeading" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked"
                                     OnAttach="AttachDropped" OnOpenAttachment="OpenAttachment" />
                         @if (historyShown)
                         {
@@ -167,6 +167,9 @@ else
     private bool discarding;
     private bool pendingClose;
     private string? pendingName;
+    private string? pendingHeading;
+    // The heading a [[Note#Heading]] link opened the note at; the new editor jumps there once, after its mount.
+    private string? openHeading;
     private string? pendingPerson;
     private bool pendingToday;
     private DateOnly? shownDay;
@@ -341,24 +344,37 @@ else
     }
 
     // Opens the note called name (null: the current view), asking first when the open note has unsaved changes.
-    private async Task RequestOpen(string? name)
+    private Task RequestOpen(string? name) => RequestOpen(name, null);
+
+    // A [[Note#Heading]] link clicked in the editor: opens that note at the heading.
+    private Task OpenHeading((string Name, string Heading) link) => RequestOpen(link.Name, link.Heading);
+
+    // Opens the note called name (null: the current view) at heading (null: at the top), asking first when the open
+    // note has unsaved changes. The open note itself only jumps to the heading, keeping what is typed.
+    private async Task RequestOpen(string? name, string? heading)
     {
         if (name is not null && string.Equals(name, openName, StringComparison.Ordinal))
         {
             page = Page.None;
             reviewShown = false;
+            if (heading is not null && editor is not null)
+            {
+                await editor.JumpToHeadingAsync(heading);
+            }
+
             return;
         }
 
         if (await KeptUnsaved())
         {
             pendingName = name;
+            pendingHeading = heading;
             pendingPerson = null;
             discarding = true;
             return;
         }
 
-        ShowNote(name);
+        ShowNote(name, heading);
     }
 
     // Saves the open note first when it has unsaved changes (job 203). True when unsaved changes are left because that
@@ -494,7 +510,7 @@ else
 
         if (pendingPerson is not { } person)
         {
-            ShowNote(pendingName);
+            ShowNote(pendingName, pendingHeading);
             return;
         }
 
@@ -524,6 +540,7 @@ else
         pendingClose = false;
         pendingDay = null;
         pendingName = null;
+        pendingHeading = null;
         pendingPerson = null;
         pendingToday = false;
         pendingBriefing = false;
@@ -569,11 +586,13 @@ else
         }
     }
 
-    private void ShowNote(string? name)
+    private void ShowNote(string? name, string? heading = null)
     {
         shownDay = name is null ? pendingDay : null;
         pendingDay = null;
         openName = name;
+        openHeading = name is null ? null : heading;
+        pendingHeading = null;
         openSensitive = name is not null
             && Snapshot is { } snapshot
             && snapshot.Sensitive.Any(n => string.Equals(n.Name, name, StringComparison.Ordinal));
@@ -1629,6 +1648,7 @@ else
             return;
         }
 
+        // ShowNote(null) also drops openHeading and pendingHeading: no heading text of the locked note stays here.
         ShowNote(null);
         ShowStatus($"Locked {DesktopText.OneLine(name)}.", "grey");
     }

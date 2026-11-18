@@ -546,6 +546,51 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
     private string RoundTrip(string markdown, string name) =>
         JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.roundTrip({Js(markdown)}, {Js(name)})"))!;
 
+    private string Outline(string markdown, string name) =>
+        JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.outline({Js(markdown)}, {Js(name)})"))!;
+
+    private static List<string> Headings(string json)
+    {
+        using JsonDocument doc = JsonDocument.Parse(json);
+        return doc.RootElement.EnumerateArray()
+            .Select(h => $"{h.GetProperty("level").GetInt32()}|{h.GetProperty("text").GetString()}")
+            .ToList();
+    }
+
+    // 205 AC-11: the body's headings without the hidden title, chips as raw text, marks dropped, code left out.
+    [Fact]
+    public void Outline_BodyHeadings_NoTitle_ChipsRaw()
+    {
+        string markdown = "# Plan\n\n## A\ntext\n### **B** #x\n```\n# not\n```\n";
+
+        Assert.Equal(["2|A", "3|B #x"], Headings(Outline(markdown, "Plan")));
+    }
+
+    // 205 AC-11: without a matching name the first line is a heading of the body.
+    [Fact]
+    public void Outline_OtherName_KeepsFirstHeading()
+    {
+        Assert.Equal(["1|Plan", "2|A"], Headings(Outline("# Plan\n\n## A\n", "Other")));
+        Assert.Equal([], Headings(Outline("", "Plan")));
+    }
+
+    // 205 AC-11: a heading link survives the round trip.
+    [Theory]
+    [InlineData("[[Plan#Goals]]\n")]
+    [InlineData("See [[Plan#Next steps]] and [[#Intro]].\n")]
+    public void RoundTrip_HeadingLink_Unchanged(string markdown)
+    {
+        Assert.Equal(markdown, bundle.Call("roundTrip", markdown));
+    }
+
+    // 205: the page functions exist in the bundle.
+    [Fact]
+    public void Bundle_HasHeadingFunctions()
+    {
+        Assert.Equal("[\"function\",\"function\",\"function\"]", bundle.Json(
+            "[typeof ContextEditor.outline, typeof ContextEditor.headings, typeof ContextEditor.scrollToHeading]"));
+    }
+
     private string TypedBlock(string text) =>
         JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.typedBlock({Js(text)})"))!;
 

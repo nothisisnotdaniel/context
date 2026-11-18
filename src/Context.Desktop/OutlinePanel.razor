@@ -1,0 +1,29 @@
+@* The open note's outline: one button per heading of the unlocked editor, in document order, indented by level. It
+   shows only from MinHeadings headings on. Clicking a button asks the editor to jump there (by index only); the panel
+   never takes focus by itself. Heading text is shown as plain text, never as markup. *@
+
+@if (Headings.Count >= MinHeadings)
+{
+    <nav class="outline-panel" aria-label="Outline">
+        @for (int i = 0; i < Headings.Count; i++)
+        {
+            int index = i;
+            OutlineHeading heading = Headings[i];
+            string shown = DesktopText.OneLine(heading.Text);
+            <button type="button" class="outline-item level-@heading.Level cut" title="@shown" @onclick="() => OnJump.InvokeAsync(index)">@shown</button>
+        }
+    </nav>
+}
+
+@code {
+    /// <summary>The fewest headings that show an outline; a shorter note needs none.</summary>
+    public const int MinHeadings = 3;
+
+    /// <summary>The open note's headings, in document order (empty: no outline).</summary>
+    [Parameter]
+    public IReadOnlyList<OutlineHeading> Headings { get; set; } = [];
+
+    /// <summary>Raised with the index of the heading clicked.</summary>
+    [Parameter]
+    public EventCallback<int> OnJump { get; set; }
+}

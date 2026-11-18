@@ -559,3 +559,40 @@ export function inlineNodes(markdown) {
 export function docJson(markdown) {
   return JSON.stringify(parse(markdown).toJSON());
 }
+
+// The atoms that show their raw text in a heading: tags, note links and mentions.
+const chipKinds = new Set(["tag", "noteLink", "mention"]);
+
+/**
+ * The headings of doc in document order, as [{ level, text }]: text is the heading's text nodes and each chip's raw
+ * text (marks dropped, a line break as a space), trimmed. Empty headings are kept, so an index always names the same
+ * heading the editor shows.
+ */
+export function headingList(doc) {
+  const list = [];
+  doc.descendants(node => {
+    if (node.type.name !== "heading") {
+      return true;
+    }
+    let text = "";
+    node.descendants(child => {
+      if (child.isText) {
+        text += child.text;
+      } else if (chipKinds.has(child.type.name)) {
+        text += child.attrs.raw;
+      } else if (child.type.name === "hard_break") {
+        text += " ";
+      }
+      return true;
+    });
+    list.push({ level: node.attrs.level, text: text.trim() });
+    return false;
+  });
+  return list;
+}
+
+/** The headings of the note body (the hidden title line left out), as JSON [{ level, text }]; needs no page. */
+export function outline(markdown, name) {
+  const { body } = titleSplit(markdown, name);
+  return JSON.stringify(headingList(parse(typeof body === "string" ? body : "")));
+}

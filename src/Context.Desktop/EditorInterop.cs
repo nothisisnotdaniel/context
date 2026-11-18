@@ -158,6 +158,14 @@ internal sealed class EditorInterop
     /// <summary>Puts the cursor in the editor.</summary>
     public ValueTask FocusAsync(ElementReference element) => js.InvokeVoidAsync("ContextEditor.focus", element);
 
+    /// <summary>The live document's headings, as JSON <c>[{level,text}]</c> (read with <see cref="OutlineHeading.Parse"/>).</summary>
+    public ValueTask<string> HeadingsAsync(ElementReference element) =>
+        js.InvokeAsync<string>("ContextEditor.headings", element);
+
+    /// <summary>Puts the cursor at the index-th heading (0-based) and scrolls to it; <c>false</c> if out of range.</summary>
+    public ValueTask<bool> ScrollToHeadingAsync(ElementReference element, int index) =>
+        js.InvokeAsync<bool>("ContextEditor.scrollToHeading", element, index);
+
     /// <summary>Called by the editor when a tag is clicked.</summary>
     [JSInvokable]
     public Task OnTag(string raw) => TagClicked?.Invoke(raw) ?? Task.CompletedTask;
