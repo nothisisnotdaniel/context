@@ -906,14 +906,15 @@ Every factory agent reads this file before working on Context. Keep it short and
     touch `settings.json`. **Saved searches** (job 207) live in the same file: `"savedSearches":[{"name":"…","query":"…"}]`
     in saved order (`SettingsStore.ReadSavedSearches`/`SaveSavedSearches`, `SavedSearch(Name, Query)`; rules in
     `SavedSearches`: name trimmed with whitespace runs collapsed, 1 to `MaxNameLength` (50) chars, no control
-    characters, unique ignoring case; query a valid tag filter of at most 200 chars or a full-text text of 3 to 200;
+    or format characters (bidi marks, zero-width), unique ignoring case; query a valid tag filter of at most 200 chars or a full-text text of 3 to 200;
     at most `MaxCount` (50)). A non-array, an item that isn't an object with exactly string `name` and `query`, or a
     broken rule throws `SettingsStoreException`; a saved-search write re-checks `dayEnd` and `savedSearches` and never
-    overwrites a broken file. `ReadDayEnd`/`SaveDayEnd` ignore and keep `savedSearches`. `DesktopActions.SaveSearch(name,
+    overwrites a broken file. Every write uses relaxed JSON escaping (non-ASCII as is) and throws
+    `SettingsTooLargeException` (an `IOException`), writing nothing, when the file would be over 64 KiB. `ReadDayEnd`/`SaveDayEnd` ignore and keep `savedSearches`. `DesktopActions.SaveSearch(name,
     query)` (texts `Type a name for the search.`, `A search name can be at most 50 characters, without control
     characters.`, `Can't save that search.`, `A saved search named <name> already exists.`, `Can't save more than 50
-    searches.`, Failed `Can't read settings.json. Nothing was saved.`, Done `Saved search <name>.`) and
-    `RemoveSavedSearch(name)` (ignoring case; Refused/`Missing` `That saved search is gone. Nothing was done.`, Done
+    searches.`, `settings.json would be over 64 KiB. Nothing was saved.`, Failed `Can't read settings.json. Nothing was saved.`, Done `Saved search <name>.`) and
+    `RemoveSavedSearch(name)` (ignoring case; a name that can't be normalized is gone; Refused/`Missing` `That saved search is gone. Nothing was done.`, Done
     `Removed saved search <name>.`) are the only writers. End the day is the only item of the More actions menu on today's view (job 200; `Main.RunPageAction("end-day")`
     calls `DesktopActions.EndDay(Snapshot.Today)` and shows the result in `p.main-status`: grey on Done/Unchanged
     (`Day closed. Moved <n> todo(s) to <D+1>.`), else red; `CurrentPanel` has no button and no status line of its own); `Program.cs` calls `DesktopActions.AutoDayEnd()`

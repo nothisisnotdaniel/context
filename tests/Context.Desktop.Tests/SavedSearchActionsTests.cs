@@ -119,6 +119,22 @@ public sealed class SavedSearchActionsTests : IDisposable
         Assert.Equal(before, File.ReadAllBytes(SettingsPath));
     }
 
+    // 207 security: a save that would make settings.json over 64 KiB is refused and writes nothing.
+    [Fact]
+    public async Task Save_OverTheLimit_Refused_Unchanged()
+    {
+        WriteSettings("{\"padding\":\"" + new string('x', 65_500) + "\"}");
+        await data.RefreshAsync();
+        byte[] before = File.ReadAllBytes(SettingsPath);
+
+        ActionResult result = await data.Actions!.SaveSearch("Mine", "#work");
+
+        Assert.Equal(
+            (ActionKind.Refused, ActionReason.Invalid, "settings.json would be over 64 KiB. Nothing was saved."),
+            (result.Kind, result.Reason, result.Text));
+        Assert.Equal(before, File.ReadAllBytes(SettingsPath));
+    }
+
     // AC-9: remove takes the entry out (ignoring case), keeps the others in order and refreshes.
     [Fact]
     public async Task Remove_Done_KeepsOthers_Refreshes()
@@ -143,6 +159,21 @@ public sealed class SavedSearchActionsTests : IDisposable
     [InlineData(null)]
     public async Task Remove_Gone_Refused(string? json)
     {
+        await AssertRemoveGone(json, "Work");
+    }
+
+    // 207 security: a name that can't be normalized can't be stored, so it is gone without matching it raw.
+    [Theory]
+    [InlineData("Work\u200B")]
+    [InlineData("Wo\u0001rk")]
+    [InlineData("")]
+    public async Task Remove_NameThatCantBeStored_RefusedGone(string name)
+    {
+        await AssertRemoveGone("{\"savedSearches\":[{\"name\":\"Work\",\"query\":\"#work\"}]}", name);
+    }
+
+    private async Task AssertRemoveGone(string? json, string name)
+    {
         if (json is not null)
         {
             WriteSettings(json);
@@ -151,7 +182,7 @@ public sealed class SavedSearchActionsTests : IDisposable
         await data.RefreshAsync();
         byte[]? before = json is null ? null : File.ReadAllBytes(SettingsPath);
 
-        ActionResult result = await data.Actions!.RemoveSavedSearch("Work");
+        ActionResult result = await data.Actions!.RemoveSavedSearch(name);
 
         Assert.Equal(
             (ActionKind.Refused, ActionReason.Missing, "That saved search is gone. Nothing was done."),

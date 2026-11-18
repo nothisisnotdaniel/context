@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Context.Tests;
 
 // 171: settings.json for the automatic day's end.
@@ -238,6 +240,43 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(50, store.ReadSavedSearches().Count);
     }
 
+    // 207 security: the longest names and queries in non-ASCII and HTML-special characters are written unescaped, stay
+    // under MaxBytes and read back.
+    [Fact]
+    public void SaveSavedSearches_LongestNonAscii_RoundTrips_UnderTheLimit()
+    {
+        SettingsStore store = new SettingsStore(root);
+        string query = string.Concat(Enumerable.Repeat("äö<>&'+\"", 25));
+        SavedSearch[] fifty = Enumerable.Range(0, SavedSearches.MaxCount)
+            .Select(i => new SavedSearch(new string('ü', 48) + i.ToString("00", CultureInfo.InvariantCulture), query))
+            .ToArray();
+
+        store.SaveSavedSearches(fifty);
+
+        Assert.True(new FileInfo(FilePath).Length <= SettingsStore.MaxBytes);
+        Assert.Contains("üüü", File.ReadAllText(FilePath), StringComparison.Ordinal);
+        Assert.Equal(
+            fifty.Select(s => (s.Name, s.Query)).ToArray(),
+            store.ReadSavedSearches().Select(s => (s.Name, s.Query)).ToArray());
+    }
+
+    // 207 security: a save that would make the file over MaxBytes throws and writes nothing, leaving no temp file.
+    [Fact]
+    public void SaveSavedSearches_OverTheLimit_Throws_Unchanged()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, "{\"padding\":\"" + new string('x', 65_500) + "\"}");
+        byte[] before = File.ReadAllBytes(FilePath);
+        SettingsStore store = new SettingsStore(root);
+
+        Assert.Throws<SettingsTooLargeException>(
+            () => store.SaveSavedSearches([new SavedSearch("Mine", "#work and not #done")]));
+        Assert.Throws<SettingsTooLargeException>(() => store.SaveDayEnd(new DayEndSettings("2026-10-28T17:00", null)));
+
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+        Assert.Equal([SettingsStore.FileName], Directory.GetFiles(root).Select(f => Path.GetFileName(f)!).ToArray());
+    }
+
     // 207 AC-6: name normalizing and the query rules.
     [Theory]
     [InlineData("  My \t  search  ", "My search")]
@@ -246,6 +285,9 @@ public sealed class SettingsStoreTests : IDisposable
     [InlineData("   ", null)]
     [InlineData("a\u0001", null)]
     [InlineData("a\u007f", null)]
+    [InlineData("a\u202Eb", null)]
+    [InlineData("a\u2066b", null)]
+    [InlineData("a\u200Bb", null)]
     public void NormalizeName(string name, string? expected)
     {
         Assert.Equal(expected, SavedSearches.NormalizeName(name));

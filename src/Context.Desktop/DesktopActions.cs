@@ -222,6 +222,7 @@ internal sealed class DesktopActions
     public const string SearchQueryInvalidText = "Can't save that search.";
     public const string SearchesFullText = "Can't save more than 50 searches.";
     public const string SearchesUnreadableText = "Can't read settings.json. Nothing was saved.";
+    public const string SearchesTooLargeText = "settings.json would be over 64 KiB. Nothing was saved.";
     public const string SearchesWriteFailedText = "Can't write settings.json. Nothing was saved.";
     public const string SearchGoneText = "That saved search is gone. Nothing was done.";
     public const string SearchesNotRemovedText = "Can't read settings.json. Nothing was removed.";
@@ -925,10 +926,10 @@ internal sealed class DesktopActions
     /// Adds the search <paramref name="query"/> (trimmed) as the last entry of <c>settings.json</c>'s
     /// <c>savedSearches</c> under <paramref name="name"/>, trimmed with whitespace runs collapsed
     /// (<see cref="SavedSearches.NormalizeName"/>). Refused, writing nothing: a blank name
-    /// (<see cref="SearchNameBlankText"/>), a name over 50 characters or with a control character
+    /// (<see cref="SearchNameBlankText"/>), a name over 50 characters or with a control or format character
     /// (<see cref="SearchNameInvalidText"/>), a query that can't be searched (<see cref="SearchQueryInvalidText"/>), a
-    /// name already stored ignoring case (<see cref="SearchExistsText"/>), a 51st entry (<see cref="SearchesFullText"/>).
-    /// A broken <c>settings.json</c> is Failed with <see cref="SearchesUnreadableText"/> and left as it is.
+    /// name already stored ignoring case (<see cref="SearchExistsText"/>), a 51st entry (<see cref="SearchesFullText"/>),
+    /// a <c>settings.json</c> that would be over 64 KiB (<see cref="SearchesTooLargeText"/>). A broken <c>settings.json</c> is Failed with <see cref="SearchesUnreadableText"/> and left as it is.
     /// </summary>
     public Task<ActionResult> SaveSearch(string name, string query) => Run(() => SaveSearchNow(name, query));
 
@@ -1031,6 +1032,10 @@ internal sealed class DesktopActions
         {
             settings.SaveSavedSearches([.. stored, new SavedSearch(normalized, trimmed)]);
         }
+        catch (SettingsTooLargeException)
+        {
+            return Refused(ActionReason.Invalid, SearchesTooLargeText);
+        }
         catch (SettingsStoreException)
         {
             return Failed(ActionReason.Unreadable, SearchesUnreadableText);
@@ -1055,8 +1060,9 @@ internal sealed class DesktopActions
             return Failed(ActionReason.Unreadable, SearchesNotRemovedText);
         }
 
-        string key = SavedSearches.NormalizeName(name) ?? name;
-        if (stored.FirstOrDefault(s => string.Equals(s.Name, key, StringComparison.OrdinalIgnoreCase)) is not { } found)
+        // A name that can't be normalized can't be stored, so it is gone rather than matched raw.
+        if (SavedSearches.NormalizeName(name) is not { } key
+            || stored.FirstOrDefault(s => string.Equals(s.Name, key, StringComparison.OrdinalIgnoreCase)) is not { } found)
         {
             return Refused(ActionReason.Missing, SearchGoneText);
         }

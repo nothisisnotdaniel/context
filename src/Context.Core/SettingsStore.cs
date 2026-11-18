@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -10,6 +11,18 @@ internal sealed class SettingsStoreException : IOException
 {
     public SettingsStoreException(string message, Exception? inner = null)
         : base(message, inner)
+    {
+    }
+}
+
+/// <summary>
+/// The new <c>settings.json</c> would be over <see cref="SettingsStore.MaxBytes"/>, so it would read as broken; nothing
+/// was written.
+/// </summary>
+internal sealed class SettingsTooLargeException : IOException
+{
+    public SettingsTooLargeException(string message)
+        : base(message)
     {
     }
 }
@@ -79,12 +92,12 @@ internal static class SavedSearches
 
     /// <summary>
     /// The name trimmed with whitespace runs collapsed to one space; <c>null</c> when that is empty, longer than
-    /// <see cref="MaxNameLength"/> or holds a control character.
+    /// <see cref="MaxNameLength"/> or holds a control or format character (bidi marks, zero-width characters).
     /// </summary>
     public static string? NormalizeName(string name)
     {
         string normalized = TagParser.CollapseWhitespace(name);
-        if (normalized.Length == 0 || normalized.Length > MaxNameLength || normalized.Any(char.IsControl))
+        if (normalized.Length == 0 || normalized.Length > MaxNameLength || normalized.Any(c => char.IsControl(c) || char.GetUnicodeCategory(c) == UnicodeCategory.Format))
         {
             return null;
         }
@@ -216,7 +229,8 @@ internal sealed class SettingsStore
     /// the root folder if needed. Throws <see cref="ArgumentException"/> for a list that breaks the rules. Reads the
     /// file again first and throws <see cref="SettingsStoreException"/> (writing nothing) when it is broken, its
     /// <c>dayEnd</c> and <c>savedSearches</c> included; throws <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/>
-    /// when it can't be written.
+    /// when it can't be written, <see cref="SettingsTooLargeException"/> (writing nothing) when the file would be over
+    /// <see cref="MaxBytes"/>.
     /// </summary>
     public void SaveSavedSearches(IReadOnlyList<SavedSearch> searches)
     {
@@ -238,16 +252,34 @@ internal sealed class SettingsStore
         Write(document);
     }
 
+    // Non-ASCII text is written as is rather than as six-byte \uXXXX escapes, so the rules' longest names and queries
+    // stay well under MaxBytes. Only the file is written this way; it is never put into HTML.
+    private static readonly JsonSerializerOptions WriteOptions = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    /// <summary>
+    /// Writes <paramref name="document"/> through a temp file and a move. Throws <see cref="SettingsTooLargeException"/>,
+    /// writing nothing, when it would be over <see cref="MaxBytes"/>.
+    /// </summary>
     private void Write(JsonObject document)
     {
-        string json = document.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n";
+        string json = document.ToJsonString(WriteOptions) + "\n";
+        byte[] bytes = Utf8NoBom.GetBytes(json);
+        if (bytes.Length > MaxBytes)
+        {
+            throw new SettingsTooLargeException($"{FileName} would be over {MaxBytes} bytes.");
+        }
+
         Directory.CreateDirectory(root);
         string temp = Path.Combine(root, $".{FileName}.{Guid.NewGuid():N}.tmp");
         try
         {
             using (FileStream stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
-                stream.Write(Utf8NoBom.GetBytes(json));
+                stream.Write(bytes);
             }
 
             File.Move(temp, FilePath, overwrite: true);
