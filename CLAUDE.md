@@ -1193,6 +1193,18 @@ Every factory agent reads this file before working on Context. Keep it short and
     first line `# <name>` (ignoring case and surrounding spaces, or the name's last segment) and the blank lines after
     it as a hidden head that is never parsed and that `getMarkdown`/`roundTrip` put back byte for byte, and inside the
     editor a level-1 heading keeps `level` 1 (saved as `# `) but is drawn as `h2.heading-level-1` (`headingDom`; job 215: `editor.css` sizes it 2em, `h2` 1.6em, `h3` 1.3em, h4–h6 keep the browser defaults), while typing `# ` makes level 2 (`typedBlock` tests the input rules without a view).
+    **Attribute box** (job 236): `attributeSplit(body)` (internal; test hook `attributeSplitJson`) cuts the body after the
+    head into `attrs` (the run of attribute-shaped lines from the first body line on: a column-0 key per `KeyEnd`, at most
+    50 chars, directly followed by `::`, any value; plus the blank lines right after) and the rest; `mount` keeps `attrs`/
+    `cleanAttrs` raw and parses only the rest, `getMarkdown`/`markCleanIf`/`roundTrip` use `joinTitle(head, attrs +
+    serialize(doc))`, `isDirty` is also true when `attrs !== cleanAttrs`. `attributeRows(markdown, name)` and
+    `attributes(element)` give `[{key,value}]` (key as written, value trimmed); `editAttributes(attrs, editsJson)` (pure;
+    `[{line,key,value}]`, `line` -1 for a new row; unchanged rows keep their bytes, changed/new ones `key:: value` with the
+    block's line ending, control characters as spaces, malformed edits give `null`) and `setAttributes(element, json)`.
+    .NET reads rows with `NoteAttribute.Parse` (all or nothing, at most 1000) and `NoteEditor` shows `details.note-attributes`
+    (never `open`) right after `div.editor-bar`, re-read after every mount, `ReloadAsync` and `ShowSavedAsync`; edits
+    (value `@onchange`, Remove, Add with `AttributeParser.NormalizeKey`, values `CollapseWhitespace`d) re-read the rows,
+    set the dot from `isDirty` and restart the pause.
     A note that was read (or unlocked) but whose page editor didn't start (`mount` threw) shows red
     `The editor couldn't start. <name> was not changed.` (`p.editor-failed`, never together with `.unreadable`) and
     can't be saved, while a failed `focus` after a mount shows nothing.

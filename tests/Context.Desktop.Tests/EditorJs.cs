@@ -9,6 +9,8 @@ namespace Context.Tests;
 /// scrollToHeading true; isDirty and getMarkdown return what the test sets; isLossless (no longer called by
 /// the desktop since job 210) returns true, so a test can check it is never asked. markClean
 /// makes the editor clean; markCleanIf does so only when its Markdown is the editor's current one, and returns that.
+/// attributes returns <c>[]</c> (or what <see cref="SetAttributeRows"/> sets); setAttributes makes the editor dirty and
+/// returns true.
 /// </summary>
 internal sealed class EditorJs
 {
@@ -32,6 +34,22 @@ internal sealed class EditorJs
         js.Setup<string>("ContextEditor.getMarkdown", _ => true).SetResult(markdown);
         js.Setup<string>("ContextEditor.headings", _ => true).SetResult("[]");
         js.Setup<bool>("ContextEditor.scrollToHeading", _ => true).SetResult(true);
+        js.Setup<string>("ContextEditor.attributes", _ => true).SetResult("[]");
+        js.Setup<bool>("ContextEditor.setAttributes", _ => SetAttributes()).SetResult(true);
+    }
+
+    /// <summary>Makes every later <c>ContextEditor.attributes</c> call return <paramref name="json"/>.</summary>
+    public void SetAttributeRows(string json) => js.Setup<string>("ContextEditor.attributes", _ => true).SetResult(json);
+
+    /// <summary>The edits JSON passed to <c>ContextEditor.setAttributes</c> so far, in order.</summary>
+    public IReadOnlyList<string> AttributeEdits() =>
+        Calls("ContextEditor.setAttributes").Select(c => (string)c.Arguments[1]!).ToList();
+
+    // An applied attribute edit makes the editor dirty, like the page's setAttributes.
+    private bool SetAttributes()
+    {
+        Dirty = true;
+        return true;
     }
 
     /// <summary>Makes every later <c>ContextEditor.headings</c> call return <paramref name="json"/>.</summary>

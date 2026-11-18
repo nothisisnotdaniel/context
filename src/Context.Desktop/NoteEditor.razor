@@ -1,4 +1,5 @@
 @inherits StateComponent
+@using System.Text.Json
 @implements IAsyncDisposable
 @* The note editor: the bundled ProseMirror editor (EditorInterop) in a host element and a status line; no Save
    button. Every save goes through one serialized path to DesktopActions.SaveNote: on its own after the pause that
@@ -17,6 +18,38 @@
             <span class="dirty-dot" role="img" aria-label="Unsaved changes" title="Unsaved changes"></span>
         }
     </div>
+    @if (attributeRows.Count > 0)
+    {
+        @* Collapsed on every open: Blazor never renders "open", so the user's toggle survives re-renders. *@
+        <details class="note-attributes">
+            <summary>Attributes (@attributeRows.Count)</summary>
+            <ul class="attribute-rows">
+                @for (int i = 0; i < attributeRows.Count; i++)
+                {
+                    int index = i;
+                    string key = DesktopText.OneLine(attributeRows[i].Key);
+                    <li class="attribute-row">
+                        <span class="attribute-key cut" title="@key">@key</span>
+                        <input type="text" class="attribute-value" maxlength="400" value="@DesktopText.OneLine(attributeRows[i].Value)"
+                               aria-label="@($"{key} value")" @onchange="e => ChangeAttribute(index, e)" />
+                        <button type="button" class="attribute-remove" aria-label="@($"Remove {key}")" title="@($"Remove {key}")"
+                                @onclick="() => RemoveAttribute(index)">×</button>
+                    </li>
+                }
+            </ul>
+            <div class="attribute-add">
+                <input type="text" class="attribute-new-key" maxlength="50" value="@newAttributeKey" aria-label="New attribute name"
+                       placeholder="Name" @oninput="e => newAttributeKey = e.Value?.ToString() ?? string.Empty" />
+                <input type="text" class="attribute-new-value" maxlength="400" value="@newAttributeValue" aria-label="New attribute value"
+                       placeholder="Value" @oninput="e => newAttributeValue = e.Value?.ToString() ?? string.Empty" />
+                <button type="button" class="attribute-add-button" @onclick="AddAttribute">Add</button>
+            </div>
+            @if (attributeKeyRefused)
+            {
+                <p class="red attribute-error" role="alert">Type an attribute name that starts with a letter.</p>
+            }
+        </details>
+    }
     @if (unreadable)
     {
         <p class="red unreadable" role="alert">@(Sensitive ? "Can't unlock" : "Can't read") @DisplayName.</p>
@@ -60,6 +93,13 @@
     // as this list, reported through OnOutline); empty until mounted, and reported empty when this editor goes away or
     // locks.
     private IReadOnlyList<OutlineHeading> outline = [];
+
+    // The rows of the open note's attribute block, read from the mounted editor only after every mount (a sensitive
+    // note's stay in the unlocked editor and here, and go away on lock); empty until mounted.
+    private IReadOnlyList<NoteAttribute> attributeRows = [];
+    private string newAttributeKey = string.Empty;
+    private string newAttributeValue = string.Empty;
+    private bool attributeKeyRefused;
 
     /// <summary>The bridge to the page's editor; one per editor.</summary>
     [Inject]
@@ -325,6 +365,7 @@
             await Interop.MountAsync(host, note.Text, await State.InlineImages(Name, note.Text), Name);
             opened = note;
             dirty = false;
+            await LoadAttributesAsync();
             await LoadOutlineAsync();
         }
         catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
@@ -353,6 +394,7 @@
             opened = saved;
             dirty = false;
             ShowStatus(string.Empty, string.Empty);
+            await LoadAttributesAsync();
             await LoadOutlineAsync();
         }
         catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
@@ -441,6 +483,7 @@
                 // The editor is mounted and works; it only didn't take the focus.
             }
 
+            await LoadAttributesAsync();
             await LoadOutlineAsync();
             if (Heading is { } heading)
             {
@@ -473,6 +516,138 @@
         {
             await OnOutline.InvokeAsync(outline);
         }
+    }
+
+    // Reads the mounted editor's attribute rows for the box; a page that is gone or a malformed list shows none.
+    private async Task LoadAttributesAsync()
+    {
+        attributeKeyRefused = false;
+        if (!mounted || disposed)
+        {
+            attributeRows = [];
+            return;
+        }
+
+        try
+        {
+            attributeRows = NoteAttribute.Parse(await Interop.AttributesAsync(host));
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            attributeRows = [];
+        }
+    }
+
+    // A row's value field changed: that row gets the new value (trimmed, whitespace runs as one space).
+    private Task ChangeAttribute(int index, ChangeEventArgs e)
+    {
+        if (index < 0 || index >= attributeRows.Count)
+        {
+            return Task.CompletedTask;
+        }
+
+        string value = AttributeValue(e.Value?.ToString());
+        List<(int Line, string Key, string Value)> edits = Unchanged();
+        edits[index] = (index, attributeRows[index].Key, value);
+        return ApplyAttributesAsync(edits);
+    }
+
+    // A row's Remove button: every other row stays as it is.
+    private Task RemoveAttribute(int index)
+    {
+        if (index < 0 || index >= attributeRows.Count)
+        {
+            return Task.CompletedTask;
+        }
+
+        List<(int Line, string Key, string Value)> edits = Unchanged();
+        edits.RemoveAt(index);
+        return ApplyAttributesAsync(edits);
+    }
+
+    // The add row: a name AttributeParser accepts becomes a new row (normalized key) after the last one.
+    private async Task AddAttribute()
+    {
+        if (AttributeParser.NormalizeKey(newAttributeKey) is not { } key)
+        {
+            attributeKeyRefused = true;
+            return;
+        }
+
+        attributeKeyRefused = false;
+        List<(int Line, string Key, string Value)> edits = [.. Unchanged(), (-1, key, AttributeValue(newAttributeValue))];
+        if (await ApplyAttributesAsync(edits))
+        {
+            newAttributeKey = string.Empty;
+            newAttributeValue = string.Empty;
+        }
+    }
+
+    // A typed value trimmed, whitespace runs as one space, and held to AttributeParser.MaxValueLength here too, not only by
+    // the field's maxlength.
+    private static string AttributeValue(string? typed)
+    {
+        string value = TagParser.CollapseWhitespace(typed ?? string.Empty);
+        return value.Length > AttributeParser.MaxValueLength ? value[..AttributeParser.MaxValueLength].TrimEnd() : value;
+    }
+
+    // Every row as read: its index, key and value, so the editor keeps its bytes.
+    private List<(int Line, string Key, string Value)> Unchanged() =>
+        attributeRows.Select((row, i) => (i, row.Key, row.Value)).ToList();
+
+    // Sends the edits (JSON [{line,key,value}], built here) to the editor, then reads the rows and the dirty state again
+    // and restarts the pause, so the next save writes the new block. False when nothing was applied.
+    private async Task<bool> ApplyAttributesAsync(List<(int Line, string Key, string Value)> edits)
+    {
+        if (!mounted || disposed)
+        {
+            return false;
+        }
+
+        Used();
+        bool applied = false;
+        try
+        {
+            applied = await Interop.SetAttributesAsync(host, AttributeEditsJson(edits));
+            if (applied)
+            {
+                dirty = await Interop.IsDirtyAsync(host);
+            }
+
+            await LoadAttributesAsync();
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            // The page is gone; the editor keeps what it has.
+        }
+
+        if (applied)
+        {
+            RestartPause();
+        }
+
+        return applied;
+    }
+
+    private static string AttributeEditsJson(List<(int Line, string Key, string Value)> edits)
+    {
+        using MemoryStream stream = new MemoryStream();
+        using (Utf8JsonWriter json = new Utf8JsonWriter(stream))
+        {
+            json.WriteStartArray();
+            foreach ((int line, string key, string value) in edits)
+            {
+                json.WriteStartObject();
+                json.WriteNumber("line", line);
+                json.WriteString("key", key);
+                json.WriteString("value", value);
+                json.WriteEndObject();
+            }
+
+            json.WriteEndArray();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
     }
 
     // Drops the outline and tells the parent: this editor is going away or its note locked.
@@ -606,6 +781,8 @@
 
     private void SessionLocked() => _ = InvokeAsync(async () =>
     {
+        attributeRows = [];
+        StateHasChanged();
         await ClearOutlineAsync();
         await OnLocked.InvokeAsync();
     });

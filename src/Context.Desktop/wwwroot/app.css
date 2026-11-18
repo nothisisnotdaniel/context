@@ -473,6 +473,68 @@ input[type="password"]:disabled {
     width: 8px;
 }
 
+/* 236: the note's leading key:: value lines in a collapsed box below the title (theme variables only). */
+.note-attributes {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    margin: 8px 0 0;
+    padding: 4px 10px;
+}
+
+.note-attributes summary {
+    color: var(--grey);
+    cursor: pointer;
+}
+
+.note-attributes .attribute-rows {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 0;
+}
+
+.note-attributes .attribute-row,
+.note-attributes .attribute-add {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+    padding: 2px 0;
+}
+
+.note-attributes .attribute-key {
+    color: var(--accent-strong);
+    flex: 0 0 140px;
+    min-width: 0;
+}
+
+.note-attributes .attribute-value,
+.note-attributes .attribute-new-value {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.note-attributes .attribute-new-key {
+    flex: 0 0 140px;
+    min-width: 0;
+}
+
+.note-attributes .attribute-remove {
+    background: none;
+    border: none;
+    border-radius: 3px;
+    color: var(--text);
+    flex: none;
+    line-height: 1;
+    padding: 2px 6px;
+}
+
+.note-attributes .attribute-remove:hover:not(:disabled) {
+    background: var(--panel);
+}
+
+.note-attributes .attribute-error {
+    margin: 4px 0;
+}
+
 .tag-panel,
 .find-panel,
 .search-panel,

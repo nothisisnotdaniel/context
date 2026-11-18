@@ -1,6 +1,7 @@
 using System.Text;
 using AngleSharp.Dom;
 using Bunit;
+using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.JSInterop;
 
@@ -1153,6 +1154,249 @@ public sealed class NoteEditorTests : IDisposable
         Assert.True(await cut.InvokeAsync(() => cut.Instance.SaveFirstAsync()));
         Assert.False(cut.Instance.HasUnsaved);
         Assert.Equal("# Plan\n\nKept\n", File.ReadAllText(PlanPath));
+    }
+
+    private const string PersonRows = "[{\"key\":\"aliases\",\"value\":\"A, B\"},{\"key\":\"Role\",\"value\":\"\"}]";
+
+    // 236 AC-5, AC-6: a note with rows shows the collapsed box right after the bar: its count, and per row the key, a
+    // plain text value field and a Remove button.
+    [Fact]
+    public async Task Attributes_ShownCollapsedAfterTheBar()
+    {
+        data.WriteNote("Plan", "# Plan\n\naliases:: A, B\nRole::\n\nBody\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.SetAttributeRows(PersonRows);
+
+        IRenderedComponent<NoteEditor> cut = await RenderAttributes("Plan");
+
+        IElement box = cut.Find("details.note-attributes");
+        Assert.False(box.HasAttribute("open"));
+        Assert.Equal("editor-bar", box.PreviousElementSibling!.ClassName);
+        Assert.Equal("DIV", box.PreviousElementSibling.TagName);
+        Assert.Equal("Attributes (2)", box.QuerySelector("summary")!.TextContent);
+        Assert.Equal(["aliases", "Role"], cut.FindAll(".attribute-key").Select(k => k.TextContent));
+        IElement value = cut.FindAll("input.attribute-value")[0];
+        Assert.Equal("text", value.GetAttribute("type"));
+        Assert.Equal("400", value.GetAttribute("maxlength"));
+        Assert.Equal("aliases value", value.GetAttribute("aria-label"));
+        Assert.Equal("A, B", value.GetAttribute("value"));
+        Assert.Equal(["Remove aliases", "Remove Role"], cut.FindAll("button.attribute-remove").Select(b => b.GetAttribute("aria-label")));
+        Assert.All(cut.FindAll(".note-attributes button"), b => Assert.Equal("button", b.GetAttribute("type")));
+        IElement key = cut.Find("input.attribute-new-key");
+        Assert.Equal(("New attribute name", "50"), (key.GetAttribute("aria-label"), key.GetAttribute("maxlength")));
+        IElement newValue = cut.Find("input.attribute-new-value");
+        Assert.Equal(("New attribute value", "400"), (newValue.GetAttribute("aria-label"), newValue.GetAttribute("maxlength")));
+        Assert.Equal("Add", cut.Find("button.attribute-add-button").TextContent);
+        Assert.Empty(cut.FindAll(".attribute-error"));
+    }
+
+    // 236 AC-6: a key and value are shown on one line through OneLine.
+    [Fact]
+    public async Task Attributes_KeyShownOnOneLine()
+    {
+        data.WriteNote("Plan", "x:: y\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.SetAttributeRows("[{\"key\":\"a\\nb\",\"value\":\"c\\nd\"}]");
+
+        IRenderedComponent<NoteEditor> cut = await RenderAttributes("Plan");
+
+        Assert.Equal("a b", cut.Find(".attribute-key").TextContent);
+        Assert.Equal("c d", cut.Find("input.attribute-value").GetAttribute("value"));
+    }
+
+    // 236 AC-5: no rows, a malformed list or a failing read show no box.
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("not json")]
+    [InlineData("[{\"key\":1,\"value\":\"x\"}]")]
+    public async Task Attributes_NoRows_NoBox(string rows)
+    {
+        data.WriteNote("Plan", "# Plan\n\nBody\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.SetAttributeRows(rows);
+
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+        cut.WaitForAssertion(() => Assert.NotEmpty(js.Calls("ContextEditor.headings")), Wait);
+
+        Assert.Single(js.Calls("ContextEditor.attributes"));
+        Assert.Empty(cut.FindAll(".note-attributes"));
+    }
+
+    // 236 AC-5: an unreadable note and an editor that didn't start show no box and never ask for rows.
+    [Fact]
+    public async Task Attributes_UnreadableOrFailed_NoBox()
+    {
+        data.WriteNote("Plan", "# Plan\n\nrole:: x\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.SetAttributeRows(PersonRows);
+        js.Fail("ContextEditor.mount", new JSException("no page"));
+
+        IRenderedComponent<NoteEditor> failed = await RenderFailed("Plan");
+
+        Assert.Empty(failed.FindAll(".note-attributes"));
+        Assert.Empty(js.Calls("ContextEditor.attributes"));
+
+        data.WriteNote("Big", new string('a', (int)NoteStore.MaxEditBytes + 1));
+        await data.RefreshAsync();
+        IRenderedComponent<NoteEditor> big = data.Bunit.Render<NoteEditor>(p => p.Add(e => e.Name, "Big"));
+        big.WaitForAssertion(() => Assert.Single(big.FindAll(".unreadable")), Wait);
+
+        Assert.Empty(big.FindAll(".note-attributes"));
+        Assert.Empty(js.Calls("ContextEditor.attributes"));
+    }
+
+    // 236 AC-5: the rows are read again after a reload and a shown restore.
+    [Fact]
+    public async Task Attributes_RereadAfterReloadAndShowSaved()
+    {
+        data.WriteNote("Plan", "# Plan\n\naliases:: A, B\nRole::\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.SetAttributeRows(PersonRows);
+        IRenderedComponent<NoteEditor> cut = await RenderAttributes("Plan");
+
+        js.SetAttributeRows("[{\"key\":\"type\",\"value\":\"person\"}]");
+        await cut.InvokeAsync(() => cut.Instance.ReloadAsync());
+        cut.WaitForAssertion(() => Assert.Equal("Attributes (1)", cut.Find(".note-attributes summary").TextContent), Wait);
+        Assert.Equal(2, js.Calls("ContextEditor.attributes").Count);
+
+        js.SetAttributeRows("[]");
+        EditableNote saved = (await data.State!.ReadForEdit("Plan"))!;
+        await cut.InvokeAsync(() => cut.Instance.ShowSavedAsync(saved));
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".note-attributes")), Wait);
+        Assert.Equal(3, js.Calls("ContextEditor.attributes").Count);
+    }
+
+    // 236 AC-6, AC-7: a changed value sends every row (the changed one trimmed and collapsed), shows the dot, restarts
+    // the pause, and the save after it writes getMarkdown.
+    [Fact]
+    public async Task Attributes_ChangedValue_SetsAndSavesAfterPause()
+    {
+        data.WriteNote("Plan", "# Plan\n\naliases:: A, B\nRole::\n");
+        EditorJs js = new EditorJs(data.Bunit, markdown: "# Plan\n\naliases:: A, B\nRole:: lead dev\n");
+        js.SetAttributeRows(PersonRows);
+        IRenderedComponent<NoteEditor> cut = await RenderAttributes("Plan");
+        Assert.Empty(cut.FindAll("span.dirty-dot"));
+
+        await cut.FindAll("input.attribute-value")[1].ChangeAsync(new ChangeEventArgs { Value = "  lead \t  dev " });
+
+        Assert.Equal(
+            ["[{\"line\":0,\"key\":\"aliases\",\"value\":\"A, B\"},{\"line\":1,\"key\":\"Role\",\"value\":\"lead dev\"}]"],
+            js.AttributeEdits());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll("span.dirty-dot")), Wait);
+        Assert.Equal(1, data.AutoSave.Pending);
+        Assert.Equal(2, js.Calls("ContextEditor.attributes").Count);
+        Assert.Equal("# Plan\n\naliases:: A, B\nRole::\n", File.ReadAllText(PlanPath));
+
+        data.AutoSave.Elapse();
+
+        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".status").TextContent), Wait);
+        Assert.Equal("# Plan\n\naliases:: A, B\nRole:: lead dev\n", File.ReadAllText(PlanPath));
+        Assert.Empty(cut.FindAll("span.dirty-dot"));
+    }
+
+    // 236 review nit: a value longer than the field allows is cut to 400 chars before it reaches the page.
+    [Fact]
+    public async Task Attributes_LongValue_CappedAt400()
+    {
+        data.WriteNote("Plan", "# Plan\n\naliases:: A, B\nRole::\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.SetAttributeRows(PersonRows);
+        IRenderedComponent<NoteEditor> cut = await RenderAttributes("Plan");
+
+        await cut.FindAll("input.attribute-value")[1].ChangeAsync(new ChangeEventArgs { Value = new string('v', 500) });
+
+        string edits = Assert.Single(js.AttributeEdits());
+        Assert.Contains("\"value\":\"" + new string('v', 400) + "\"}", edits, StringComparison.Ordinal);
+        Assert.DoesNotContain(new string('v', 401), edits, StringComparison.Ordinal);
+    }
+
+    // 236 AC-6: Remove sends every other row as it is.
+    [Fact]
+    public async Task Attributes_Remove_SendsTheOtherRows()
+    {
+        data.WriteNote("Plan", "# Plan\n\naliases:: A, B\nRole::\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.SetAttributeRows(PersonRows);
+        IRenderedComponent<NoteEditor> cut = await RenderAttributes("Plan");
+
+        await cut.FindAll("button.attribute-remove")[0].ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(["[{\"line\":1,\"key\":\"Role\",\"value\":\"\"}]"], js.AttributeEdits());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll("span.dirty-dot")), Wait);
+        Assert.Equal(1, data.AutoSave.Pending);
+    }
+
+    // 236 AC-7: a name AttributeParser refuses shows the red line in the box and sends nothing.
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("1st")]
+    [InlineData("due date")]
+    [InlineData("role::")]
+    public async Task Attributes_AddInvalidName_RedLineNothingSent(string name)
+    {
+        data.WriteNote("Plan", "# Plan\n\naliases:: A, B\nRole::\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.SetAttributeRows(PersonRows);
+        IRenderedComponent<NoteEditor> cut = await RenderAttributes("Plan");
+
+        await cut.Find("input.attribute-new-key").InputAsync(new ChangeEventArgs { Value = name });
+        await cut.Find("input.attribute-new-value").InputAsync(new ChangeEventArgs { Value = "x" });
+        await cut.Find("button.attribute-add-button").ClickAsync(new MouseEventArgs());
+
+        IElement error = cut.Find(".note-attributes p.attribute-error");
+        Assert.Equal("Type an attribute name that starts with a letter.", error.TextContent);
+        Assert.Equal("alert", error.GetAttribute("role"));
+        Assert.True(error.ClassList.Contains("red"));
+        Assert.Empty(js.AttributeEdits());
+        Assert.Empty(cut.FindAll("span.dirty-dot"));
+    }
+
+    // 236 AC-7: a valid name adds a row with the normalized key and the trimmed, collapsed value, after every row.
+    [Fact]
+    public async Task Attributes_AddValidName_AppendsNormalizedRow()
+    {
+        data.WriteNote("Plan", "# Plan\n\naliases:: A, B\nRole::\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.SetAttributeRows(PersonRows);
+        IRenderedComponent<NoteEditor> cut = await RenderAttributes("Plan");
+
+        await cut.Find("input.attribute-new-key").InputAsync(new ChangeEventArgs { Value = "  Start-Date_2 " });
+        await cut.Find("input.attribute-new-value").InputAsync(new ChangeEventArgs { Value = "  2026  11 " });
+        await cut.Find("button.attribute-add-button").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(
+            ["[{\"line\":0,\"key\":\"aliases\",\"value\":\"A, B\"},{\"line\":1,\"key\":\"Role\",\"value\":\"\"},{\"line\":-1,\"key\":\"start-date_2\",\"value\":\"2026 11\"}]"],
+            js.AttributeEdits());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll("span.dirty-dot")), Wait);
+        Assert.Empty(cut.FindAll(".attribute-error"));
+        Assert.Equal(string.Empty, cut.Find("input.attribute-new-key").GetAttribute("value"));
+    }
+
+    // 236: a sensitive note's rows go with its editor when the session locks.
+    [Fact]
+    public async Task Attributes_SensitiveLock_RowsGone()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("Plan", "# Plan\n\nrole:: x\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.SetAttributeRows("[{\"key\":\"role\",\"value\":\"x\"}]");
+        await data.RefreshAsync();
+        IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p
+            .Add(e => e.Name, "Plan")
+            .Add(e => e.Sensitive, true));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".note-attributes")), Wait);
+
+        data.Session!.Lock();
+
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".note-attributes")), Wait);
+    }
+
+    private async Task<IRenderedComponent<NoteEditor>> RenderAttributes(string name)
+    {
+        IRenderedComponent<NoteEditor> cut = await Render(name);
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".note-attributes")), Wait);
+        return cut;
     }
 
     private string PlanPath => Path.Combine(data.Root, "Plan.md");
