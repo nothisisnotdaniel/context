@@ -228,6 +228,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#272](backlog/272-steady-maintests-windowclose-closedafterlastrender.md) Steady MainTests.WindowClose_ClosedAfterLastRender_IsStillSeen
 - [?] [#273](backlog/273-check-outline-link-contrast-in-the.md) Check outline link contrast in the right sidebar
 - [?] [#274](backlog/274-visible-heading-for-the-sidebar-outline.md) Visible heading for the sidebar outline
+- [?] [#275](backlog/275-one-helper-for-opening-a-daily.md) One helper for opening a daily note in Main.razor
+- [?] [#276](backlog/276-feedback-when-a-day-pick-is.md) Feedback when a day pick is ignored while busy
 
 ## Dropped with the terminal UI
 
