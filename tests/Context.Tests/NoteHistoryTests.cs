@@ -278,5 +278,33 @@ public sealed class NoteHistoryTests : IDisposable
         Assert.False(Directory.Exists(Path.Combine(parent, ".history")));
     }
 
+    // 203 AC-10: KeptWithin is true only while the newest version of the note's own kind is younger than the gap.
+    [Fact]
+    public void KeptWithin_NewestVersionAgainstTheGap()
+    {
+        NoteInfo note = store.Create("Plan");
+        NoteHistory history = History();
+        TimeSpan gap = TimeSpan.FromMinutes(5);
+        Assert.False(history.KeptWithin(note.Path, gap));
+
+        history.Keep(note.Path, "a\n"u8.ToArray());
+        now = Start.AddMinutes(4).AddSeconds(59);
+        Assert.True(history.KeptWithin(note.Path, gap));
+        now = Start.AddMinutes(5);
+        Assert.False(history.KeptWithin(note.Path, gap));
+        now = Start.AddMinutes(-1);
+        Assert.False(history.KeptWithin(note.Path, gap));
+    }
+
+    // 203 AC-10: a broken .history is a NoteHistoryException, as for Versions.
+    [Fact]
+    public void KeptWithin_BrokenHistory_Throws()
+    {
+        NoteInfo note = store.Create("Plan");
+        File.WriteAllText(Path.Combine(root, ".history"), "in the way");
+
+        Assert.Throws<NoteHistoryException>(() => History().KeptWithin(note.Path, TimeSpan.FromMinutes(5)));
+    }
+
     private NoteHistory History() => new NoteHistory(store, () => now);
 }

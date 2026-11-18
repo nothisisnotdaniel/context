@@ -200,6 +200,31 @@ internal sealed partial class NoteHistory
     }
 
     /// <summary>
+    /// True when the newest version of the note at <paramref name="notePath"/> (of its own kind, found like
+    /// <see cref="Versions"/>) was kept less than <paramref name="gap"/> ago on this history's clock. False with no
+    /// version, and for a newest version from the future. Throws <see cref="NoteHistoryException"/> like
+    /// <see cref="Versions"/>.
+    /// </summary>
+    public bool KeptWithin(string notePath, TimeSpan gap)
+    {
+        try
+        {
+            Entry? newest = ListFolder(FolderFor(notePath), KindOf(notePath)).OrderByDescending(e => e, ByAge).FirstOrDefault();
+            if (newest is null)
+            {
+                return false;
+            }
+
+            TimeSpan age = utcNow() - newest.Version.SavedUtc;
+            return age >= TimeSpan.Zero && age < gap;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException && e is not NoteHistoryException)
+        {
+            throw new NoteHistoryException();
+        }
+    }
+
+    /// <summary>
     /// Reads the version <paramref name="id"/> of <paramref name="note"/> (found like <see cref="Versions"/>, never
     /// through a link, at most <see cref="MaxVersionBytes"/>). False when there is no such version or it can't be read.
     /// </summary>

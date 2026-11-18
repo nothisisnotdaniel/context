@@ -217,6 +217,9 @@ internal sealed class DesktopActions
     /// <summary>The longest todo text <see cref="AddTodo"/> accepts, as in the console.</summary>
     public const int MaxTodoLength = 200;
 
+    /// <summary>How old a note's newest version must be before an automatic save keeps another one (5 minutes).</summary>
+    public static readonly TimeSpan AutoVersionGap = TimeSpan.FromMinutes(5);
+
     /// <summary>The largest note text <see cref="SaveNote"/> writes (5 MB, as for imports).</summary>
     public const long MaxNoteBytes = NoteStore.MaxEditBytes;
 
@@ -581,9 +584,13 @@ internal sealed class DesktopActions
     /// Saves <paramref name="text"/> over the note <paramref name="opened"/> came from through
     /// <see cref="NoteStore.SaveIfUnchanged"/>, keeping its line endings and BOM. Writes nothing when the text is
     /// unchanged (<see cref="ActionReason.Unchanged"/>, done, no refresh), when the file changed on disk or is gone,
-    /// or when the text is over <see cref="MaxNoteBytes"/>. The result's text is the note's name when done.
+    /// or when the text is over <see cref="MaxNoteBytes"/>. The result's text is the note's name when done. An
+    /// <paramref name="auto"/> save (the editor's pause after typing) keeps the previous bytes as a version only when
+    /// the note has none or its newest is at least <see cref="AutoVersionGap"/> old on the history clock; every other
+    /// check is the same.
     /// </summary>
-    public Task<ActionResult> SaveNote(EditableNote opened, string text) => Run(() => SaveNoteNow(opened, text));
+    public Task<ActionResult> SaveNote(EditableNote opened, string text, bool auto = false) =>
+        Run(() => SaveNoteNow(opened, text, auto));
 
     /// <summary>
     /// Restores the note <paramref name="name"/> to its kept version <paramref name="id"/>, only when the user
@@ -994,13 +1001,13 @@ internal sealed class DesktopActions
         };
     }
 
-    private ActionResult SaveNoteNow(EditableNote opened, string text)
+    private ActionResult SaveNoteNow(EditableNote opened, string text, bool auto = false)
     {
         if (IsSealedPath(opened.Path))
         {
             try
             {
-                return SaveSensitiveNow(opened, text);
+                return SaveSensitiveNow(opened, text, auto);
             }
             catch (NoteHistoryException)
             {
@@ -1019,7 +1026,8 @@ internal sealed class DesktopActions
 
         try
         {
-            NoteSaveResult saved = notes.SaveIfUnchanged(opened, text, out EditableNote? savedNote, state.HistoryStore);
+            NoteHistory? history = KeepsVersion(opened, auto) ? state.HistoryStore : null;
+            NoteSaveResult saved = notes.SaveIfUnchanged(opened, text, out EditableNote? savedNote, history);
             return saved switch
             {
                 NoteSaveResult.Saved => new ActionResult(ActionKind.Done, ActionReason.None, opened.Name, savedNote),
@@ -2356,7 +2364,13 @@ internal sealed class DesktopActions
     }
 
     // Re-seals the open sensitive note with a new note key. Needs no private key; never writes plain text.
-    private ActionResult SaveSensitiveNow(EditableNote opened, string text)
+    // True when a save keeps the previous bytes as a version: always for an explicit save; for an automatic one only
+    // when the newest version is at least AutoVersionGap old (or there is none). Throws NoteHistoryException like
+    // NoteHistory.Versions.
+    private bool KeepsVersion(EditableNote opened, bool auto) =>
+        !auto || !state.HistoryStore.KeptWithin(opened.Path, AutoVersionGap);
+
+    private ActionResult SaveSensitiveNow(EditableNote opened, string text, bool auto)
     {
         string plainText = text.Replace("\r\n", "\n", StringComparison.Ordinal);
         if (string.Equals(plainText, opened.Text, StringComparison.Ordinal))
@@ -2398,7 +2412,7 @@ internal sealed class DesktopActions
             TempName(found.Name, NoteStore.SensitiveExtension),
             file,
             overwrite: true,
-            () => KeepSealed(found, opened.Version));
+            () => KeepSealed(found, opened.Version, KeepsVersion(opened, auto)));
         if (!written)
         {
             return Refused(ActionReason.ChangedOnDisk, ChangedOnDiskText(opened.Name));
@@ -2411,8 +2425,9 @@ internal sealed class DesktopActions
     }
 
     // True when the sealed file still has the version it was opened with; then its bytes are kept as a version, sealed
-    // under its current title (no key call). Throws NoteHistoryException when they can't be kept.
-    private bool KeepSealed(NoteInfo found, string version)
+    // under its current title (no key call) unless keep is false (an automatic save within AutoVersionGap). Throws
+    // NoteHistoryException when they can't be kept.
+    private bool KeepSealed(NoteInfo found, string version, bool keep)
     {
         byte[] current;
         try
@@ -2429,7 +2444,11 @@ internal sealed class DesktopActions
             return false;
         }
 
-        state.HistoryStore.Keep(found.Path, current, found.Name);
+        if (keep)
+        {
+            state.HistoryStore.Keep(found.Path, current, found.Name);
+        }
+
         return true;
     }
 

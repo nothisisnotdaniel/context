@@ -101,9 +101,20 @@ that day instead. Times' data folder is `TIMES_DATA_DIR` when set (an absolute p
 folder; it is only read. The desktop app has an `End the day` button in the current view, and it closes the day by
 itself after you book your leaving in Times (the todos move once, at a leaving at 17:00 or later).
 
+### Saving
+
+The desktop app saves the open note by itself one second after you stop typing; the line under the note says
+`Saving…` and then `Saved.` in grey. The Save button, Ctrl+S (Cmd+S on macOS) and `/save` still save at once. Opening
+another note, the person behind a mention, `/today`, `/briefing` or `/meeting`, and closing the window save first, so
+`Discard changes to <name>?` only appears when that save failed; its red reason stays under the note, and your text
+stays in the editor. Rename, New subpage, Move, Mark sensitive, Make plain, Restore this version, Export, a capture
+into the open inbox and triage into the open note also save first, and say `Save <name> first.` only when that save
+failed. A note that changed on disk since you opened it is never overwritten: the save is refused in red.
+
 ### Note history
 
-The desktop app keeps the previous text of a note as a version every time you save a change in it. The versions sit
+The desktop app keeps the previous text of a note as a version every time you save a change in it; while it saves by
+itself, it keeps at most one version every five minutes. The versions sit
 in a `.history` folder next to the note (`.history/<title>/`), at most 50 per note and 25 MB in total; the oldest go
 first. `History` in a note's toolbar lists them, shows how each differs from the saved text, and `Restore this
 version` puts one back after asking (the current text is kept as a version too). Renaming or moving a note takes its
@@ -126,8 +137,8 @@ files of up to 10 MB each per drop. The app checks each file's type from its byt
 in the `.attachments` folder of the note's level (next to the note file), under a cleaned name (`My Shot (1).PNG`
 becomes `My-Shot-1.png`; a name already taken gets `-2`, `-3` and so on). It inserts a link at the drop position:
 `![shot.png](.attachments/shot.png)` for an image, which shows in the note, and `[plan.pdf](.attachments/plan.pdf)`
-for a PDF, which opens in the system's PDF viewer when you click it. The note is not saved by the drop; save it to
-keep the link. Sensitive notes can't have attachments.
+for a PDF, which opens in the system's PDF viewer when you click it. The inserted links are an edit like any other: the
+note saves itself a second later. Sensitive notes can't have attachments.
 
 Moving a note to another level takes the attachments it links along into the new level's `.attachments` folder
 (renamed with `-2` and its links updated when the name is taken there). An attachment that another note in the old

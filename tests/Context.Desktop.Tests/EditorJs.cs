@@ -5,7 +5,8 @@ namespace Context.Tests;
 
 /// <summary>
 /// Plans bunit's strict JS interop for the bundled editor (<c>ContextEditor.*</c>): mount, focus, markClean,
-/// insertAttachment and destroy do nothing; isLossless, isDirty and getMarkdown return what the test sets.
+/// insertAttachment and destroy do nothing; isLossless, isDirty and getMarkdown return what the test sets. markClean
+/// makes the editor clean; markCleanIf does so only when its Markdown is the editor's current one, and returns that.
 /// </summary>
 internal sealed class EditorJs
 {
@@ -16,14 +17,17 @@ internal sealed class EditorJs
         js = context.JSInterop;
         js.SetupVoid("ContextEditor.mount", _ => true).SetVoidResult();
         js.SetupVoid("ContextEditor.focus", _ => true).SetVoidResult();
-        js.SetupVoid("ContextEditor.markClean", _ => true).SetVoidResult();
+        js.SetupVoid("ContextEditor.markClean", _ => MarkClean()).SetVoidResult();
+        js.Setup<bool>("ContextEditor.markCleanIf", i => CleanIf(i)).SetResult(true);
+        js.Setup<bool>("ContextEditor.markCleanIf", i => !Same(i)).SetResult(false);
         js.SetupVoid("ContextEditor.destroy", _ => true).SetVoidResult();
         js.SetupVoid("ContextEditor.insertAttachment", _ => true).SetVoidResult();
         Lossless = lossless;
         Dirty = dirty;
         Markdown = markdown;
         js.Setup<bool>("ContextEditor.isLossless", _ => true).SetResult(lossless);
-        js.Setup<bool>("ContextEditor.isDirty", _ => true).SetResult(dirty);
+        js.Setup<bool>("ContextEditor.isDirty", _ => Dirty).SetResult(true);
+        js.Setup<bool>("ContextEditor.isDirty", _ => !Dirty).SetResult(false);
         js.Setup<string>("ContextEditor.getMarkdown", _ => true).SetResult(markdown);
     }
 
@@ -36,10 +40,32 @@ internal sealed class EditorJs
     /// <summary>Makes the editor report <paramref name="markdown"/> as an edit (isDirty true).</summary>
     public void Edit(string markdown)
     {
-        Dirty = true;
         Markdown = markdown;
-        js.Setup<bool>("ContextEditor.isDirty", _ => true).SetResult(true);
         js.Setup<string>("ContextEditor.getMarkdown", _ => true).SetResult(markdown);
+        Dirty = true;
+    }
+
+    /// <summary>
+    /// Makes the editor report an edit that no save can write: <paramref name="markdown"/> padded past
+    /// <see cref="DesktopActions.MaxNoteBytes"/>, so the save-first before leaving the note (job 203) is refused as
+    /// too large and the <c>Discard changes</c> and <c>Save &lt;name&gt; first.</c> paths show as before.
+    /// </summary>
+    public void EditUnsavable(string markdown) => Edit(markdown + new string('x', (int)DesktopActions.MaxNoteBytes + 1));
+
+    /// <summary>
+    /// Types <paramref name="markdown"/> into the editor of <paramref name="cut"/>: the edit (<see cref="Edit"/>), the
+    /// page's dirty report and the <c>OnChanged</c> call that every change of the text makes.
+    /// </summary>
+    public async Task Change<T>(IRenderedComponent<T> cut, string markdown)
+        where T : Microsoft.AspNetCore.Components.IComponent
+    {
+        Edit(markdown);
+        EditorInterop page = Page();
+        await cut.InvokeAsync(async () =>
+        {
+            await page.OnDirty(true);
+            await page.OnChanged();
+        });
     }
 
     /// <summary>Makes every later <paramref name="identifier"/> call (<c>ContextEditor.mount</c>, <c>focus</c> or
@@ -54,6 +80,25 @@ internal sealed class EditorJs
         {
             js.SetupVoid(identifier, _ => true).SetException(exception);
         }
+    }
+
+    private bool MarkClean()
+    {
+        Dirty = false;
+        return true;
+    }
+
+    private bool Same(JSRuntimeInvocation call) => string.Equals((string?)call.Arguments[1], Markdown, StringComparison.Ordinal);
+
+    private bool CleanIf(JSRuntimeInvocation call)
+    {
+        if (!Same(call))
+        {
+            return false;
+        }
+
+        Dirty = false;
+        return true;
     }
 
     /// <summary>The calls of <paramref name="identifier"/> so far.</summary>

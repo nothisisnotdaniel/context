@@ -302,6 +302,8 @@ export function mount(element, markdown, dotnet, images, name) {
           editor.dropPos = tr.mapping.map(editor.dropPos);
         }
         reportDirty(editor);
+        // Every text change restarts .NET's auto-save pause; .NET reads nothing until the pause elapses.
+        dotnet.invokeMethodAsync("OnChanged").catch(() => {});
       }
     },
     handleClickOn(view, pos, node) {
@@ -393,6 +395,20 @@ export function markClean(element) {
     editor.clean = editor.view.state.doc;
     reportDirty(editor);
   }
+}
+
+/**
+ * Marks the document clean only when its Markdown still equals markdown (the text a save just wrote), and returns
+ * whether it did. Compares and marks in one turn, so an edit typed while the save ran keeps the editor dirty.
+ */
+export function markCleanIf(element, markdown) {
+  const editor = editors.get(element);
+  if (!editor || joinTitle(editor.head, serialize(editor.view.state.doc)) !== markdown) {
+    return false;
+  }
+  editor.clean = editor.view.state.doc;
+  reportDirty(editor);
+  return true;
 }
 
 /** Removes the editor from element. */

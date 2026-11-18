@@ -45,7 +45,7 @@ public sealed class EditingFlowTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        js.Edit("# Plan\n\nUnsaved\n");
+        js.EditUnsavable("# Plan\n\nUnsaved\n");
 
         await NameButton(cut, "Other").ClickAsync(new MouseEventArgs());
 
@@ -89,7 +89,7 @@ public sealed class EditingFlowTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        js.Edit("# Plan\n\nUnsaved\n");
+        js.EditUnsavable("# Plan\n\nUnsaved\n");
 
         await RunPalette(cut, "/current");
 

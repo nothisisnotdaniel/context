@@ -777,12 +777,30 @@ Every factory agent reads this file before working on Context. Keep it short and
     todo, or the fixed red text. A recurring todo has a grey `span.repeat` after its text (`TodoRepeat.Label`, same
     `title`). `TodoPanel.AskDone(todo)` opens the same dialog for the palette's `/done`.
     **Editing:** clicking a note name (`NotesPanel` button), a link or `/open` in the palette shows `NoteEditor` in the
-    main region (`Main` keeps the open name; a dirty editor asks `Discard changes to <name>?` first). `NoteEditor`
+    main region (`Main` keeps the open name; a dirty editor saves first, job 203, and asks `Discard changes to <name>?`
+    only when that save failed). `NoteEditor`
     reads through `DesktopState.ReadForEdit` (`NoteStore.ReadForEdit` -> `EditableNote`: text with `\n`, raw-byte
     SHA-256 `Version`, CRLF and BOM flags), mounts the page editor through `EditorInterop` (the only class that touches
-    `IJSRuntime`; `[JSInvokable]` `OnTag`/`OnLink`/`OnPerson`/`OnAttachment` only navigate, `OnDrop` only raises `FilesDropped`) and saves on the Save button or Ctrl/Cmd+S through
+    `IJSRuntime`; `[JSInvokable]` `OnTag`/`OnLink`/`OnPerson`/`OnAttachment` only navigate, `OnDrop` only raises `FilesDropped`, `OnChanged` only raises `Changed`) and saves through
     `DesktopActions.SaveNote` -> `NoteStore.SaveIfUnchanged` (unchanged text writes nothing; version re-checked before
-    the move; CRLF and BOM kept; temp file mode `0600`). While the page's editor differs from the saved text, a
+    the move; CRLF and BOM kept; temp file mode `0600`). **Auto save** (job 203): `view.js` calls `OnChanged` on every
+    `docChanged` transaction; each `Changed` restarts the pause (`IAutoSavePause`, real `AutoSavePause.Pause` = 1 s,
+    tests `FakeAutoSavePause.Elapse()`), and when it elapses a dirty editor saves. `NoteEditor.SaveAsync(bool auto)` is
+    the one save path, serialized by a `SemaphoreSlim` (cancels the pending pause, waits for a running save): grey
+    `Saving…`, then grey `Saved.` (auto) or accent `Saved <name>.` (Save button, Ctrl/Cmd+S, `/save`, `LockOpen`); a
+    refusal or failure shows its red text, keeps the text (no remount) and starts no new save without a new edit; an
+    auto save refused as `Busy` restores the previous status and waits for the next pause. After `Done` the editor is
+    marked clean only through `ContextEditor.markCleanIf(element, markdown)` (compare and mark in one JS turn), so text
+    typed during a save stays dirty and saves after the next pause. The pause is cancelled on reload, `ShowSavedAsync`,
+    an explicit save and dispose; an unedited note is never saved. `SaveFirstAsync()` (true when nothing unsaved is
+    left) is what `Main` calls before leaving the note (`KeptUnsaved`: `RequestOpen`, mentions, `/today`, `/briefing`,
+    `/meeting`) and before every `Save <name> first.` refusal; the source rule that only bound handlers call a method
+    that calls `Actions` exempts exactly `SaveFirstAsync`/`AutoSaveAsync` -> `SaveAsync`. Window close: `Program`'s
+    closing handler asks the singleton `CloseGuard` (wired by `Main` through `Attach`/`Detach`, `HasUnsaved` read
+    without the dispatcher): with unsaved changes it cancels the close, saves first asynchronously and closes once
+    through the window thread (`PhotinoWindow.Invoke`), or shows `Discard changes to <name>?` (Discard closes, Cancel
+    keeps the window). `DesktopActions.SaveNote(opened, text, auto)`: an auto save keeps a history version only when the
+    note has none or its newest is at least `AutoVersionGap` (5 min, history clock; `NoteHistory.KeptWithin`). While the page's editor differs from the saved text, a
     `span.dirty-dot` (`role="img"`, `Unsaved changes`) shows right after the note title: the page calls
     `EditorInterop.OnDirty(bool)` only when that state flips (`DirtyChanged`), a `Done` save and a reload clear it, and
     it is display only (every decision still asks `IsDirtyAsync`). Tag and note-link chips are tab stops (`chipDom` in

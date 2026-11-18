@@ -433,6 +433,78 @@ public sealed class NoteHistoryActionsTests : IDisposable
         Assert.Equal(HistoryKind.Unreadable, (await data.State.History("Plan")).Kind);
     }
 
+    // 203 AC-10: automatic saves within AutoVersionGap keep one version (the text as opened); once the newest version
+    // is 5 minutes old the next one keeps another; explicit saves keep one every time.
+    [Fact]
+    public async Task SaveNote_Auto_KeepsAVersionOnlyAfterTheGap()
+    {
+        data.WriteNote("Plan", "opened\n");
+        await data.RefreshAsync();
+        EditableNote opened = (await data.State!.ReadForEdit("Plan"))!;
+
+        foreach (string text in new[] { "one\n", "two\n", "three\n" })
+        {
+            ActionResult saved = await data.Actions!.SaveNote(opened, text, auto: true);
+            Assert.Equal(ActionKind.Done, saved.Kind);
+            opened = saved.Note!;
+            data.UtcNow = data.UtcNow.AddSeconds(20);
+        }
+
+        Assert.Equal([".history/Plan/" + Id + ".md", "Plan.md"], RootFiles());
+        Assert.Equal("opened\n", Read(".history/Plan/" + Id + ".md"));
+        Assert.Equal("three\n", Read("Plan.md"));
+
+        data.UtcNow = new DateTime(2026, 10, 29, 9, 5, 0, DateTimeKind.Utc);
+        opened = (await data.Actions!.SaveNote(opened, "four\n", auto: true)).Note!;
+        Assert.Equal(2, (await data.State.History("Plan")).Versions.Count);
+        Assert.Equal("three\n", Read(".history/Plan/20261029T090500000Z.md"));
+
+        opened = (await data.Actions.SaveNote(opened, "five\n")).Note!;
+        await data.Actions.SaveNote(opened, "six\n", auto: false);
+        Assert.Equal(4, (await data.State.History("Plan")).Versions.Count);
+        Assert.Equal("six\n", Read("Plan.md"));
+    }
+
+    // 203 AC-10: the gap is measured from the newest version, also when it was kept by an explicit save.
+    [Fact]
+    public async Task SaveNote_Auto_AfterExplicitSave_WaitsForTheGap()
+    {
+        data.WriteNote("Plan", "opened\n");
+        await data.RefreshAsync();
+        EditableNote opened = (await data.State!.ReadForEdit("Plan"))!;
+
+        opened = (await data.Actions!.SaveNote(opened, "explicit\n")).Note!;
+        data.UtcNow = data.UtcNow.AddMinutes(4).AddSeconds(59);
+        opened = (await data.Actions.SaveNote(opened, "auto\n", auto: true)).Note!;
+        Assert.Single((await data.State.History("Plan")).Versions);
+
+        data.UtcNow = data.UtcNow.AddSeconds(1);
+        await data.Actions.SaveNote(opened, "later\n", auto: true);
+        Assert.Equal(2, (await data.State.History("Plan")).Versions.Count);
+    }
+
+    // 203 AC-10/AC-11: sensitive automatic saves follow the same gap for their sealed versions, with no Agree.
+    [Fact]
+    public async Task SaveNote_Sensitive_Auto_KeepsASealedVersionOnlyAfterTheGap()
+    {
+        await Sealed("Plan", "opened\n");
+        EditableNote opened = (await data.State!.ReadSensitive("Plan"))!;
+        int agrees = data.Keys.Agrees;
+
+        opened = (await data.Actions!.SaveNote(opened, "one\n", auto: true)).Note!;
+        data.UtcNow = data.UtcNow.AddSeconds(30);
+        opened = (await data.Actions.SaveNote(opened, "two\n", auto: true)).Note!;
+        Assert.Equal([".history/Plan/" + Id + "~Plan.ctxs", "Plan.ctxs"], RootFiles());
+
+        data.UtcNow = data.UtcNow.AddMinutes(5);
+        ActionResult last = await data.Actions.SaveNote(opened, "three\n", auto: true);
+
+        Assert.Equal(ActionKind.Done, last.Kind);
+        Assert.Equal(3, RootFiles().Length);
+        Assert.Equal(agrees, data.Keys.Agrees);
+        Assert.Equal("opened\n", Unseal(Path.Combine(data.Root, ".history", "Plan", Id + "~Plan.ctxs"), "Plan"));
+    }
+
     private async Task Sealed(string name, string text)
     {
         data.Keys.Dispose();

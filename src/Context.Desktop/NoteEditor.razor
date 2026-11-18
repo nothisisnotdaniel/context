@@ -1,7 +1,9 @@
 @inherits StateComponent
 @implements IAsyncDisposable
 @* The note editor: the bundled ProseMirror editor (EditorInterop) in a host element, a Save button and a status
-   line. Saving goes through DesktopActions.SaveNote only from the Save button and Ctrl/Cmd+S. Tag and link clicks
+   line. Every save goes through one serialized path to DesktopActions.SaveNote: on its own after the pause that
+   follows the last edit (IAutoSavePause), from the Save button and Ctrl/Cmd+S, and from the parent before it leaves
+   the note (SaveFirstAsync). Tag and link clicks
    come back from the page as events and only open things; the page's dirty flips only show or hide the dot next
    to the name (every decision still asks IsDirtyAsync). A sensitive note is read through DesktopState.ReadSensitive
    (the one place the OS is asked for the key); its text lives only in the SensitiveSession and in the page's editor,
@@ -14,7 +16,7 @@
         {
             <span class="dirty-dot" role="img" aria-label="Unsaved changes" title="Unsaved changes"></span>
         }
-        <button type="button" class="save" disabled="@(opened is null || saving)" @onclick="() => Save(null)">Save</button>
+        <button type="button" class="save" disabled="@(opened is null || saving)" @onclick="() => SaveAsync(false)">Save</button>
     </div>
     @if (unreadable)
     {
@@ -56,10 +58,17 @@
     private string statusText = string.Empty;
     private string statusClass = string.Empty;
     private List<(string Text, string Css)> statusLines = [];
+    private readonly SemaphoreSlim saveGate = new(1, 1);
+    private CancellationTokenSource? pause;
+    private bool disposed;
 
     /// <summary>The bridge to the page's editor; one per editor.</summary>
     [Inject]
     internal EditorInterop Interop { get; set; } = null!;
+
+    /// <summary>The pause after the last edit before the editor saves on its own.</summary>
+    [Inject]
+    internal IAutoSavePause Pause { get; set; } = null!;
 
     /// <summary>The note to open (its name).</summary>
     [Parameter]
@@ -101,7 +110,106 @@
     private string DisplayName => DesktopText.OneLine(Name);
 
     /// <summary>True when the text changed since it was opened or last saved.</summary>
-    public async Task<bool> IsDirtyAsync() => mounted && await Interop.IsDirtyAsync(host);
+    public async Task<bool> IsDirtyAsync() => mounted && !disposed && await Interop.IsDirtyAsync(host);
+
+    /// <summary>
+    /// True (without asking the page) while the editor shows unsaved changes, a save runs or an automatic save is
+    /// pending: the window close asks this from its own thread.
+    /// </summary>
+    internal bool HasUnsaved => mounted && !disposed && (dirty || saving || pause is not null);
+
+    /// <summary>
+    /// Before the parent leaves the note: waits for a running save, then saves what is still unsaved. True when
+    /// nothing unsaved is left; false when that save was refused or failed (its red text is shown).
+    /// </summary>
+    public async Task<bool> SaveFirstAsync()
+    {
+        await SaveAsync(true);
+        return !await IsDirtyAsync();
+    }
+
+    /// <summary>
+    /// The one save path, never overlapping: cancels the pending pause, waits for a running save, then saves the
+    /// editor's Markdown (or the text as opened when nothing was edited) and shows grey <c>Saving…</c> meanwhile. An
+    /// <paramref name="auto"/> save does nothing when nothing is unsaved, ends with grey <c>Saved.</c>, and when it
+    /// was refused as busy leaves the status as it was and waits for the next pause; an explicit one ends with accent
+    /// <c>Saved &lt;name&gt;.</c>. A refusal or failure shows its red text and keeps the editor's text as it is. A
+    /// save keeps the editor clean only when its text is still what was saved. <c>null</c> when nothing was saved.
+    /// </summary>
+    internal async Task<ActionResult?> SaveAsync(bool auto)
+    {
+        CancelPause();
+        await saveGate.WaitAsync();
+        try
+        {
+            if (disposed || opened is not { } note || !mounted)
+            {
+                return null;
+            }
+
+            Used();
+            bool edited = await Interop.IsDirtyAsync(host);
+            if (auto && !edited)
+            {
+                return null;
+            }
+
+            string text = edited ? await Interop.GetMarkdownAsync(host) : note.Text;
+            (string Text, string Css, List<(string Text, string Css)> Lines) before = (statusText, statusClass, statusLines);
+            saving = true;
+            ShowStatus("Saving…", "grey");
+            StateHasChanged();
+            ActionResult result = await Actions.SaveNote(note, text, auto);
+            if (disposed)
+            {
+                return result;
+            }
+
+            if (auto && result.Kind == ActionKind.Refused && result.Reason == ActionReason.Busy)
+            {
+                (statusText, statusClass, statusLines) = before;
+                RestartPause();
+            }
+            else if (result.Kind == ActionKind.Done)
+            {
+                if (result.Note is { } saved)
+                {
+                    opened = saved;
+                    lossy = !await Interop.IsLosslessAsync(saved.Text, Name);
+                }
+
+                if (edited)
+                {
+                    // Compared and marked in one turn of the page: what was typed during the save stays unsaved.
+                    dirty = !await Interop.MarkCleanIfAsync(host, text);
+                    if (dirty)
+                    {
+                        RestartPause();
+                    }
+                }
+
+                // Nothing was edited, so the page is already clean; it is not marked clean again, so text typed while
+                // this save ran stays unsaved and its own pause saves it.
+
+                ShowStatus(auto ? "Saved." : $"Saved {DesktopText.OneLine(result.Text)}.", auto ? "grey" : "accent");
+            }
+            else
+            {
+                ShowStatus(DesktopText.OneLine(result.Text), "red");
+            }
+
+            return result;
+        }
+        finally
+        {
+            saving = false;
+            saveGate.Release();
+            if (!disposed)
+            {
+                StateHasChanged();
+            }
+        }
+    }
 
     /// <summary>
     /// What a save writes: the note as opened and the editor's Markdown, or the text as opened when nothing was
@@ -117,29 +225,6 @@
         bool dirty = await Interop.IsDirtyAsync(host);
         string text = dirty ? await Interop.GetMarkdownAsync(host) : note.Text;
         return new SaveRequest(note, text);
-    }
-
-    /// <summary>Shows how a save ended; after a save the saved text becomes the text as opened.</summary>
-    internal async Task ApplySaveAsync(ActionResult result)
-    {
-        if (result.Kind == ActionKind.Done)
-        {
-            if (result.Note is { } saved)
-            {
-                opened = saved;
-                lossy = !await Interop.IsLosslessAsync(saved.Text, Name);
-            }
-
-            await Interop.MarkCleanAsync(host);
-            dirty = false;
-            ShowStatus($"Saved {DesktopText.OneLine(result.Text)}.", "accent");
-        }
-        else
-        {
-            ShowStatus(DesktopText.OneLine(result.Text), "red");
-        }
-
-        StateHasChanged();
     }
 
     /// <summary>
@@ -192,6 +277,8 @@
             return;
         }
 
+        CancelPause();
+
         EditableNote? note = await State.ReadForEdit(Name);
         if (note is null)
         {
@@ -224,6 +311,7 @@
             return;
         }
 
+        CancelPause();
         try
         {
             lossy = !await Interop.IsLosslessAsync(saved.Text, Name);
@@ -242,6 +330,8 @@
 
     public async ValueTask DisposeAsync()
     {
+        disposed = true;
+        CancelPause();
         Dispose();
         if (Sensitive)
         {
@@ -257,6 +347,7 @@
         Interop.DirtyChanged -= DirtyChanged;
         Interop.FilesDropped -= FilesDropped;
         Interop.AttachmentClicked -= AttachmentClicked;
+        Interop.Changed -= EditorChanged;
         await Interop.DestroyAsync();
     }
 
@@ -290,6 +381,7 @@
             Interop.DirtyChanged += DirtyChanged;
             Interop.FilesDropped += FilesDropped;
             Interop.AttachmentClicked += AttachmentClicked;
+            Interop.Changed += EditorChanged;
 
             // A sensitive note shows no images: nothing next to it is read.
             IReadOnlyList<InlineImage> images = Sensitive ? [] : await State.InlineImages(Name, note.Text);
@@ -319,28 +411,58 @@
         StateHasChanged();
     }
 
-    private async Task Save(KeyboardEventArgs? key)
+    // Ctrl/Cmd+S saves at once; every other key only counts as use.
+    private async Task Save(KeyboardEventArgs key)
     {
         Used();
-        if (key is not null && !((key.CtrlKey || key.MetaKey) && string.Equals(key.Key, "s", StringComparison.OrdinalIgnoreCase)))
+        if ((key.CtrlKey || key.MetaKey) && string.Equals(key.Key, "s", StringComparison.OrdinalIgnoreCase))
+        {
+            await SaveAsync(false);
+        }
+    }
+
+    // Every change of the text starts the pause again; only the last one before a quiet pause leads to a save.
+    private Task EditorChanged() => InvokeAsync(RestartPause);
+
+    private void RestartPause()
+    {
+        CancelPause();
+        if (disposed || !mounted)
         {
             return;
         }
 
-        if (await PrepareSaveAsync() is not { } request)
-        {
-            return;
-        }
+        pause = new CancellationTokenSource();
+        _ = AutoSaveAsync(pause.Token);
+    }
 
-        saving = true;
+    private void CancelPause()
+    {
+        if (pause is { } pending)
+        {
+            pause = null;
+            pending.Cancel();
+            pending.Dispose();
+        }
+    }
+
+    // Waits for the pause, then saves on the renderer's thread unless the pause was cancelled meanwhile.
+    private async Task AutoSaveAsync(CancellationToken cancel)
+    {
         try
         {
-            ActionResult result = await Actions.SaveNote(request.Note, request.Text);
-            await ApplySaveAsync(result);
+            await Pause.WaitAsync(cancel);
+            await InvokeAsync(async () =>
+            {
+                if (!cancel.IsCancellationRequested && !disposed)
+                {
+                    await SaveAsync(true);
+                }
+            });
         }
-        finally
+        catch (Exception e) when (e is OperationCanceledException or JSException or JSDisconnectedException or ObjectDisposedException)
         {
-            saving = false;
+            // Cancelled by a newer edit, a save or the editor going away; or the page is gone.
         }
     }
 
