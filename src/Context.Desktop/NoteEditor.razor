@@ -546,7 +546,7 @@
             return Task.CompletedTask;
         }
 
-        string value = TagParser.CollapseWhitespace(e.Value?.ToString() ?? string.Empty);
+        string value = AttributeValue(e.Value?.ToString());
         List<(int Line, string Key, string Value)> edits = Unchanged();
         edits[index] = (index, attributeRows[index].Key, value);
         return ApplyAttributesAsync(edits);
@@ -575,12 +575,20 @@
         }
 
         attributeKeyRefused = false;
-        List<(int Line, string Key, string Value)> edits = [.. Unchanged(), (-1, key, TagParser.CollapseWhitespace(newAttributeValue))];
+        List<(int Line, string Key, string Value)> edits = [.. Unchanged(), (-1, key, AttributeValue(newAttributeValue))];
         if (await ApplyAttributesAsync(edits))
         {
             newAttributeKey = string.Empty;
             newAttributeValue = string.Empty;
         }
+    }
+
+    // A typed value trimmed, whitespace runs as one space, and held to AttributeParser.MaxValueLength here too, not only by
+    // the field's maxlength.
+    private static string AttributeValue(string? typed)
+    {
+        string value = TagParser.CollapseWhitespace(typed ?? string.Empty);
+        return value.Length > AttributeParser.MaxValueLength ? value[..AttributeParser.MaxValueLength].TrimEnd() : value;
     }
 
     // Every row as read: its index, key and value, so the editor keeps its bytes.

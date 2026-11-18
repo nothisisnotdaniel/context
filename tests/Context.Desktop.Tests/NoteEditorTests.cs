@@ -1260,7 +1260,7 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Equal(2, js.Calls("ContextEditor.attributes").Count);
 
         js.SetAttributeRows("[]");
-        EditableNote saved = (await data.State.ReadForEdit("Plan"))!;
+        EditableNote saved = (await data.State!.ReadForEdit("Plan"))!;
         await cut.InvokeAsync(() => cut.Instance.ShowSavedAsync(saved));
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".note-attributes")), Wait);
         Assert.Equal(3, js.Calls("ContextEditor.attributes").Count);
@@ -1292,6 +1292,22 @@ public sealed class NoteEditorTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".status").TextContent), Wait);
         Assert.Equal("# Plan\n\naliases:: A, B\nRole:: lead dev\n", File.ReadAllText(PlanPath));
         Assert.Empty(cut.FindAll("span.dirty-dot"));
+    }
+
+    // 236 review nit: a value longer than the field allows is cut to 400 chars before it reaches the page.
+    [Fact]
+    public async Task Attributes_LongValue_CappedAt400()
+    {
+        data.WriteNote("Plan", "# Plan\n\naliases:: A, B\nRole::\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.SetAttributeRows(PersonRows);
+        IRenderedComponent<NoteEditor> cut = await RenderAttributes("Plan");
+
+        await cut.FindAll("input.attribute-value")[1].ChangeAsync(new ChangeEventArgs { Value = new string('v', 500) });
+
+        string edits = Assert.Single(js.AttributeEdits());
+        Assert.Contains("\"value\":\"" + new string('v', 400) + "\"}", edits, StringComparison.Ordinal);
+        Assert.DoesNotContain(new string('v', 401), edits, StringComparison.Ordinal);
     }
 
     // 236 AC-6: Remove sends every other row as it is.
