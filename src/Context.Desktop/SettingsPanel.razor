@@ -1,8 +1,9 @@
 @inherits StateComponent
-@* The settings: the Exchange calendar link (set, replace, remove) and the key that opens sensitive notes. The link
+@* The settings: the Exchange calendar link (set, replace, remove), whether Context reads classic Outlook (Windows
+   only; DesktopState.OutlookSetting) and the key that opens sensitive notes. The link
    is a bearer secret: it is typed into a password field that has no value, kept in one field of this component
    until it is saved or the panel closes, handed only to DesktopActions and never rendered back; what is shown is
-   the masked link from DesktopState.CalendarLinkSetting. Both sections reload whenever the state changes. *@
+   the masked link from DesktopState.CalendarLinkSetting. Every section reloads whenever the state changes. *@
 
 <section class="page settings-panel" aria-label="Settings">
     <div class="panel-bar">
@@ -36,6 +37,29 @@
         }
     </div>
     <p class="settings-result @resultClass" role="status">@resultText</p>
+    <h3>Outlook</h3>
+    @if (outlook is null)
+    {
+        <p class="outlook-state grey">Loading…</p>
+    }
+    else if (outlook.Availability == OutlookAvailability.Unsupported)
+    {
+        <p class="outlook-state grey">@OutlookUnsupportedText</p>
+    }
+    else if (outlook.Availability == OutlookAvailability.NotInstalled)
+    {
+        <p class="outlook-state grey">@OutlookNotInstalledText</p>
+    }
+    else
+    {
+        <label class="outlook-line">
+            <input type="checkbox" class="outlook-enabled" checked="@outlook.Enabled" disabled="@busy"
+                   @onchange="ToggleOutlook" />
+            Read calendar and mail from Outlook
+        </label>
+        <p class="outlook-hint grey">@OutlookHintText</p>
+    }
+    <p class="outlook-result @outlookResultClass" role="status">@outlookResultText</p>
     <h3>Sensitive notes</h3>
     @if (key is null)
     {
@@ -87,6 +111,10 @@
 @code {
     public const string UnreadableText = "Can't read calendar-link.txt. Set the link again or remove it.";
     public const string ReplaceQuestion = "Replace the calendar link? The downloaded calendar copy is deleted too.";
+    public const string OutlookUnsupportedText = "Outlook is only available on Windows.";
+    public const string OutlookNotInstalledText =
+        "Classic Outlook isn't installed. The new Outlook can't be read; use a calendar link instead.";
+    public const string OutlookHintText = "Outlook may ask whether Context may access it.";
     public const string RemoveQuestion = "Remove the calendar link? The downloaded calendar copy is deleted too.";
 
     private const string TimeFormat = "yyyy-MM-dd HH:mm";
@@ -94,6 +122,9 @@
 
     private CalendarLinkView? link;
     private SensitiveKeyView? key;
+    private OutlookSettingView? outlook;
+    private string outlookResultText = string.Empty;
+    private string outlookResultClass = string.Empty;
     private int request;
 
     // The typed link: never rendered, cleared once it is saved and when the panel closes.
@@ -135,10 +166,12 @@
     {
         int mine = ++request;
         CalendarLinkView linkNow = await State.CalendarLinkSetting();
+        OutlookSettingView outlookNow = await State.OutlookSetting();
         SensitiveKeyView keyNow = await State.SensitiveKey();
         if (mine == request)
         {
             link = linkNow;
+            outlook = outlookNow;
             key = keyNow;
         }
     }
@@ -230,6 +263,31 @@
         }
 
         ShowResult(DesktopText.OneLine(result.Text), result.Kind == ActionKind.Done ? "accent" : "red");
+        await Load();
+    }
+
+    // The checkbox: stores the new value, then shows what is stored.
+    private async Task ToggleOutlook(ChangeEventArgs e)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        bool on = e.Value is bool value ? value : string.Equals(e.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.SetOutlookEnabled(on);
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        outlookResultText = DesktopText.OneLine(result.Text);
+        outlookResultClass = result.Kind == ActionKind.Done ? "accent" : "red";
         await Load();
     }
 

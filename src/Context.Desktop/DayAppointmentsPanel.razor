@@ -1,10 +1,10 @@
 @inherits StateComponent
-@* The shown day's appointments at the top of the right sidebar (DesktopState.DayAppointments: the calendar files and
-   the feed's cached copy, never a download). On today it lists the last past appointment and every one not yet past
-   (AppointmentList.Shown), on any other day all of them. The arrows step the day; a click on an appointment asks Main
-   to show its appointment page. Below the list, on every day, the Exchange feed's status from the snapshot's current
-   view (offline or failed; the link is never shown). It reads only, and reloads whenever the state changes, keeping
-   the shown rows. *@
+@* The shown day's appointments at the top of the right sidebar (DesktopState.DayAppointments: the calendar files,
+   the feed's cached copy and Outlook when it is on, never a download). On today it lists the last past appointment
+   and every one not yet past (AppointmentList.Shown), on any other day all of them. The arrows step the day; a click
+   on an appointment asks Main to show its appointment page. Below the list, on every day, how reading Outlook went
+   and the Exchange feed's status from the snapshot's current view (offline or failed; the link is never shown). It
+   reads only, and reloads whenever the state changes, keeping the shown rows. *@
 
 <section class="day-appointments" aria-label="Appointments">
     <div class="day-appointments-bar">
@@ -49,6 +49,10 @@
         @foreach (string name in view.Unreadable)
         {
             <p class="red" role="status">Can't read @CalendarStore.FolderName/@DesktopText.OneLine(name)</p>
+        }
+        @if (OutlookStatusLine.Text(view.Outlook) is { } outlookLine)
+        {
+            <p class="outlook-status @OutlookStatusLine.Css(view.Outlook)" role="status">@outlookLine</p>
         }
         @if (Snapshot?.Current is { } current)
         {

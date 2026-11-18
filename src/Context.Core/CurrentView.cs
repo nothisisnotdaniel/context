@@ -175,13 +175,16 @@ internal sealed record CurrentView
     /// one <see cref="TagIndex.NoteTags"/> call when there is at least one appointment, and synced when something is
     /// due; <paramref name="dueOnDayOnly"/> keeps only the todos due exactly on <paramref name="today"/> (a chosen day's
     /// view: none is overdue); with no appointments and nothing due (also when <c>todos.json</c> can't be read) it isn't touched.
+    /// <paramref name="extra"/> appointments (in the calendar's zone, for example Outlook's) are filtered and sorted
+    /// together with the files' and the feed's events through <see cref="CalendarStore.Day(DateOnly, IReadOnlyList{Appointment})"/>.
     /// </summary>
     public static CurrentView Build(
         TodoStore todos, TagIndex index, NoteStore notes, CalendarStore calendar, CalendarFeed? feed, DateOnly today,
-        bool dueOnDayOnly = false)
+        bool dueOnDayOnly = false, IReadOnlyList<Appointment>? extra = null)
     {
         CalendarFeedResult result = Fetch(feed);
-        CalendarDay day = calendar.Day(today, FeedEvents(result, calendar.Zone, today));
+        IReadOnlyList<Appointment> feedEvents = FeedEvents(result, calendar.Zone, today);
+        CalendarDay day = calendar.Day(today, extra is null || extra.Count == 0 ? feedEvents : [.. feedEvents, .. extra]);
 
         IReadOnlyList<TodoItem> items;
         bool todosUnreadable = false;

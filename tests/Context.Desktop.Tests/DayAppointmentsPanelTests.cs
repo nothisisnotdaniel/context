@@ -246,6 +246,71 @@ public sealed class DayAppointmentsPanelTests : IDisposable
         Assert.Equal(fresh ? CalendarFeedStatus.Fresh : CalendarFeedStatus.NotConfigured, data.State!.Snapshot!.Current!.Status);
     }
 
+    // 217 AC-3: Outlook's appointments show merged with the .ics ones, and a click opens the appointment page.
+    [Fact]
+    public async Task Outlook_Ok_MergedRows_ClickOpensThePage()
+    {
+        WriteDays();
+        new SettingsStore(data.Root).SaveOutlook(true);
+        data.Outlook.Days[DesktopFixture.Today] =
+        [
+            new Appointment("From Outlook", null, new DateTime(2026, 10, 29, 10, 30, 0), new DateTime(2026, 10, 29, 11, 0, 0), false),
+        ];
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        WaitForItems(cut, 3);
+
+        Assert.Equal(["08:30-09:30 Standup", "10:30-11:00 From Outlook", "11:00-12:00 Plan"], Items(cut));
+        Assert.Empty(cut.FindAll(".day-appointments .outlook-status"));
+
+        await cut.FindAll(".day-appointments .appointment-item")[1].ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(
+            () => Assert.Equal("From Outlook", cut.Find(".current-region section.appointment-page h2").TextContent),
+            Wait);
+    }
+
+    // 217 AC-4: each failure shows its status line under the list; the .ics appointments still show.
+    [Theory]
+    [InlineData("NotRunning", false, "grey", "Outlook isn't running. Start it to see its appointments and mail.")]
+    [InlineData("Denied", false, "red", "Can't read Outlook (access denied).")]
+    [InlineData("Failed", false, "red", "Can't read Outlook (error).")]
+    [InlineData("Ok", true, "red", "Can't read Outlook (error).")]
+    public async Task Outlook_Failure_StatusLine_KeepsTheIcsRows(string kind, bool throws, string css, string text)
+    {
+        WriteDays();
+        new SettingsStore(data.Root).SaveOutlook(true);
+        data.Outlook.AppointmentKind = Enum.Parse<OutlookReadKind>(kind);
+        data.Outlook.Throws = throws ? new InvalidOperationException("MARKER-217") : null;
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        WaitForItems(cut, 2);
+
+        IElement line = cut.Find(".day-appointments p.outlook-status");
+        Assert.Equal(text, line.TextContent);
+        Assert.Contains(css, line.ClassList);
+        Assert.Equal("status", line.GetAttribute("role"));
+        Assert.Equal(["08:30-09:30 Standup", "11:00-12:00 Plan"], Items(cut));
+        Assert.DoesNotContain("MARKER-217", cut.Markup, StringComparison.Ordinal);
+    }
+
+    // 217 AC-5: a source call that doesn't return within the timeout shows "timed out", and the panel leaves Loading….
+    [Fact]
+    public async Task Outlook_Blocked_TimedOut_LeavesLoading()
+    {
+        WriteDays();
+        new SettingsStore(data.Root).SaveOutlook(true);
+        data.OutlookTimeout = TimeSpan.FromMilliseconds(100);
+        data.Outlook.Block();
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.DoesNotContain("Loading…", cut.Find(".day-appointments").TextContent, StringComparison.Ordinal);
+            Assert.Equal("Can't read Outlook (timed out).", cut.Find(".day-appointments p.outlook-status").TextContent);
+        }, Wait);
+        Assert.Contains("red", cut.Find(".day-appointments p.outlook-status").ClassList);
+        Assert.Equal(["08:30-09:30 Standup", "11:00-12:00 Plan"], Items(cut));
+    }
+
     private static string Heading(IRenderedComponent<Main> cut) => cut.Find(".day-appointments h2.day-appointments-day").TextContent;
 
     private static string[] Items(IRenderedComponent<Main> cut) =>

@@ -17,11 +17,11 @@ public sealed class DesktopSourceTests
     // which components reach only through the injected Actions (only Actions.RestoreVersion( itself is let through).
     // 177: NoteAttachments.Add (caught by Add), MoveWithNote and RemoveUnlinked. 178: TodoStore.MarkNotified.
     // 179: InboxTriage.Snooze; InboxTriage.Remove is checked on its own (Sources_CallInboxTriageWritesOnlyInDesktopActions),
-    // since components remove from their own lists. 201: NoteTodos.Complete (matched by Complete).
+    // since components remove from their own lists. 201: NoteTodos.Complete (matched by Complete). 217: SettingsStore.SaveOutlook.
     private static readonly Regex Writes = new(
         @"(?:(?<!\bActions)|(?!\.\s*RestoreVersion\s*\())\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
         + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture|CreateChild|Move|Ensure|CreateWithText"
-        + @"|CloseDay|RefreshWorked|MoveTodos|AutoClose|MoveDue|SaveDayEnd|SaveSavedSearches|Keep|RemoveHistory|RestoreVersion|MoveWithNote|RemoveUnlinked|MarkNotified|Snooze)\s*\(",
+        + @"|CloseDay|RefreshWorked|MoveTodos|AutoClose|MoveDue|SaveDayEnd|SaveSavedSearches|Keep|RemoveHistory|RestoreVersion|MoveWithNote|RemoveUnlinked|MarkNotified|Snooze|SaveOutlook)\s*\(",
         RegexOptions.CultureInvariant);
 
     // 136: the real key stores and the real file dialog, spelled in pieces: no test file may hold their names (see
@@ -85,6 +85,10 @@ public sealed class DesktopSourceTests
     private const string RealUpdateSourceFile = "src/Context.Desktop/" + RealUpdateSource + ".cs";
 
     // 134: spelled in pieces too: no test file may hold the real launcher's name.
+    // 217: the real Outlook COM source, spelled in pieces: no test file may hold its name.
+    private const string RealOutlook = "Outlook" + "ComSource";
+    private const string RealOutlookFile = "src/Context.Desktop/" + RealOutlook + ".cs";
+
     private const string RealLauncher = "Shell" + "NoteLauncher";
     private const string RealLauncherFile = "src/Context.Desktop/" + RealLauncher + ".cs";
 
@@ -1284,6 +1288,7 @@ public sealed class DesktopSourceTests
     [InlineData("todos.MoveDue(day, day.AddDays(1))")]
     [InlineData("settings.SaveDayEnd(values)")]
     [InlineData("settings.SaveSavedSearches(searches)")]
+    [InlineData("settings.SaveOutlook(on)")]
     [InlineData("history.Keep(note.Path, bytes)")]
     [InlineData("state.HistoryStore.Keep(found.Path, current, found.Name)")]
     [InlineData("state.HistoryStore.RemoveHistory(path, \".md\")")]
@@ -1673,7 +1678,7 @@ public sealed class DesktopSourceTests
             RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs"));
     }
 
-    // 136 AC-10: native calls live only in the macOS key store.
+    // 136 AC-10, 217 AC-8: native calls live only in the macOS key store and the Outlook COM source.
     [Fact]
     public void Sources_HaveNativeCallsOnlyInTheMacStore()
     {
@@ -1683,7 +1688,80 @@ public sealed class DesktopSourceTests
             .Where(f => native.Any(n => File.ReadAllText(Path.Combine(root, f)).Contains(n, StringComparison.Ordinal)))
             .ToList();
 
-        Assert.Equal([RealMacStoreFile], found);
+        Assert.Equal([RealMacStoreFile, RealOutlookFile], found.Order(StringComparer.Ordinal));
+    }
+
+    // 217 AC-8: the Outlook COM source is named only by itself and Program.cs, which picks it on Windows.
+    [Fact]
+    public void Sources_NameTheOutlookSourceOnlyInItselfAndProgram()
+    {
+        string root = RepoFiles.Root();
+        List<string> found = RepoFiles.Sources(root, "src", ".cs", ".razor")
+            .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains(RealOutlook, StringComparison.Ordinal))
+            .ToList();
+
+        Assert.Equal([RealOutlookFile, ProgramFile], found.Order(StringComparer.Ordinal));
+        string program = File.ReadAllText(Path.Combine(root, ProgramFile));
+        Assert.Contains("return new " + RealOutlook + "();", program, StringComparison.Ordinal);
+        Assert.Contains("return new UnsupportedOutlookSource();", program, StringComparison.Ordinal);
+        Assert.Contains("OperatingSystem.IsWindows()", program, StringComparison.Ordinal);
+    }
+
+    // 217 AC-8: no test touches the real Outlook source (it would talk to COM); tests use FakeOutlookSource.
+    [Fact]
+    public void Tests_NeverReferenceTheRealOutlookSource()
+    {
+        string root = RepoFiles.Root();
+        List<string> found = [];
+        foreach (string folder in new[] { "tests/Context.Tests", "tests/Context.Desktop.Tests" })
+        {
+            found.AddRange(RepoFiles.Sources(root, folder, ".cs", ".csproj")
+                .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains(RealOutlook, StringComparison.Ordinal)));
+        }
+
+        Assert.True(found.Count == 0, "Tests name the real Outlook source: " + string.Join(", ", found));
+        Assert.Contains(
+            "tests/Context.Desktop.Tests/FakeOutlookSource.cs",
+            RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs"));
+    }
+
+    // 217 AC-8: the Outlook source only attaches to a running Outlook (GetActiveObject) and never starts one or
+    // writes to it.
+    [Theory]
+    [InlineData("Activator.CreateInstance")]
+    [InlineData("CoCreateInstance")]
+    [InlineData(".Save(")]
+    [InlineData(".Send(")]
+    [InlineData(".Delete(")]
+    [InlineData(".Move(")]
+    [InlineData(".Display(")]
+    [InlineData("CreateItem")]
+    public void OutlookSource_AttachesOnlyAndNeverWrites(string forbidden)
+    {
+        string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), RealOutlookFile));
+
+        Assert.DoesNotContain(forbidden, source, StringComparison.Ordinal);
+        Assert.Contains("GetActiveObject(", source, StringComparison.Ordinal);
+        Assert.Contains("CLSIDFromProgID(", source, StringComparison.Ordinal);
+        Assert.Contains("Marshal.FinalReleaseComObject(", source, StringComparison.Ordinal);
+        Assert.Contains("[SupportedOSPlatform(\"windows\")]", source, StringComparison.Ordinal);
+    }
+
+    // 217 AC-8: the Outlook source reads no mail body and no recipients, and never asks a folder for its Count.
+    [Theory]
+    [InlineData("Body")]
+    [InlineData("HTMLBody")]
+    [InlineData("Recipients")]
+    [InlineData("RequiredAttendees")]
+    [InlineData("OptionalAttendees")]
+    [InlineData("SenderEmailAddress")]
+    [InlineData("Attachments")]
+    [InlineData(".Count")]
+    public void OutlookSource_ReadsNoBodyOrRecipients(string forbidden)
+    {
+        string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), RealOutlookFile));
+
+        Assert.DoesNotContain(forbidden, source, StringComparison.Ordinal);
     }
 
     // 136 AC-10: the certificate store and CNG are used only in the Windows key store.

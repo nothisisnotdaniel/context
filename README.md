@@ -191,6 +191,19 @@ those 7 days), `Overdue` (open todos due before today) and `Next week` (the appo
 ahead, one line per day an appointment touches). Every heading is printed, also when its section is empty. It never
 opens `context.db`. In the desktop app, `/review` in the command palette shows the same page; click a note to open it.
 
+### Outlook
+
+On Windows with classic Outlook, the desktop app can show the day's Outlook appointments next to the ones from
+`calendar/*.ics` and the Exchange calendar, and the last day's Inbox mail (at most ten, newest first) in the sidebar
+below the appointments. Turn it on in Settings, under *Outlook*: `Read calendar and mail from Outlook`. It is off by
+default and stored as `"outlook":{"enabled":true}` in `settings.json`. Context reads the Outlook that is already
+running, with the profile you are signed in with: no app registration, no token, and it never starts Outlook, never
+changes anything in it and stores nothing from it on disk. It reads only the default Calendar (title, location,
+start, end, all day) and the default Inbox (time, sender name, subject), at most every five minutes. Outlook may ask
+whether Context may access it; if you deny it, the panels show `Can't read Outlook (access denied).`. With Outlook
+closed they show `Outlook isn't running.`. The new Outlook and other systems can't be read; the section says so, and
+a calendar link works instead. The command-line tool doesn't read Outlook.
+
 ### Note templates
 
 Keep notes you write again and again (meetings, reviews) as plain Markdown files in the `templates` folder of the

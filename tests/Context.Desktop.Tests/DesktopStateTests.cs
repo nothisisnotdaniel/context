@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Reflection;
 
@@ -382,5 +383,213 @@ public sealed class DesktopStateTests : IDisposable
         Assert.Equal(LinksViewKind.IndexUnreadable, links.Kind);
         Assert.Empty(links.Links);
         Assert.Equal(text, File.ReadAllText(Path.Combine(data.Root, TagIndex.FileName)));
+    }
+
+    // 217: an Outlook appointment on the test day, in the calendar's zone.
+    private static Appointment OutlookAppointment(string title, int hour, int minute = 0) =>
+        new(title, "Room 1", new DateTime(2026, 10, 29, hour, minute, 0), new DateTime(2026, 10, 29, hour + 1, minute, 0), false);
+
+    private static MailSummary Mail(string subject, int hoursAgo, int minutes = 0) =>
+        new(new DateTime(2026, 10, 29, 9, 0, 0, DateTimeKind.Utc).AddHours(-hoursAgo).AddMinutes(-minutes), "Ann", subject);
+
+    private void OutlookOn() => new SettingsStore(data.Root).SaveOutlook(true);
+
+    // 217 AC-1: with no outlook section, with enabled false, or with Outlook not available, nothing is asked across
+    // Refresh, DayAppointments and RecentMail, and the mail view is Off.
+    [Theory]
+    [InlineData(null, "Available")]
+    [InlineData("{\"outlook\":{\"enabled\":false}}", "Available")]
+    [InlineData("{\"outlook\":{\"enabled\":\"yes\"}}", "Available")]
+    [InlineData("not json", "Available")]
+    [InlineData("{\"outlook\":{\"enabled\":true}}", "NotInstalled")]
+    [InlineData("{\"outlook\":{\"enabled\":true}}", "Unsupported")]
+    public async Task Outlook_Off_AsksTheSourceNothing(string? settings, string availability)
+    {
+        if (settings is not null)
+        {
+            data.WriteFile(SettingsStore.FileName, settings);
+        }
+
+        data.Outlook.Available = Enum.Parse<OutlookAvailability>(availability);
+        data.Outlook.Days[DesktopFixture.Today] = [OutlookAppointment("From Outlook", 11)];
+        data.Outlook.Mails = [Mail("Hello", 1)];
+
+        DesktopSnapshot snapshot = await data.RefreshAsync();
+        DayAppointmentsView day = await data.State!.DayAppointments(DesktopFixture.Today);
+        RecentMailView mail = await data.State.RecentMail();
+
+        Assert.Equal((0, 0), (data.Outlook.AppointmentCalls, data.Outlook.MailCalls));
+        Assert.Empty(snapshot.Current!.Appointments);
+        Assert.Empty(day.Appointments);
+        Assert.Equal(OutlookStatus.Off, day.Outlook);
+        Assert.Equal(OutlookStatus.Off, mail.Status);
+        Assert.Empty(mail.Mails);
+    }
+
+    // 217 AC-3: Outlook's appointments are merged with the .ics ones in CalendarStore.Day order, the same in
+    // DayAppointments and in the snapshot's current view (so /meeting numbers them like the sidebar).
+    [Fact]
+    public async Task Outlook_Ok_MergesAppointments_InDayOrder_InTheSidebarAndTheSnapshot()
+    {
+        OutlookOn();
+        data.WriteCalendar("a.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("Standup", "20261029T090000", "20261029T093000"),
+            DesktopFixture.Event("Lunch", "20261029T120000", "20261029T130000")));
+        data.Outlook.Days[DesktopFixture.Today] = [OutlookAppointment("Review", 14), OutlookAppointment("Planning", 10, 30)];
+        CalendarStore store = new CalendarStore(data.Root, DesktopFixture.Zone);
+        string[] expected = store.Day(DesktopFixture.Today, data.Outlook.Days[DesktopFixture.Today]).Appointments
+            .Select(a => a.Title).ToArray();
+
+        DesktopSnapshot snapshot = await data.RefreshAsync();
+        DayAppointmentsView day = await data.State!.DayAppointments(DesktopFixture.Today);
+
+        Assert.Equal(["Standup", "Planning", "Lunch", "Review"], expected);
+        Assert.Equal(expected, day.Appointments.Select(a => a.Title).ToArray());
+        Assert.Equal(expected, snapshot.Current!.Appointments.Select(a => a.Title).ToArray());
+        Assert.Equal(OutlookStatus.Ok, day.Outlook);
+        Assert.Equal(DesktopFixture.Today, data.Outlook.AppointmentArguments[0].Day);
+        Assert.Same(DesktopFixture.Zone, data.Outlook.AppointmentArguments[0].Zone);
+    }
+
+    // 217 AC-3: the appointment page finds an Outlook appointment by its title.
+    [Fact]
+    public async Task Outlook_Ok_AppointmentPage_FindsTheOutlookAppointment()
+    {
+        OutlookOn();
+        data.Outlook.Days[DesktopFixture.Today] = [OutlookAppointment("Review", 14)];
+        DesktopState state = data.CreateState();
+
+        AppointmentPageView page = await state.AppointmentPage("Review", DesktopFixture.Today);
+
+        Assert.NotNull(page.First);
+        Assert.Equal(("Review", "Room 1", new DateTime(2026, 10, 29, 14, 0, 0)), (page.First.Title, page.First.Location, page.First.Start));
+        Assert.False(page.IndexUnreadable);
+    }
+
+    // 217 AC-4: every failure kind (and a call that throws) gives its status; the .ics appointments still show and
+    // nothing throws.
+    [Theory]
+    [InlineData("NotRunning", false, "NotRunning")]
+    [InlineData("Denied", false, "Denied")]
+    [InlineData("Failed", false, "Failed")]
+    [InlineData("Ok", true, "Failed")]
+    public async Task Outlook_Failure_GivesItsStatus_AndKeepsTheIcsAppointments(
+        string kindName, bool throws, string expectedName)
+    {
+        OutlookReadKind kind = Enum.Parse<OutlookReadKind>(kindName);
+        OutlookStatus expected = Enum.Parse<OutlookStatus>(expectedName);
+        OutlookOn();
+        data.WriteCalendar("a.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("Standup", "20261029T090000", "20261029T093000")));
+        data.Outlook.AppointmentKind = kind;
+        data.Outlook.MailKind = kind;
+        data.Outlook.Days[DesktopFixture.Today] = [OutlookAppointment("Review", 14)];
+        data.Outlook.Mails = [Mail("Hello", 1)];
+        data.Outlook.Throws = throws ? new InvalidOperationException("secret text") : null;
+
+        DesktopSnapshot snapshot = await data.RefreshAsync();
+        DayAppointmentsView day = await data.State!.DayAppointments(DesktopFixture.Today);
+        RecentMailView mail = await data.State.RecentMail();
+
+        Assert.False(snapshot.Failed);
+        Assert.Equal(["Standup"], snapshot.Current!.Appointments.Select(a => a.Title).ToArray());
+        Assert.Equal(["Standup"], day.Appointments.Select(a => a.Title).ToArray());
+        Assert.False(day.Failed);
+        Assert.Equal(expected, day.Outlook);
+        Assert.Equal(expected, mail.Status);
+        Assert.Empty(mail.Mails);
+    }
+
+    // 217 AC-5: a source call that doesn't return within OutlookTimeout gives TimedOut; the .ics appointments show.
+    [Fact]
+    public async Task Outlook_Blocked_TimesOut()
+    {
+        OutlookOn();
+        data.OutlookTimeout = TimeSpan.FromMilliseconds(100);
+        data.WriteCalendar("a.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("Standup", "20261029T090000", "20261029T093000")));
+        data.Outlook.Days[DesktopFixture.Today] = [OutlookAppointment("Review", 14)];
+        data.Outlook.Block();
+        DesktopState state = data.CreateState();
+
+        DayAppointmentsView day = await state.DayAppointments(DesktopFixture.Today);
+        RecentMailView mail = await state.RecentMail();
+
+        Assert.Equal(TimeSpan.FromMilliseconds(100), state.OutlookTimeout);
+        Assert.Equal(OutlookStatus.TimedOut, day.Outlook);
+        Assert.Equal(["Standup"], day.Appointments.Select(a => a.Title).ToArray());
+        Assert.Equal(OutlookStatus.TimedOut, mail.Status);
+    }
+
+    // 217 AC-5: the default timeout is ten seconds.
+    [Fact]
+    public void Outlook_DefaultTimeout_IsTenSeconds()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(10), data.CreateState().OutlookTimeout);
+    }
+
+    // 217 AC-6: two reads within five minutes (by the state's UTC clock) make one source call; one after five
+    // minutes makes a second; each day has its own entry.
+    [Fact]
+    public async Task Outlook_Cache_FiveMinutesPerDayAndForMail()
+    {
+        OutlookOn();
+        DesktopState state = data.CreateState();
+        DateOnly tomorrow = DesktopFixture.Today.AddDays(1);
+
+        await state.DayAppointments(DesktopFixture.Today);
+        await state.RecentMail();
+        data.UtcNow = data.UtcNow.AddMinutes(4).AddSeconds(59);
+        await state.DayAppointments(DesktopFixture.Today);
+        await state.RecentMail();
+        Assert.Equal((1, 1), (data.Outlook.AppointmentCalls, data.Outlook.MailCalls));
+
+        await state.DayAppointments(tomorrow);
+        Assert.Equal(2, data.Outlook.AppointmentCalls);
+        Assert.Equal(tomorrow, data.Outlook.AppointmentArguments[1].Day);
+
+        data.UtcNow = data.UtcNow.AddSeconds(1);
+        await state.DayAppointments(DesktopFixture.Today);
+        await state.RecentMail();
+        Assert.Equal((3, 2), (data.Outlook.AppointmentCalls, data.Outlook.MailCalls));
+    }
+
+    // 217 AC-6: a clock that went back makes the cached read stale.
+    [Fact]
+    public async Task Outlook_Cache_ClockBack_ReadsAgain()
+    {
+        OutlookOn();
+        DesktopState state = data.CreateState();
+
+        await state.RecentMail();
+        data.UtcNow = data.UtcNow.AddMinutes(-1);
+        await state.RecentMail();
+
+        Assert.Equal(2, data.Outlook.MailCalls);
+    }
+
+    // 217 AC-7: RecentMail asks for the last 24 hours and at most ten, and lists at most ten received in the last
+    // 24 hours, newest first.
+    [Fact]
+    public async Task RecentMail_LastDay_AtMostTen_NewestFirst()
+    {
+        OutlookOn();
+        data.Outlook.Mails =
+        [
+            .. Enumerable.Range(1, 11).Select(i => Mail("m" + i.ToString(CultureInfo.InvariantCulture), i)),
+            Mail("old", 24, 1),
+            Mail("newest", 0, 5),
+        ];
+        DesktopState state = data.CreateState();
+
+        RecentMailView view = await state.RecentMail();
+
+        Assert.Equal(OutlookStatus.Ok, view.Status);
+        Assert.Equal(
+            ["newest", "m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9"],
+            view.Mails.Select(m => m.Subject).ToArray());
+        (DateTime since, int max) = Assert.Single(data.Outlook.MailArguments);
+        Assert.Equal((new DateTime(2026, 10, 28, 9, 0, 0, DateTimeKind.Utc), 10), (since, max));
+        Assert.Equal(new DateTime(2026, 10, 29, 10, 0, 0), view.LocalNow);
     }
 }

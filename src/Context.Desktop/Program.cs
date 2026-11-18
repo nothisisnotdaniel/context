@@ -37,6 +37,17 @@ internal static class Program
             return new UnsupportedKeyStore();
         }
 
+        // Classic Outlook's COM interface, read-only; other systems have none.
+        static IOutlookSource Outlook()
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                return new OutlookComSource();
+            }
+
+            return new UnsupportedOutlookSource();
+        }
+
         string folder = NoteStore.DefaultFolder();
         NoteStore notes = new NoteStore(folder);
         TagIndex index = new TagIndex(folder);
@@ -51,7 +62,7 @@ internal static class Program
         CalendarFeed feed = new CalendarFeed(folder, calendarLink, http, () => DateTime.UtcNow);
         SensitiveSession session = new SensitiveSession(() => DateTime.UtcNow);
         DesktopState state = new DesktopState(
-            notes, todos, index, calendar, feed, Today, () => DateTime.UtcNow, KeyStore(), session, calendarLink);
+            notes, todos, index, calendar, feed, Today, () => DateTime.UtcNow, KeyStore(), session, calendarLink, Outlook());
         DesktopActions actions = new DesktopActions(
             notes, todos, state, new ShellNoteLauncher(), calendarLink, feed, () => DateTime.Now, calendar,
             TimesFolder.Resolve(Environment.GetEnvironmentVariable(TimesFolder.VariableName)), new SystemNotifier());

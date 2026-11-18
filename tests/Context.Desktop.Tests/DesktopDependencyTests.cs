@@ -176,4 +176,20 @@ public sealed class DesktopDependencyTests
             ["Photino.Blazor", "Velopack"],
             desktop.Descendants("PackageReference").Select(e => e.Attribute("Include")?.Value ?? string.Empty).Order(StringComparer.Ordinal).ToArray());
     }
+
+    // 217 AC-8: Outlook is read late-bound through dynamic: no Office interop assembly and no Outlook package, in the
+    // assembly's references or the desktop's lock file.
+    [Fact]
+    public void Desktop_HasNoOfficeInterop()
+    {
+        string[] found = typeof(DesktopState).Assembly.GetReferencedAssemblies()
+            .Select(r => r.Name ?? string.Empty)
+            .Where(n => n.Contains("Office", StringComparison.OrdinalIgnoreCase) || n.Contains("Outlook", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        string lockFile = File.ReadAllText(Path.Combine(RepoFiles.Root(), "src/Context.Desktop/packages.lock.json"));
+
+        Assert.Empty(found);
+        Assert.DoesNotContain("Office", lockFile, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Outlook", lockFile, StringComparison.OrdinalIgnoreCase);
+    }
 }
