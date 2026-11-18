@@ -2274,8 +2274,8 @@ public sealed class DesktopSourceTests
         Assert.Contains("width: 18px;", svg);
         Assert.Contains("height: 18px;", svg);
         Assert.DoesNotContain("http", razor, StringComparison.Ordinal);
-        // Capture, Today, Pick a day, and (job 213) the calendar's Previous and Next month arrows.
-        Assert.Equal(5, Regex.Matches(razor, "stroke=\"currentColor\"").Count);
+        // Capture, Search (job 218), Today, Pick a day, and (job 213) the calendar's Previous and Next month arrows.
+        Assert.Equal(6, Regex.Matches(razor, "stroke=\"currentColor\"").Count);
     }
 
     // 199 AC-1, AC-8, AC-9: the Capture icon is inline (no URL, no img), the popover is styled like the day pick, and
@@ -2313,6 +2313,45 @@ public sealed class DesktopSourceTests
         Assert.Single(Regex.Matches(main, Regex.Escape("Actions.CaptureText(")));
         Assert.Contains("OnCapture=\"CaptureAsync\"", main, StringComparison.Ordinal);
         Assert.Contains("Task<bool> CaptureAsync(string text)", main, StringComparison.Ordinal);
+    }
+
+    // 218 AC-9: the Search popover and its backdrop are styled like Capture's, with theme colours only (var(--…) or
+    // transparent), so light and dark mode both follow the theme; Main hands the text to ShowSearch.
+    [Fact]
+    public void TopBar_SearchPopover_ThemeColoursOnly()
+    {
+        string root = RepoFiles.Root();
+        string css = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "app.css")).ReplaceLineEndings("\n");
+        string main = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "Main.razor"));
+
+        string backdrop = CssBlock(css, ".search-pop-backdrop {");
+        Assert.Contains("position: fixed;", backdrop);
+        Assert.Contains("inset: 0;", backdrop);
+        Assert.Contains("background: transparent;", backdrop);
+        string pop = CssBlock(css, ".search-pop {");
+        Assert.Contains("top: 100%;", pop);
+        Assert.Contains("background: var(--panel);", pop);
+        Assert.Contains("border: 1px solid var(--line);", pop);
+        Assert.Contains(".search-pop input {", css, StringComparison.Ordinal);
+        foreach (string block in new[] { backdrop, pop, CssBlock(css, ".search-pop input {") })
+        {
+            foreach (Match m in Regex.Matches(block, @"(?m)^\s*(color|background|background-color|border|border-color)\s*:\s*([^;]*);"))
+            {
+                string value = m.Groups[2].Value;
+                string colour = Regex.Replace(value, @"^\d+px\s+solid\s+", string.Empty);
+                Assert.True(colour == "transparent" || Regex.IsMatch(colour, @"^var\(--[a-z-]+\)$"), m.Value);
+            }
+        }
+
+        Assert.Contains("OnSearch=\"ShowSearch\"", main[..main.IndexOf("@code", StringComparison.Ordinal)][main.IndexOf("<TopBar", StringComparison.Ordinal)..], StringComparison.Ordinal);
+    }
+
+    private static string CssBlock(string css, string head)
+    {
+        int at = css.IndexOf(head, StringComparison.Ordinal);
+        Assert.True(at >= 0, head);
+        string block = css[at..];
+        return block[..block.IndexOf('}')];
     }
 
     // 212 AC-8: the read-only day view is gone; no desktop source names it.

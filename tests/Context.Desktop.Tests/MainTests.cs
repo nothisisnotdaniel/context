@@ -2647,23 +2647,76 @@ public sealed class MainTests : IDisposable
         Assert.True(cut.Find(".search-panel p[role=status]").ClassList.Contains("grey"));
     }
 
-    // 207 AC-3: the sidebar's Search button shows the panel with an empty, focused input and the grey hint.
+    // The element ids the focus went to, in order.
+    private string[] FocusIds() =>
+        data.Bunit.JSInterop.Invocations
+            .Where(i => i.Identifier == "Blazor._internal.domWrapper.focus" && i.Arguments[0] is ElementReference)
+            .Select(i => ((ElementReference)i.Arguments[0]!).Id)
+            .ToArray();
+
+    // Top bar Search (job 218): opens the popover, types the text and presses Return.
+    private static async Task TopBarSearch(IRenderedComponent<Main> cut, string text)
+    {
+        await cut.Find(".top-bar button.search-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".search-pop input")), Wait);
+        await cut.Find(".search-pop input").InputAsync(new ChangeEventArgs { Value = text });
+        await cut.Find(".search-pop input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+    }
+
+    // 207 AC-3, 218 AC-5: the top bar's Search with an empty field shows the panel with an empty, focused input and
+    // the grey hint; the popover is gone.
     [Fact]
     public async Task SearchButton_ShowsPanel_EmptyInputFocused()
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await cut.Find(".notes-bar-buttons button.search-open").ClickAsync(new MouseEventArgs());
+        await TopBarSearch(cut, string.Empty);
 
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".search-panel")), Wait);
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".search-panel").TextContent, StringComparison.Ordinal), Wait);
+        Assert.Empty(cut.FindAll(".search-pop"));
         IElement input = cut.Find(".search-panel input.search-input");
         Assert.Equal(string.Empty, input.GetAttribute("value"));
         Assert.Equal("Search", cut.Find(".search-panel h2").TextContent);
-        Assert.Equal(
-            "Type text or a tag filter like #project and not #done.", cut.Find(".search-panel p[role=status]").TextContent);
-        JSRuntimeInvocation focus = data.Bunit.JSInterop.VerifyFocusAsyncInvoke();
-        Assert.Equal(
-            input.GetAttribute("blazor:elementReference"), ((ElementReference)focus.Arguments[0]!).Id);
+        IElement status = cut.Find(".search-panel p[role=status]");
+        Assert.Equal("Type text or a tag filter like #project and not #done.", status.TextContent);
+        Assert.True(status.ClassList.Contains("grey"));
+        AssertFocused(cut, ".search-panel input.search-input");
+    }
+
+    // 218 AC-5: the top bar's Search with typed text shows its results; each search gives the focus to the panel's
+    // input (the same element both times, never the popover's field, which is gone).
+    [Fact]
+    public async Task TopBarSearch_Text_ShowsResults_PanelInputFocusedEachTime()
+    {
+        data.WriteNote("Anna", "# Anna\nBudget 2027\n#work\n");
+        data.WriteNote("Plan", "x\n");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await cut.Find(".top-bar button.search-open").ClickAsync(new MouseEventArgs());
+        string? popField = cut.Find(".search-pop input").GetAttribute("blazor:elementReference");
+        Assert.False(string.IsNullOrEmpty(popField));
+        await cut.Find(".search-pop input").InputAsync(new ChangeEventArgs { Value = "budget" });
+        int before = FocusIds().Length;
+        await cut.Find(".search-pop input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Anna"], cut.FindAll(".search-panel .note-button").Select(b => b.TextContent).ToArray()), Wait);
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".search-panel").TextContent, StringComparison.Ordinal), Wait);
+        Assert.Equal("Search: budget", cut.Find(".search-panel h2").TextContent);
+        Assert.Empty(cut.FindAll(".search-pop"));
+        cut.WaitForAssertion(() => Assert.True(FocusIds().Length > before), Wait);
+        string panelInput = FocusIds()[^1];
+        Assert.NotEqual(popField, panelInput);
+        before = FocusIds().Length;
+
+        await TopBarSearch(cut, string.Empty);
+
+        cut.WaitForAssertion(() => Assert.Equal("Search", cut.Find(".search-panel h2").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(
+            "Type text or a tag filter like #project and not #done.", cut.Find(".search-panel p[role=status]").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(panelInput, FocusIds()[^1]), Wait);
+        Assert.True(FocusIds().Length > before + 1);
     }
 
     // 207 AC-4: Return in the panel's input shows the typed text's results, as /search would.
@@ -2673,8 +2726,9 @@ public sealed class MainTests : IDisposable
         data.WriteNote("Anna", "# Anna\nBudget 2027\n#work\n");
         data.WriteNote("Plan", "x\n");
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        await cut.Find(".notes-bar-buttons button.search-open").ClickAsync(new MouseEventArgs());
+        await TopBarSearch(cut, string.Empty);
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".search-panel")), Wait);
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".search-panel").TextContent, StringComparison.Ordinal), Wait);
 
         await cut.Find(".search-input").InputAsync(new ChangeEventArgs { Value = "budget" });
         await cut.Find(".search-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
@@ -3626,7 +3680,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal(["rename", "delete", "history", "make-plain", "lock"], await MenuIdsAsync(cut));
     }
 
-    // 199 AC-1: Capture is the first icon button, before Today and Pick a day; no popover at first. (216: with no note
+    // 199 AC-1: Capture is the first icon button, before Search (218), Today and Pick a day; no popover at first. (216: with no note
     // open the menu has no items, so there is no … button.)
     [Fact]
     public async Task TopBar_CaptureButtonFirst_NoPopoverAtFirst()
@@ -3634,7 +3688,7 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
         Assert.Equal(
-            ["capture-open", "today-open", "day-pick-open"],
+            ["capture-open", "search-open", "today-open", "day-pick-open"],
             cut.FindAll(".top-bar-buttons > button").Select(b => b.ClassName ?? string.Empty).ToArray());
         IElement button = cut.Find("button.capture-open");
         Assert.Equal("Capture", button.GetAttribute("aria-label"));

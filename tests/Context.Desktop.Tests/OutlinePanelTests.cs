@@ -341,7 +341,9 @@ public sealed class OutlinePanelTests : IDisposable
         await cut.Find(".page > .panel-bar button.close").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("aside.todos-region nav.outline-panel button").Count), Wait);
 
-        await cut.Find("button.search-open").ClickAsync(new MouseEventArgs());
+        await cut.Find(".top-bar button.search-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".search-pop input")), Wait);
+        await cut.Find(".search-pop input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".search-panel")), Wait);
         Assert.Empty(cut.FindAll("nav.outline-panel"));
         await cut.Find(".search-panel button.close").ClickAsync(new MouseEventArgs());
