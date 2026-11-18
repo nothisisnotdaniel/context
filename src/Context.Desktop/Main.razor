@@ -463,7 +463,7 @@ else
 
         // The same steps as /meeting: a dirty editor is saved first or asks, unless it shows this meeting's note.
         if (editor is not null && openName is not null
-            && !string.Equals(openName, MeetingNote.NameFor(first), StringComparison.Ordinal)
+            && !MeetingNote.IsNoteOf(first, openName)
             && await KeptUnsaved())
         {
             pendingName = null;
@@ -1134,7 +1134,7 @@ else
 
                 // A dirty editor asks first, unless it already shows this meeting's note.
                 if (editor is not null && openName is not null
-                    && !string.Equals(openName, MeetingNote.NameFor(appointment), StringComparison.Ordinal)
+                    && !MeetingNote.IsNoteOf(appointment, openName)
                     && await KeptUnsaved())
                 {
                     pendingName = null;
