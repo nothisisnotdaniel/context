@@ -100,7 +100,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#254](backlog/254-month-calendar-in-the-day-picker.md) Month calendar in the day picker → 213-month-calendar-picker
 - [x] [#279](backlog/279-today-s-appointments-in-the-right.md) Today's appointments in the right sidebar → 214-sidebar-today-appointments
 - [x] [#278](backlog/278-today-and-home-open-today-s.md) Today and Home open today's note in the editor → 216-today-home-open-note
-- [ ] [#25](backlog/025-outlook-as-a-source.md) Outlook as a source
+- [x] [#25](backlog/025-outlook-as-a-source.md) Outlook as a source → 217-outlook-com-source
 - [ ] [#271](backlog/271-search-icon-in-the-top-bar.md) Search icon in the top bar, opens like Capture
 - [x] [#282](backlog/282-bigger-level-1-and-2-headings.md) Bigger level 1 and 2 headings in the note editor → 215-bigger-editor-headings
 - [ ] [#69](backlog/069-board-view-for-a-tag.md) Board view for a tag
