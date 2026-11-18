@@ -21,6 +21,19 @@
   letter-spacing: normal;
 }
 
+/* Level 1 (drawn as h2.heading-level-1) > level 2 (h2) > level 3 (h3); h4 to h6 keep the browser defaults. */
+.note-editor-body h2 {
+  font-size: 1.6em;
+}
+
+.note-editor-body h2.heading-level-1 {
+  font-size: 2em;
+}
+
+.note-editor-body h3 {
+  font-size: 1.3em;
+}
+
 .note-editor-body ul {
   list-style: disc;
   margin: 0 0 10px;

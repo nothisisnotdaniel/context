@@ -458,7 +458,7 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
         JsonElement heading = doc.RootElement.GetProperty("content")[0];
         Assert.Equal("heading", Type(heading));
         Assert.Equal(1, heading.GetProperty("attrs").GetProperty("level").GetInt32());
-        Assert.Equal("[\"h2\",0]", bundle.Json("ContextEditor.headingDom(1)"));
+        Assert.Equal("[\"h2\",{\"class\":\"heading-level-1\"},0]", bundle.Json("ContextEditor.headingDom(1)"));
         string saved = JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.roundTrip({Js(markdown)}, {nameArgument})"))!;
         Assert.StartsWith("# Project notes\n", saved, StringComparison.Ordinal);
         Assert.Equal(markdown, saved);
@@ -477,15 +477,19 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
         Assert.Contains("\n# Another level one\n", RoundTrip(markdown, "Title line"), StringComparison.Ordinal);
     }
 
-    // 202 AC-4: every heading level is drawn at h2 or below.
+    // 202 AC-4, 215 AC-1: every heading level is drawn at h2 or below; level 1 is an h2 with the class heading-level-1.
     [Theory]
-    [InlineData(1, "h2")]
-    [InlineData(2, "h2")]
-    [InlineData(3, "h3")]
-    [InlineData(6, "h6")]
-    public void HeadingDom_NeverH1(int level, string tag)
+    [InlineData(1, "[\"h2\",{\"class\":\"heading-level-1\"},0]")]
+    [InlineData(2, "[\"h2\",0]")]
+    [InlineData(3, "[\"h3\",0]")]
+    [InlineData(4, "[\"h4\",0]")]
+    [InlineData(5, "[\"h5\",0]")]
+    [InlineData(6, "[\"h6\",0]")]
+    public void HeadingDom_NeverH1(int level, string expected)
     {
-        Assert.Equal($"[\"{tag}\",0]", bundle.Json($"ContextEditor.headingDom({level})"));
+        string dom = bundle.Json($"ContextEditor.headingDom({level})");
+        Assert.Equal(expected, dom);
+        Assert.DoesNotContain("\"h1\"", dom, StringComparison.Ordinal);
     }
 
     // 202 AC-5: typing "# " or "## " makes a level-2 heading, "### " level 3; no typed input gives level 1.

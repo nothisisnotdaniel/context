@@ -1153,7 +1153,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     Job 202: `NoteEditor` passes `Name` to `mount` (5th argument); `splitTitle(markdown, name)` keeps a
     first line `# <name>` (ignoring case and surrounding spaces, or the name's last segment) and the blank lines after
     it as a hidden head that is never parsed and that `getMarkdown`/`roundTrip` put back byte for byte, and inside the
-    editor a level-1 heading keeps `level` 1 (saved as `# `) but is drawn as `h2` (`headingDom`), while typing `# ` makes level 2 (`typedBlock` tests the input rules without a view).
+    editor a level-1 heading keeps `level` 1 (saved as `# `) but is drawn as `h2.heading-level-1` (`headingDom`; job 215: `editor.css` sizes it 2em, `h2` 1.6em, `h3` 1.3em, h4–h6 keep the browser defaults), while typing `# ` makes level 2 (`typedBlock` tests the input rules without a view).
     A note that was read (or unlocked) but whose page editor didn't start (`mount` threw) shows red
     `The editor couldn't start. <name> was not changed.` (`p.editor-failed`, never together with `.unreadable`) and
     can't be saved, while a failed `focus` after a mount shows nothing.

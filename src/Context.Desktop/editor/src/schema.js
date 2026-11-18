@@ -14,9 +14,15 @@ export function chipDom(kind, raw) {
   return ["span", { class: "chip " + chip.name + " accent", title: raw, tabindex: "0", role: chip.role }, raw];
 }
 
-/** The toDOM spec of a heading of that level: level 1 is drawn as h2, so the page title is the only level-1 heading. */
+/**
+ * The toDOM spec of a heading of that level: level 1 is drawn as h2, so the page title is the only level-1 heading,
+ * with the class heading-level-1 so editor.css can draw it bigger than level 2.
+ */
 export function headingDom(level) {
-  return ["h" + Math.max(level, 2), 0];
+  if (level <= 1) {
+    return ["h2", { class: "heading-level-1" }, 0];
+  }
+  return ["h" + level, 0];
 }
 
 export const schema = new Schema({
