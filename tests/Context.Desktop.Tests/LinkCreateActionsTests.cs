@@ -94,6 +94,24 @@ public sealed class LinkCreateActionsTests : IDisposable
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
     }
 
+    // AC-4: an existing top-level sensitive note (any case) is opened as it is: nothing written, no key-store call.
+    [Fact]
+    public async Task CreateLinkedNote_ExistsSensitive_Unchanged()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("Diary", "# Diary\n");
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+
+        ActionResult result = await data.Actions!.CreateLinkedNote("diary");
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Equal(ActionReason.Unchanged, result.Reason);
+        Assert.Equal("Diary", result.Text);
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        AssertNoKeyCalls();
+    }
+
     // AC-5: an invalid segment is refused with that segment's ValidateTitle text; nothing written, no key call.
     [Theory]
     [InlineData("a//b", "A note needs a title.")]
