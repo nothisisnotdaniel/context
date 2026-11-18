@@ -50,6 +50,11 @@ internal sealed class DesktopState
     private string? offeredBriefing;
     private string? offeredStartNote;
 
+    // Counts the Changed handlers' reloads that are still running (StateComponent), for tests to wait on.
+    private readonly object reloadGate = new();
+    private int reloads;
+    private TaskCompletionSource? reloadsSettled;
+
     public DesktopState(
         NoteStore notes,
         TodoStore todos,
@@ -117,6 +122,47 @@ internal sealed class DesktopState
 
     /// <summary>The offered start note's name once, then <c>null</c> until the next offer.</summary>
     public string? TakeStartNote() => Interlocked.Exchange(ref offeredStartNote, null);
+
+    /// <summary>Counts one more running reload; called before a <see cref="Changed"/> handler dispatches it.</summary>
+    internal void BeginReload() => Interlocked.Increment(ref reloads);
+
+    /// <summary>Ends one reload begun by <see cref="BeginReload"/>; the last one completes <see cref="ReloadsSettled"/>.</summary>
+    internal void EndReload()
+    {
+        if (Interlocked.Decrement(ref reloads) != 0)
+        {
+            return;
+        }
+
+        TaskCompletionSource? done = null;
+        lock (reloadGate)
+        {
+            if (Volatile.Read(ref reloads) == 0)
+            {
+                done = reloadsSettled;
+                reloadsSettled = null;
+            }
+        }
+
+        done?.TrySetResult();
+    }
+
+    /// <summary>
+    /// A completed task when no reload is running; otherwise one that completes when the running count drops to 0.
+    /// </summary>
+    internal Task ReloadsSettled()
+    {
+        lock (reloadGate)
+        {
+            if (Volatile.Read(ref reloads) == 0)
+            {
+                return Task.CompletedTask;
+            }
+
+            reloadsSettled ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            return reloadsSettled.Task;
+        }
+    }
 
     /// <summary>How many snapshots have been built so far.</summary>
     public int Builds => Volatile.Read(ref builds);
