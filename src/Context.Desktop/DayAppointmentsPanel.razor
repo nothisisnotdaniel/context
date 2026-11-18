@@ -20,11 +20,11 @@
         DateTime from = view.Day.ToDateTime(TimeOnly.MinValue);
         @if (view.Failed)
         {
-            <p class="red">Can't read the calendar.</p>
+            <p class="red" role="status">Can't read the calendar.</p>
         }
         else if (shown.Count == 0)
         {
-            <p class="grey">No appointments.</p>
+            <p class="grey" role="status">No appointments.</p>
         }
         else
         {
@@ -46,7 +46,7 @@
         }
         @foreach (string name in view.Unreadable)
         {
-            <p class="red">Can't read @CalendarStore.FolderName/@DesktopText.OneLine(name)</p>
+            <p class="red" role="status">Can't read @CalendarStore.FolderName/@DesktopText.OneLine(name)</p>
         }
     }
 </section>
