@@ -111,7 +111,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#292](backlog/292-no-browser-context-menu-on-right.md) No browser context menu on right click in the desktop app → 224-no-context-menu
 - [x] [#293](backlog/293-narrower-pick-a-day-calendar-popover.md) Narrower Pick a day calendar popover → 226-narrow-day-pick
 - [x] [#294](backlog/294-hide-private-appointments.md) Hide private appointments → 227-hide-private-appointments
-- [ ] [#295](backlog/295-typing-name-makes-a-person-mention.md) Typing @[Name] makes a person mention chip right away
+- [x] [#295](backlog/295-typing-name-makes-a-person-mention.md) Typing @[Name] makes a person mention chip right away → 232-typed-mention-chip
 - [ ] [#296](backlog/296-clicking-a-link-to-a-missing.md) Clicking a link to a missing note creates the note
 - [ ] [#297](backlog/297-note-title-shows-only-the-page.md) Note title shows only the page's own name
 - [ ] [#298](backlog/298-attributes-in-a-collapsed-box-below.md) Attributes in a collapsed box below the note title
