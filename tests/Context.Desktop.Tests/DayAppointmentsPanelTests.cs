@@ -271,7 +271,7 @@ public sealed class DayAppointmentsPanelTests : IDisposable
 
     // 217 AC-4: each failure shows its status line under the list; the .ics appointments still show.
     [Theory]
-    [InlineData("NotRunning", false, "grey", "Outlook isn't running. Start it to see its appointments and mail.")]
+    [InlineData("NotRunning", false, "grey", "Outlook isn't running. Start it to see its appointments.")]
     [InlineData("Denied", false, "red", "Can't read Outlook (access denied).")]
     [InlineData("Failed", false, "red", "Can't read Outlook (error).")]
     [InlineData("Ok", true, "red", "Can't read Outlook (error).")]

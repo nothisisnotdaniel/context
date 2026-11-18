@@ -10,7 +10,6 @@ internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
     private readonly object gate = new();
     private readonly ManualResetEventSlim open = new(initialState: true);
     private readonly List<(DateOnly Day, TimeZoneInfo Zone)> appointmentCalls = [];
-    private readonly List<(DateTime SinceUtc, int Max)> mailCalls = [];
     private int availabilityCalls;
 
     public OutlookAvailability Available { get; set; } = OutlookAvailability.Available;
@@ -21,13 +20,7 @@ internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
     /// <summary>The items an <see cref="OutlookReadKind.Ok"/> <see cref="Appointments"/> call answers, by day.</summary>
     public Dictionary<DateOnly, IReadOnlyList<Appointment>> Days { get; } = [];
 
-    /// <summary>The kind every <see cref="RecentMail"/> call answers.</summary>
-    public OutlookReadKind MailKind { get; set; } = OutlookReadKind.Ok;
-
-    /// <summary>The items an <see cref="OutlookReadKind.Ok"/> <see cref="RecentMail"/> call answers, as they are.</summary>
-    public IReadOnlyList<MailSummary> Mails { get; set; } = [];
-
-    /// <summary>When set, <see cref="Appointments"/> and <see cref="RecentMail"/> throw this after counting the call.</summary>
+    /// <summary>When set, <see cref="Appointments"/> throws this after counting the call.</summary>
     public Exception? Throws { get; set; }
 
     public int AppointmentCalls
@@ -41,30 +34,7 @@ internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
         }
     }
 
-    public int MailCalls
-    {
-        get
-        {
-            lock (gate)
-            {
-                return mailCalls.Count;
-            }
-        }
-    }
-
     public int AvailabilityCalls => Volatile.Read(ref availabilityCalls);
-
-    /// <summary>The arguments of every <see cref="RecentMail"/> call, in order.</summary>
-    public IReadOnlyList<(DateTime SinceUtc, int Max)> MailArguments
-    {
-        get
-        {
-            lock (gate)
-            {
-                return [.. mailCalls];
-            }
-        }
-    }
 
     /// <summary>The arguments of every <see cref="Appointments"/> call, in order.</summary>
     public IReadOnlyList<(DateOnly Day, TimeZoneInfo Zone)> AppointmentArguments
@@ -75,30 +45,6 @@ internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
             {
                 return [.. appointmentCalls];
             }
-        }
-    }
-
-    /// <summary>
-    /// Waits until <see cref="RecentMail"/> was called at least <paramref name="count"/> times, at most
-    /// <paramref name="timeout"/>; true when it was.
-    /// </summary>
-    public bool WaitForMailCalls(int count, TimeSpan timeout)
-    {
-        DateTime until = DateTime.UtcNow + timeout;
-        lock (gate)
-        {
-            while (mailCalls.Count < count)
-            {
-                TimeSpan left = until - DateTime.UtcNow;
-                if (left <= TimeSpan.Zero)
-                {
-                    return false;
-                }
-
-                Monitor.Wait(gate, left);
-            }
-
-            return true;
         }
     }
 
@@ -133,25 +79,6 @@ internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
         }
 
         return new OutlookRead<Appointment>(OutlookReadKind.Ok, Days.TryGetValue(day, out IReadOnlyList<Appointment>? items) ? items : []);
-    }
-
-    public OutlookRead<MailSummary> RecentMail(DateTime sinceUtc, int max)
-    {
-        lock (gate)
-        {
-            mailCalls.Add((sinceUtc, max));
-            Monitor.PulseAll(gate);
-        }
-
-        open.Wait();
-        if (Throws is not null)
-        {
-            throw Throws;
-        }
-
-        return MailKind == OutlookReadKind.Ok
-            ? new OutlookRead<MailSummary>(OutlookReadKind.Ok, Mails)
-            : new OutlookRead<MailSummary>(MailKind);
     }
 
     /// <summary>Releases the gate, so no read stays blocked after the test; the gate itself is kept for late reads.</summary>

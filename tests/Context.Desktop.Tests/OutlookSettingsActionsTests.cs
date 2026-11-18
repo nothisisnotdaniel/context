@@ -77,18 +77,15 @@ public sealed class OutlookSettingsActionsTests : IDisposable
         new SettingsStore(data.Root).SaveOutlook(true);
         DesktopState state = data.CreateState();
         await state.DayAppointments(DesktopFixture.Today);
-        await state.RecentMail();
-        Assert.Equal((1, 1), (data.Outlook.AppointmentCalls, data.Outlook.MailCalls));
+        Assert.Equal(1, data.Outlook.AppointmentCalls);
 
         ActionResult result = await data.Actions!.SetOutlookEnabled(true);
         Assert.Equal(ActionKind.Done, result.Kind);
         int appointmentCalls = data.Outlook.AppointmentCalls;
         await state.DayAppointments(DesktopFixture.Today);
-        await state.RecentMail();
 
-        // The refresh after the action has already read today's appointments anew; the mail is read anew too.
+        // The refresh after the action has already read today's appointments anew, so this read is served from it.
         Assert.True(appointmentCalls >= 2);
         Assert.Equal(appointmentCalls, data.Outlook.AppointmentCalls);
-        Assert.Equal(2, data.Outlook.MailCalls);
     }
 }

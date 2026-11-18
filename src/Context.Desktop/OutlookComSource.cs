@@ -9,7 +9,7 @@ namespace Context;
 /// Reads the running classic Outlook through its COM interface, late-bound (<c>dynamic</c>, no interop assembly), with
 /// the profile that is already signed in. It only attaches to a running Outlook (<c>GetActiveObject</c>) and never
 /// starts it, never writes to it, and reads only the subject, location, start, end and all-day flag of the default
-/// Calendar's items and the received time, sender name and subject of the default Inbox's items. Every COM object it
+/// Calendar's items. Every COM object it
 /// touches is released in a <c>finally</c>. A COM error becomes a kind, never an exception text.
 /// </summary>
 [SupportedOSPlatform("windows")]
@@ -17,15 +17,11 @@ internal sealed class OutlookComSource : IOutlookSource
 {
     private const string ProgId = "Outlook.Application";
 
-    // OlDefaultFolders: olFolderCalendar and olFolderInbox.
+    // OlDefaultFolders: olFolderCalendar.
     private const int CalendarFolder = 9;
-    private const int InboxFolder = 6;
 
     // The most items walked per read, whatever the folder holds.
     private const int MaxItems = 500;
-
-    // The most mails returned per read.
-    private const int MaxMails = 10;
 
     private const int MkEUnavailable = unchecked((int)0x800401E3);
     private const int EAccessDenied = unchecked((int)0x80070005);
@@ -98,56 +94,6 @@ internal sealed class OutlookComSource : IOutlookSource
         }
     }
 
-    public OutlookRead<MailSummary> RecentMail(DateTime sinceUtc, int max)
-    {
-        Stack<object> held = new();
-        try
-        {
-            if (Attach(held) is not { } application)
-            {
-                return new OutlookRead<MailSummary>(OutlookReadKind.NotRunning);
-            }
-
-            int limit = Math.Clamp(max, 0, MaxMails);
-            DateTime since = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(sinceUtc, DateTimeKind.Utc), TimeZoneInfo.Local);
-            string filter = "[ReceivedTime] >= '" + Filter(since) + "'";
-
-            dynamic ns = Hold(held, application.GetNamespace("MAPI"));
-            dynamic folder = Hold(held, ns.GetDefaultFolder(InboxFolder));
-            dynamic items = Hold(held, folder.Items);
-            dynamic restricted = Hold(held, items.Restrict(filter));
-            restricted.Sort("[ReceivedTime]", true);
-
-            List<MailSummary> found = [];
-            int taken = 0;
-            int walked = 0;
-            object? next = restricted.GetFirst();
-            while (next is not null && walked < MaxItems && taken < limit)
-            {
-                walked++;
-                dynamic item = Hold(held, next);
-                MailSummary? mail = ReadMail(item);
-                if (mail is not null && mail.ReceivedUtc >= sinceUtc)
-                {
-                    found.Insert(taken, mail);
-                    taken++;
-                }
-
-                next = restricted.GetNext();
-            }
-
-            return new OutlookRead<MailSummary>(OutlookReadKind.Ok, found);
-        }
-        catch (Exception e)
-        {
-            return new OutlookRead<MailSummary>(KindOf(e));
-        }
-        finally
-        {
-            Release(held);
-        }
-    }
-
     // The running Outlook, or null when none runs. Never starts one.
     private static dynamic? Attach(Stack<object> held)
     {
@@ -193,26 +139,6 @@ internal sealed class OutlookComSource : IOutlookSource
         catch (Exception e) when (e is RuntimeBinderException or InvalidCastException or ArgumentException)
         {
             // Not an appointment item, or a time that doesn't exist in the zone: skipped.
-            return null;
-        }
-    }
-
-    private static MailSummary? ReadMail(dynamic item)
-    {
-        try
-        {
-            DateTime received = (DateTime)item.ReceivedTime;
-
-            // SenderName can make Outlook's object-model guard ask the user; a refusal is a COM error (Denied).
-            string sender = (string?)item.SenderName ?? string.Empty;
-            string subject = (string?)item.Subject ?? string.Empty;
-            DateTime receivedUtc = TimeZoneInfo.ConvertTimeToUtc(
-                DateTime.SpecifyKind(received, DateTimeKind.Unspecified), TimeZoneInfo.Local);
-            return new MailSummary(receivedUtc, sender, subject);
-        }
-        catch (Exception e) when (e is RuntimeBinderException or InvalidCastException or ArgumentException)
-        {
-            // Not a mail item (a report, say), or a time that doesn't exist: skipped.
             return null;
         }
     }

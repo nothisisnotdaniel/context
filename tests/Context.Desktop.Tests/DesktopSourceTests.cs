@@ -1764,6 +1764,86 @@ public sealed class DesktopSourceTests
         Assert.DoesNotContain(forbidden, source, StringComparison.Ordinal);
     }
 
+    // 223 AC-3: the Outlook source reads no mail: no sender, no received time, no Inbox folder.
+    [Theory]
+    [InlineData("SenderName")]
+    [InlineData("ReceivedTime")]
+    [InlineData("InboxFolder")]
+    [InlineData("Inbox")]
+    public void OutlookSource_ReadsNoMail(string forbidden)
+    {
+        string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), RealOutlookFile));
+
+        Assert.DoesNotContain(forbidden, source, StringComparison.Ordinal);
+    }
+
+    // 223 AC-2: the Mail panel is gone, and no source names the mail read or its view.
+    [Fact]
+    public void Sources_HaveNoMailPanel()
+    {
+        string root = RepoFiles.Root();
+        List<string> found = RepoFiles.Sources(root, "src", ".cs", ".razor")
+            .Where(f =>
+            {
+                string text = File.ReadAllText(Path.Combine(root, f));
+                return new[] { "RecentMail", "MailSummary", "RecentMailView" }
+                    .Any(n => text.Contains(n, StringComparison.Ordinal));
+            })
+            .ToList();
+
+        Assert.False(File.Exists(Path.Combine(root, RepoFiles.DesktopFolder, "RecentMailPanel.razor")));
+        Assert.Empty(found);
+    }
+
+    // 223 AC-4: the stylesheet has no mail rules left.
+    [Theory]
+    [InlineData("recent-mail")]
+    [InlineData("mail-item")]
+    public void AppCss_HasNoMailRules(string forbidden)
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+
+        Assert.DoesNotContain(forbidden, css, StringComparison.Ordinal);
+    }
+
+    // 223 AC-5: the settings page promises no mail.
+    [Fact]
+    public void SettingsPanel_MentionsNoMail()
+    {
+        string text = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "SettingsPanel.razor"));
+
+        Assert.DoesNotContain("mail", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Read calendar from Outlook", text, StringComparison.Ordinal);
+    }
+
+    // 223 AC-8: README's Outlook section mentions no mail or Inbox.
+    [Fact]
+    public void Readme_OutlookSection_MentionsNoMail()
+    {
+        string text = File.ReadAllText(Path.Combine(RepoFiles.Root(), "README.md")).ReplaceLineEndings("\n");
+        int start = text.IndexOf("\n### Outlook\n", StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        int end = text.IndexOf("\n#", start + 1, StringComparison.Ordinal);
+        string section = end < 0 ? text[start..] : text[start..end];
+
+        Assert.Contains("Read calendar from Outlook", section, StringComparison.Ordinal);
+        Assert.DoesNotContain("mail", section, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("inbox", section, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // 223 AC-8: CLAUDE.md names no mail panel, mail read or sender.
+    [Theory]
+    [InlineData("RecentMailPanel")]
+    [InlineData("RecentMail")]
+    [InlineData("MailSummary")]
+    [InlineData("SenderName")]
+    public void ClaudeMd_NamesNoMailRead(string forbidden)
+    {
+        string text = File.ReadAllText(Path.Combine(RepoFiles.Root(), "CLAUDE.md"));
+
+        Assert.DoesNotContain(forbidden, text, StringComparison.Ordinal);
+    }
+
     // 136 AC-10: the certificate store and CNG are used only in the Windows key store.
     [Theory]
     [InlineData("X509Store")]
