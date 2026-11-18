@@ -259,6 +259,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#302](backlog/302-one-path-to-endreload-in-statecomponent.md) One path to EndReload in StateComponent
 - [?] [#304](backlog/304-same-selector-for-the-re-found.md) Same selector for the re-found note button in ReviewPanelTests
 - [ ] [#305](backlog/305-people-page-opened-from-a-person.md) People page opened from a person icon in the left sidebar
+- [ ] [#306](backlog/306-left-sidebar-shows-the-10-most.md) Left sidebar shows the 10 most recently opened notes instead of the hierarchy (after: #305)
+- [ ] [#307](backlog/307-top-bar-icons-in-the-order.md) Top bar icons in the order Home, Search, Capture, Calendar, More
 
 ## Dropped with the terminal UI
 
