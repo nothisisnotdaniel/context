@@ -23,6 +23,32 @@ internal sealed record NoteLinkTarget
     public override string ToString() => nameof(NoteLinkTarget);
 }
 
+/// <summary>
+/// One <c>[[link]]</c> found by <see cref="NoteLinkParser.FindSpans"/>: its 1-based <see cref="Line"/>, the index in
+/// the text of the trimmed target's first character (<see cref="Offset"/>) and the raw <see cref="Target"/>.
+/// </summary>
+internal sealed record NoteLinkSpan
+{
+    public NoteLinkSpan(int line, int offset, string target)
+    {
+        Line = line;
+        Offset = offset;
+        Target = target;
+    }
+
+    /// <summary>The 1-based line number in the text (fence lines and fenced lines count).</summary>
+    public int Line { get; }
+
+    /// <summary>The index in the text of the target's first character.</summary>
+    public int Offset { get; }
+
+    /// <summary>The target as written, trimmed (raw note text).</summary>
+    public string Target { get; }
+
+    /// <summary>Returns only the type name: the target is raw note text, so formatting this record must never print it.</summary>
+    public override string ToString() => nameof(NoteLinkSpan);
+}
+
 /// <summary>Finds <c>[[Note name]]</c> links (the wiki-link syntax of Obsidian, Logseq and Foam) in Markdown text.</summary>
 internal static class NoteLinkParser
 {
@@ -47,12 +73,45 @@ internal static class NoteLinkParser
     {
         List<string> targets = [];
         HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+        List<(int Start, int Length)> found = [];
         foreach (string line in TagParser.LinesOutsideFences(markdown))
         {
-            ParseLine(line, targets, seen);
+            found.Clear();
+            ParseLine(line, found);
+            foreach ((int start, int length) in found)
+            {
+                string text = line.Substring(start, length);
+                if (seen.Add(text))
+                {
+                    targets.Add(text);
+                }
+            }
         }
 
         return targets;
+    }
+
+    /// <summary>
+    /// Every link in <paramref name="markdown"/>, in order, repeats included: the same scan as <see cref="Parse"/>
+    /// (fences, code spans, the same limits), so the distinct targets ignoring case, first spelling kept, are exactly
+    /// <see cref="Parse"/>'s. Each span has its 1-based line, the index in <paramref name="markdown"/> of the trimmed
+    /// target's first character, and that raw target; <c>markdown.Substring(Offset, Target.Length)</c> is the target.
+    /// </summary>
+    public static IReadOnlyList<NoteLinkSpan> FindSpans(string markdown)
+    {
+        List<NoteLinkSpan> spans = [];
+        List<(int Start, int Length)> found = [];
+        foreach ((int number, int lineStart, string line) in TagParser.IndexedLinesOutsideFences(markdown))
+        {
+            found.Clear();
+            ParseLine(line, found);
+            foreach ((int start, int length) in found)
+            {
+                spans.Add(new NoteLinkSpan(number, lineStart + start, line.Substring(start, length)));
+            }
+        }
+
+        return spans;
     }
 
     /// <summary>
@@ -72,7 +131,8 @@ internal static class NoteLinkParser
         return new NoteLinkTarget(target[..hash].Trim(), heading.Length == 0 ? null : heading);
     }
 
-    private static void ParseLine(string line, List<string> targets, HashSet<string> seen)
+    // Adds the start and length (in the line) of each link's trimmed target, in order.
+    private static void ParseLine(string line, List<(int Start, int Length)> found)
     {
         // The first ']' and the first '[' at or after the current text start; remembered so a line full of
         // "[[" is still scanned once (each search only moves forward).
@@ -130,14 +190,11 @@ internal static class NoteLinkParser
 
             if (closed && nextOpen > nextClose)
             {
-                ReadOnlySpan<char> target = line.AsSpan(textStart, nextClose - textStart).Trim();
+                ReadOnlySpan<char> raw = line.AsSpan(textStart, nextClose - textStart);
+                ReadOnlySpan<char> target = raw.Trim();
                 if (target.Length > 0 && target.Length <= MaxTargetLength)
                 {
-                    string text = target.ToString();
-                    if (seen.Add(text))
-                    {
-                        targets.Add(text);
-                    }
+                    found.Add((textStart + (raw.Length - raw.TrimStart().Length), target.Length));
                 }
 
                 i = nextClose + 2;

@@ -386,6 +386,121 @@ public sealed class MainTests : IDisposable
         Assert.Equal("# Other\n", File.ReadAllText(Path.Combine(data.Root, "Other.md")));
     }
 
+    // 206 AC-9: with links to update Enter asks first, focus on Cancel; Rename renames, updates the links and reopens.
+    [Fact]
+    public async Task Rename_WithLinks_AsksThenRenamesAndUpdatesLinks()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        data.WriteNote("Other", "see [[Plan]]\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        await ChooseAsync(cut, "rename");
+        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+
+        await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+
+        cut.WaitForElement("[role=dialog]", Wait);
+        Assert.Equal("Rename Plan to Project? Links in 1 note will be updated.", cut.Find("[role=dialog] .question").TextContent);
+        Assert.Equal("Rename", cut.Find("[role=dialog] button.confirm").TextContent);
+        AssertFocused(cut, "[role=dialog] button.cancel");
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Contains("Renamed to", cut.Find(".main-status").TextContent, StringComparison.Ordinal), Wait);
+        Assert.Equal("Renamed to Project. Updated links in 1 note.", cut.Find(".main-status").TextContent);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
+        cut.WaitForAssertion(() => Assert.Equal("Project", cut.Find(".note-title").TextContent), Wait);
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Empty(cut.FindAll(".rename-title"));
+        Assert.Equal("see [[Project]]\n", File.ReadAllText(Path.Combine(data.Root, "Other.md")));
+    }
+
+    // 206 AC-9: Cancel or Esc in the question writes nothing and keeps the name field with its text.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Rename_WithLinks_CancelOrEsc_KeepsField(bool esc)
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        data.WriteNote("Other", "see [[Plan]]\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        await ChooseAsync(cut, "rename");
+        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        cut.WaitForElement("[role=dialog]", Wait);
+
+        if (esc)
+        {
+            await cut.Find("[role=dialog]").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        }
+        else
+        {
+            await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        }
+
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("[role=dialog]")), Wait);
+        Assert.Equal("Project", cut.Find(".rename-title").GetAttribute("value"));
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    // 206 AC-9: links left after the rename show the Done text in red; the editor still opens the new name.
+    [Fact]
+    public async Task Rename_LinksLeft_RedLine_OpensNewName()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        data.WriteNote("Work", "w\n");
+        data.WriteFile(Path.Combine("Work", "A.md"), "[[Plan]]\n");
+        data.WriteFile(Path.Combine("Work", ".history"), "in the way");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        await ChooseAsync(cut, "rename");
+        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
+        await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        cut.WaitForElement("[role=dialog]", Wait);
+
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Contains("Renamed to", cut.Find(".main-status").TextContent, StringComparison.Ordinal), Wait);
+        Assert.Equal(
+            "Renamed to Project, but links in 1 note couldn't be updated: Work/A.", cut.Find(".main-status").TextContent);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        cut.WaitForAssertion(() => Assert.Equal("Project", cut.Find(".note-title").TextContent), Wait);
+    }
+
+    // 206 AC-9: a refused rename after the question shows red and keeps the name field.
+    [Fact]
+    public async Task Rename_LinksCantBeWritten_RedLine_KeepsField()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        data.WriteNote("Other", "see [[Plan]]\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        await ChooseAsync(cut, "rename");
+        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Pro#ject" });
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        cut.WaitForElement("[role=dialog]", Wait);
+
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            "Links to Plan can't be written with the name Pro#ject. Nothing was renamed.",
+            cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Equal("Pro#ject", cut.Find(".rename-title").GetAttribute("value"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
     // 134 AC-8: Delete asks in ConfirmDialog; Cancel deletes nothing.
     [Fact]
     public async Task Delete_Cancel_DeletesNothing()
@@ -521,6 +636,8 @@ public sealed class MainTests : IDisposable
         await ChooseAsync(cut, "rename");
         await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
         await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        cut.WaitForElement("[role=dialog]", Wait);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Equal("Project", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Equal(

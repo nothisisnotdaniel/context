@@ -122,7 +122,7 @@ public sealed class NoteHistoryActionsTests : IDisposable
         WriteVersion("Plan", Id, "old\n");
         await data.RefreshAsync();
 
-        ActionResult result = await data.Actions!.RenameNote("Plan", "Project");
+        ActionResult result = await data.Actions!.RenameNote("Plan", "Project", null);
 
         Assert.Equal(ActionKind.Done, result.Kind);
         Assert.Equal([".history/Project/" + Id + ".md", "Project.md"], RootFiles());
@@ -188,7 +188,7 @@ public sealed class NoteHistoryActionsTests : IDisposable
         ActionResult saved = await data.Actions!.SaveNote(opened, "second\n");
         Assert.Equal(ActionKind.Done, saved.Kind);
 
-        ActionResult renamed = await data.Actions.RenameNote("Plan", "Project");
+        ActionResult renamed = await data.Actions.RenameNote("Plan", "Project", null);
 
         Assert.Equal(ActionKind.Done, renamed.Kind);
         Assert.Equal([".history/Project/" + Id + "~Plan.ctxs", "Project.ctxs"], RootFiles());
@@ -209,7 +209,7 @@ public sealed class NoteHistoryActionsTests : IDisposable
         data.WriteFile(Path.Combine(".history", "Project", "20261001T090000000Z.md"), "left over\n");
         SortedDictionary<string, string> before = Files();
 
-        ActionResult renamed = await data.Actions.RenameNote("Plan", "Project");
+        ActionResult renamed = await data.Actions.RenameNote("Plan", "Project", null);
 
         Assert.Equal((ActionKind.Refused, ActionReason.Exists), (renamed.Kind, renamed.Reason));
         Assert.Equal(DesktopActions.ExistsText("Project"), renamed.Text);

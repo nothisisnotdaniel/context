@@ -37,7 +37,17 @@ Every factory agent reads this file before working on Context. Keep it short and
     `CodeSpans` (shared, not copied). A backtick run that opens a matched code span between `[[` and that first `]`
     means no link, and the scan goes on at that span (job 163: ``[[a `b]] c` `` is no link; ``[[a`b]]`` links to ``a`b``). It scans
     each line once (cached next `]`, `[` and code-span start). `[[...]]` is never
-    a tag and `#[...]` never a link; `|alias` is part of the target. **Heading links** (job 205): `NoteLinkParser.Split(target)`
+    a tag and `#[...]` never a link; `|alias` is part of the target. `NoteLinkParser.FindSpans(markdown)` (job 206) is the
+    same scan (`ParseLine`, `TagParser.IndexedLinesOutsideFences`) with every link, repeats included, as
+    `NoteLinkSpan(Line, Offset, Target)` (`Offset` is the trimmed target's index in the text); its distinct targets are
+    exactly `Parse`'s. **Link rewriting on rename** (job 206, `NoteLinkRewriter.cs`, pure strings):
+    `Rewrite(text, NameLookup before, oldName, newName)` replaces only the note-part characters of each link whose text
+    before the first `|` resolves through `before.ResolveLink` to `oldName` or `<oldName>/...` with the new full name
+    (a written trailing `.md`, `#heading`, `|alias`, spaces, CRLF and BOM stay; code, `[[#Intro]]`, other and missing
+    notes stay); the same instance when nothing changes or the names differ only in case. `TryRewrite(..., after, ...)`
+    also checks the round trip (every link parses through `FindSpans` in the same place and each rewritten one resolves
+    through the post-rename names to the expected name and heading; a new title with `#`, `|`, `[`, `]` or a backtick
+    fails when a link changes). **Heading links** (job 205): `NoteLinkParser.Split(target)`
     gives `NoteLinkTarget(Note, Heading?)`, split at the first `#`, both trimmed, `Heading` null when nothing follows the `#`
     (`[[#Intro]]` has an empty note part: a heading of the note it is in). Targets are stored as written and
     resolved only at query time by `NameLookup.ResolveLink` (the whole target through `NameLookup.Resolve` first, with no heading, so
@@ -310,7 +320,8 @@ Every factory agent reads this file before working on Context. Keep it short and
   `MaxBytesPerNote` (25 MB), never the new one; any failure is `NoteHistoryException`. `Versions`/`TryRead` never
   follow a link or reparse point and list only regular files with a valid name (newest first, `NoteVersion`).
   `NoteStore.SaveIfUnchanged(..., history)` keeps the previous bytes after the version check, before the move; only
-  `DesktopActions.SaveNote` passes one (capture, day's end, briefing, import and the CLI keep none). `Rename`/`Move`
+  `DesktopActions.SaveNote` and the link rewrites of `DesktopActions.RenameNote` (job 206, always a version, no
+  `KeptWithin` gap) pass one (capture, day's end, briefing, import and the CLI keep none). `Rename`/`Move`
   move `.history/<Title>/` along (never over an existing one; moved back when the note move fails); only `DeleteNote`
   passes `removeHistory: true` to `Delete`/`DeleteSensitive`. `List()` drops top-level dot-files. Sensitive: a save
   copies the old sealed file byte for byte (zero `Agree`); a rename seals the new file, moves the history (a clash
@@ -350,7 +361,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Rename(name, newTitle)` finds `name` through `TryFind` (never a path), normalizes and validates `newTitle` like
     `Create` (`ArgumentException` with the `ValidateTitle` text), throws `NoteExistsException` when another note has
     that title ignoring case (a case-only rename of the same note is allowed), moves the file with
-    `File.Move(..., overwrite: false)` (bytes and `# Title` line unchanged; `[[links]]` elsewhere are not rewritten) and
+    `File.Move(..., overwrite: false)` (bytes and `# Title` line unchanged; `[[links]]` elsewhere are not rewritten here; the desktop `RenameNote` does that) and
     returns the new `NoteInfo`, the note itself when the title is exactly its name (nothing written), or `null` when no
     note matches. `Delete(name)` deletes the file `TryFind(name)` found and returns true, else false (nothing deleted,
     never anything outside `List()`). There is no trash; only the desktop uses them (no command-line command).
@@ -712,7 +723,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     assembly is public-signed with the committed `Context.snk`, see **Strong name**). `Context` grants only
     `Context.Tests` and `Context.Desktop` only `Context.Desktop.Tests`, the same way; no `InternalsVisibleTo` is name-only.
     It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, picking a todo by its text in `TodoPicker.cs`, todos inside notes in `NoteTodoParser.cs` and `NoteTodo.cs`, tag parsing in `TagParser.cs`,
-    `[[note link]]` parsing in `NoteLinkParser.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
+    `[[note link]]` parsing in `NoteLinkParser.cs`, link rewriting on rename in `NoteLinkRewriter.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
     `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs`, note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs` (its triage queue, remove and snooze in `InboxTriage.cs`), the day's end in `DayEnd.cs` (Times' day file in `TimesDay.cs`, `settings.json` in `SettingsStore.cs`), the morning briefing in `Briefing.cs` (Times' flexitime balance in `TimesBalance.cs`), the todo input rules (`TryParseDate`,
@@ -733,7 +744,8 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `src/Context.Desktop/`: the desktop app (`Microsoft.NET.Sdk.Razor`, `WinExe`, references `Context.Core`
     only, never the command-line project; components and classes in `namespace Context`). `Program.cs` only wires
     things up (stores built like `Cli`'s, Photino window `Context` 1100x750, dev tools
-    only in Debug). `DesktopState` builds a `DesktopSnapshot` (`Failed`, `Today`, `CurrentView? Current`,
+    only in Debug). `LinkRenamePlan.cs` (job 206) works out, read-only, which plain notes a rename's link rewrite
+    changes (for `DesktopState.LinkUpdateCount` and `DesktopActions.RenameNote`). `DesktopState` builds a `DesktopSnapshot` (`Failed`, `Today`, `CurrentView? Current`,
     `Todos`, `Notes`, unreadable flags, `Folder`) off the UI thread with `Refresh()` (one at a time; requests during a run
     coalesce into one more run) and raises `Changed`; `Tick()` refreshes when the day changed or 5 min passed.
     `DataWatcher` (one `FileSystemWatcher` with subfolders, `IsRelevant` filter: the top-level files as before, plus
@@ -759,8 +771,17 @@ Every factory agent reads this file before working on Context. Keep it short and
     <text>` in the palette (a bad time or no text: red `Type /todo <yyyy-MM-dd|today|tomorrow> [HH:mm] <text>.`).
     Note actions: `CreateNote(title)` (`NoteStore.Create`; invalid: Refused/`Invalid` with the `ValidateTitle` text;
     existing: Refused/`Exists` `Note <name> already exists.`; else Failed `Can't create that note. Nothing was done.`),
-    `RenameNote(name, newTitle)` (`NoteStore.Rename`; same name: Done/`Unchanged`, no refresh; same invalid/exists texts;
-    gone: Refused/`Missing` `<name> no longer exists. Nothing was done.`), `DeleteNote(name, confirmation)` (no
+    `RenameNote(name, newTitle, confirmation)` (`NoteStore.Rename`; same name: Done/`Unchanged`, no refresh; same
+    invalid/exists texts; gone: Refused/`Missing` `<name> no longer exists. Nothing was done.`; job 206: `LinkRenamePlan`
+    first finds the plain notes whose links `NoteLinkRewriter` would change, a failed round trip is Refused/`Invalid`
+    `Links to <old> can't be written with the name <new>. Nothing was renamed.`, and with notes to change and no
+    confirmation Refused/`NotConfirmed`, both writing nothing; then the note is renamed and each note is read, rewritten
+    and saved through `SaveIfUnchanged(..., HistoryStore)` (a version always kept), up to 3 tries on changed on disk; Done
+    `Renamed to <new>.`, `Renamed to <new>. Updated links in <n> notes.` or Done/`LinksLeft` `Renamed to <new>, but links
+    in <k> notes couldn't be updated: <up to 3 names>[ and <m> more].`; `ActionResult.Name` is the new full name; one
+    refresh. `DesktopState.LinkUpdateCount(name, newTitle)` gives that count read-only (0 for same, case-only, invalid
+    or taken names); Main asks `Rename <old> to <new>? Links in <n> notes will be updated.` (`Rename`, focus on Cancel;
+    Cancel/Esc keeps the name field) when it is above 0), `DeleteNote(name, confirmation)` (no
     confirmation: `NotConfirmed`; `NoteStore.Delete`, the whole subtree), `CreateSubpage(parent, title)`
     (`NoteStore.CreateChild`; Done text is the full name; the `CreateNote` texts, a missing parent `<parent> no longer
     exists. Nothing was done.`, too long `A note's full name can be at most 400 characters.`, below `calendar`

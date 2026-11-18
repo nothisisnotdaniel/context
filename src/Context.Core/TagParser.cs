@@ -42,13 +42,23 @@ internal static class TagParser
     /// The lines of <see cref="LinesOutsideFences"/>, each with its 1-based number in <paramref name="markdown"/>
     /// (fence lines and fenced lines still count). Used by <see cref="DecisionParser"/>.
     /// </summary>
-    internal static IEnumerable<(int Number, string Line)> NumberedLinesOutsideFences(string markdown)
+    internal static IEnumerable<(int Number, string Line)> NumberedLinesOutsideFences(string markdown) =>
+        IndexedLinesOutsideFences(markdown).Select(l => (l.Number, l.Line));
+
+    /// <summary>
+    /// The lines of <see cref="NumberedLinesOutsideFences"/>, each also with the index in <paramref name="markdown"/> of
+    /// its first character, so a position in the line maps back to the text. Used by <see cref="NoteLinkParser.FindSpans"/>.
+    /// </summary>
+    internal static IEnumerable<(int Number, int Start, string Line)> IndexedLinesOutsideFences(string markdown)
     {
         bool inFence = false;
         int number = 0;
+        int start = 0;
         foreach (string rawLine in markdown.Split('\n'))
         {
             number++;
+            int lineStart = start;
+            start += rawLine.Length + 1;
             string line = rawLine.TrimEnd('\r');
             if (line.TrimStart().StartsWith(Fence, StringComparison.Ordinal))
             {
@@ -61,7 +71,7 @@ internal static class TagParser
                 continue;
             }
 
-            yield return (number, line);
+            yield return (number, lineStart, line);
         }
     }
 
