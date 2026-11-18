@@ -633,7 +633,18 @@ input[type="password"]:disabled {
     z-index: 2;
 }
 
-.day-pick,
+/* Pick a day: only as wide as its month header and grid. */
+.day-pick {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    padding: 8px;
+    position: absolute;
+    right: 8px;
+    top: 100%;
+    width: max-content;
+    z-index: 3;
+}
+
 .capture-pop {
     background: var(--panel);
     border: 1px solid var(--line);
@@ -716,11 +727,11 @@ input[type="password"]:disabled {
 
 .day-pick .day-pick-grid th.week {
     border-right: 1px solid var(--line);
-    padding-right: 6px;
+    padding-right: 4px;
 }
 
 .day-pick .day-pick-grid td {
-    padding: 1px;
+    padding: 0;
 }
 
 .day-pick .day {
@@ -728,9 +739,9 @@ input[type="password"]:disabled {
     border: 1px solid transparent;
     border-radius: 4px;
     color: var(--text);
-    min-width: 2.2em;
     padding: 3px 0;
     text-align: center;
+    width: 1.8em;
 }
 
 .day-pick .day.outside {

@@ -2426,6 +2426,125 @@ public sealed class DesktopSourceTests
         Assert.Contains("OnSearch=\"ShowSearch\"", main[..main.IndexOf("@code", StringComparison.Ordinal)][main.IndexOf("<TopBar", StringComparison.Ordinal)..], StringComparison.Ordinal);
     }
 
+    private static string CssRule(string css, string selector)
+    {
+        List<string> bodies = CssRules(css).Where(r => Regex.Replace(r.Selector, @"\s+", " ") == selector).Select(r => r.Body).ToList();
+        Assert.True(bodies.Count == 1, selector + " should be one rule, found " + bodies.Count);
+        return bodies[0];
+    }
+
+    // Declarations of a rule body as name -> value.
+    private static Dictionary<string, string> CssDeclarations(string body)
+    {
+        Dictionary<string, string> map = new(StringComparer.Ordinal);
+        foreach (string part in body.Split(';'))
+        {
+            int colon = part.IndexOf(':');
+            if (colon > 0)
+            {
+                map[part[..colon].Trim()] = part[(colon + 1)..].Trim();
+            }
+        }
+
+        return map;
+    }
+
+    // 226 AC-1: Pick a day has its own rule, the same popover box as before plus width: max-content.
+    [Fact]
+    public void DayPick_OwnRule_MaxContentWidth()
+    {
+        Dictionary<string, string> d = CssDeclarations(CssRule(AppCss(), ".day-pick"));
+        Assert.Equal("max-content", d["width"]);
+        Assert.Equal("var(--panel)", d["background"]);
+        Assert.Equal("1px solid var(--line)", d["border"]);
+        Assert.Equal("8px", d["padding"]);
+        Assert.Equal("absolute", d["position"]);
+        Assert.Equal("8px", d["right"]);
+        Assert.Equal("100%", d["top"]);
+        Assert.Equal("3", d["z-index"]);
+    }
+
+    // 226 AC-2: Capture keeps its popover box with no width, and its input rule is unchanged.
+    [Fact]
+    public void CapturePop_Unchanged_NoWidth()
+    {
+        string css = AppCss();
+        Dictionary<string, string> d = CssDeclarations(CssRule(css, ".capture-pop"));
+        Assert.Equal("var(--panel)", d["background"]);
+        Assert.Equal("1px solid var(--line)", d["border"]);
+        Assert.Equal("8px", d["padding"]);
+        Assert.Equal("absolute", d["position"]);
+        Assert.Equal("8px", d["right"]);
+        Assert.Equal("100%", d["top"]);
+        Assert.Equal("3", d["z-index"]);
+        Assert.False(d.ContainsKey("width"));
+        Dictionary<string, string> input = CssDeclarations(CssRule(css, ".capture-pop input"));
+        Assert.Equal("320px", input["width"]);
+        Assert.Equal("calc(100vw - 48px)", input["max-width"]);
+    }
+
+    // 226 AC-3: day cells are 1.8em wide with 3px 0 padding; no Pick a day rule keeps 2.2em.
+    [Fact]
+    public void DayPick_Day_NarrowWidth()
+    {
+        string css = AppCss();
+        Dictionary<string, string> d = CssDeclarations(CssRule(css, ".day-pick .day"));
+        Assert.Equal("1.8em", d["width"]);
+        Assert.Equal("3px 0", d["padding"]);
+        Assert.False(d.ContainsKey("min-width"));
+        foreach ((string selector, string body) in CssRules(css).Where(r => r.Selector.StartsWith(".day-pick", StringComparison.Ordinal)))
+        {
+            Assert.False(body.Contains("2.2em", StringComparison.Ordinal), selector);
+        }
+    }
+
+    // 226 AC-4: grid cells have no padding; the week column keeps its line with 4px right padding.
+    [Fact]
+    public void DayPick_GridPadding_Tight()
+    {
+        string css = AppCss();
+        Assert.Equal("0", CssDeclarations(CssRule(css, ".day-pick .day-pick-grid td"))["padding"]);
+        Dictionary<string, string> week = CssDeclarations(CssRule(css, ".day-pick .day-pick-grid th.week"));
+        Assert.Equal("4px", week["padding-right"]);
+        Assert.Equal("1px solid var(--line)", week["border-right"]);
+    }
+
+    // 226 AC-5: every Pick a day rule uses theme colours only, and the focus ring stays.
+    [Fact]
+    public void DayPick_ThemeColoursOnly()
+    {
+        string css = AppCss();
+        List<(string Selector, string Body)> rules = CssRules(css).Where(r => r.Selector.StartsWith(".day-pick", StringComparison.Ordinal)).ToList();
+        Assert.NotEmpty(rules);
+        foreach ((string selector, string body) in rules)
+        {
+            Assert.False(Regex.IsMatch(body, @"#[0-9a-fA-F]|rgb\(|hsl\(", RegexOptions.IgnoreCase), selector);
+            foreach ((string name, string value) in CssDeclarations(body))
+            {
+                if (name != "color" && name != "background" && !name.StartsWith("border", StringComparison.Ordinal)
+                    && name != "box-shadow" && name != "outline")
+                {
+                    continue;
+                }
+
+                // Border properties that take no colour (collapse, radius, width, style, spacing) are not checked.
+                if (Regex.IsMatch(name, @"^border(-[a-z]+)*-(collapse|radius|width|style|spacing)$"))
+                {
+                    continue;
+                }
+
+                foreach (string token in value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    bool skip = Regex.IsMatch(token, @"^-?\d*\.?\d+([a-z]+|%)?$") || token == "solid" || token == "inset";
+                    bool colour = Regex.IsMatch(token, @"^var\(--[a-z0-9-]+\)$") || token == "transparent" || token == "none";
+                    Assert.True(skip || colour, selector + " " + name + ": " + value);
+                }
+            }
+        }
+
+        Assert.Equal("2px solid var(--accent-strong)", CssDeclarations(CssRule(css, ".day-pick .day:focus-visible"))["outline"]);
+    }
+
     private static string CssBlock(string css, string head)
     {
         int at = css.IndexOf(head, StringComparison.Ordinal);
