@@ -219,6 +219,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#263](backlog/263-show-the-error-when-saving-on.md) Show the error when saving on window close fails
 - [?] [#264](backlog/264-check-auto-save-by-hand-in.md) Check auto save by hand in the desktop app
 - [?] [#265](backlog/265-rename-ask-again-when-the-link.md) Rename: ask again when the link count changed before Confirm
+- [?] [#266](backlog/266-tag-filters-decide-on-number-tags.md) Tag filters: decide on number tags like #1234
+- [?] [#267](backlog/267-saved-searches-icon-for-the-remove.md) Saved searches: icon for the × remove button
 
 ## Dropped with the terminal UI
 
