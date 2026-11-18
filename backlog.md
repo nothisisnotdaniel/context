@@ -109,6 +109,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#292](backlog/292-no-browser-context-menu-on-right.md) No browser context menu on right click in the desktop app
 - [ ] [#293](backlog/293-narrower-pick-a-day-calendar-popover.md) Narrower Pick a day calendar popover
 - [ ] [#294](backlog/294-hide-private-appointments.md) Hide private appointments
+- [ ] [#295](backlog/295-typing-name-makes-a-person-mention.md) Typing @[Name] makes a person mention chip right away
+- [ ] [#296](backlog/296-clicking-a-link-to-a-missing.md) Clicking a link to a missing note creates the note
 - [ ] [#69](backlog/069-board-view-for-a-tag.md) Board view for a tag
 - [ ] [#74](backlog/074-waiting-for-list.md) Waiting-for list
 - [ ] [#78](backlog/078-smart-paste.md) Smart paste
@@ -248,8 +250,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#286](backlog/286-culture-safe-dates-in-the-outlook.md) Culture-safe dates in the Outlook Restrict filter
 - [?] [#287](backlog/287-show-loading-in-the-mail-panel.md) Show Loading in the mail panel during the first read
 - [?] [#288](backlog/288-don-t-let-a-blocked-outlook.md) Don't let a blocked Outlook delay every refresh
-- [ ] [#295](backlog/295-typing-name-makes-a-person-mention.md) Typing @[Name] makes a person mention chip right away
-- [ ] [#296](backlog/296-clicking-a-link-to-a-missing.md) Clicking a link to a missing note creates the note
 
 ## Dropped with the terminal UI
 
