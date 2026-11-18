@@ -93,6 +93,10 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#62](backlog/062-links-to-headings.md) Links to headings → 205-heading-links
 - [x] [#66](backlog/066-rename-with-link-update.md) Rename with link update → 206-rename-link-update
 - [x] [#68](backlog/068-saved-searches.md) Saved searches → 207-saved-searches
+- [ ] [#268](backlog/268-remove-the-save-button-from-the.md) Remove the Save button from the note editor
+- [ ] [#269](backlog/269-outline-in-the-right-sidebar-no.md) Outline in the right sidebar, no reformat notice
+- [ ] [#270](backlog/270-editor-works-on-a-day-opened.md) Editor works on a day opened from the calendar
+- [ ] [#271](backlog/271-search-icon-in-the-top-bar.md) Search icon in the top bar, opens like Capture
 - [ ] [#69](backlog/069-board-view-for-a-tag.md) Board view for a tag
 - [ ] [#74](backlog/074-waiting-for-list.md) Waiting-for list
 - [ ] [#78](backlog/078-smart-paste.md) Smart paste
