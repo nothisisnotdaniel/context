@@ -234,7 +234,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#242](backlog/242-tidy-the-desktop-layout-icon-buttons.md) Tidy the desktop layout: icon buttons, no dates, set-apart capture bar → 192-tidy-desktop-layout
 - [x] [#243](backlog/243-open-triage-tags-and-settings-as.md) Open Triage, Tags and Settings as their own pages with an × close → 193-page-views-close-x
 - [ ] [#255](backlog/255-decisions-longer-than-one-line-a.md) Numbered #!d decisions: a marked paragraph, referenced as #!d1234
-- [ ] [#256](backlog/256-no-prerelease-for-backlog-only-pushes.md) No prerelease for backlog-only pushes
+- [x] [#256](backlog/256-no-prerelease-for-backlog-only-pushes.md) No prerelease for backlog-only pushes → 231-no-prerelease-backlog-pushes
 - [ ] [#257](backlog/257-web-links-work-in-the-note.md) Web links work in the note editor
 - [?] [#259](backlog/259-check-the-capture-popover-in-a.md) Check the Capture popover in a narrow window
 - [?] [#260](backlog/260-return-focus-to-the-button-after.md) Return focus to the … button after a menu item or outside click
