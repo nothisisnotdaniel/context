@@ -211,7 +211,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#229](backlog/229-note-tree-operation-fixes.md) Note tree operation fixes
 - [ ] [#238](backlog/238-stable-tests-and-locked-restore-on.md) Stable tests and locked restore on CI
 - [ ] [#230](backlog/230-clean-invisible-and-control-characters-in.md) Clean invisible and control characters in text
-- [ ] [#183](backlog/183-turn-a-typed-name-into-a.md) Turn a typed @[Name] into a mention chip right away
+- [x] [#183](backlog/183-turn-a-typed-name-into-a.md) Turn a typed @[Name] into a mention chip right away (merged into #295)
 - [ ] [#237](backlog/237-code-spans-and-fences-in-tags.md) Code spans and fences in tags, links and mentions
 - [?] [#189](backlog/189-resolve-person-aliases-without-an-allocation.md) Resolve person aliases without an allocation per mention row
 - [?] [#190](backlog/190-show-the-unreadable-todos-line-at.md) Show the unreadable-todos line at the top of the person page

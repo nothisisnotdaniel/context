@@ -13,3 +13,4 @@ Today a typed @[Name] only becomes a chip after the note is reopened, so it is u
 ## Notes
 
 Proposed by job 156-people-pages (review-ux round 1, nit 2).
+Merged into #295 on 2026-11-18 (duplicate).

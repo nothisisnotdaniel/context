@@ -8,8 +8,8 @@ The note editor (src/Context.Desktop/editor/src/view.js, rules()) has input rule
 
 ## Why
 
-User report on 2026-11-18: typing @[ in a note does not work.
+User report on 2026-11-18: typing @[ in a note does not work. Today a typed @[Name] only becomes a chip after the note is reopened, so it is unclear whether the mention worked or can be clicked.
 
 ## Notes
 
-Requested by the user on 2026-11-18. Cause found: rules() in view.js has tagRule and linkRule but no mention rule.
+Requested by the user on 2026-11-18. Cause found: rules() in view.js has tagRule and linkRule but no mention rule. Merged with #183 (proposed by job 156-people-pages, review-ux round 1, nit 2), which asked for the same input rule; keep the stored text unchanged.
