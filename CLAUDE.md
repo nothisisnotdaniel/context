@@ -1175,7 +1175,11 @@ Every factory agent reads this file before working on Context. Keep it short and
     subpages; notes start collapsed, `Main` passes `OpenName` so opening a note expands its ancestors, and the
     expanded set survives `State.Changed`. An open subpage shows `<nav class="breadcrumb" aria-label="Breadcrumb">`
     as the first child of `.note-area`: each ancestor a `button.crumb` opening it through `RequestOpen`, the last item a span with
-    `aria-current="page"`. The plain-note menu also has `New subpage` (field `Subpage title`, `Create subpage` /
+    `aria-current="page"`.
+    Below it the editor's `h2.note-title` shows only the page's own name (the last segment) and its `title` attribute
+    holds the full name (job 235); the unreadable and editor-failed lines and the status lines keep the full name. Both
+    go through `DesktopText.NoteName` (`OneLine`, then every bidi control U+202A-202E/U+2066-2069 becomes `�`).
+    The plain-note menu also has `New subpage` (field `Subpage title`, `Create subpage` /
     `Cancel`, Enter/Esc; Done opens the page and shows `Created <full name>`) and `Move` (field `New parent`, prefilled
     with the parent, empty = top level, `Move here` / `Cancel`; Done reopens the note and shows `Moved to <name>`);
     both, like Rename, refuse a dirty editor with `Save <name> first.`. Rename prefills `Title`, Export suggests

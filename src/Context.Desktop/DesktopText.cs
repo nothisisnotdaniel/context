@@ -15,6 +15,24 @@ internal static class DesktopText
     public static string OneLine(string raw) => SafeText.Clean(raw).Replace('\n', ' ');
 
     /// <summary>
+    /// A note's name for the note editor (job 235): <see cref="OneLine"/>, then every bidi embedding, override or
+    /// isolate control (U+202A to U+202E, U+2066 to U+2069) becomes one <see cref="SafeText.Placeholder"/>, so a name
+    /// can't reorder the text shown around it.
+    /// </summary>
+    public static string NoteName(string raw)
+    {
+        string line = OneLine(raw);
+        if (!line.Any(IsBidiControl))
+        {
+            return line;
+        }
+
+        return new string(line.Select(c => IsBidiControl(c) ? SafeText.Placeholder : c).ToArray());
+    }
+
+    private static bool IsBidiControl(char c) => c is >= '\u202A' and <= '\u202E' or >= '\u2066' and <= '\u2069';
+
+    /// <summary>
     /// A todo's due date as typed in the palette, like the console's <c>/todo</c>: <c>today</c>, <c>tomorrow</c>
     /// (ignoring case, from <paramref name="today"/>) or <c>yyyy-MM-dd</c>.
     /// </summary>

@@ -235,6 +235,27 @@ public sealed class HeadingLinkTests : IDisposable
         Assert.Empty(js.Jumps());
     }
 
+    // 235 AC-5: a missing heading in a subpage names the subpage by its full name, while its title shows only its own name.
+    [Fact]
+    public async Task Main_MissingHeading_Subpage_LineNamesFullName()
+    {
+        data.WriteNote("Other", "See [[a/b/c#Goals]]\n");
+        data.WriteNote("a", "# a\n");
+        data.WriteFile(Path.Combine("a", "b.md"), "# b\n");
+        data.WriteFile(Path.Combine("a", "b", "c.md"), "## Intro\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.SetHeadings("""[{"level":2,"text":"Intro"}]""");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Other");
+
+        await cut.InvokeAsync(() => js.Page().OnLink("[[a/b/c#Goals]]"));
+
+        cut.WaitForAssertion(() => Assert.Equal("a/b/c has no heading Goals.", cut.Find(".note-editor .status").TextContent), Wait);
+        Assert.Equal("c", cut.Find(".note-title").TextContent);
+        Assert.Equal("a/b/c", cut.Find(".note-title").GetAttribute("title"));
+        Assert.Empty(js.Jumps());
+    }
+
     // AC-6: a plain link after a heading link opens at the top: the heading is used once.
     [Fact]
     public async Task Main_PlainLinkAfterHeadingLink_NoJump()

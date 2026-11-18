@@ -296,7 +296,7 @@ public sealed class AppointmentPanelTests : IDisposable
         await link.ClickAsync(new MouseEventArgs());
 
         const string Name = "Meetings/Budget/2026-10-29";
-        cut.WaitForAssertion(() => Assert.Equal(Name, cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(Name, cut.Find(".note-title").GetAttribute("title")), Wait);
         cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
         Assert.Equal("Created Meetings/Budget/2026-10-29", cut.Find(".main-status").TextContent);
         Assert.Contains("accent", cut.Find(".main-status").ClassList);
@@ -373,6 +373,6 @@ public sealed class AppointmentPanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);
-        cut.WaitForAssertion(() => Assert.Equal(name, cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(name, cut.Find(".note-title").GetAttribute("title")), Wait);
     }
 }

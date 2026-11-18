@@ -158,7 +158,7 @@ public sealed class MeetingNoteActionsTests : IDisposable
 
         await RunPalette(cut, line);
 
-        cut.WaitForAssertion(() => Assert.Equal(Review, cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(Review, cut.Find(".note-title").GetAttribute("title")), Wait);
         Assert.Equal("Created " + Review, cut.Find(".main-status").TextContent);
         Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
         cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
@@ -178,7 +178,7 @@ public sealed class MeetingNoteActionsTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await RunPalette(cut, "/meeting 20");
 
-        cut.WaitForAssertion(() => Assert.Equal("Meetings/M19/2026-10-29", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Meetings/M19/2026-10-29", cut.Find(".note-title").GetAttribute("title")), Wait);
         Assert.True(File.Exists(PathOf("Meetings/M19/2026-10-29")));
     }
 
@@ -194,7 +194,7 @@ public sealed class MeetingNoteActionsTests : IDisposable
 
         await RunPalette(cut, "/meeting 1");
 
-        cut.WaitForAssertion(() => Assert.Equal("Meetings/Standup/2026-10-29", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Meetings/Standup/2026-10-29", cut.Find(".note-title").GetAttribute("title")), Wait);
         Assert.False(Directory.Exists(PathOf("Meetings/Early", string.Empty)));
     }
 
@@ -276,7 +276,7 @@ public sealed class MeetingNoteActionsTests : IDisposable
             () => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
         Assert.False(File.Exists(PathOf(Review)));
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal(Review, cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(Review, cut.Find(".note-title").GetAttribute("title")), Wait);
         Assert.True(File.Exists(PathOf(Review)));
         Assert.Equal("Created " + Review, cut.Find(".main-status").TextContent);
         Assert.Equal("# Plan\n", File.ReadAllText(PathOf("Plan")));
@@ -295,7 +295,7 @@ public sealed class MeetingNoteActionsTests : IDisposable
 
         await RunPalette(cut, "/meeting 2");
 
-        cut.WaitForAssertion(() => Assert.Equal(Review, cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(Review, cut.Find(".note-title").GetAttribute("title")), Wait);
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.True(File.Exists(PathOf(Review)));
         Assert.Equal("# Plan\n\nSaved first\n", File.ReadAllText(PathOf("Plan")));
@@ -344,7 +344,7 @@ public sealed class MeetingNoteActionsTests : IDisposable
         await RunPalette(cut, "/meeting 2");
 
         Assert.Empty(cut.FindAll("[role=dialog]"));
-        Assert.Equal(name, cut.Find(".note-title").TextContent);
+        Assert.Equal(name, cut.Find(".note-title").GetAttribute("title"));
         Assert.Single(js.Calls("ContextEditor.mount"));
         Assert.Equal("# mine\n", File.ReadAllText(PathOf(name)));
     }
@@ -400,7 +400,7 @@ public sealed class MeetingNoteActionsTests : IDisposable
         await RunPalette(cut, "/open " + name);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
-        cut.WaitForAssertion(() => Assert.Equal(name, cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(name, cut.Find(".note-title").GetAttribute("title")), Wait);
     }
 
     private static async Task Open(IRenderedComponent<Main> cut, EditorJs js, string name)
@@ -427,7 +427,7 @@ public sealed class MeetingNoteActionsTests : IDisposable
 
         await RunPalette(cut, "/meeting 2");
 
-        cut.WaitForAssertion(() => Assert.Equal("Meetings/Plan/2026-10-29", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Meetings/Plan/2026-10-29", cut.Find(".note-title").GetAttribute("title")), Wait);
         cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
 
