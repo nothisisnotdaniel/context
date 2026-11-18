@@ -1163,7 +1163,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     every wait in `SensitiveFlowTests`, which runs real ECDH and AES-GCM) passes an explicit, bounded timeout from a named
     constant in its class, and no test ever changes `BunitContext.DefaultWaitTimeout`. The guard finds every `.cs` file under `tests/Context.Desktop.Tests/` that calls `WaitForAssertion`, `WaitForState` or `WaitForElement`; each has exactly one `Wait` constant (10-30 s) passed as the last argument of every wait; a new test file needs no registration. Any component's render re-parses the whole rendered markup, so a test
     that compares elements or clicks right after opening a note first waits until the page's own `Task.Run` loads
-    have rendered (job 175: `MainTests.OpenFull` waits until `.links-panel` shows no `Loading…`).
+    have rendered (job 175: `MainTests.OpenFull` waits until `.links-panel` shows no `Loading…`). A `WaitForAssertion`/`WaitForState` re-checks only after a render, so a wait on state that is not rendered (set off the renderer with no render after it) awaits a task with the class's `Wait` instead (job 204: the window close completes `DesktopFixture.Closed`, and no wait lambda reads `CloseCalls`, checked by `WaitTimeoutSourceTests`; `DesktopFixture.CloseAfter` holds a close until a test lets it go).
 - **Style:**
   - `Cli` writes plain text through injected `TextWriter`s (stdout, stderr) and mentions no `Console.` (checked
     by `CliTests`); only `Program.cs` names `Console`. The desktop shows text through Blazor components only.
