@@ -830,7 +830,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     an explicit save and dispose; an unedited note is never saved. `SaveFirstAsync()` (true when nothing unsaved is
     left) is what `Main` calls before leaving the note (`KeptUnsaved`: `RequestOpen`, mentions, `/today`, `/briefing`,
     `/meeting`) and before every `Save <name> first.` refusal; the source rule that only bound handlers call a method
-    that calls `Actions` exempts exactly `SaveFirstAsync`/`AutoSaveAsync` -> `SaveAsync`, and `SaveAsync` counts as bound only through the bound key handler `Save` (Ctrl/Cmd+S). Window close: `Program`'s
+    that calls `Actions` exempts exactly `SaveFirstAsync`/`AutoSaveAsync` -> `SaveAsync`, and `SaveAsync` counts as
+    bound only through the bound key handler `Save` (Ctrl/Cmd+S). Window close: `Program`'s
     closing handler asks the singleton `CloseGuard` (wired by `Main` through `Attach`/`Detach`, `HasUnsaved` read
     without the dispatcher): with unsaved changes it cancels the close, saves first asynchronously and closes once
     through the window thread (`PhotinoWindow.Invoke`), or shows `Discard changes to <name>?` (Discard closes, Cancel
