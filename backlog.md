@@ -118,7 +118,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#299](backlog/299-crash-log-and-a-hint-on.md) Crash log and a hint on the next start → 237-crash-log-hint
 - [x] [#300](backlog/300-parent-notes-show-links-to-their.md) Parent notes show links to their subpages → 238-subpage-links
 - [x] [#305](backlog/305-people-page-opened-from-a-person.md) People page opened from a person icon in the left sidebar → 239-people-page
-- [ ] [#306](backlog/306-left-sidebar-shows-the-10-most.md) Left sidebar shows the 10 most recently opened notes instead of the hierarchy (after: #305)
+- [x] [#306](backlog/306-left-sidebar-shows-the-10-most.md) Left sidebar shows the 10 most recently opened notes instead of the hierarchy (after: #305) → 240-recent-notes-sidebar
 - [ ] [#307](backlog/307-top-bar-icons-in-the-order.md) Top bar icons in the order Home, Search, Capture, Calendar, More
 - [ ] [#69](backlog/069-board-view-for-a-tag.md) Board view for a tag
 - [ ] [#74](backlog/074-waiting-for-list.md) Waiting-for list
