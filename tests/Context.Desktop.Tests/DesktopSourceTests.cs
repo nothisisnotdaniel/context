@@ -283,6 +283,23 @@ public sealed class DesktopSourceTests
         Assert.Contains(colours, c => c.Contains("var(--accent-strong)", StringComparison.Ordinal));
     }
 
+    // 236 AC-8: the note's attribute box is styled with only the theme's colour variables (no hex, rgb( or named
+    // colour), so light and dark mode both apply.
+    [Fact]
+    public void AppCss_AttributeBox_ThemeVariablesOnly()
+    {
+        string css = AppCss();
+
+        (string Selector, string Body)[] rules = CssRules(css).Where(r => r.Selector.Contains(".note-attributes", StringComparison.Ordinal)).ToArray();
+        Assert.Contains(rules, r => r.Selector.Trim() == ".note-attributes");
+        string[] colours = rules
+            .SelectMany(r => System.Text.RegularExpressions.Regex.Matches(r.Body, @"(?m)^\s*(?:color|background(?:-color)?|border(?:-(?:top|bottom|left|right))?(?:-color)?|outline):\s*([^;]+);").Select(m => m.Groups[1].Value))
+            .ToArray();
+        Assert.NotEmpty(colours);
+        Assert.All(colours, c => Assert.Matches(@"^(none|1px solid var\(--line\)|var\(--(accent-strong|line|text|grey|panel|red|background)\))$", c.Trim()));
+        Assert.All(rules, r => Assert.DoesNotMatch(@"#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(", r.Body));
+    }
+
     // 214 AC-10: the sidebar appointments, the appointment page and its create link are styled with only the theme's
     // variables: no hex, rgb( or named colour, so light and dark mode both work.
     [Theory]

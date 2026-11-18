@@ -519,10 +519,188 @@ export function joinTitle(head, body) {
   return head + body;
 }
 
+// AttributeParser.KeyEnd: the length of the key at the start of line (a letter, then letters, digits, "-" or "_",
+// tested per UTF-16 unit); 0 when it doesn't start with a letter.
+function keyEnd(line) {
+  if (!isLetter(line[0])) {
+    return 0;
+  }
+  let end = 1;
+  while (end < line.length && isTagChar(line[end])) {
+    end++;
+  }
+  return end;
+}
+
+// The key length of an attribute-shaped line (a column-0 key of at most 50 chars directly followed by "::", any
+// value), or 0.
+function attributeKeyEnd(line) {
+  const end = keyEnd(line);
+  return end > 0 && end <= MaxTagLength && line.startsWith("::", end) ? end : 0;
+}
+
+// .NET's string.Trim (char.IsWhiteSpace at both ends).
+function netTrim(text) {
+  let start = 0;
+  let end = text.length;
+  while (start < end && isNetWhite(text[start])) {
+    start++;
+  }
+  while (end > start && isNetWhite(text[end - 1])) {
+    end--;
+  }
+  return text.slice(start, end);
+}
+
+// The lines of text, each with its "\n" (the last one may have none).
+function rawLines(text) {
+  const lines = [];
+  let pos = 0;
+  while (pos < text.length) {
+    const nl = text.indexOf("\n", pos);
+    const end = nl < 0 ? text.length : nl + 1;
+    lines.push(text.slice(pos, end));
+    pos = end;
+  }
+  return lines;
+}
+
+// A line without its line ending ("\n" or "\r\n").
+function lineText(raw) {
+  return raw.replace(/\r?\n$/, "");
+}
+
+const BlankLine = /^[ \t]*\r?\n?$/;
+
+/**
+ * Splits the body (the text after the hidden title head) into the attribute block (attrs: the run of attribute-shaped
+ * lines from its first line on, plus the blank lines straight after it; "" when the first line is not one) and the
+ * rest. attrs + body is always the input.
+ */
+export function attributeSplit(body) {
+  if (typeof body !== "string") {
+    return { attrs: "", body };
+  }
+  const lines = rawLines(body);
+  let count = 0;
+  let length = 0;
+  while (count < lines.length && attributeKeyEnd(lineText(lines[count])) > 0) {
+    length += lines[count].length;
+    count++;
+  }
+  if (count === 0) {
+    return { attrs: "", body };
+  }
+  for (let i = count; i < lines.length && BlankLine.test(lines[i]); i++) {
+    length += lines[i].length;
+  }
+  return { attrs: body.slice(0, length), body: body.slice(length) };
+}
+
+// The rows of an attribute block: each attribute line's raw text (line ending included), key as written and value
+// trimmed; and the trailing blank lines.
+function attributeBlockRows(attrs) {
+  const rows = [];
+  let length = 0;
+  for (const raw of rawLines(attrs)) {
+    const text = lineText(raw);
+    const end = attributeKeyEnd(text);
+    if (end === 0) {
+      break;
+    }
+    rows.push({ raw, key: text.slice(0, end), value: netTrim(text.slice(end + 2)) });
+    length += raw.length;
+  }
+  return { rows, trailing: attrs.slice(length) };
+}
+
+/** The rows of an attribute block as JSON [{ key, value }]: key as written, value trimmed. */
+export function attributeBlockRowsJson(attrs) {
+  return JSON.stringify(attributeBlockRows(attrs).rows.map(row => ({ key: row.key, value: row.value })));
+}
+
+/** The note's attribute block (see attributeSplit) as JSON [{ key, value }]: key as written, value trimmed; no DOM. */
+export function attributeRows(markdown, name) {
+  const { body } = titleSplit(markdown, name);
+  return attributeBlockRowsJson(attributeSplit(typeof body === "string" ? body : "").attrs);
+}
+
+// A key or value from outside with every control character (and the Unicode line and paragraph separators) as a
+// space, so an edit can never add a line.
+function oneLine(text) {
+  let out = "";
+  for (const c of text) {
+    out += c.length === 1 && (isControl(c) || c === "\u2028" || c === "\u2029") ? " " : c;
+  }
+  return out;
+}
+
+const MaxEdits = 1000;
+
+/**
+ * The attribute block attrs after editsJson ([{ line, key, value }] in the new order; line is the original row index
+ * or -1 for a new row). A row whose key and value are unchanged keeps its raw bytes; a changed or new one is written
+ * "key:: value" ("key::" when the value is empty) with the block's line ending. New rows go after the last row, before
+ * the trailing blank lines; an empty list removes the block. Returns null, changing nothing, for malformed edits
+ * (not an array, a line out of range, a key or value that isn't a string, a key that is no attribute key).
+ */
+export function editAttributes(attrs, editsJson) {
+  if (typeof attrs !== "string" || typeof editsJson !== "string") {
+    return null;
+  }
+  let edits;
+  try {
+    edits = JSON.parse(editsJson);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(edits) || edits.length > MaxEdits) {
+    return null;
+  }
+  const { rows, trailing } = attributeBlockRows(attrs);
+  if (edits.length === 0) {
+    return "";
+  }
+  const first = rows.length > 0 ? rows[0].raw : "";
+  const eol = first.endsWith("\r\n") ? "\r\n" : "\n";
+  const lines = [];
+  for (const edit of edits) {
+    if (edit === null || typeof edit !== "object" || !Number.isInteger(edit.line) || edit.line < -1
+      || edit.line >= rows.length || typeof edit.key !== "string" || typeof edit.value !== "string") {
+      return null;
+    }
+    const row = edit.line >= 0 ? rows[edit.line] : null;
+    if (row !== null && row.key === edit.key && row.value === edit.value) {
+      lines.push(row.raw);
+      continue;
+    }
+    const key = oneLine(edit.key);
+    const value = netTrim(oneLine(edit.value));
+    if (key.length === 0 || attributeKeyEnd(key + "::") !== key.length) {
+      return null;
+    }
+    const text = value.length > 0 ? key + ":: " + value : key + "::";
+    // A changed row keeps having no line ending when it had none (the block ended the file).
+    lines.push(row !== null && !row.raw.endsWith("\n") ? text : text + eol);
+  }
+  let out = "";
+  for (const line of lines) {
+    if (out.length > 0 && !out.endsWith("\n")) {
+      out += eol;
+    }
+    out += line;
+  }
+  if (trailing.length > 0 && !out.endsWith("\n")) {
+    out += eol;
+  }
+  return out + trailing;
+}
+
 /** The text after opening and saving without an edit (with a name: the title line is kept as it is). */
 export function roundTrip(markdown, name) {
   const { head, body } = titleSplit(markdown, name);
-  return joinTitle(head, serialize(parse(body)));
+  const { attrs, body: rest } = attributeSplit(body);
+  return joinTitle(head, attrs + serialize(parse(rest)));
 }
 
 /** True when opening and saving without an edit gives the same text back. */
@@ -594,5 +772,5 @@ export function headingList(doc) {
 /** The headings of the note body (the hidden title line left out), as JSON [{ level, text }]; needs no page. */
 export function outline(markdown, name) {
   const { body } = titleSplit(markdown, name);
-  return JSON.stringify(headingList(parse(typeof body === "string" ? body : "")));
+  return JSON.stringify(headingList(parse(attributeSplit(typeof body === "string" ? body : "").body)));
 }

@@ -155,6 +155,17 @@ internal sealed class EditorInterop
     public ValueTask<string> HeadingsAsync(ElementReference element) =>
         js.InvokeAsync<string>("ContextEditor.headings", element);
 
+    /// <summary>The rows of the editor's attribute block, as JSON <c>[{key,value}]</c> (read with <see cref="NoteAttribute.Parse"/>).</summary>
+    public ValueTask<string> AttributesAsync(ElementReference element) =>
+        js.InvokeAsync<string>("ContextEditor.attributes", element);
+
+    /// <summary>
+    /// Replaces the editor's attribute block by <paramref name="editsJson"/> (<c>[{line,key,value}]</c> in the new order,
+    /// built by .NET); <c>false</c> when the editor refused the edits.
+    /// </summary>
+    public ValueTask<bool> SetAttributesAsync(ElementReference element, string editsJson) =>
+        js.InvokeAsync<bool>("ContextEditor.setAttributes", element, editsJson);
+
     /// <summary>Puts the cursor at the index-th heading (0-based) and scrolls to it; <c>false</c> if out of range.</summary>
     public ValueTask<bool> ScrollToHeadingAsync(ElementReference element, int index) =>
         js.InvokeAsync<bool>("ContextEditor.scrollToHeading", element, index);

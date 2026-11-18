@@ -9,7 +9,7 @@ import { baseKeymap, toggleMark, setBlockType, chainCommands } from "prosemirror
 import { splitListItem, liftListItem, sinkListItem } from "prosemirror-schema-list";
 import { inputRules, wrappingInputRule, textblockTypeInputRule, InputRule } from "prosemirror-inputrules";
 import { schema } from "./schema.js";
-import { parse, serialize, splitTitle, joinTitle, headingList, normalizePerson, isNetWhite } from "./markdown.js";
+import { parse, serialize, splitTitle, joinTitle, headingList, attributeSplit, attributeBlockRowsJson, editAttributes, normalizePerson, isNetWhite } from "./markdown.js";
 
 const editors = new WeakMap();
 
@@ -233,9 +233,19 @@ function listItemView(node, view, getPos) {
   };
 }
 
+// True when the document or the attribute block changed since the editor was opened or last marked clean.
+function editorDirty(editor) {
+  return editor.attrs !== editor.cleanAttrs || !editor.view.state.doc.eq(editor.clean);
+}
+
+// The editor's whole text: the hidden head, the attribute block as kept, then the document.
+function editorMarkdown(editor) {
+  return joinTitle(editor.head, editor.attrs + serialize(editor.view.state.doc));
+}
+
 // Tells .NET when the editor's dirty state flipped (never per keystroke); it only shows a marker there.
 function reportDirty(editor) {
-  const dirty = !editor.view.state.doc.eq(editor.clean);
+  const dirty = editorDirty(editor);
   if (dirty !== editor.dirty) {
     editor.dirty = dirty;
     editor.dotnet.invokeMethodAsync("OnDirty", dirty).catch(() => {});
@@ -313,13 +323,15 @@ function typedDoc(text) {
  * Opens markdown in a new editor inside element; tag, link, mention and attachment clicks, drops and dirty flips call
  * back into dotnet. images ([{ src, mime, base64 }], checked by .NET) are shown inline through blob: URLs. With a
  * name, a first line "# <name>" (and the blank lines after it) is not shown: it stays on the editor as head and
- * getMarkdown writes it back unchanged.
+ * getMarkdown writes it back unchanged. The attribute block right after it (attributeSplit) is not shown either: it
+ * stays on the editor as attrs, changed only through setAttributes, and getMarkdown writes it back before the body.
  */
 export function mount(element, markdown, dotnet, images, name) {
   destroy(element);
-  const { head, body } = JSON.parse(splitTitle(markdown, name));
+  const { head, body: afterHead } = JSON.parse(splitTitle(markdown, name));
+  const { attrs, body } = attributeSplit(afterHead);
   const doc = parse(body);
-  const editor = { view: null, head, clean: doc, dirty: false, dotnet, images: new Map(), dropPos: null };
+  const editor = { view: null, head, attrs, cleanAttrs: attrs, clean: doc, dirty: false, dotnet, images: new Map(), dropPos: null };
   for (const image of images || []) {
     if (image && typeof image.src === "string" && !editor.images.has(image.src)) {
       editor.images.set(image.src, blobUrl(image.mime, image.base64));
@@ -442,13 +454,13 @@ export function insertAttachment(element, src, name, isImage, mime, base64) {
 /** The editor's text as Markdown: the hidden title line first, unchanged. */
 export function getMarkdown(element) {
   const editor = editors.get(element);
-  return editor ? joinTitle(editor.head, serialize(editor.view.state.doc)) : "";
+  return editor ? editorMarkdown(editor) : "";
 }
 
-/** True when the document changed since it was opened or last marked clean. */
+/** True when the document or the attribute block changed since it was opened or last marked clean. */
 export function isDirty(element) {
   const editor = editors.get(element);
-  return editor ? !editor.view.state.doc.eq(editor.clean) : false;
+  return editor ? editorDirty(editor) : false;
 }
 
 /** Marks the current document as saved. */
@@ -456,6 +468,7 @@ export function markClean(element) {
   const editor = editors.get(element);
   if (editor) {
     editor.clean = editor.view.state.doc;
+    editor.cleanAttrs = editor.attrs;
     reportDirty(editor);
   }
 }
@@ -466,10 +479,11 @@ export function markClean(element) {
  */
 export function markCleanIf(element, markdown) {
   const editor = editors.get(element);
-  if (!editor || joinTitle(editor.head, serialize(editor.view.state.doc)) !== markdown) {
+  if (!editor || editorMarkdown(editor) !== markdown) {
     return false;
   }
   editor.clean = editor.view.state.doc;
+  editor.cleanAttrs = editor.attrs;
   reportDirty(editor);
   return true;
 }
@@ -536,5 +550,29 @@ export function scrollToHeading(element, index) {
   if (dom && typeof dom.scrollIntoView === "function") {
     dom.scrollIntoView({ block: "start" });
   }
+  return true;
+}
+
+/** The rows of the editor's attribute block, as JSON [{ key, value }] (see attributeRows); "[]" without an editor. */
+export function attributes(element) {
+  const editor = editors.get(element);
+  return editor ? attributeBlockRowsJson(editor.attrs) : "[]";
+}
+
+/**
+ * Applies editsJson ([{ line, key, value }], see editAttributes) to the editor's attribute block and reports the dirty
+ * state. Returns true; false, changing nothing, without an editor or for malformed edits.
+ */
+export function setAttributes(element, editsJson) {
+  const editor = editors.get(element);
+  if (!editor) {
+    return false;
+  }
+  const attrs = editAttributes(editor.attrs, editsJson);
+  if (typeof attrs !== "string") {
+    return false;
+  }
+  editor.attrs = attrs;
+  reportDirty(editor);
   return true;
 }

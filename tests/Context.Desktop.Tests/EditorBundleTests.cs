@@ -590,6 +590,217 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
         Assert.Contains("Math.max(m[1].length, 2)", File.ReadAllText(Path.Combine(folder, "view.js")), StringComparison.Ordinal);
     }
 
+    // 236 AC-1: the leading block's rows (key as written, value trimmed), the body without it, later lines kept.
+    [Fact]
+    public void AttributeRows_LeadingBlockOnly()
+    {
+        string markdown = "# P\n\naliases:: A, B\ntype:: person\nrole::\n\nBody\nrole:: x\n";
+
+        Assert.Equal(
+            [("aliases", "A, B"), ("type", "person"), ("role", string.Empty)],
+            Rows(bundle.Json($"ContextEditor.attributeRows({Js(markdown)}, {Js("P")})")));
+        (string head, string attrs, string body) = Split(markdown, "P");
+        Assert.Equal(("# P\n\n", "aliases:: A, B\ntype:: person\nrole::\n\n", "Body\nrole:: x\n"), (head, attrs, body));
+        using JsonDocument doc = JsonDocument.Parse(bundle.Call("docJson", body));
+        JsonElement[] blocks = doc.RootElement.GetProperty("content").EnumerateArray().ToArray();
+        string first = string.Concat(Nodes(blocks[0]).Select(Text));
+        Assert.StartsWith("Body", first, StringComparison.Ordinal);
+        Assert.Contains("role:: x", string.Concat(blocks.SelectMany(Nodes).Select(Text)), StringComparison.Ordinal);
+    }
+
+    // 236 AC-1: without a title head the block starts at the very first line; a key shape per KeyEnd, at most 50 chars.
+    [Theory]
+    [InlineData("role:: x\nText\n", "role", "x")]
+    [InlineData("Start-Date_2::   2026  \n", "Start-Date_2", "2026")]
+    [InlineData("\u00e9t\u00e9:: v", "\u00e9t\u00e9", "v")]
+    [InlineData("a::b\n", "a", "b")]
+    public void AttributeRows_NoTitle_FirstLine(string markdown, string key, string value)
+    {
+        Assert.Equal([(key, value)], Rows(bundle.Json($"ContextEditor.attributeRows({Js(markdown)}, {Js("T")})")));
+    }
+
+    // 236 AC-1: a first body line that is not attribute-shaped gives no rows and leaves the body as it is.
+    [Theory]
+    [InlineData("# T\n\nText\nrole:: x\n")]
+    [InlineData("\nrole:: x\n")]
+    [InlineData("```\nrole:: x\n```\n")]
+    [InlineData(" role:: x\n")]
+    [InlineData("# T\n\n role:: x\n")]
+    [InlineData("1role:: x\n")]
+    [InlineData("role : x\n")]
+    [InlineData("role: x\n")]
+    [InlineData("-role:: x\n")]
+    [InlineData("# Other\n\nrole:: x\n")]
+    public void AttributeRows_NoBlock_BodyUnchanged(string markdown)
+    {
+        Assert.Empty(Rows(bundle.Json($"ContextEditor.attributeRows({Js(markdown)}, {Js("T")})")));
+        (string head, string attrs, string body) = Split(markdown, "T");
+        Assert.Equal(string.Empty, attrs);
+        Assert.Equal(markdown, head + body);
+        Assert.Equal(JsonDocument.Parse(SplitTitle(markdown, "T")).RootElement.GetProperty("body").GetString(), body);
+    }
+
+    // 236 AC-1: a key over 50 chars is no attribute line; 50 is.
+    [Fact]
+    public void AttributeRows_KeyLength()
+    {
+        string fifty = "k" + new string('a', 49);
+
+        Assert.Single(Rows(bundle.Json($"ContextEditor.attributeRows({Js(fifty + ":: v\n")}, {Js("T")})")));
+        Assert.Empty(Rows(bundle.Json($"ContextEditor.attributeRows({Js(fifty + "a:: v\n")}, {Js("T")})")));
+    }
+
+    // 236 AC-2: for every lossless fixture (with its own title as the name, and with T) head + attrs + body is the input.
+    [Theory]
+    [MemberData(nameof(Lossless))]
+    public void AttributeSplit_JoinsBackExactly(string file)
+    {
+        string markdown = Read(file);
+        foreach (string name in new[] { OwnTitle(markdown) ?? "T", "T" })
+        {
+            (string head, string attrs, string body) = Split(markdown, name);
+            Assert.Equal(markdown, head + attrs + body);
+        }
+    }
+
+    // 236 AC-2: the new fixture holds a title, a block with empty values and [[Link]] values, and later attribute lines;
+    // its block is split off.
+    [Fact]
+    public void AttributeBlockFixture_CoversTheSpec()
+    {
+        string markdown = Read(Path.Combine("lossless", "attribute-block.md"));
+        (string head, string attrs, string body) = Split(markdown, "Attribute block");
+
+        Assert.Equal("# Attribute block\n\n", head);
+        Assert.DoesNotContain('\r', markdown);
+        Assert.Contains("role::\n", attrs, StringComparison.Ordinal);
+        Assert.Contains("[[ACME]]", attrs, StringComparison.Ordinal);
+        Assert.Contains("later:: ", body, StringComparison.Ordinal);
+        Assert.Equal(5, Rows(bundle.Json($"ContextEditor.attributeRows({Js(markdown)}, {Js("Attribute block")})")).Count);
+        Assert.Equal(markdown, RoundTrip(markdown, "Attribute block"));
+    }
+
+    // 236 AC-3: a changed value rewrites only its line; the other rows keep their bytes (LF and CRLF).
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public void EditAttributes_ChangedValue_OnlyThatLine(string eol)
+    {
+        string attrs = $"aliases::  A,  B {eol}type:: person{eol}role::{eol}{eol}";
+
+        string? edited = Edit(attrs, Edits((0, "aliases", "A,  B"), (1, "type", "company"), (2, "role", string.Empty)));
+
+        Assert.Equal($"aliases::  A,  B {eol}type:: company{eol}role::{eol}{eol}", edited);
+        AssertParsed(edited!, ("aliases", "A, B"), ("type", "company"));
+    }
+
+    // 236 AC-3: an empty value is written "key::"; nothing changed keeps every byte.
+    [Fact]
+    public void EditAttributes_EmptyValueAndUnchanged()
+    {
+        string attrs = "Type::\tperson\nrole::\n";
+
+        Assert.Equal(attrs, Edit(attrs, Edits((0, "Type", "person"), (1, "role", string.Empty))));
+        Assert.Equal("Type::\nrole::\n", Edit(attrs, Edits((0, "Type", string.Empty), (1, "role", string.Empty))));
+    }
+
+    // 236 AC-3: an added row goes after the last row, before the trailing blank lines, with the block's line ending.
+    [Theory]
+    [InlineData("type:: person\n\n\n", "type:: person\nstart:: 2026\n\n\n")]
+    [InlineData("type:: person\r\n\r\n", "type:: person\r\nstart:: 2026\r\n\r\n")]
+    [InlineData("type:: person", "type:: person\nstart:: 2026\n")]
+    [InlineData("type:: person\r\n  ", "type:: person\r\nstart:: 2026\r\n  ")]
+    public void EditAttributes_Add_BeforeTrailingBlanks(string attrs, string expected)
+    {
+        string? edited = Edit(attrs, Edits((0, "type", "person"), (-1, "start", "2026")));
+
+        Assert.Equal(expected, edited);
+        AssertParsed(edited!, ("type", "person"), ("start", "2026"));
+    }
+
+    // 236 AC-3: removing a row drops its line; removing all drops the block and its trailing blank lines.
+    [Fact]
+    public void EditAttributes_Remove()
+    {
+        string attrs = "aliases:: A\ntype:: person\nrole:: lead\n\n";
+
+        string? edited = Edit(attrs, Edits((0, "aliases", "A"), (2, "role", "lead")));
+        Assert.Equal("aliases:: A\nrole:: lead\n\n", edited);
+        AssertParsed(edited!, ("aliases", "A"), ("role", "lead"));
+        Assert.Equal(string.Empty, Edit(attrs, "[]"));
+        Assert.Equal("aliases:: A\n\n", Edit("aliases:: A\ntype:: x", Edits((0, "aliases", "A"))) + "\n");
+    }
+
+    // 236 AC-3: a key or value with a line break or another control character can never add a line.
+    [Fact]
+    public void EditAttributes_ControlCharacters_StayOnOneLine()
+    {
+        string? edited = Edit("type:: person\n", Edits((0, "type", "a\nb\r\u2028c\u0000"), (-1, "role", "x\ninjected:: y")));
+
+        Assert.Equal("type:: a b  c\nrole:: x injected:: y\n", edited);
+        AssertParsed(edited!, ("type", "a b c"), ("role", "x injected:: y"));
+    }
+
+    // 236 AC-3: malformed edits change nothing (null).
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("{}")]
+    [InlineData("[{\"line\":5,\"key\":\"a\",\"value\":\"b\"}]")]
+    [InlineData("[{\"line\":-2,\"key\":\"a\",\"value\":\"b\"}]")]
+    [InlineData("[{\"line\":0.5,\"key\":\"a\",\"value\":\"b\"}]")]
+    [InlineData("[{\"line\":-1,\"key\":1,\"value\":\"b\"}]")]
+    [InlineData("[{\"line\":-1,\"key\":\"a\"}]")]
+    [InlineData("[{\"line\":-1,\"key\":\"1a\",\"value\":\"b\"}]")]
+    [InlineData("[{\"line\":-1,\"key\":\"a b\",\"value\":\"b\"}]")]
+    [InlineData("[{\"line\":-1,\"key\":\"\",\"value\":\"b\"}]")]
+    [InlineData("[null]")]
+    public void EditAttributes_Malformed_Null(string edits)
+    {
+        Assert.Null(Edit("type:: person\n", edits));
+    }
+
+    // 236 AC-3: an edited block parses back to the same rows, and the C# parser reads the same pairs from the whole note.
+    [Fact]
+    public void EditAttributes_WholeNote_ParsesAsExpected()
+    {
+        string markdown = "# P\n\naliases:: A, B\ntype:: person\nrole::\n\nBody\nlater:: z\n";
+        (string head, string attrs, string body) = Split(markdown, "P");
+
+        string edited = Edit(attrs, Edits((0, "aliases", "A, B"), (2, "role", "Lead"), (-1, "affiliation", "[[ACME]]")))!;
+
+        Assert.Equal(
+            [("aliases", "A, B"), ("role", "Lead"), ("affiliation", "[[ACME]]")],
+            Rows(bundle.Json($"ContextEditor.attributeRows({Js(head + edited + body)}, {Js("P")})")));
+        Assert.Equal(
+            [("aliases", "A, B"), ("role", "Lead"), ("affiliation", "[[ACME]]"), ("later", "z")],
+            AttributeParser.Parse(head + edited + body).Select(a => (a.Key, a.Value)));
+    }
+
+    private (string Head, string Attrs, string Body) Split(string markdown, string name)
+    {
+        using JsonDocument title = JsonDocument.Parse(SplitTitle(markdown, name));
+        string head = title.RootElement.GetProperty("head").GetString()!;
+        using JsonDocument split = JsonDocument.Parse(JsonSerializer.Deserialize<string>(
+            bundle.Json($"ContextEditor.attributeSplitJson({Js(title.RootElement.GetProperty("body").GetString()!)})"))!);
+        return (head, split.RootElement.GetProperty("attrs").GetString()!, split.RootElement.GetProperty("body").GetString()!);
+    }
+
+    private static List<(string Key, string Value)> Rows(string json)
+    {
+        using JsonDocument doc = JsonDocument.Parse(JsonSerializer.Deserialize<string>(json)!);
+        return doc.RootElement.EnumerateArray()
+            .Select(r => (r.GetProperty("key").GetString()!, r.GetProperty("value").GetString()!)).ToList();
+    }
+
+    private string? Edit(string attrs, string edits) =>
+        JsonSerializer.Deserialize<string?>(bundle.Json($"ContextEditor.editAttributes({Js(attrs)}, {Js(edits)})"));
+
+    private static string Edits(params (int Line, string Key, string Value)[] edits) =>
+        JsonSerializer.Serialize(edits.Select(e => new { line = e.Line, key = e.Key, value = e.Value }));
+
+    private static void AssertParsed(string text, params (string Key, string Value)[] expected) =>
+        Assert.Equal(expected.Select(e => (e.Key.ToLowerInvariant(), e.Value)), AttributeParser.Parse(text).Select(a => (a.Key, a.Value)));
+
     private string SplitTitle(string markdown, string name) =>
         JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.splitTitle({Js(markdown)}, {Js(name)})"))!;
 
