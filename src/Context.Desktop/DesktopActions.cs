@@ -910,6 +910,24 @@ internal sealed class DesktopActions
         Run(() => OpenAttachmentNow(name, src), refresh: false);
 
     /// <summary>
+    /// Opens the crash folder of <paramref name="hint"/> in the OS file manager through the <see cref="INoteLauncher"/>
+    /// (job 237): <see cref="CrashHint.Folder"/> is the only path given, never text from the page. False when the
+    /// launcher throws. Never writes and never refreshes.
+    /// </summary>
+    public bool OpenCrashFolder(CrashHint hint)
+    {
+        try
+        {
+            launcher.Launch(hint.Folder);
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Makes the plain note <paramref name="name"/> sensitive, only when the user <paramref name="confirmed"/> it:
     /// seals its text for this machine's key and the recovery key (both from the key store, no private-key call),
     /// writes <c>&lt;name&gt;.ctxs</c> through a private temp file and a move that never overwrites, then deletes

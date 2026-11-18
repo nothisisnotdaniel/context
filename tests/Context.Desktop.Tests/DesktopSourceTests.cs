@@ -97,6 +97,10 @@ public sealed class DesktopSourceTests
     private const string NotifierFolder = "src/Context.Desktop/";
     private const string RealNotifierFile = NotifierFolder + RealNotifier + ".cs";
 
+    // 237: the crash log prunes its own old logs in <root>/.logs with File.Delete; it writes through no other method.
+    private const string CrashLogFile = "src/Context.Desktop/CrashLog.cs";
+    private const string CrashLogDelete = "File.Delete(";
+
     // 139: System.IO's file system classes as whole words (RecoveryFile. is none).
     private static readonly Regex FileSystemClass = new(@"\b(File|Directory|Path)\.", RegexOptions.CultureInvariant);
 
@@ -744,6 +748,14 @@ public sealed class DesktopSourceTests
             {
                 Assert.Contains(".ArgumentList.Add(", text, StringComparison.Ordinal);
                 text = text.Replace(".ArgumentList.Add(", string.Empty, StringComparison.Ordinal);
+            }
+
+            // 237: the crash log deletes its own pruned logs (only regular crash-*.log files in .logs) and nothing else;
+            // any other writing call in it (.Move(, .Save( and so on) still fails.
+            if (file == CrashLogFile)
+            {
+                Assert.Contains(CrashLogDelete, text, StringComparison.Ordinal);
+                text = text.Replace(CrashLogDelete, string.Empty, StringComparison.Ordinal);
             }
 
             found.AddRange(Writes.Matches(text).Select(m => $"{file}: {m.Value}"));
@@ -1590,6 +1602,26 @@ public sealed class DesktopSourceTests
             .ToList();
 
         Assert.Equal(["src/Context.Core/TodoStore.cs", ActionsFile], found);
+    }
+
+    // 237 AC-12: the crash log names no data store, no actions and no console; its session file is written in place
+    // (no temp file, no move), and Program.cs hooks both exception events and ends the session after the window.
+    [Fact]
+    public void CrashLog_NamesNoStoreActionsOrConsole()
+    {
+        string root = RepoFiles.Root();
+        string source = File.ReadAllText(Path.Combine(root, CrashLogFile));
+
+        Assert.DoesNotMatch(@"\bNoteStore\b|\bDesktopActions\b|\bConsole\.|\.Move\(|File\.Replace\(", source);
+        Assert.Contains("FileMode.CreateNew", source, StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(source, Regex.Escape(CrashLogDelete)));
+
+        string program = File.ReadAllText(Path.Combine(root, ProgramFile)).ReplaceLineEndings("\n");
+        Assert.Matches(@"VelopackApp\.Build\(\)\.Run\(\);\n\n(?:        //[^\n]*\n)*        CrashLog crashLog = new CrashLog\(", program);
+        Assert.Contains("AppDomain.CurrentDomain.UnhandledException +=", program, StringComparison.Ordinal);
+        Assert.Contains("TaskScheduler.UnobservedTaskException +=", program, StringComparison.Ordinal);
+        Assert.Contains("e.SetObserved();", program, StringComparison.Ordinal);
+        Assert.Contains("        app.Run();\n        crashLog.End();\n", program, StringComparison.Ordinal);
     }
 
     // 178 AC-11: the real notifier is named only by itself and Program.cs, which hands it to the actions.

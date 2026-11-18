@@ -1,0 +1,32 @@
+@* Catches an exception a component throws (job 237): writes the crash log (source "component") once per error and
+   shows the fixed line with the log's path instead of the page. *@
+@using Microsoft.Extensions.DependencyInjection
+@inherits ErrorBoundaryBase
+
+@if (CurrentException is null)
+{
+    @ChildContent
+}
+else
+{
+    <p class="red crash-boundary failed" role="alert">@LineText(logPath)</p>
+}
+
+@code {
+    private string? logPath;
+
+    /// <summary>Gives the registered <see cref="CrashLog"/>; without one nothing is written.</summary>
+    [Inject]
+    internal IServiceProvider Services { get; set; } = null!;
+
+    /// <summary>The fixed line shown for a caught error; <paramref name="path"/> is <c>null</c> when no log was written.</summary>
+    internal static string LineText(string? path) => path is null
+        ? "Something went wrong. Close and reopen Context."
+        : $"Something went wrong. Crash log: {DesktopText.OneLine(path)}. Close and reopen Context.";
+
+    protected override Task OnErrorAsync(Exception exception)
+    {
+        logPath = Services.GetService<CrashLog>()?.Write("component", exception);
+        return Task.CompletedTask;
+    }
+}

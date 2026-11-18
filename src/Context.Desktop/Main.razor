@@ -1,6 +1,7 @@
 @inherits StateComponent
 @implements IAsyncDisposable
 
+<CrashHintBar />
 @if (Snapshot is { } snapshot)
 {
     @if (snapshot.Failed)

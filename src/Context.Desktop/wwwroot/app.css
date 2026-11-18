@@ -1875,3 +1875,30 @@ nav.saved-searches ul {
     padding: 0;
     text-decoration: underline;
 }
+
+/* Job 237: the one-line crash hint over the top of the window, until dismissed. */
+.crash-hint {
+    align-items: center;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--text);
+    display: flex;
+    gap: 8px;
+    left: 50%;
+    max-width: 80vw;
+    padding: 6px 10px;
+    position: fixed;
+    top: 8px;
+    transform: translateX(-50%);
+    z-index: 5;
+}
+
+.crash-hint-text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.crash-hint .red {
+    flex: 0 0 auto;
+}

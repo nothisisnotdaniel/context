@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.DependencyInjection;
 using Photino.Blazor;
 using Photino.NET;
@@ -10,7 +11,7 @@ namespace Context;
 /// page's editor is reached only through <see cref="EditorInterop"/>, a newer build through <see cref="StartupUpdate"/>,
 /// the OS default editor through <see cref="ShellNoteLauncher"/>, system notifications through
 /// <see cref="SystemNotifier"/>, the OS key store for sensitive notes through
-/// <see cref="IKeyStore"/>.
+/// <see cref="IKeyStore"/>, unexpected errors through <see cref="CrashLog"/>.
 /// </summary>
 internal static class Program
 {
@@ -18,6 +19,23 @@ internal static class Program
     private static void Main(string[] args)
     {
         VelopackApp.Build().Run();
+
+        // The crash log (job 237): an unexpected error is written to <data folder>/.logs, and the session marker there
+        // notices an exit that left no exception (a hard kill or a stopped web view). The handlers never throw.
+        CrashLog crashLog = new CrashLog(
+            NoteStore.DefaultFolder(),
+            () => DateTime.UtcNow,
+            StartupUpdate.CurrentVersion,
+            RuntimeInformation.OSDescription + " " + RuntimeInformation.ProcessArchitecture,
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            crashLog.Write("unhandled", e.ExceptionObject as Exception ?? new InvalidOperationException("A non-exception object was thrown."));
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            crashLog.Write("unobserved-task", e.Exception);
+            e.SetObserved();
+        };
+        CrashHint? crashHint = crashLog.Begin();
 
         static DateOnly Today() => DateOnly.FromDateTime(DateTime.Now);
 
@@ -69,6 +87,12 @@ internal static class Program
 
         PhotinoBlazorAppBuilder builder = PhotinoBlazorAppBuilder.CreateDefault(args);
         builder.Services.AddSingleton(state);
+        builder.Services.AddSingleton(crashLog);
+        if (crashHint is not null)
+        {
+            builder.Services.AddSingleton(crashHint);
+        }
+
         builder.Services.AddSingleton(actions);
         builder.Services.AddTransient<EditorInterop>();
         builder.Services.AddSingleton<IAutoSavePause>(new AutoSavePause());
@@ -144,5 +168,6 @@ internal static class Program
             new VelopackUpdateSource(StartupUpdate.IncludePrereleases(StartupUpdate.CurrentVersion)));
         _ = update.Start();
         app.Run();
+        crashLog.End();
     }
 }
