@@ -30,6 +30,7 @@ internal sealed class DesktopState
     private int builds;
     private volatile DesktopSnapshot? snapshot;
     private string? offeredBriefing;
+    private string? offeredStartNote;
 
     public DesktopState(
         NoteStore notes,
@@ -82,6 +83,15 @@ internal sealed class DesktopState
 
     /// <summary>The offered briefing's name once, then <c>null</c> until the next offer.</summary>
     public string? TakeBriefing() => Interlocked.Exchange(ref offeredBriefing, null);
+
+    /// <summary>
+    /// Offers today's daily note <paramref name="name"/>, made sure of at start, for <c>Main</c> to open while nothing
+    /// else is shown. An in-memory value only: nothing is written. Called only by the actions' start-up call.
+    /// </summary>
+    public void OfferStartNote(string name) => Interlocked.Exchange(ref offeredStartNote, name);
+
+    /// <summary>The offered start note's name once, then <c>null</c> until the next offer.</summary>
+    public string? TakeStartNote() => Interlocked.Exchange(ref offeredStartNote, null);
 
     /// <summary>How many snapshots have been built so far.</summary>
     public int Builds => Volatile.Read(ref builds);

@@ -133,16 +133,14 @@ ol {
 }
 
 .note,
-.todo,
-.linked-note {
+.todo {
     display: flex;
     gap: 8px;
     padding: 3px 0;
 }
 
 .note .name,
-.todo .text,
-.linked-note .name {
+.todo .text {
     flex: 1 1 auto;
     min-width: 0;
 }
@@ -153,12 +151,6 @@ ol {
     font-size: 12px;
 }
 
-.linked-note .tags {
-    flex: 0 1 auto;
-    min-width: 0;
-}
-
-.number,
 .date,
 .time {
     flex: none;
@@ -256,23 +248,6 @@ td {
 th {
     color: var(--grey);
     font-weight: 500;
-}
-
-.appointments th:first-child,
-.appointments td.number {
-    font-variant-numeric: tabular-nums;
-    text-align: right;
-    width: 40px;
-}
-
-.appointments th:nth-child(2),
-.appointments td.time {
-    width: 110px;
-}
-
-.due th:first-child,
-.due td:first-child {
-    width: 110px;
 }
 
 .failed,
@@ -1385,45 +1360,6 @@ nav.saved-searches ul {
 
 .breadcrumb .crumb-current {
     max-width: 30em;
-}
-
-/* Meeting prep: the related notes under an appointment, grey and indented, one link-like button per note. */
-.related td {
-    padding-top: 0;
-}
-
-.related-notes {
-    list-style: none;
-    margin: 0 0 4px 12px;
-    padding: 0;
-}
-
-.related-note {
-    display: flex;
-    gap: 8px;
-    font-size: 12px;
-    min-width: 0;
-}
-
-.related-note .note-button {
-    background: none;
-    border: none;
-    border-radius: 3px;
-    color: var(--accent-strong);
-    flex: 0 1 auto;
-    min-width: 0;
-    padding: 0;
-    text-align: left;
-    text-decoration: underline dotted;
-}
-
-.related-note .note-button:hover:not(:disabled) {
-    text-decoration: underline;
-}
-
-.related-note .matches {
-    flex: 0 1 auto;
-    min-width: 0;
 }
 
 /* Inbox triage: the line on top of the inbox, the count left, the five actions and the form of the chosen one. */

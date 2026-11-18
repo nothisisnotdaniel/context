@@ -17,19 +17,19 @@ public sealed class EditingFlowTests : IDisposable
 
     public void Dispose() => data.Dispose();
 
-    // AC-7: clicking a note's name opens it in the main region instead of /current.
+    // AC-7: clicking a note's name opens it in the main region instead of the no-note placeholder.
     [Fact]
     public async Task NoteName_Click_OpensEditor()
     {
         data.WriteNote("Plan", "# Plan\n");
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        Assert.Single(cut.FindAll(".current-region .current"));
+        Assert.Single(cut.FindAll(".current-region p.no-note"));
 
         await Open(cut, js, "Plan");
 
         Assert.Equal("Plan", cut.Find(".current-region .note-title").TextContent);
-        Assert.Empty(cut.FindAll(".current-region .current"));
+        Assert.Empty(cut.FindAll(".current-region p.no-note"));
         Assert.Equal("# Plan\n", js.MountedText());
         Assert.Equal(
             ["notes-region", "current-region", "todos-region"],
@@ -81,22 +81,33 @@ public sealed class EditingFlowTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal("Other", cut.Find(".note-title").TextContent), Wait);
     }
 
-    // AC-7 / AC-11: /current from the palette with unsaved changes asks, then shows /current.
+    // 216 AC-6: /current is no palette command any more: it is never ranked (typing /c ranks the other commands),
+    // and Enter on it runs nothing and writes nothing.
     [Fact]
-    public async Task PaletteCurrent_Dirty_AsksThenShowsCurrent()
+    public async Task PaletteCurrent_IsNoCommand()
     {
         data.WriteNote("Plan", "# Plan\n");
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        await Open(cut, js, "Plan");
-        js.EditUnsavable("# Plan\n\nUnsaved\n");
+        Assert.DoesNotContain(CommandPalette.Commands, c => c.Name == "/current");
+        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "k", CtrlKey = true });
+        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/current" });
+        Assert.DoesNotContain("/current", cut.FindAll(".palette-row .usage").Select(u => u.TextContent));
+        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/c" });
+        string[] ranked = cut.FindAll(".palette-row .usage").Select(u => u.TextContent).ToArray();
+        Assert.Contains(ranked, u => u.StartsWith("/capture", StringComparison.Ordinal));
+        Assert.DoesNotContain("/current", ranked);
+        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
 
+        await Open(cut, js, "Plan");
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
         await RunPalette(cut, "/current");
 
-        Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".current-region .current")), Wait);
-        Assert.Empty(cut.FindAll(".note-editor"));
+        Assert.Equal("No matching command.", cut.Find(".palette p.none").TextContent);
+        Assert.Equal(string.Empty, cut.Find(".main-status").TextContent);
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        Assert.Single(js.Calls("ContextEditor.mount"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
     }
 
     // AC-9: a tag click lists the notes with that tag, sorted ignoring case; clicking one opens it.
@@ -156,7 +167,7 @@ public sealed class EditingFlowTests : IDisposable
             cut.Find(".palette-input").GetAttribute("blazor:elementReference"),
             ((Microsoft.AspNetCore.Components.ElementReference)focus.Arguments[0]!).Id);
         Assert.Equal(
-            ["/briefing", "/capture <text>", "/current", "/decisions [tag]", "/done <text>", "/export", "/find <attribute> <value>", "/import", "/meeting <number>", "/new <title> [--template <name>]", "/open <note>", "/review", "/save", "/search <text>", "/settings", "/tags [tag]", "/today", "/todo <<yyyy-MM-dd|today|tomorrow> [HH:mm]|every <weekday|day|month>> <text>", "/triage"],
+            ["/briefing", "/capture <text>", "/decisions [tag]", "/done <text>", "/export", "/find <attribute> <value>", "/import", "/meeting <number>", "/new <title> [--template <name>]", "/open <note>", "/review", "/save", "/search <text>", "/settings", "/tags [tag]", "/today", "/todo <<yyyy-MM-dd|today|tomorrow> [HH:mm]|every <weekday|day|month>> <text>", "/triage"],
             cut.FindAll(".palette-row .usage").Select(u => u.TextContent).ToArray());
 
         await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
@@ -358,11 +369,11 @@ public sealed class EditingFlowTests : IDisposable
         Assert.Empty(cut.FindAll(".tags-panel"));
     }
 
-    // 137 AC-2: opening a note, or the current view, hides the tags view and the tag panel.
+    // 137 AC-2: opening a note, or Today, hides the tags view and the tag panel.
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task TagsView_OpeningANoteOrTheCurrentView_HidesBoth(bool note)
+    public async Task TagsView_OpeningANoteOrToday_HidesBoth(bool note)
     {
         data.WriteNote("Plan", "#work\n");
         EditorJs js = new EditorJs(data.Bunit);
@@ -384,8 +395,8 @@ public sealed class EditingFlowTests : IDisposable
         }
         else
         {
-            await RunPalette(cut, "/current");
-            cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".current-region .current")), Wait);
+            await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+            cut.WaitForAssertion(() => Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent), Wait);
         }
 
         Assert.Empty(cut.FindAll(".tags-panel"));

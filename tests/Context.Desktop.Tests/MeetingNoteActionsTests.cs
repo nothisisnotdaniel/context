@@ -132,7 +132,7 @@ public sealed class MeetingNoteActionsTests : IDisposable
         Assert.StartsWith("# 2026-10-29 Review Q4 plan\n\n#meeting\n", File.ReadAllText(PathOf(Review)), StringComparison.Ordinal);
     }
 
-    // AC-1: the number counts the appointments hidden behind "… N more" too.
+    // AC-1: the number counts every appointment of today, as `context current` does (216: no dashboard shows them).
     [Fact]
     public async Task PaletteMeeting_HiddenAppointment_StillNumbered()
     {
@@ -143,8 +143,6 @@ public sealed class MeetingNoteActionsTests : IDisposable
         data.WriteCalendar("a.ics", DesktopFixture.Calendar(events));
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        Assert.Equal("… 6 more", cut.Find("tr.more").TextContent.Trim());
-
         await RunPalette(cut, "/meeting 20");
 
         cut.WaitForAssertion(() => Assert.Equal("2026-10-29 M19", cut.Find(".note-title").TextContent), Wait);

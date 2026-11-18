@@ -2,7 +2,9 @@
 @* The shown day's appointments at the top of the right sidebar (DesktopState.DayAppointments: the calendar files and
    the feed's cached copy, never a download). On today it lists the last past appointment and every one not yet past
    (AppointmentList.Shown), on any other day all of them. The arrows step the day; a click on an appointment asks Main
-   to show its appointment page. It reads only, and reloads whenever the state changes, keeping the shown rows. *@
+   to show its appointment page. Below the list, on every day, the Exchange feed's status from the snapshot's current
+   view (offline or failed; the link is never shown). It reads only, and reloads whenever the state changes, keeping
+   the shown rows. *@
 
 <section class="day-appointments" aria-label="Appointments">
     <div class="day-appointments-bar">
@@ -47,6 +49,17 @@
         @foreach (string name in view.Unreadable)
         {
             <p class="red" role="status">Can't read @CalendarStore.FolderName/@DesktopText.OneLine(name)</p>
+        }
+        @if (Snapshot?.Current is { } current)
+        {
+            @if (current.Status == CalendarFeedStatus.Stale && current.CachedAtUtc is { } cachedAt)
+            {
+                <p class="grey feed">Exchange calendar offline, showing the copy from @CacheTime(current, cachedAt).</p>
+            }
+            else if (current.Status == CalendarFeedStatus.Failed)
+            {
+                <p class="red feed">Can't download the Exchange calendar (@DesktopText.OneLine(current.Reason ?? string.Empty)).</p>
+            }
         }
     }
 </section>
@@ -121,6 +134,13 @@
         loaded = Shown;
         view = null;
         return Load();
+    }
+
+    // The time of the feed's cached copy in the calendar's zone.
+    private static string CacheTime(CurrentView current, DateTime cachedAtUtc)
+    {
+        DateTime local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(cachedAtUtc, DateTimeKind.Utc), current.Zone);
+        return local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
     }
 
     // Keeps the shown rows while it reloads. A result for another day, or an older request's result, is dropped.
