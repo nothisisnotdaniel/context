@@ -183,10 +183,12 @@ Every factory agent reads this file before working on Context. Keep it short and
     `[d 00:00, d+1 00:00)` plus zero-length events starting on `d`, sorted all-day first, then start, then title
     (ordinal ignoring case), and the names of unreadable files (IO/access error, `FormatException`, too large).
     `IcsParser.Parse(text, zone)` scans linearly (no regexes): unfolds lines starting with space/tab, matches
-    names ignoring case, unescapes `\n \N \, \; \\`, reads `SUMMARY`, `LOCATION`, `DTSTART`, `DTEND`, `STATUS` of
+    names ignoring case, unescapes `\n \N \, \; \\`, reads `SUMMARY`, `LOCATION`, `DTSTART`, `DTEND`, `STATUS`, `CLASS` of
     each `VEVENT` (nested components like `VALARM` ignored). Times: `…Z` (UTC), `;TZID=` (unknown id = local),
     floating (local), `;VALUE=DATE` (all-day, `DTEND` exclusive). No `DTEND`: ends at start (all-day: one day).
-    Skips `STATUS:CANCELLED`, missing/invalid `DTSTART`, end before start. No `BEGIN:VCALENDAR` throws
+    Skips `STATUS:CANCELLED`, private events (job 227: `PRIVATE` or `CONFIDENTIAL`, trimmed, ignoring case, on any
+    `CLASS` line; always on, no setting, so they never reach the sidebar, `/meeting`, `context current`, review or
+    person pages; `calendar-link.ics` stays as received), missing/invalid `DTSTART`, end before start. No `BEGIN:VCALENDAR` throws
     `FormatException`. **Recurring events** (job 162): `IcsParser.Parse(text, zone, day)` (used by `Day` and for the
     feed in `CurrentView`) also reads `UID`, `RRULE`, `RDATE`, `EXDATE`, `RECURRENCE-ID` and returns every occurrence
     touching `day` (the `Overlaps` rule); `Parse(text, zone)` (`All`, `PersonView`, the feed check) still gives one
@@ -198,8 +200,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     `UNTIL` or several `RRULE`s drop only the rule's occurrences. Occurrences keep DTSTART's wall clock in its zone
     and the event's duration, then are converted. `RDATE` adds (no duplicates; `PERIOD` ignored), `EXDATE` removes
     (a date value, or any value on an all-day event, removes that local day); an event with `RECURRENCE-ID` and the
-    same `UID` replaces the occurrence starting then (cancelled: only removes); a cancelled series and its overrides
-    show nothing. Bounds: without `COUNT` the rule skips ahead to the day; at most `RecurrenceRule.MaxPeriodsPerEvent`
+    same `UID` replaces the occurrence starting then (cancelled or private: only removes); a cancelled or private series
+    and its overrides show nothing. Bounds: without `COUNT` the rule skips ahead to the day; at most `RecurrenceRule.MaxPeriodsPerEvent`
     (50,000) periods per event and `RecurrenceBudget.StepsPerParse` (1,000,000) steps per `Parse`, after which events
     show only DTSTART and `RDATE`s. Not supported: `VTIMEZONE`, `EXRULE`, `RANGE=THISANDFUTURE`, occurrences on
     person pages. The current view shows each appointment with its time
@@ -1231,12 +1233,15 @@ Every factory agent reads this file before working on Context. Keep it short and
     and no test does (tests use `FakeOutlookSource`: availability, kind and items per call, call counts, `Throws`, a
     `ManualResetEventSlim` gate released on dispose). `OutlookComSource` is late-bound (`dynamic`, no interop package),
     attaches only through `ole32!CLSIDFromProgID` + `oleaut32!GetActiveObject` (never `Activator.CreateInstance`, never
-    starts Outlook), reads only `Subject`, `Location`, `Start`, `End`, `AllDayEvent` of the
+    starts Outlook), reads only `Sensitivity`, `Subject`, `Location`, `Start`, `End`, `AllDayEvent` of the
     default Calendar (9; `Sort("[Start]")`, `IncludeRecurrences`, `Restrict` built only from the day in current-culture
     `g`), walks `GetFirst`/`GetNext` (never `Count`; 500 items), converts machine time to the
     calendar zone and `FinalReleaseComObject`s every COM object; it writes nothing (no `.Save(`/`.Send(`/`.Delete(`/
     `.Move(`/`.Display(`) and reads no `Body`/`HTMLBody`/`Recipients`/`RequiredAttendees`/`SenderEmailAddress`, and has
-    no exemption from any other source scan. On = `SettingsStore.ReadOutlook()` (exactly `"outlook":{"enabled":true}`;
+    no exemption from any other source scan. Private items (job 227, always on, no setting): `ReadAppointment` reads
+    `Sensitivity` first and skips the item, before reading anything else of it, unless `OutlookSensitivity.IsPrivate`
+    sees a number equal to 0 (Normal) or 1 (Personal); Private (2), Confidential (3), any other or unreadable value is
+    hidden (fails closed; `OutlookSensitivity.cs`, `OutlookSensitivityTests`). On = `SettingsStore.ReadOutlook()` (exactly `"outlook":{"enabled":true}`;
     anything else or a broken file is off) and `Available`; off asks the source nothing. `DesktopState` caches each
     day's appointments (one `OutlookCall` with its start time under `outlookGate`; a running call is shared,
     a finished one kept `OutlookCacheAge` = 5 min by the UTC clock), waits at most `OutlookTimeout` (10 s, ctor

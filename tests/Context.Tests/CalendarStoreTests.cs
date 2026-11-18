@@ -250,4 +250,36 @@ public sealed class CalendarStoreTests : IDisposable
         Assert.Empty(day.Unreadable);
         Assert.Equal(["Real"], Titles(day));
     }
+
+    // Job 227 AC-4: private and confidential events in a calendar file are left out of the day.
+    [Fact]
+    public void Day_PrivateEventsInFile_LeftOut()
+    {
+        Write(
+            "work.ics",
+            Event("Open", ":20261029T090000"),
+            Event("Secret", ":20261029T100000", extra: "CLASS:PRIVATE\r\n"),
+            Event("Hush", ":20261029T110000", extra: "CLASS:confidential\r\n"),
+            Event("Public", ":20261029T120000", extra: "CLASS:PUBLIC\r\n"));
+
+        CalendarDay day = Day();
+
+        Assert.Equal(["Open", "Public"], Titles(day));
+        Assert.Empty(day.Unreadable);
+    }
+
+    // Job 227 AC-4: the feed's events (passed as extra) come through the parser, so its private ones are gone too.
+    [Fact]
+    public void Day_PrivateFeedEventsAsExtra_LeftOut()
+    {
+        string feed = "BEGIN:VCALENDAR\r\n" + Event("Feed open", ":20261029T090000")
+            + Event("Feed secret", ":20261029T100000", extra: "CLASS:PRIVATE\r\n") + "END:VCALENDAR\r\n";
+        CalendarFeedResult result = new CalendarFeedResult(CalendarFeedStatus.Fresh, feed, null, null);
+        IReadOnlyList<Appointment> extra = CurrentView.FeedEvents(result, IcsParserTests.Zone, Today);
+        Write("work.ics", Event("File open", ":20261029T080000"));
+
+        CalendarDay day = new CalendarStore(root, IcsParserTests.Zone).Day(Today, extra);
+
+        Assert.Equal(["File open", "Feed open"], Titles(day));
+    }
 }

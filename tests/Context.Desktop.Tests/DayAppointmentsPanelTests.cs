@@ -328,4 +328,44 @@ public sealed class DayAppointmentsPanelTests : IDisposable
 
     // ".day-appointments shows no Loading… and no .appointment-item".
     private static void WaitForEmpty(IRenderedComponent<Main> cut) => WaitForItems(cut, 0);
+
+    // 227 AC-7: a private appointment never shows in the sidebar, and the pages of the shown ones don't list it.
+    [Fact]
+    public async Task PrivateAppointment_NotShown_NorOnThePages()
+    {
+        data.WriteCalendar("work.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("Standup", "20261029T083000", "20261029T093000"),
+            DesktopFixture.Event("Doctor", "20261029T100000", "20261029T110000")
+                .Replace("END:VEVENT", "CLASS:PRIVATE\r\nEND:VEVENT", StringComparison.Ordinal),
+            DesktopFixture.Event("Plan", "20261029T110000", "20261029T120000")));
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        WaitForItems(cut, 2);
+
+        Assert.Equal(["08:30-09:30 Standup", "11:00-12:00 Plan"], Items(cut));
+        Assert.DoesNotContain("Doctor", cut.Markup, StringComparison.Ordinal);
+
+        foreach ((int index, string title) in new[] { (0, "Standup"), (1, "Plan") })
+        {
+            await cut.FindAll(".day-appointments .appointment-item")[index].ClickAsync(new MouseEventArgs());
+            cut.WaitForAssertion(() =>
+            {
+                Assert.Equal(title, cut.Find(".current-region section.appointment-page h2").TextContent);
+                Assert.DoesNotContain("Loading…", cut.Find(".current-region section.appointment-page").TextContent, StringComparison.Ordinal);
+            }, Wait);
+            Assert.DoesNotContain("Doctor", cut.Markup, StringComparison.Ordinal);
+        }
+    }
+
+    // 227 AC-7: a day with only private appointments looks like a day with none.
+    [Fact]
+    public async Task OnlyPrivateAppointments_LooksEmpty()
+    {
+        data.WriteCalendar("work.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("Doctor", "20261029T100000", "20261029T110000")
+                .Replace("END:VEVENT", "CLASS:CONFIDENTIAL\r\nEND:VEVENT", StringComparison.Ordinal)));
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        WaitForEmpty(cut);
+
+        Assert.DoesNotContain("Doctor", cut.Markup, StringComparison.Ordinal);
+    }
 }

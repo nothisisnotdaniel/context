@@ -409,4 +409,25 @@ public sealed class PersonViewTests : IDisposable
         Assert.False(view.TodosUnreadable);
         Assert.Equal(PersonViewKind.NoMentions, carl.Kind);
     }
+
+    // Job 227 AC-4: a private appointment never shows on a person page, whether the title, the location or an
+    // attendee matches, from a file or the feed's cache.
+    [Fact]
+    public void Build_PrivateAppointments_NotListed()
+    {
+        WriteNote("people", "# people");
+        WriteNote("people/Anna Schmidt", "# Anna Schmidt\n@[Anna Schmidt]");
+        WriteCalendar("work.ics", Calendar(
+            Event("Sync with @[Anna Schmidt]", ":20261029T080000Z", ":20261029T090000Z"),
+            Event("Secret with @[Anna Schmidt]", ":20261029T100000Z", ":20261029T110000Z", "CLASS:PRIVATE"),
+            Event("Lunch", ":20261029T120000Z", ":20261029T130000Z", "LOCATION:@[Anna Schmidt]", "CLASS:CONFIDENTIAL"),
+            Event("Call", ":20261029T140000Z", ":20261029T150000Z", "ATTENDEE;CN=Anna Schmidt:mailto:a@b", "class:private")));
+        PlantCache(Calendar(
+            Event("Cached secret @[Anna Schmidt]", ":20261030T080000Z", ":20261030T090000Z", "CLASS:PRIVATE")));
+
+        PersonView view = Build("Anna Schmidt", Feed());
+
+        Assert.Equal(["Sync with @[Anna Schmidt]"], view.Appointments.Select(a => a.Title));
+        Assert.Equal(0, http.Requests);
+    }
 }

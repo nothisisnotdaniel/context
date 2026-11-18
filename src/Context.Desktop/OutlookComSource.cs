@@ -8,8 +8,9 @@ namespace Context;
 /// <summary>
 /// Reads the running classic Outlook through its COM interface, late-bound (<c>dynamic</c>, no interop assembly), with
 /// the profile that is already signed in. It only attaches to a running Outlook (<c>GetActiveObject</c>) and never
-/// starts it, never writes to it, and reads only the subject, location, start, end and all-day flag of the default
-/// Calendar's items. Every COM object it
+/// starts it, never writes to it, and reads only the sensitivity, subject, location, start, end and all-day flag of the
+/// default Calendar's items; a private or confidential item (see <see cref="OutlookSensitivity"/>) is skipped. Every COM
+/// object it
 /// touches is released in a <c>finally</c>. A COM error becomes a kind, never an exception text.
 /// </summary>
 [SupportedOSPlatform("windows")]
@@ -122,6 +123,14 @@ internal sealed class OutlookComSource : IOutlookSource
     {
         try
         {
+            // Private and Confidential items (and any whose sensitivity can't be read) are skipped before
+            // anything else of them is read.
+            object? sensitivity = item.Sensitivity;
+            if (OutlookSensitivity.IsPrivate(sensitivity))
+            {
+                return null;
+            }
+
             string subject = (string?)item.Subject ?? string.Empty;
             string? location = (string?)item.Location;
             DateTime start = (DateTime)item.Start;

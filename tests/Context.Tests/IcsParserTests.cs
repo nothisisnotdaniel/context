@@ -190,4 +190,88 @@ public sealed class IcsParserTests
         Assert.Empty(Single(Event("DTSTART:20261029T080000Z")).Attendees);
         Assert.Empty(new Appointment("x", null, DateTime.MinValue, DateTime.MinValue, false).Attendees);
     }
+
+    // Job 227 AC-1: CLASS:PRIVATE / CONFIDENTIAL (any case, spaces, folded) are left out of both overloads.
+    [Theory]
+    [InlineData("CLASS:PRIVATE")]
+    [InlineData("CLASS:CONFIDENTIAL")]
+    [InlineData("CLASS:private")]
+    [InlineData("class:Confidential")]
+    [InlineData("CLASS:  PRIVATE  ")]
+    [InlineData("CLASS:PRI\r\n VATE")]
+    [InlineData("CLASS;X-PARAM=1:PRIVATE")]
+    public void Parse_PrivateClass_LeftOut(string classLine)
+    {
+        string text = Calendar(
+            "BEGIN:VEVENT", "SUMMARY:secret", classLine,
+            "DTSTART:20261029T100000", "DTEND:20261029T110000", "END:VEVENT",
+            "BEGIN:VEVENT", "SUMMARY:open", "DTSTART:20261029T120000", "END:VEVENT");
+
+        Assert.Equal("open", Assert.Single(IcsParser.Parse(text, Zone)).Title);
+        Assert.Equal("open", Assert.Single(IcsParser.Parse(text, Zone, new DateOnly(2026, 10, 29))).Title);
+    }
+
+    // Job 227 AC-1: a private CLASS on any of several CLASS lines hides the event.
+    [Fact]
+    public void Parse_PrivateOnSecondClassLine_LeftOut()
+    {
+        string text = Event("SUMMARY:secret", "CLASS:PUBLIC", "CLASS:PRIVATE", "DTSTART:20261029T100000");
+
+        Assert.Empty(IcsParser.Parse(text, Zone));
+        Assert.Empty(IcsParser.Parse(text, Zone, new DateOnly(2026, 10, 29)));
+    }
+
+    // Job 227 AC-1: PUBLIC, an unknown CLASS or none still show.
+    [Theory]
+    [InlineData("CLASS:PUBLIC")]
+    [InlineData("CLASS:X-SECRETISH")]
+    [InlineData("CLASS:PRIVATELY")]
+    [InlineData("X-NOTHING:1")]
+    public void Parse_OtherClass_Shown(string classLine)
+    {
+        string text = Event("SUMMARY:open", classLine, "DTSTART:20261029T100000");
+
+        Assert.Equal("open", Single(text).Title);
+        Assert.Equal("open", Assert.Single(IcsParser.Parse(text, Zone, new DateOnly(2026, 10, 29))).Title);
+    }
+
+    private static string WeeklyWith(string[] series, string[] overrideLines) => Calendar(
+    [
+        "BEGIN:VEVENT", "UID:w@example.com", "SUMMARY:Weekly", "DTSTART:20261006T100000", "DTEND:20261006T110000",
+        "RRULE:FREQ=WEEKLY", .. series, "END:VEVENT",
+        "BEGIN:VEVENT", "UID:w@example.com", "RECURRENCE-ID:20261013T100000", .. overrideLines, "END:VEVENT",
+    ]);
+
+    // Job 227 AC-2: a private series shows no occurrence and none of its overrides (even one without CLASS).
+    [Fact]
+    public void Parse_PrivateSeries_ShowsNothing()
+    {
+        string text = WeeklyWith(["CLASS:PRIVATE"], ["SUMMARY:Moved", "DTSTART:20261013T150000"]);
+
+        foreach (int day in new[] { 6, 13, 20, 27 })
+        {
+            Assert.Empty(IcsParser.Parse(text, Zone, new DateOnly(2026, 10, day)));
+        }
+    }
+
+    // Job 227 AC-2: a private override of a public series removes only that occurrence.
+    [Fact]
+    public void Parse_PrivateOverride_RemovesItsOccurrence()
+    {
+        string text = WeeklyWith([], ["SUMMARY:Secret", "CLASS:CONFIDENTIAL", "DTSTART:20261013T150000"]);
+
+        Assert.Empty(IcsParser.Parse(text, Zone, new DateOnly(2026, 10, 13)));
+        Assert.Equal("Weekly", Assert.Single(IcsParser.Parse(text, Zone, new DateOnly(2026, 10, 6))).Title);
+        Assert.Equal("Weekly", Assert.Single(IcsParser.Parse(text, Zone, new DateOnly(2026, 10, 20))).Title);
+    }
+
+    // Job 227 AC-3: a calendar with only private events still parses (no FormatException).
+    [Fact]
+    public void Parse_OnlyPrivateEvents_EmptyNotThrowing()
+    {
+        string text = Event("SUMMARY:secret", "CLASS:PRIVATE", "DTSTART:20261029T100000");
+
+        Assert.Empty(IcsParser.Parse(text, Zone));
+        Assert.Empty(IcsParser.Parse(text, Zone, new DateOnly(2026, 10, 29)));
+    }
 }

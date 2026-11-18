@@ -65,7 +65,8 @@ internal sealed record Appointment
 
 /// <summary>
 /// Reads the part of iCalendar (RFC 5545) that <c>/current</c> and the person pages need: the <c>SUMMARY</c>,
-/// <c>LOCATION</c>, <c>DTSTART</c>, <c>DTEND</c>, <c>STATUS</c> and <c>ATTENDEE</c> names of each <c>VEVENT</c>, and
+/// <c>LOCATION</c>, <c>DTSTART</c>, <c>DTEND</c>, <c>STATUS</c>, <c>CLASS</c> and <c>ATTENDEE</c> names of each
+/// <c>VEVENT</c>, and
 /// for <see cref="Parse(string, TimeZoneInfo, DateOnly)"/> its recurrence (<c>UID</c>, <c>RRULE</c> through
 /// <see cref="RecurrenceRule"/>, <c>RDATE</c>, <c>EXDATE</c>, <c>RECURRENCE-ID</c>). Everything else, including
 /// nested components such as <c>VALARM</c> and <c>VTIMEZONE</c>, is ignored. The input is untrusted: it is scanned
@@ -79,7 +80,8 @@ internal static class IcsParser
 
     /// <summary>
     /// Returns every event in <paramref name="text"/> that has a valid <c>DTSTART</c>, isn't
-    /// <c>STATUS:CANCELLED</c> and doesn't end before it starts, in file order. Times are converted to
+    /// <c>STATUS:CANCELLED</c>, isn't private (<c>CLASS:PRIVATE</c> or <c>CLASS:CONFIDENTIAL</c>) and doesn't end
+    /// before it starts, in file order. Times are converted to
     /// <paramref name="local"/>.
     /// </summary>
     /// <remarks>Recurrence is not expanded: each <c>VEVENT</c> gives at most one appointment, its <c>DTSTART</c>.</remarks>
@@ -105,7 +107,9 @@ internal static class IcsParser
     /// <c>RRULE</c>, <c>RDATE</c>s, without <c>EXDATE</c>s and without the occurrences replaced by a
     /// <c>RECURRENCE-ID</c> event of the same <c>UID</c>), plus every override and single event. Each occurrence
     /// keeps <c>DTSTART</c>'s wall-clock time in its source zone and the event's duration, converted to
-    /// <paramref name="local"/>. An unsupported or invalid rule only drops the rule's occurrences.
+    /// <paramref name="local"/>. An unsupported or invalid rule only drops the rule's occurrences. A cancelled or
+    /// private (<c>CLASS:PRIVATE</c>/<c>CONFIDENTIAL</c>) series shows none of its occurrences and none of its
+    /// overrides; a cancelled or private override only removes the occurrence it replaces.
     /// </summary>
     /// <exception cref="FormatException">The text has no <c>BEGIN:VCALENDAR</c> line.</exception>
     public static IReadOnlyList<Appointment> Parse(string text, TimeZoneInfo local, DateOnly day)
@@ -115,7 +119,8 @@ internal static class IcsParser
         DateTime to = day == DateOnly.MaxValue ? DateTime.MaxValue : from.AddDays(1);
 
         Dictionary<string, Exclusions> replaced = new Dictionary<string, Exclusions>(StringComparer.Ordinal);
-        HashSet<string> cancelledSeries = new HashSet<string>(StringComparer.Ordinal);
+        // Cancelled or private series: their overrides are hidden too.
+        HashSet<string> hiddenSeries = new HashSet<string>(StringComparer.Ordinal);
         foreach (EventBuilder builder in events)
         {
             if (builder.Uid is null)
@@ -133,9 +138,9 @@ internal static class IcsParser
 
                 exclusions.Add(builder.RecurrenceId.Value, builder.RecurrenceId, local);
             }
-            else if (builder.Cancelled)
+            else if (builder.Cancelled || builder.Private)
             {
-                cancelledSeries.Add(builder.Uid);
+                hiddenSeries.Add(builder.Uid);
             }
         }
 
@@ -145,7 +150,7 @@ internal static class IcsParser
         {
             if (builder.RecurrenceId is not null)
             {
-                Appointment? single = builder.Uid is not null && cancelledSeries.Contains(builder.Uid)
+                Appointment? single = builder.Uid is not null && hiddenSeries.Contains(builder.Uid)
                     ? null
                     : builder.Build(local);
                 if (single is not null && CalendarStore.Overlaps(single, from, to))
@@ -702,6 +707,7 @@ internal static class IcsParser
         private ContentLine? start;
         private ContentLine? end;
         private bool cancelled;
+        private bool isPrivate;
         private readonly List<string> attendees = [];
         private readonly List<string> rules = [];
         private readonly List<ContentLine> recurrenceDates = [];
@@ -718,6 +724,9 @@ internal static class IcsParser
 
         /// <summary>True for <c>STATUS:CANCELLED</c>.</summary>
         public bool Cancelled => cancelled;
+
+        /// <summary>True when any <c>CLASS</c> line is <c>PRIVATE</c> or <c>CONFIDENTIAL</c> (trimmed, ignoring case).</summary>
+        public bool Private => isPrivate;
 
         /// <summary>Every <c>RRULE</c> value; only exactly one is expanded.</summary>
         public IReadOnlyList<string> Rules => rules;
@@ -795,11 +804,24 @@ internal static class IcsParser
             {
                 cancelled = content.Value.Trim().Equals("CANCELLED", StringComparison.OrdinalIgnoreCase);
             }
+            else if (content.Is("CLASS"))
+            {
+                string value = content.Value.Trim();
+                if (value.Equals("PRIVATE", StringComparison.OrdinalIgnoreCase)
+                    || value.Equals("CONFIDENTIAL", StringComparison.OrdinalIgnoreCase))
+                {
+                    isPrivate = true;
+                }
+            }
         }
 
+        /// <summary>
+        /// The event at its <c>DTSTART</c>, or <c>null</c> when it is cancelled, private, has no valid start or ends
+        /// before it starts.
+        /// </summary>
         public Appointment? Build(TimeZoneInfo local)
         {
-            if (cancelled || start is null)
+            if (cancelled || isPrivate || start is null)
             {
                 return null;
             }

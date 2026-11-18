@@ -411,4 +411,32 @@ public sealed class MeetingNoteActionsTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
     }
+
+    // 227 AC-7: a private appointment takes no number: /meeting 2 opens the second public one, /meeting 3 is out of
+    // range, and no note is ever made for the private one.
+    [Fact]
+    public async Task PaletteMeeting_PrivateAppointment_NotNumbered()
+    {
+        data.WriteCalendar("work.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("Standup", "20261029T090000", "20261029T091500"),
+            DesktopFixture.Event("Doctor", "20261029T100000", "20261029T110000")
+                .Replace("END:VEVENT", "CLASS:PRIVATE\r\nEND:VEVENT", StringComparison.Ordinal),
+            DesktopFixture.Event("Plan", "20261029T120000", "20261029T130000")));
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, "/meeting 2");
+
+        cut.WaitForAssertion(() => Assert.Equal("Meetings/Plan/2026-10-29", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
+
+        await RunPalette(cut, "/meeting 3");
+
+        cut.WaitForAssertion(
+            () => Assert.Equal("There is no appointment 3 today.", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root));
+        Assert.False(Directory.Exists(PathOf("Meetings/Doctor", string.Empty)));
+    }
 }
