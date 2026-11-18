@@ -1050,8 +1050,19 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Can't read the data folder.`): an empty `.top-bar-start` and right-aligned `.top-bar-buttons` with icon buttons
     `button.capture-open` (`Capture`, job 199: a hand-drawn "T" with an I-beam caret; a `.capture-pop` popover with one
     `input[type=text]` `aria-label="Capture"`, placeholder `Capture to inbox`, maxlength 1000, focused on open, and a
-    `.capture-pop-backdrop`), `button.today-open` (`Today`) and `button.day-pick-open` (`Pick a day`; a popover with `input[type=date]`
-    `aria-label="Day"`, min 1900-01-01, max 2100-12-31, and a `.day-pick-backdrop`). Esc, the backdrop or the button
+    `.capture-pop-backdrop`), `button.today-open` (`Today`) and `button.day-pick-open` (`Pick a day`; job 213: a `.day-pick` month calendar with a
+    `.day-pick-backdrop` and no input: header `button.day-pick-prev`/`day-pick-next` (icon-only, `Previous month`/`Next
+    month`, disabled on January 1900/December 2100) around `.day-pick-month` (`MMMM yyyy`, invariant, also the
+    `table[role=grid]`'s `aria-label`); columns an empty week header then `Mo`..`Su`; always 6 rows from the Monday on or
+    before the 1st, each a `th.week[role=rowheader]` (`ISOWeek` of its Monday, `aria-label` `Week <n>`) and 7
+    `td[role=gridcell]` > `button.day` (`aria-label` `dddd, d MMMM yyyy`; `outside` for other months, still clickable;
+    disabled outside 1900-01-01..2100-12-31); `TopBar` parameters `Today` (`today`, `aria-current="date"`) and
+    `Selected` (`selected`, gridcell `aria-selected="true"`; `Main.SelectedDay`: the open note's day when its name is
+    exactly `yyyy-MM-dd`, today with no note and no Triage/Tags/Settings/search/review page, else null). Each opening
+    starts on `Selected ?? Today` with that day as the one `tabindex="0"` day (roving tabindex) and focuses it; arrows
+    move ±1/±7 days, PageUp/PageDown ±1 month (day clamped), never outside the range, the shown month follows; a click or
+    Enter calls `OnPick` once and closes (a later event finds it closed). Date maths in `MonthGrid.cs`; styles only
+    theme variables, `.day.today.selected` keeps an inner ring). Esc, the backdrop or the button
     closes a popover; opening one closes the other, so at most one is open. `Main.ShowToday` goes through `RequestOpen(null)` (the unsaved-changes guard) to today's current view.
     `PickDay(DateOnly)` (job 212) works like `/today` for that day: it opens the day's daily note (`yyyy-MM-dd`) in the
     page editor through `Actions.OpenDailyNote(day)` (`DailyNote.Ensure` with `DailyNote.Compose` for that day; the

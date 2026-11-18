@@ -383,13 +383,15 @@ public sealed class DesktopSourceTests
     [Fact]
     public void Css_KeepsTheFocusRingsOfOtherControls()
     {
+        // Job 213 added one more: the calendar's focus day.
         const int RingsInAppCssBefore211 = 9;
+        const int CalendarDayRing = 1;
         string root = RepoFiles.Root();
         string css = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "app.css"));
         string editorCss = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "editor", "editor.css"));
 
         Assert.Equal(
-            RingsInAppCssBefore211,
+            RingsInAppCssBefore211 + CalendarDayRing,
             System.Text.RegularExpressions.Regex.Matches(css, @"outline: 2px solid var\(--accent-strong\)").Count);
         Assert.Contains(
             "outline: 2px solid var(--accent-strong);",
@@ -1979,7 +1981,8 @@ public sealed class DesktopSourceTests
         Assert.Contains("width: 18px;", svg);
         Assert.Contains("height: 18px;", svg);
         Assert.DoesNotContain("http", razor, StringComparison.Ordinal);
-        Assert.Equal(3, Regex.Matches(razor, "stroke=\"currentColor\"").Count);
+        // Capture, Today, Pick a day, and (job 213) the calendar's Previous and Next month arrows.
+        Assert.Equal(5, Regex.Matches(razor, "stroke=\"currentColor\"").Count);
     }
 
     // 199 AC-1, AC-8, AC-9: the Capture icon is inline (no URL, no img), the popover is styled like the day pick, and
