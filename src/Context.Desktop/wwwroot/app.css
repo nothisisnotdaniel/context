@@ -1458,6 +1458,49 @@ nav.saved-searches ul {
     max-width: 30em;
 }
 
+/* Subpages (job 238): the open note's direct children below the note body, styled like the breadcrumb's links. */
+.subpages {
+    border-top: 1px solid var(--line);
+    margin-top: 16px;
+    padding-top: 12px;
+}
+
+.subpages h2 {
+    margin-top: 0;
+}
+
+.subpages ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.subpages li {
+    align-items: baseline;
+    display: flex;
+    gap: 8px;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.subpages .subpage-link {
+    background: none;
+    border: none;
+    color: var(--accent-strong);
+    max-width: 30em;
+    padding: 0;
+    text-align: left;
+}
+
+.subpages .subpage-link:hover {
+    text-decoration: underline;
+}
+
+.subpages .subpage-count {
+    color: var(--grey);
+    flex-shrink: 0;
+}
+
 /* Inbox triage: the line on top of the inbox, the count left, the five actions and the form of the chosen one. */
 .triage-panel {
     border-bottom: 1px solid var(--line);
