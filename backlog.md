@@ -98,7 +98,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#258](backlog/258-no-accent-bar-left-of-the.md) No accent bar left of the editor while editing → 211-no-editor-accent-bar
 - [x] [#270](backlog/270-editor-works-on-a-day-opened.md) Editor works on a day opened from the calendar → 212-calendar-day-editor
 - [x] [#254](backlog/254-month-calendar-in-the-day-picker.md) Month calendar in the day picker → 213-month-calendar-picker
-- [ ] [#279](backlog/279-today-s-appointments-in-the-right.md) Today's appointments in the right sidebar
+- [x] [#279](backlog/279-today-s-appointments-in-the-right.md) Today's appointments in the right sidebar → 214-sidebar-today-appointments
 - [ ] [#278](backlog/278-today-and-home-open-today-s.md) Today and Home open today's note in the editor
 - [ ] [#271](backlog/271-search-icon-in-the-top-bar.md) Search icon in the top bar, opens like Capture
 - [ ] [#69](backlog/069-board-view-for-a-tag.md) Board view for a tag
