@@ -653,8 +653,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     package of the channel becomes the delta base; an installed copy that can't apply a delta falls back to the full
     package. Delete stale drafts by hand.
   - **Versions:** a `develop` push makes a prerelease `X.Y.(Z+1)-develop.<run number>`, one patch above the highest
-    release tag (`.github/scripts/develop-version.sh`; `0.0.1-develop.<n>` while there is no tag). A push that changes
-    only the root `backlog.md` is skipped (`paths-ignore`) and makes no prerelease. A release PR takes its version from
+    release tag (`.github/scripts/develop-version.sh`; `0.0.1-develop.<n>` while there is no tag). A push whose changes
+    are all in the root `backlog.md` and/or `backlog/**` (the user stories) is skipped (`paths-ignore`) and makes no
+    prerelease. A release PR takes its version from
     the title (`.github/scripts/release-pr-version.sh`: a plain `X.Y.Z`, no prerelease label, tag not there yet); the release and its tag are
     made on the merge commit, and closed-unmerged PRs, PRs from other branches and fork PRs never reach a step. A pushed
     tag gives its own version, must be on `main`, and a `-develop` tag is refused. The version is checked against SemVer

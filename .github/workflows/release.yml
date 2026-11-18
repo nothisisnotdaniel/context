@@ -2,8 +2,8 @@
 # release. Four jobs: release creates the release as a draft, desktop-macos and desktop-windows upload into
 # the draft, and publish makes it public once every asset is there.
 # - A push to develop makes a prerelease X.Y.(Z+1)-develop.<run number>, one patch above the
-#   highest release tag (.github/scripts/develop-version.sh). A push that changes only the root
-#   backlog.md is skipped (paths-ignore), so it makes no prerelease.
+#   highest release tag (.github/scripts/develop-version.sh). A push whose changes are all in the root
+#   backlog.md and/or backlog/** (the user stories) is skipped (paths-ignore), so it makes no prerelease.
 # - A merged pull request from develop into main titled "release vX.Y.Z" makes the release vX.Y.Z
 #   (and its tag) on the merge commit (.github/scripts/release-pr-version.sh). Closed-unmerged PRs,
 #   PRs from other branches and fork PRs are skipped by the job's if:.
@@ -76,6 +76,7 @@ on:
       - "v*"
     paths-ignore:
       - "backlog.md"
+      - "backlog/**"
   pull_request:
     types:
       - "closed"
