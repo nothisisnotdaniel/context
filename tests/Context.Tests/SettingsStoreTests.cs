@@ -322,4 +322,116 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.True(SavedSearches.IsValidQuery(new string('q', 200)));
         Assert.False(SavedSearches.IsValidQuery(new string('q', 201)));
     }
+
+    // 217 AC-1: a missing file or section, or anything other than exactly {"enabled":<bool>}, is off; nothing is created.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("{}")]
+    [InlineData("{\"outlook\":{\"enabled\":false}}")]
+    [InlineData("{\"outlook\":true}")]
+    [InlineData("{\"outlook\":null}")]
+    [InlineData("{\"outlook\":{}}")]
+    [InlineData("{\"outlook\":{\"enabled\":\"true\"}}")]
+    [InlineData("{\"outlook\":{\"enabled\":1}}")]
+    [InlineData("{\"outlook\":{\"enabled\":true,\"x\":1}}")]
+    [InlineData("{\"outlook\":[true]}")]
+    public void ReadOutlook_MissingOrOther_IsOff(string? text)
+    {
+        if (text is not null)
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllText(FilePath, text);
+        }
+
+        Assert.False(new SettingsStore(root).ReadOutlook());
+        Assert.Equal(text is not null, Directory.Exists(root));
+    }
+
+    // 217 AC-1: exactly {"enabled":true} is on.
+    [Fact]
+    public void ReadOutlook_EnabledTrue_IsOn()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, "{\"outlook\":{\"enabled\":true}}");
+
+        Assert.True(new SettingsStore(root).ReadOutlook());
+    }
+
+    // 217 AC-1: SaveOutlook writes exactly {"enabled":<bool>} and keeps dayEnd, savedSearches and every other
+    // property equal in value; no temp file is left.
+    [Fact]
+    public void SaveOutlook_RoundTrip_KeepsDayEndAndSavedSearches()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(
+            FilePath,
+            "{\"theme\":\"dark\",\"dayEnd\":{\"worked\":\"2026-11-14T17:00\",\"moved\":\"2026-11-14\"},"
+            + "\"savedSearches\":[{\"name\":\"Work\",\"query\":\"#work\"},{\"name\":\"Budget\",\"query\":\"budget 2027\"}]}");
+        SettingsStore store = new SettingsStore(root);
+        System.Text.Json.Nodes.JsonNode before = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(FilePath))!;
+
+        store.SaveOutlook(true);
+
+        Assert.True(store.ReadOutlook());
+        System.Text.Json.Nodes.JsonNode after = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(FilePath))!;
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(before["dayEnd"], after["dayEnd"]));
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(before["savedSearches"], after["savedSearches"]));
+        Assert.Equal("dark", (string?)after["theme"]);
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(
+            System.Text.Json.Nodes.JsonNode.Parse("{\"enabled\":true}"), after["outlook"]));
+        Assert.Equal([SettingsStore.FileName], Directory.GetFiles(root).Select(f => Path.GetFileName(f)!).ToArray());
+
+        store.SaveOutlook(false);
+
+        Assert.False(store.ReadOutlook());
+        System.Text.Json.Nodes.JsonNode off = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(FilePath))!;
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(before["dayEnd"], off["dayEnd"]));
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(before["savedSearches"], off["savedSearches"]));
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(
+            System.Text.Json.Nodes.JsonNode.Parse("{\"enabled\":false}"), off["outlook"]));
+    }
+
+    // 217 AC-1: SaveOutlook replaces a malformed outlook section, but creates the file when there is none.
+    [Fact]
+    public void SaveOutlook_ReplacesAnOtherOutlookValue_AndCreatesTheFile()
+    {
+        SettingsStore store = new SettingsStore(root);
+        store.SaveOutlook(true);
+        Assert.True(store.ReadOutlook());
+
+        File.WriteAllText(FilePath, "{\"outlook\":{\"enabled\":true,\"x\":1}}");
+        store.SaveOutlook(true);
+
+        Assert.True(store.ReadOutlook());
+        Assert.DoesNotContain("\"x\"", File.ReadAllText(FilePath), StringComparison.Ordinal);
+    }
+
+    // 217 AC-1: a broken settings.json (its dayEnd and savedSearches included) is never overwritten by SaveOutlook.
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("[1]")]
+    [InlineData("{\"dayEnd\":{\"moved\":5}}")]
+    [InlineData("{\"savedSearches\":5}")]
+    public void SaveOutlook_Broken_Throws_AndIsNeverOverwritten(string text)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, text);
+        byte[] before = File.ReadAllBytes(FilePath);
+
+        Assert.Throws<SettingsStoreException>(() => new SettingsStore(root).SaveOutlook(true));
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+        Assert.Equal([SettingsStore.FileName], Directory.GetFiles(root).Select(f => Path.GetFileName(f)!).ToArray());
+    }
+
+    // 217 AC-1: a save that would make the file over MaxBytes throws and writes nothing.
+    [Fact]
+    public void SaveOutlook_OverTheLimit_Throws_Unchanged()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, "{\"padding\":\"" + new string('x', 65_516) + "\"}");
+        byte[] before = File.ReadAllBytes(FilePath);
+
+        Assert.Throws<SettingsTooLargeException>(() => new SettingsStore(root).SaveOutlook(true));
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+    }
 }

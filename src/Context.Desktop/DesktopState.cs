@@ -10,6 +10,18 @@ internal sealed class DesktopState
     /// <summary><see cref="Tick"/> refreshes when the last refresh is at least this old.</summary>
     public static readonly TimeSpan MaxAge = TimeSpan.FromMinutes(5);
 
+    /// <summary>How long an Outlook read (appointments of one day, or the mail) is kept, by the state's UTC clock.</summary>
+    public static readonly TimeSpan OutlookCacheAge = TimeSpan.FromMinutes(5);
+
+    /// <summary>The default <see cref="OutlookTimeout"/>.</summary>
+    public static readonly TimeSpan DefaultOutlookTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>The most mails <see cref="RecentMail"/> lists.</summary>
+    public const int MaxMails = 10;
+
+    /// <summary>How far back <see cref="RecentMail"/> lists mail.</summary>
+    public static readonly TimeSpan MailWindow = TimeSpan.FromHours(24);
+
     private readonly object gate = new();
 
     // One user of the tag index at a time: the snapshot build, NotesWithTag, Tags and Links.
@@ -22,6 +34,12 @@ internal sealed class DesktopState
     private readonly CalendarLink? calendarLink;
     private readonly Func<DateOnly> today;
     private readonly Func<DateTime> utcNow;
+    private readonly IOutlookSource outlook;
+
+    // Guards the Outlook cache: one call per day (appointments) and one for the mail, each with its start time.
+    private readonly object outlookGate = new();
+    private Dictionary<DateOnly, OutlookCall<Appointment>> outlookDays = new();
+    private OutlookCall<MailSummary>? outlookMail;
 
     private Task<DesktopSnapshot>? running;
     private bool pending;
@@ -42,8 +60,12 @@ internal sealed class DesktopState
         Func<DateTime> utcNow,
         IKeyStore? keyStore = null,
         SensitiveSession? session = null,
-        CalendarLink? calendarLink = null)
+        CalendarLink? calendarLink = null,
+        IOutlookSource? outlook = null,
+        TimeSpan? outlookTimeout = null)
     {
+        this.outlook = outlook ?? new UnsupportedOutlookSource();
+        OutlookTimeout = outlookTimeout ?? DefaultOutlookTimeout;
         this.calendarLink = calendarLink;
         this.notes = notes;
         this.todos = todos;
@@ -56,6 +78,9 @@ internal sealed class DesktopState
         Session = session ?? new SensitiveSession(utcNow);
         HistoryStore = new NoteHistory(notes, utcNow);
     }
+
+    /// <summary>How long one Outlook source call may take before it counts as timed out.</summary>
+    public TimeSpan OutlookTimeout { get; }
 
     /// <summary>The kept versions of the notes, with the same clock as this state.</summary>
     public NoteHistory HistoryStore { get; }
@@ -437,8 +462,9 @@ internal sealed class DesktopState
         try
         {
             localNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc), calendar.Zone);
-            CalendarDay found = ReadDay(day);
-            return new DayAppointmentsView(day, found.Appointments, found.Unreadable, localNow);
+            (OutlookStatus status, IReadOnlyList<Appointment> fromOutlook) = OutlookDay(day);
+            CalendarDay found = ReadDay(day, fromOutlook);
+            return new DayAppointmentsView(day, found.Appointments, found.Unreadable, localNow, outlook: status);
         }
         catch (Exception)
         {
@@ -458,7 +484,7 @@ internal sealed class DesktopState
         Appointment? first = null;
         try
         {
-            List<Appointment> same = ReadDay(day).Appointments
+            List<Appointment> same = ReadDay(day, OutlookDay(day).Items).Appointments
                 .Where(a => string.Equals(a.Title, title, StringComparison.Ordinal))
                 .ToList();
             first = same.FirstOrDefault();
@@ -485,14 +511,210 @@ internal sealed class DesktopState
         }
     });
 
-    // The day's appointments from the calendar files and the feed's cached copy; never downloads.
-    private CalendarDay ReadDay(DateOnly day)
+    // The day's appointments from the calendar files, the feed's cached copy and Outlook's; never downloads.
+    private CalendarDay ReadDay(DateOnly day, IReadOnlyList<Appointment> fromOutlook)
     {
         string? cached = feed?.ReadCache();
-        IReadOnlyList<Appointment> extra = cached is null
+        IReadOnlyList<Appointment> fromFeed = cached is null
             ? []
             : CurrentView.FeedEvents(new CalendarFeedResult(CalendarFeedStatus.Stale, cached), calendar.Zone, day);
-        return calendar.Day(day, extra);
+        return calendar.Day(day, [.. fromFeed, .. fromOutlook]);
+    }
+
+    /// <summary>
+    /// The last day's Inbox mail from Outlook (at most <see cref="MaxMails"/>, received at or after the state's clock
+    /// minus <see cref="MailWindow"/>, newest first), off the calling thread. With Outlook off it asks the source
+    /// nothing and gives <see cref="OutlookStatus.Off"/>. Reads only, stores nothing on disk, and never throws.
+    /// </summary>
+    public Task<RecentMailView> RecentMail() => Task.Run(() =>
+    {
+        DateTime nowUtc = default;
+        DateTime localNow = default;
+        try
+        {
+            nowUtc = DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc);
+            localNow = TimeZoneInfo.ConvertTimeFromUtc(nowUtc, calendar.Zone);
+            if (!OutlookOn())
+            {
+                return new RecentMailView(OutlookStatus.Off, [], localNow, calendar.Zone);
+            }
+
+            DateTime since = nowUtc - MailWindow;
+            OutlookCall<MailSummary> call;
+            lock (outlookGate)
+            {
+                if (outlookMail is null || !outlookMail.Usable(nowUtc))
+                {
+                    outlookMail = Start(nowUtc, () => outlook.RecentMail(since, MaxMails));
+                }
+
+                call = outlookMail;
+            }
+
+            (OutlookStatus status, IReadOnlyList<MailSummary> items) = Finish(call);
+            List<MailSummary> mails = items
+                .Where(m => m.ReceivedUtc >= since)
+                .OrderByDescending(m => m.ReceivedUtc)
+                .Take(MaxMails)
+                .ToList();
+            return new RecentMailView(status, mails, localNow, calendar.Zone);
+        }
+        catch (Exception)
+        {
+            return new RecentMailView(OutlookStatus.Failed, [], localNow, calendar.Zone);
+        }
+    });
+
+    /// <summary>
+    /// Forgets every cached Outlook read, so the next read asks the source again. Called when the Outlook setting
+    /// changes.
+    /// </summary>
+    public void ForgetOutlook()
+    {
+        lock (outlookGate)
+        {
+            outlookDays = new Dictionary<DateOnly, OutlookCall<Appointment>>();
+            outlookMail = null;
+        }
+    }
+
+    /// <summary>
+    /// Whether Outlook can be read here (<see cref="IOutlookSource.Availability"/>) and whether the setting is on,
+    /// off the calling thread. Never throws: an unreadable <c>settings.json</c> reads as off.
+    /// </summary>
+    public Task<OutlookSettingView> OutlookSetting() => Task.Run(() =>
+    {
+        OutlookAvailability availability = OutlookAvailability.Unsupported;
+        try
+        {
+            availability = outlook.Availability();
+            return new OutlookSettingView(availability, new SettingsStore(notes.Root).ReadOutlook(), false);
+        }
+        catch (Exception)
+        {
+            return new OutlookSettingView(availability, false, true);
+        }
+    });
+
+    /// <summary>Whether Outlook can be read here; reads no mail or calendar data and never throws.</summary>
+    public OutlookAvailability ReadOutlookAvailability()
+    {
+        try
+        {
+            return outlook.Availability();
+        }
+        catch (Exception)
+        {
+            return OutlookAvailability.Unsupported;
+        }
+    }
+
+    // Outlook is read only when the setting is on and the source can read it; an unreadable settings.json is off.
+    private bool OutlookOn()
+    {
+        try
+        {
+            return new SettingsStore(notes.Root).ReadOutlook() && outlook.Availability() == OutlookAvailability.Available;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    // Outlook's appointments of the day, through the cache; Off and nothing asked when Outlook is off. Never throws.
+    private (OutlookStatus Status, IReadOnlyList<Appointment> Items) OutlookDay(DateOnly day)
+    {
+        try
+        {
+            if (!OutlookOn())
+            {
+                return (OutlookStatus.Off, []);
+            }
+
+            DateTime nowUtc = DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc);
+            TimeZoneInfo zone = calendar.Zone;
+            OutlookCall<Appointment> call;
+            lock (outlookGate)
+            {
+                if (!outlookDays.TryGetValue(day, out OutlookCall<Appointment>? cached) || !cached.Usable(nowUtc))
+                {
+                    cached = Start(nowUtc, () => outlook.Appointments(day, zone));
+                    outlookDays[day] = cached;
+                }
+
+                call = cached;
+            }
+
+            return Finish(call);
+        }
+        catch (Exception)
+        {
+            return (OutlookStatus.Failed, []);
+        }
+    }
+
+    // One source call on its own thread (it may block on Outlook or its security prompt for long, so it neither waits
+    // for nor holds a pool thread); a call that throws reads as Failed.
+    private static OutlookCall<T> Start<T>(DateTime startedUtc, Func<OutlookRead<T>> read) =>
+        new(startedUtc, Task.Factory.StartNew(
+            () =>
+            {
+                try
+                {
+                    return read();
+                }
+                catch (Exception)
+                {
+                    return new OutlookRead<T>(OutlookReadKind.Failed);
+                }
+            },
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default));
+
+    // Waits for the call at most OutlookTimeout; the call itself keeps running and stays cached while it does.
+    private (OutlookStatus Status, IReadOnlyList<T> Items) Finish<T>(OutlookCall<T> call)
+    {
+        if (!call.Read.Wait(OutlookTimeout))
+        {
+            return (OutlookStatus.TimedOut, []);
+        }
+
+        OutlookRead<T> read = call.Read.Result;
+        return read.Kind switch
+        {
+            OutlookReadKind.Ok => (OutlookStatus.Ok, read.Items),
+            OutlookReadKind.NotRunning => (OutlookStatus.NotRunning, []),
+            OutlookReadKind.Denied => (OutlookStatus.Denied, []),
+            _ => (OutlookStatus.Failed, []),
+        };
+    }
+
+    // One Outlook source call and when it started. A call still running is shared; a finished one is kept for
+    // OutlookCacheAge.
+    private sealed class OutlookCall<T>
+    {
+        public OutlookCall(DateTime startedUtc, Task<OutlookRead<T>> read)
+        {
+            StartedUtc = startedUtc;
+            Read = read;
+        }
+
+        public DateTime StartedUtc { get; }
+
+        public Task<OutlookRead<T>> Read { get; }
+
+        public bool Usable(DateTime nowUtc)
+        {
+            if (!Read.IsCompleted)
+            {
+                return true;
+            }
+
+            TimeSpan age = nowUtc - StartedUtc;
+            return age >= TimeSpan.Zero && age < OutlookCacheAge;
+        }
     }
 
     /// <summary>
@@ -808,12 +1030,15 @@ internal sealed class DesktopState
                 todosUnreadable = true;
             }
 
+            // Outlook's appointments of the day go into the current view with the feed's, outside the index lock.
+            IReadOnlyList<Appointment> fromOutlook = OutlookDay(day).Items;
+
             CurrentView current;
             IReadOnlyList<NoteTodo> noteTodos;
             bool noteTodosUnreadable = false;
             lock (indexGate)
             {
-                current = CurrentView.Build(todos, index, notes, calendar, feed, day);
+                current = CurrentView.Build(todos, index, notes, calendar, feed, day, extra: fromOutlook);
                 try
                 {
                     // Syncs first: the current view skips the sync when nothing needs the index.

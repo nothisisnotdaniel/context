@@ -47,7 +47,7 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.Equal("Close", close.GetAttribute("aria-label"));
         Assert.Equal("Close", close.GetAttribute("title"));
         Assert.NotNull(close.QuerySelector("svg"));
-        Assert.Equal(["Exchange calendar", "Sensitive notes"], cut.FindAll("h3").Select(h => h.TextContent).ToArray());
+        Assert.Equal(["Exchange calendar", "Outlook", "Sensitive notes"], cut.FindAll("h3").Select(h => h.TextContent).ToArray());
         IElement line = cut.Find(".calendar-link-state");
         Assert.Equal("No calendar link set.", line.TextContent);
         Assert.True(line.ClassList.Contains("grey"));
@@ -64,6 +64,8 @@ public sealed class SettingsPanelTests : IDisposable
     [Fact]
     public async Task Field_IsAMaskedInputWithoutAValue_SaveDisabledWhileEmpty()
     {
+        // 217: without Outlook here the Outlook section has no checkbox, so the link field is the only input.
+        data.Outlook.Available = OutlookAvailability.Unsupported;
         IRenderedComponent<SettingsPanel> cut = await Show();
 
         IElement field = Assert.Single(cut.FindAll("input"));
@@ -540,6 +542,94 @@ public sealed class SettingsPanelTests : IDisposable
     }
 
     // Builds the state and renders the panel once both sections have loaded.
+    // 217 AC-2: without Outlook here the section says why, in grey, with no checkbox.
+    [Theory]
+    [InlineData("Unsupported", "Outlook is only available on Windows.")]
+    [InlineData("NotInstalled", "Classic Outlook isn't installed. The new Outlook can't be read; use a calendar link instead.")]
+    public async Task Outlook_NotAvailable_GreyLine_NoCheckbox(string availability, string text)
+    {
+        data.Outlook.Available = Enum.Parse<OutlookAvailability>(availability);
+
+        IRenderedComponent<SettingsPanel> cut = await Show();
+
+        IElement line = cut.Find(".outlook-state");
+        Assert.Equal(text, line.TextContent);
+        Assert.Contains("grey", line.ClassList);
+        Assert.Empty(cut.FindAll("input.outlook-enabled"));
+        Assert.Empty(cut.FindAll(".outlook-hint"));
+    }
+
+    // 217 AC-2: with classic Outlook the checkbox shows the stored value, with the grey hint.
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("{\"outlook\":{\"enabled\":false}}", false)]
+    [InlineData("{\"outlook\":{\"enabled\":true}}", true)]
+    public async Task Outlook_Available_CheckboxShowsTheStoredValue(string? settings, bool expected)
+    {
+        if (settings is not null)
+        {
+            data.WriteFile(SettingsStore.FileName, settings);
+        }
+
+        IRenderedComponent<SettingsPanel> cut = await Show();
+
+        IElement box = cut.Find("label.outlook-line input.outlook-enabled");
+        Assert.Equal("checkbox", box.GetAttribute("type"));
+        Assert.Equal(expected, box.HasAttribute("checked"));
+        Assert.Equal("Read calendar and mail from Outlook", cut.Find("label.outlook-line").TextContent.Trim());
+        IElement hint = cut.Find(".outlook-hint");
+        Assert.Equal("Outlook may ask whether Context may access it.", hint.TextContent);
+        Assert.Contains("grey", hint.ClassList);
+        Assert.Empty(cut.FindAll(".outlook-state"));
+        Assert.Equal(0, data.Outlook.AppointmentCalls + data.Outlook.MailCalls);
+    }
+
+    // 217 AC-2: toggling calls SetOutlookEnabled; Done shows Outlook on./off. in the accent colour and the box follows.
+    [Fact]
+    public async Task Outlook_Toggle_OnThenOff()
+    {
+        IRenderedComponent<SettingsPanel> cut = await Show();
+
+        await cut.Find("input.outlook-enabled").ChangeAsync(new ChangeEventArgs { Value = true });
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("Outlook on.", cut.Find(".outlook-result").TextContent);
+            Assert.True(cut.Find("input.outlook-enabled").HasAttribute("checked"));
+        }, Wait);
+        Assert.Contains("accent", cut.Find(".outlook-result").ClassList);
+        Assert.Equal("status", cut.Find(".outlook-result").GetAttribute("role"));
+        Assert.True(new SettingsStore(data.Root).ReadOutlook());
+
+        await cut.Find("input.outlook-enabled").ChangeAsync(new ChangeEventArgs { Value = false });
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("Outlook off.", cut.Find(".outlook-result").TextContent);
+            Assert.False(cut.Find("input.outlook-enabled").HasAttribute("checked"));
+        }, Wait);
+        Assert.False(new SettingsStore(data.Root).ReadOutlook());
+    }
+
+    // 217 AC-2: a broken settings.json shows the Failed text in red and stays as it is.
+    [Fact]
+    public async Task Outlook_Toggle_BrokenSettings_RedFailedText()
+    {
+        data.WriteFile(SettingsStore.FileName, "{\"dayEnd\":{\"moved\":5}}");
+        string path = Path.Combine(data.Root, SettingsStore.FileName);
+        byte[] before = File.ReadAllBytes(path);
+        IRenderedComponent<SettingsPanel> cut = await Show();
+
+        await cut.Find("input.outlook-enabled").ChangeAsync(new ChangeEventArgs { Value = true });
+
+        cut.WaitForAssertion(
+            () => Assert.Equal("Can't read settings.json. Nothing was saved.", cut.Find(".outlook-result").TextContent),
+            Wait);
+        Assert.Contains("red", cut.Find(".outlook-result").ClassList);
+        Assert.False(cut.Find("input.outlook-enabled").HasAttribute("checked"));
+        Assert.Equal(before, File.ReadAllBytes(path));
+    }
+
     private async Task<IRenderedComponent<SettingsPanel>> Show()
     {
         data.CreateState();

@@ -52,6 +52,12 @@ internal sealed class DesktopFixture : IDisposable
     /// <summary>The launcher the actions use for "Open in default editor"; it only records paths.</summary>
     public FakeNoteLauncher Launcher { get; } = new();
 
+    /// <summary>The Outlook source the state reads; in memory, Available, answering nothing. Released in <see cref="Dispose"/>.</summary>
+    public FakeOutlookSource Outlook { get; } = new();
+
+    /// <summary>The state's Outlook timeout; <c>null</c> keeps the default. Set it before <see cref="CreateState"/>.</summary>
+    public TimeSpan? OutlookTimeout { get; set; }
+
     /// <summary>The notifier the actions show reminders through; it only records them.</summary>
     public FakeNotifier Notifier { get; } = new();
 
@@ -127,6 +133,7 @@ internal sealed class DesktopFixture : IDisposable
 
     public void Dispose()
     {
+        Outlook.Dispose();
         Bunit.Dispose();
         Keys.Dispose();
 
@@ -168,7 +175,9 @@ internal sealed class DesktopFixture : IDisposable
             () => UtcNow,
             Keys,
             Session,
-            link);
+            link,
+            Outlook,
+            OutlookTimeout);
         Actions = new DesktopActions(
             Notes, Todos, State, Launcher, link, feed, () => LocalNow, new CalendarStore(Root, Zone), TimesFolder, Notifier);
         Bunit.Services.AddSingleton(State);

@@ -224,6 +224,9 @@ internal sealed class DesktopActions
     public const string SearchesUnreadableText = "Can't read settings.json. Nothing was saved.";
     public const string SearchesTooLargeText = "settings.json would be over 64 KiB. Nothing was saved.";
     public const string SearchesWriteFailedText = "Can't write settings.json. Nothing was saved.";
+    public const string OutlookOnText = "Outlook on.";
+    public const string OutlookOffText = "Outlook off.";
+    public const string OutlookUnavailableText = "Outlook can't be read on this computer.";
     public const string SearchGoneText = "That saved search is gone. Nothing was done.";
     public const string SearchesNotRemovedText = "Can't read settings.json. Nothing was removed.";
     public const string SearchesRemoveFailedText = "Can't write settings.json. Nothing was removed.";
@@ -984,6 +987,47 @@ internal sealed class DesktopActions
     /// (<see cref="SearchGoneText"/>); a broken file is Failed with <see cref="SearchesNotRemovedText"/>.
     /// </summary>
     public Task<ActionResult> RemoveSavedSearch(string name) => Run(() => RemoveSavedSearchNow(name));
+
+    /// <summary>
+    /// Stores whether Context reads Outlook (<c>"outlook":{"enabled":…}</c> in <c>settings.json</c>, every other
+    /// property kept) and forgets the cached Outlook reads. Done with <see cref="OutlookOnText"/> or
+    /// <see cref="OutlookOffText"/>. Turning it on is Refused/<see cref="ActionReason.Invalid"/>
+    /// (<see cref="OutlookUnavailableText"/>, writing nothing) when the source is not
+    /// <see cref="OutlookAvailability.Available"/>. A broken <c>settings.json</c> is Failed with
+    /// <see cref="SearchesUnreadableText"/> and left as it is.
+    /// </summary>
+    public Task<ActionResult> SetOutlookEnabled(bool on) => Run(() => SetOutlookEnabledNow(on));
+
+    private ActionResult SetOutlookEnabledNow(bool on)
+    {
+        if (on && state.ReadOutlookAvailability() != OutlookAvailability.Available)
+        {
+            return Refused(ActionReason.Invalid, OutlookUnavailableText);
+        }
+
+        try
+        {
+            settings.SaveOutlook(on);
+        }
+        catch (SettingsTooLargeException)
+        {
+            return Refused(ActionReason.Invalid, SearchesTooLargeText);
+        }
+        catch (SettingsStoreException)
+        {
+            return Failed(ActionReason.Unreadable, SearchesUnreadableText);
+        }
+        catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+        {
+            return Failed(ActionReason.WriteFailed, SearchesWriteFailedText);
+        }
+        finally
+        {
+            state.ForgetOutlook();
+        }
+
+        return new ActionResult(ActionKind.Done, ActionReason.None, on ? OutlookOnText : OutlookOffText);
+    }
 
     private static ActionResult Refused(ActionReason reason, string text) => new(ActionKind.Refused, reason, text);
 

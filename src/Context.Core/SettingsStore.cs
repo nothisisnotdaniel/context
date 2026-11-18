@@ -168,7 +168,7 @@ internal static class SavedSearches
 
 /// <summary>
 /// <c>&lt;root&gt;/settings.json</c>: <c>{"dayEnd":{"worked":"yyyy-MM-ddTHH:mm","moved":"yyyy-MM-dd"}}</c>, both values
-/// optional, and <c>"savedSearches":[{"name":"…","query":"…"}]</c>. Read through <see cref="BoundedFile"/>; written as UTF-8 without BOM through a temp file and a move,
+/// optional, <c>"savedSearches":[{"name":"…","query":"…"}]</c> and <c>"outlook":{"enabled":true|false}</c>. Read through <see cref="BoundedFile"/>; written as UTF-8 without BOM through a temp file and a move,
 /// keeping every other property. The automatic day's end (<see cref="DayEnd.AutoClose"/>) and the saved searches use it.
 /// </summary>
 internal sealed class SettingsStore
@@ -187,6 +187,8 @@ internal sealed class SettingsStore
     private const string SavedSearchesKey = "savedSearches";
     private const string NameKey = "name";
     private const string QueryKey = "query";
+    private const string OutlookKey = "outlook";
+    private const string EnabledKey = "enabled";
 
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
@@ -268,6 +270,30 @@ internal sealed class SettingsStore
         }
 
         document[SavedSearchesKey] = array;
+        Write(document);
+    }
+
+    /// <summary>
+    /// True when <c>outlook</c> is exactly <c>{"enabled":true}</c>. A missing file or section, or any other value
+    /// (another property, a non-boolean <c>enabled</c>, no object), counts as off. Throws
+    /// <see cref="SettingsStoreException"/> only when the file itself can't be read or isn't a JSON object.
+    /// </summary>
+    public bool ReadOutlook() => OutlookOf(ReadRoot()) ?? false;
+
+    /// <summary>
+    /// Writes <c>"outlook":{"enabled":<paramref name="enabled"/>}</c>, replacing whatever <c>outlook</c> held and
+    /// keeping every other property, creating the root folder if needed. Reads the file again first and throws
+    /// <see cref="SettingsStoreException"/> (writing nothing) when it is broken, its <c>dayEnd</c> and
+    /// <c>savedSearches</c> included; throws <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/>
+    /// when it can't be written, <see cref="SettingsTooLargeException"/> (writing nothing) when the file would be over
+    /// <see cref="MaxBytes"/>.
+    /// </summary>
+    public void SaveOutlook(bool enabled)
+    {
+        JsonObject document = ReadRoot();
+        DayEndOf(document);
+        SavedSearchesOf(document);
+        document[OutlookKey] = new JsonObject { [EnabledKey] = enabled };
         Write(document);
     }
 
@@ -443,6 +469,26 @@ internal sealed class SettingsStore
         }
 
         return searches;
+    }
+
+    // The stored value of "outlook", or null when it is missing or anything other than exactly {"enabled":<bool>}.
+    private static bool? OutlookOf(JsonObject document)
+    {
+        if (!document.TryGetPropertyValue(OutlookKey, out JsonNode? node)
+            || node is not JsonObject section
+            || section.Count != 1
+            || !section.TryGetPropertyValue(EnabledKey, out JsonNode? enabledNode)
+            || enabledNode is not JsonValue value)
+        {
+            return null;
+        }
+
+        return value.GetValueKind() switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => null,
+        };
     }
 
     private static string? StringOf(JsonNode? node) =>

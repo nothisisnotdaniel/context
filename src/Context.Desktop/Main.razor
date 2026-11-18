@@ -122,6 +122,7 @@
             </main>
             <aside class="todos-region">
                 <DayAppointmentsPanel OnOpen="OpenAppointment" />
+                <RecentMailPanel />
                 @if (openName is not null && page == Page.None && searchShown is null)
                 {
                     <OutlinePanel Headings="outline" OnJump="JumpToOutline" />
