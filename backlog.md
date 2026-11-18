@@ -236,6 +236,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#277](backlog/277-arrow-and-page-keys-in-the.md) Arrow and Page keys in the Pick a day calendar do not scroll the page
 - [?] [#280](backlog/280-keep-the-old-appointment-rows-dimmed.md) Keep the old appointment rows dimmed while stepping days
 - [?] [#281](backlog/281-one-reset-helper-for-the-pending.md) One reset helper for the pending state in Main.razor
+- [?] [#283](backlog/283-spacing-for-the-no-note-placeholder.md) Spacing for the no-note placeholder in the note area
 
 ## Dropped with the terminal UI
 
