@@ -9,7 +9,7 @@ import { baseKeymap, toggleMark, setBlockType, chainCommands } from "prosemirror
 import { splitListItem, liftListItem, sinkListItem } from "prosemirror-schema-list";
 import { inputRules, wrappingInputRule, textblockTypeInputRule, InputRule } from "prosemirror-inputrules";
 import { schema } from "./schema.js";
-import { parse, serialize, splitTitle, joinTitle, headingList } from "./markdown.js";
+import { parse, serialize, splitTitle, joinTitle, headingList, normalizePerson, isNetWhite } from "./markdown.js";
 
 const editors = new WeakMap();
 
@@ -103,6 +103,36 @@ function inCode(state, start) {
   return $start.parent.type.spec.code || $start.marks().some(m => m.type.spec.code);
 }
 
+// True when pos starts its textblock, follows a hard break (a line break in the markdown) or follows whitespace.
+function afterWhite(state, pos) {
+  const $pos = state.doc.resolve(pos);
+  if ($pos.parentOffset === 0) {
+    return true;
+  }
+  const before = $pos.nodeBefore;
+  if (before === null) {
+    return false;
+  }
+  return before.type === schema.nodes.hard_break || (before.isText && isNetWhite(before.text[before.text.length - 1]));
+}
+
+// True when from..end holds only text without marks and the typed character gets none: what a mention chip replaces
+// must serialize as exactly the typed characters.
+function plainText(state, from, end) {
+  const typed = state.storedMarks || state.doc.resolve(end).marks();
+  if (typed.length > 0) {
+    return false;
+  }
+  let plain = true;
+  state.doc.nodesBetween(from, end, node => {
+    if (node.isInline && (!node.isText || node.marks.length > 0)) {
+      plain = false;
+    }
+    return true;
+  });
+  return plain;
+}
+
 function rules() {
   const tagWord = new RegExp("(^|\\s)(#\\p{L}[\\p{L}\\p{Nd}_-]*)([\\s.,;:!?)])$", "u");
   const tagRule = new InputRule(tagWord, (state, match, start, end) => {
@@ -121,6 +151,28 @@ function rules() {
     }
     return state.tr.replaceWith(start, end, schema.nodes.noteLink.create({ raw: match[0], target }));
   });
+  // @[Person name] as markdown.js and PersonParser read it: '@' at the start of the textblock or after whitespace,
+  // '[', text up to the first ']' on the line, a name normalizePerson accepts; only plain text, never in code.
+  const mentionRule = new InputRule(/(^|[^])@\[([^\]\n\ufffc]*)\]$/, (state, match, start, end) => {
+    const from = start + match[1].length;
+    const before = match[1];
+    if (before === "" || before === "\ufffc" ? !afterWhite(state, from) : !isNetWhite(before)) {
+      return null;
+    }
+    const name = normalizePerson(match[2]);
+    if (name === null || inCode(state, from) || !plainText(state, from, end)) {
+      return null;
+    }
+    return state.tr.replaceWith(from, end, schema.nodes.mention.create({ raw: match[0].slice(match[1].length), name }));
+  });
+  // '(' straight after a mention chip: the parser reads "@[Name](" as text, so the chip turns back into its raw text.
+  const mentionParenRule = new InputRule(/\ufffc\($/, (state, match, start, end) => {
+    const node = state.doc.nodeAt(start);
+    if (!node || node.type !== schema.nodes.mention || start + node.nodeSize !== end) {
+      return null;
+    }
+    return state.tr.replaceWith(start, end, schema.text(node.attrs.raw + "("));
+  });
   return inputRules({
     rules: [
       wrappingInputRule(/^\s*>\s$/, schema.nodes.blockquote),
@@ -131,6 +183,8 @@ function rules() {
       textblockTypeInputRule(/^```$/, schema.nodes.code_block),
       tagRule,
       linkRule,
+      mentionRule,
+      mentionParenRule,
     ],
   });
 }
@@ -230,6 +284,15 @@ function chipNode(view, target) {
  * shape docJson gives. DOM-free: the rules run on an EditorState with no view.
  */
 export function typedBlock(text) {
+  return JSON.stringify(typedDoc(text).toJSON());
+}
+
+/** The markdown serialize writes for the doc typedBlock(text) builds. DOM-free. */
+export function typedMarkdown(text) {
+  return serialize(typedDoc(text));
+}
+
+function typedDoc(text) {
   const plugin = rules();
   let state = EditorState.create({ doc: schema.topNodeType.create(null, schema.nodes.paragraph.create()), plugins: [plugin] });
   const typing = {
@@ -243,7 +306,7 @@ export function typedBlock(text) {
       typing.dispatch(state.tr.insertText(ch, from, to));
     }
   }
-  return JSON.stringify(state.doc.toJSON());
+  return state.doc;
 }
 
 /**
