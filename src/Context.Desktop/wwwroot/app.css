@@ -667,6 +667,111 @@ input[type="password"]:disabled {
     max-width: calc(100vw - 48px);
 }
 
+/* Pick a day: a month calendar with Monday-first weeks and ISO week numbers. Only theme colours, so light and dark
+   mode both follow the theme. */
+.day-pick .day-pick-header {
+    align-items: center;
+    display: flex;
+    gap: 4px;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+
+.day-pick .day-pick-month {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.day-pick .day-pick-prev,
+.day-pick .day-pick-next {
+    align-items: center;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--text);
+    display: inline-flex;
+    padding: 2px;
+}
+
+.day-pick .day-pick-prev:hover:not(:disabled),
+.day-pick .day-pick-next:hover:not(:disabled) {
+    background: var(--background);
+    border-color: var(--line);
+}
+
+.day-pick .day-pick-prev:disabled,
+.day-pick .day-pick-next:disabled {
+    color: var(--grey);
+}
+
+.day-pick .day-pick-grid {
+    border-collapse: collapse;
+}
+
+.day-pick .day-pick-grid th {
+    color: var(--grey);
+    font-size: 0.8em;
+    font-weight: normal;
+    padding: 2px;
+    text-align: center;
+}
+
+.day-pick .day-pick-grid th.week {
+    border-right: 1px solid var(--line);
+    padding-right: 6px;
+}
+
+.day-pick .day-pick-grid td {
+    padding: 1px;
+}
+
+.day-pick .day {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--text);
+    min-width: 2.2em;
+    padding: 3px 0;
+    text-align: center;
+}
+
+.day-pick .day.outside {
+    color: var(--grey);
+}
+
+.day-pick .day:not(.selected):hover:not(:disabled) {
+    background: var(--background);
+    border-color: var(--line);
+}
+
+.day-pick .day:focus-visible {
+    outline: 2px solid var(--accent-strong);
+    outline-offset: 1px;
+}
+
+.day-pick .day:disabled {
+    color: var(--line);
+}
+
+.day-pick .day.today {
+    border-color: var(--accent-strong);
+    font-weight: 600;
+}
+
+.day-pick .day.selected {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: var(--on-accent);
+}
+
+/* Today and the selected day at once: the filled day keeps an inner ring for today, visible in both themes. */
+.day-pick .day.today.selected {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    box-shadow: inset 0 0 0 2px var(--on-accent);
+    color: var(--on-accent);
+}
+
 /* More actions: the shown page's actions as a menu under the three dots, anchored to the right edge. */
 .page-menu {
     background: var(--panel);

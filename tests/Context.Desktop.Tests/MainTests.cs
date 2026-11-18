@@ -1,3 +1,4 @@
+using System.Globalization;
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.AspNetCore.Components;
@@ -2850,31 +2851,42 @@ public sealed class MainTests : IDisposable
         int mounts = js.Calls("ContextEditor.mount").Count;
 
         await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
-        Assert.Equal("date", cut.Find("input[aria-label=Day]").GetAttribute("type"));
-        Assert.Equal("1900-01-01", cut.Find("input[aria-label=Day]").GetAttribute("min"));
-        Assert.Equal("2100-12-31", cut.Find("input[aria-label=Day]").GetAttribute("max"));
+        Assert.Single(cut.FindAll(".day-pick table[role=grid]"));
+        Assert.Empty(cut.FindAll(".day-pick input"));
         Assert.Equal("true", cut.Find("button.day-pick-open").GetAttribute("aria-expanded"));
         await cut.Find("button.day-pick-open").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
         Assert.Empty(cut.FindAll(".day-pick-backdrop"));
         Assert.Equal("false", cut.Find("button.day-pick-open").GetAttribute("aria-expanded"));
         await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
-        await cut.Find("input[aria-label=Day]").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        await cut.Find(".day-pick button.day[tabindex='0']").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
         Assert.Empty(cut.FindAll(".day-pick-backdrop"));
         await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
         await cut.Find(".day-pick-backdrop").ClickAsync(new MouseEventArgs());
-        Assert.Empty(cut.FindAll("input[aria-label=Day]"));
+        Assert.Empty(cut.FindAll(".day-pick"));
         await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
         await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
-        Assert.Empty(cut.FindAll("input[aria-label=Day]"));
+        Assert.Empty(cut.FindAll(".day-pick"));
 
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
     }
 
+    // 213: opens the calendar, steps to value's month with the month buttons and clicks that day's button (not a
+    // neighbouring month's copy of it).
     private static async Task PickDate(IRenderedComponent<Main> cut, string value)
     {
+        DateOnly day = DateOnly.ParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+        string month = day.ToString("MMMM yyyy", CultureInfo.InvariantCulture);
         await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
-        await cut.Find("input[aria-label=Day]").ChangeAsync(new ChangeEventArgs { Value = value });
+        DateOnly shown = DateOnly.ParseExact(cut.Find(".day-pick table[role=grid]").GetAttribute("aria-label") ?? string.Empty, "MMMM yyyy", CultureInfo.InvariantCulture);
+        for (int i = 0; i < 2400 && shown.ToString("MMMM yyyy", CultureInfo.InvariantCulture) != month; i++)
+        {
+            await cut.Find(shown < day ? ".day-pick button.day-pick-next" : ".day-pick button.day-pick-prev").ClickAsync(new MouseEventArgs());
+            shown = DateOnly.ParseExact(cut.Find(".day-pick table[role=grid]").GetAttribute("aria-label") ?? string.Empty, "MMMM yyyy", CultureInfo.InvariantCulture);
+        }
+
+        string label = day.ToString("dddd, d MMMM yyyy", CultureInfo.InvariantCulture);
+        await cut.Find($".day-pick button.day:not(.outside)[aria-label='{label}']").ClickAsync(new MouseEventArgs());
     }
 
     // 212: picks value and waits until the day's note named name is in the editor, mounted and ready, with its links
@@ -2914,7 +2926,7 @@ public sealed class MainTests : IDisposable
         await PickAndOpen(cut, js, "2026-11-20", "2026-11-20");
 
         Assert.Empty(cut.FindAll(".day-pick-backdrop"));
-        Assert.Empty(cut.FindAll("input[aria-label=Day]"));
+        Assert.Empty(cut.FindAll(".day-pick"));
         Assert.Equal("Created 2026-11-20", cut.Find(".main-status").TextContent);
         Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
         Assert.Equal(
@@ -3101,7 +3113,7 @@ public sealed class MainTests : IDisposable
 
         await PickDate(cut, "2026-11-20");
 
-        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("input[aria-label=Day]")), Wait);
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".day-pick")), Wait);
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal("2026-11-20", cut.Find(".note-title").TextContent);
         Assert.Single(js.Calls("ContextEditor.mount"));
@@ -3144,23 +3156,45 @@ public sealed class MainTests : IDisposable
         Assert.False(File.Exists(second));
     }
 
-    // 198 AC-8, 212 AC-9: a bad value does nothing: the popover stays open and nothing is written.
-    [Theory]
-    [InlineData("")]
-    [InlineData("nonsense")]
-    [InlineData("1899-12-31")]
-    [InlineData("2101-01-01")]
-    [InlineData("20261120")]
-    public async Task TopBar_PickDay_BadValue_Ignored(string value)
+    // 213 AC-7 (replaces 198 AC-8, the typed date input): Main passes Today and Selected: today's view selects today, a
+    // daily note selects its day, another note or a page selects nothing and the calendar opens on today's month.
+    [Fact]
+    public async Task TopBar_Calendar_SelectedFollowsTheShownDay()
     {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
 
-        await PickDate(cut, value);
-
-        Assert.Single(cut.FindAll("input[aria-label=Day]"));
-        Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent);
+        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        Assert.Equal("October 2026", cut.Find(".day-pick table[role=grid]").GetAttribute("aria-label"));
+        Assert.Equal("Thursday, 29 October 2026", cut.Find(".day-pick button.day.today.selected").GetAttribute("aria-label"));
+        Assert.Equal("Thursday, 29 October 2026", cut.Find(".day-pick button.day[tabindex='0']").GetAttribute("aria-label"));
+        await cut.Find(".day-pick-backdrop").ClickAsync(new MouseEventArgs());
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+
+        await Open(cut, js, "Plan");
+        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        Assert.Empty(cut.FindAll(".day-pick button.day.selected"));
+        Assert.Single(cut.FindAll(".day-pick button.day.today"));
+        Assert.Equal("Thursday, 29 October 2026", cut.Find(".day-pick button.day[tabindex='0']").GetAttribute("aria-label"));
+        await cut.Find(".day-pick-backdrop").ClickAsync(new MouseEventArgs());
+
+        await PickAndOpen(cut, js, "2026-11-20", "2026-11-20");
+        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        Assert.Equal("November 2026", cut.Find(".day-pick table[role=grid]").GetAttribute("aria-label"));
+        Assert.Equal("Friday, 20 November 2026", cut.Find(".day-pick button.day.selected").GetAttribute("aria-label"));
+        Assert.Equal("Friday, 20 November 2026", cut.Find(".day-pick button.day[tabindex='0']").GetAttribute("aria-label"));
+        Assert.Contains("outside", cut.Find(".day-pick button.day.today").ClassList);
+        await cut.Find(".day-pick-backdrop").ClickAsync(new MouseEventArgs());
+
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent), Wait);
+        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".settings-panel")), Wait);
+        await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
+        Assert.Empty(cut.FindAll(".day-pick button.day.selected"));
+        Assert.Equal("October 2026", cut.Find(".day-pick table[role=grid]").GetAttribute("aria-label"));
     }
 
     // 212 AC-7: Today then a note name, and Today then /today, end in an editor whose change auto save saves.

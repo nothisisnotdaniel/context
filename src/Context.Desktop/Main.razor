@@ -14,7 +14,7 @@
                 <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" OnTriage="ShowTriage" OnSearch="ShowSearch" />
             </aside>
             <main class="current-region">
-                <TopBar OnToday="ShowToday" OnPick="PickDay" OnCapture="CaptureAsync" PageActions="@PageActionsFor(snapshot)"
+                <TopBar Today="@snapshot.Today" Selected="@SelectedDay(snapshot)" OnToday="ShowToday" OnPick="PickDay" OnCapture="CaptureAsync" PageActions="@PageActionsFor(snapshot)"
                         PageActionsDisabled="@(running || renaming || subpaging || moving)" OnPageAction="RunPageAction" />
                 @if (page == Page.Triage)
                 {
@@ -366,6 +366,25 @@ else
 
     // The Today button: the current view of today, asking first when the open note has unsaved changes.
     private Task ShowToday() => RequestOpen(null);
+
+    // The day the top bar's calendar marks and opens on: the open note's day when its name is exactly yyyy-MM-dd, today
+    // on today's view (no note and no page shown), else none.
+    private DateOnly? SelectedDay(DesktopSnapshot snapshot)
+    {
+        if (openName is { } name)
+        {
+            return DateOnly.TryParseExact(name, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly day)
+                ? day
+                : null;
+        }
+
+        if (page == Page.None && searchShown is null && !reviewShown)
+        {
+            return snapshot.Today;
+        }
+
+        return null;
+    }
 
     // A day picked in the top bar: that day's daily note in the page editor, like /today for that day (job 212). The
     // open note of that day stays as it is; another dirty note is saved first, or the discard dialog asks.

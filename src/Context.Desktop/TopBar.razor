@@ -1,7 +1,8 @@
 @* The slim bar across the top of the main area: Capture (a "T" with a text caret), Today (home) and Pick a day
    (calendar). Capture opens a small popover with one text field; Return hands the text to the parent, which captures
-   it to the inbox and answers in the main status line. The pick opens a small popover with one native date input; a
-   valid date is handed to the parent, which opens that day's note (saving unsaved changes first). More actions
+   it to the inbox and answers in the main status line. The pick opens a month calendar (Monday-first weeks with ISO
+   week numbers, today and the shown day marked); the picked day is handed to the parent, which opens that day's note
+   (saving unsaved changes first). More actions
    (three dots, last) opens the shown page's actions as a menu; the chosen item's id goes to the parent, which runs
    it. At most one of the three popovers is open. *@
 
@@ -28,8 +29,49 @@
     @if (open)
     {
         <div class="day-pick-backdrop" @onclick="Close"></div>
+        string monthLabel = MonthGrid.MonthLabel(shownMonth);
+        DateOnly gridStart = MonthGrid.Start(shownMonth);
         <div class="day-pick">
-            <input type="date" aria-label="Day" @ref="field" min="1900-01-01" max="2100-12-31" @onchange="Picked" />
+            <div class="day-pick-header">
+                <button type="button" class="day-pick-prev" aria-label="Previous month" title="Previous month" disabled="@(shownMonth <= MonthGrid.First)" @onclick="PreviousMonth"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 18l-6-6 6-6"/></svg></button>
+                <span class="day-pick-month">@monthLabel</span>
+                <button type="button" class="day-pick-next" aria-label="Next month" title="Next month" disabled="@(shownMonth >= MonthGrid.MonthOf(MonthGrid.Last))" @onclick="NextMonth"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 18l6-6-6-6"/></svg></button>
+            </div>
+            <table class="day-pick-grid" role="grid" aria-label="@monthLabel">
+                <thead>
+                    <tr>
+                        <th role="columnheader" class="week"></th>
+                        @foreach (string name in DayNames)
+                        {
+                            <th role="columnheader">@name</th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @for (int row = 0; row < MonthGrid.Days / 7; row++)
+                    {
+                        DateOnly monday = gridStart.AddDays(row * 7);
+                        int week = MonthGrid.Week(monday);
+                        <tr>
+                            <th role="rowheader" class="week" aria-label="@($"Week {week}")">@week</th>
+                            @for (int column = 0; column < 7; column++)
+                            {
+                                int index = (row * 7) + column;
+                                DateOnly day = monday.AddDays(column);
+                                bool isSelected = Selected == day;
+                                bool isToday = Today == day;
+                                bool isFocus = day == focusDay;
+                                <td role="gridcell" aria-selected="@(isSelected ? "true" : null)">
+                                    <button type="button" class="@DayClass(day, isToday, isSelected)" aria-label="@MonthGrid.DayLabel(day)"
+                                            aria-current="@(isToday ? "date" : null)" tabindex="@(isFocus ? "0" : "-1")"
+                                            disabled="@(!MonthGrid.InRange(day))" @ref="dayButtons[index]"
+                                            @onclick="() => PickDayAsync(day)" @onkeydown="DayKey">@day.Day</button>
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
         </div>
     }
     @if (MenuShown)
@@ -56,11 +98,13 @@
 </div>
 
 @code {
-    private const string Format = "yyyy-MM-dd";
+    private static readonly string[] DayNames = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
 
     private bool open;
-    private bool focusField;
-    private ElementReference field;
+    private bool focusDayPending;
+    private DateOnly shownMonth;
+    private DateOnly focusDay;
+    private readonly ElementReference[] dayButtons = new ElementReference[MonthGrid.Days];
     private bool captureOpen;
     private bool focusCapture;
     private bool capturing;
@@ -78,11 +122,15 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        // The popover just opened: the date input takes the focus, so Esc and typing work at once.
-        if (focusField && open)
+        // The calendar just opened or a key moved the focus day: that day's button takes the focus.
+        if (focusDayPending && open)
         {
-            focusField = false;
-            await field.FocusAsync();
+            focusDayPending = false;
+            int index = focusDay.DayNumber - MonthGrid.Start(shownMonth).DayNumber;
+            if (index >= 0 && index < MonthGrid.Days)
+            {
+                await dayButtons[index].FocusAsync();
+            }
         }
 
         // The capture popover just opened: its text field takes the focus.
@@ -127,6 +175,14 @@
     [Parameter]
     public EventCallback OnToday { get; set; }
 
+    /// <summary>Today, marked in the calendar; the calendar opens on it when no day is selected.</summary>
+    [Parameter]
+    public DateOnly Today { get; set; }
+
+    /// <summary>The shown day (the open daily note, or today's view), or null; marked and opened on.</summary>
+    [Parameter]
+    public DateOnly? Selected { get; set; }
+
     /// <summary>Called with a valid picked day (1900..2100).</summary>
     [Parameter]
     public EventCallback<DateOnly> OnPick { get; set; }
@@ -150,7 +206,14 @@
     private void Toggle()
     {
         open = !open;
-        focusField = open;
+        focusDayPending = open;
+        if (open)
+        {
+            // Every opening starts again from the selected day (or today), never from the month browsed last time.
+            focusDay = MonthGrid.Clamp(Selected ?? Today);
+            shownMonth = MonthGrid.MonthOf(focusDay);
+        }
+
         captureOpen = false;
         menuOpen = false;
     }
@@ -262,15 +325,94 @@
         }
     }
 
-    private async Task Picked(ChangeEventArgs e)
+    private string DayClass(DateOnly day, bool isToday, bool isSelected)
     {
-        if (!DateOnly.TryParseExact(e.Value?.ToString(), Format, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly day)
-            || day.Year < 1900 || day.Year > 2100)
+        string css = "day";
+        if (day.Year != shownMonth.Year || day.Month != shownMonth.Month)
+        {
+            css += " outside";
+        }
+
+        if (isToday)
+        {
+            css += " today";
+        }
+
+        if (isSelected)
+        {
+            css += " selected";
+        }
+
+        return css;
+    }
+
+    // Prev and next show the month before or after; the focus day keeps its day of month (clamped), so the grid
+    // still has exactly one tab stop, but the focus stays on the clicked button.
+    private void PreviousMonth() => ShowMonth(-1);
+
+    private void NextMonth() => ShowMonth(1);
+
+    private void ShowMonth(int months)
+    {
+        DateOnly month = MonthGrid.AddMonths(shownMonth, months);
+        if (month == shownMonth)
+        {
+            return;
+        }
+
+        shownMonth = MonthGrid.MonthOf(month);
+        focusDay = MonthGrid.AddMonths(focusDay, months);
+    }
+
+    // A day was chosen (click, or Return through DayKey): the calendar closes and the parent opens the day. A second
+    // event for the same choice (the browser's click after Return) finds the calendar closed and does nothing.
+    private async Task PickDayAsync(DateOnly day)
+    {
+        if (!open || !MonthGrid.InRange(day))
         {
             return;
         }
 
         open = false;
+        focusDayPending = false;
         await OnPick.InvokeAsync(day);
+    }
+
+    // Keys on a day button: arrows move the focus day by a day or a week, PageUp/PageDown by a month (day of month
+    // clamped), never outside 1900..2100; the shown month follows the focus day. Return picks the focus day. Esc
+    // bubbles to the bar, which closes the popover.
+    private async Task DayKey(KeyboardEventArgs e)
+    {
+        DateOnly next;
+        switch (e.Key)
+        {
+            case "ArrowLeft":
+                next = MonthGrid.AddDays(focusDay, -1);
+                break;
+            case "ArrowRight":
+                next = MonthGrid.AddDays(focusDay, 1);
+                break;
+            case "ArrowUp":
+                next = MonthGrid.AddDays(focusDay, -7);
+                break;
+            case "ArrowDown":
+                next = MonthGrid.AddDays(focusDay, 7);
+                break;
+            case "PageUp":
+                next = MonthGrid.AddMonths(focusDay, -1);
+                break;
+            case "PageDown":
+                next = MonthGrid.AddMonths(focusDay, 1);
+                break;
+            case "Enter":
+                await PickDayAsync(focusDay);
+                return;
+            default:
+                return;
+        }
+
+        focusDay = next;
+        shownMonth = MonthGrid.MonthOf(next);
+        focusDayPending = true;
     }
 }
