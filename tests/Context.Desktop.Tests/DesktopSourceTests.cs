@@ -446,6 +446,191 @@ public sealed class DesktopSourceTests
         }
     }
 
+    // 215 AC-2 (user change): no editor rule (inside @media blocks too) whose selector names h4 to h6 sets a size, weight or case.
+    [Fact]
+    public void EditorCss_LeavesH4ToH6Sizes()
+    {
+        foreach ((string selector, string body) in CssRules(BuiltEditorCss()))
+        {
+            bool namesLowHeading = selector.Split(',').Select(sel => sel.Trim()).Any(sel =>
+                sel.StartsWith(".note-editor-body", StringComparison.Ordinal)
+                && System.Text.RegularExpressions.Regex.IsMatch(sel, @"\bh[4-6]\b"));
+            if (!namesLowHeading)
+            {
+                continue;
+            }
+
+            Assert.DoesNotMatch(@"(^|[;\s])font-size\s*:", body);
+            Assert.DoesNotMatch(@"(^|[;\s])font\s*:", body);
+            Assert.DoesNotMatch(@"(^|[;\s])font-weight\s*:", body);
+            foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(body, @"text-transform\s*:\s*([^;]*)"))
+            {
+                Assert.Equal("none", m.Groups[1].Value.Trim());
+            }
+        }
+    }
+
+    // 215 AC-3: from app.css then the built editor.css, the element headingDom draws for each level resolves to
+    // level 1 > level 2 > level 3 > level 4 (user change: h3 1.3em), with h4 to h6 unchanged.
+    [Fact]
+    public void EditorHeadings_RenderLargestFirst()
+    {
+        EditorBundle bundle = new();
+        Dictionary<int, decimal> expected = new() { [1] = 28m, [2] = 22.4m, [3] = 18.2m, [4] = 14m, [5] = 11.62m, [6] = 9.38m };
+        foreach ((int level, decimal px) in expected)
+        {
+            using System.Text.Json.JsonDocument dom = System.Text.Json.JsonDocument.Parse(bundle.Json($"ContextEditor.headingDom({level})"));
+            System.Text.Json.JsonElement root = dom.RootElement;
+            string tag = root[0].GetString()!;
+            string? cls = root.GetArrayLength() == 3 ? root[1].GetProperty("class").GetString() : null;
+
+            Assert.Equal(px, Math.Round(EditorHeadingPx(tag, cls), 2));
+        }
+
+        Assert.True(EditorHeadingPx("h2", "heading-level-1") > EditorHeadingPx("h2", null));
+        Assert.True(EditorHeadingPx("h2", null) > EditorHeadingPx("h3", null));
+        Assert.True(EditorHeadingPx("h3", null) > EditorHeadingPx("h4", null));
+    }
+
+    // 215 AC-3: the resolver's inputs: body is 14px, nothing around the editor sets a font-size, and the only app.css
+    // heading selectors are the global h1/h2 and the panel ones.
+    [Fact]
+    public void EditorHeadings_ResolverInputsHold()
+    {
+        string app = AppCss();
+        string editor = BuiltEditorCss();
+
+        Assert.Contains(CssRules(app), rule => rule.Selector == "body" && rule.Body.Contains("font-size: 14px;", StringComparison.Ordinal));
+        string[] around = [".note-editor-body", ".editor-host", ".ProseMirror"];
+        foreach ((string selector, string body) in CssRules(app).Concat(CssRules(editor)))
+        {
+            if (selector.Split(',').Select(sel => sel.Trim()).Any(around.Contains))
+            {
+                Assert.DoesNotContain("font-size", body, StringComparison.Ordinal);
+                Assert.DoesNotMatch(@"(^|[;\s])font\s*:", body);
+            }
+        }
+
+        string[] headings = CssSelectors(app)
+            .Where(sel => System.Text.RegularExpressions.Regex.IsMatch(sel.Split(' ', '>', '+', '~')[^1], @"^h[1-6]\b"))
+            .Distinct()
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        string[] expected =
+        [
+            "h1", "h2", ".notes-region h2", ".todos-region h2", ".panel-bar h2", ".settings-panel h3", ".person-panel h2",
+            ".links-panel h2", ".review-panel h3", ".review-panel h4.review-day", ".history-bar h2",
+        ];
+        Assert.Equal(expected.Order(StringComparer.Ordinal), headings);
+    }
+
+    // 215 AC-4: the three size rules set no colour, and the shared editor heading rule keeps its colour and case.
+    [Fact]
+    public void EditorCss_HeadingSizeRules_SetNoColour()
+    {
+        string css = BuiltEditorCss();
+        foreach (string selector in new[] { "\n.note-editor-body h2", ".note-editor-body h2.heading-level-1", "\n.note-editor-body h3" })
+        {
+            string body = RuleBody(css, selector);
+            Assert.DoesNotContain("color", body, StringComparison.Ordinal);
+            Assert.DoesNotContain("background", body, StringComparison.Ordinal);
+            Assert.DoesNotContain("border", body, StringComparison.Ordinal);
+            Assert.DoesNotMatch(@"#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(", body);
+        }
+
+        string shared = RuleBody(css, ".note-editor-body h6");
+        Assert.Contains("color: var(--accent-strong);", shared, StringComparison.Ordinal);
+        Assert.Contains("text-transform: none;", shared, StringComparison.Ordinal);
+        Assert.Contains("letter-spacing: normal;", shared, StringComparison.Ordinal);
+    }
+
+    // 215 AC-5: the global h1 and h2 rules stay, and app.css never styles the editor body.
+    [Fact]
+    public void AppCss_GlobalHeadings_Unchanged()
+    {
+        string css = AppCss();
+        string h1 = RuleBody(css, "\nh1");
+        string h2 = RuleBody(css, "}\n\nh2");
+
+        Assert.Contains("font-size: 20px;", h1, StringComparison.Ordinal);
+        Assert.Contains("color: var(--accent-strong);", h1, StringComparison.Ordinal);
+        Assert.Contains("font-size: 13px;", h2, StringComparison.Ordinal);
+        Assert.Contains("color: var(--grey);", h2, StringComparison.Ordinal);
+        Assert.Contains("text-transform: uppercase;", h2, StringComparison.Ordinal);
+        Assert.DoesNotContain("note-editor-body", css, StringComparison.Ordinal);
+    }
+
+    // 215 AC-6: source and built editor.css hold the three size rules; the built editor.js draws the level-1 class.
+    [Fact]
+    public void EditorCss_SourceAndBuilt_HoldHeadingSizes()
+    {
+        string[] rules =
+        [
+            ".note-editor-body h2 { font-size: 1.6em; }",
+            ".note-editor-body h2.heading-level-1 { font-size: 2em; }",
+            ".note-editor-body h3 { font-size: 1.3em; }",
+        ];
+        foreach (string css in new[] { EditorFile("editor/src/editor.css"), BuiltEditorCss() })
+        {
+            string flat = System.Text.RegularExpressions.Regex.Replace(css, @"\s+", " ");
+            foreach (string rule in rules)
+            {
+                Assert.Contains(rule, flat, StringComparison.Ordinal);
+            }
+        }
+
+        Assert.Contains("heading-level-1", EditorFile("wwwroot/editor/editor.js"), StringComparison.Ordinal);
+    }
+
+    private static string AppCss() => EditorFile("wwwroot/app.css");
+
+    private static string BuiltEditorCss() => EditorFile("wwwroot/editor/editor.css");
+
+    // The font-size in px of a heading element inside .note-editor-body: the most specific of "tag",
+    // ".note-editor-body tag" and ".note-editor-body tag.cls" in app.css then editor.css (later wins on a tie),
+    // em times the inherited 14px, else the browser default.
+    private static decimal EditorHeadingPx(string tag, string? cls)
+    {
+        List<(string Selector, int Specificity)> candidates = [(tag, 1), (".note-editor-body " + tag, 11)];
+        if (cls is not null)
+        {
+            candidates.Add(($".note-editor-body {tag}.{cls}", 21));
+        }
+
+        string? best = null;
+        int bestSpecificity = -1;
+        foreach ((string selector, string body) in CssRules(AppCss()).Concat(CssRules(BuiltEditorCss())))
+        {
+            System.Text.RegularExpressions.Match size = System.Text.RegularExpressions.Regex.Match(body, @"font-size\s*:\s*([^;]+);");
+            if (!size.Success)
+            {
+                continue;
+            }
+
+            foreach (string sel in selector.Split(',').Select(s => s.Trim()))
+            {
+                foreach ((string candidate, int specificity) in candidates)
+                {
+                    if (sel == candidate && specificity >= bestSpecificity)
+                    {
+                        best = size.Groups[1].Value.Trim();
+                        bestSpecificity = specificity;
+                    }
+                }
+            }
+        }
+
+        Dictionary<string, string> defaults = new() { ["h2"] = "1.5em", ["h3"] = "1.17em", ["h4"] = "1em", ["h5"] = "0.83em", ["h6"] = "0.67em" };
+        string value = best ?? defaults[tag];
+        if (value.EndsWith("px", StringComparison.Ordinal))
+        {
+            return decimal.Parse(value[..^2], System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        Assert.EndsWith("em", value, StringComparison.Ordinal);
+        return decimal.Parse(value[..^2], System.Globalization.CultureInfo.InvariantCulture) * 14m;
+    }
+
     // 209 AC-8: no rule styles a Save button in the editor bar; the shared bar rule stays and a later editor-bar rule
     // keeps the dirty dot right after the title.
     [Fact]
