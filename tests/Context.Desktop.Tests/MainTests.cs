@@ -2877,57 +2877,115 @@ public sealed class MainTests : IDisposable
         await cut.Find("input[aria-label=Day]").ChangeAsync(new ChangeEventArgs { Value = value });
     }
 
-    // 198 AC-6, AC-7: a picked day shows its appointments, todos due that day and linked notes; no End the day.
+    // 212: picks value and waits until the day's note named name is in the editor, mounted and ready, with its links
+    // panel loaded.
+    private static async Task PickAndOpen(IRenderedComponent<Main> cut, EditorJs js, string value, string name)
+    {
+        int mounts = js.Calls("ContextEditor.mount").Count;
+        await PickDate(cut, value);
+        cut.WaitForAssertion(() => Assert.Equal(name, cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);
+    }
+
+    // 212: types text into the open editor, lets the auto save pause end and waits for grey Saved.
+    private async Task TypeAndAutoSave(IRenderedComponent<Main> cut, EditorJs js, string text)
+    {
+        await js.Change(cut, text);
+        cut.WaitForAssertion(() => Assert.Equal(1, data.AutoSave.Pending), Wait);
+        data.AutoSave.Elapse();
+        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".note-editor .status").TextContent), Wait);
+        Assert.Contains("grey", cut.Find(".note-editor .status").ClassList);
+    }
+
+    // 212 AC-1: a picked day with no note creates it with that day's compose and opens it in the page editor.
     [Fact]
-    public async Task TopBar_PickDay_ShowsThatDaysView()
+    public async Task TopBar_PickDay_CreatesThatDaysNoteAndOpensTheEditor()
     {
         data.WriteCalendar("work.ics", DesktopFixture.Calendar(
-            DesktopFixture.Event("Planning", "20261120T090000", "20261120T100000"),
-            DesktopFixture.Event("Today only", "20261029T090000", "20261029T100000")));
-        data.AddTodo("Ship #launch", new DateOnly(2026, 11, 20));
+            DesktopFixture.Event("Planning", "20261120T090000Z", "20261120T093000Z"),
+            DesktopFixture.Event("Today only", "20261029T090000Z", "20261029T093000Z")));
+        data.AddTodo("Ship", new DateOnly(2026, 11, 20));
         data.AddTodo("Other day", new DateOnly(2026, 11, 21));
-        data.AddTodo("Overdue", new DateOnly(2026, 10, 1));
-        data.WriteNote("Launch plan", "# Launch\n#launch\n");
+        EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await PickDate(cut, "2026-11-20");
+        await PickAndOpen(cut, js, "2026-11-20", "2026-11-20");
 
-        cut.WaitForAssertion(() => Assert.Equal("2026-11-20", cut.Find("h1.title").TextContent), Wait);
-        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Markup), Wait);
         Assert.Empty(cut.FindAll(".day-pick-backdrop"));
-        Assert.Contains("Planning", cut.Find("table.appointments").TextContent);
-        Assert.DoesNotContain("Today only", cut.Find(".current").TextContent);
-        Assert.Equal(["Ship #launch"], cut.FindAll("tr.due-todo td.cut").Select(e => e.TextContent).ToArray());
-        Assert.Equal(["Launch plan"], cut.FindAll("li.linked-note .name").Select(e => e.TextContent).ToArray());
-        Assert.Empty(cut.FindAll("button.end-day"));
-        Assert.Empty(cut.FindAll(".day-end-status"));
-        Assert.Empty(cut.FindAll("button.page-menu-open"));
+        Assert.Empty(cut.FindAll("input[aria-label=Day]"));
+        Assert.Equal("Created 2026-11-20", cut.Find(".main-status").TextContent);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
+        Assert.Equal(
+            "# 2026-11-20\n\n## Appointments\n- 10:00-10:30 Planning\n\n## Todos\n- Ship\n",
+            File.ReadAllText(Path.Combine(data.Root, "2026-11-20.md")));
+        Assert.Single(cut.FindAll(".note-editor"));
+        Assert.Empty(cut.FindAll("h1.title"));
+        Assert.Empty(cut.FindAll(".current"));
     }
 
-    // 198 AC-6: empty states name the day.
+    // 212 AC-2: the story's test: typing into a picked day's note is saved by auto save.
     [Fact]
-    public async Task TopBar_PickDay_EmptyStatesNameTheDay()
+    public async Task TopBar_PickDay_TypingIsAutoSaved()
     {
+        EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await PickAndOpen(cut, js, "2026-11-20", "2026-11-20");
+
+        await TypeAndAutoSave(cut, js, "# 2026-11-20\n\nTyped at once\n");
+
+        Assert.Equal("# 2026-11-20\n\nTyped at once\n", File.ReadAllText(Path.Combine(data.Root, "2026-11-20.md")));
+    }
+
+    // 212 AC-3: an existing plain day note opens as it is: nothing written, no Created text.
+    [Fact]
+    public async Task TopBar_PickDay_ExistingNote_OpensUnchanged()
+    {
+        data.WriteNote("2026-11-20", "# mine\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+
+        await PickAndOpen(cut, js, "2026-11-20", "2026-11-20");
+
+        Assert.Equal("# mine\n", js.MountedText());
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.DoesNotContain("Created", cut.Find(".main-status").TextContent, StringComparison.Ordinal);
+    }
+
+    // 212 AC-3: an existing sensitive day note goes through the unlock flow like /today and is never rewritten.
+    [Fact]
+    public async Task TopBar_PickDay_SensitiveNote_OpensThroughUnlock()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("2026-11-20", "# secret day\n");
+        data.Keys.AgreeThrows = true;
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
 
         await PickDate(cut, "2026-11-20");
 
-        cut.WaitForAssertion(() => Assert.Contains("No appointments on 2026-11-20.", cut.Find(".current").TextContent), Wait);
-        Assert.Contains("Nothing due on 2026-11-20.", cut.Find(".current").TextContent);
+        cut.WaitForAssertion(() => Assert.Equal("Can't unlock 2026-11-20.", cut.Find(".unreadable").TextContent), Wait);
+        Assert.Equal(1, data.Keys.Agrees);
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.False(File.Exists(Path.Combine(data.Root, "2026-11-20.md")));
+        Assert.DoesNotContain("Created", cut.Find(".main-status").TextContent, StringComparison.Ordinal);
     }
 
-    // 198 AC-7: picking today's date shows exactly today's view; Today after another day returns to it.
+    // 212 AC-4: picking today's date opens today's daily note in the editor, and typing is auto saved.
     [Fact]
-    public async Task TopBar_PickToday_AndTodayAfterAnotherDay_ShowTodaysView()
+    public async Task TopBar_PickToday_OpensTodaysNoteInTheEditor()
     {
+        EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await PickDate(cut, "2026-10-29");
-        Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent);
-        Assert.Equal(["end-day"], await MenuIdsAsync(cut));
+        await PickAndOpen(cut, js, "2026-10-29", "2026-10-29");
 
-        await PickDate(cut, "2026-11-20");
-        cut.WaitForAssertion(() => Assert.Equal("2026-11-20", cut.Find("h1.title").TextContent), Wait);
+        Assert.Empty(cut.FindAll("h1.title"));
+        Assert.Equal("Created 2026-10-29", cut.Find(".main-status").TextContent);
+        await TypeAndAutoSave(cut, js, "# 2026-10-29\n\nToday typed\n");
+        Assert.Equal("# 2026-10-29\n\nToday typed\n", File.ReadAllText(Path.Combine(data.Root, "2026-10-29.md")));
         await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent), Wait);
         Assert.Equal(["end-day"], await MenuIdsAsync(cut));
@@ -2982,29 +3040,111 @@ public sealed class MainTests : IDisposable
         Assert.Equal(0, data.Keys.Agrees);
     }
 
-    // 198 AC-8: a dirty note asks first; Keep keeps it and no day shows; Discard shows the day. Bad values are ignored.
+    // 212 AC-5: another note's unsaved changes are saved first, then the picked day's note opens.
     [Fact]
-    public async Task TopBar_PickDay_DirtyEditor_KeepOrDiscard()
+    public async Task TopBar_PickDay_DirtyEditor_SavesFirstThenOpens()
     {
         data.WriteNote("Plan", "# Plan\n");
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
+        js.Edit("# Plan\n\nTyped\n");
+
+        await PickAndOpen(cut, js, "2026-11-20", "2026-11-20");
+
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Equal("# Plan\n\nTyped\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.True(File.Exists(Path.Combine(data.Root, "2026-11-20.md")));
+    }
+
+    // 212 AC-5: when that save fails the discard dialog asks: Cancel keeps the note and its text, Confirm opens the day.
+    [Fact]
+    public async Task TopBar_PickDay_SaveFails_CancelOrConfirm()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        int mounts = js.Calls("ContextEditor.mount").Count;
         js.EditUnsavable("# Plan\n\nUnsaved\n");
 
         await PickDate(cut, "2026-11-20");
 
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll("[role=dialog]")), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
+        Assert.False(File.Exists(Path.Combine(data.Root, "2026-11-20.md")));
         await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
-        Assert.Empty(cut.FindAll("h1.title"));
+        Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
+        Assert.True(js.Dirty);
+        Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.False(File.Exists(Path.Combine(data.Root, "2026-11-20.md")));
+
         await PickDate(cut, "2026-11-20");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("[role=dialog]")), Wait);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal("2026-11-20", cut.Find("h1.title").TextContent), Wait);
-        Assert.Empty(cut.FindAll(".note-editor"));
+        cut.WaitForAssertion(() => Assert.Equal("2026-11-20", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        Assert.Equal("Created 2026-11-20", cut.Find(".main-status").TextContent);
+        Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
     }
 
+    // 212 AC-5: picking the day of the note already open changes nothing: no dialog, no remount, unsaved text kept.
+    [Fact]
+    public async Task TopBar_PickDay_SameDay_KeepsTheEditor()
+    {
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await PickAndOpen(cut, js, "2026-11-20", "2026-11-20");
+        js.EditUnsavable("# 2026-11-20\n\nUnsaved\n");
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+
+        await PickDate(cut, "2026-11-20");
+
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("input[aria-label=Day]")), Wait);
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Equal("2026-11-20", cut.Find(".note-title").TextContent);
+        Assert.Single(js.Calls("ContextEditor.mount"));
+        Assert.True(js.Dirty);
+        Assert.Empty(js.Calls("ContextEditor.getMarkdown"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    // 212 AC-6: a day note that can't be written gives the red line, opens no editor and keeps the shown view.
+    [Fact]
+    public async Task TopBar_PickDay_WriteFails_RedLineViewKept()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        string first = Path.Combine(data.Root, "2026-11-20.md");
+        string second = Path.Combine(data.Root, "2026-11-21.md");
+        data.Actions!.BeforeWrite = () =>
+        {
+            Directory.CreateDirectory(first);
+            Directory.CreateDirectory(second);
+        };
+
+        await PickDate(cut, "2026-11-20");
+
+        cut.WaitForAssertion(
+            () => Assert.Equal("Can't write 2026-11-20. Nothing was done.", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Empty(js.Calls("ContextEditor.mount"));
+        Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent);
+        Assert.False(File.Exists(first));
+
+        await Open(cut, js, "Plan");
+        int mounts = js.Calls("ContextEditor.mount").Count;
+        await PickDate(cut, "2026-11-21");
+        cut.WaitForAssertion(
+            () => Assert.Equal("Can't write 2026-11-21. Nothing was done.", cut.Find(".main-status").TextContent), Wait);
+        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
+        Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
+        Assert.False(File.Exists(second));
+    }
+
+    // 198 AC-8, 212 AC-9: a bad value does nothing: the popover stays open and nothing is written.
     [Theory]
     [InlineData("")]
     [InlineData("nonsense")]
@@ -3014,59 +3154,78 @@ public sealed class MainTests : IDisposable
     public async Task TopBar_PickDay_BadValue_Ignored(string value)
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
 
         await PickDate(cut, value);
 
         Assert.Single(cut.FindAll("input[aria-label=Day]"));
         Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent);
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
     }
 
-    // 198 AC-8: opening a note after viewing another day shows the note, and Today then shows today's view.
+    // 212 AC-7: Today then a note name, and Today then /today, end in an editor whose change auto save saves.
     [Fact]
-    public async Task TopBar_OtherDay_ThenOpenNote_ShowsTheNote()
+    public async Task Routes_TodayThenNoteOrToday_EditorSaves()
     {
         data.WriteNote("Plan", "# Plan\n");
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        await PickDate(cut, "2026-11-20");
-        cut.WaitForAssertion(() => Assert.Equal("2026-11-20", cut.Find("h1.title").TextContent), Wait);
 
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
         await Open(cut, js, "Plan");
+        await TypeAndAutoSave(cut, js, "# Plan\n\nFrom a name\n");
+        Assert.Equal("# Plan\n\nFrom a name\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
 
-        Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal("Today, 2026-10-29", cut.Find("h1.title").TextContent), Wait);
+        int mounts = js.Calls("ContextEditor.mount").Count;
+        await RunPalette(cut, "/today");
+        cut.WaitForAssertion(() => Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
+        await TypeAndAutoSave(cut, js, "# 2026-10-29\n\nFrom today\n");
+        Assert.Equal("# 2026-10-29\n\nFrom today\n", File.ReadAllText(Path.Combine(data.Root, "2026-10-29.md")));
     }
 
-    // 198 AC-9: the other day's view reloads after a state change and keeps showing that day.
+    // 212 AC-7: day A then day B opens B (A left as saved); a day then a note name opens the note; each saves.
     [Fact]
-    public async Task TopBar_OtherDay_ReloadsAfterStateChange()
+    public async Task Routes_DayThenDayOrNote_EditorSaves()
     {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        await PickDate(cut, "2026-11-20");
-        cut.WaitForAssertion(() => Assert.Contains("Nothing due on 2026-11-20.", cut.Find(".current").TextContent), Wait);
 
-        data.AddTodo("Late addition", new DateOnly(2026, 11, 20));
-        data.WriteCalendar("new.ics", DesktopFixture.Calendar(DesktopFixture.Event("Added talk", "20261120T130000", "20261120T140000")));
-        await data.State!.Refresh();
+        await PickAndOpen(cut, js, "2026-11-20", "2026-11-20");
+        await TypeAndAutoSave(cut, js, "# 2026-11-20\n\nDay A\n");
+        await PickAndOpen(cut, js, "2026-11-21", "2026-11-21");
+        Assert.Equal("# 2026-11-20\n\nDay A\n", File.ReadAllText(Path.Combine(data.Root, "2026-11-20.md")));
+        await TypeAndAutoSave(cut, js, "# 2026-11-21\n\nDay B\n");
+        Assert.Equal("# 2026-11-21\n\nDay B\n", File.ReadAllText(Path.Combine(data.Root, "2026-11-21.md")));
 
-        cut.WaitForAssertion(() => Assert.Contains("Late addition", cut.Find(".current").TextContent), Wait);
-        cut.WaitForAssertion(() => Assert.Contains("Added talk", cut.Find(".current").TextContent), Wait);
-        Assert.Equal("2026-11-20", cut.Find("h1.title").TextContent);
+        await Open(cut, js, "Plan");
+        await TypeAndAutoSave(cut, js, "# Plan\n\nAfter a day\n");
+        Assert.Equal("# Plan\n\nAfter a day\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.Equal("# 2026-11-21\n\nDay B\n", File.ReadAllText(Path.Combine(data.Root, "2026-11-21.md")));
     }
 
-    // 198 AC-9: an unreadable todos.json and calendar file still show their lines for another day.
+    // 212 AC-8: a picked day's note has the plain-note menu, a sensitive one the sensitive-note menu; no End the day.
     [Fact]
-    public async Task TopBar_OtherDay_ShowsUnreadableLines()
+    public async Task TopBar_PickDay_MenuHasTheNotesItems()
     {
-        data.WriteFile("todos.json", "not json");
-        data.WriteCalendar("bad.ics", "nope");
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("2026-11-21", "# secret day\n");
+        EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await PickDate(cut, "2026-11-20");
+        await PickAndOpen(cut, js, "2026-11-20", "2026-11-20");
+        Assert.Equal(
+            ["rename", "delete", "history", "new-subpage", "move", "open-external", "export", "mark-sensitive"],
+            await MenuIdsAsync(cut));
 
-        cut.WaitForAssertion(() => Assert.Contains("Can't read todos.json.", cut.Find(".current").TextContent), Wait);
-        Assert.Contains("Can't read calendar/bad.ics", cut.Find(".current").TextContent);
+        await PickDate(cut, "2026-11-21");
+        cut.WaitForAssertion(() => Assert.Equal("2026-11-21", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Contains(cut.FindAll(".links-panel p"), p => p.TextContent == "Sensitive notes have no links."), Wait);
+        Assert.Equal(["rename", "delete", "history", "make-plain", "lock"], await MenuIdsAsync(cut));
     }
 
     // 199 AC-1: Capture is the first icon button, before Today and Pick a day; no popover at first.

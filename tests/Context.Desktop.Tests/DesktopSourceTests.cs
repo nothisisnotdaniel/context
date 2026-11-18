@@ -2018,4 +2018,19 @@ public sealed class DesktopSourceTests
         Assert.Contains("OnCapture=\"CaptureAsync\"", main, StringComparison.Ordinal);
         Assert.Contains("Task<bool> CaptureAsync(string text)", main, StringComparison.Ordinal);
     }
+
+    // 212 AC-8: the read-only day view is gone; no desktop source names it, and CurrentPanel takes no Day.
+    [Fact]
+    public void NoDayView_NoShownDay_CurrentPanelHasNoDay()
+    {
+        string root = RepoFiles.Root();
+        foreach (string file in RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".razor", ".cs"))
+        {
+            string text = File.ReadAllText(Path.Combine(root, file));
+            Assert.False(text.Contains("DayView", StringComparison.Ordinal), file + " mentions DayView");
+            Assert.False(text.Contains("shownDay", StringComparison.Ordinal), file + " mentions shownDay");
+        }
+
+        Assert.Null(typeof(CurrentPanel).GetProperty("Day"));
+    }
 }

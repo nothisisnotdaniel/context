@@ -112,7 +112,7 @@
                     }
                     else
                     {
-                        <CurrentPanel OnOpen="RequestOpen" Day="@shownDay" />
+                        <CurrentPanel OnOpen="RequestOpen" />
                     }
                 </div>
             </main>
@@ -196,8 +196,8 @@ else
     private string? openHeading;
     private string? pendingPerson;
     private bool pendingToday;
-    private DateOnly? shownDay;
-    private DateOnly? pendingDay;
+    // A day picked in the top bar whose daily note opens once the unsaved-changes dialog is confirmed.
+    private DateOnly? pendingPickedDay;
     private bool pendingBriefing;
     private Appointment? pendingMeeting;
     private bool paletteOpen;
@@ -365,17 +365,43 @@ else
     private void CloseSettings() => page = Page.None;
 
     // The Today button: the current view of today, asking first when the open note has unsaved changes.
-    private Task ShowToday()
-    {
-        pendingDay = null;
-        return RequestOpen(null);
-    }
+    private Task ShowToday() => RequestOpen(null);
 
-    // A day picked in the top bar: that day's view, asking first like RequestOpen; applied once the guard resolves.
-    private Task PickDay(DateOnly day)
+    // A day picked in the top bar: that day's daily note in the page editor, like /today for that day (job 212). The
+    // open note of that day stays as it is; another dirty note is saved first, or the discard dialog asks.
+    private async Task PickDay(DateOnly day)
     {
-        pendingDay = day;
-        return RequestOpen(null);
+        if (editor is not null && openName is not null
+            && !string.Equals(openName, Actions.DailyNoteName(day), StringComparison.Ordinal)
+            && await KeptUnsaved())
+        {
+            pendingName = null;
+            pendingPerson = null;
+            pendingToday = false;
+            pendingPickedDay = day;
+            pendingBriefing = false;
+            pendingMeeting = null;
+            discarding = true;
+            return;
+        }
+
+        if (running)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult daily;
+        try
+        {
+            daily = await Actions.OpenDailyNote(day);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        ShowDaily(daily);
     }
 
     // Opens the note called name (null: the current view), asking first when the open note has unsaved changes.
@@ -520,6 +546,29 @@ else
             return;
         }
 
+        if (pendingPickedDay is { } picked)
+        {
+            pendingPickedDay = null;
+            if (running)
+            {
+                return;
+            }
+
+            running = true;
+            ActionResult daily;
+            try
+            {
+                daily = await Actions.OpenDailyNote(picked);
+            }
+            finally
+            {
+                running = false;
+            }
+
+            ShowDaily(daily);
+            return;
+        }
+
         if (pendingMeeting is { } meeting)
         {
             pendingMeeting = null;
@@ -573,7 +622,7 @@ else
     {
         discarding = false;
         pendingClose = false;
-        pendingDay = null;
+        pendingPickedDay = null;
         pendingName = null;
         pendingHeading = null;
         pendingPerson = null;
@@ -623,8 +672,6 @@ else
 
     private void ShowNote(string? name, string? heading = null)
     {
-        shownDay = name is null ? pendingDay : null;
-        pendingDay = null;
         (string? Name, bool Sensitive) before = (openName, openSensitive);
         openName = name;
         openHeading = name is null ? null : heading;
@@ -641,6 +688,7 @@ else
         pendingName = null;
         pendingPerson = null;
         pendingToday = false;
+        pendingPickedDay = null;
         pendingBriefing = false;
         pendingMeeting = null;
         tagShown = null;
@@ -844,6 +892,7 @@ else
                     pendingName = null;
                     pendingPerson = null;
                     pendingToday = false;
+                    pendingPickedDay = null;
                     pendingMeeting = null;
                     pendingBriefing = true;
                     discarding = true;
@@ -876,6 +925,7 @@ else
                     pendingName = null;
                     pendingPerson = null;
                     pendingToday = true;
+                    pendingPickedDay = null;
                     pendingBriefing = false;
                     pendingMeeting = null;
                     discarding = true;
@@ -923,6 +973,7 @@ else
                     pendingName = null;
                     pendingPerson = null;
                     pendingToday = false;
+                    pendingPickedDay = null;
                     pendingBriefing = false;
                     pendingMeeting = appointment;
                     discarding = true;
@@ -1801,8 +1852,8 @@ else
         }
     }
 
-    // The shown page's actions for the top bar's More actions menu: a plain or sensitive note's, End the day on today's
-    // view, none on another day or on a page (Triage, Tags, Settings).
+    // The shown page's actions for the top bar's More actions menu: a plain or sensitive note's, End the day on the
+    // current view, none on a page (Triage, Tags, Settings).
     private IReadOnlyList<PageAction> PageActionsFor(DesktopSnapshot snapshot)
     {
         if (page != Page.None)
@@ -1812,7 +1863,7 @@ else
 
         if (openName is null)
         {
-            return shownDay is { } day && day != snapshot.Today ? [] : [new PageAction("end-day", "End the day")];
+            return [new PageAction("end-day", "End the day")];
         }
 
         PageAction[] common =
@@ -1917,7 +1968,7 @@ else
             }
             case "end-day":
             {
-                if (running || openName is not null || Snapshot is not { } snapshot || (shownDay is { } day && day != snapshot.Today))
+                if (running || openName is not null || Snapshot is not { } snapshot)
                 {
                     return;
                 }
