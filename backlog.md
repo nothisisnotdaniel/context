@@ -102,7 +102,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#278](backlog/278-today-and-home-open-today-s.md) Today and Home open today's note in the editor
 - [ ] [#25](backlog/025-outlook-as-a-source.md) Outlook as a source
 - [ ] [#271](backlog/271-search-icon-in-the-top-bar.md) Search icon in the top bar, opens like Capture
-- [ ] [#282](backlog/282-bigger-level-1-and-2-headings.md) Bigger level 1 and 2 headings in the note editor
+- [x] [#282](backlog/282-bigger-level-1-and-2-headings.md) Bigger level 1 and 2 headings in the note editor → 215-bigger-editor-headings
 - [ ] [#69](backlog/069-board-view-for-a-tag.md) Board view for a tag
 - [ ] [#74](backlog/074-waiting-for-list.md) Waiting-for list
 - [ ] [#78](backlog/078-smart-paste.md) Smart paste
