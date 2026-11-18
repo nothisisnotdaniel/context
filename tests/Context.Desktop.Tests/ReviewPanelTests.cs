@@ -1,5 +1,6 @@
 using AngleSharp.Dom;
 using Bunit;
+using Microsoft.AspNetCore.Components.Web;
 
 namespace Context.Tests;
 
@@ -50,9 +51,8 @@ public sealed class ReviewPanelTests : IDisposable
             cut.FindAll(".review-panel h3").Select(h => h.TextContent).ToArray());
     }
 
-    // AC-8: every section filled; typed note buttons report the name; overdue class; appointments grouped by day.
-    [Fact]
-    public void Render_Filled_RowsAndButtons()
+    // Writes the notes, todos and calendar the filled panel shows.
+    private void WriteFilled()
     {
         WriteNote("Plan", new DateTime(2026, 10, 28, 9, 0, 0, DateTimeKind.Utc));
         WriteNote("Old", new DateTime(2026, 10, 10, 9, 0, 0, DateTimeKind.Utc));
@@ -65,6 +65,13 @@ public sealed class ReviewPanelTests : IDisposable
             DesktopFixture.Event("Standup", "20261030T090000", "20261030T091500", "Room 1"),
             DesktopFixture.Event("Lunch", "20261030T120000", "20261030T130000"),
             DesktopFixture.Event(string.Empty, "20261101T100000", "20261101T110000")));
+    }
+
+    // AC-8: every section filled; typed note buttons report the name; overdue class; appointments grouped by day.
+    [Fact]
+    public async Task Render_Filled_RowsAndButtons()
+    {
+        WriteFilled();
         List<string> opened = [];
         int closed = 0;
 
@@ -95,11 +102,32 @@ public sealed class ReviewPanelTests : IDisposable
         Assert.Equal("(no title)", lists[1].QuerySelector(".title")!.TextContent);
         Assert.Empty(cut.FindAll(".review-panel .red"));
 
-        button.Click();
-        cut.Find(".panel-bar button.close").Click();
+        // 222: no reload may hold the renderer, and the buttons are found again, so each click is the current one.
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        await cut.InvokeAsync(() => { });
+        await cut.Find(".review-note button.note-button").ClickAsync(new MouseEventArgs());
+        await cut.Find(".panel-bar button.close").ClickAsync(new MouseEventArgs());
 
         Assert.Equal(["Plan"], opened);
         Assert.Equal(1, closed);
+    }
+
+    // 222 AC-3: a state reload between the render and the click re-renders the rows; the click still opens the note.
+    [Fact]
+    public async Task Click_AfterStateReload_OpensNote()
+    {
+        WriteFilled();
+        List<string> opened = [];
+
+        IRenderedComponent<ReviewPanel> cut = Render(opened);
+
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".review-note")), Wait);
+        await data.State!.Refresh().WaitAsync(Wait);
+        await data.State.ReloadsSettled().WaitAsync(Wait);
+        await cut.Find("button.note-button").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(["Plan"], opened);
+        Assert.Single(cut.FindAll(".review-note"));
     }
 
     // AC-8: empty sections show the grey texts.
