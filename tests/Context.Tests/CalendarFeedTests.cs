@@ -155,17 +155,17 @@ public sealed class CalendarFeedTests : IDisposable
     [Fact]
     public void Fetch_OnlyPrivateEvents_Fresh()
     {
-        const string privateOnly =
+        const string PrivateOnly =
             "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Secret\r\nCLASS:PRIVATE\r\nDTSTART:20261029T080000Z\r\n"
             + "END:VEVENT\r\nEND:VCALENDAR\r\n";
-        FakeHttpHandler handler = FakeHttpHandler.Ok(privateOnly);
+        FakeHttpHandler handler = FakeHttpHandler.Ok(PrivateOnly);
 
         CalendarFeedResult result = Feed(handler).Fetch();
 
         Assert.Equal(CalendarFeedStatus.Fresh, result.Status);
         Assert.Null(result.Reason);
-        Assert.Equal(privateOnly, result.Text);
-        Assert.Equal(Encoding.UTF8.GetBytes(privateOnly), File.ReadAllBytes(CachePath));
+        Assert.Equal(PrivateOnly, result.Text);
+        Assert.Equal(Encoding.UTF8.GetBytes(PrivateOnly), File.ReadAllBytes(CachePath));
     }
 
     // AC-2: the cache is written with the user's permissions only.
