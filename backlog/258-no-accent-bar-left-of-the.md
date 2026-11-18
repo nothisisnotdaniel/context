@@ -13,3 +13,5 @@ The bar was added in job 196 as a quiet edit marker, but it still reads as a box
 ## Notes
 
 Requested by the user on 2026-11-17 ("remove the bar in front of the editor when editing"; confirmed: the vertical line at the left). Rule at app.css:508.
+
+The user asked again on 2026-11-18: "The vertical line in front of the editor is still present. Remove it." Check that no left border, bar or shadow is left next to the editor, focused or not.

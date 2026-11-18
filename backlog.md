@@ -95,7 +95,9 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#68](backlog/068-saved-searches.md) Saved searches → 207-saved-searches
 - [ ] [#268](backlog/268-remove-the-save-button-from-the.md) Remove the Save button from the note editor
 - [ ] [#269](backlog/269-outline-in-the-right-sidebar-no.md) Outline in the right sidebar, no reformat notice
+- [ ] [#258](backlog/258-no-accent-bar-left-of-the.md) No accent bar left of the editor while editing
 - [ ] [#270](backlog/270-editor-works-on-a-day-opened.md) Editor works on a day opened from the calendar
+- [ ] [#254](backlog/254-month-calendar-in-the-day-picker.md) Month calendar in the day picker
 - [ ] [#271](backlog/271-search-icon-in-the-top-bar.md) Search icon in the top bar, opens like Capture
 - [ ] [#69](backlog/069-board-view-for-a-tag.md) Board view for a tag
 - [ ] [#74](backlog/074-waiting-for-list.md) Waiting-for list
@@ -211,11 +213,9 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#241](backlog/241-see-decisions-past-the-first-100.md) See decisions past the first 100
 - [x] [#242](backlog/242-tidy-the-desktop-layout-icon-buttons.md) Tidy the desktop layout: icon buttons, no dates, set-apart capture bar → 192-tidy-desktop-layout
 - [x] [#243](backlog/243-open-triage-tags-and-settings-as.md) Open Triage, Tags and Settings as their own pages with an × close → 193-page-views-close-x
-- [ ] [#254](backlog/254-month-calendar-in-the-day-picker.md) Month calendar in the day picker
 - [ ] [#255](backlog/255-decisions-longer-than-one-line-a.md) Numbered #!d decisions: a marked paragraph, referenced as #!d1234
 - [ ] [#256](backlog/256-no-prerelease-for-backlog-only-pushes.md) No prerelease for backlog-only pushes
 - [ ] [#257](backlog/257-web-links-work-in-the-note.md) Web links work in the note editor
-- [ ] [#258](backlog/258-no-accent-bar-left-of-the.md) No accent bar left of the editor while editing
 - [?] [#259](backlog/259-check-the-capture-popover-in-a.md) Check the Capture popover in a narrow window
 - [?] [#260](backlog/260-return-focus-to-the-button-after.md) Return focus to the … button after a menu item or outside click
 - [?] [#261](backlog/261-check-context-db-in-the-todo.md) Check context.db in the todo done tests for note todos

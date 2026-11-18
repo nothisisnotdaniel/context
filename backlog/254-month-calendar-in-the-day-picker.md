@@ -13,3 +13,5 @@ The native date input shows only a text field (tt.mm.jjjj), which gives no overv
 ## Notes
 
 Requested by the user on 2026-11-17 after the screenshots of job 198 (#250). No new package; built in Razor and CSS. Week numbers use ISO 8601 (System.Globalization.ISOWeek).
+
+The user asked on 2026-11-18: "The calendar popup doesn't require an input box. Instead make the icon open the calendar directly." Clicking the Pick a day icon shows the month calendar at once, with no date input box in the popover.
