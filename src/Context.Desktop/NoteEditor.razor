@@ -187,11 +187,9 @@
                         RestartPause();
                     }
                 }
-                else
-                {
-                    await Interop.MarkCleanAsync(host);
-                    dirty = false;
-                }
+
+                // Nothing was edited, so the page is already clean; it is not marked clean again, so text typed while
+                // this save ran stays unsaved and its own pause saves it.
 
                 ShowStatus(auto ? "Saved." : $"Saved {DesktopText.OneLine(result.Text)}.", auto ? "grey" : "accent");
             }
