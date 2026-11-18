@@ -110,7 +110,6 @@ internal sealed class CrashLog
     {
         try
         {
-            DateTime now = Utc(utcNow());
             CrashHint? hint = null;
             if (ReadSession() is (bool running, DateTime start))
             {
@@ -125,6 +124,14 @@ internal sealed class CrashLog
                 {
                     hint = new CrashHint(newest, Folder);
                 }
+            }
+
+            // The new start is taken after any unclean-exit log and is always later than the newest log's name time,
+            // so a log that was already shown never counts as newer than this session on the next start.
+            DateTime now = Utc(utcNow());
+            if (NewestLogTime() is { } newestTime && newestTime.AddMilliseconds(1) > now)
+            {
+                now = newestTime.AddMilliseconds(1);
             }
 
             lock (gate)
@@ -176,7 +183,20 @@ internal sealed class CrashLog
     {
         try
         {
-            Directory.CreateDirectory(Folder);
+            // Never through a link: a linked .logs folder or session file (or anything but a regular file there) is
+            // left alone, so no other file is ever overwritten.
+            if (!EnsureFolder())
+            {
+                return;
+            }
+
+            FileInfo session = new FileInfo(SessionPath);
+            if (session.LinkTarget is not null || Directory.Exists(SessionPath)
+                || (session.Exists && session.Attributes.HasFlag(FileAttributes.ReparsePoint)))
+            {
+                return;
+            }
+
             File.WriteAllText(SessionPath, kind + " " + Stamp(start));
         }
         catch (Exception)
@@ -231,7 +251,11 @@ internal sealed class CrashLog
         fill(body);
         byte[] bytes = Encoding.UTF8.GetBytes(body.ToString());
 
-        Directory.CreateDirectory(Folder);
+        if (!EnsureFolder())
+        {
+            return null;
+        }
+
         string stem = "crash-" + now.ToString(StampFormat, CultureInfo.InvariantCulture);
         for (int n = 1; n <= 99; n++)
         {
@@ -259,6 +283,27 @@ internal sealed class CrashLog
         }
 
         return null;
+    }
+
+    // Creates the crash folder when missing; false when it is (or became) a link, a reparse point or not a folder.
+    private bool EnsureFolder()
+    {
+        Directory.CreateDirectory(Folder);
+        return IsPlainFolder(Folder);
+    }
+
+    /// <summary>True when <paramref name="path"/> is a folder itself: not a link, not a reparse point, not a file.</summary>
+    public static bool IsPlainFolder(string path)
+    {
+        try
+        {
+            DirectoryInfo info = new DirectoryInfo(path);
+            return info.Exists && info.LinkTarget is null && !info.Attributes.HasFlag(FileAttributes.ReparsePoint);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     // Each exception, depth first: the outer one, then its InnerException or every AggregateException entry, at most
@@ -359,7 +404,7 @@ internal sealed class CrashLog
     private List<(FileInfo File, string Stamp, int Number)> Logs()
     {
         List<(FileInfo File, string Stamp, int Number)> logs = [];
-        if (!Directory.Exists(Folder))
+        if (!IsPlainFolder(Folder))
         {
             return logs;
         }
@@ -382,6 +427,18 @@ internal sealed class CrashLog
             return byStamp != 0 ? byStamp : b.Number.CompareTo(a.Number);
         });
         return logs;
+    }
+
+    // The UTC time in the newest log's name, or null.
+    private DateTime? NewestLogTime()
+    {
+        foreach ((FileInfo _, string stamp, int _) in Logs())
+        {
+            return DateTime.SpecifyKind(
+                DateTime.ParseExact(stamp, StampFormat, CultureInfo.InvariantCulture), DateTimeKind.Utc);
+        }
+
+        return null;
     }
 
     // The newest log written at or after start (to the millisecond of its name), or null.

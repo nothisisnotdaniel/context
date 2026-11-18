@@ -912,10 +912,16 @@ internal sealed class DesktopActions
     /// <summary>
     /// Opens the crash folder of <paramref name="hint"/> in the OS file manager through the <see cref="INoteLauncher"/>
     /// (job 237): <see cref="CrashHint.Folder"/> is the only path given, never text from the page. False when the
-    /// launcher throws. Never writes and never refreshes.
+    /// launcher throws, and false without a launch when the folder is not a plain folder at click time (missing, a file, a
+    /// link or a reparse point), so the shell never opens whatever was put there. Never writes and never refreshes.
     /// </summary>
     public bool OpenCrashFolder(CrashHint hint)
     {
+        if (!CrashLog.IsPlainFolder(hint.Folder))
+        {
+            return false;
+        }
+
         try
         {
             launcher.Launch(hint.Folder);

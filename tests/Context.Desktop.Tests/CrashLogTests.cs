@@ -352,4 +352,95 @@ public sealed class CrashLogTests : IDisposable
         Assert.Null(Create().Begin());
         Assert.StartsWith("running ", File.ReadAllText(SessionPath, Encoding.UTF8), StringComparison.Ordinal);
     }
+
+    // AC-7 (round 2): with a frozen clock, the unclean-exit log is shown once; the start after it shows nothing.
+    [Fact]
+    public void Begin_UncleanExit_FrozenClock_ShowsTheHintOnce()
+    {
+        Create().Begin();
+
+        CrashLog second = Create();
+        Assert.NotNull(second.Begin());
+        second.End();
+
+        Assert.Null(Create().Begin());
+        Assert.Single(LogFiles());
+    }
+
+    // AC-7 (round 2): a crash in the same millisecond is still shown; the next start after it is not.
+    [Fact]
+    public void Begin_LogInTheStartMillisecond_ShownOnce()
+    {
+        CrashLog first = Create();
+        first.Begin();
+        first.Write("component", new Exception("same millisecond"));
+
+        CrashLog second = Create();
+        Assert.NotNull(second.Begin());
+        second.End();
+
+        Assert.Null(Create().Begin());
+    }
+
+    // AC-4 (round 2): a linked .logs folder is never written through.
+    [Fact]
+    public void BeginWriteEnd_FolderIsASymlink_WriteNothingThere()
+    {
+        string target = Path.Combine(root, "elsewhere");
+        Directory.CreateDirectory(target);
+        try
+        {
+            Directory.CreateSymbolicLink(Logs, target);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            // This OS refuses symlinks here; there is nothing to check.
+            return;
+        }
+
+        CrashLog log = Create();
+        Assert.Null(log.Begin());
+        Assert.Null(log.Write("component", new Exception("n")));
+        log.End();
+
+        Assert.Empty(Directory.GetFileSystemEntries(target));
+    }
+
+    // AC-5 (round 2): a session file that is a symlink is never written through; its target stays as it was.
+    [Fact]
+    public void BeginEnd_SessionIsASymlink_TargetUnchanged()
+    {
+        Directory.CreateDirectory(Logs);
+        string target = Path.Combine(root, "target.txt");
+        File.WriteAllText(target, "target");
+        try
+        {
+            File.CreateSymbolicLink(SessionPath, target);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            // This OS refuses symlinks here; there is nothing to check.
+            return;
+        }
+
+        CrashLog log = Create();
+        log.Begin();
+        log.End();
+
+        Assert.Equal("target", File.ReadAllText(target));
+        Assert.NotNull(new FileInfo(SessionPath).LinkTarget);
+    }
+
+    // AC-5 (round 2): a folder named like the session file is left alone and nothing throws.
+    [Fact]
+    public void BeginEnd_SessionIsAFolder_DoNotThrow()
+    {
+        Directory.CreateDirectory(SessionPath);
+
+        CrashLog log = Create();
+        Assert.Null(log.Begin());
+        log.End();
+
+        Assert.True(Directory.Exists(SessionPath));
+    }
 }

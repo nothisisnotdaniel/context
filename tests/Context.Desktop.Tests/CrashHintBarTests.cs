@@ -25,6 +25,7 @@ public sealed class CrashHintBarTests : IDisposable
 
     private void RegisterHint()
     {
+        Directory.CreateDirectory(Folder);
         data.CreateState();
         data.Bunit.Services.AddSingleton(Hint);
     }
@@ -96,5 +97,46 @@ public sealed class CrashHintBarTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal("Can't open the folder.", cut.Find(".crash-hint .red").TextContent), Wait);
         Assert.Equal([Folder], data.Launcher.Launched);
         Assert.DoesNotContain("secret launcher detail", cut.Markup, StringComparison.Ordinal);
+    }
+
+    // AC-10 (round 2): .logs as a file: nothing is launched and the red line shows.
+    [Fact]
+    public async Task OpenFolder_FolderIsAFile_LaunchesNothing()
+    {
+        RegisterHint();
+        Directory.Delete(Folder);
+        File.WriteAllText(Folder, "not a folder");
+        IRenderedComponent<CrashHintBar> cut = await data.RenderAsync<CrashHintBar>();
+
+        await cut.Find(".crash-hint-open").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Can't open the folder.", cut.Find(".crash-hint .red").TextContent), Wait);
+        Assert.Empty(data.Launcher.Launched);
+    }
+
+    // AC-10 (round 2): .logs as a symlink to another folder: nothing is launched and the red line shows.
+    [Fact]
+    public async Task OpenFolder_FolderIsASymlink_LaunchesNothing()
+    {
+        RegisterHint();
+        Directory.Delete(Folder);
+        string target = Path.Combine(data.Root, "elsewhere");
+        Directory.CreateDirectory(target);
+        try
+        {
+            Directory.CreateSymbolicLink(Folder, target);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            // This OS refuses symlinks here; there is nothing to check.
+            return;
+        }
+
+        IRenderedComponent<CrashHintBar> cut = await data.RenderAsync<CrashHintBar>();
+
+        await cut.Find(".crash-hint-open").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Can't open the folder.", cut.Find(".crash-hint .red").TextContent), Wait);
+        Assert.Empty(data.Launcher.Launched);
     }
 }
