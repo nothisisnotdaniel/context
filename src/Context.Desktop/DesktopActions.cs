@@ -722,6 +722,23 @@ internal sealed class DesktopActions
     public Task<ActionResult> CreateSubpage(string parent, string title) => Run(() => CreateSubpageNow(parent, title));
 
     /// <summary>
+    /// Creates the note a clicked <c>[[link]]</c> to a missing note names. The name is the note part of
+    /// <paramref name="target"/> (<see cref="NoteLinkParser.Split"/>, so a heading is dropped), trimmed, with one
+    /// trailing <c>.md</c> removed (ignoring case), split at <c>/</c> with each segment trimmed (and normalized like
+    /// <see cref="NoteStore.NormalizeTitle"/>). Every segment must pass <see cref="NoteStore.ValidateTitle"/> and the full
+    /// name be at most <see cref="NoteStore.MaxNameLength"/> characters, else Refused/<see cref="ActionReason.Invalid"/>
+    /// with that text; a top-level <c>calendar</c> parent is Refused/<see cref="ActionReason.Invalid"/> and a sensitive
+    /// top-level parent Refused/<see cref="ActionReason.Locked"/>, both with <see cref="NoSubpagesText"/>. None of these
+    /// writes anything or asks for a key. Otherwise each missing parent (<c># &lt;title&gt;\n</c>) and then the note
+    /// (<c># &lt;title&gt;\n</c>) is created through <see cref="NoteStore.Create"/> and
+    /// <see cref="NoteStore.CreateChild"/>; an existing parent is reused (exact case first, then ignoring case, its own
+    /// spelling kept). A note that already exists is Done/<see cref="ActionReason.Unchanged"/> with its name and nothing
+    /// written. A failed write is Failed with <see cref="CreateFailedText"/>; parents created before it stay. The
+    /// result's text is the note's full name when done.
+    /// </summary>
+    public Task<ActionResult> CreateLinkedNote(string target) => Run(() => CreateLinkedNoteNow(target));
+
+    /// <summary>
     /// Opens the page of the person <paramref name="name"/> (<c>Anna Schmidt</c> or <c>@[Anna Schmidt]</c>, normalized
     /// like a mention by <see cref="PersonParser.NormalizeTyped"/>): the note <c>people/&lt;Name&gt;</c>. A missing
     /// top-level <c>people</c> note is created through <see cref="NoteStore.Create"/> (an existing one is reused, in any
@@ -2025,6 +2042,109 @@ internal sealed class DesktopActions
         catch (ArgumentException)
         {
             return Refused(ActionReason.Invalid, NoSubpagesText(parent));
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, CreateFailedText);
+        }
+    }
+
+    private ActionResult CreateLinkedNoteNow(string target)
+    {
+        string typed = NoteLinkParser.Split(target).Note.Trim();
+        if (typed.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+        {
+            typed = typed[..^3];
+        }
+
+        // Each segment is checked on its own, so no "..", "\", ":" or leading "." ever reaches a path.
+        string[] segments = typed.Split('/').Select(NoteStore.NormalizeTitle).ToArray();
+        foreach (string segment in segments)
+        {
+            string? invalid = NoteStore.ValidateTitle(segment);
+            if (invalid is not null)
+            {
+                return Refused(ActionReason.Invalid, invalid);
+            }
+        }
+
+        string full = string.Join("/", segments);
+        if (full.Length > NoteStore.MaxNameLength)
+        {
+            return Refused(ActionReason.Invalid, NameTooLongText);
+        }
+
+        NoteInfo? parent = null;
+        try
+        {
+            if (notes.TryFind(full, out NoteInfo? existing) && existing is not null)
+            {
+                return new ActionResult(ActionKind.Done, ActionReason.Unchanged, existing.Name);
+            }
+
+            if (segments.Length == 1 && notes.TryFindSensitive(full, out NoteInfo? sealedNote) && sealedNote is not null)
+            {
+                return new ActionResult(ActionKind.Done, ActionReason.Unchanged, sealedNote.Name);
+            }
+
+            if (segments.Length > 1)
+            {
+                // Nothing is created under the calendar note or a sealed note, and no key is asked for.
+                if (string.Equals(segments[0], CalendarStore.FolderName, StringComparison.OrdinalIgnoreCase))
+                {
+                    string shown = notes.TryFind(segments[0], out NoteInfo? calendarNote) && calendarNote is not null
+                        ? calendarNote.Name
+                        : segments[0];
+                    return Refused(ActionReason.Invalid, NoSubpagesText(shown));
+                }
+
+                if (notes.TryFindSensitive(segments[0], out NoteInfo? sealedParent) && sealedParent is not null)
+                {
+                    return Refused(ActionReason.Locked, NoSubpagesText(sealedParent.Name));
+                }
+            }
+
+            for (int i = 0; i < segments.Length; i++)
+            {
+                string wanted = parent is null ? segments[i] : parent.Name + "/" + segments[i];
+                if (notes.TryFind(wanted, out NoteInfo? found) && found is not null)
+                {
+                    if (i == segments.Length - 1)
+                    {
+                        return new ActionResult(ActionKind.Done, ActionReason.Unchanged, found.Name);
+                    }
+
+                    parent = found;
+                    continue;
+                }
+
+                try
+                {
+                    parent = parent is null ? notes.Create(segments[i]) : notes.CreateChild(parent.Name, segments[i]);
+                }
+                catch (NoteExistsException)
+                {
+                    // Created by someone else between the check and the write.
+                    if (!notes.TryFind(wanted, out found) || found is null)
+                    {
+                        return Refused(ActionReason.Exists, ExistsText(wanted));
+                    }
+
+                    if (i == segments.Length - 1)
+                    {
+                        return new ActionResult(ActionKind.Done, ActionReason.Unchanged, found.Name);
+                    }
+
+                    parent = found;
+                }
+            }
+
+            return new ActionResult(ActionKind.Done, ActionReason.None, parent!.Name);
+        }
+        catch (ArgumentException)
+        {
+            // A parent that can't hold subpages (below calendar, or a title that can't be a folder).
+            return Refused(ActionReason.Invalid, NoSubpagesText(parent?.Name ?? full));
         }
         catch (Exception)
         {
