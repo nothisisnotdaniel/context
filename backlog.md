@@ -95,7 +95,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#68](backlog/068-saved-searches.md) Saved searches → 207-saved-searches
 - [x] [#268](backlog/268-remove-the-save-button-from-the.md) Remove the Save button from the note editor → 209-remove-save-button
 - [x] [#269](backlog/269-outline-in-the-right-sidebar-no.md) Outline in the right sidebar, no reformat notice → 210-outline-right-sidebar
-- [ ] [#258](backlog/258-no-accent-bar-left-of-the.md) No accent bar left of the editor while editing
+- [x] [#258](backlog/258-no-accent-bar-left-of-the.md) No accent bar left of the editor while editing → 211-no-editor-accent-bar
 - [ ] [#270](backlog/270-editor-works-on-a-day-opened.md) Editor works on a day opened from the calendar
 - [ ] [#254](backlog/254-month-calendar-in-the-day-picker.md) Month calendar in the day picker
 - [ ] [#271](backlog/271-search-icon-in-the-top-bar.md) Search icon in the top bar, opens like Capture
