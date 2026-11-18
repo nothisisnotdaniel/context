@@ -529,7 +529,7 @@ internal sealed class DesktopActions
 
     /// <summary>The rename question when links in <paramref name="count"/> notes will change.</summary>
     public static string RenameQuestion(string oldName, string newName, int count) =>
-        $"Rename {oldName} to {newName}? Links in {NotesText(count)} will be updated.";
+        $"Rename {DesktopText.OneLine(oldName)} to {DesktopText.OneLine(newName)}? Links in {NotesText(count)} will be updated.";
 
     /// <summary><c>1 note</c> or <c>&lt;n&gt; notes</c>.</summary>
     public static string NotesText(int count) =>
