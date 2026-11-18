@@ -226,7 +226,6 @@ public sealed class DesktopSourceTests
     [InlineData(".note .name,")]
     [InlineData(".tag-notes .note-button")]
     [InlineData(".editor-bar,")]
-    [InlineData(".editor-host:focus-within")]
     [InlineData(".note-entry {")]
     [InlineData(".note-toolbar {")]
     [InlineData(".dirty-dot {")]
@@ -296,36 +295,128 @@ public sealed class DesktopSourceTests
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(css, "editor-failed"));
     }
 
-    // 196 AC-1 to AC-5: the editor area has no box; focus shows as a theme-coloured bar.
+    // 196, 211 AC-3: the editor area has no box and the layout stays as it was.
     [Fact]
-    public void AppCss_EditorHost_HasNoBox_AndKeepsAVisibleFocusIndicator()
+    public void AppCss_EditorHost_HasNoBox_AndNoFocusMarker()
     {
         string root = RepoFiles.Root();
         string css = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "app.css"));
         string host = RuleBody(css, ".editor-host");
-        string focus = RuleBody(css, ".editor-host:focus-within");
         string bar = RuleBody(css, ".editor-bar,\n.panel-bar");
 
+        Assert.Equal("margin-top: 12px;", host.Trim());
         Assert.DoesNotContain("border", host, StringComparison.Ordinal);
         Assert.DoesNotContain("background", host, StringComparison.Ordinal);
-        Assert.DoesNotContain("padding-left", host, StringComparison.Ordinal);
-        Assert.DoesNotContain("padding-right", host, StringComparison.Ordinal);
-        Assert.DoesNotMatch(@"padding:\s*\S+\s+[^0\s;]", host);
+        Assert.DoesNotContain("padding", host, StringComparison.Ordinal);
         Assert.DoesNotMatch(@"(margin|padding)-(left|inline)", host);
         Assert.DoesNotMatch(@"margin:\s*\S+\s+\S+", host);
         Assert.DoesNotContain("padding", bar, StringComparison.Ordinal);
         Assert.DoesNotContain("margin-left", bar, StringComparison.Ordinal);
 
-        Assert.DoesNotContain("border-color", focus, StringComparison.Ordinal);
-        Assert.Matches(@"box-shadow:\s*-\d+px 0 0 0 var\(--accent-strong\);", focus);
-        Assert.DoesNotMatch(@"box-shadow:\s*0 0 0", focus);
-        Assert.DoesNotContain("none", focus, StringComparison.Ordinal);
-
-        Assert.DoesNotMatch(@"#[0-9a-fA-F]{3,8}\b|rgba?\(", host + focus);
-
-        Assert.Contains("display: none;", RuleBody(css, ".editor-host:empty"), StringComparison.Ordinal);
+        Assert.Equal("display: none;", RuleBody(css, ".editor-host:empty").Trim());
         string editorCss = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "editor", "editor.css"));
         Assert.Contains("outline: none;", RuleBody(editorCss, ".note-editor-body"), StringComparison.Ordinal);
+    }
+
+    // 211 AC-1, AC-5: no selector in app.css (inside @media blocks too) pairs the editor with a focus pseudo-class;
+    // editor.css has only the chip's focus ring.
+    [Fact]
+    public void Css_HasNoEditorFocusSelector()
+    {
+        string root = RepoFiles.Root();
+        string css = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+        string editorCss = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "editor", "editor.css"));
+
+        Assert.DoesNotContain(".editor-host:focus", css, StringComparison.Ordinal);
+        Assert.DoesNotContain(CssSelectors(css), IsEditorFocusSelector);
+        Assert.Equal([".note-editor-body .chip:focus-visible"], CssSelectors(editorCss).Where(IsEditorFocusSelector));
+
+        int media = css.IndexOf("@media (prefers-color-scheme: dark)", StringComparison.Ordinal);
+        Assert.True(media >= 0);
+        int open = css.IndexOf('{', media);
+        int depth = 0;
+        int close = open;
+        do
+        {
+            depth += css[close] == '{' ? 1 : css[close] == '}' ? -1 : 0;
+            close++;
+        }
+        while (depth > 0);
+        Assert.DoesNotMatch(@"editor-host|note-editor|ProseMirror", css[open..close]);
+    }
+
+    // 211 AC-2: no rule whose subject is the editor host, the editor or its body draws a box, a border, a shadow,
+    // an outline or a background, in any state.
+    [Fact]
+    public void Css_EditorItselfHasNoBorderShadowOutlineOrBackground()
+    {
+        string root = RepoFiles.Root();
+        string wwwroot = Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot");
+        Regex subject = new(
+            @"(^|[\s>+~])\.(editor-host|note-editor|note-editor-body|ProseMirror)(:[\w-]+(\([^)]*\))?)*$");
+        Regex forbidden = new(
+            @"(?m)(^|[\s;])(box-shadow|border|border-left|border-inline-start|outline|background)\s*:\s*([^;]*)");
+        int checkedRules = 0;
+
+        foreach (string file in new[] { Path.Combine(wwwroot, "app.css"), Path.Combine(wwwroot, "editor", "editor.css") })
+        {
+            foreach ((string selector, string body) in CssRules(File.ReadAllText(file)))
+            {
+                if (!selector.Split(',').Any(sel => subject.IsMatch(sel.Trim())))
+                {
+                    continue;
+                }
+
+                checkedRules++;
+                foreach (System.Text.RegularExpressions.Match m in forbidden.Matches(body))
+                {
+                    bool outlineNone = m.Groups[2].Value == "outline" && m.Groups[3].Value.Trim() == "none";
+                    Assert.True(outlineNone, $"{Path.GetFileName(file)}: {selector} sets {m.Groups[2].Value}");
+                }
+            }
+        }
+
+        Assert.True(checkedRules >= 4, checkedRules.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    // 211 AC-4: the keyboard focus rings on other controls stay.
+    [Fact]
+    public void Css_KeepsTheFocusRingsOfOtherControls()
+    {
+        const int RingsInAppCssBefore211 = 9;
+        string root = RepoFiles.Root();
+        string css = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+        string editorCss = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "editor", "editor.css"));
+
+        Assert.Equal(
+            RingsInAppCssBefore211,
+            System.Text.RegularExpressions.Regex.Matches(css, @"outline: 2px solid var\(--accent-strong\)").Count);
+        Assert.Contains(
+            "outline: 2px solid var(--accent-strong);",
+            RuleBody(editorCss, ".note-editor-body .chip:focus-visible"),
+            StringComparison.Ordinal);
+    }
+
+    private static bool IsEditorFocusSelector(string selector) =>
+        System.Text.RegularExpressions.Regex.IsMatch(selector, @"editor-host|note-editor|ProseMirror")
+        && System.Text.RegularExpressions.Regex.IsMatch(selector, @":focus(-within|-visible)?\b");
+
+    private static IEnumerable<string> CssSelectors(string css) =>
+        CssRules(css).SelectMany(rule => rule.Selector.Split(',')).Select(sel => sel.Trim());
+
+    // Every style rule as (selector list, body), including rules nested in @media blocks; comments are dropped.
+    private static IEnumerable<(string Selector, string Body)> CssRules(string css)
+    {
+        css = System.Text.RegularExpressions.Regex.Replace(css.ReplaceLineEndings("\n"), @"/\*.*?\*/", " ",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(css, @"([^{}]+)\{([^{}]*)\}"))
+        {
+            string selector = m.Groups[1].Value.Trim();
+            if (!selector.StartsWith('@'))
+            {
+                yield return (selector, m.Groups[2].Value);
+            }
+        }
     }
 
     // 209 AC-8: no rule styles a Save button in the editor bar; the shared bar rule stays and a later editor-bar rule
