@@ -19,7 +19,9 @@ internal sealed record DesktopSnapshot
         bool sensitiveSupported = false,
         bool recoveryReady = false,
         IReadOnlyList<NoteTodo>? noteTodos = null,
-        bool noteTodosUnreadable = false)
+        bool noteTodosUnreadable = false,
+        IReadOnlyList<SavedSearch>? savedSearches = null,
+        bool savedSearchesUnreadable = false)
     {
         Failed = failed;
         Today = today;
@@ -34,6 +36,8 @@ internal sealed record DesktopSnapshot
         RecoveryReady = recoveryReady;
         NoteTodos = noteTodos ?? [];
         NoteTodosUnreadable = noteTodosUnreadable;
+        SavedSearches = savedSearches ?? [];
+        SavedSearchesUnreadable = savedSearchesUnreadable;
     }
 
     /// <summary>Returns only the type name, so formatting a snapshot never prints its raw text.</summary>
@@ -77,6 +81,12 @@ internal sealed record DesktopSnapshot
 
     /// <summary>True when <c>context.db</c> can't be read; then <see cref="NoteTodos"/> is empty.</summary>
     public bool NoteTodosUnreadable { get; }
+
+    /// <summary>The saved searches in <c>settings.json</c> (<see cref="SettingsStore.ReadSavedSearches"/>), in saved order.</summary>
+    public IReadOnlyList<SavedSearch> SavedSearches { get; }
+
+    /// <summary>True when <c>settings.json</c> or its saved searches can't be read; then <see cref="SavedSearches"/> is empty.</summary>
+    public bool SavedSearchesUnreadable { get; }
 
     /// <summary>The snapshot shown when building one threw.</summary>
     public static DesktopSnapshot ForFailure(string folder, DateOnly today) =>

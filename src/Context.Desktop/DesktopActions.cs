@@ -216,6 +216,17 @@ internal sealed class DesktopActions
     public const string CalendarLinkRemovedText = "Calendar link removed.";
     public const string CalendarLinkNotSetText = "No calendar link set.";
 
+    public const string SearchNameBlankText = "Type a name for the search.";
+    public const string SearchNameInvalidText =
+        "A search name can be at most 50 characters, without control characters.";
+    public const string SearchQueryInvalidText = "Can't save that search.";
+    public const string SearchesFullText = "Can't save more than 50 searches.";
+    public const string SearchesUnreadableText = "Can't read settings.json. Nothing was saved.";
+    public const string SearchesWriteFailedText = "Can't write settings.json. Nothing was saved.";
+    public const string SearchGoneText = "That saved search is gone. Nothing was done.";
+    public const string SearchesNotRemovedText = "Can't read settings.json. Nothing was removed.";
+    public const string SearchesRemoveFailedText = "Can't write settings.json. Nothing was removed.";
+
     /// <summary>
     /// The longest calendar link <see cref="SetCalendarLink"/> accepts, in characters as typed. Core has no such
     /// limit; the desktop field has the same <c>maxlength</c>.
@@ -244,6 +255,7 @@ internal sealed class DesktopActions
     private readonly Func<DateTime> localNow;
     private readonly CalendarStore calendar;
     private readonly DayEnd dayEnd;
+    private readonly SettingsStore settings;
     private readonly string? timesFolder;
     private readonly INotifier? notifier;
     private int running;
@@ -270,7 +282,8 @@ internal sealed class DesktopActions
         this.notifier = notifier;
         this.localNow = localNow ?? (() => DateTime.Now);
         this.calendar = calendar ?? new CalendarStore(notes.Root, TimeZoneInfo.Local);
-        dayEnd = new DayEnd(notes, todos, this.calendar, calendarFeed, timesFolder, new SettingsStore(notes.Root));
+        settings = new SettingsStore(notes.Root);
+        dayEnd = new DayEnd(notes, todos, this.calendar, calendarFeed, timesFolder, settings);
         this.timesFolder = timesFolder;
         this.calendarLink = calendarLink;
         this.calendarFeed = calendarFeed;
@@ -899,6 +912,33 @@ internal sealed class DesktopActions
     /// </summary>
     public Task<ActionResult> ExportNote(string name, string path) => Run(() => ExportNoteNow(name, path), refresh: false);
 
+    /// <summary>The Refused/<see cref="ActionReason.Exists"/> text of <see cref="SaveSearch"/> (raw name).</summary>
+    public static string SearchExistsText(string name) => $"A saved search named {name} already exists.";
+
+    /// <summary>The Done text of <see cref="SaveSearch"/> (raw name).</summary>
+    public static string SearchSavedText(string name) => $"Saved search {name}.";
+
+    /// <summary>The Done text of <see cref="RemoveSavedSearch"/> (raw name).</summary>
+    public static string SearchRemovedText(string name) => $"Removed saved search {name}.";
+
+    /// <summary>
+    /// Adds the search <paramref name="query"/> (trimmed) as the last entry of <c>settings.json</c>'s
+    /// <c>savedSearches</c> under <paramref name="name"/>, trimmed with whitespace runs collapsed
+    /// (<see cref="SavedSearches.NormalizeName"/>). Refused, writing nothing: a blank name
+    /// (<see cref="SearchNameBlankText"/>), a name over 50 characters or with a control character
+    /// (<see cref="SearchNameInvalidText"/>), a query that can't be searched (<see cref="SearchQueryInvalidText"/>), a
+    /// name already stored ignoring case (<see cref="SearchExistsText"/>), a 51st entry (<see cref="SearchesFullText"/>).
+    /// A broken <c>settings.json</c> is Failed with <see cref="SearchesUnreadableText"/> and left as it is.
+    /// </summary>
+    public Task<ActionResult> SaveSearch(string name, string query) => Run(() => SaveSearchNow(name, query));
+
+    /// <summary>
+    /// Removes the saved search named <paramref name="name"/> (ignoring case) from <c>settings.json</c>, keeping the
+    /// others in order. A name no longer stored is Refused/<see cref="ActionReason.Missing"/>
+    /// (<see cref="SearchGoneText"/>); a broken file is Failed with <see cref="SearchesNotRemovedText"/>.
+    /// </summary>
+    public Task<ActionResult> RemoveSavedSearch(string name) => Run(() => RemoveSavedSearchNow(name));
+
     private static ActionResult Refused(ActionReason reason, string text) => new(ActionKind.Refused, reason, text);
 
     private static ActionResult Failed(ActionReason reason, string text) => new(ActionKind.Failed, reason, text);
@@ -946,6 +986,95 @@ internal sealed class DesktopActions
         {
             Volatile.Write(ref running, 0);
         }
+    }
+
+    // The checks on the input come first, so a bad name or query gets the same answer whatever the file holds.
+    private ActionResult SaveSearchNow(string name, string query)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return Refused(ActionReason.Invalid, SearchNameBlankText);
+        }
+
+        if (SavedSearches.NormalizeName(name) is not { } normalized)
+        {
+            return Refused(ActionReason.Invalid, SearchNameInvalidText);
+        }
+
+        string trimmed = query.Trim();
+        if (!SavedSearches.IsValidQuery(trimmed))
+        {
+            return Refused(ActionReason.Invalid, SearchQueryInvalidText);
+        }
+
+        IReadOnlyList<SavedSearch> stored;
+        try
+        {
+            stored = settings.ReadSavedSearches();
+        }
+        catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+        {
+            return Failed(ActionReason.Unreadable, SearchesUnreadableText);
+        }
+
+        if (stored.Any(s => string.Equals(s.Name, normalized, StringComparison.OrdinalIgnoreCase)))
+        {
+            return Refused(ActionReason.Exists, SearchExistsText(normalized));
+        }
+
+        if (stored.Count >= SavedSearches.MaxCount)
+        {
+            return Refused(ActionReason.Invalid, SearchesFullText);
+        }
+
+        try
+        {
+            settings.SaveSavedSearches([.. stored, new SavedSearch(normalized, trimmed)]);
+        }
+        catch (SettingsStoreException)
+        {
+            return Failed(ActionReason.Unreadable, SearchesUnreadableText);
+        }
+        catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+        {
+            return Failed(ActionReason.WriteFailed, SearchesWriteFailedText);
+        }
+
+        return new ActionResult(ActionKind.Done, ActionReason.None, SearchSavedText(normalized));
+    }
+
+    private ActionResult RemoveSavedSearchNow(string name)
+    {
+        IReadOnlyList<SavedSearch> stored;
+        try
+        {
+            stored = settings.ReadSavedSearches();
+        }
+        catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+        {
+            return Failed(ActionReason.Unreadable, SearchesNotRemovedText);
+        }
+
+        string key = SavedSearches.NormalizeName(name) ?? name;
+        if (stored.FirstOrDefault(s => string.Equals(s.Name, key, StringComparison.OrdinalIgnoreCase)) is not { } found)
+        {
+            return Refused(ActionReason.Missing, SearchGoneText);
+        }
+
+        try
+        {
+            settings.SaveSavedSearches(stored.Where(s => !ReferenceEquals(s, found)).ToList());
+        }
+        catch (SettingsStoreException)
+        {
+            return Failed(ActionReason.Unreadable, SearchesNotRemovedText);
+        }
+        catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+        {
+            return Failed(ActionReason.WriteFailed, SearchesRemoveFailedText);
+        }
+
+        return new ActionResult(ActionKind.Done, ActionReason.None, SearchRemovedText(found.Name));
     }
 
     // The checks on the value come first, so a bad value gets the same answer whether or not a link is stored.

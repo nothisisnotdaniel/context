@@ -37,9 +37,107 @@ internal sealed record DayEndSettings
 }
 
 /// <summary>
+/// A saved search: its <see cref="Name"/> as shown in the sidebar and its <see cref="Query"/> (full-text text or a
+/// tag filter), both raw outside text.
+/// </summary>
+internal sealed record SavedSearch
+{
+    public SavedSearch(string name, string query)
+    {
+        Name = name;
+        Query = query;
+    }
+
+    /// <summary>The name, normalized (<see cref="SavedSearches.NormalizeName"/>).</summary>
+    public string Name { get; }
+
+    /// <summary>The query as typed, trimmed.</summary>
+    public string Query { get; }
+
+    /// <summary>
+    /// Both values, for the desktop sidebar: Context.Desktop never names a <c>.Query</c> member (a source rule that
+    /// keeps the calendar link's text unread).
+    /// </summary>
+    public void Deconstruct(out string name, out string query)
+    {
+        name = Name;
+        query = Query;
+    }
+
+    /// <summary>Only the type name: the contents are raw outside text.</summary>
+    public override string ToString() => nameof(SavedSearch);
+}
+
+/// <summary>The rules for saved searches, shared by <see cref="SettingsStore"/> and the desktop actions.</summary>
+internal static class SavedSearches
+{
+    /// <summary>The most characters a name may have after normalizing.</summary>
+    public const int MaxNameLength = 50;
+
+    /// <summary>The most saved searches.</summary>
+    public const int MaxCount = 50;
+
+    /// <summary>
+    /// The name trimmed with whitespace runs collapsed to one space; <c>null</c> when that is empty, longer than
+    /// <see cref="MaxNameLength"/> or holds a control character.
+    /// </summary>
+    public static string? NormalizeName(string name)
+    {
+        string normalized = TagParser.CollapseWhitespace(name);
+        if (normalized.Length == 0 || normalized.Length > MaxNameLength || normalized.Any(char.IsControl))
+        {
+            return null;
+        }
+
+        return normalized;
+    }
+
+    /// <summary>
+    /// True when the trimmed <paramref name="query"/> can be searched: a tag filter (<see cref="TagFilter.IsTagFilter"/>)
+    /// of at most <see cref="TagFilterView.MaxQueryLength"/> characters that parses, or else a full-text text of
+    /// <see cref="SearchView.MinQueryLength"/> to <see cref="SearchView.MaxQueryLength"/> characters.
+    /// </summary>
+    public static bool IsValidQuery(string query)
+    {
+        string trimmed = query.Trim();
+        if (TagFilter.IsTagFilter(trimmed))
+        {
+            return trimmed.Length <= TagFilterView.MaxQueryLength && TagFilter.TryParse(trimmed, out _, out _);
+        }
+
+        return trimmed.Length >= SearchView.MinQueryLength && trimmed.Length <= SearchView.MaxQueryLength;
+    }
+
+    /// <summary>
+    /// True when every entry has a normalized valid name and a valid query, no two names are equal ignoring case and
+    /// there are at most <see cref="MaxCount"/>.
+    /// </summary>
+    public static bool IsValidList(IReadOnlyList<SavedSearch> searches)
+    {
+        if (searches.Count > MaxCount)
+        {
+            return false;
+        }
+
+        HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
+        foreach (SavedSearch search in searches)
+        {
+            if (SavedSearches.NormalizeName(search.Name) != search.Name
+                || !IsValidQuery(search.Query)
+                || !names.Add(search.Name))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+
+/// <summary>
 /// <c>&lt;root&gt;/settings.json</c>: <c>{"dayEnd":{"worked":"yyyy-MM-ddTHH:mm","moved":"yyyy-MM-dd"}}</c>, both values
-/// optional. Read through <see cref="BoundedFile"/>; written as UTF-8 without BOM through a temp file and a move,
-/// keeping every other property. Only the automatic day's end (<see cref="DayEnd.AutoClose"/>) uses it.
+/// optional, and <c>"savedSearches":[{"name":"…","query":"…"}]</c>. Read through <see cref="BoundedFile"/>; written as UTF-8 without BOM through a temp file and a move,
+/// keeping every other property. The automatic day's end (<see cref="DayEnd.AutoClose"/>) and the saved searches use it.
 /// </summary>
 internal sealed class SettingsStore
 {
@@ -54,6 +152,9 @@ internal sealed class SettingsStore
     private const string MovedKey = "moved";
     private const string WorkedFormat = "yyyy-MM-dd'T'HH:mm";
     private const string MovedFormat = "yyyy-MM-dd";
+    private const string SavedSearchesKey = "savedSearches";
+    private const string NameKey = "name";
+    private const string QueryKey = "query";
 
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
@@ -98,6 +199,47 @@ internal sealed class SettingsStore
         SetOrRemove(
             dayEnd, MovedKey, settings.Moved?.ToString(MovedFormat, CultureInfo.InvariantCulture));
 
+        Write(document);
+    }
+
+    /// <summary>
+    /// The saved searches in saved order; a missing file or <c>savedSearches</c> property gives an empty list. Names
+    /// come back normalized (<see cref="SavedSearches.NormalizeName"/>). Throws <see cref="SettingsStoreException"/>
+    /// when the file can't be read, or <c>savedSearches</c> isn't an array of at most <see cref="SavedSearches.MaxCount"/>
+    /// objects with exactly a string <c>name</c> and <c>query</c> that keep the rules (a valid name, a valid query,
+    /// no two names equal ignoring case).
+    /// </summary>
+    public IReadOnlyList<SavedSearch> ReadSavedSearches() => SavedSearchesOf(ReadRoot());
+
+    /// <summary>
+    /// Writes <paramref name="searches"/> as <c>savedSearches</c>, in order, keeping every other property, creating
+    /// the root folder if needed. Throws <see cref="ArgumentException"/> for a list that breaks the rules. Reads the
+    /// file again first and throws <see cref="SettingsStoreException"/> (writing nothing) when it is broken, its
+    /// <c>dayEnd</c> and <c>savedSearches</c> included; throws <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/>
+    /// when it can't be written.
+    /// </summary>
+    public void SaveSavedSearches(IReadOnlyList<SavedSearch> searches)
+    {
+        if (!SavedSearches.IsValidList(searches))
+        {
+            throw new ArgumentException("Bad saved searches.", nameof(searches));
+        }
+
+        JsonObject document = ReadRoot();
+        DayEndOf(document);
+        SavedSearchesOf(document);
+        JsonArray array = [];
+        foreach (SavedSearch search in searches)
+        {
+            array.Add(new JsonObject { [NameKey] = search.Name, [QueryKey] = search.Query });
+        }
+
+        document[SavedSearchesKey] = array;
+        Write(document);
+    }
+
+    private void Write(JsonObject document)
+    {
         string json = document.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n";
         Directory.CreateDirectory(root);
         string temp = Path.Combine(root, $".{FileName}.{Guid.NewGuid():N}.tmp");
@@ -212,6 +354,44 @@ internal sealed class SettingsStore
         }
 
         return new DayEndSettings(worked, moved);
+    }
+
+    private static List<SavedSearch> SavedSearchesOf(JsonObject document)
+    {
+        if (!document.TryGetPropertyValue(SavedSearchesKey, out JsonNode? node))
+        {
+            return [];
+        }
+
+        if (node is not JsonArray array || array.Count > SavedSearches.MaxCount)
+        {
+            throw new SettingsStoreException("Bad savedSearches.");
+        }
+
+        List<SavedSearch> searches = [];
+        foreach (JsonNode? item in array)
+        {
+            if (item is not JsonObject entry
+                || entry.Count != 2
+                || !entry.TryGetPropertyValue(NameKey, out JsonNode? nameNode)
+                || !entry.TryGetPropertyValue(QueryKey, out JsonNode? queryNode)
+                || StringOf(nameNode) is not { } rawName
+                || StringOf(queryNode) is not { } query
+                || SavedSearches.NormalizeName(rawName) is not { } name
+                || !SavedSearches.IsValidQuery(query))
+            {
+                throw new SettingsStoreException("Bad saved search.");
+            }
+
+            searches.Add(new SavedSearch(name, query));
+        }
+
+        if (!SavedSearches.IsValidList(searches))
+        {
+            throw new SettingsStoreException("Bad savedSearches.");
+        }
+
+        return searches;
     }
 
     private static string? StringOf(JsonNode? node) =>

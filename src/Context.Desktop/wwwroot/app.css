@@ -1181,6 +1181,74 @@ input[type="password"]:disabled {
     background: color-mix(in srgb, var(--accent-strong) 15%, transparent);
 }
 
+/* 207: saved searches between the sidebar bar and the note list: a cut name per row and an icon remove button. */
+nav.saved-searches ul {
+    list-style: none;
+    margin: 0 0 8px;
+    padding: 0;
+}
+
+.saved-search-row {
+    align-items: center;
+    display: flex;
+    gap: 6px;
+    padding: 2px 0;
+}
+
+.saved-search-row .saved-search {
+    background: none;
+    border: none;
+    color: var(--accent-strong);
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 2px 0;
+    text-align: left;
+}
+
+.saved-search-row .saved-search:hover:not(:disabled) {
+    text-decoration: underline;
+}
+
+.saved-search-row .saved-search-remove {
+    background: none;
+    border: none;
+    border-radius: 3px;
+    color: var(--text);
+    flex: none;
+    line-height: 1;
+    padding: 2px 6px;
+}
+
+.saved-search-row .saved-search-remove:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent-strong) 15%, transparent);
+}
+
+.saved-search-result,
+.saved-searches-unreadable {
+    margin: 0 0 8px;
+}
+
+/* 207: the search panel's input and its save form. */
+.search-panel .search-input {
+    box-sizing: border-box;
+    margin: 0 0 8px;
+    width: 100%;
+}
+
+.search-save-bar {
+    margin-top: 8px;
+}
+
+.search-save-bar .search-save-name {
+    box-sizing: border-box;
+    max-width: 320px;
+    width: 100%;
+}
+
+.search-save-result {
+    margin: 6px 0 0;
+}
+
 /* The open subpage's ancestors above the toolbar; long titles are cut, the full name is in the title attribute. */
 .breadcrumb ol {
     display: flex;

@@ -21,6 +21,8 @@ public sealed class DataWatcherTests : IDisposable
     [InlineData("calendar-link.ics")]
     [InlineData("calendar/work.ics")]
     [InlineData("calendar/WORK.ICS")]
+    [InlineData("settings.json")]
+    [InlineData("SETTINGS.JSON")]
     public void IsRelevant_DataFiles_True(string relative)
     {
         Assert.True(DataWatcher.IsRelevant(Root, Path.Combine(Root, relative)));
@@ -32,6 +34,8 @@ public sealed class DataWatcherTests : IDisposable
     [InlineData("context.db-journal")]
     [InlineData("context.db-wal")]
     [InlineData(".todos.json.0123456789abcdef.tmp")]
+    [InlineData(".settings.json.0123456789abcdef.tmp")]
+    [InlineData("../settings.json")]
     [InlineData(".Note.md.0123456789abcdef.tmp")]
     [InlineData(".calendar-link.ics.0123456789abcdef.tmp")]
     [InlineData("calendar-link.txt")]
@@ -68,6 +72,7 @@ public sealed class DataWatcherTests : IDisposable
     [InlineData("Calendar/sub/notes.md")]
     [InlineData("Meetings/.Meeting 1.md.0123456789abcdef.tmp")]
     [InlineData("Meetings/todos.json")]
+    [InlineData("sub/settings.json")]
     [InlineData("Meetings/work.ics")]
     [InlineData("Meetings/Meeting 1.ctxs")]
     [InlineData("Meetings/.md")]
@@ -77,6 +82,31 @@ public sealed class DataWatcherTests : IDisposable
     public void IsRelevant_Subfolders_False(string relative)
     {
         Assert.False(DataWatcher.IsRelevant(Root, Path.Combine(Root, relative)));
+    }
+
+    // 207 AC-10: settings.json edited outside the app shows its saved searches after the refresh the watcher runs.
+    [Fact]
+    public async Task SettingsEditedOutside_RefreshShowsSavedSearches()
+    {
+        data.WriteNote("Plan", "p");
+        DesktopSnapshot first = await data.RefreshAsync();
+        Assert.Empty(first.SavedSearches);
+        Assert.False(first.SavedSearchesUnreadable);
+
+        data.WriteFile(
+            SettingsStore.FileName, "{\"savedSearches\":[{\"name\":\"Work\",\"query\":\"#work and not #done\"}]}");
+        Assert.True(DataWatcher.IsRelevant(data.Root, Path.Combine(data.Root, SettingsStore.FileName)));
+        await data.State!.Refresh();
+
+        SavedSearch entry = Assert.Single(data.State.Snapshot!.SavedSearches);
+        Assert.Equal("Work", entry.Name);
+        Assert.Equal("#work and not #done", entry.Query);
+
+        data.WriteFile(SettingsStore.FileName, "{\"savedSearches\":5}");
+        await data.State.Refresh();
+
+        Assert.Empty(data.State.Snapshot!.SavedSearches);
+        Assert.True(data.State.Snapshot.SavedSearchesUnreadable);
     }
 
     // AC-9: absolute paths elsewhere are never relevant.

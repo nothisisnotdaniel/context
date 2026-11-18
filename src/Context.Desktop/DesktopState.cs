@@ -496,6 +496,26 @@ internal sealed class DesktopState
     });
 
     /// <summary>
+    /// The plain notes that match the tag filter <paramref name="text"/> (<see cref="TagFilterView.Build"/>) after
+    /// syncing the index, off the calling thread. Reads only and never throws: any failure gives the
+    /// <see cref="TagFilterViewKind.IndexUnreadable"/> view.
+    /// </summary>
+    public Task<TagFilterView> TagFilter(string text) => Task.Run(() =>
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                return TagFilterView.Build(index, notes, text);
+            }
+        }
+        catch (Exception)
+        {
+            return new TagFilterView(TagFilterViewKind.IndexUnreadable, string.Empty, []);
+        }
+    });
+
+    /// <summary>
     /// The notes whose text contains <paramref name="text"/> (<see cref="SearchView.Build"/>) after syncing the index,
     /// off the calling thread. Reads only and never throws: any failure gives the
     /// <see cref="SearchViewKind.IndexUnreadable"/> view.
@@ -760,9 +780,22 @@ internal sealed class DesktopState
                 }
             }
 
+            IReadOnlyList<SavedSearch> savedSearches;
+            bool savedSearchesUnreadable = false;
+            try
+            {
+                savedSearches = new SettingsStore(notes.Root).ReadSavedSearches();
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                savedSearches = [];
+                savedSearchesUnreadable = true;
+            }
+
             return new DesktopSnapshot(
                 false, day, current, todoList, todosUnreadable, noteList, notesUnreadable, folder, sensitive,
-                KeyStore.Supported, RecoveryReady(), noteTodos, noteTodosUnreadable);
+                KeyStore.Supported, RecoveryReady(), noteTodos, noteTodosUnreadable, savedSearches,
+                savedSearchesUnreadable);
         }
         catch (Exception)
         {

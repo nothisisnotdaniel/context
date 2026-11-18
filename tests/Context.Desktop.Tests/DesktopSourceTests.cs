@@ -21,7 +21,7 @@ public sealed class DesktopSourceTests
     private static readonly Regex Writes = new(
         @"(?:(?<!\bActions)|(?!\.\s*RestoreVersion\s*\())\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
         + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture|CreateChild|Move|Ensure|CreateWithText"
-        + @"|CloseDay|RefreshWorked|MoveTodos|AutoClose|MoveDue|SaveDayEnd|Keep|RemoveHistory|RestoreVersion|MoveWithNote|RemoveUnlinked|MarkNotified|Snooze)\s*\(",
+        + @"|CloseDay|RefreshWorked|MoveTodos|AutoClose|MoveDue|SaveDayEnd|SaveSavedSearches|Keep|RemoveHistory|RestoreVersion|MoveWithNote|RemoveUnlinked|MarkNotified|Snooze)\s*\(",
         RegexOptions.CultureInvariant);
 
     // 136: the real key stores and the real file dialog, spelled in pieces: no test file may hold their names (see
@@ -919,6 +919,7 @@ public sealed class DesktopSourceTests
     [InlineData("dayEnd.AutoClose(today, now)")]
     [InlineData("todos.MoveDue(day, day.AddDays(1))")]
     [InlineData("settings.SaveDayEnd(values)")]
+    [InlineData("settings.SaveSavedSearches(searches)")]
     [InlineData("history.Keep(note.Path, bytes)")]
     [InlineData("state.HistoryStore.Keep(found.Path, current, found.Name)")]
     [InlineData("state.HistoryStore.RemoveHistory(path, \".md\")")]

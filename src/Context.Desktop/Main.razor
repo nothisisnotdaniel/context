@@ -11,7 +11,7 @@
     {
         <div class="layout" @onkeydown="OpenPalette">
             <aside class="notes-region">
-                <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" OnTriage="ShowTriage" />
+                <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" OnTriage="ShowTriage" OnSearch="ShowSearch" />
             </aside>
             <main class="current-region">
                 <TopBar OnToday="ShowToday" OnPick="PickDay" OnCapture="CaptureAsync" PageActions="@PageActionsFor(snapshot)"
@@ -42,7 +42,7 @@
                 }
                 @if (searchShown is { } search)
                 {
-                    <SearchPanel Text="@search" OnOpen="RequestOpen" OnClose="CloseSearch" />
+                    <SearchPanel Text="@search" Request="@searchRequest" OnOpen="RequestOpen" OnClose="CloseSearch" />
                 }
                 @if (decisionsShown is { } decisionsTag)
                 {
@@ -167,6 +167,9 @@ else
     private bool reviewShown;
     private (string Key, string Value)? findShown;
     private string? searchShown;
+
+    // Bumped each time the search panel is asked for, so asking again for the same text starts it over.
+    private int searchRequest;
     private string? decisionsShown;
     private enum Page { None, Triage, Tags, Settings }
     private bool discarding;
@@ -298,6 +301,15 @@ else
     private void CloseFind() => findShown = null;
 
     private void CloseSearch() => searchShown = null;
+
+    // The search panel with <paramref name="text"/> (empty from the sidebar's Search button, a saved search's query,
+    // or the text after /search); its input gets the focus.
+    private void ShowSearch(string text)
+    {
+        searchShown = text;
+        searchRequest++;
+        ShowStatus(string.Empty, string.Empty);
+    }
 
     private void CloseDecisions() => decisionsShown = null;
 
@@ -689,9 +701,8 @@ else
                 break;
             case "/search":
                 // The text to look for in every plain note: /search budget 2027. Read only; SearchPanel shows the
-                // usage line for a blank or bad text.
-                searchShown = rest;
-                ShowStatus(string.Empty, string.Empty);
+                // hint for a blank text and the usage line for a bad one.
+                ShowSearch(rest);
                 break;
             case "/decisions":
                 // Every note's Decision: lines, or those of the notes with a tag: /decisions #work. Read only;
