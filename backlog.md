@@ -218,6 +218,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#262](backlog/262-rename-a-note-update-its-title.md) Rename a note: update its # title line too
 - [?] [#263](backlog/263-show-the-error-when-saving-on.md) Show the error when saving on window close fails
 - [?] [#264](backlog/264-check-auto-save-by-hand-in.md) Check auto save by hand in the desktop app
+- [?] [#265](backlog/265-rename-ask-again-when-the-link.md) Rename: ask again when the link count changed before Confirm
 
 ## Dropped with the terminal UI
 
