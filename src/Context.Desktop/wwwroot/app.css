@@ -619,6 +619,13 @@ input[type="password"]:disabled {
     z-index: 2;
 }
 
+.search-pop-backdrop {
+    background: transparent;
+    inset: 0;
+    position: fixed;
+    z-index: 2;
+}
+
 .page-menu-backdrop {
     background: transparent;
     inset: 0;
@@ -638,6 +645,22 @@ input[type="password"]:disabled {
 }
 
 .capture-pop input {
+    width: 320px;
+    max-width: calc(100vw - 48px);
+}
+
+/* Search: the same small popover as Capture, theme colours only. */
+.search-pop {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    padding: 8px;
+    position: absolute;
+    right: 8px;
+    top: 100%;
+    z-index: 3;
+}
+
+.search-pop input {
     width: 320px;
     max-width: calc(100vw - 48px);
 }

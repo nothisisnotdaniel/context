@@ -14,7 +14,7 @@
                 <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" OnTriage="ShowTriage" OnSearch="ShowSearch" />
             </aside>
             <main class="current-region">
-                <TopBar Today="@snapshot.Today" Selected="@SelectedDay()" OnToday="ShowToday" OnPick="PickDay" OnCapture="CaptureAsync" PageActions="@PageActionsFor(snapshot)"
+                <TopBar Today="@snapshot.Today" Selected="@SelectedDay()" OnToday="ShowToday" OnPick="PickDay" OnCapture="CaptureAsync" OnSearch="ShowSearch" PageActions="@PageActionsFor(snapshot)"
                         PageActionsDisabled="@(running || renaming || subpaging || moving)" OnPageAction="RunPageAction" />
                 @if (page == Page.Triage)
                 {
@@ -361,8 +361,8 @@ else
 
     private void CloseSearch() => searchShown = null;
 
-    // The search panel with <paramref name="text"/> (empty from the sidebar's Search button, a saved search's query,
-    // or the text after /search); its input gets the focus.
+    // The search panel with <paramref name="text"/> (the text typed in the top bar's Search popover, possibly empty,
+    // a saved search's query, or the text after /search); its input gets the focus.
     private void ShowSearch(string text)
     {
         searchShown = text;

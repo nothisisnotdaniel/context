@@ -12,6 +12,7 @@ public sealed class TopBarTests : IDisposable
     private readonly BunitContext context = new();
     private readonly List<string> chosen = [];
     private readonly List<DateOnly> picked = [];
+    private readonly List<string> searched = [];
 
     public TopBarTests()
     {
@@ -31,7 +32,8 @@ public sealed class TopBarTests : IDisposable
         context.Render<TopBar>(p => p
             .Add(c => c.PageActions, actions)
             .Add(c => c.PageActionsDisabled, disabled)
-            .Add(c => c.OnPageAction, EventCallback.Factory.Create<string>(this, id => chosen.Add(id))));
+            .Add(c => c.OnPageAction, EventCallback.Factory.Create<string>(this, id => chosen.Add(id)))
+            .Add(c => c.OnSearch, EventCallback.Factory.Create<string>(this, text => searched.Add(text))));
 
     private IRenderedComponent<TopBar> RenderCalendar(DateOnly today, DateOnly? selected) =>
         context.Render<TopBar>(p => p
@@ -91,7 +93,7 @@ public sealed class TopBarTests : IDisposable
 
         IReadOnlyList<IElement> buttons = cut.FindAll(".top-bar-buttons > button");
         Assert.Equal(
-            ["capture-open", "today-open", "day-pick-open", "page-menu-open"],
+            ["capture-open", "search-open", "today-open", "day-pick-open", "page-menu-open"],
             buttons.Select(b => b.ClassName ?? string.Empty).ToArray());
         IElement open = buttons[^1];
         Assert.Equal("button", open.GetAttribute("type"));
@@ -128,7 +130,9 @@ public sealed class TopBarTests : IDisposable
         IRenderedComponent<TopBar> cut = Render([]);
 
         Assert.Empty(cut.FindAll("button.page-menu-open"));
-        Assert.Equal(3, cut.FindAll(".top-bar-buttons > button").Count);
+        Assert.Equal(
+            ["capture-open", "search-open", "today-open", "day-pick-open"],
+            cut.FindAll(".top-bar-buttons > button").Select(b => b.ClassName ?? string.Empty).ToArray());
     }
 
     // AC-8: disabled while busy, and an open menu closes when the parent disables it.
@@ -605,7 +609,167 @@ public sealed class TopBarTests : IDisposable
         cut.Find("button.capture-open").Click();
         Assert.Equal(["capture"], Open(cut));
         Assert.Equal("false", cut.Find("button.day-pick-open").GetAttribute("aria-expanded"));
+        // 218 AC-7: Search closes the other three, and each of them closes Search.
+        cut.Find("button.search-open").Click();
+        Assert.Equal(["search"], Open(cut));
+        Assert.Equal("false", cut.Find("button.capture-open").GetAttribute("aria-expanded"));
+        cut.Find("button.capture-open").Click();
+        Assert.Equal(["capture"], Open(cut));
+        Assert.Equal("false", cut.Find("button.search-open").GetAttribute("aria-expanded"));
+        cut.Find("button.search-open").Click();
+        cut.Find("button.day-pick-open").Click();
+        Assert.Equal(["day"], Open(cut));
+        cut.Find("button.search-open").Click();
+        Assert.Equal(["search"], Open(cut));
+        Assert.Equal("false", cut.Find("button.day-pick-open").GetAttribute("aria-expanded"));
+        cut.Find("button.page-menu-open").Click();
+        Assert.Equal(["menu"], Open(cut));
+        cut.Find("button.search-open").Click();
+        Assert.Equal(["search"], Open(cut));
+        Assert.Equal("false", cut.Find("button.page-menu-open").GetAttribute("aria-expanded"));
         Assert.Empty(chosen);
+        Assert.Empty(searched);
+    }
+
+    private static IElement SearchField(IRenderedComponent<TopBar> cut) => Assert.Single(cut.FindAll(".search-pop input"));
+
+    private static void SearchKey(IRenderedComponent<TopBar> cut, string key) =>
+        SearchField(cut).KeyDown(new KeyboardEventArgs { Key = key });
+
+    // 218 AC-1: Search sits after Capture: typed, named, closed, icon only, one safe decorative svg.
+    [Fact]
+    public void Search_Button_IconOnly_WithSafeSvg()
+    {
+        IRenderedComponent<TopBar> cut = Render(Actions());
+
+        IElement button = cut.Find(".top-bar-buttons > button.search-open");
+        Assert.Equal("button", button.GetAttribute("type"));
+        Assert.Equal("Search", button.GetAttribute("aria-label"));
+        Assert.Equal("Search", button.GetAttribute("title"));
+        Assert.Equal("false", button.GetAttribute("aria-expanded"));
+        Assert.Equal(string.Empty, button.TextContent.Trim());
+        IElement svg = Assert.Single(button.QuerySelectorAll("svg"));
+        Assert.Equal("true", svg.GetAttribute("aria-hidden"));
+        string markup = svg.OuterHtml;
+        foreach (string banned in new[] { "<script", "href", "src=", "url(", "style", "#" })
+        {
+            Assert.DoesNotContain(banned, markup, StringComparison.OrdinalIgnoreCase);
+        }
+
+        Assert.Contains("currentColor", markup, StringComparison.Ordinal);
+        Assert.Empty(cut.FindAll(".search-pop"));
+        Assert.Empty(cut.FindAll(".search-pop-backdrop"));
+    }
+
+    // 218 AC-3: a click opens the popover with one empty, named text field that takes the focus; a second click closes it.
+    [Fact]
+    public void Search_Click_OpensPopover_FocusesField_SecondClickCloses()
+    {
+        IRenderedComponent<TopBar> cut = Render(Actions());
+
+        cut.Find("button.search-open").Click();
+
+        Assert.Single(cut.FindAll(".search-pop-backdrop"));
+        Assert.Single(cut.FindAll(".search-pop"));
+        IElement input = SearchField(cut);
+        Assert.Equal("text", input.GetAttribute("type"));
+        Assert.Equal("Search", input.GetAttribute("aria-label"));
+        Assert.Equal("Search notes", input.GetAttribute("placeholder"));
+        Assert.Equal("200", input.GetAttribute("maxlength"));
+        Assert.Equal(string.Empty, input.GetAttribute("value") ?? string.Empty);
+        Assert.Equal("true", cut.Find("button.search-open").GetAttribute("aria-expanded"));
+        Assert.Equal(Ref(cut, ".search-pop input"), LastFocusId());
+
+        cut.Find("button.search-open").Click();
+
+        Assert.Empty(cut.FindAll(".search-pop"));
+        Assert.Empty(cut.FindAll(".search-pop-backdrop"));
+        Assert.Equal("false", cut.Find("button.search-open").GetAttribute("aria-expanded"));
+        Assert.Empty(searched);
+    }
+
+    // 218 AC-4: Return hands the typed text over once and closes; other keys do nothing; reopening shows an empty field.
+    [Fact]
+    public void Search_Enter_RaisesTextOnce_Closes_ReopensEmpty()
+    {
+        IRenderedComponent<TopBar> cut = Render(Actions());
+
+        cut.Find("button.search-open").Click();
+        SearchField(cut).Input("budget");
+        SearchKey(cut, "a");
+        SearchKey(cut, "ArrowDown");
+        Assert.Empty(searched);
+
+        SearchKey(cut, "Enter");
+
+        Assert.Equal(["budget"], searched);
+        Assert.Empty(cut.FindAll(".search-pop"));
+        Assert.Equal("false", cut.Find("button.search-open").GetAttribute("aria-expanded"));
+
+        cut.Find("button.search-open").Click();
+
+        Assert.Equal(string.Empty, SearchField(cut).GetAttribute("value") ?? string.Empty);
+        Assert.Equal(["budget"], searched);
+    }
+
+    // 218 AC-4 (moved from NotesPanelTests 207 AC-3): Return on an empty field asks for the panel with an empty text.
+    [Fact]
+    public void Search_EnterEmpty_RaisesEmptyText()
+    {
+        IRenderedComponent<TopBar> cut = Render(Actions());
+
+        cut.Find("button.search-open").Click();
+        SearchKey(cut, "Enter");
+
+        Assert.Equal([string.Empty], searched);
+        Assert.Empty(cut.FindAll(".search-pop"));
+    }
+
+    // 218 AC-4: typed text that is closed away (a second click) is not kept for the next opening.
+    [Fact]
+    public void Search_ClosedWithText_ReopensEmpty()
+    {
+        IRenderedComponent<TopBar> cut = Render(Actions());
+
+        cut.Find("button.search-open").Click();
+        SearchField(cut).Input("left over");
+        cut.Find("button.search-open").Click();
+        cut.Find("button.search-open").Click();
+
+        Assert.Equal(string.Empty, SearchField(cut).GetAttribute("value") ?? string.Empty);
+        Assert.Empty(searched);
+    }
+
+    // 218 AC-6: Esc closes the popover, raises nothing and gives the focus back to the Search icon.
+    [Fact]
+    public void Search_Escape_ClosesAndFocusesSearchButton()
+    {
+        IRenderedComponent<TopBar> cut = Render(Actions());
+        string? button = Ref(cut, "button.search-open");
+
+        cut.Find("button.search-open").Click();
+        SearchField(cut).Input("budget");
+        SearchKey(cut, "Escape");
+
+        Assert.Empty(cut.FindAll(".search-pop"));
+        Assert.Empty(searched);
+        Assert.Equal("false", cut.Find("button.search-open").GetAttribute("aria-expanded"));
+        Assert.Equal(button, LastFocusId());
+    }
+
+    // 218 AC-6: the backdrop closes the popover and raises nothing.
+    [Fact]
+    public void Search_Backdrop_Closes()
+    {
+        IRenderedComponent<TopBar> cut = Render(Actions());
+
+        cut.Find("button.search-open").Click();
+        cut.Find(".search-pop-backdrop").Click();
+
+        Assert.Empty(cut.FindAll(".search-pop"));
+        Assert.Empty(cut.FindAll(".search-pop-backdrop"));
+        Assert.Empty(searched);
+        Assert.Equal("false", cut.Find("button.search-open").GetAttribute("aria-expanded"));
     }
 
     private static string[] Open(IRenderedComponent<TopBar> cut)
@@ -614,6 +778,11 @@ public sealed class TopBarTests : IDisposable
         if (cut.FindAll(".capture-pop").Count > 0)
         {
             open.Add("capture");
+        }
+
+        if (cut.FindAll(".search-pop").Count > 0)
+        {
+            open.Add("search");
         }
 
         if (cut.FindAll(".day-pick").Count > 0)

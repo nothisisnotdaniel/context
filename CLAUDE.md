@@ -1002,7 +1002,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     and a Close button, and lists `DesktopState.Find(key, value)` as note buttons (through `OnOpen`); grey
     `Loading…`, grey `No notes have <key>:: <value>.`, red `Can't read the attributes.` (red usage line for an `InvalidQuery`); same read-only,
     `indexGate`, reload and stale-result rules. Opening a note closes it.
-    `SearchPanel` (job 170, `/search <text>`, the sidebar's Search button and saved searches through
+    `SearchPanel` (job 170, `/search <text>`, the top bar's Search popover (job 218) and saved searches through
     `Main.ShowSearch(text)`, which bumps `searchRequest` so the same text starts over; `Main`'s `searchShown`, after
     `FindPanel`) has the heading `Search: <text>` (`Search` when blank) and `Close`, then `input[type=text].search-input`
     (job 207; `aria-label="Search"`, placeholder `Search notes`, maxlength 200, focused on every request; Return searches
@@ -1050,13 +1050,17 @@ Every factory agent reads this file before working on Context. Keep it short and
     a dirty editor is refused with `Save <name> first.`, else `SaveExportFile("<name>.md")` and `ExportNote`'s text
     in the main status line. Rules (`DesktopSourceTests`): `WritePlainCopy` and `ReadImport` are named in
     `Context.Desktop` only in `DesktopActions.cs`, and no `.razor` file matches `\b(File|Directory|Path)\.`.
-    **Sidebar bar (job 197):** `NotesPanel`'s bar holds only the icon buttons (`.notes-bar-buttons`: search (job 207, magnifying glass, `OnSearch("")`), triage, tags, settings), right-aligned (`justify-content: flex-end`); no logo and no visible "Notes" heading, the top-level `ul.note-list` carries `aria-label="Notes"`. Between the bar and the list, `nav.saved-searches` (job 207, `aria-label="Saved searches"`, only with entries; `DesktopSnapshot.SavedSearches`) has per entry `button.saved-search` (name through `OneLine`, cut, `title` the query; `OnSearch(query)`) and `button.saved-search-remove` (`×`, `aria-label`/`title` `Remove <name>`; `Actions.RemoveSavedSearch`, result in grey/red `p.saved-search-result`); `SavedSearchesUnreadable` shows red `Can't read saved searches.` instead. **Placeholders:** a box's placeholder says only what it is for (`New todo`, `Capture to inbox`), never a `Return to …` hint; Return still submits and there are no submit buttons.
+    **Sidebar bar (job 197):** `NotesPanel`'s bar holds only the icon buttons (`.notes-bar-buttons`: triage, tags, settings; Search moved to the top bar in job 218, `NotesPanel.OnSearch` stays for saved searches), right-aligned (`justify-content: flex-end`); no logo and no visible "Notes" heading, the top-level `ul.note-list` carries `aria-label="Notes"`. Between the bar and the list, `nav.saved-searches` (job 207, `aria-label="Saved searches"`, only with entries; `DesktopSnapshot.SavedSearches`) has per entry `button.saved-search` (name through `OneLine`, cut, `title` the query; `OnSearch(query)`) and `button.saved-search-remove` (`×`, `aria-label`/`title` `Remove <name>`; `Actions.RemoveSavedSearch`, result in grey/red `p.saved-search-result`); `SavedSearchesUnreadable` shows red `Can't read saved searches.` instead. **Placeholders:** a box's placeholder says only what it is for (`New todo`, `Capture to inbox`), never a `Return to …` hint; Return still submits and there are no submit buttons.
     **Tidy layout (job 192):** the Triage, Tags and Settings buttons in `NotesPanel`'s bar are icon-only (inline `svg`, `aria-hidden`, `currentColor`; `aria-label` and `title` carry the name), note rows show no modified date, and `.top-bar` is a band (`--panel` background, `--line` bottom border).
     **Top bar (job 198):** `TopBar` replaces the capture box as the first child of `Main`'s `main.current-region` (not with
     `Can't read the data folder.`): an empty `.top-bar-start` and right-aligned `.top-bar-buttons` with icon buttons
     `button.capture-open` (`Capture`, job 199: a hand-drawn "T" with an I-beam caret; a `.capture-pop` popover with one
     `input[type=text]` `aria-label="Capture"`, placeholder `Capture to inbox`, maxlength 1000, focused on open, and a
-    `.capture-pop-backdrop`), `button.today-open` (`Today`) and `button.day-pick-open` (`Pick a day`; job 213: a `.day-pick` month calendar with a
+    `.capture-pop-backdrop`), `button.search-open` (`Search`, job 218: the magnifying glass; a `.search-pop` popover
+    with a `.search-pop-backdrop`, styled like `.capture-pop`, with one `input[type=text]` `aria-label="Search"`,
+    placeholder `Search notes`, maxlength 200, empty and focused on each opening; Return calls `OnSearch(text)` once
+    (`Main.ShowSearch`, empty text too) and closes, so the panel's input takes the focus; Esc closes and focuses
+    `button.search-open`), `button.today-open` (`Today`) and `button.day-pick-open` (`Pick a day`; job 213: a `.day-pick` month calendar with a
     `.day-pick-backdrop` and no input: header `button.day-pick-prev`/`day-pick-next` (icon-only, `Previous month`/`Next
     month`, disabled on January 1900/December 2100) around `.day-pick-month` (`MMMM yyyy`, invariant, also the
     `table[role=grid]`'s `aria-label`); columns an empty week header then `Mo`..`Su`; always 6 rows from the Monday on or
@@ -1069,7 +1073,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     move ±1/±7 days, PageUp/PageDown ±1 month (day clamped), never outside the range, the shown month follows; a click or
     Enter calls `OnPick` once and closes (a later event finds it closed). Date maths in `MonthGrid.cs`; styles only
     theme variables, `.day.today.selected` keeps an inner ring). Esc, the backdrop or the button
-    closes a popover; opening one closes the other, so at most one is open. `Main.ShowToday` (the `Today` button and `/today`, job 216) opens today's daily note in the page editor as
+    closes a popover; opening one closes the others, so at most one is open. `Main.ShowToday` (the `Today` button and `/today`, job 216) opens today's daily note in the page editor as
     `/today` describes (created when missing; another dirty note saved first, else the discard dialog; today's note
     itself stays as it is and a shown page closes). At start `Program.cs` calls `DesktopActions.AutoOpenToday()`, which
     ensures today's note like `OpenDailyNote()` and offers it through `DesktopState.OfferStartNote(name)` (a failure

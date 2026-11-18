@@ -86,13 +86,12 @@ public sealed class NotesPanelTests : IDisposable
     {
         IElement[] buttons = bar.QuerySelectorAll(".notes-bar-buttons button").ToArray();
         Assert.Equal(
-            ["search-open", "triage-open", "tags-open", "settings-open"], buttons.Select(b => b.ClassList.First()).ToArray());
-        Assert.Equal(["Search", "Triage", "Tags", "Settings"], buttons.Select(b => b.GetAttribute("aria-label")!).ToArray());
+            ["triage-open", "tags-open", "settings-open"], buttons.Select(b => b.ClassList.First()).ToArray());
+        Assert.Equal(["Triage", "Tags", "Settings"], buttons.Select(b => b.GetAttribute("aria-label")!).ToArray());
     }
 
     // 192 AC-1, AC-2: icon buttons with names, typed, svg child, no visible text, safe decorative svg.
     [Theory]
-    [InlineData("search-open", "Search")]
     [InlineData("triage-open", "Triage")]
     [InlineData("tags-open", "Tags")]
     [InlineData("settings-open", "Settings")]
@@ -116,17 +115,13 @@ public sealed class NotesPanelTests : IDisposable
         Assert.DoesNotContain("#", markup, StringComparison.Ordinal);
     }
 
-    // 207 AC-3: the Search button asks for the search panel with an empty text.
+    // 218 AC-2: Search moved to the top bar; the sidebar has no Search button.
     [Fact]
-    public async Task SearchButton_RaisesOnSearch_Empty()
+    public async Task Bar_HasNoSearchButton()
     {
-        List<string> searched = [];
-        await data.RefreshAsync();
-        IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OnSearch, (string text) => searched.Add(text)));
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
-        await cut.Find(".notes-bar-buttons button.search-open").ClickAsync(new MouseEventArgs());
-
-        Assert.Equal([string.Empty], searched);
+        Assert.Empty(cut.FindAll("button.search-open"));
     }
 
     // 207 AC-8: the saved searches sit between the bar and the note list: a cut name with the query as title, and an

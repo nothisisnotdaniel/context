@@ -1,15 +1,17 @@
-@* The slim bar across the top of the main area: Capture (a "T" with a text caret), Today (home) and Pick a day
-   (calendar). Capture opens a small popover with one text field; Return hands the text to the parent, which captures
-   it to the inbox and answers in the main status line. The pick opens a month calendar (Monday-first weeks with ISO
+@* The slim bar across the top of the main area: Capture (a "T" with a text caret), Search (magnifying glass), Today
+   (home) and Pick a day (calendar). Capture opens a small popover with one text field; Return hands the text to the
+   parent, which captures it to the inbox and answers in the main status line. Search opens the same kind of popover;
+   Return hands the text to the parent, which shows the search panel, and Esc gives the focus back to the icon. The pick opens a month calendar (Monday-first weeks with ISO
    week numbers, today and the shown day marked); the picked day is handed to the parent, which opens that day's note
    (saving unsaved changes first). More actions
    (three dots, last) opens the shown page's actions as a menu; the chosen item's id goes to the parent, which runs
-   it. At most one of the three popovers is open. *@
+   it. At most one of the four popovers is open. *@
 
 <div class="top-bar" @onkeydown="Key">
     <div class="top-bar-start"></div>
     <div class="top-bar-buttons">
         <button type="button" class="capture-open" aria-label="Capture" title="Capture" aria-expanded="@(captureOpen ? "true" : "false")" @onclick="ToggleCapture"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 6h10"/><path d="M9 6v13"/><path d="M19 4v16"/><path d="M17 4h4"/><path d="M17 20h4"/></svg></button>
+        <button type="button" class="search-open" aria-label="Search" title="Search" aria-expanded="@(searchOpen ? "true" : "false")" @ref="searchButton" @onclick="ToggleSearch"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/></svg></button>
         <button type="button" class="today-open" aria-label="Today" title="Today" @onclick="() => OnToday.InvokeAsync()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg></button>
         <button type="button" class="day-pick-open" aria-label="Pick a day" title="Pick a day" aria-expanded="@(open ? "true" : "false")" @onclick="Toggle"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>
         @if (PageActions.Count > 0)
@@ -24,6 +26,14 @@
         <div class="capture-pop">
             <input type="text" aria-label="Capture" placeholder="Capture to inbox" maxlength="1000" @ref="captureField"
                    value="@captureText" @oninput="CaptureInput" @onchange="CaptureInput" @onkeydown="CaptureKey" />
+        </div>
+    }
+    @if (searchOpen)
+    {
+        <div class="search-pop-backdrop" @onclick="Close"></div>
+        <div class="search-pop">
+            <input type="text" aria-label="Search" placeholder="Search notes" maxlength="200" @ref="searchField"
+                   value="@searchText" @oninput="SearchInput" @onchange="SearchInput" @onkeydown="SearchKey" />
         </div>
     }
     @if (open)
@@ -110,6 +120,12 @@
     private bool capturing;
     private string captureText = string.Empty;
     private ElementReference captureField;
+    private bool searchOpen;
+    private bool focusSearch;
+    private bool focusSearchButton;
+    private string searchText = string.Empty;
+    private ElementReference searchField;
+    private ElementReference searchButton;
     private bool menuOpen;
     private int focusItem = -1;
     private int focused = -1;
@@ -138,6 +154,20 @@
         {
             focusCapture = false;
             await captureField.FocusAsync();
+        }
+
+        // The search popover just opened: its text field takes the focus.
+        if (focusSearch && searchOpen)
+        {
+            focusSearch = false;
+            await searchField.FocusAsync();
+        }
+
+        // Esc closed the search popover: the focus goes back to its icon.
+        if (focusSearchButton)
+        {
+            focusSearchButton = false;
+            await searchButton.FocusAsync();
         }
 
         // The menu just opened or an arrow key moved: that item takes the focus.
@@ -191,6 +221,10 @@
     [Parameter]
     public Func<string, Task<bool>>? OnCapture { get; set; }
 
+    /// <summary>Called with the typed text (possibly empty) on Return in the search popover.</summary>
+    [Parameter]
+    public EventCallback<string> OnSearch { get; set; }
+
     /// <summary>The shown page's actions, in menu order; empty hides the More actions button.</summary>
     [Parameter]
     public IReadOnlyList<PageAction> PageActions { get; set; } = [];
@@ -215,6 +249,7 @@
         }
 
         captureOpen = false;
+        searchOpen = false;
         menuOpen = false;
     }
 
@@ -222,6 +257,18 @@
     {
         captureOpen = !captureOpen;
         focusCapture = captureOpen;
+        searchOpen = false;
+        open = false;
+        menuOpen = false;
+    }
+
+    // Every opening starts with an empty field.
+    private void ToggleSearch()
+    {
+        searchOpen = !searchOpen;
+        focusSearch = searchOpen;
+        searchText = string.Empty;
+        captureOpen = false;
         open = false;
         menuOpen = false;
     }
@@ -233,12 +280,14 @@
         focused = menuOpen ? 0 : -1;
         open = false;
         captureOpen = false;
+        searchOpen = false;
     }
 
     private void Close()
     {
         open = false;
         captureOpen = false;
+        searchOpen = false;
         menuOpen = false;
     }
 
@@ -295,6 +344,37 @@
         {
             Close();
         }
+    }
+
+    private void SearchInput(ChangeEventArgs e) => searchText = e.Value?.ToString() ?? string.Empty;
+
+    // Return closes the popover and hands the typed text to the parent (which shows the search panel); Esc closes it
+    // and gives the focus back to the icon (the bar's own Esc handler also runs, and finds it closed).
+    private async Task SearchKey(KeyboardEventArgs e)
+    {
+        if (!searchOpen)
+        {
+            return;
+        }
+
+        if (e.Key == "Escape")
+        {
+            searchOpen = false;
+            focusSearch = false;
+            focusSearchButton = true;
+            return;
+        }
+
+        if (e.Key != "Enter")
+        {
+            return;
+        }
+
+        string text = searchText;
+        searchText = string.Empty;
+        searchOpen = false;
+        focusSearch = false;
+        await OnSearch.InvokeAsync(text);
     }
 
     private void CaptureInput(ChangeEventArgs e) => captureText = e.Value?.ToString() ?? string.Empty;
