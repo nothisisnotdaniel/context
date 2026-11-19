@@ -73,6 +73,8 @@ public sealed class NoteTransferActionsTests : IDisposable
         data.WriteFile(Path.Combine("sub", "Other.md"), "other\n");
 
         await ImportRefused(Path.Combine(data.Root, "sub", "Other.md"), "That file is already in the Context folder. Nothing changed.");
+        // 298: another case is the same folder only on a file system that ignores case; fake that one.
+        data.Notes!.IgnoresCase = _ => true;
         await ImportRefused(Path.Combine(data.Root.ToUpperInvariant(), "Plan.md"), "That file is already in the Context folder. Nothing changed.");
     }
 
@@ -217,6 +219,8 @@ public sealed class NoteTransferActionsTests : IDisposable
         data.WriteNote("Plan", "text\n");
 
         await ExportRefused("Plan", Path.Combine(data.Root, "Copy.md"), "Export to a path outside the Context folder. Nothing was written.");
+        // 298: another case is the same folder only on a file system that ignores case; fake that one.
+        data.Notes!.IgnoresCase = _ => true;
         await ExportRefused(
             "Plan", Path.Combine(data.Root.ToUpperInvariant(), "sub", "Copy.md"), "Export to a path outside the Context folder. Nothing was written.");
     }

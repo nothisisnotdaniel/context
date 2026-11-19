@@ -81,6 +81,8 @@ public sealed class ShareActionsTests : IDisposable
         data.WriteNote("Plan", "text\n");
 
         await Refused("Plan", Path.Combine(data.Root, "Plan.html"), "Export to a path outside the Context folder. Nothing was written.");
+        // 298: another case is the same folder only on a file system that ignores case; fake that one.
+        data.Notes!.IgnoresCase = _ => true;
         await Refused(
             "Plan", Path.Combine(data.Root.ToUpperInvariant(), "sub", "Plan.html"), "Export to a path outside the Context folder. Nothing was written.");
         Assert.False(File.Exists(Path.Combine(data.Root, "Plan.html")));
