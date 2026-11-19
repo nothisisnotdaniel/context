@@ -381,7 +381,7 @@ public sealed class CliTests : IDisposable
 
         string json = Assert.Single(lines, l => l.StartsWith("context <command> --json", StringComparison.Ordinal));
         Assert.EndsWith(
-            "Print one JSON object: version, todos, notes, note show, tags, find, search, current, review.",
+            "Print one JSON object: version, todos, notes, note show, tags, find, search, current, review, item.",
             json,
             StringComparison.Ordinal);
     }
@@ -715,9 +715,11 @@ public sealed class CliTests : IDisposable
     [Fact]
     public void TodoTexts_NameNoNumber()
     {
-        // Every help line except meeting's (167 AC-7 lists "meeting <n>").
+        // Every help line except meeting's (167 AC-7 lists "meeting <n>") and item's (280 lists "item <n>").
         string help = string.Join(
-            '\n', Run("help").Out.Split('\n').Where(l => !l.StartsWith("context meeting <n>", StringComparison.Ordinal)));
+            '\n',
+            Run("help").Out.Split('\n').Where(l => !l.StartsWith("context meeting <n>", StringComparison.Ordinal)
+                && !l.StartsWith("context item <n>", StringComparison.Ordinal)));
         string text = help + Run("todo").Err + Run("todo", "done").Err;
 
         Assert.Contains("todo done <text...>", text, StringComparison.Ordinal);

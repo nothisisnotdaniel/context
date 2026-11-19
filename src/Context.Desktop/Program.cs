@@ -87,6 +87,20 @@ internal static class Program
             return null;
         }
 
+        // The lock of a running desktop app (job 280), or null when another holder has it or it can't be made.
+        static FileStream? RunningLock(string root)
+        {
+            try
+            {
+                PrivateFile.CreateFolder(DesktopRequest.Folder(root));
+                return PrivateFile.OpenLock(DesktopRequest.LockPath(root));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
+        }
+
         string folder = NoteStore.DefaultFolder();
         NoteStore notes = new NoteStore(folder);
         TagIndex index = new TagIndex(folder);
@@ -196,6 +210,15 @@ internal static class Program
 
         using DataWatcher watcher = new DataWatcher(folder, state);
         watcher.Start();
+
+        // Work item pages from the command line (job 280): while the app runs it holds <root>/.desktop/running.lock open,
+        // so `context item <n> --open` knows not to start a second copy and only leaves its request, which this watcher
+        // reads, deletes and hands to the actions (Main then opens the page). When the lock can't be taken the app runs
+        // without it; the command line then starts the app again, which only brings it to the front on macOS.
+        using FileStream? runningLock = RunningLock(folder);
+        using OpenRequestWatcher openRequests = new OpenRequestWatcher(folder);
+        openRequests.ItemRequested += item => _ = actions.OpenRequestedItem(item);
+        openRequests.Start();
 
         // Screenshots into the inbox (job 260): the watched folder from the settings page follows every state change, and
         // on macOS Control+Option+Shift+S opens the area picker. Both write only through the actions.

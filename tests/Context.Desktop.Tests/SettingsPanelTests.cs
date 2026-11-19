@@ -47,7 +47,7 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.Equal("Close", close.GetAttribute("aria-label"));
         Assert.Equal("Close", close.GetAttribute("title"));
         Assert.NotNull(close.QuerySelector("svg"));
-        Assert.Equal(["Exchange calendar", "Outlook", "Pasting", "Screenshots", "Sensitive notes"], cut.FindAll("h3").Select(h => h.TextContent).ToArray());
+        Assert.Equal(["Exchange calendar", "Outlook", "Pasting", "Screenshots", "Repository folders", "Sensitive notes"], cut.FindAll("h3").Select(h => h.TextContent).ToArray());
         IElement line = cut.Find(".calendar-link-state");
         Assert.Equal("No calendar link set.", line.TextContent);
         Assert.True(line.ClassList.Contains("grey"));
@@ -65,14 +65,15 @@ public sealed class SettingsPanelTests : IDisposable
     public async Task Field_IsAMaskedInputWithoutAValue_SaveDisabledWhileEmpty()
     {
         // 217: without Outlook here the Outlook section has no checkbox, so (244: besides the Pasting checkbox) the link
-        // field is the only input (260: besides the screenshot folder field).
+        // field is the only input (260: besides the screenshot folder field; 280: and the repository folder field).
         data.Outlook.Available = OutlookAvailability.Unsupported;
         IRenderedComponent<SettingsPanel> cut = await Show();
 
         Assert.Single(cut.FindAll("input[type=checkbox]"), i => i.ClassList.Contains("fetch-titles"));
         IElement field = Assert.Single(
             cut.FindAll("input"),
-            i => i.GetAttribute("type") != "checkbox" && !i.ClassList.Contains("screenshot-folder-field"));
+            i => i.GetAttribute("type") != "checkbox" && !i.ClassList.Contains("screenshot-folder-field")
+                && !i.ClassList.Contains("repository-field"));
         Assert.Equal("password", field.GetAttribute("type"));
         Assert.Equal("Calendar link", field.GetAttribute("aria-label"));
         Assert.Equal("off", field.GetAttribute("autocomplete"));

@@ -22,6 +22,7 @@
   <ItemGroup>
     <Compile Include="..\Context.Tests\FakeHttpHandler.cs" Link="FakeHttpHandler.cs" />
     <Compile Include="..\Context.Tests\RemovedFeature.cs" Link="RemovedFeature.cs" />
+    <Compile Include="..\Context.Tests\FakeCommitLog.cs" Link="FakeCommitLog.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -757,7 +757,7 @@ public sealed class MainTests : IDisposable
         IElement panel = cut.Find("main.current-region").Children[1];
         Assert.True(panel.ClassList.Contains("settings-panel"));
         Assert.Equal("Settings", panel.QuerySelector("h2")!.TextContent);
-        Assert.Equal(["Exchange calendar", "Outlook", "Pasting", "Screenshots", "Sensitive notes"], panel.QuerySelectorAll("h3").Select(h => h.TextContent).ToArray());
+        Assert.Equal(["Exchange calendar", "Outlook", "Pasting", "Screenshots", "Repository folders", "Sensitive notes"], panel.QuerySelectorAll("h3").Select(h => h.TextContent).ToArray());
         Assert.Empty(cut.FindAll(".palette"));
 
         await cut.Find(".settings-panel button.close").ClickAsync(new MouseEventArgs());
@@ -4609,5 +4609,74 @@ public sealed class MainTests : IDisposable
         Assert.Empty(aside.QuerySelectorAll(".mail-item"));
         Assert.Empty(aside.QuerySelectorAll("[aria-label=Mail]"));
         Assert.Empty(cut.FindAll(".recent-mail, .mail-item"));
+    }
+
+    // 280 AC-11: the work item page items/1234 shows the ItemPanel between the editor and the links panel; a note
+    // button opens that note, and another note has no panel.
+    [Fact]
+    public async Task ItemPage_ShowsItemPanel_OtherNoteNot()
+    {
+        data.WriteNote("items", "# items\n");
+        data.WriteFile(Path.Combine("items", "1234.md"), "# 1234\n");
+        data.WriteNote("Plan", "Work on #1234\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await Open(cut, js, "Plan");
+        Assert.Empty(cut.FindAll(".item-panel"));
+
+        await Open(cut, js, "items/1234");
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".item-panel").TextContent, StringComparison.Ordinal), Wait);
+        Assert.Equal(["Plan"], cut.FindAll(".item-panel .note-button").Select(b => b.TextContent).ToArray());
+        IElement region = cut.Find(".note-area");
+        int item = region.Children.Index().Single(c => c.Item.ClassList.Contains("item-panel")).Index;
+        Assert.True(region.Children.Index().Single(c => c.Item.ClassList.Contains("note-editor")).Index < item);
+        Assert.True(item < region.Children.Index().Single(c => c.Item.ClassList.Contains("links-panel")).Index);
+
+        await cut.Find(".item-panel .note-button").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-title").TextContent), Wait);
+        Assert.Empty(cut.FindAll(".item-panel"));
+    }
+
+    // 280 AC-10: a request from the command line (DesktopActions.OpenRequestedItem, as the watcher calls it) creates
+    // items and the page and opens it in the editor in place of the open note.
+    [Fact]
+    public async Task RequestedItem_CreatesAndOpensPage()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+        int mounts = js.Calls("ContextEditor.mount").Count;
+
+        ActionResult result = await data.Actions!.OpenRequestedItem(1234);
+
+        Assert.Equal((ActionKind.Done, "items/1234"), (result.Kind, result.Text));
+        cut.WaitForAssertion(() => Assert.Equal("1234", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".item-panel").TextContent, StringComparison.Ordinal), Wait);
+        Assert.Equal("# items\n", File.ReadAllText(Path.Combine(data.Root, "items.md")));
+        Assert.Equal("# 1234\n", File.ReadAllText(Path.Combine(data.Root, "items", "1234.md")));
+        Assert.Null(data.State!.TakeItemPage());
+    }
+
+    // 280 AC-10: a request for an existing page writes nothing and still opens it.
+    [Fact]
+    public async Task RequestedItem_ExistingPage_OpensWithoutWrite()
+    {
+        data.WriteNote("items", "# items\n");
+        data.WriteFile(Path.Combine("items", "77.md"), "# 77\n\nMy notes.\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        cut.WaitForAssertion(() => Assert.NotNull(data.State!.Snapshot), Wait);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
+
+        ActionResult result = await data.Actions!.OpenRequestedItem(77);
+
+        Assert.Equal((ActionKind.Done, ActionReason.Unchanged), (result.Kind, result.Reason));
+        cut.WaitForAssertion(() => Assert.Equal("77", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 }

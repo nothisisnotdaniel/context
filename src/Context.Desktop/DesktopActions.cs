@@ -232,6 +232,12 @@ internal sealed class DesktopActions
     public const string FetchTitlesOnText = "Page titles on.";
     public const string FetchTitlesOffText = "Page titles off.";
     public const string SettingsNotSavedText = "Can't save settings.json.";
+    public const string RepositoryBlankText = "Type a folder path.";
+    public const string RepositoryRelativeText = "Type an absolute folder path.";
+    public const string RepositoryTooLongText = "A folder path can be at most 400 characters.";
+    public const string RepositoryFullText = "Can't add more than 20 repository folders.";
+    public const string RepositoryUnreadableText = "Can't read settings.json. Nothing was saved.";
+    public const string RepositoryGoneText = "That folder is no longer in the list. Nothing was done.";
     public const string ScreenshotAddedText = "Screenshot added to inbox.";
     public const string ScreenshotFolderSavedText = "Screenshot folder saved.";
     public const string ScreenshotFolderRemovedText = "Screenshot folder removed.";
@@ -402,6 +408,21 @@ internal sealed class DesktopActions
 
     /// <summary>The red line when a person's page can't be opened or made (invalid name, sensitive people note).</summary>
     public static string PersonRefusedText(string name) => $"Can't make a page for {name}. Nothing was done.";
+
+    /// <summary>The refusal of <see cref="OpenItem"/> when the top-level <c>items</c> note is sensitive.</summary>
+    public static string ItemSensitiveText(string name) => $"{name} is sensitive, so no work item page can be made.";
+
+    /// <summary>The refusal of <see cref="AddRepository"/> for a folder that doesn't exist.</summary>
+    public static string RepositoryMissingText(string folder) => $"No such folder: {folder}.";
+
+    /// <summary>The refusal of <see cref="AddRepository"/> for a folder already in the list.</summary>
+    public static string RepositoryDuplicateText(string folder) => $"{folder} is already in the list.";
+
+    /// <summary>The answer of <see cref="AddRepository"/>.</summary>
+    public static string RepositoryAddedText(string folder) => $"Added {folder}.";
+
+    /// <summary>The answer of <see cref="RemoveRepository"/>.</summary>
+    public static string RepositoryRemovedText(string folder) => $"Removed {folder}.";
 
     /// <summary>The red line when a note can't go under that parent (or can't take a subpage).</summary>
     public static string NoSubpagesText(string parent) => $"{parent} can't have subpages. Nothing was done.";
@@ -941,6 +962,70 @@ internal sealed class DesktopActions
     /// an existing page is never changed. The result's text is the person page's full name when done.
     /// </summary>
     public Task<ActionResult> OpenPerson(string name) => Run(() => OpenPersonNow(name));
+
+    /// <summary>
+    /// Opens the page of work item <paramref name="item"/> (job 280): the note <c>items/&lt;n&gt;</c>, created with
+    /// <see cref="WorkItems.EnsurePage"/> (a missing top-level <c>items</c> as <c># items\n</c>, the page as
+    /// <c># &lt;n&gt;\n</c>) like <see cref="OpenPerson"/>; an existing page is reused
+    /// (<see cref="ActionReason.Unchanged"/>, no refresh). A sensitive top-level <c>items</c> is refused
+    /// (<see cref="ActionReason.Locked"/>, <see cref="ItemSensitiveText"/>) with nothing written and no key asked for.
+    /// The result's text is the page's full name when done.
+    /// </summary>
+    public Task<ActionResult> OpenItem(int item) => Run(() => OpenItemNow(item));
+
+    /// <summary>
+    /// Opens the page of work item <paramref name="item"/> asked for by <c>context item &lt;n&gt; --open</c> (job 280,
+    /// <see cref="OpenRequestWatcher"/>): <see cref="OpenItem"/>'s write, then the page is offered through
+    /// <see cref="DesktopState.OfferItemPage"/>, which <c>Main</c> opens with the unsaved-changes ask. While another
+    /// action runs (Busy) an existing page is still offered, since the command line made it before asking.
+    /// </summary>
+    public async Task<ActionResult> OpenRequestedItem(int item)
+    {
+        ActionResult result = await Run(() =>
+        {
+            ActionResult opened = OpenItemNow(item);
+            if (opened.Kind == ActionKind.Done)
+            {
+                state.OfferItemPage(opened.Text);
+            }
+
+            return opened;
+        });
+        if (result.Kind == ActionKind.Refused && result.Reason == ActionReason.Busy
+            && notes.TryFind(WorkItems.PageNote(item), out NoteInfo? page) && page is not null)
+        {
+            state.OfferItemPage(page.Name);
+        }
+
+        if (result.Reason is ActionReason.Unchanged or ActionReason.Busy)
+        {
+            try
+            {
+                await state.Refresh();
+            }
+            catch (Exception)
+            {
+                // The offer stays; the watcher or the next tick shows it.
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Adds a repository folder (job 280) to <c>"repositories"</c> in <c>settings.json</c>, every other property kept.
+    /// The typed text is trimmed and checked by <see cref="Repositories.CheckAdd"/>: blank, too long, relative, missing,
+    /// already listed (ignoring case) or a 21st folder are refused with fixed texts and nothing written; an unreadable
+    /// file is Failed with <see cref="RepositoryUnreadableText"/> and never overwritten. Done:
+    /// <see cref="RepositoryAddedText"/>.
+    /// </summary>
+    public Task<ActionResult> AddRepository(string folder) => Run(() => AddRepositoryNow(folder));
+
+    /// <summary>
+    /// Removes the repository folder <paramref name="folder"/> (ordinal match) from <c>settings.json</c>; one no longer
+    /// listed is Refused/<see cref="ActionReason.Missing"/>. Done: <see cref="RepositoryRemovedText"/>.
+    /// </summary>
+    public Task<ActionResult> RemoveRepository(string folder) => Run(() => RemoveRepositoryNow(folder));
 
     /// <summary>The name of today's daily note (<see cref="DailyNote.NameFor"/>), by the injected local clock.</summary>
     public string DailyNoteName() => DailyNoteName(DateOnly.FromDateTime(localNow()));
@@ -3123,6 +3208,90 @@ internal sealed class DesktopActions
         catch (Exception)
         {
             return Failed(ActionReason.WriteFailed, CreateFailedText);
+        }
+    }
+
+    private ActionResult OpenItemNow(int item)
+    {
+        try
+        {
+            WorkItemPage page = WorkItems.EnsurePage(notes, item);
+            return page.Kind switch
+            {
+                WorkItemPageKind.Sensitive => Refused(ActionReason.Locked, ItemSensitiveText(page.Name)),
+                WorkItemPageKind.Created => new ActionResult(ActionKind.Done, ActionReason.None, page.Name),
+                _ => new ActionResult(ActionKind.Done, ActionReason.Unchanged, page.Name),
+            };
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, CreateFailedText);
+        }
+    }
+
+    private ActionResult AddRepositoryNow(string typed)
+    {
+        try
+        {
+            IReadOnlyList<string> current = settings.ReadRepositories();
+            RepositoryCheck check = Repositories.CheckAdd(current, typed, out string folder);
+            switch (check)
+            {
+                case RepositoryCheck.Blank:
+                    return Refused(ActionReason.Invalid, RepositoryBlankText);
+                case RepositoryCheck.TooLong:
+                    return Refused(ActionReason.Invalid, RepositoryTooLongText);
+                case RepositoryCheck.Relative:
+                    return Refused(ActionReason.Invalid, RepositoryRelativeText);
+                case RepositoryCheck.Missing:
+                    return Refused(ActionReason.Missing, RepositoryMissingText(folder));
+                case RepositoryCheck.Duplicate:
+                    return Refused(ActionReason.Exists, RepositoryDuplicateText(folder));
+                case RepositoryCheck.Full:
+                    return Refused(ActionReason.Invalid, RepositoryFullText);
+            }
+
+            settings.SaveRepositories([.. current, folder]);
+            return new ActionResult(ActionKind.Done, ActionReason.None, RepositoryAddedText(folder));
+        }
+        catch (SettingsTooLargeException)
+        {
+            return Refused(ActionReason.Invalid, SettingsNotSavedText);
+        }
+        catch (SettingsStoreException)
+        {
+            return Failed(ActionReason.Unreadable, RepositoryUnreadableText);
+        }
+        catch (Exception e) when (e is IOException || e is UnauthorizedAccessException || e is ArgumentException)
+        {
+            return Failed(ActionReason.WriteFailed, SettingsNotSavedText);
+        }
+    }
+
+    private ActionResult RemoveRepositoryNow(string folder)
+    {
+        try
+        {
+            IReadOnlyList<string> current = settings.ReadRepositories();
+            if (!current.Contains(folder, StringComparer.Ordinal))
+            {
+                return Refused(ActionReason.Missing, RepositoryGoneText);
+            }
+
+            settings.SaveRepositories([.. current.Where(f => !string.Equals(f, folder, StringComparison.Ordinal))]);
+            return new ActionResult(ActionKind.Done, ActionReason.None, RepositoryRemovedText(folder));
+        }
+        catch (SettingsTooLargeException)
+        {
+            return Refused(ActionReason.Invalid, SettingsNotSavedText);
+        }
+        catch (SettingsStoreException)
+        {
+            return Failed(ActionReason.Unreadable, RepositoryUnreadableText);
+        }
+        catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+        {
+            return Failed(ActionReason.WriteFailed, SettingsNotSavedText);
         }
     }
 

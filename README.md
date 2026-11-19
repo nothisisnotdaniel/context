@@ -230,6 +230,22 @@ those 7 days), `Overdue` (open todos due before today) and `Next week` (the appo
 ahead, one line per day an appointment touches). Every heading is printed, also when its section is empty. It never
 opens `context.db`. In the desktop app, `/review` in the command palette shows the same page; click a note to open it.
 
+### Work items
+
+A work item from Times is referenced as `#1234` (digits only, so it is never a tag). Its page is the note `items/1234`:
+above its links it shows the notes, todos, people and meetings that mention `#1234`, the hours booked on it in Times
+(per ISO week and in total, read from Times' day files, never changed) and the commits whose message mentions it in
+the git repositories you list in Settings, under *Repository folders* (absolute paths, at most 20; stored as
+`"repositories"` in `settings.json`). `git` must be on the app's PATH.
+
+`context item 1234` prints the same sections as text (`Item #1234`, `Notes`, `Todos`, `People`, `Meetings`, `Hours`,
+`Commits`), `context item 1234 --json` as one JSON object, and `context item 1234 --open` creates the page when it is
+missing and opens it in the desktop app (starting it when it isn't running; macOS and the installed Windows build).
+
+```powershell
+(context item 1234 --json | ConvertFrom-Json).hours.totalMinutes
+```
+
 ### Outlook
 
 On Windows with classic Outlook, the desktop app can show the day's Outlook appointments next to the ones from

@@ -144,6 +144,10 @@
                         {
                             <PersonPanel Person="@person" OnOpen="RequestOpen" />
                         }
+                        @if (WorkItems.ItemOf(name) is { } item)
+                        {
+                            <ItemPanel Item="item" OnOpen="RequestOpen" OnPerson="OpenMention" />
+                        }
                         <LinksPanel Name="@name" Sensitive="openSensitive" OnOpen="RequestOpen" OnTag="ShowTag" />
                     }
                     else
@@ -312,6 +316,28 @@ else
         {
             ShowNote(offered);
         }
+
+        _ = TakeItemPage();
+    }
+
+    // A work item page asked for from the command line (job 280, DesktopActions.OpenRequestedItem) opens like a click
+    // on a note name: the open note's unsaved changes are saved first, and when that fails the discard dialog asks.
+    // While that dialog is already open, or before the first snapshot, the offer waits for the next state change.
+    // True when it was taken.
+    private async Task<bool> TakeItemPage()
+    {
+        if (Snapshot is null || discarding)
+        {
+            return false;
+        }
+
+        if (State.TakeItemPage() is not { } itemPage)
+        {
+            return false;
+        }
+
+        await RequestOpen(itemPage, null);
+        return true;
     }
 
     // Today's note offered at start opens only while no note is open and no page, dialog or edit field is shown;
@@ -343,6 +369,7 @@ else
     protected override async Task OnStateChangedAsync()
     {
         bool started = TakeStartNote();
+        started |= await TakeItemPage();
         if (State.TakeBriefing() is not { } offered || string.Equals(offered, openName, StringComparison.Ordinal))
         {
             if (started)

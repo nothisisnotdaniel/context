@@ -21,12 +21,15 @@ internal static class PrivateFile
     /// Opens a new file at <paramref name="path"/> for writing (<see cref="FileMode.CreateNew"/>, no
     /// sharing, mode <c>0600</c> off Windows). Throws <see cref="IOException"/> when it exists.
     /// </summary>
-    internal static FileStream OpenNew(string path)
+    internal static FileStream OpenNew(string path) => OpenNew(path, FileMode.CreateNew, FileAccess.Write);
+
+    // The one unshared open behind OpenNew and OpenLock: a file this creates is 0600 off Windows.
+    private static FileStream OpenNew(string path, FileMode mode, FileAccess access)
     {
         FileStreamOptions options = new FileStreamOptions
         {
-            Mode = FileMode.CreateNew,
-            Access = FileAccess.Write,
+            Mode = mode,
+            Access = access,
             Share = FileShare.None,
         };
         if (!OperatingSystem.IsWindows())
@@ -36,6 +39,13 @@ internal static class PrivateFile
 
         return new FileStream(path, options);
     }
+
+    /// <summary>
+    /// Opens (or creates, mode <c>0600</c> off Windows) the lock file <paramref name="path"/> with no sharing, so a
+    /// second open of it, in this or another process, fails with <see cref="IOException"/> while the returned stream
+    /// is open (job 280: the desktop's <c>.desktop/running.lock</c>). Nothing is written to it.
+    /// </summary>
+    internal static FileStream OpenLock(string path) => OpenNew(path, FileMode.OpenOrCreate, FileAccess.ReadWrite);
 
     /// <summary>Creates <paramref name="path"/> (it must not exist) holding <paramref name="bytes"/>, like <see cref="OpenNew"/>.</summary>
     internal static void Write(string path, byte[] bytes)

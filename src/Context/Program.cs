@@ -12,4 +12,5 @@ return new Cli(
     Today,
     () => DateTime.Now,
     http,
-    TimesFolder.Resolve(Environment.GetEnvironmentVariable(TimesFolder.VariableName))).Run(args);
+    TimesFolder.Resolve(Environment.GetEnvironmentVariable(TimesFolder.VariableName)),
+    new ProcessDesktopLauncher()).Run(args);

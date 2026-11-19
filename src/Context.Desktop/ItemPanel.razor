@@ -1,0 +1,222 @@
+@inherits StateComponent
+@* The work item page of the open note items/<n> (job 280, DesktopState.Item): the notes, todos, people and meetings
+   that mention #<n>, the hours booked on it in Times (per ISO week and in total) and the commits in the repository
+   folders set on the settings page whose message mentions it. Each section shows only with rows. It reads only (no
+   download, nothing written but context.db), and reloads whenever the state changes. *@
+
+<section class="item-panel" aria-label="Work item">
+    @if (shown is null)
+    {
+        <p class="grey" role="status">Loading…</p>
+    }
+    else
+    {
+        WorkItemView view = shown.View;
+        @if (view.IndexUnreadable)
+        {
+            <p class="red" role="status">Can't read the mentions.</p>
+        }
+        else if (view.Notes.Count == 0 && view.OpenTodos.Count == 0 && view.DoneTodos.Count == 0
+            && view.Meetings.Count == 0 && !view.TodosUnreadable)
+        {
+            <p class="grey item-empty" role="status">No notes, todos or meetings mention #@ItemText.</p>
+        }
+        @if (view.Notes.Count > 0)
+        {
+            <h2>Notes</h2>
+            <ul class="person-notes item-notes">
+                @foreach (string note in view.Notes)
+                {
+                    string name = DesktopText.OneLine(note);
+                    <li>
+                        <button type="button" class="name note-button cut" title="@name" @onclick="() => OnOpen.InvokeAsync(note)">@name</button>
+                    </li>
+                }
+            </ul>
+        }
+        @if (view.OpenTodos.Count > 0)
+        {
+            <h2>Open todos</h2>
+            <ul class="person-todos item-open-todos">
+                @foreach (TodoItem todo in view.OpenTodos)
+                {
+                    string text = DesktopText.OneLine(todo.Text);
+                    <li class="person-todo">
+                        <span class="date grey">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                        <span class="text cut" title="@text">@text</span>
+                    </li>
+                }
+            </ul>
+        }
+        @if (view.DoneTodos.Count > 0)
+        {
+            <h2>Done todos</h2>
+            <ul class="person-todos item-done-todos">
+                @foreach (TodoItem todo in view.DoneTodos)
+                {
+                    string text = DesktopText.OneLine(todo.Text);
+                    <li class="person-todo">
+                        <span class="date grey">@view.DoneDate(todo).ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                        <span class="text cut" title="@text">@text</span>
+                    </li>
+                }
+            </ul>
+        }
+        @if (view.TodosUnreadable)
+        {
+            <p class="red" role="status">Can't read the todos.</p>
+        }
+        @if (view.People.Count > 0)
+        {
+            <h2>People</h2>
+            <ul class="person-notes item-people">
+                @foreach (WorkItemPerson person in view.People)
+                {
+                    string name = DesktopText.OneLine(person.Name);
+                    <li>
+                        <button type="button" class="name note-button cut" title="@name" @onclick="() => OnPerson.InvokeAsync(person.Name)">@name</button>
+                        <span class="count grey">@person.Count.ToString(CultureInfo.InvariantCulture)</span>
+                    </li>
+                }
+            </ul>
+        }
+        @if (view.Meetings.Count > 0)
+        {
+            <h2>Meetings</h2>
+            <ul class="person-appointments item-meetings">
+                @foreach (Appointment appointment in view.Meetings)
+                {
+                    string title = DesktopText.OneLine(appointment.Title.Length == 0 ? "(no title)" : appointment.Title);
+                    string location = DesktopText.OneLine(appointment.Location ?? string.Empty);
+                    <li class="person-appointment">
+                        <span class="date grey">@appointment.Start.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                        <span class="time grey">@PersonView.TimeText(appointment)</span>
+                        <span class="title cut" title="@title">@title</span>
+                        @if (location.Length > 0)
+                        {
+                            <span class="location grey cut" title="@location">@location</span>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+        @if (view.TimesKind == WorkItemTimesKind.NotSetUp)
+        {
+            <p class="grey item-hint" role="status">Times isn't set up, so no hours.</p>
+        }
+        else if (view.TimesKind == WorkItemTimesKind.Unlistable)
+        {
+            <p class="red" role="status">Can't read Times' folder.</p>
+        }
+        else if (view.Hours.Weeks.Count > 0)
+        {
+            <h2>Hours</h2>
+            <ul class="person-todos item-hours">
+                @foreach (WorkItemWeek week in view.Hours.Weeks)
+                {
+                    <li class="person-todo">
+                        <span class="date grey">@week.Week</span>
+                        <span class="text">@TimesNow.FormatLeft(week.Total)</span>
+                    </li>
+                }
+                <li class="person-todo item-total">
+                    <span class="date grey">Total</span>
+                    <span class="text">@TimesNow.FormatLeft(view.Hours.Total)</span>
+                </li>
+            </ul>
+        }
+        @if (view.Hours.SkippedFiles > 0)
+        {
+            <p class="red" role="status">Skipped @view.Hours.SkippedFiles.ToString(CultureInfo.InvariantCulture) unreadable Times day file(s).</p>
+        }
+        @if (shown.SettingsUnreadable)
+        {
+            <p class="red" role="status">Can't read settings.json.</p>
+        }
+        else if (view.CommitsKind == WorkItemCommitsKind.NotSetUp)
+        {
+            <p class="grey item-hint" role="status">Set repository folders in Settings to see commits.</p>
+        }
+        else if (view.CommitsKind == WorkItemCommitsKind.GitMissing)
+        {
+            <p class="red" role="status">Can't run git, so no commits.</p>
+        }
+        @if (view.Commits.Count > 0)
+        {
+            <h2>Commits</h2>
+            <ul class="person-todos item-commits">
+                @foreach (WorkItemCommit commit in view.Commits)
+                {
+                    string repo = DesktopText.OneLine(commit.Repo);
+                    string hash = DesktopText.OneLine(commit.Hash.Length > ShortHash ? commit.Hash[..ShortHash] : commit.Hash);
+                    string subject = DesktopText.OneLine(commit.Subject);
+                    <li class="person-todo item-commit">
+                        <span class="date grey">@commit.Date.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                        <span class="repo grey cut" title="@repo">@repo</span>
+                        <span class="hash grey">@hash</span>
+                        <span class="text cut" title="@subject">@subject</span>
+                    </li>
+                }
+            </ul>
+        }
+        @foreach (string repo in view.FailedRepos)
+        {
+            <p class="red" role="status">Can't read commits in @DesktopText.OneLine(repo).</p>
+        }
+    }
+</section>
+
+@code {
+    // The commit hash is shown with its first 7 characters, as git's short hash.
+    private const int ShortHash = 7;
+
+    private WorkItemPageView? shown;
+    private int? loaded;
+    private int request;
+
+    /// <summary>The work item number of the open page <c>items/&lt;n&gt;</c>.</summary>
+    [Parameter]
+    [EditorRequired]
+    public int Item { get; set; }
+
+    /// <summary>Called with a mentioning note's name when it is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    /// <summary>Called with a person's name when it is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnPerson { get; set; }
+
+    private string ItemText => Item.ToString(CultureInfo.InvariantCulture);
+
+    protected override Task OnParametersSetAsync()
+    {
+        if (loaded == Item)
+        {
+            return Task.CompletedTask;
+        }
+
+        // Another work item: its rows are not known yet, so the old ones go.
+        loaded = Item;
+        shown = null;
+        return Load();
+    }
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    // Keeps the shown rows while it reloads. A result for another work item, or an older request's result, is dropped.
+    private async Task Load()
+    {
+        int mine = ++request;
+        int item = Item;
+        WorkItemPageView result = await State.Item(item);
+        if (mine == request && item == Item)
+        {
+            shown = result;
+        }
+    }
+}

@@ -111,6 +111,41 @@
         }
     </div>
     <p class="screenshot-result @screenshotResultClass" role="status">@screenshotResultText</p>
+    <h3>Repository folders</h3>
+    @if (repositories is null)
+    {
+        <p class="repository-state grey">Loading…</p>
+    }
+    else if (repositories.Unreadable)
+    {
+        <p class="repository-state red">Can't read settings.json.</p>
+    }
+    else if (repositories.Folders.Count == 0)
+    {
+        <p class="repository-state grey">@RepositoriesNotSetText</p>
+    }
+    else
+    {
+        <ul class="repository-list" aria-label="Repository folders">
+            @foreach (string repository in repositories.Folders)
+            {
+                string shownFolder = DesktopText.OneLine(repository);
+                <li class="repository-row">
+                    <span class="repository-folder cut" title="@shownFolder">@shownFolder</span>
+                    <button type="button" class="repository-remove" disabled="@busy" aria-label="@($"Remove {shownFolder}")"
+                            @onclick="() => RemoveRepository(repository)">Remove</button>
+                </li>
+            }
+        </ul>
+    }
+    <div class="repository-entry">
+        <input type="text" class="repository-field" @key="repositoryFieldKey"
+               maxlength="@Repositories.MaxPathLength" autocomplete="off" spellcheck="false"
+               disabled="@busy" aria-label="Repository folder" placeholder="Folder's full path"
+               @oninput="RepositoryTyped" @onkeydown="e => AddRepository(e)" />
+        <button type="button" class="repository-add" disabled="@busy" @onclick="() => AddRepository(null)">Add</button>
+    </div>
+    <p class="repository-result @repositoryResultClass" role="status">@repositoryResultText</p>
     <h3>Sensitive notes</h3>
     @if (key is null)
     {
@@ -171,6 +206,8 @@
     public const string ScreenshotHotkeyText = "Press Control+Option+Shift+S to add a screen area to the inbox.";
     public const string ScreenshotWindowsText =
         "The screenshot hotkey works on macOS. On Windows, set the folder to the Snipping Tool's screenshots folder.";
+    public const string RepositoriesNotSetText =
+        "No repository folders set. Add a git repository's folder to see its commits on work item pages.";
     public const string ScreenshotUnreadableText = "Can't read the screenshot folder setting.";
     public const string ScreenshotMissingText = "Folder not found.";
     public const string ScreenshotNotSetText = "No screenshot folder set. Once one is set, images saved into it are added to the inbox.";
@@ -192,6 +229,11 @@
     private int fetchTitlesKey;
     private int request;
     private ScreenshotFolderView? screenshots;
+    private RepositoryFoldersView? repositories;
+    private string typedRepository = string.Empty;
+    private int repositoryFieldKey;
+    private string repositoryResultText = string.Empty;
+    private string repositoryResultClass = string.Empty;
     private string typedFolder = string.Empty;
     private int screenshotFieldKey;
     private string screenshotResultText = string.Empty;
@@ -239,10 +281,12 @@
         OutlookSettingView outlookNow = await State.OutlookSetting();
         bool fetchTitlesNow = await State.FetchTitlesSetting();
         ScreenshotFolderView screenshotsNow = await State.ScreenshotFolderSetting();
+        RepositoryFoldersView repositoriesNow = await State.RepositoryFolders();
         SensitiveKeyView keyNow = await State.SensitiveKey();
         if (mine == request)
         {
             screenshots = screenshotsNow;
+            repositories = repositoriesNow;
             link = linkNow;
             outlook = outlookNow;
             fetchTitles = fetchTitlesNow;
@@ -451,6 +495,69 @@
     {
         screenshotResultText = DesktopText.OneLine(result.Text);
         screenshotResultClass = result.Kind == ActionKind.Done ? "accent" : "red";
+        await Load();
+    }
+
+    private void RepositoryTyped(ChangeEventArgs e)
+    {
+        typedRepository = e.Value?.ToString() ?? string.Empty;
+        repositoryResultText = string.Empty;
+        repositoryResultClass = string.Empty;
+    }
+
+    // Enter in the repository field or Add; an added folder empties the field.
+    private async Task AddRepository(KeyboardEventArgs? pressed)
+    {
+        if ((pressed is not null && pressed.Key != "Enter") || busy)
+        {
+            return;
+        }
+
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.AddRepository(typedRepository);
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        if (result.Kind == ActionKind.Done)
+        {
+            typedRepository = string.Empty;
+            repositoryFieldKey++;
+        }
+
+        await RepositoryDone(result);
+    }
+
+    private async Task RemoveRepository(string repository)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.RemoveRepository(repository);
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        await RepositoryDone(result);
+    }
+
+    private async Task RepositoryDone(ActionResult result)
+    {
+        repositoryResultText = DesktopText.OneLine(result.Text);
+        repositoryResultClass = result.Kind == ActionKind.Done ? "accent" : "red";
         await Load();
     }
 
