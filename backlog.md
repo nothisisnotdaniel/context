@@ -275,6 +275,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#319](backlog/319-crash-hint-bar-doesn-t-cover.md) Crash hint bar doesn't cover the header
 - [?] [#320](backlog/320-crash-log-link-checks-close-the.md) Crash log link checks: close the check-then-act window
 - [?] [#321](backlog/321-fix-flaky-palettemeeting-privateappointment-notnum.md) Fix flaky PaletteMeeting_PrivateAppointment_NotNumbered test
+- [?] [#322](backlog/322-recent-notes-sidebar-keep-the-parent.md) Recent notes sidebar: keep the parent name visible on long titles
 
 ## Dropped with the terminal UI
 
