@@ -182,7 +182,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [h] [#153](backlog/153-check-the-unsaved-changes-dot-in.md) Check the unsaved-changes dot in both themes
 - [ ] [#154](backlog/154-ignore-held-enter-repeats-on-a.md) Ignore held Enter repeats on a focused chip
 - [h] [#155](backlog/155-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view
-- [?] [#156](backlog/156-hide-the-empty-editor-box-when.md) Hide the empty editor box when the editor fails to start
+- [ ] [#156](backlog/156-hide-the-empty-editor-box-when.md) Hide the empty editor box when the editor fails to start
 - [ ] [#226](backlog/226-cli-and-console-todo-hints.md) CLI and console todo hints
 - [?] [#160](backlog/160-replace-the-console-text-parity-rule.md) Replace the console text-parity rule in CLAUDE.md
 - [ ] [#235](backlog/235-signing-hardening-and-windows-signing.md) Signing hardening and Windows signing
