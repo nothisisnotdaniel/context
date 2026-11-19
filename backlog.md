@@ -177,7 +177,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#225](backlog/225-settings-calendar-link-field.md) Settings calendar link field
 - [h] [#145](backlog/145-look-at-the-notes-bar-buttons.md) Look at the notes bar buttons in a narrow sidebar
 - [h] [#146](backlog/146-check-desktop-settings-key-details-on.md) Check desktop settings key details on Windows and macOS
-- [?] [#151](backlog/151-clear-the-capture-status-line-on.md) Clear the capture status line on new input
+- [ ] [#151](backlog/151-clear-the-capture-status-line-on.md) Clear the capture status line on new input
 - [h] [#152](backlog/152-check-the-capture-row-at-the.md) Check the capture row at the minimum window size
 - [h] [#153](backlog/153-check-the-unsaved-changes-dot-in.md) Check the unsaved-changes dot in both themes
 - [?] [#154](backlog/154-ignore-held-enter-repeats-on-a.md) Ignore held Enter repeats on a focused chip
