@@ -284,6 +284,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#328](backlog/328-smart-paste-don-t-fetch-page.md) Smart paste: don't fetch page titles from local or private addresses
 - [?] [#329](backlog/329-smart-paste-limit-concurrent-page-title.md) Smart paste: limit concurrent page-title fetches
 - [?] [#330](backlog/330-smart-paste-say-why-a-page.md) Smart paste: say why a page title wasn't used
+- [h] [#331](backlog/331-check-cmd-shift-v-plain-paste.md) Check Cmd+Shift+V plain paste in the macOS app
 
 ## Dropped with the terminal UI
 
