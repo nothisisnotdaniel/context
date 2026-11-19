@@ -312,6 +312,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#356](backlog/356-merge-notes-re-check-subpages-right.md) Merge notes: re-check subpages right before the delete
 - [?] [#357](backlog/357-similar-notes-limit-pairs-when-many.md) Similar notes: limit pairs when many notes share a title
 - [?] [#358](backlog/358-release-check-target-is-a-commit.md) Release: check TARGET is a commit sha in the version checks
+- [?] [#359](backlog/359-refuse-lookalike-spellings-of-the-removed.md) Refuse lookalike spellings of the removed secret options
+- [?] [#360](backlog/360-test-the-full-removed-option-sentence.md) Test the full removed-option sentence in CLAUDE.md
 
 ## Dropped with the terminal UI
 
