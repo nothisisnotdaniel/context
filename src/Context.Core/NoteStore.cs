@@ -994,7 +994,8 @@ internal sealed class NoteStore
 
     // The paths of the files in a folder whose name ends in the extension in any case, on every OS. Links (symbolic
     // links, junctions, other reparse points), folders and devices are left out, so a note never reads a file from
-    // outside the root through a link. Throws when the folder can't be read.
+    // outside the root through a link. Throws when the folder can't be read. The "*" + extension pattern matches
+    // ignoring case through NoteFileOptions; callers still check the exact extension (Path.GetExtension, ignoring case).
     private static List<string> Files(string folder, string extension) =>
         new DirectoryInfo(folder).EnumerateFiles("*" + extension, NoteFileOptions)
             .Where(f => !IsLink(f) && (f.Attributes & (FileAttributes.Directory | FileAttributes.Device)) == 0)
