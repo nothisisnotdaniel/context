@@ -331,6 +331,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#375](backlog/375-code-block-copy-announce-the-result.md) Code block Copy: announce the result to screen readers
 - [?] [#376](backlog/376-code-blocks-track-changed-blocks-by.md) Code blocks: track changed blocks by identity, not index
 - [ ] [#377](backlog/377-dependency-list-with-licence-links.md) Dependency list with licence links
+- [?] [#378](backlog/378-app-icon-full-bleed-variant-for.md) App icon: full-bleed variant for Windows and Linux
 
 ## Dropped with the terminal UI
 
