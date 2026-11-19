@@ -302,6 +302,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#346](backlog/346-redraw-diagrams-when-the-system-theme.md) Redraw diagrams when the system theme changes
 - [?] [#347](backlog/347-keep-the-old-diagram-while-it.md) Keep the old diagram while it redraws
 - [?] [#348](backlog/348-descriptive-alt-text-for-diagrams.md) Descriptive alt text for diagrams
+- [h] [#349](backlog/349-check-that-mermaid-diagrams-draw-on.md) Check that mermaid diagrams draw on macOS and Windows
 
 ## Dropped with the terminal UI
 
