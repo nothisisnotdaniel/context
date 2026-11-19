@@ -12,3 +12,29 @@ internal interface IGlobalHotkey : IDisposable
     /// <summary>Registers the hotkey; false when the system refused it (for example another app holds it).</summary>
     public bool Register();
 }
+
+/// <summary>
+/// The hotkeys Context registers (jobs 260 and 282), as Carbon key codes, modifier bits and ids. Each hotkey has its
+/// own id, so its handler raises <see cref="IGlobalHotkey.Pressed"/> only for its own presses.
+/// </summary>
+internal static class GlobalHotkeys
+{
+    /// <summary>kVK_ANSI_S.</summary>
+    public const uint KeyS = 0x01;
+
+    /// <summary>kVK_Space.</summary>
+    public const uint KeySpace = 0x31;
+
+    /// <summary>Carbon's controlKey, optionKey and shiftKey bits.</summary>
+    public const uint Control = 0x1000;
+    public const uint Option = 0x0800;
+    public const uint Shift = 0x0200;
+
+    /// <summary>Control+Option+Shift+S: a screen area into the inbox.</summary>
+    public const uint ScreenshotModifiers = Control | Option | Shift;
+    public const uint ScreenshotId = 1;
+
+    /// <summary>Control+Option+Space: the command bar.</summary>
+    public const uint CommandBarModifiers = Control | Option;
+    public const uint CommandBarId = 2;
+}

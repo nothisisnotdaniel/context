@@ -394,7 +394,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     sensitive note `Make plain` and `Lock` instead of `Open in default editor`; both mark and make-plain ask in a
     `ConfirmDialog` and need a saved note.
   - **Rules (tests):** no file in `src/Context.Core/` or `src/Context/` mentions `AesGcm`, `ECDiffieHellman`,
-    `IKeyStore` or `SealedNote`; `DllImport`/`LibraryImport`/`extern ` appear only in `MacKeyStore.cs`, `OutlookComSource.cs` and (job 260) `MacGlobalHotkey.cs`; `X509Store`
+    `IKeyStore` or `SealedNote`; `DllImport`/`LibraryImport`/`extern ` appear only in `MacKeyStore.cs`, `OutlookComSource.cs` and (job 260, 282) `MacGlobalHotkey.cs`; `X509Store`
     and `CngKey` only in `WindowsKeyStore.cs`; no test references `WindowsKeyStore`, `MacKeyStore` or
     `PhotinoFileDialog` (tests use `FakeKeyStore`, which counts `Agree` and can throw, and `FakeFileDialog`), so
     `dotnet test` never touches a real key store, Keychain or file dialog; no new NuGet package.
@@ -1647,6 +1647,27 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Folder: <path>`, red `Folder not found.`, red `Can't read the screenshot folder setting.`), `input.screenshot-folder-field`,
     `Save folder`, `Remove folder`. Tests: `ScreenshotInboxTests`, `ScreenshotActionsTests`,
     `ScreenshotFolderWatcherTests` (bounded `SpinWait` on `Processed`), with `FakeScreenCapture` and `FakeGlobalHotkey`.
+    **Command bar** (job 282, macOS only): a second global hotkey, Control+Option+Space (`GlobalHotkeys`: key codes,
+    modifiers and the ids 1 screenshot / 2 bar; `MacGlobalHotkey(keyCode, modifiers, id)` answers only events whose
+    `GetEventParameter` id is its own), opens `PhotinoCommandBarWindow` (a chromeless, topmost 640x300 child window
+    serving only `wwwroot/commandbar/commandbar.{html,js,css}` through its `ctxbar:` scheme; CSP `'self'`; the page sets
+    text only through `textContent`). `CommandBarHotkey` shows the bar when none is open and focuses it otherwise.
+    Each bar gets a `CommandBarHost`: JSON messages `complete`/`run`/`close` (over 4 KiB, malformed or unknown: no
+    answer), answers `suggestions`/`result`/`close`/`focus`; one run at a time; an `ok` result closes after
+    `CloseDelay` (1.5 s, through the injected `delay`). `CommandBarRouter` (pure): `Route` sends `todo`/`note`/`capture`
+    to Context, everything else to Times as separate arguments (one leading `times`/`tm` dropped; in `cp`/`checkpoint`
+    a quicklist work item becomes `#<position>`); `Suggest` ranks command names with `CommandMatcher` and lists
+    quicklist rows after `cp `. Core `TimesProjects.Read(timesFolder)` reads Times' `projects.json` (read-only, 64 KiB,
+    any bad row: empty). `TimesExecutable.Find` looks in `~/.dotnet/tools` then `PATH` (`tm`, `tm.exe` on Windows);
+    `TimesProcessRunner` runs it with `ArgumentList`, stdin closed, `NO_COLOR=1`, 64 KiB per stream, killed after 10 s.
+    Context lines go through `CommandBarContext` (a singleton) to `Main.RunFromBar`, which Main registers in
+    `OnInitialized` and unregisters on dispose (the one Actions caller not bound to an event attribute, allowed by
+    `ActionCallProblems`); `todo` uses `TodoCommand.TryParse` (shared with the palette's `/todo`), `note` calls
+    `DesktopActions.NoteToday` (`- HH:mm <text>` at the end of today's daily note, 1-1000 chars, 3 retries, sensitive
+    refused). Settings `h3` `Command bar` (after Screenshots): the hotkey line and, when `DesktopState.TimesCommandFound`
+    is false (`DesktopFixture.TimesCommand`), a grey "tm not found" line. Tests: `CommandBarRouterTests`,
+    `CommandBarHostTests`, `CommandBarHotkeyTests`, `CommandBarMainTests`, `NoteTodayActionsTests`,
+    `TimesExecutableTests`, `TimesProcessRunnerTests`, `TimesProjectsTests`.
     **Crash log** (job 237, `CrashLog.cs`, desktop only): `CrashLog(root, utcNow, version, os, home)` writes into
     `<root>/.logs/` (a dot folder, so `List()` and `DataWatcher` ignore it). `Write(source, e)` writes
     `crash-yyyyMMdd-HHmmss-fff.log` (UTC; `-2`..`-99` on a clash, `FileMode.CreateNew`) holding only the UTC time, the
@@ -1715,7 +1736,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Environment.GetEnvironmentVariable`, `args` or `Console.`, so an update never touches the data folder; no test
     references `VelopackUpdateSource` (tests use `FakeUpdateSource`, never the network).
     **Launcher rule:** `Process` / `System.Diagnostics` appear only in `ShellNoteLauncher.cs`, (job 178)
-    `SystemNotifier.cs` and (job 260) `MacScreenCapture.cs`, each named only in itself and in `Program.cs`, and (job 280)
+    `SystemNotifier.cs`, (job 260) `MacScreenCapture.cs` and (job 282) `TimesProcessRunner.cs`, each named only in itself
+    and in `Program.cs` (the runner also in its own `TimesProcessRunnerTests`, Unix-only temp `tm` scripts; every other
+    test uses `FakeTimesRunner`), and (job 280)
     outside the desktop only in Core's `GitCommitLog.cs` and the command line's `ProcessDesktopLauncher.cs` (both
     `ArgumentList` only, never a shell; `WorkItemSourceTests`); no test names `ProcessDesktopLauncher`; no test
     names `MacScreenCapture` or `MacGlobalHotkey` (tests use `FakeScreenCapture` and `FakeGlobalHotkey`); no test names `SystemNotifier` (tests use

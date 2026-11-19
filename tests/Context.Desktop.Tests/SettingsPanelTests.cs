@@ -47,7 +47,7 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.Equal("Close", close.GetAttribute("aria-label"));
         Assert.Equal("Close", close.GetAttribute("title"));
         Assert.NotNull(close.QuerySelector("svg"));
-        Assert.Equal(["Exchange calendar", "Outlook", "Pasting", "Screenshots", "Repository folders", "Sensitive notes"], cut.FindAll("h3").Select(h => h.TextContent).ToArray());
+        Assert.Equal(["Exchange calendar", "Outlook", "Pasting", "Screenshots", "Command bar", "Repository folders", "Sensitive notes"], cut.FindAll("h3").Select(h => h.TextContent).ToArray());
         IElement line = cut.Find(".calendar-link-state");
         Assert.Equal("No calendar link set.", line.TextContent);
         Assert.True(line.ClassList.Contains("grey"));
@@ -782,6 +782,39 @@ public sealed class SettingsPanelTests : IDisposable
 
         IElement line = cut.Find(".screenshot-hotkey");
         Assert.Equal(text, line.TextContent);
+        Assert.Contains("grey", line.ClassList);
+    }
+
+    // 282 AC-10: on macOS the section names the bar's hotkey; elsewhere it says the bar is only on macOS.
+    [Theory]
+    [InlineData(true, "Press Control+Option+Space anywhere to open the command bar.")]
+    [InlineData(false, "The command bar is only on macOS.")]
+    public async Task CommandBar_HotkeyLineFollowsTheOs(bool isMac, string text)
+    {
+        data.IsMac = isMac;
+
+        IRenderedComponent<SettingsPanel> cut = await Show();
+
+        cut.WaitForAssertion(() => Assert.Contains("Command bar", cut.FindAll("h3").Select(h => h.TextContent)), Wait);
+        IElement line = cut.Find(".command-bar-hotkey");
+        Assert.Equal(text, line.TextContent);
+        Assert.Contains("grey", line.ClassList);
+        Assert.Empty(cut.FindAll(".command-bar-times"));
+    }
+
+    // 282 AC-10: with no tm found, a grey line says Times commands need it.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task CommandBar_NoTimesCommand_GreyLine(string? found)
+    {
+        data.TimesCommand = found;
+
+        IRenderedComponent<SettingsPanel> cut = await Show();
+
+        cut.WaitForAssertion(() => Assert.Contains("Command bar", cut.FindAll("h3").Select(h => h.TextContent)), Wait);
+        IElement line = cut.Find(".command-bar-times");
+        Assert.Equal("Times commands need the tm command, which wasn't found.", line.TextContent);
         Assert.Contains("grey", line.ClassList);
     }
 

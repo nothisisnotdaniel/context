@@ -44,6 +44,12 @@ public sealed class DesktopSourceTests
     private const string RealScreenCaptureFile = "src/Context.Desktop/" + RealScreenCapture + ".cs";
     private const string RealHotkeyFile = "src/Context.Desktop/" + RealHotkey + ".cs";
 
+    // 282: the real Times runner (starts tm), named only by itself, Program.cs and its own test.
+    private const string RealTimesRunner = "Times" + "ProcessRunner";
+    private const string RealTimesRunnerFile = "src/Context.Desktop/" + RealTimesRunner + ".cs";
+    private const string RealTimesRunnerTestFile = "tests/Context.Desktop.Tests/" + RealTimesRunner + "Tests.cs";
+    private const string CommandBarFolder = "src/Context.Desktop/wwwroot/commandbar/";
+
     // 136: SealedNote.cs makes P-256 keys in memory with .NET's ECDiffieHellman.Create; that writes no data.
     private const string SealedNoteFile = "src/Context.Desktop/SealedNote.cs";
     private const string KeyFactory = "ECDiffieHellman.Create(";
@@ -1595,8 +1601,8 @@ public sealed class DesktopSourceTests
             RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs"));
     }
 
-    // 134 AC-9, 178, 260: only the real launcher, the real notifier and the real area picker start a process; Process and System.Diagnostics appear
-    // nowhere else in the app.
+    // 134 AC-9, 178, 260, 282: only the real launcher, the real notifier, the real area picker and the real Times runner
+    // start a process; Process and System.Diagnostics appear nowhere else in the app.
     [Fact]
     public void Sources_UseProcessOnlyInTheLauncher()
     {
@@ -1607,7 +1613,7 @@ public sealed class DesktopSourceTests
             .ToList();
 
         Assert.Equal(
-            new[] { RealLauncherFile, RealNotifierFile, RealScreenCaptureFile }.Order(StringComparer.Ordinal),
+            new[] { RealLauncherFile, RealNotifierFile, RealScreenCaptureFile, RealTimesRunnerFile }.Order(StringComparer.Ordinal),
             found.Order(StringComparer.Ordinal));
     }
 
@@ -1810,6 +1816,77 @@ public sealed class DesktopSourceTests
             RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs"));
     }
 
+    // 282 AC-9: only the Times runner's own test names the real runner (it starts temp scripts); every other test uses
+    // FakeTimesRunner. In the app only the runner itself and Program.cs name it.
+    [Fact]
+    public void Sources_NameTheTimesRunnerOnlyInItselfProgramAndItsTest()
+    {
+        string root = RepoFiles.Root();
+        List<string> found = [];
+        foreach (string folder in new[] { "tests/Context.Tests", "tests/Context.Desktop.Tests", RepoFiles.DesktopFolder })
+        {
+            found.AddRange(RepoFiles.Sources(root, folder, ".cs", ".razor", ".csproj")
+                .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains(RealTimesRunner, StringComparison.Ordinal)));
+        }
+
+        Assert.Equal(
+            new[] { ProgramFile, RealTimesRunnerFile, RealTimesRunnerTestFile }.Order(StringComparer.Ordinal),
+            found.Order(StringComparer.Ordinal));
+        Assert.Contains(
+            "tests/Context.Desktop.Tests/FakeTimesRunner.cs",
+            RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs"));
+    }
+
+    // 282 AC-9: the bar page sets shown text only through textContent and runs no built code.
+    [Fact]
+    public void CommandBarScript_UsesNoHtmlOrEval()
+    {
+        string script = File.ReadAllText(Path.Combine(RepoFiles.Root(), CommandBarFolder, "commandbar.js"));
+
+        Assert.DoesNotContain("innerHTML", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("outerHTML", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("insertAdjacentHTML", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("document.write", script, StringComparison.Ordinal);
+        Assert.DoesNotMatch(new Regex(@"\beval\s*\(", RegexOptions.CultureInvariant), script);
+        Assert.DoesNotContain("new Function", script, StringComparison.Ordinal);
+        Assert.Contains("textContent", script, StringComparison.Ordinal);
+    }
+
+    // 282 AC-9: the bar page is local-only: a strict CSP and its one script.
+    [Fact]
+    public void CommandBarPage_HasTheCspAndOneLocalScript()
+    {
+        string root = RepoFiles.Root();
+        string page = File.ReadAllText(Path.Combine(root, CommandBarFolder, "commandbar.html"));
+
+        Assert.Contains(
+            "content=\"default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'\"",
+            page,
+            StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(page, "<script", RegexOptions.CultureInvariant));
+        Assert.Contains("<script src=\"commandbar.js\"></script>", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("http", page.Replace("http-equiv", string.Empty, StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.Equal(
+            ["commandbar.css", "commandbar.html", "commandbar.js"],
+            Directory.GetFiles(Path.Combine(root, CommandBarFolder)).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+    }
+
+    // 282: the bar window serves only its three files.
+    [Theory]
+    [InlineData("ctxbar://localhost/commandbar.html", "commandbar.html")]
+    [InlineData("ctxbar://localhost/commandbar.js?v=1", "commandbar.js")]
+    [InlineData("ctxbar://localhost/commandbar.css#x", "commandbar.css")]
+    [InlineData("ctxbar://localhost/../appsettings.json", null)]
+    [InlineData("ctxbar://localhost/index.html", null)]
+    [InlineData("ctxbar://localhost/commandbar/commandbar.js", null)]
+    [InlineData("ctxbar://evil/commandbar.js", null)]
+    [InlineData("https://localhost/commandbar.js", null)]
+    [InlineData("ctxbar://localhost/COMMANDBAR.JS", null)]
+    public void CommandBarWindow_ServesOnlyItsFiles(string url, string? file)
+    {
+        Assert.Equal(file, PhotinoCommandBarWindow.FileFor(url));
+    }
+
     // 134 AC-9: the launcher passes the path as FileName through the shell, with no arguments.
     [Fact]
     public void Launcher_UsesShellExecuteWithThePathOnly()
@@ -1860,7 +1937,7 @@ public sealed class DesktopSourceTests
     // on macOS only.
     [Theory]
     [InlineData(RealScreenCapture, RealScreenCaptureFile, "return new " + RealScreenCapture + "(root);")]
-    [InlineData(RealHotkey, RealHotkeyFile, "return new " + RealHotkey + "();")]
+    [InlineData(RealHotkey, RealHotkeyFile, "return new " + RealHotkey + "(keyCode, modifiers, id);")]
     public void Sources_NameTheScreenshotPartsOnlyInThemselvesAndProgram(string name, string file, string made)
     {
         string root = RepoFiles.Root();
@@ -2494,7 +2571,10 @@ public sealed class DesktopSourceTests
             // Save (Ctrl/Cmd+S); only this pair counts as bound through its caller.
             bool boundThrough = methods.Any(m => KeyCallers.Contains((m.Name, name)) && word.IsMatch(m.Body)
                 && IsBoundHandler(m.Name, bindings));
-            if (!bindings.Any(b => word.IsMatch(b)) && !boundThrough)
+            // 282: the command bar's runner (Main's RunFromBar) is bound to the bar window's Enter key through
+            // CommandBarContext: it counts as bound only when OnInitialized registers exactly it.
+            bool barBound = IsBarRunner(name, methods);
+            if (!bindings.Any(b => word.IsMatch(b)) && !boundThrough && !barBound)
             {
                 problems.Add(name + " is bound by no event attribute");
             }
@@ -2506,7 +2586,8 @@ public sealed class DesktopSourceTests
             // the last edit (AutoSaveAsync) and by the parent before it leaves the note (SaveFirstAsync); only these
             // two pairs are exempt.
             if (methods.Any(m => m.Name != name && word.IsMatch(m.Body) && !IsBoundHandler(m.Name, bindings)
-                && !SaveCallers.Contains((m.Name, name))))
+                && !SaveCallers.Contains((m.Name, name))
+                && !(barBound && m.Name == "OnInitialized")))
             {
                 problems.Add(name + " is called by another method");
             }
@@ -2516,6 +2597,15 @@ public sealed class DesktopSourceTests
     }
 
     private const string RecordOpenedCall = "Actions.RecordOpened(";
+
+    private const string BarRunner = "RunFromBar";
+
+    // 282: RunFromBar is the bar's runner when OnInitialized stores exactly it and registers that with CommandBar.
+    private static bool IsBarRunner(string name, List<(string Name, string Body)> methods) =>
+        name == BarRunner
+        && methods.Any(m => m.Name == "OnInitialized"
+            && m.Body.Contains("barRunner = " + BarRunner + ";", StringComparison.Ordinal)
+            && m.Body.Contains("CommandBar.Register(barRunner);", StringComparison.Ordinal));
 
     private static readonly HashSet<(string Caller, string Callee)> SaveCallers =
         [("SaveFirstAsync", "SaveAsync"), ("AutoSaveAsync", "SaveAsync")];
@@ -2667,7 +2757,10 @@ public sealed class DesktopSourceTests
         Assert.Contains(".top-bar-buttons button:hover {\n    color: var(--accent-strong);", css.ReplaceLineEndings("\n"), StringComparison.Ordinal);
         Assert.Contains(".top-bar-buttons button:focus-visible {", css, StringComparison.Ordinal);
 
-        Assert.Single(Regex.Matches(main, Regex.Escape("Actions.CaptureText(")));
+        // 282: the second call is the command bar's capture line, in its runner RunFromBar.
+        Assert.Equal(2, Regex.Matches(main, Regex.Escape("Actions.CaptureText(")).Count);
+        Assert.Single(Regex.Matches(main, Regex.Escape("captured = await Actions.CaptureText(text);")));
+        Assert.Single(Regex.Matches(main, Regex.Escape("captured = await Actions.CaptureText(rest);")));
         Assert.Contains("OnCapture=\"CaptureAsync\"", main, StringComparison.Ordinal);
         Assert.Contains("Task<bool> CaptureAsync(string text)", main, StringComparison.Ordinal);
     }

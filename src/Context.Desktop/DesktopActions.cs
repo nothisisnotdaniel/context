@@ -592,6 +592,18 @@ internal sealed class DesktopActions
     /// <summary>The red line when a capture's text is too long.</summary>
     public static string CaptureTooLongText => $"A capture can be at most {Inbox.MaxTextLength} characters.";
 
+    /// <summary>The command bar's <c>note</c> (job 282): the red line for an empty text.</summary>
+    public const string NoteEmptyText = "Type something to add to today's note.";
+
+    /// <summary>The red line when a <c>note</c> line is too long.</summary>
+    public static string NoteTooLongText => $"A note line can be at most {Inbox.MaxTextLength} characters.";
+
+    /// <summary>The red line when today's note is sensitive.</summary>
+    public static string NoteSensitiveText(string name) => $"{name} is sensitive. Nothing was added.";
+
+    /// <summary>The Done text of a <c>note</c> line.</summary>
+    public static string NoteAddedText(string name) => $"Added to {name}.";
+
     /// <summary>The Done text of a rename that changed no other note.</summary>
     public static string RenamedText(string name) => $"Renamed to {name}.";
 
@@ -701,6 +713,9 @@ internal sealed class DesktopActions
     /// <summary>Test hook: runs on the worker thread right before an action's checks and write.</summary>
     internal Action? BeforeWrite { get; set; }
 
+    /// <summary>Test hook: called in <see cref="NoteToday"/> after each read of today's note, before its save (the try number).</summary>
+    internal Action<int>? BeforeNoteTodaySave { get; set; }
+
     /// <summary>Test hook: runs before every save attempt of <see cref="CaptureText"/>, after the inbox was read.</summary>
     internal Action? BeforeCaptureSave { get; set; }
 
@@ -722,6 +737,16 @@ internal sealed class DesktopActions
     /// <see cref="CapturedText"/> when done.
     /// </summary>
     public Task<ActionResult> CaptureText(string text) => Run(() => CaptureTextNow(text));
+
+    /// <summary>
+    /// The command bar's <c>note</c> (job 282): appends <c>- HH:mm &lt;text&gt;</c> (local time) to the end of today's
+    /// daily note, creating it first through <see cref="DailyNote.Ensure"/> (composed like <see cref="OpenDailyNote()"/>).
+    /// The text is cleaned to one line (<see cref="Inbox.Clean"/>); empty or over <see cref="Inbox.MaxTextLength"/>
+    /// characters is refused. A sensitive daily note is refused without a key-store call; a note that keeps changing on
+    /// disk (<see cref="Inbox.MaxRetries"/> retries), would grow past <see cref="MaxNoteBytes"/> or can't be written is
+    /// refused with nothing written. Done: <see cref="NoteAddedText"/> with the note's name in <see cref="ActionResult.Name"/>.
+    /// </summary>
+    public Task<ActionResult> NoteToday(string text) => Run(() => NoteTodayNow(text));
 
     /// <summary>
     /// Triage: creates the note <paramref name="title"/> as <c># &lt;Title&gt;\n\n&lt;text&gt;\n</c> through
@@ -2262,6 +2287,62 @@ internal sealed class DesktopActions
         catch (Exception)
         {
             return Failed(ActionReason.WriteFailed, CaptureFailedText);
+        }
+    }
+
+    private ActionResult NoteTodayNow(string? text)
+    {
+        string cleaned = Inbox.Clean(text ?? string.Empty);
+        if (cleaned.Length == 0)
+        {
+            return Refused(ActionReason.Invalid, NoteEmptyText);
+        }
+
+        if (cleaned.Length > Inbox.MaxTextLength)
+        {
+            return Refused(ActionReason.Invalid, NoteTooLongText);
+        }
+
+        DateTime now = localNow();
+        DateOnly day = DateOnly.FromDateTime(now);
+        string name = DailyNote.NameFor(day);
+        string line = now.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture) + " " + cleaned;
+        try
+        {
+            DailyNoteResult ensured = DailyNote.Ensure(notes, day, () => DailyNote.Compose(todos, calendar, calendarFeed, day));
+            if (ensured.Kind == DailyNoteKind.Sensitive)
+            {
+                return Refused(ActionReason.Locked, NoteSensitiveText(ensured.Name));
+            }
+
+            name = ensured.Name;
+            for (int attempt = 0; attempt <= Inbox.MaxRetries; attempt++)
+            {
+                if (!notes.TryFind(name, out NoteInfo? found) || found is null)
+                {
+                    return Refused(ActionReason.Missing, NoNoteNamedText(name));
+                }
+
+                EditableNote opened = notes.ReadForEdit(found);
+                BeforeNoteTodaySave?.Invoke(attempt);
+                NoteSaveResult result = notes.SaveIfUnchanged(opened, Appended(opened.Text, line), out _, state.HistoryStore);
+                switch (result)
+                {
+                    case NoteSaveResult.Saved:
+                        return new ActionResult(ActionKind.Done, ActionReason.None, NoteAddedText(found.Name), name: found.Name);
+                    case NoteSaveResult.TooLarge:
+                        return Refused(ActionReason.Invalid, TooLargeText(found.Name));
+                    default:
+                        // ChangedOnDisk or Missing: read again.
+                        continue;
+                }
+            }
+
+            return Refused(ActionReason.ChangedOnDisk, ChangedText(name));
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, NoteWriteFailedText(name));
         }
     }
 

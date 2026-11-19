@@ -77,15 +77,23 @@ internal static class Program
             return null;
         }
 
-        static IGlobalHotkey? Hotkey()
+        // Each hotkey with its own id (job 282), so the screenshot and the command bar presses stay apart.
+        static IGlobalHotkey? Hotkey(uint keyCode, uint modifiers, uint id)
         {
             if (OperatingSystem.IsMacOS())
             {
-                return new MacGlobalHotkey();
+                return new MacGlobalHotkey(keyCode, modifiers, id);
             }
 
             return null;
         }
+
+        // The installed Times command (job 282): the .NET tool's `tm` in ~/.dotnet/tools, else on PATH.
+        static string? TimesCommand() => TimesExecutable.Find(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            Environment.GetEnvironmentVariable("PATH"),
+            OperatingSystem.IsWindows(),
+            File.Exists);
 
         // The lock of a running desktop app (job 280), or null when another holder has it or it can't be made.
         static FileStream? RunningLock(string root)
@@ -128,7 +136,7 @@ internal static class Program
         string? timesFolder = TimesFolder.Resolve(Environment.GetEnvironmentVariable(TimesFolder.VariableName));
         DesktopState state = new DesktopState(
             notes, todos, index, calendar, feed, Today, () => DateTime.UtcNow, KeyStore(), session, calendarLink, Outlook(),
-            pageTitles: pageTitles, timesFolder: timesFolder);
+            pageTitles: pageTitles, timesFolder: timesFolder, timesCommand: TimesCommand);
         DesktopActions actions = new DesktopActions(
             notes, todos, state, new ShellNoteLauncher(), calendarLink, feed, () => DateTime.Now, calendar,
             timesFolder, new SystemNotifier(),
@@ -151,6 +159,9 @@ internal static class Program
         builder.Services.AddSingleton(closeGuard);
         PhotinoFileDialog dialog = new PhotinoFileDialog();
         builder.Services.AddSingleton<IFileDialog>(dialog);
+        // The command bar's way into Main (job 282): Main registers its runner for todo, note and capture lines.
+        CommandBarContext commandBarContext = new CommandBarContext();
+        builder.Services.AddSingleton(commandBarContext);
         builder.RootComponents.Add<App>("app");
         PhotinoBlazorApp app = builder.Build();
 
@@ -225,10 +236,20 @@ internal static class Program
         using ScreenshotFolderWatcher screenshots = new ScreenshotFolderWatcher(
             new SettingsStore(folder), state, (path, lastTry) => actions.ImportScreenshot(path, lastTry));
         screenshots.Start();
-        IGlobalHotkey? hotkey = Hotkey();
+        IGlobalHotkey? hotkey = Hotkey(GlobalHotkeys.KeyS, GlobalHotkeys.ScreenshotModifiers, GlobalHotkeys.ScreenshotId);
         using ScreenshotHotkey? screenshotHotkey =
             hotkey is null ? null : new ScreenshotHotkey(hotkey, () => actions.CaptureScreenshot());
         _ = screenshotHotkey?.Register();
+
+        // The command bar (job 282): on macOS Control+Option+Space opens a small window that runs Times one-shots
+        // (`tm <words>`, no shell, 10 s timeout) or Context's todo, note and capture lines through Main's hook.
+        TimesProcessRunner timesRunner = new TimesProcessRunner(TimesCommand, TimeSpan.FromSeconds(10));
+        PhotinoCommandBarWindow commandBar = new PhotinoCommandBarWindow(
+            app.MainWindow,
+            () => new CommandBarHost(timesRunner, commandBarContext, () => TimesProjects.Read(timesFolder), Task.Delay));
+        IGlobalHotkey? barHotkey = Hotkey(GlobalHotkeys.KeySpace, GlobalHotkeys.CommandBarModifiers, GlobalHotkeys.CommandBarId);
+        using CommandBarHotkey? commandBarHotkey = barHotkey is null ? null : new CommandBarHotkey(barHotkey, commandBar);
+        _ = commandBarHotkey?.Register();
         _ = state.Refresh();
 
         // Installed Windows copies only: look for a newer build in the background; it is put in place after exit.

@@ -292,6 +292,27 @@ without `--template` creates a note with just its title. A template name is only
 `templates/` (ignoring case), never used as a path; a name that isn't there prints the templates you have. In the
 desktop app, `/new Weekly sync --template meeting` in the command palette does the same and opens the note.
 
+### Command bar
+
+On macOS, Control+Option+Space opens a small command bar in front of any app, even when Context is in the
+background. Type a line and press Enter:
+
+- `todo <yyyy-MM-dd|today|tomorrow> [HH:mm] <text>` or `todo every <weekday|day|month> <text>` adds a todo.
+- `note <text>` adds `- HH:mm <text>` to the end of today's note (created first when needed).
+- `capture <text>` adds the text to the inbox.
+- Any other line runs the Times tool `tm` with its words as arguments, for example `a`, `l`, `b`, `be`, `status`,
+  or `cp 1234 review`. A leading `times` or `tm` is left out. In a checkpoint, a work item from Times' project
+  quicklist is passed as its number in the list (`#2`).
+
+Tab completes the picked suggestion (↑/↓ pick), Esc or clicking elsewhere closes the bar. A result stays in red until
+you type again; a success closes the bar after a moment. The bar finds `tm` in `~/.dotnet/tools` first, then on
+`PATH`; Settings says when it isn't found. On Windows and Linux there is no command bar.
+
+Manual check (the real hotkey and window can't run in tests): with the app running, press Control+Option+Space in
+another app; the bar opens centred and focused. Press it again: the same bar keeps focus. Control+Option+Shift+S
+still opens only the screen-area picker, and Control+Option+Space only the bar. With Times installed, `a`, `status`,
+`cp <work item> test` and `l` each show Times' answer; `todo today x`, `note x` and `capture x` show up in Context.
+
 ### JSON output
 
 Add `--json` to a read command (`version`, `todos`, `notes`, `note show`, `tags`,

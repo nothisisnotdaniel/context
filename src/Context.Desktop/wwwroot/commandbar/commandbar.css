@@ -1,0 +1,110 @@
+/* The command bar (job 282): the app's colours and fonts, one input, up to six suggestions, one result line. */
+:root {
+    color-scheme: light dark;
+    --accent-strong: #1e78c8;
+    --text: #1d1d1f;
+    --grey: #6e6e73;
+    --red: #d70015;
+    --background: #ffffff;
+    --panel: #f5f5f7;
+    --line: #d2d2d7;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --accent-strong: #63b8ff;
+        --text: #f5f5f7;
+        --grey: #98989d;
+        --red: #ff453a;
+        --background: #1c1c1e;
+        --panel: #242426;
+        --line: #3a3a3c;
+    }
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+}
+
+body {
+    background: var(--background);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 15px;
+}
+
+.bar {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+}
+
+#line {
+    width: 100%;
+    padding: 10px 12px;
+    font: inherit;
+    font-size: 20px;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+}
+
+#line:focus {
+    outline: 2px solid var(--accent-strong);
+    outline-offset: 1px;
+}
+
+#suggestions {
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 0;
+    flex: 1;
+    overflow: hidden;
+}
+
+#suggestions li {
+    display: flex;
+    gap: 12px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+#suggestions li[aria-selected="true"] {
+    background: var(--panel);
+    outline: 1px solid var(--accent-strong);
+}
+
+#suggestions .detail {
+    color: var(--grey);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#result {
+    margin: 8px 0 0;
+    min-height: 1.3em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#result.ok {
+    color: var(--accent-strong);
+}
+
+#result.error {
+    color: var(--red);
+}

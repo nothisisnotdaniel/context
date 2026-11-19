@@ -297,9 +297,21 @@ else
     [Inject]
     internal CloseGuard Guard { get; set; } = null!;
 
+    /// <summary>The command bar's way in (job 282): this page runs its todo, note and capture lines.</summary>
+    [Inject]
+    internal CommandBarContext CommandBar { get; set; } = null!;
+
+    // The runner registered with CommandBar, kept so DisposeAsync clears exactly this one.
+    private Func<string, Task<CommandBarResult>>? barRunner;
+
     public ValueTask DisposeAsync()
     {
         Guard.Detach();
+        if (barRunner is not null)
+        {
+            CommandBar.Unregister(barRunner);
+        }
+
         Dispose();
         return ValueTask.CompletedTask;
     }
@@ -311,6 +323,8 @@ else
             () => editor?.HasUnsaved ?? false,
             SaveFirstForCloseAsync,
             () => InvokeAsync(AskDiscardForClose));
+        barRunner = RunFromBar;
+        CommandBar.Register(barRunner);
         TakeStartNote();
         if (State.TakeBriefing() is { } offered)
         {
@@ -1398,47 +1412,10 @@ else
                 PickDone(rest);
                 break;
             case "/todo":
-                int split = rest.IndexOfAny([' ', '\t']);
-                TodoRepeat? repeat = null;
-                DateOnly due;
-                if (string.Equals(split < 0 ? rest : rest[..split], "every", StringComparison.OrdinalIgnoreCase))
+                if (!TodoCommand.TryParse(rest, Snapshot?.Today ?? default, out TodoCommand? todo, out string todoUsage) || todo is null)
                 {
-                    // /todo every <unit> <text>: the unit is the next word, the text the rest.
-                    string every = split < 0 ? string.Empty : rest[(split + 1)..].TrimStart();
-                    int unitEnd = every.IndexOfAny([' ', '\t']);
-                    if (unitEnd < 0 || every[(unitEnd + 1)..].Trim().Length == 0
-                        || !TodoInput.TryParseRepeat(every[..unitEnd], Snapshot?.Today ?? default, out TodoRepeat parsed, out due))
-                    {
-                        ShowStatus("Type /todo every <weekday|day|month> <text>.", "red");
-                        break;
-                    }
-
-                    repeat = parsed;
-                    rest = every;
-                    split = unitEnd;
-                }
-                else if (split < 0 || !DesktopText.TryParseDue(rest[..split], Snapshot?.Today ?? default, out due))
-                {
-                    ShowStatus("Type /todo <yyyy-MM-dd|today|tomorrow> <text>.", "red");
+                    ShowStatus("Type /" + todoUsage + ".", "red");
                     break;
-                }
-
-                // /todo <date> [HH:mm] <text>: a time-shaped word after the date is the time, never text (not after every).
-                string todoText = rest[(split + 1)..].TrimStart();
-                TimeOnly? todoTime = null;
-                int timeEnd = todoText.IndexOfAny([' ', '\t']);
-                string timeWord = timeEnd < 0 ? todoText : todoText[..timeEnd];
-                if (repeat is null && TodoInput.LooksLikeTime(timeWord))
-                {
-                    if (timeEnd < 0 || todoText[(timeEnd + 1)..].Trim().Length == 0
-                        || !TodoInput.TryParseTime(timeWord, out TimeOnly parsedTime))
-                    {
-                        ShowStatus("Type /todo <yyyy-MM-dd|today|tomorrow> [HH:mm] <text>.", "red");
-                        break;
-                    }
-
-                    todoTime = parsedTime;
-                    todoText = todoText[(timeEnd + 1)..];
                 }
 
                 if (!running)
@@ -1446,7 +1423,7 @@ else
                     running = true;
                     try
                     {
-                        ActionResult added = await Actions.AddTodo(todoText, due, repeat, todoTime);
+                        ActionResult added = await Actions.AddTodo(todo.Text, todo.Due, todo.Repeat, todo.Time);
                         ShowStatus(
                             added.Kind == ActionKind.Done ? $"Added: {DesktopText.OneLine(added.Text)}" : DesktopText.OneLine(added.Text),
                             added.Kind == ActionKind.Done ? "accent" : "red");
@@ -1553,6 +1530,115 @@ else
 
         await Captured();
         return true;
+    }
+
+    // The command bar's Context lines (job 282), the bar window's Enter key: todo, capture and note with the palette's
+    // rules and guards, run on this page's dispatcher. todo is /todo's parsing and action, capture /capture's guard
+    // and action, note appends a timed line to today's note (saved first when it is open with unsaved changes, and
+    // reloaded after when it is clean). Called on the bar host's thread.
+    private async Task<CommandBarResult> RunFromBar(string line)
+    {
+        CommandBarResult result = CommandBarResult.Error(CommandBarContext.NotReadyText);
+        await InvokeAsync(async () =>
+        {
+            string trimmed = line.Trim();
+            int split = trimmed.IndexOfAny([' ', '\t']);
+            string word = split < 0 ? trimmed : trimmed[..split];
+            string rest = split < 0 ? string.Empty : trimmed[(split + 1)..].Trim();
+            if (Snapshot is null)
+            {
+                return;
+            }
+
+            if (running)
+            {
+                result = CommandBarResult.Error(DesktopActions.BusyText);
+                return;
+            }
+
+            if (string.Equals(word, "todo", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TodoCommand.TryParse(rest, Snapshot.Today, out TodoCommand? todo, out string usage) || todo is null)
+                {
+                    result = CommandBarResult.Error("Type " + usage + ".");
+                    return;
+                }
+
+                running = true;
+                try
+                {
+                    ActionResult added = await Actions.AddTodo(todo.Text, todo.Due, todo.Repeat, todo.Time);
+                    result = added.Kind == ActionKind.Done
+                        ? CommandBarResult.Done($"Added: {DesktopText.OneLine(added.Text)}")
+                        : CommandBarResult.Error(DesktopText.OneLine(added.Text));
+                }
+                finally
+                {
+                    running = false;
+                }
+            }
+            else if (string.Equals(word, "capture", StringComparison.OrdinalIgnoreCase))
+            {
+                if (await CaptureHeld() is { } held)
+                {
+                    result = CommandBarResult.Error(DesktopText.OneLine(held));
+                    return;
+                }
+
+                running = true;
+                ActionResult captured;
+                try
+                {
+                    captured = await Actions.CaptureText(rest);
+                }
+                finally
+                {
+                    running = false;
+                }
+
+                result = new CommandBarResult(captured.Kind == ActionKind.Done, DesktopText.OneLine(captured.Text));
+                if (captured.Kind == ActionKind.Done)
+                {
+                    await Captured();
+                }
+            }
+            else if (string.Equals(word, "note", StringComparison.OrdinalIgnoreCase))
+            {
+                string daily = Actions.DailyNoteName();
+                bool dailyOpen = openName is { } shown && string.Equals(shown, daily, StringComparison.OrdinalIgnoreCase);
+                if (dailyOpen && !openSensitive && await KeptUnsaved())
+                {
+                    result = CommandBarResult.Error($"Save {DesktopText.OneLine(openName ?? daily)} first.");
+                    return;
+                }
+
+                running = true;
+                ActionResult noted;
+                try
+                {
+                    noted = await Actions.NoteToday(rest);
+                }
+                finally
+                {
+                    running = false;
+                }
+
+                result = new CommandBarResult(noted.Kind == ActionKind.Done, DesktopText.OneLine(noted.Text));
+                if (noted.Kind == ActionKind.Done
+                    && openName is { } open && string.Equals(open, noted.Name, StringComparison.OrdinalIgnoreCase)
+                    && !openSensitive && editor is not null && !await editor.IsDirtyAsync())
+                {
+                    await editor.ReloadAsync();
+                }
+            }
+            else
+            {
+                result = CommandBarResult.Error("Unknown command.");
+            }
+
+            StateHasChanged();
+        });
+        return result;
     }
 
     // After a capture: an open inbox shows the new line, and its next save starts from the file as it is now. Text
