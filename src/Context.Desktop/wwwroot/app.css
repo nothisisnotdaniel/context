@@ -512,10 +512,12 @@ input[type="password"]:disabled {
     min-width: 0;
 }
 
-/* The similar notes panel (job 268): both note names, the grey reason and the two Keep buttons on one line. */
+/* The similar notes panel (job 268): both note names, the grey reason and the two Keep buttons on one line; on a
+   narrow window the line wraps instead of squeezing the reason. */
 .similar-rows li {
     align-items: baseline;
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     padding: 3px 0;
 }
@@ -527,7 +529,7 @@ input[type="password"]:disabled {
 
 .similar-rows .reason {
     flex: 1;
-    min-width: 0;
+    min-width: 8em;
 }
 
 .similar-rows .similar-buttons {
