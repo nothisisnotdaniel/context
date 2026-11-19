@@ -151,7 +151,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#72](backlog/072-command-bar.md) Command bar (after: Times#4) → 282-command-bar
 - [x] [#73](backlog/073-mail-digest.md) Mail digest → 286-mail-digest
 - [x] [#75](backlog/075-todos-tied-to-meetings.md) Todos tied to meetings → 287-todos-tied-to-meetings
-- [ ] [#76](backlog/076-done-log.md) Done log
+- [x] [#76](backlog/076-done-log.md) Done log → 293-done-log
 - [ ] [#23](backlog/023-voice-capture-spike.md) Voice capture spike
 - [ ] [#24](backlog/024-voice-notes.md) Voice notes (after: #23)
 - [ ] [#27](backlog/027-todo-dates-with-years.md) Todo dates with years
