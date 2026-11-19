@@ -476,6 +476,9 @@ internal sealed class DesktopActions
     /// <summary>The line after an export.</summary>
     public static string ExportedText(string name, string path) => $"Exported {name} to {path}";
 
+    /// <summary>The Done text of <see cref="ShareNote"/> (raw name and path).</summary>
+    public static string SharedText(string name, string path) => $"Shared {name} as HTML: {path}";
+
     /// <summary>The red line when the export target is already there.</summary>
     public static string ExportExistsText(string path) => $"That file already exists; choose a new name: {path}";
 
@@ -1124,6 +1127,18 @@ internal sealed class DesktopActions
     /// without a private-key call. Changes nothing in the data folder and never refreshes.
     /// </summary>
     public Task<ActionResult> ExportNote(string name, string path) => Run(() => ExportNoteNow(name, path), refresh: false);
+
+    /// <summary>
+    /// Writes the note <paramref name="name"/> as a self-contained HTML page (<see cref="NoteHtml.Render"/>) to the new
+    /// file <paramref name="path"/>, with the path, existence and <see cref="NoteStore.WritePlainCopy"/> rules and texts
+    /// of <see cref="ExportNote"/>. A plain note's image attachments are embedded; with
+    /// <paramref name="leaveOutPrivate"/> lines tagged <c>#private</c> are left out. A sensitive note is written only
+    /// while it is the open <see cref="SensitiveSession"/> note (else <c>Unlock &lt;name&gt; first.</c>) and only with a
+    /// <paramref name="confirmed"/> warning (else Refused <see cref="ActionReason.NotConfirmed"/>), from the session
+    /// text without images and without a private-key call. Changes nothing in the data folder and never refreshes.
+    /// </summary>
+    public Task<ActionResult> ShareNote(string name, string path, bool leaveOutPrivate, Confirmation? confirmed) =>
+        Run(() => ShareNoteNow(name, path, leaveOutPrivate, confirmed), refresh: false);
 
     /// <summary>The Refused/<see cref="ActionReason.Exists"/> text of <see cref="SaveSearch"/> (raw name).</summary>
     public static string SearchExistsText(string name) => $"A saved search named {name} already exists.";
@@ -2779,25 +2794,9 @@ internal sealed class DesktopActions
     // The console's /export with the path from the OS save dialog, checked again here.
     private ActionResult ExportNoteNow(string name, string? path)
     {
-        string shown = path ?? string.Empty;
-        string target;
-        try
+        if (CopyTarget(path, out string target, out string shown) is { } refused)
         {
-            if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
-            {
-                return Refused(ActionReason.Invalid, CantWriteText(shown));
-            }
-
-            target = Path.GetFullPath(path);
-            shown = target;
-            if (notes.Contains(target))
-            {
-                return Refused(ActionReason.Invalid, ExportInsideText);
-            }
-        }
-        catch (Exception)
-        {
-            return Refused(ActionReason.Invalid, CantWriteText(shown));
+            return refused;
         }
 
         NoteInfo? note;
@@ -2824,21 +2823,46 @@ internal sealed class DesktopActions
         string text;
         try
         {
-            // Decoded like the console's File.ReadAllText (UTF-8 unless a byte order mark says otherwise), but bounded.
-            byte[] bytes = BoundedFile.Read(note.Path, MaxNoteBytes);
-            using MemoryStream stream = new MemoryStream(bytes, writable: false);
-            using StreamReader reader = new StreamReader(stream, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-            text = reader.ReadToEnd();
+            text = ReadPlainCopy(note);
         }
         catch (Exception)
         {
             return Failed(ActionReason.Unreadable, CantReadText(note.Name));
         }
 
+        return WriteCopy(target, shown, text, ExportedText(note.Name, shown));
+    }
+
+    // Where an export or share goes: a fully qualified path outside the data folder, as a full path and as shown; null
+    // when it may be written, else the refusal.
+    private ActionResult? CopyTarget(string? path, out string target, out string shown)
+    {
+        shown = path ?? string.Empty;
+        target = string.Empty;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
+            {
+                return Refused(ActionReason.Invalid, CantWriteText(shown));
+            }
+
+            target = Path.GetFullPath(path);
+            shown = target;
+            return notes.Contains(target) ? Refused(ActionReason.Invalid, ExportInsideText) : null;
+        }
+        catch (Exception)
+        {
+            return Refused(ActionReason.Invalid, CantWriteText(shown));
+        }
+    }
+
+    // Writes the new file through WritePlainCopy (never overwrites) and answers done, or why not.
+    private ActionResult WriteCopy(string target, string shown, string text, string done)
+    {
         try
         {
             NoteStore.WritePlainCopy(target, text);
-            return new ActionResult(ActionKind.Done, ActionReason.None, ExportedText(note.Name, shown));
+            return new ActionResult(ActionKind.Done, ActionReason.None, done);
         }
         catch (Exception)
         {
@@ -2846,6 +2870,74 @@ internal sealed class DesktopActions
                 ? Refused(ActionReason.Exists, ExportExistsText(shown))
                 : Failed(ActionReason.WriteFailed, CantWriteText(shown));
         }
+    }
+
+    // Reads a plain note's saved text like the console's File.ReadAllText (UTF-8 unless a byte order mark says
+    // otherwise), but bounded.
+    private static string ReadPlainCopy(NoteInfo note)
+    {
+        byte[] bytes = BoundedFile.Read(note.Path, MaxNoteBytes);
+        using MemoryStream stream = new MemoryStream(bytes, writable: false);
+        using StreamReader reader = new StreamReader(stream, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        return reader.ReadToEnd();
+    }
+
+    // /share and the Share menu item, with the path from the OS save dialog, checked again here. A sensitive note is
+    // the one deliberate plain copy of a sealed note: only its open session text, only after the dialog's warning.
+    private ActionResult ShareNoteNow(string name, string? path, bool leaveOutPrivate, Confirmation? confirmed)
+    {
+        if (CopyTarget(path, out string target, out string shown) is { } refused)
+        {
+            return refused;
+        }
+
+        NoteInfo? note;
+        EditableNote? open = null;
+        try
+        {
+            if (!notes.TryFind(name, out note) || note is null)
+            {
+                if (!notes.TryFindSensitive(name, out note) || note is null)
+                {
+                    return Refused(ActionReason.Missing, NoteMissingText(name));
+                }
+
+                open = OpenSensitive(note);
+                if (open is null)
+                {
+                    return Refused(ActionReason.Locked, UnlockFirstText(note.Name));
+                }
+
+                if (confirmed is null)
+                {
+                    return Refused(ActionReason.NotConfirmed, NotConfirmedText);
+                }
+            }
+
+            if (File.Exists(target) || Directory.Exists(target))
+            {
+                return Refused(ActionReason.Exists, ExportExistsText(shown));
+            }
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.Unreadable, CantReadText(name));
+        }
+
+        string html;
+        try
+        {
+            NoteInfo found = note;
+            string text = open?.Text ?? ReadPlainCopy(found);
+            Func<string, ResolvedAttachment?> images = open is null ? src => attachments.TryResolve(found.Name, src) : _ => null;
+            html = NoteHtml.Render(found.Title, text, images, leaveOutPrivate);
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.Unreadable, CantReadText(note.Name));
+        }
+
+        return WriteCopy(target, shown, html, SharedText(note.Name, shown));
     }
 
     // Only a regular .md file directly in the note folder: no link or reparse point, no folder, and seekable. A file

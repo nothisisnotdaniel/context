@@ -1,7 +1,7 @@
 namespace Context;
 
 /// <summary>
-/// The OS file dialogs: for the recovery file, and for importing and exporting notes. A cancelled dialog gives
+/// The OS file dialogs: for the recovery file, and for importing, exporting and sharing notes. A cancelled dialog gives
 /// <c>null</c> (or no files). What they return is what the user picked, and still unchecked.
 /// </summary>
 internal interface IFileDialog
@@ -20,4 +20,10 @@ internal interface IFileDialog
     /// without an extension gets <c>.md</c>.
     /// </summary>
     public string? SaveExportFile(string suggestedName);
+
+    /// <summary>
+    /// Asks where to save a shared note's HTML page called <paramref name="suggestedName"/> (<c>Title.html</c>); a chosen
+    /// name without an extension gets <c>.html</c>.
+    /// </summary>
+    public string? SaveShareFile(string suggestedName);
 }

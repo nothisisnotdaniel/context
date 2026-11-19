@@ -9,9 +9,13 @@ internal sealed class PhotinoFileDialog : IFileDialog
 
     private const string MarkdownExtension = ".md";
 
+    private const string HtmlExtension = ".html";
+
     private static readonly (string Name, string[] Extensions)[] Filters = [("Recovery file", ["*" + Extension])];
 
     private static readonly (string Name, string[] Extensions)[] MarkdownFilters = [("Markdown", ["*" + MarkdownExtension])];
+
+    private static readonly (string Name, string[] Extensions)[] HtmlFilters = [("Web page", ["*" + HtmlExtension])];
 
     /// <summary>The app's window; set once it is built.</summary>
     public PhotinoWindow? Window { get; set; }
@@ -92,6 +96,30 @@ internal sealed class PhotinoFileDialog : IFileDialog
             }
 
             return Path.HasExtension(chosen) ? chosen : chosen + MarkdownExtension;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    // As above: the suggested name is shown in the title.
+    public string? SaveShareFile(string suggestedName)
+    {
+        if (Window is not { } window)
+        {
+            return null;
+        }
+
+        try
+        {
+            string? chosen = window.ShowSaveFile("Share " + DesktopText.OneLine(suggestedName), null, HtmlFilters);
+            if (string.IsNullOrWhiteSpace(chosen))
+            {
+                return null;
+            }
+
+            return Path.HasExtension(chosen) ? chosen : chosen + HtmlExtension;
         }
         catch (Exception)
         {

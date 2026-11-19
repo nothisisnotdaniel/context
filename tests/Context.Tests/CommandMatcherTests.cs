@@ -90,6 +90,22 @@ public sealed class CommandMatcherTests
         Assert.Equal(expected, CommandMatcher.Match(names, n => n, line));
     }
 
+    // 250: with /share among the palette's names it is found first by its prefix, in full and with a typo.
+    [Theory]
+    [InlineData("/sh")]
+    [InlineData("/share")]
+    [InlineData("/shaer")]
+    public void Match_Share(string line)
+    {
+        string[] names =
+        [
+            "/board", "/briefing", "/capture", "/decisions", "/done", "/export", "/find", "/import", "/meeting", "/new",
+            "/open", "/review", "/save", "/search", "/settings", "/share", "/tags", "/today", "/todo", "/triage",
+        ];
+
+        Assert.Equal("/share", CommandMatcher.Match(names, n => n, line)[0]);
+    }
+
     [Theory]
     [InlineData("", "", 0)]
     [InlineData("open", "opne", 2)]
