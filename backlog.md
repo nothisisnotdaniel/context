@@ -280,6 +280,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#324](backlog/324-tag-board-show-the-target-column.md) Tag board: show the target column name on the move buttons
 - [?] [#325](backlog/325-tag-board-hint-when-a-card.md) Tag board: hint when a card is dropped on No status
 - [?] [#326](backlog/326-tag-board-highlight-a-column-while.md) Tag board: highlight a column while a card is dragged over it
+- [?] [#327](backlog/327-person-page-mark-overdue-waiting-for.md) Person page: mark overdue waiting-for follow-ups
 
 ## Dropped with the terminal UI
 
