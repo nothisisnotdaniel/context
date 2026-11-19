@@ -121,7 +121,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#306](backlog/306-left-sidebar-shows-the-10-most.md) Left sidebar shows the 10 most recently opened notes instead of the hierarchy (after: #305) → 240-recent-notes-sidebar
 - [x] [#307](backlog/307-top-bar-icons-in-the-order.md) Top bar icons in the order Home, Search, Capture, Calendar, More → 241-topbar-icon-order
 - [x] [#69](backlog/069-board-view-for-a-tag.md) Board view for a tag → 242-tag-board-view
-- [ ] [#74](backlog/074-waiting-for-list.md) Waiting-for list
+- [x] [#74](backlog/074-waiting-for-list.md) Waiting-for list → 243-waiting-for-list
 - [ ] [#78](backlog/078-smart-paste.md) Smart paste
 - [ ] [#80](backlog/080-agenda-carry-over.md) Agenda carry-over
 - [ ] [#79](backlog/079-share-a-note.md) Share a note
