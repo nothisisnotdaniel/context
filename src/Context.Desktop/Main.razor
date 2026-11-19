@@ -120,6 +120,12 @@
                                 }
                             </div>
                         }
+                        @if (DesktopState.MeetingNoteDay(name) is { } meetingDay)
+                        {
+                            @* A meeting note's tied todos (job 287); the panel shows nothing unless one of the day's
+                               appointments has this note. *@
+                            <MeetingTodosPanel @key="name" Day="meetingDay" NoteName="@name" />
+                        }
                         int shownEditor = editorGeneration;
                         <NoteEditor @key="(name, openSensitive)" @ref="editor" Name="@name" Sensitive="openSensitive"
                                     OnTag="ShowTag" OnOpenNote="RequestOpen" OnOpenHeading="OpenHeading" OnCreateNote="CreateLinked" Heading="@openHeading" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked"

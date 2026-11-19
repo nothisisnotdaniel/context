@@ -8,7 +8,8 @@ namespace Context;
 /// <summary>
 /// A todo: its id, its text, the day it is due, when it was added (UTC), when it was done (UTC, <c>null</c> while
 /// it is open), how it repeats (<c>null</c> for a todo that doesn't), its time of day (<c>null</c> for an untimed
-/// todo) and when its reminder was shown (UTC, <c>null</c> until then). The id is never shown; it is how a todo is
+/// todo), when its reminder was shown (UTC, <c>null</c> until then) and the meeting occurrence it is tied to
+/// (<c>null</c> for an untied todo). The id is never shown; it is how a todo is
 /// addressed for <see cref="TodoStore.Complete(Guid)"/>, so a list that changed since it was shown can't make another
 /// todo done.
 /// </summary>
@@ -22,7 +23,8 @@ internal sealed record TodoItem
         DateTime? done = null,
         TodoRepeat? repeat = null,
         TimeOnly? time = null,
-        DateTime? notified = null)
+        DateTime? notified = null,
+        MeetingLink? meeting = null)
     {
         Id = id;
         Text = text;
@@ -32,6 +34,7 @@ internal sealed record TodoItem
         Repeat = repeat;
         Time = time;
         Notified = notified;
+        Meeting = meeting;
     }
 
     /// <summary>Unique within the list, stable across reads; never shown to the user.</summary>
@@ -55,6 +58,9 @@ internal sealed record TodoItem
 
     /// <summary>When the todo's reminder was shown, UTC; <c>null</c> until then. Not part of the id.</summary>
     public DateTime? Notified { get; }
+
+    /// <summary>The meeting occurrence the todo is tied to (job 287); <c>null</c> for an untied todo. Not part of the id.</summary>
+    public MeetingLink? Meeting { get; }
 }
 
 /// <summary>Thrown when <c>todos.json</c> exists but can't be read or parsed. The file is never overwritten then.</summary>
@@ -83,6 +89,9 @@ internal sealed class TodoStore
 
     /// <summary>How <see cref="TodoItem.Time"/> is stored and shown.</summary>
     public const string StoredTimeFormat = "HH:mm";
+
+    /// <summary>How <see cref="MeetingLink.Start"/> is stored.</summary>
+    public const string StoredMeetingStartFormat = "yyyy-MM-dd'T'HH:mm";
 
     /// <summary>The largest <c>todos.json</c> that is read (5 MB); a bigger one can't be read.</summary>
     public const long MaxFileBytes = 5L * 1024 * 1024;
@@ -147,7 +156,8 @@ internal sealed class TodoStore
             TodoItem todo = todos[i];
             if (todo.Done is null && todo.Notified is null && wanted.Contains(todo.Id))
             {
-                todos[i] = new TodoItem(todo.Id, todo.Text, todo.Due, todo.Created, null, todo.Repeat, todo.Time, now);
+                todos[i] = new TodoItem(
+                    todo.Id, todo.Text, todo.Due, todo.Created, null, todo.Repeat, todo.Time, now, todo.Meeting);
                 marked.Add(todos[i]);
             }
         }
@@ -178,10 +188,17 @@ internal sealed class TodoStore
     /// <see cref="Add(string, DateOnly, TodoRepeat?)"/> with a time of day (<c>null</c> for an untimed todo); the
     /// todo has no <see cref="TodoItem.Notified"/> yet.
     /// </summary>
-    public TodoItem Add(string text, DateOnly due, TodoRepeat? repeat, TimeOnly? time)
+    public TodoItem Add(string text, DateOnly due, TodoRepeat? repeat, TimeOnly? time) =>
+        Add(text, due, repeat, time, null);
+
+    /// <summary>
+    /// <see cref="Add(string, DateOnly, TodoRepeat?, TimeOnly?)"/> tied to <paramref name="meeting"/> (<c>null</c>: an
+    /// untied todo).
+    /// </summary>
+    public TodoItem Add(string text, DateOnly due, TodoRepeat? repeat, TimeOnly? time, MeetingLink? meeting)
     {
         List<TodoItem> todos = Read();
-        TodoItem todo = NewTodo(todos, text, due, repeat, time);
+        TodoItem todo = NewTodo(todos, text, due, repeat, time, meeting);
         todos.Add(todo);
         PrivateFile.CreateFolder(root);
         Write(todos);
@@ -222,12 +239,13 @@ internal sealed class TodoStore
             DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc),
             open.Repeat,
             open.Time,
-            open.Notified);
+            open.Notified,
+            open.Meeting);
         todos[index] = done;
         TodoItem? again = null;
         if (open.Repeat is { } repeat && TryNextDue(repeat, open.Due, today, out DateOnly nextDue))
         {
-            again = NewTodo(todos, open.Text, nextDue, repeat, open.Time);
+            again = NewTodo(todos, open.Text, nextDue, repeat, open.Time, null);
             todos.Add(again);
         }
 
@@ -259,12 +277,35 @@ internal sealed class TodoStore
             TodoItem todo = todos[i];
             if (todo.Done is null && ids.Contains(todo.Id))
             {
-                todos[i] = new TodoItem(todo.Id, todo.Text, to, todo.Created, null, todo.Repeat, todo.Time);
+                todos[i] = new TodoItem(todo.Id, todo.Text, to, todo.Created, null, todo.Repeat, todo.Time, null, todo.Meeting);
             }
         }
 
         Write(todos);
-        return due.Select(t => new TodoItem(t.Id, t.Text, to, t.Created, null, t.Repeat, t.Time)).ToList();
+        return due.Select(t => new TodoItem(t.Id, t.Text, to, t.Created, null, t.Repeat, t.Time, null, t.Meeting)).ToList();
+    }
+
+    /// <summary>
+    /// Ties the open todo with <paramref name="id"/> to <paramref name="link"/> in one read and one write: sets
+    /// <see cref="TodoItem.Meeting"/>, sets <see cref="TodoItem.Due"/> to <see cref="MeetingLink.Day"/> and clears
+    /// <see cref="TodoItem.Notified"/>, keeping id, text, created, repeat and time, and returns it. Returns <c>null</c>
+    /// (and writes nothing) when no open todo has that id. Throws <see cref="TodoStoreException"/> (and writes nothing)
+    /// if the file can't be read.
+    /// </summary>
+    public TodoItem? Tie(Guid id, MeetingLink link)
+    {
+        List<TodoItem> todos = Read();
+        int index = todos.FindIndex(t => t.Id == id && t.Done is null);
+        if (index < 0)
+        {
+            return null;
+        }
+
+        TodoItem open = todos[index];
+        TodoItem tied = new TodoItem(open.Id, open.Text, link.Day, open.Created, null, open.Repeat, open.Time, null, link);
+        todos[index] = tied;
+        Write(todos);
+        return tied;
     }
 
     /// <summary>
@@ -324,7 +365,8 @@ internal sealed class TodoStore
             .ThenBy(t => t.Created).ToList();
 
     /// <summary>A new open todo with an id no todo in <paramref name="todos"/> has and the clock's time.</summary>
-    private TodoItem NewTodo(List<TodoItem> todos, string text, DateOnly due, TodoRepeat? repeat, TimeOnly? time)
+    private TodoItem NewTodo(
+        List<TodoItem> todos, string text, DateOnly due, TodoRepeat? repeat, TimeOnly? time, MeetingLink? meeting)
     {
         Guid id = newId();
         while (id == Guid.Empty || todos.Any(t => t.Id == id))
@@ -332,7 +374,8 @@ internal sealed class TodoStore
             id = Guid.NewGuid();
         }
 
-        return new TodoItem(id, text, due, DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc), repeat: repeat, time: time);
+        return new TodoItem(
+            id, text, due, DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc), repeat: repeat, time: time, meeting: meeting);
     }
 
     /// <summary><see cref="TodoInput.NextDue"/>, or <c>false</c> at the end of the calendar (no next todo then).</summary>
@@ -460,11 +503,60 @@ internal sealed class TodoStore
                 time = parsedTime;
             }
 
+            MeetingLink? meeting = null;
+            if (item.Meeting is { } storedMeeting && storedMeeting.ValueKind != JsonValueKind.Null)
+            {
+                meeting = ReadMeeting(storedMeeting) ?? throw new TodoStoreException($"Can't read {FileName}.");
+            }
+
             todos.Add(new TodoItem(
-                id, item.Text!, item.Due!.Value, created, AsUtc(item.Done), repeat, time, AsUtc(item.Notified)));
+                id, item.Text!, item.Due!.Value, created, AsUtc(item.Done), repeat, time, AsUtc(item.Notified), meeting));
         }
 
         return todos;
+    }
+
+    /// <summary>
+    /// A stored meeting: an object with a non-empty string <c>uid</c> of at most <see cref="MeetingLink.MaxUidLength"/>
+    /// characters, a string <c>start</c> in exactly <see cref="StoredMeetingStartFormat"/> and an optional string
+    /// <c>title</c> (missing: empty). <c>null</c> for anything else.
+    /// </summary>
+    private static MeetingLink? ReadMeeting(JsonElement stored)
+    {
+        if (stored.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (!stored.TryGetProperty("uid", out JsonElement uidValue) || uidValue.ValueKind != JsonValueKind.String
+            || uidValue.GetString() is not { Length: > 0 and <= MeetingLink.MaxUidLength } uid)
+        {
+            return null;
+        }
+
+        if (!stored.TryGetProperty("start", out JsonElement startValue) || startValue.ValueKind != JsonValueKind.String
+            || !DateTime.TryParseExact(
+                startValue.GetString(),
+                StoredMeetingStartFormat,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None,
+                out DateTime start))
+        {
+            return null;
+        }
+
+        string title = string.Empty;
+        if (stored.TryGetProperty("title", out JsonElement titleValue))
+        {
+            if (titleValue.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            title = titleValue.GetString()!;
+        }
+
+        return new MeetingLink(uid, start, title);
     }
 
     /// <summary>A stored time of day: exactly <c>HH:mm</c>, two ASCII digits each, 00:00 to 23:59.</summary>
@@ -534,6 +626,14 @@ internal sealed class TodoStore
                 Repeat = t.Repeat?.Stored,
                 Time = t.Time?.ToString(StoredTimeFormat, System.Globalization.CultureInfo.InvariantCulture),
                 Notified = t.Notified,
+                Meeting = t.Meeting is { } meeting ? JsonSerializer.SerializeToElement(
+                    new MeetingJson
+                    {
+                        Uid = meeting.Uid,
+                        Start = meeting.Start.ToString(StoredMeetingStartFormat, System.Globalization.CultureInfo.InvariantCulture),
+                        Title = meeting.Title,
+                    },
+                    JsonOptions) : null,
             })
             .ToList();
         string json = JsonSerializer.Serialize(items, JsonOptions) + "\n";
@@ -596,5 +696,23 @@ internal sealed class TodoStore
         /// </summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public DateTime? Notified { get; set; }
+
+        /// <summary>
+        /// The tied meeting (job 287), <c>{"uid","start","title"}</c>; left out for an untied todo, so a list without
+        /// tied todos is written as before. Read as raw JSON and checked by <c>ReadMeeting</c>: a non-object value, a
+        /// missing, empty or too long <c>uid</c> or a bad <c>start</c> makes the file unreadable.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public JsonElement? Meeting { get; set; }
+    }
+
+    /// <summary>The JSON shape of a stored meeting, in written order.</summary>
+    private sealed class MeetingJson
+    {
+        public string? Uid { get; set; }
+
+        public string? Start { get; set; }
+
+        public string? Title { get; set; }
     }
 }

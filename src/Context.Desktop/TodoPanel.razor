@@ -270,6 +270,15 @@
                     {
                         <span class="repeat" title="@repeat.Label">@repeat.Label</span>
                     }
+                    @if (todo.Meeting is { } meeting)
+                    {
+                        string meetingTitle = DesktopText.OneLine(meeting.Title);
+                        <span class="todo-meeting grey cut" title="@meetingTitle">@meetingTitle</span>
+                        @if (Snapshot?.MeetingHints.Contains(todo.Id) == true)
+                        {
+                            <span class="meeting-hint grey">Meeting cancelled or moved</span>
+                        }
+                    }
                 </label>
             </li>
         }

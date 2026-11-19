@@ -194,18 +194,40 @@ internal sealed class OutlookComSource : IOutlookSource
             DateTime start = (DateTime)item.Start;
             DateTime end = (DateTime)item.End;
             bool allDay = (bool)item.AllDayEvent;
+            string? uid = ReadUid(item);
             if (allDay)
             {
                 return new Appointment(
-                    subject, string.IsNullOrEmpty(location) ? null : location, start.Date, end.Date, true);
+                    subject, string.IsNullOrEmpty(location) ? null : location, start.Date, end.Date, true, null, uid);
             }
 
             return new Appointment(
-                subject, string.IsNullOrEmpty(location) ? null : location, ToZone(start, zone), ToZone(end, zone), false);
+                subject,
+                string.IsNullOrEmpty(location) ? null : location,
+                ToZone(start, zone),
+                ToZone(end, zone),
+                false,
+                null,
+                uid);
         }
         catch (Exception e) when (e is RuntimeBinderException or InvalidCastException or ArgumentException)
         {
             // Not an appointment item, or a time that doesn't exist in the zone: skipped.
+            return null;
+        }
+    }
+
+    // "outlook:" + GlobalAppointmentID (job 287, the same on every occurrence of a series); null when it can't be
+    // read or is empty. Only stored in todos.json, never shown.
+    private static string? ReadUid(dynamic item)
+    {
+        try
+        {
+            string? id = (string?)item.GlobalAppointmentID;
+            return string.IsNullOrEmpty(id) ? null : MeetingLink.OutlookUidPrefix + id;
+        }
+        catch (Exception e) when (e is RuntimeBinderException or InvalidCastException or COMException)
+        {
             return null;
         }
     }

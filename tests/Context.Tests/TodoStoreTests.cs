@@ -1549,4 +1549,187 @@ public sealed class TodoStoreTests : IDisposable
         Assert.Equal(0, new FileInfo(FilePath).Length);
         Assert.Equal([FilePath], Directory.GetFileSystemEntries(root));
     }
+
+    // 287: the meeting the tie tests use.
+    private static readonly MeetingLink Weekly = new("abc", new DateTime(2026, 11, 20, 10, 0, 0), "Weekly sync");
+
+    private static string MeetingJson(string uid, string start, string title) =>
+        $",\n    \"meeting\": {{\n      \"uid\": \"{uid}\",\n      \"start\": \"{start}\",\n      \"title\": \"{title}\"\n    }}";
+
+    // 287 AC-2: a file without meeting is written back byte for byte as before through Add, Complete, MoveDue and Migrate.
+    [Fact]
+    public void FileWithoutMeeting_AddCompleteMoveDueMigrate_SameBytesAsBefore()
+    {
+        Directory.CreateDirectory(root);
+        string a = JsonTodo(IdA, "a", "2026-11-03", "2026-10-28T09:00:00Z");
+        string b = JsonTodo(IdB, "b", "2026-11-05", "2026-10-28T09:00:00Z");
+        File.WriteAllText(FilePath, JsonList(a));
+        TodoStore store = new TodoStore(root, () => DoneAt, () => IdB);
+
+        store.Add("b", new DateOnly(2026, 11, 5));
+        Assert.Equal(JsonList(a, JsonTodo(IdB, "b", "2026-11-05", "2026-11-14T08:30:00Z")), File.ReadAllText(FilePath));
+
+        File.WriteAllText(FilePath, JsonList(a, b));
+        store.Complete(IdA);
+        Assert.Equal(
+            JsonList(JsonTodo(IdA, "a", "2026-11-03", "2026-10-28T09:00:00Z", done: "2026-11-14T08:30:00Z"), b),
+            File.ReadAllText(FilePath));
+
+        File.WriteAllText(FilePath, JsonList(a, b));
+        store.MoveDue(new DateOnly(2026, 11, 3), new DateOnly(2026, 11, 4));
+        Assert.Equal(JsonList(JsonTodo(IdA, "a", "2026-11-04", "2026-10-28T09:00:00Z"), b), File.ReadAllText(FilePath));
+
+        File.WriteAllText(FilePath, "[{\"text\":\"c\",\"due\":\"2026-11-03\",\"created\":\"2026-10-28T09:00:00Z\"}]");
+        Assert.True(store.Migrate());
+        Guid derived = TodoStore.DerivedId("c", new DateOnly(2026, 11, 3), new DateTime(2026, 10, 28, 9, 0, 0, DateTimeKind.Utc), 0);
+        Assert.Equal(JsonList(JsonTodo(derived, "c", "2026-11-03", "2026-10-28T09:00:00Z")), File.ReadAllText(FilePath));
+        Assert.DoesNotContain("meeting", File.ReadAllText(FilePath), StringComparison.Ordinal);
+    }
+
+    // 287 AC-2: a todo with a meeting is written after the other fields and round-trips exactly.
+    [Fact]
+    public void Add_WithMeeting_WritesMeetingLastAndRoundTrips()
+    {
+        TodoStore store = new TodoStore(root, () => Start, () => IdA);
+
+        TodoItem added = store.Add("Bring slides", Weekly.Day, null, null, Weekly);
+
+        string expected = JsonList(
+            JsonTodo(IdA, "Bring slides", "2026-11-20", "2026-10-28T09:00:00Z").Replace("\n  }", MeetingJson("abc", "2026-11-20T10:00", "Weekly sync") + "\n  }"));
+        Assert.Equal(expected, File.ReadAllText(FilePath));
+        TodoItem read = Assert.Single(new TodoStore(root).List());
+        Assert.Equal(added, read);
+        Assert.Equal(Weekly, read.Meeting);
+
+        new TodoStore(root, () => Start, () => IdB).Add("x", Weekly.Day);
+        Assert.Equal(added, new TodoStore(root).List().Single(t => t.Id == IdA));
+    }
+
+    // 287 AC-2: notified, time and repeat come before meeting; Migrate keeps it.
+    [Fact]
+    public void Meeting_MigrateKeepsIt()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath,
+            "[{\"text\":\"a\",\"due\":\"2026-11-20\",\"created\":\"2026-10-01T09:00:00Z\",\"time\":\"09:30\","
+            + "\"meeting\":{\"uid\":\"abc\",\"start\":\"2026-11-20T10:00\",\"title\":\"Weekly sync\"}}]");
+
+        Assert.True(new TodoStore(root).Migrate());
+
+        string json = File.ReadAllText(FilePath);
+        Assert.Contains("\"time\": \"09:30\"," + MeetingJson("abc", "2026-11-20T10:00", "Weekly sync")[1..], json, StringComparison.Ordinal);
+        Assert.Equal(Weekly, Assert.Single(new TodoStore(root).List()).Meeting);
+    }
+
+    public static TheoryData<string> BadMeetings => new()
+    {
+        "\"meeting\":42",
+        "\"meeting\":\"abc\"",
+        "\"meeting\":[]",
+        "\"meeting\":true",
+        "\"meeting\":{\"start\":\"2026-11-20T10:00\",\"title\":\"t\"}",
+        "\"meeting\":{\"uid\":\"\",\"start\":\"2026-11-20T10:00\",\"title\":\"t\"}",
+        "\"meeting\":{\"uid\":42,\"start\":\"2026-11-20T10:00\",\"title\":\"t\"}",
+        "\"meeting\":{\"uid\":\"" + new string('u', 1001) + "\",\"start\":\"2026-11-20T10:00\",\"title\":\"t\"}",
+        "\"meeting\":{\"uid\":\"abc\",\"title\":\"t\"}",
+        "\"meeting\":{\"uid\":\"abc\",\"start\":\"2026-11-20 10:00\",\"title\":\"t\"}",
+        "\"meeting\":{\"uid\":\"abc\",\"start\":\"2026-11-20T10:00:00\",\"title\":\"t\"}",
+        "\"meeting\":{\"uid\":\"abc\",\"start\":\"2026-11-20\",\"title\":\"t\"}",
+        "\"meeting\":{\"uid\":\"abc\",\"start\":\"2026-13-20T10:00\",\"title\":\"t\"}",
+        "\"meeting\":{\"uid\":\"abc\",\"start\":42,\"title\":\"t\"}",
+    };
+
+    // 287 AC-2: each bad meeting form makes the file unreadable; it is never written.
+    [Theory]
+    [MemberData(nameof(BadMeetings))]
+    public void BadMeeting_IsUnreadable(string field)
+    {
+        Directory.CreateDirectory(root);
+        string text = "[{\"id\":\"" + IdA + "\",\"text\":\"a\",\"due\":\"2026-11-16\",\"created\":\"2026-10-01T09:00:00Z\"," + field + "}]";
+        File.WriteAllText(FilePath, text);
+        TodoStore store = new TodoStore(root, () => Start, () => IdB);
+
+        Assert.Throws<TodoStoreException>(() => store.List());
+        Assert.Throws<TodoStoreException>(() => store.Add("b", new DateOnly(2026, 11, 16)));
+        Assert.Throws<TodoStoreException>(() => store.Tie(IdA, Weekly));
+        Assert.Throws<TodoStoreException>(() => store.Complete(IdA));
+        Assert.False(store.Migrate());
+        Assert.Equal(text, File.ReadAllText(FilePath));
+    }
+
+    // 287 AC-3: Tie sets the meeting and the due date, keeps the time, clears notified, in exactly one write.
+    [Fact]
+    public void Tie_SetsMeetingAndDue_KeepsTime_ClearsNotified_OneWrite()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath,
+            "[{\"id\":\"" + IdA + "\",\"text\":\"a\",\"due\":\"2026-11-16\",\"created\":\"2026-10-01T09:00:00Z\",\"repeat\":\"monday\","
+            + "\"time\":\"09:30\",\"notified\":\"2026-11-16T08:30:00Z\"},"
+            + "{\"id\":\"" + IdB + "\",\"text\":\"b\",\"due\":\"2026-11-17\",\"created\":\"2026-10-01T09:00:00Z\"}]");
+        TodoStore store = new TodoStore(root);
+
+        TodoItem? tied = store.Tie(IdA, Weekly);
+
+        Assert.NotNull(tied);
+        Assert.Equal(Weekly, tied.Meeting);
+        Assert.Equal(new DateOnly(2026, 11, 20), tied.Due);
+        Assert.Equal(new TimeOnly(9, 30), tied.Time);
+        Assert.Equal(TodoRepeat.Weekly(DayOfWeek.Monday), tied.Repeat);
+        Assert.Null(tied.Notified);
+        Assert.Equal(IdA, tied.Id);
+        Assert.Equal(tied, store.List().Single(t => t.Id == IdA));
+        Assert.Null(store.List().Single(t => t.Id == IdB).Meeting);
+        Assert.Equal([FilePath], Directory.GetFiles(root));
+    }
+
+    // 287 AC-3: Tie on an unknown or a done id returns null and leaves the file's bytes unchanged.
+    [Fact]
+    public void Tie_UnknownOrDone_ReturnsNull_NoWrite()
+    {
+        TodoStore store = new TodoStore(root, () => DoneAt, () => IdA);
+        store.Add("a", new DateOnly(2026, 11, 16));
+        store.Complete(IdA);
+        byte[] bytes = File.ReadAllBytes(FilePath);
+        DateTime written = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(FilePath, written);
+
+        Assert.Null(store.Tie(IdA, Weekly));
+        Assert.Null(store.Tie(IdB, Weekly));
+
+        Assert.Equal(bytes, File.ReadAllBytes(FilePath));
+        Assert.Equal(written, File.GetLastWriteTimeUtc(FilePath));
+    }
+
+    // 287: Complete keeps the meeting on the done todo, the next todo of a recurring one has none; MoveDue keeps it.
+    [Fact]
+    public void Complete_KeepsMeeting_NextHasNone_MoveDueKeepsIt()
+    {
+        Guid[] ids = [IdA, IdB, IdC];
+        int next = 0;
+        TodoStore store = new TodoStore(root, () => DoneAt, () => ids[next++]);
+        store.Add("weekly", Weekly.Day, TodoRepeat.Weekly(DayOfWeek.Friday), null, Weekly);
+        store.Add("moved", new DateOnly(2026, 11, 10), null, null, Weekly);
+
+        TodoItem? done = store.Complete(IdA, new DateOnly(2026, 11, 20), out TodoItem? again);
+        IReadOnlyList<TodoItem> moved = store.MoveDue(new DateOnly(2026, 11, 10), new DateOnly(2026, 11, 11));
+
+        Assert.Equal(Weekly, done!.Meeting);
+        Assert.Null(again!.Meeting);
+        Assert.Equal(Weekly, Assert.Single(moved).Meeting);
+        Assert.Equal(Weekly, store.List().Single(t => t.Id == IdB).Meeting);
+        Assert.Equal(Weekly, Assert.Single(store.ListDone()).Meeting);
+    }
+
+    // 287 AC-4: a 1000-character Uid gives a link that round-trips through todos.json.
+    [Fact]
+    public void LongestUid_RoundTrips()
+    {
+        string uid = new string('u', MeetingLink.MaxUidLength);
+        MeetingLink link = MeetingLink.For(new Appointment("T", null, new DateTime(2026, 11, 20, 10, 0, 0), new DateTime(2026, 11, 20, 11, 0, 0), false, null, uid))!;
+        TodoStore store = new TodoStore(root, () => Start, () => IdA);
+
+        store.Add("a", link.Day, null, null, link);
+
+        Assert.Equal(link, Assert.Single(new TodoStore(root).List()).Meeting);
+    }
 }

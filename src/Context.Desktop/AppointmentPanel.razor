@@ -3,7 +3,8 @@
    (DesktopState.AppointmentPage: meeting prep with no cap, over the title and the union of their attendees). A note
    opens through OnOpen; with none, a link asks Main for the meeting note of the first such appointment. It reads only,
    and reloads whenever the state changes, keeping the shown rows. Above the notes, the open topics for the next 1:1 with
-   the attendees (job 253) each have a checkbox that ticks the topic off in its note after a confirmation. *@
+   the attendees (job 253) each have a checkbox that ticks the topic off in its note after a confirmation. Below them, the
+   todos tied to these appointments (job 287, MeetingTodosPanel). *@
 
 <section class="page appointment-page" aria-label="Appointment">
     <div class="panel-bar">
@@ -35,6 +36,7 @@
     {
         <p class="red topic-result" role="status">@DesktopText.OneLine(failed.Text)</p>
     }
+    <MeetingTodosPanel Day="Day" Title="@Title" />
     <h3 id="appointment-notes-heading">Notes</h3>
     @if (view is null)
     {

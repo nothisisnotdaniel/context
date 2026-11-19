@@ -162,6 +162,8 @@ internal sealed class DesktopActions
     public const string TodosWriteFailedText = "Can't write todos.json. Nothing was done.";
     public const string FailedText = "Can't make that change.";
     public const string EmptyTodoText = "Write the todo first.";
+    public const string NoMeetingTodosText = "This appointment can't hold todos.";
+    public const string MeetingTodosChangedText = "The todo list changed. Nothing was moved.";
     public const string CreateFailedText = "Can't create that note. Nothing was done.";
     public const string ChildSensitiveText = "Only top-level notes can be sensitive.";
     public const string ParentSensitiveText = "A note with subpages can't be sensitive.";
@@ -897,6 +899,22 @@ internal sealed class DesktopActions
     /// </summary>
     public Task<ActionResult> AddTodo(string text, DateOnly due, TodoRepeat? repeat = null, TimeOnly? time = null) =>
         Run(() => AddTodoNow(text, due, repeat, time));
+
+    /// <summary>
+    /// Adds a todo due on <paramref name="appointment"/>'s date and tied to it (<see cref="MeetingLink.For"/>, job 287)
+    /// with the <see cref="AddTodo"/> text rules. An appointment without a usable Uid is refused with
+    /// <see cref="NoMeetingTodosText"/>; nothing is written then. The result's text is the todo's text when done.
+    /// </summary>
+    public Task<ActionResult> AddMeetingTodo(Appointment appointment, string text) =>
+        Run(() => AddMeetingTodoNow(appointment, text));
+
+    /// <summary>
+    /// Ties the open todo <paramref name="id"/> to <paramref name="appointment"/> (<see cref="TodoStore.Tie"/>, job 287):
+    /// its due becomes the appointment's date, which is the result's <see cref="ActionResult.NextDue"/>. A todo that went
+    /// away or was done is <see cref="MeetingTodosChangedText"/>, an appointment without a usable Uid
+    /// <see cref="NoMeetingTodosText"/>; neither writes anything.
+    /// </summary>
+    public Task<ActionResult> TieTodo(Guid id, Appointment appointment) => Run(() => TieTodoNow(id, appointment));
 
     /// <summary>
     /// Creates the note <paramref name="title"/> through <see cref="NoteStore.Create"/>. An invalid title is refused
@@ -2326,6 +2344,62 @@ internal sealed class DesktopActions
         }
 
         return SaveNoteNow(opened, text);
+    }
+
+    private ActionResult AddMeetingTodoNow(Appointment appointment, string text)
+    {
+        if (MeetingLink.For(appointment) is not { } link)
+        {
+            return Refused(ActionReason.Invalid, NoMeetingTodosText);
+        }
+
+        string trimmed = text.Trim();
+        if (trimmed.Length == 0)
+        {
+            return Refused(ActionReason.Invalid, EmptyTodoText);
+        }
+
+        if (trimmed.Length > MaxTodoLength)
+        {
+            return Refused(ActionReason.Invalid, TodoTooLongText);
+        }
+
+        try
+        {
+            TodoItem added = todos.Add(trimmed, link.Day, null, null, link);
+            return new ActionResult(ActionKind.Done, ActionReason.None, added.Text, nextDue: added.Due);
+        }
+        catch (TodoStoreException)
+        {
+            return Failed(ActionReason.Unreadable, TodosUnreadableText);
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, TodosWriteFailedText);
+        }
+    }
+
+    private ActionResult TieTodoNow(Guid id, Appointment appointment)
+    {
+        if (MeetingLink.For(appointment) is not { } link)
+        {
+            return Refused(ActionReason.Invalid, NoMeetingTodosText);
+        }
+
+        try
+        {
+            return todos.Tie(id, link) is { } tied
+                ? new ActionResult(ActionKind.Done, ActionReason.None, tied.Text, nextDue: tied.Due)
+                : Refused(ActionReason.Changed, MeetingTodosChangedText);
+        }
+        catch (TodoStoreException)
+        {
+            return Failed(ActionReason.Unreadable, TodosUnreadableText);
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, TodosWriteFailedText);
+        }
     }
 
     private ActionResult AddTodoNow(string text, DateOnly due, TodoRepeat? repeat, TimeOnly? time)

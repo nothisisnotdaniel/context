@@ -624,4 +624,34 @@ public sealed class TodoPanelTests : IDisposable
         }, Wait);
         Assert.Equal("- [x] waiting: @[Cleo] notes\n", File.ReadAllText(Path.Combine(data.Root, "Meeting.md")));
     }
+
+    // 287 AC-13: a tied todo shows its meeting's title in grey span.todo-meeting (full title in title) and keeps its due
+    // date; only the todo whose occurrence was removed from the .ics shows "Meeting cancelled or moved".
+    [Fact]
+    public async Task Render_TiedTodo_MeetingMarkerAndHint()
+    {
+        data.WriteCalendar("meetings.ics", DesktopFixture.Calendar(MeetingCalendar.Sync("EXDATE:20261105T110000")));
+        TodoStore store = MeetingCalendar.Store(data);
+        store.Add("Untied", DesktopFixture.Today);
+        store.Add("Bring budget", DesktopFixture.Today, null, null, MeetingCalendar.SyncLink());
+        store.Add("Ask about Q4", DesktopFixture.Today.AddDays(2), null, null, MeetingCalendar.SyncLink(1));
+
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+        cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll("li.todo span.todo-meeting").Count), Wait);
+
+        IReadOnlyList<IElement> items = cut.FindAll("li.todo");
+        Assert.Equal(["Untied", "Bring budget", "Ask about Q4"], items.Select(i => i.QuerySelector(".text")!.TextContent).ToArray());
+        Assert.Null(items[0].QuerySelector(".todo-meeting"));
+        IElement marker = items[1].QuerySelector("span.todo-meeting")!;
+        Assert.Equal("Sync", marker.TextContent);
+        Assert.Equal("Sync", marker.GetAttribute("title"));
+        Assert.Contains("grey", marker.ClassList);
+        Assert.Contains("cut", marker.ClassList);
+        Assert.Equal("2026-10-29", items[1].QuerySelector(".date")!.TextContent);
+        Assert.Equal("2026-10-31", items[2].QuerySelector(".date")!.TextContent);
+        Assert.Null(items[1].QuerySelector(".meeting-hint"));
+        IElement hint = items[2].QuerySelector(".meeting-hint")!;
+        Assert.Equal("Meeting cancelled or moved", hint.TextContent);
+        Assert.Contains("grey", hint.ClassList);
+    }
 }

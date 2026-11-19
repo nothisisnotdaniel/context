@@ -199,4 +199,89 @@ public sealed class DesktopActionsTests : IDisposable
 
     // context.db* is the tag index the state's refresh keeps; it is not user data.
     private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
+
+    // 287 AC-6: AddMeetingTodo stores the trimmed text due on the appointment's date, tied to it; the result's NextDue
+    // is that date.
+    [Fact]
+    public async Task AddMeetingTodo_StoresTodoTiedToTheAppointment()
+    {
+        await data.RefreshAsync();
+        Appointment sync = MeetingCalendar.At("Sync", MeetingCalendar.SyncToday.AddDays(7), MeetingCalendar.SyncUid);
+
+        ActionResult result = await data.Actions!.AddMeetingTodo(sync, "  Bring budget  ");
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Equal("Bring budget", result.Text);
+        Assert.Equal(new DateOnly(2026, 11, 5), result.NextDue);
+        TodoItem added = Assert.Single(data.Todos!.List());
+        Assert.Equal("Bring budget", added.Text);
+        Assert.Equal(new DateOnly(2026, 11, 5), added.Due);
+        Assert.Equal(MeetingCalendar.SyncLink(1), added.Meeting);
+        Assert.Null(added.Time);
+        Assert.Null(added.Repeat);
+    }
+
+    // 287 AC-4/AC-8: an appointment without a UID, a blank text and a too long text are refused and write nothing.
+    [Fact]
+    public async Task AddMeetingTodo_NoUidOrBadText_RefusedNothingWritten()
+    {
+        await data.RefreshAsync();
+        Appointment sync = MeetingCalendar.At("Sync", MeetingCalendar.SyncToday, MeetingCalendar.SyncUid);
+
+        ActionResult noUid = await data.Actions!.AddMeetingTodo(MeetingCalendar.At("Plain", MeetingCalendar.SyncToday, null), "x");
+        ActionResult longUid = await data.Actions.AddMeetingTodo(
+            MeetingCalendar.At("Sync", MeetingCalendar.SyncToday, new string('u', MeetingLink.MaxUidLength + 1)), "x");
+        ActionResult blank = await data.Actions.AddMeetingTodo(sync, "   ");
+        ActionResult tooLong = await data.Actions.AddMeetingTodo(sync, new string('x', DesktopActions.MaxTodoLength + 1));
+
+        Assert.Equal((ActionKind.Refused, ActionReason.Invalid, "This appointment can't hold todos."), (noUid.Kind, noUid.Reason, noUid.Text));
+        Assert.Equal("This appointment can't hold todos.", longUid.Text);
+        Assert.Equal(DesktopActions.EmptyTodoText, blank.Text);
+        Assert.Equal(DesktopActions.TodoTooLongText, tooLong.Text);
+        Assert.False(File.Exists(Path.Combine(data.Root, "todos.json")));
+    }
+
+    // 287 AC-3/AC-9: TieTodo moves an open todo to the appointment: due its date (the result's NextDue), time kept.
+    [Fact]
+    public async Task TieTodo_Open_TiesAndMovesDue()
+    {
+        TodoItem todo = MeetingCalendar.Store(data).Add("Later", DesktopFixture.Today.AddDays(3), null, new TimeOnly(9, 30));
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.TieTodo(
+            todo.Id, MeetingCalendar.At("Sync", MeetingCalendar.SyncToday.AddDays(7), MeetingCalendar.SyncUid));
+
+        Assert.Equal((ActionKind.Done, "Later", new DateOnly(2026, 11, 5)), (result.Kind, result.Text, result.NextDue));
+        TodoItem tied = Assert.Single(data.Todos!.List());
+        Assert.Equal(new DateOnly(2026, 11, 5), tied.Due);
+        Assert.Equal(new TimeOnly(9, 30), tied.Time);
+        Assert.Equal(MeetingCalendar.SyncLink(1), tied.Meeting);
+        Assert.Equal(tied.Meeting, Assert.Single(data.State!.Snapshot!.Todos).Meeting);
+    }
+
+    // 287 AC-11: TieTodo on a done or unknown todo is the changed line and leaves the file's bytes; an appointment
+    // without a UID is refused the same way.
+    [Fact]
+    public async Task TieTodo_DoneUnknownOrNoUid_RefusedNothingWritten()
+    {
+        TodoStore store = MeetingCalendar.Store(data);
+        TodoItem done = store.Add("Done", DesktopFixture.Today);
+        TodoItem open = store.Add("Open", DesktopFixture.Today);
+        store.Complete(done.Id);
+        await data.RefreshAsync();
+        string path = Path.Combine(data.Root, "todos.json");
+        byte[] before = File.ReadAllBytes(path);
+        Appointment sync = MeetingCalendar.At("Sync", MeetingCalendar.SyncToday, MeetingCalendar.SyncUid);
+
+        ActionResult doneResult = await data.Actions!.TieTodo(done.Id, sync);
+        ActionResult unknown = await data.Actions.TieTodo(Guid.NewGuid(), sync);
+        ActionResult noUid = await data.Actions.TieTodo(open.Id, MeetingCalendar.At("Plain", MeetingCalendar.SyncToday, null));
+
+        Assert.Equal(
+            (ActionKind.Refused, ActionReason.Changed, "The todo list changed. Nothing was moved."),
+            (doneResult.Kind, doneResult.Reason, doneResult.Text));
+        Assert.Equal("The todo list changed. Nothing was moved.", unknown.Text);
+        Assert.Equal((ActionKind.Refused, "This appointment can't hold todos."), (noUid.Kind, noUid.Text));
+        Assert.Equal(before, File.ReadAllBytes(path));
+    }
 }

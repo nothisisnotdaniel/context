@@ -268,7 +268,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     `CLASS` line; always on, no setting, so they never reach the sidebar, `/meeting`, `context current`, review or
     person pages; `calendar-link.ics` stays as received), missing/invalid `DTSTART`, end before start. No `BEGIN:VCALENDAR` throws
     `FormatException`. **Recurring events** (job 162): `IcsParser.Parse(text, zone, day)` (used by `Day` and for the
-    feed in `CurrentView`) also reads `UID`, `RRULE`, `RDATE`, `EXDATE`, `RECURRENCE-ID` and returns every occurrence
+    feed in `CurrentView`) also reads `UID` (job 287: `Appointment.Uid` on every occurrence and override, and from
+    `Parse(text, zone)` too; Outlook's is `outlook:` + `GlobalAppointmentID`; not part of `Equals`/`GetHashCode`), `RRULE`, `RDATE`, `EXDATE`, `RECURRENCE-ID` and returns every occurrence
     touching `day` (the `Overlaps` rule); `Parse(text, zone)` (`All`, `PersonView`, the feed check) still gives one
     entry per `VEVENT`, its `DTSTART`. `RecurrenceRule` (`Recurrence.cs`, day numbers only, so no `DateTime`
     overflow) supports `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`, `INTERVAL`, `COUNT` (DTSTART counts, excluded dates too),
@@ -570,6 +571,19 @@ Every factory agent reads this file before working on Context. Keep it short and
     and repeat, new id, `created` from the clock, `NextDue` as due) in the same write; `Complete(id)` delegates with
     `DateOnly.MinValue`. An older build ignores `repeat` and drops it on its next write. `TodoPicker.NoTodosText` and
     `NoPickText(pick, shown)` are the picker's red lines for `context todo done` and `/done`.
+    **Meeting todos** (job 287, `MeetingLink.cs`): `TodoItem.Meeting` (`MeetingLink(Uid, Start, Title)`: the event's
+    Uid, the occurrence's local start to the minute, its one-line title cut to 200) is stored after `notified`, only when
+    set, as `"meeting":{"uid":"…","start":"yyyy-MM-ddTHH:mm","title":"…"}` (not in `DerivedId`, so a list without
+    meetings has the same bytes as before). A non-object, a missing/empty/non-string `uid` or one over
+    `MeetingLink.MaxUidLength` (1000), or a bad `start` makes the file unreadable; a missing `title` reads as empty.
+    `MeetingLink.For(appointment)` is `null` without a Uid or over 1000 chars (so a tie never writes an unreadable file);
+    `Matches` needs the same Uid (ordinal) and start minute. `Add(text, due, repeat, time, meeting)`; `Tie(id, link)`
+    sets `Meeting`, `Due = link.Day` and clears `Notified` on one open todo in one read and write (keeps `Time` and
+    `Repeat`), else `null` and no write. `Complete` keeps `Meeting` on the done todo, the next of a recurring todo has
+    none; `MoveDue`, `MarkNotified` and `Migrate` keep it. `MeetingLink.NextOccurrence(link, day, localNow)` reads the
+    days from `link.Day` (or today, when later) through `link.Day + MaxSearchDays` (100) and returns the earliest
+    appointment with the Uid starting after both `link.Start` and `localNow` on the first day that has one, else `null`;
+    `Missing(link, appointmentsOfDay)`. The Uid is never shown; an older build drops `meeting` on its next write.
     **Todos inside notes** (job 201, `NoteTodoParser.cs`, `NoteTodo.cs`): `NoteTodoParser.Parse(markdown)` gives a
     `ParsedNoteTodo(Line, Text, Due?, Raw)` for each line outside fences (`TagParser.NumberedLinesOutsideFences`) that is
     optional spaces/tabs, `-`/`*`/`+`, one space, `[ ]`, one space, then text; the first whitespace-delimited token
@@ -1587,6 +1601,26 @@ Every factory agent reads this file before working on Context. Keep it short and
     (title, full name in `title`, grey `.matches`) through `RequestOpen`; with none, `button.create-note-link`
     `Create a new note` runs the `/meeting` steps (`Main.CreateAppointmentNote`, the first such appointment re-read
     through `DayAppointments`) and opens the meeting note with accent `Created <name>`.
+    **Meeting todos** (job 287; the desktop has no `/current`, so the appointment page stands in for it and for the
+    appointment's menu; `context current` is unchanged): `MeetingTodosPanel` (`section.meeting-todos`, `h3 Todos`) sits
+    on the appointment page below the topics and, in `Main`, above the editor of a note named `Meetings/<part>/yyyy-MM-dd`
+    (`DesktopState.MeetingNoteDay`). It reads `DesktopState.MeetingAppointments(day, title, noteName)` on `Task.Run`
+    (the day's appointments with the title, or those `MeetingNote.IsNoteOf` the note; none renders nothing) and
+    `MeetingTodos(appointments)` (the snapshot's open todos whose `Meeting` `Matches` one, `List()` order). The first
+    appointment without a usable Uid gives grey `This appointment can't hold todos.` and no controls. Else, in keyboard
+    order: `input.meeting-todo-text` (placeholder and `aria-label` `Todo for this meeting`, max 200) and `Add`
+    (`Actions.AddMeetingTodo(first, text)`: due the first's date, tied to it), `select.tie-todo` (`Tie an open todo…`,
+    then the untied open todos; a choice runs `Actions.TieTodo(id, first)`), then each tied todo's checkbox (the usual
+    `Mark this todo done?` dialog) and `button.push-todo` `Push to next meeting`: `DesktopState.NextMeeting(todo)`
+    (`MeetingLink.NextOccurrence` over files, the feed cache, never a download, and Outlook when on) and `TieTodo` to
+    it, accent `Moved to yyyy-MM-dd.`; with none, `No next meeting found. Pick another appointment:` and
+    `button.pick-meeting`s (`yyyy-MM-dd HH:mm Title`) of `UpcomingAppointments(today)` (today..+13, with a Uid) minus the
+    current occurrence, or grey `No other appointments in the next 14 days.` A todo done or gone meanwhile is red
+    `The todo list changed. Nothing was moved.` (`TieTodo` writes nothing). `TodoPanel` shows a tied todo's
+    `MeetingLink.Title` as grey `span.todo-meeting` (cut, full title in `title`) and grey `Meeting cancelled or moved`
+    for ids in `DesktopSnapshot.MeetingHints`: open tied todos due today..+100 whose occurrence is `Missing`, an
+    `outlook:` Uid only from an `Ok` Outlook read of the day, any other from the files plus the cached feed when no
+    calendar file is unreadable (without a cache, only a Uid the files have); never a download.
     `NoteEditor` renders none: it reloads the list after the mount, after every `Done` save (auto or explicit),
     `ReloadAsync` and `ShowSavedAsync` and reports each through `OnOutline` (empty when disposed or locked); `Main` keeps
     the current editor's latest list (each editor's callback carries the generation it was rendered with, so a report
