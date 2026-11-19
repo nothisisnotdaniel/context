@@ -93,7 +93,7 @@ public sealed class TopBarTests : IDisposable
 
         IReadOnlyList<IElement> buttons = cut.FindAll(".top-bar-buttons > button");
         Assert.Equal(
-            ["capture-open", "search-open", "today-open", "day-pick-open", "page-menu-open"],
+            ["today-open", "search-open", "capture-open", "day-pick-open", "page-menu-open"],
             buttons.Select(b => b.ClassName ?? string.Empty).ToArray());
         IElement open = buttons[^1];
         Assert.Equal("button", open.GetAttribute("type"));
@@ -123,6 +123,20 @@ public sealed class TopBarTests : IDisposable
         Assert.Equal("false", cut.Find("button.page-menu-open").GetAttribute("aria-expanded"));
     }
 
+    // 241 AC-3: labels, titles and svgs stay, and no button sets a tabindex (DOM order is Tab order).
+    [Fact]
+    public void Render_ButtonsKeepLabelsAndNoTabindex()
+    {
+        IRenderedComponent<TopBar> cut = Render(Actions());
+
+        string[] expected = ["Today", "Search", "Capture", "Pick a day", "More actions"];
+        IReadOnlyList<IElement> buttons = cut.FindAll(".top-bar-buttons > button");
+        Assert.Equal(expected, buttons.Select(b => b.GetAttribute("aria-label") ?? string.Empty).ToArray());
+        Assert.Equal(expected, buttons.Select(b => b.GetAttribute("title") ?? string.Empty).ToArray());
+        Assert.All(buttons, b => Assert.Single(b.QuerySelectorAll("svg")));
+        Assert.All(buttons, b => Assert.False(b.HasAttribute("tabindex")));
+    }
+
     // AC-7: no actions, no … button.
     [Fact]
     public void Render_NoActions_NoMenuButton()
@@ -131,7 +145,7 @@ public sealed class TopBarTests : IDisposable
 
         Assert.Empty(cut.FindAll("button.page-menu-open"));
         Assert.Equal(
-            ["capture-open", "search-open", "today-open", "day-pick-open"],
+            ["today-open", "search-open", "capture-open", "day-pick-open"],
             cut.FindAll(".top-bar-buttons > button").Select(b => b.ClassName ?? string.Empty).ToArray());
     }
 

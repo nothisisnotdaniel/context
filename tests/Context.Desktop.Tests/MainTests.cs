@@ -4057,15 +4057,15 @@ public sealed class MainTests : IDisposable
         Assert.Equal(["rename", "delete", "history", "make-plain", "lock"], await MenuIdsAsync(cut));
     }
 
-    // 199 AC-1: Capture is the first icon button, before Search (218), Today and Pick a day; no popover at first. (216: with no note
+    // 199 AC-1, 241: Today is the first icon button, then Search (218), Capture and Pick a day; no popover at first. (216: with no note
     // open the menu has no items, so there is no … button.)
     [Fact]
-    public async Task TopBar_CaptureButtonFirst_NoPopoverAtFirst()
+    public async Task TopBar_TodayButtonFirst_NoPopoverAtFirst()
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
         Assert.Equal(
-            ["capture-open", "search-open", "today-open", "day-pick-open"],
+            ["today-open", "search-open", "capture-open", "day-pick-open"],
             cut.FindAll(".top-bar-buttons > button").Select(b => b.ClassName ?? string.Empty).ToArray());
         IElement button = cut.Find("button.capture-open");
         Assert.Equal("Capture", button.GetAttribute("aria-label"));
