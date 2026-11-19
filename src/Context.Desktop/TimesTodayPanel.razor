@@ -22,6 +22,7 @@ else if (view is { Kind: TimesNowKind.Unreadable })
 @code {
     private TimesNow? view;
     private int request;
+    private bool disposed;
 
     /// <summary>The panel's one line for a booked day; every Times name through <see cref="DesktopText.OneLine"/>.</summary>
     internal static string Line(TimesNow times)
@@ -47,7 +48,11 @@ else if (view is { Kind: TimesNowKind.Unreadable })
         await Load();
     }
 
-    protected override void OnDisposing() => State.TimesChanged -= OnTimesChanged;
+    protected override void OnDisposing()
+    {
+        disposed = true;
+        State.TimesChanged -= OnTimesChanged;
+    }
 
     protected override async Task OnStateChangedAsync()
     {
@@ -55,11 +60,34 @@ else if (view is { Kind: TimesNowKind.Unreadable })
         StateHasChanged();
     }
 
-    private void OnTimesChanged() => _ = InvokeAsync(async () =>
+    // A Tick that races disposal does nothing: the flag stops it before and after the read.
+    private void OnTimesChanged()
     {
-        await Load();
-        StateHasChanged();
-    });
+        if (disposed)
+        {
+            return;
+        }
+
+        _ = Reload();
+    }
+
+    private async Task Reload()
+    {
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                await Load();
+                if (!disposed)
+                {
+                    StateHasChanged();
+                }
+            });
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
 
     // Keeps the shown line while it reloads; an older request's result is dropped.
     private async Task Load()
