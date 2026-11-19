@@ -141,7 +141,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#231](backlog/231-bounded-reads-of-regular-files-only.md) Bounded reads of regular files only → 275-bounded-regular-file-reads
 - [x] [#50](backlog/050-times-bookings-in-current.md) Times bookings in /current → 277-times-bookings-current
 - [x] [#52](backlog/052-recent-and-pinned-notes.md) Recent and pinned notes → 278-recent-pinned-notes
-- [ ] [#63](backlog/063-project-page-per-work-item.md) Project page per work item
+- [x] [#63](backlog/063-project-page-per-work-item.md) Project page per work item → 280-project-page-work-item
 - [ ] [#72](backlog/072-command-bar.md) Command bar (after: Times#4)
 - [ ] [#73](backlog/073-mail-digest.md) Mail digest
 - [ ] [#75](backlog/075-todos-tied-to-meetings.md) Todos tied to meetings
