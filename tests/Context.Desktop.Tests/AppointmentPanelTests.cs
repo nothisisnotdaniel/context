@@ -11,6 +11,8 @@ public sealed class AppointmentPanelTests : IDisposable
     // The sidebar list, the page's related notes and an opened note load on Task.Run; every wait passes this timeout.
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
 
+    private const string CloseButton = "section.appointment-page.page > .panel-bar button.close";
+
     private const string NotADatabase = "this is not a database, just some text that fills the header....";
 
     private const string ThreeHeadings =
@@ -61,7 +63,7 @@ public sealed class AppointmentPanelTests : IDisposable
         Assert.Equal("Budget", page.QuerySelector("h2")!.TextContent);
         Assert.True(cut.Find(".note-area").HasAttribute("hidden"));
         Assert.DoesNotContain(page.QuerySelectorAll("button"), b => b.TextContent.Trim() == "Close");
-        IElement close = Assert.Single(cut.FindAll("section.appointment-page.page > .panel-bar button.close"));
+        IElement close = Assert.Single(cut.FindAll(CloseButton));
         Assert.Equal("button", close.GetAttribute("type"));
         Assert.Equal("Close", close.GetAttribute("aria-label"));
         Assert.Equal("Close", close.GetAttribute("title"));
@@ -71,7 +73,7 @@ public sealed class AppointmentPanelTests : IDisposable
         Assert.Equal("false", svg.GetAttribute("focusable"));
         Assert.Same(close, page.QuerySelector(".panel-bar")!.LastElementChild);
 
-        await Click(cut, () => cut.Find("section.appointment-page.page > .panel-bar button.close"));
+        await Click(cut, () => cut.Find(CloseButton));
 
         Assert.Empty(cut.FindAll(".appointment-page"));
         Assert.False(cut.Find(".note-area").HasAttribute("hidden"));
