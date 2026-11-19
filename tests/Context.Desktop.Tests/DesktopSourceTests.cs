@@ -518,7 +518,8 @@ public sealed class DesktopSourceTests
     }
 
     // 215 AC-3: the resolver's inputs: body is 14px, nothing around the editor sets a font-size, and the only app.css
-    // heading selectors are the global h1/h2 and the panel ones (219: plus the appointment page's h3 Notes).
+    // heading selectors are the global h1/h2 and the panel ones (219: plus the appointment page's h3 Notes; 243: the
+    // sidebar's Waiting for h3).
     [Fact]
     public void EditorHeadings_ResolverInputsHold()
     {
@@ -545,7 +546,7 @@ public sealed class DesktopSourceTests
         [
             "h1", "h2", ".notes-region h2", ".todos-region h2", ".panel-bar h2", ".settings-panel h3", ".person-panel h2",
             ".links-panel h2", ".review-panel h3", ".review-panel h4.review-day", ".history-bar h2", ".appointment-page h3",
-            ".subpages h2", ".board-column h3",
+            ".subpages h2", ".board-column h3", ".todos .waiting-for h3",
         ];
         Assert.Equal(expected.Order(StringComparer.Ordinal), headings);
     }

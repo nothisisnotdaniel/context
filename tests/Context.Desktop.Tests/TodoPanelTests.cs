@@ -546,6 +546,27 @@ public sealed class TodoPanelTests : IDisposable
         Assert.Empty(cut.FindAll("p.grey"));
     }
 
+    // 243 AC-2: the group's heading is styled like the sidebar's h2 and the group is set off by a line, in theme colours.
+    [Fact]
+    public void AppCss_WaitingForGroup_HeadingAndLine()
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+
+        string heading = Block(css, ".todos .waiting-for h3 {");
+        Assert.Contains("color: var(--grey);", heading, StringComparison.Ordinal);
+        Assert.Contains("font-size: 13px;", heading, StringComparison.Ordinal);
+        Assert.Contains("text-transform: uppercase;", heading, StringComparison.Ordinal);
+        Assert.Contains("border-top: 1px solid var(--line);", Block(css, ".todos .waiting-for {"), StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"#[0-9a-fA-F]{3,8}\b|\b(rgb|rgba|hsl|hsla)\(", heading);
+    }
+
+    private static string Block(string css, string selector)
+    {
+        int at = css.IndexOf("\n" + selector, StringComparison.Ordinal);
+        Assert.True(at >= 0, selector);
+        return css[at..css.IndexOf('}', at)];
+    }
+
     // 243 AC-2: no waiting-for todo, no group; only waiting-for todos: no todo list and no empty line.
     [Fact]
     public async Task Render_WaitingFor_ShownOnlyWithRows()
