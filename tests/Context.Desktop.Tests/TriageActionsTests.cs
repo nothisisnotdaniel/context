@@ -102,6 +102,85 @@ public sealed class TriageActionsTests : IDisposable
         Assert.Equal(broken, Files());
     }
 
+    // 243 AC-7: the waiting-for todo is added for the follow-up day, then the line leaves the inbox.
+    [Fact]
+    public async Task TriageDelegate_AddsTheWaitingTodoThenRemovesTheLine()
+    {
+        data.WriteNote("inbox", InboxText);
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.TriageDelegate(Item, " anna  berg ", " call Anna ", DesktopFixture.Today.AddDays(3));
+
+        Assert.Equal((ActionKind.Done, "Added: waiting: @[anna berg] call Anna"), (result.Kind, result.Text));
+        TodoItem todo = Assert.Single(data.State!.Snapshot!.Todos);
+        Assert.Equal(("waiting: @[anna berg] call Anna", DesktopFixture.Today.AddDays(3)), (todo.Text, todo.Due));
+        Assert.Equal("anna berg", WaitingFor.TryParse(todo.Text)!.Person);
+        Assert.Equal(InboxAfter, File.ReadAllText(InboxPath));
+    }
+
+    // 243 AC-8: an empty or invalid person, an empty text or a too long todo is refused; nothing is written.
+    [Theory]
+    [InlineData("", "call Anna", DesktopActions.TriagePersonText)]
+    [InlineData("   ", "call Anna", DesktopActions.TriagePersonText)]
+    [InlineData("a/b", "call Anna", DesktopActions.TriagePersonText)]
+    [InlineData("a]b", "call Anna", DesktopActions.TriagePersonText)]
+    [InlineData("Anna", "", DesktopActions.EmptyTodoText)]
+    [InlineData("Anna", "   ", DesktopActions.EmptyTodoText)]
+    public async Task TriageDelegate_Refused_NothingWritten(string person, string text, string expected)
+    {
+        data.WriteNote("inbox", InboxText);
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult result = await data.Actions!.TriageDelegate(Item, person, text, DesktopFixture.Today);
+
+        Assert.Equal((ActionKind.Refused, expected), (result.Kind, result.Text));
+        Assert.Equal(before, Files());
+    }
+
+    // 243 AC-8: the composed text counts against the todo length; just over it is refused, at it is added.
+    [Fact]
+    public async Task TriageDelegate_ComposedTooLong_Refused()
+    {
+        data.WriteNote("inbox", InboxText);
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+        int room = DesktopActions.MaxTodoLength - WaitingFor.Compose("Anna", string.Empty).Length;
+
+        ActionResult tooLong = await data.Actions!.TriageDelegate(Item, "Anna", new string('x', room + 1), DesktopFixture.Today);
+
+        Assert.Equal((ActionKind.Refused, DesktopActions.TodoTooLongText), (tooLong.Kind, tooLong.Text));
+        Assert.Equal(before, Files());
+
+        ActionResult fits = await data.Actions.TriageDelegate(Item, "Anna", new string('x', room), DesktopFixture.Today);
+
+        Assert.Equal(ActionKind.Done, fits.Kind);
+        Assert.Equal(DesktopActions.MaxTodoLength, Assert.Single(data.State!.Snapshot!.Todos).Text.Length);
+    }
+
+    // 243 AC-7: the line is gone: refused, nothing written; the removal fails: LineKept, the todo stays.
+    [Fact]
+    public async Task TriageDelegate_LineGoneOrKept()
+    {
+        data.WriteNote("inbox", "# inbox\n- first\n" + Line + " edited\n");
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult gone = await data.Actions!.TriageDelegate(Item, "Anna", "call Anna", DesktopFixture.Today);
+
+        Assert.Equal((ActionKind.Refused, DesktopActions.TriageLineGoneText), (gone.Kind, gone.Text));
+        Assert.Equal(before, Files());
+
+        data.WriteNote("inbox", InboxText);
+        await data.RefreshAsync();
+        data.Actions.BeforeTriageRemove = () => File.WriteAllText(InboxPath, "# inbox\n- someone else\n");
+
+        ActionResult kept = await data.Actions.TriageDelegate(Item, "Anna", "call Anna", DesktopFixture.Today);
+
+        Assert.Equal((ActionKind.Failed, ActionReason.LineKept), (kept.Kind, kept.Reason));
+        Assert.Equal("waiting: @[Anna] call Anna", Assert.Single(data.State!.Snapshot!.Todos).Text);
+    }
+
     // AC-7: "- <text>" is appended after a final newline is added; the other bytes and CRLF stay; the line leaves.
     [Theory]
     [InlineData("# Plan\n- old\n", "# Plan\n- old\n- call Anna\n")]

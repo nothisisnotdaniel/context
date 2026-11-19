@@ -1,7 +1,7 @@
 @inherits StateComponent
 @* Inbox triage: shows the first line of the inbox queue (DesktopState.Triage) and turns it into a note, a todo or an
    addition to a note, drops it or snoozes it, through the DesktopActions triage methods. Outside a text field the
-   keys n, t, a, d and l pick the action (1 and 2 in the Later form), Esc closes the form or the panel. The parent may
+   keys n, t, w, a, d and l pick the action (1 and 2 in the Later form), Esc closes the form or the panel. The parent may
    hold an action back (Guard: the inbox or the target is open with unsaved changes) and hears what was written
    (OnTriaged). A sensitive target is unlocked here (one key-store call) and locked again afterwards. *@
 
@@ -40,6 +40,7 @@
         <div class="triage-buttons">
             <button type="button" class="triage-note" disabled="@running" aria-pressed="@Pressed(TriageForm.Note)" @onclick="() => OpenForm(TriageForm.Note)">Note (N)</button>
             <button type="button" class="triage-todo" disabled="@running" aria-pressed="@Pressed(TriageForm.Todo)" @onclick="() => OpenForm(TriageForm.Todo)">Todo (T)</button>
+            <button type="button" class="triage-delegate" disabled="@running" aria-pressed="@Pressed(TriageForm.Delegate)" @onclick="() => OpenForm(TriageForm.Delegate)">Delegate (W)</button>
             <button type="button" class="triage-append" disabled="@running" aria-pressed="@Pressed(TriageForm.Append)" @onclick="() => OpenForm(TriageForm.Append)">Add to note (A)</button>
             <button type="button" class="triage-drop" disabled="@running" @onclick="AskDrop">Drop (D)</button>
             <button type="button" class="triage-later" disabled="@running" aria-pressed="@Pressed(TriageForm.Later)" @onclick="() => OpenForm(TriageForm.Later)">Later (L)</button>
@@ -61,6 +62,20 @@
                            @onkeydown:stopPropagation="true" />
                     <input type="text" class="triage-date" value="@dateText" maxlength="10" disabled="@running"
                            aria-label="Due date" placeholder="Empty: today" @oninput="DateTyped" @onkeydown="e => TodoFromItem(e)"
+                           @onkeydown:stopPropagation="true" />
+                    <button type="button" class="triage-cancel" disabled="@running" @onclick="CloseForm">Cancel</button>
+                </div>
+                break;
+            case TriageForm.Delegate:
+                <div class="triage-form">
+                    <input type="text" class="triage-person" value="@personText" maxlength="@NoteStore.MaxTitleLength" disabled="@running"
+                           aria-label="Person" placeholder="Name" @ref="field" @oninput="PersonTyped" @onkeydown="e => DelegateItem(e)"
+                           @onkeydown:stopPropagation="true" />
+                    <input type="text" class="triage-delegate-text" value="@todoText" maxlength="@DesktopActions.MaxTodoLength" disabled="@running"
+                           aria-label="Todo text" placeholder="Todo text" @oninput="TodoTyped" @onkeydown="e => DelegateItem(e)"
+                           @onkeydown:stopPropagation="true" />
+                    <input type="text" class="triage-follow-up" value="@dateText" maxlength="10" disabled="@running"
+                           aria-label="Follow-up date" placeholder="Empty: in a week" @oninput="DateTyped" @onkeydown="e => DelegateItem(e)"
                            @onkeydown:stopPropagation="true" />
                     <button type="button" class="triage-cancel" disabled="@running" @onclick="CloseForm">Cancel</button>
                 </div>
@@ -102,6 +117,7 @@
     private string todoText = string.Empty;
     private string dateText = string.Empty;
     private string nameText = string.Empty;
+    private string personText = string.Empty;
     private string laterText = string.Empty;
     private bool dropping;
     private bool running;
@@ -117,6 +133,7 @@
         None,
         Note,
         Todo,
+        Delegate,
         Append,
         Later,
     }
@@ -162,7 +179,7 @@
             await panel.FocusAsync();
         }
 
-        if (focusField && form is TriageForm.Note or TriageForm.Todo or TriageForm.Append && !running)
+        if (focusField && form is TriageForm.Note or TriageForm.Todo or TriageForm.Delegate or TriageForm.Append && !running)
         {
             focusField = false;
             await field.FocusAsync();
@@ -203,6 +220,8 @@
 
     private void DateTyped(ChangeEventArgs e) => dateText = e.Value?.ToString() ?? string.Empty;
 
+    private void PersonTyped(ChangeEventArgs e) => personText = e.Value?.ToString() ?? string.Empty;
+
     private void NameTyped(ChangeEventArgs e) => nameText = e.Value?.ToString() ?? string.Empty;
 
     private void LaterTyped(ChangeEventArgs e) => laterText = e.Value?.ToString() ?? string.Empty;
@@ -226,6 +245,12 @@
                 focusField = true;
                 break;
             case TriageForm.Todo:
+                todoText = item.Text.Trim();
+                dateText = string.Empty;
+                focusField = true;
+                break;
+            case TriageForm.Delegate:
+                personText = string.Empty;
                 todoText = item.Text.Trim();
                 dateText = string.Empty;
                 focusField = true;
@@ -355,6 +380,9 @@
             case "t":
                 OpenForm(TriageForm.Todo);
                 break;
+            case "w":
+                OpenForm(TriageForm.Delegate);
+                break;
             case "a":
                 OpenForm(TriageForm.Append);
                 break;
@@ -413,6 +441,40 @@
         try
         {
             result = await Actions.TriageToTodo(item, todoText, due);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        await Finish(result, string.Empty);
+    }
+
+    // Enter in a Delegate field: a waiting-for todo for the person; an empty follow-up date is in a week.
+    private async Task DelegateItem(KeyboardEventArgs? key)
+    {
+        if (FieldKey(key) is not { } item || view is not { } shown)
+        {
+            return;
+        }
+
+        string typed = dateText.Trim();
+        DateOnly followUp = shown.Today.AddDays(WaitingFor.DefaultFollowUpDays);
+        if (typed.Length > 0 && !TodoInput.TryParseDate(typed, shown.Today, out followUp))
+        {
+            ShowStatus(DesktopActions.TriageDateText, "red");
+            return;
+        }
+
+        if (!await Begin(null))
+        {
+            return;
+        }
+
+        ActionResult result;
+        try
+        {
+            result = await Actions.TriageDelegate(item, personText, todoText, followUp);
         }
         finally
         {

@@ -510,4 +510,118 @@ public sealed class TodoPanelTests : IDisposable
         Assert.Equal("<img src=x onerror=alert(1)> \uFFFD", cut.Find(".text").TextContent);
         Assert.Equal("R&D", cut.Find("button.todo-note").TextContent);
     }
+
+    // 243 ----------------------------------------------------------------------------------------
+
+    // 243 AC-2: open waiting-for todos (stored and in notes) leave the todo list and show in their own group below it,
+    // in the same order, each row built like a todo row.
+    [Fact]
+    public async Task Render_WaitingFor_OwnGroupBelowTheList()
+    {
+        data.AddTodo("Plain", DesktopFixture.Today);
+        data.AddTodo("waiting: @[Anna] slides", DesktopFixture.Today.AddDays(-1));
+        data.AddTodo("Waiting:@[Bob] contract", DesktopFixture.Today.AddDays(2), time: new TimeOnly(9, 30));
+        WriteNoteInPast("Meeting", "- [ ] waiting: @[Cleo] notes due:2026-10-30\n- [ ] plain note todo\n");
+
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+
+        Assert.Equal(
+            ["Plain", "plain note todo"],
+            cut.FindAll("ul.todo-list li.todo .text").Select(t => t.TextContent).ToArray());
+        IElement group = cut.Find("section.waiting-for");
+        Assert.Equal("Waiting for", group.GetAttribute("aria-label"));
+        Assert.Equal("Waiting for", group.QuerySelector("h3")!.TextContent);
+        IReadOnlyList<IElement> rows = cut.FindAll("section.waiting-for ul.waiting-list li.todo");
+        Assert.Equal(
+            ["2026-10-28 waiting: @[Anna] slides", "2026-10-30 waiting: @[Cleo] notes", "2026-10-31 09:30 Waiting:@[Bob] contract"],
+            rows.Select(r => string.Join(" ", r.QuerySelectorAll(".date, .time, .text").Select(e => e.TextContent))).ToArray());
+        Assert.All(rows, r => Assert.Single(r.QuerySelectorAll("input[type=checkbox].done")));
+        Assert.Equal("Cleo", rows[1].QuerySelector("button.mention")!.TextContent.Trim('@', '[', ']'));
+        Assert.Equal("Meeting", rows[1].QuerySelector("button.todo-note")!.TextContent);
+        Assert.Empty(rows[0].QuerySelectorAll("button.todo-note"));
+        Assert.Contains("overdue", rows[0].QuerySelector(".date")!.ClassList);
+        // The group comes after the list in the panel.
+        string markup = cut.Markup;
+        Assert.True(markup.IndexOf("todo-list", StringComparison.Ordinal) < markup.IndexOf("waiting-for", StringComparison.Ordinal));
+        Assert.Empty(cut.FindAll("p.grey"));
+    }
+
+    // 243 AC-2: the group's heading is styled like the sidebar's h2 and the group is set off by a line, in theme colours.
+    [Fact]
+    public void AppCss_WaitingForGroup_HeadingAndLine()
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+
+        string heading = Block(css, ".todos .waiting-for h3 {");
+        Assert.Contains("color: var(--grey);", heading, StringComparison.Ordinal);
+        Assert.Contains("font-size: 13px;", heading, StringComparison.Ordinal);
+        Assert.Contains("text-transform: uppercase;", heading, StringComparison.Ordinal);
+        Assert.Contains("border-top: 1px solid var(--line);", Block(css, ".todos .waiting-for {"), StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"#[0-9a-fA-F]{3,8}\b|\b(rgb|rgba|hsl|hsla)\(", heading);
+    }
+
+    private static string Block(string css, string selector)
+    {
+        int at = css.IndexOf("\n" + selector, StringComparison.Ordinal);
+        Assert.True(at >= 0, selector);
+        return css[at..css.IndexOf('}', at)];
+    }
+
+    // 243 AC-2: no waiting-for todo, no group; only waiting-for todos: no todo list and no empty line.
+    [Fact]
+    public async Task Render_WaitingFor_ShownOnlyWithRows()
+    {
+        data.AddTodo("Plain", DesktopFixture.Today);
+        data.AddTodo("waiting @[Anna] not a waiting-for todo", DesktopFixture.Today);
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+        Assert.Empty(cut.FindAll("section.waiting-for"));
+        Assert.Equal(2, cut.FindAll("ul.todo-list li.todo").Count);
+
+        using DesktopFixture only = new DesktopFixture();
+        only.AddTodo("waiting: @[Anna] slides", DesktopFixture.Today);
+        IRenderedComponent<TodoPanel> waiting = await only.RenderAsync<TodoPanel>();
+        Assert.Empty(waiting.FindAll("ul.todo-list"));
+        Assert.Single(waiting.FindAll("ul.waiting-list li.todo"));
+        Assert.DoesNotContain("No todos yet", waiting.Markup, StringComparison.Ordinal);
+    }
+
+    // 243 AC-3: ticking a stored waiting-for row asks the usual question and completes it in todos.json.
+    [Fact]
+    public async Task TickWaiting_Stored_CompletesTodo()
+    {
+        data.AddTodo("Plain", DesktopFixture.Today);
+        data.AddTodo("waiting: @[Anna] slides", DesktopFixture.Today);
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+
+        cut.Find("ul.waiting-list input.done").Change(true);
+        Assert.Equal("Mark this todo done? waiting: @[Anna] slides", cut.Find("[role=dialog] .question").TextContent);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("Done: waiting: @[Anna] slides", cut.Find("p.result").TextContent);
+            Assert.Empty(cut.FindAll("section.waiting-for"));
+        }, Wait);
+        Assert.Equal(["Plain"], data.Todos!.List().Select(t => t.Text).ToArray());
+        Assert.Equal(["waiting: @[Anna] slides"], data.Todos.ListDone().Select(t => t.Text).ToArray());
+    }
+
+    // 243 AC-3: ticking a note's waiting-for row turns its [ ] into [x].
+    [Fact]
+    public async Task TickWaiting_NoteTodo_WritesX()
+    {
+        WriteNoteInPast("Meeting", "- [ ] waiting: @[Cleo] notes\n");
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+
+        cut.Find("ul.waiting-list input.done").Change(true);
+        Assert.Equal("Mark this todo done? waiting: @[Cleo] notes", cut.Find("[role=dialog] .question").TextContent);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("Done: waiting: @[Cleo] notes", cut.Find("p.result").TextContent);
+            Assert.Empty(cut.FindAll("section.waiting-for"));
+        }, Wait);
+        Assert.Equal("- [x] waiting: @[Cleo] notes\n", File.ReadAllText(Path.Combine(data.Root, "Meeting.md")));
+    }
 }

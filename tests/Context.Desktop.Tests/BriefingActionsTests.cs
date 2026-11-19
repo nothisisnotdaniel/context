@@ -84,7 +84,7 @@ public sealed class BriefingActionsTests : IDisposable
         Assert.Equal((ActionKind.Done, ActionReason.None, "briefings/2026-10-29"), (result.Kind, result.Reason, result.Text));
         Assert.Equal("# briefings\n", File.ReadAllText(Path.Combine(data.Root, "briefings.md")));
         Assert.Equal(
-            "# 2026-10-29\n\n## Appointments\n- No appointments.\n\n## Todos\n- call Anna\n\n## Open checkpoint\n"
+            "# 2026-10-29\n\n## Appointments\n- No appointments.\n\n## Todos\n- call Anna\n\n## Follow-ups\n- No follow-ups due.\n\n## Open checkpoint\n"
             + "- No Times bookings in the last 7 days.\n\n## Flexitime balance\n- No Times bookings.\n",
             File.ReadAllText(PagePath("2026-10-29")));
         Assert.Equal("briefings/2026-10-29", data.State!.TakeBriefing());

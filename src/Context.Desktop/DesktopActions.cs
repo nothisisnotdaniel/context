@@ -507,6 +507,9 @@ internal sealed class DesktopActions
     /// <summary>The accent line after a triage line became a todo.</summary>
     public static string TriageTodoText(string text) => $"Added: {text}";
 
+    /// <summary>The red line when a delegated line has no valid person.</summary>
+    public const string TriagePersonText = "Type a person's name.";
+
     /// <summary>The accent line after a triage line was added to the note <paramref name="name"/>.</summary>
     public static string TriageAddedText(string name) => $"Added to {name}.";
 
@@ -610,6 +613,17 @@ internal sealed class DesktopActions
     /// </summary>
     public Task<ActionResult> TriageToTodo(InboxItem item, string text, DateOnly due) =>
         Run(() => TriageToTodoNow(item, text, due));
+
+    /// <summary>
+    /// Triage: delegates the line. Adds the waiting-for todo <c>waiting: @[person] text</c>
+    /// (<see cref="WaitingFor.Compose"/>) due on <paramref name="followUp"/> (the <see cref="AddTodo"/> rules and texts
+    /// for the composed text; an empty text is <see cref="EmptyTodoText"/>), then removes the line, with the checks
+    /// and results of <see cref="TriageToTodo"/>. A person <see cref="PersonParser.NormalizeTyped"/> refuses, or one that
+    /// doesn't read back as the same mention (a <c>]</c>), is
+    /// <see cref="TriagePersonText"/>; every refusal writes nothing and keeps the line.
+    /// </summary>
+    public Task<ActionResult> TriageDelegate(InboxItem item, string person, string text, DateOnly followUp) =>
+        Run(() => TriageDelegateNow(item, person, text, followUp));
 
     /// <summary>
     /// Triage: appends <c>- &lt;text&gt;\n</c> (after a missing final newline) to the note <paramref name="name"/>,
@@ -1586,6 +1600,32 @@ internal sealed class DesktopActions
         }
 
         ActionResult added = AddTodoNow(text, due, null, null);
+        return added.Kind == ActionKind.Done
+            ? TriageRemove(item, TodoStore.FileName, TriageTodoText(added.Text), null)
+            : added;
+    }
+
+    private ActionResult TriageDelegateNow(InboxItem item, string person, string text, DateOnly followUp)
+    {
+        // A name that wouldn't read back as the same mention (a ']' ends it early) is refused too.
+        if (PersonParser.NormalizeTyped(person) is not { } name
+            || WaitingFor.TryParse(WaitingFor.Compose(name, string.Empty))?.Person != name)
+        {
+            return Refused(ActionReason.Invalid, TriagePersonText);
+        }
+
+        string trimmed = text.Trim();
+        if (trimmed.Length == 0)
+        {
+            return Refused(ActionReason.Invalid, EmptyTodoText);
+        }
+
+        if (TriageCheck(item) is { } refused)
+        {
+            return refused;
+        }
+
+        ActionResult added = AddTodoNow(WaitingFor.Compose(name, trimmed), followUp, null, null);
         return added.Kind == ActionKind.Done
             ? TriageRemove(item, TodoStore.FileName, TriageTodoText(added.Text), null)
             : added;

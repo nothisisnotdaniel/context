@@ -105,6 +105,22 @@ ol {
     margin-top: 0;
 }
 
+/* The sidebar's Waiting for group (job 243): its own block below the todo list, headed like the h2 above it. */
+.todos .waiting-for {
+    border-top: 1px solid var(--line);
+    margin-top: 12px;
+    padding-top: 12px;
+}
+
+.todos .waiting-for h3 {
+    color: var(--grey);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    margin: 0 0 8px;
+    text-transform: uppercase;
+}
+
 .current-region {
     overflow-y: auto;
     padding: 20px 24px;
@@ -1657,6 +1673,7 @@ nav.saved-searches ul {
 }
 
 .triage-form .triage-date,
+.triage-form .triage-follow-up,
 .triage-form .triage-until {
     flex: 0 0 9em;
 }

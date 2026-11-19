@@ -72,7 +72,7 @@ public sealed class BriefingTests : IDisposable
     }
 
     private static string Page(string checkpoint, string balance) =>
-        "# 2026-11-13\n\n## Appointments\n- No appointments.\n\n## Todos\n- Nothing due.\n\n## Open checkpoint\n"
+        "# 2026-11-13\n\n## Appointments\n- No appointments.\n\n## Todos\n- Nothing due.\n\n## Follow-ups\n- No follow-ups due.\n\n## Open checkpoint\n"
         + checkpoint + "\n## Flexitime balance\n" + balance;
 
     // AC-3: the exact page: the daily note's sections byte for byte, the open groups and the balance through today-1.
@@ -90,7 +90,7 @@ public sealed class BriefingTests : IDisposable
         string daily = DailyNote.Compose(Todos(), Calendar(), null, Today);
         Assert.StartsWith(daily, text, StringComparison.Ordinal);
         Assert.Equal(
-            "# 2026-11-13\n\n## Appointments\n- No appointments.\n\n## Todos\n- call Anna\n\n## Open checkpoint\n"
+            "# 2026-11-13\n\n## Appointments\n- No appointments.\n\n## Todos\n- call Anna\n\n## Follow-ups\n- No follow-ups due.\n\n## Open checkpoint\n"
             + "- 2026-11-12: #12 A, C line\n\n## Flexitime balance\n- -4:00 through 2026-11-12.\n",
             text);
     }
@@ -182,6 +182,43 @@ public sealed class BriefingTests : IDisposable
         {
             File.SetUnixFileMode(times, mode);
         }
+    }
+
+    // 243 AC-5: one line per open waiting-for todo due today or earlier, in List() order; an overdue one with its
+    // date; future ones, plain todos and done ones left out; text through OneLine; the other sections unchanged.
+    [Fact]
+    public void Compose_FollowUps_DueAndOverdue()
+    {
+        TodoStore todos = Todos();
+        todos.Add("waiting: @[Anna  Schmidt] send the slides", Today);
+        todos.Add("WAITING:\t@[Bob] contract\u0007 draft", Today.AddDays(-2));
+        todos.Add("waiting: @[Cleo] later", Today.AddDays(1));
+        todos.Add("plain todo", Today);
+        TodoItem done = todos.Add("waiting: @[Dora] done already", Today);
+        todos.Complete(done.Id);
+
+        string text = Compose();
+
+        Assert.Contains(
+            "\n\n## Follow-ups\n- Bob: contract\uFFFD draft (due 2026-11-11)\n- Anna Schmidt: send the slides\n\n## Open checkpoint\n",
+            text,
+            StringComparison.Ordinal);
+        Assert.StartsWith(DailyNote.Compose(Todos(), Calendar(), null, Today), text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Cleo", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Dora", text, StringComparison.Ordinal);
+    }
+
+    // 243 AC-5: none due, and a bad todos.json.
+    [Fact]
+    public void Compose_FollowUps_NoneAndUnreadable()
+    {
+        Todos().Add("waiting: @[Cleo] later", Today.AddDays(1));
+        Assert.Contains("\n\n## Follow-ups\n- No follow-ups due.\n\n## Open checkpoint\n", Compose(), StringComparison.Ordinal);
+
+        File.WriteAllText(Path.Combine(root, TodoStore.FileName), "{ broken");
+        string text = Compose();
+        Assert.Contains("\n\n## Follow-ups\n- Can't read todos.json.\n\n## Open checkpoint\n", text, StringComparison.Ordinal);
+        Assert.StartsWith(DailyNote.Compose(Todos(), Calendar(), null, Today), text, StringComparison.Ordinal);
     }
 
     [Theory]

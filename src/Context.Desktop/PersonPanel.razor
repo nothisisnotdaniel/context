@@ -1,7 +1,7 @@
 @inherits StateComponent
 @* The person page of the open note (DesktopState.Person): the notes that mention the person with @[...], the
    appointments from the calendar files and the cached published calendar that mention them or list them as an
-   attendee, then the open and the done todos that mention them, with one red line above them per alias on the page
+   attendee, then the waiting-for todos and the open and the done todos that mention them, with one red line above them per alias on the page
    that links to no one or to another person. It reads only (no download), and reloads whenever the state changes. *@
 
 <section class="person-panel" aria-label="Person">
@@ -61,6 +61,20 @@
                             {
                                 <span class="location grey cut" title="@location">@location</span>
                             }
+                        </li>
+                    }
+                </ul>
+            }
+            @if (view.Waiting.Count > 0)
+            {
+                <h2>Waiting for</h2>
+                <ul class="person-todos waiting-todos">
+                    @foreach (TodoItem todo in view.Waiting)
+                    {
+                        string text = DesktopText.OneLine(WaitingFor.TryParse(todo.Text)?.Rest ?? todo.Text);
+                        <li class="person-todo">
+                            <span class="date grey">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                            <span class="text cut" title="@text">@text</span>
                         </li>
                     }
                 </ul>

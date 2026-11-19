@@ -257,6 +257,37 @@ public sealed class PersonPanelTests : IDisposable
             cut.Find("section.person-panel").Children.Select(c => c.TagName).ToArray());
     }
 
+    // 243 AC-4: Waiting for (due date, the text after the mention through OneLine) before Open todos, only when
+    // non-empty; an alias matches; a todo waiting on Anna that mentions Bob stays under Bob's Open todos.
+    [Fact]
+    public async Task Render_Waiting_BeforeOpenTodos()
+    {
+        data.WriteNote("people", "# people\n");
+        data.WriteFile(Path.Combine("people", "Anna Schmidt.md"), "# Anna Schmidt\naliases:: AS\n");
+        data.AddTodo("waiting: @[AS] <b>slides</b>\u0007 for @[Bob]", DesktopFixture.Today.AddDays(2));
+        data.AddTodo("waiting: @[Anna Schmidt] contract", DesktopFixture.Today);
+        data.AddTodo("Call @[Anna Schmidt]", DesktopFixture.Today);
+        await data.RefreshAsync();
+
+        IRenderedComponent<PersonPanel> cut = Render("Anna Schmidt");
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Waiting for", "Open todos"],
+            cut.FindAll("h2").Select(h => h.TextContent).ToArray()), Wait);
+        Assert.Equal(
+            ["2026-10-29|contract", "2026-10-31|<b>slides</b>\uFFFD for @[Bob]"],
+            TodoRows(cut, "waiting-todos"));
+        Assert.Equal(["2026-10-29|Call @[Anna Schmidt]"], TodoRows(cut, "open-todos"));
+        Assert.Empty(cut.FindAll("b"));
+        Assert.Empty(cut.FindAll("input"));
+
+        IRenderedComponent<PersonPanel> bob = Render("Bob");
+        bob.WaitForAssertion(() => Assert.Equal(
+            ["Open todos"], bob.FindAll("h2").Select(h => h.TextContent).ToArray()), Wait);
+        Assert.Equal(["2026-10-31|waiting: @[AS] <b>slides</b>\uFFFD for @[Bob]"], TodoRows(bob, "open-todos"));
+        Assert.Empty(bob.FindAll("ul.waiting-todos"));
+    }
+
     // 159 AC-9: each todo section only when non-empty; a person mentioned only in a done todo is found.
     [Fact]
     public async Task Render_OnlyDoneTodo_OnlyDoneSection()
