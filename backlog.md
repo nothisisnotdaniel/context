@@ -289,6 +289,10 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#333](backlog/333-fix-flaky-editingflowtests-palettecurrent-isnocomm.md) Fix flaky EditingFlowTests.PaletteCurrent_IsNoCommand test → 246-flaky-palette-tests
 - [?] [#334](backlog/334-fix-flaky-sensitiveflowtests-markandmakeplain-dirt.md) Fix flaky SensitiveFlowTests.MarkAndMakePlain_Dirty_AskToSaveFirst test
 - [?] [#335](backlog/335-fix-flaky-open-anyroute-putsitfirst-once.md) Fix flaky Open_AnyRoute_PutsItFirst_Once test
+- [?] [#336](backlog/336-cap-the-total-size-of-embedded.md) Cap the total size of embedded images in a shared note
+- [?] [#337](backlog/337-split-notehtml-cs-into-block-and.md) Split NoteHtml.cs into block and inline renderers
+- [?] [#338](backlog/338-fix-the-stale-comment-above-sharenotenow.md) Fix the stale comment above ShareNoteNow
+- [?] [#339](backlog/339-share-a-note-as-pdf.md) Share a note as PDF
 
 ## Dropped with the terminal UI
 
