@@ -51,8 +51,8 @@ internal sealed record ReviewDay
 }
 
 /// <summary>
-/// The data of the weekly review, with no rendering: the notes changed and the todos done in the last 7 days
-/// (today included), the overdue todos and the appointments of the next 7 days. Any front end builds it with
+/// The data of the weekly review, with no rendering: the notes changed and the todos done (from the done log) in the last
+/// 7 days (today included), the overdue todos and the appointments of the next 7 days. Any front end builds it with
 /// <see cref="Build"/> and draws it its own way. All text in it is raw outside text: every front end must clean it
 /// (<see cref="SafeText.Clean"/>) and escape it for its own output. It never opens <c>context.db</c>.
 /// </summary>
@@ -67,7 +67,8 @@ internal sealed record ReviewView
         TimeZoneInfo zone,
         IReadOnlyList<ChangedNote> changedNotes,
         bool todosUnreadable,
-        IReadOnlyList<TodoItem> doneTodos,
+        IReadOnlyList<DoneEntry> done,
+        bool doneLogUnreadable,
         IReadOnlyList<TodoItem> overdue,
         IReadOnlyList<ReviewDay> days,
         string folder,
@@ -81,7 +82,8 @@ internal sealed record ReviewView
         Zone = zone;
         ChangedNotes = changedNotes;
         TodosUnreadable = todosUnreadable;
-        DoneTodos = doneTodos;
+        Done = done;
+        DoneLogUnreadable = doneLogUnreadable;
         Overdue = overdue;
         Days = days;
         Folder = folder;
@@ -109,11 +111,17 @@ internal sealed record ReviewView
     /// <summary>The notes (no sensitive ones) last written from <see cref="From"/> to <see cref="To"/>, newest first.</summary>
     public IReadOnlyList<ChangedNote> ChangedNotes { get; }
 
-    /// <summary>True when <c>todos.json</c> can't be read; then <see cref="DoneTodos"/> and <see cref="Overdue"/> are empty.</summary>
+    /// <summary>True when <c>todos.json</c> can't be read; then <see cref="Overdue"/> is empty.</summary>
     public bool TodosUnreadable { get; }
 
-    /// <summary>The todos done from <see cref="From"/> to <see cref="To"/>, in <see cref="TodoStore.ListDone"/> order.</summary>
-    public IReadOnlyList<TodoItem> DoneTodos { get; }
+    /// <summary>
+    /// The done-log entries (<see cref="DoneLog"/>) dated <see cref="From"/> to <see cref="To"/>, in
+    /// <see cref="DoneLogView"/> order (newest date first, then later line first).
+    /// </summary>
+    public IReadOnlyList<DoneEntry> Done { get; }
+
+    /// <summary>True when the done note can't be read; then <see cref="Done"/> is empty.</summary>
+    public bool DoneLogUnreadable { get; }
 
     /// <summary>The open todos due before <see cref="To"/>, in <see cref="TodoStore.List"/> order.</summary>
     public IReadOnlyList<TodoItem> Overdue { get; }
@@ -136,15 +144,10 @@ internal sealed record ReviewView
     /// <summary>Why the feed failed (a fixed text), as in <see cref="CurrentView.Reason"/>.</summary>
     public string? Reason { get; }
 
-    /// <summary>The day <paramref name="todo"/> was done, in <see cref="Zone"/>.</summary>
-    public DateOnly DoneDate(TodoItem todo) =>
-        todo.Done is { } done
-            ? DayInZone(done, Zone)
-            : throw new ArgumentException("The todo is not done.", nameof(todo));
-
     /// <summary>
     /// Reads everything the review needs. The feed (if any) is fetched once; <c>context.db</c> is never opened. An
-    /// unreadable <c>todos.json</c> sets <see cref="TodosUnreadable"/>; the rest is still filled.
+    /// unreadable <c>todos.json</c> sets <see cref="TodosUnreadable"/> and an unreadable done note
+    /// <see cref="DoneLogUnreadable"/>; the rest is still filled.
     /// </summary>
     public static ReviewView Build(
         NoteStore notes, TodoStore todos, CalendarStore calendar, CalendarFeed? feed, DateOnly today)
@@ -160,24 +163,20 @@ internal sealed record ReviewView
             .ThenBy(n => n.Name, StringComparer.Ordinal)
             .ToList();
 
-        IReadOnlyList<TodoItem> done = [];
         IReadOnlyList<TodoItem> overdue = [];
         bool todosUnreadable = false;
         try
         {
-            IReadOnlyList<TodoItem> open = todos.List();
-            IReadOnlyList<TodoItem> finished = todos.ListDone();
-            overdue = open.Where(t => t.Due < today).ToList();
-            done = finished
-                .Where(t => t.Done is { } d && InRange(DayInZone(d, zone), from, today))
-                .ToList();
+            overdue = todos.List().Where(t => t.Due < today).ToList();
         }
         catch (TodoStoreException)
         {
-            done = [];
             overdue = [];
             todosUnreadable = true;
         }
+
+        DoneLogView log = DoneLogView.Build(notes);
+        List<DoneEntry> done = log.Entries.Where(e => InRange(e.Date, from, today)).ToList();
 
         CalendarFeedResult result = CurrentView.Fetch(feed);
         List<ReviewDay> days = [];
@@ -204,6 +203,7 @@ internal sealed record ReviewView
             changed,
             todosUnreadable,
             done,
+            log.Unreadable,
             overdue,
             days,
             calendar.Folder,
@@ -219,10 +219,6 @@ internal sealed record ReviewView
         DateTime utc = time.Kind == DateTimeKind.Utc ? time : time.ToUniversalTime();
         return TimeZoneInfo.ConvertTimeFromUtc(utc, zone);
     }
-
-    // A UTC done time as its day in zone.
-    private static DateOnly DayInZone(DateTime utc, TimeZoneInfo zone) =>
-        DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), zone));
 
     private static bool InRange(DateOnly day, DateOnly from, DateOnly to) => day >= from && day <= to;
 }

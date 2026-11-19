@@ -51,6 +51,14 @@ public sealed class ReviewViewTests : IDisposable
         return $"{{\"text\":\"{text}\",\"due\":\"{due}\",\"created\":\"{created}\"{doneField}{repeatField}}}";
     }
 
+    private void WriteDone(string text)
+    {
+        Directory.CreateDirectory(root);
+        string path = Path.Combine(root, "done.md");
+        File.WriteAllText(path, text);
+        File.SetLastWriteTimeUtc(path, Now);
+    }
+
     private void WriteCalendar(string name, string text)
     {
         string folder = Path.Combine(root, CalendarStore.FolderName);
@@ -106,15 +114,12 @@ public sealed class ReviewViewTests : IDisposable
         Assert.DoesNotContain(view.ChangedNotes, n => n.Name == "Secret");
     }
 
-    // AC-2: done todos in the window (in the zone) in ListDone order; overdue is due < today in List order.
+    // AC-2: overdue is due < today in List order; done todos in todos.json are no longer part of the review.
     [Fact]
-    public void Todos_DoneInWindowAndOverdue()
+    public void Todos_OverdueOnly_StoredDoneTodosLeftOut()
     {
         WriteTodos("["
             + Todo("done today", "2026-10-20", done: "2026-10-29T07:00:00Z") + ","
-            + Todo("done edge", "2026-10-20", done: "2026-10-22T23:30:00Z") + ","
-            + Todo("done too old", "2026-10-20", done: "2026-10-22T22:30:00Z") + ","
-            + Todo("done tomorrow", "2026-10-20", done: "2026-10-29T23:30:00Z") + ","
             + Todo("late b", "2026-10-28") + ","
             + Todo("late a", "2026-10-01", repeat: "day") + ","
             + Todo("due today", "2026-10-29") + ","
@@ -124,25 +129,62 @@ public sealed class ReviewViewTests : IDisposable
         ReviewView view = Build();
 
         Assert.False(view.TodosUnreadable);
-        Assert.Equal(["done today", "done edge"], view.DoneTodos.Select(t => t.Text));
-        Assert.Equal(new DateOnly(2026, 10, 23), view.DoneDate(view.DoneTodos[1]));
+        Assert.Empty(view.Done);
         Assert.Equal(["late a", "late b"], view.Overdue.Select(t => t.Text));
     }
 
-    // AC-2: an unreadable todos.json sets the flag, empties both lists and still fills the rest.
+    // Job 293 AC-10: the done list is the done-log entries dated From..To, in DoneLogView order.
+    [Fact]
+    public void Done_FromDoneLogInWindow()
+    {
+        WriteDone("# done\n"
+            + "- 2026-10-22 too old\n"
+            + "- 2026-10-23 first day (due 2026-10-20)\n"
+            + "- 2026-10-29 today a\n"
+            + "- 2026-10-29 today b #work\n"
+            + "- 2026-10-30 tomorrow\n");
+
+        ReviewView view = Build();
+
+        Assert.False(view.DoneLogUnreadable);
+        Assert.Equal(["today b #work", "today a", "first day"], view.Done.Select(e => e.Text));
+        Assert.Equal(new DateOnly(2026, 10, 20), view.Done[2].Due);
+        Assert.Equal(new DateOnly(2026, 10, 23), view.Done[2].Date);
+    }
+
+    // Job 293 AC-10: an unreadable done.md sets DoneLogUnreadable and empties Done; overdue stays filled.
+    [Fact]
+    public void Done_Unreadable_SetsFlag()
+    {
+        WriteTodos("[" + Todo("late", "2026-10-28") + "]");
+        Directory.CreateDirectory(root);
+        using (FileStream big = File.Create(Path.Combine(root, "done.md")))
+        {
+            big.SetLength(NoteStore.MaxNoteBytes + 1);
+        }
+
+        ReviewView view = Build();
+
+        Assert.True(view.DoneLogUnreadable);
+        Assert.Empty(view.Done);
+        Assert.Equal("late", Assert.Single(view.Overdue).Text);
+    }
+
+    // AC-2 (job 293): an unreadable todos.json empties only Overdue; the done log and the rest are still filled.
     [Fact]
     public void Todos_Unreadable_RestStillFilled()
     {
         WriteTodos("not json");
         WriteNote("A", Utc(10, 28, 10));
+        WriteDone("# done\n- 2026-10-29 shipped\n");
         WriteCalendar("a.ics", Calendar(Event("Plan", "20261030T090000", "20261030T100000")));
 
         ReviewView view = Build();
 
         Assert.True(view.TodosUnreadable);
-        Assert.Empty(view.DoneTodos);
+        Assert.Equal("shipped", Assert.Single(view.Done).Text);
         Assert.Empty(view.Overdue);
-        Assert.Equal("A", Assert.Single(view.ChangedNotes).Name);
+        Assert.Contains(view.ChangedNotes, n => n.Name == "A");
         Assert.Equal("Plan", Assert.Single(view.Days[0].Appointments).Title);
     }
 

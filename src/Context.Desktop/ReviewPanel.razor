@@ -1,5 +1,5 @@
 @inherits StateComponent
-@* The weekly review (DesktopState.Review): the notes changed and the todos done in the last 7 days, the overdue todos
+@* The weekly review (DesktopState.Review): the notes changed and the todos done (from the done log) in the last 7 days, the overdue todos
    and the next 7 days' appointments grouped by day. It reads only, and reloads whenever the state changes, keeping
    the shown rows meanwhile. *@
 
@@ -37,22 +37,22 @@
         }
 
         <h3>Done todos</h3>
-        @if (view.TodosUnreadable)
+        @if (view.DoneLogUnreadable)
         {
-            <p class="red">Can't read todos.json.</p>
+            <p class="red">Can't read the done log.</p>
         }
-        else if (view.DoneTodos.Count == 0)
+        else if (view.Done.Count == 0)
         {
             <p class="grey">No todos done.</p>
         }
         else
         {
             <ul class="review-todos done-todos">
-                @foreach (TodoItem todo in view.DoneTodos)
+                @foreach (DoneEntry entry in view.Done)
                 {
-                    string text = DesktopText.OneLine(todo.Text);
+                    string text = DesktopText.OneLine(entry.Text);
                     <li class="review-todo">
-                        <span class="date grey">@Date(view.DoneDate(todo))</span>
+                        <span class="date grey">@Date(entry.Date)</span>
                         <span class="text cut" title="@text">@text</span>
                     </li>
                 }

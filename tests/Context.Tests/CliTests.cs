@@ -644,6 +644,59 @@ public sealed class CliTests : IDisposable
         Assert.Equal((0, "Done: call Anna\n", string.Empty), (plain.Code, plain.Out, plain.Err));
     }
 
+    // 293 AC-3: todo done appends the done-log line for a stored todo; stdout and the exit code are unchanged.
+    [Fact]
+    public void TodoDone_StoredTodo_AppendsDoneLogLine()
+    {
+        Run("todo", "add", "2026-10-28", "Send report #work");
+
+        Result result = Run("todo", "done", "send report");
+
+        Assert.Equal((0, "Done: Send report #work\n", string.Empty), (result.Code, result.Out, result.Err));
+        Assert.Equal("# done\n- 2026-10-29 Send report #work (due 2026-10-28)\n", Read("done.md"));
+    }
+
+    // 293 AC-3: a note todo without due: appends a line with no due part.
+    [Fact]
+    public void TodoDone_NoteTodo_AppendsDoneLogLineWithoutDue()
+    {
+        WriteNote("Meeting", "# Meeting\n- [ ] call Anna\n");
+        WriteNote("done", "# done\n- 2026-10-01 earlier");
+
+        Result result = Run("todo", "done", "call anna");
+
+        Assert.Equal((0, "Done: call Anna\n", string.Empty), (result.Code, result.Out, result.Err));
+        Assert.Equal("# done\n- 2026-10-01 earlier\n- 2026-10-29 call Anna\n", Read("done.md"));
+    }
+
+    // 293 AC-6: a done.md that would grow past MaxEditBytes is left alone; the todo is done, stderr says so, exit 0.
+    [Fact]
+    public void TodoDone_DoneLogTooLarge_StderrAndExitZero()
+    {
+        Run("todo", "add", "2026-10-28", "Send report");
+        Directory.CreateDirectory(root);
+        string path = Path.Combine(root, "done.md");
+        byte[] full = Encoding.UTF8.GetBytes("# done\n" + new string('a', (int)NoteStore.MaxEditBytes - 8) + "\n");
+        File.WriteAllBytes(path, full);
+
+        Result result = Run("todo", "done", "send");
+
+        Assert.Equal((0, "Done: Send report\n"), (result.Code, result.Out));
+        Assert.Equal(["Couldn't add it to the done log."], result.ErrLines);
+        Assert.Equal(full, File.ReadAllBytes(path));
+        Assert.Equal(string.Empty, Run("todos").Out);
+    }
+
+    // 293 AC-11: a todo that can't be completed appends nothing to done.md.
+    [Fact]
+    public void TodoDone_NoMatch_AppendsNothing()
+    {
+        Run("todo", "add", "2026-10-28", "Send report");
+
+        Assert.Equal(1, Run("todo", "done", "nothing like it").Code);
+        Assert.False(File.Exists(Path.Combine(root, "done.md")));
+    }
+
     // 178 AC-3, AC-4: a time after the date makes a timed todo; it shows in Added:, todos and --json.
     [Fact]
     public void TodoAdd_WithTime_AddsTimedTodo_ListsTime()
@@ -2079,6 +2132,13 @@ public sealed class CliTests : IDisposable
         File.SetLastWriteTimeUtc(Path.Combine(root, name + ".md"), modifiedUtc);
     }
 
+    // done.md with a last-write time before every review window, so it is no changed note.
+    private void WriteDoneLog(string text)
+    {
+        WriteNote(DoneLog.NoteName, text);
+        File.SetLastWriteTimeUtc(Path.Combine(root, "done.md"), new DateTime(2026, 9, 1, 8, 0, 0, DateTimeKind.Utc));
+    }
+
     private void WriteTodosJson(string json)
     {
         Directory.CreateDirectory(root);
@@ -2096,6 +2156,7 @@ public sealed class CliTests : IDisposable
             + "{\"text\":\"Sent report\",\"due\":\"2026-10-20\",\"created\":\"2026-10-01T00:00:00Z\",\"done\":\"2026-10-27T10:00:00Z\"},"
             + "{\"text\":\"Call Bob\",\"due\":\"2026-10-25\",\"created\":\"2026-10-01T00:00:00Z\"},"
             + "{\"text\":\"Due today\",\"due\":\"2026-10-29\",\"created\":\"2026-10-01T00:00:00Z\"}]");
+        WriteDoneLog("# done\n- 2026-10-27 Sent report (due 2026-10-20)\n");
         WriteIcs("a.ics", "BEGIN:VCALENDAR\r\n"
             + "BEGIN:VEVENT\r\nSUMMARY:Kickoff\r\nLOCATION:Room 1\r\nDTSTART:20261030T090000Z\r\nDTEND:20261030T100000Z\r\nEND:VEVENT\r\n"
             + "BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20261102\r\nEND:VEVENT\r\n"
@@ -2124,7 +2185,7 @@ public sealed class CliTests : IDisposable
 
         Assert.Equal(0, result.Code);
         Assert.Equal(string.Empty, result.Err);
-        Assert.Equal("Review, 2026-10-23 to 2026-10-29\nChanged notes\nDone todos\nOverdue\nNext week\n", result.Out);
+        Assert.Equal("Review, 2026-10-23 to 2026-10-29\nChanged notes\nDone todos\nNo todos done.\nOverdue\nNext week\n", result.Out);
         Assert.False(File.Exists(Path.Combine(root, TagIndex.FileName)));
     }
 
@@ -2155,8 +2216,43 @@ public sealed class CliTests : IDisposable
         Assert.Equal(1, result.Code);
         Assert.Equal(["Can't read todos.json."], result.ErrLines);
         Assert.Equal(
-            "Review, 2026-10-23 to 2026-10-29\nChanged notes\n2026-10-28 14:05\tPlan\nDone todos\nOverdue\nNext week\n",
+            "Review, 2026-10-23 to 2026-10-29\nChanged notes\n2026-10-28 14:05\tPlan\nDone todos\nNo todos done.\nOverdue\nNext week\n",
             result.Out);
+    }
+
+    // 293 AC-12: an unreadable done.md leaves out the Done todos heading, prints the rest, stderr line, exit 1.
+    [Fact]
+    public void Review_UnreadableDoneLog_NoHeading_ExitOne()
+    {
+        WriteReviewNote("Plan", new DateTime(2026, 10, 28, 14, 5, 0, DateTimeKind.Utc));
+        WriteTodosJson("[{\"text\":\"Call Bob\",\"due\":\"2026-10-25\",\"created\":\"2026-10-01T00:00:00Z\"}]");
+        using (FileStream big = File.Create(Path.Combine(root, "done.md")))
+        {
+            big.SetLength(NoteStore.MaxNoteBytes + 1);
+        }
+
+        File.SetLastWriteTimeUtc(Path.Combine(root, "done.md"), new DateTime(2026, 9, 1, 8, 0, 0, DateTimeKind.Utc));
+
+        Result result = Run("review");
+
+        Assert.Equal(1, result.Code);
+        Assert.Equal(["Can't read the done log."], result.ErrLines);
+        Assert.Equal(
+            "Review, 2026-10-23 to 2026-10-29\nChanged notes\n2026-10-28 14:05\tPlan\n"
+            + "Overdue\n2026-10-25\tCall Bob\nNext week\n",
+            result.Out);
+    }
+
+    // 293 AC-12: entries print as date and text (no due part), newest first; ones outside the week are left out.
+    [Fact]
+    public void Review_DoneLogEntries_DateAndText()
+    {
+        WriteDoneLog("# done\n- 2026-10-22 old\n- 2026-10-24 a\u0007b (due 2026-10-20)\n- 2026-10-29 last\n");
+
+        Result result = Run("review");
+
+        Assert.Equal(0, result.Code);
+        Assert.Contains("Done todos\n2026-10-29\tlast\n2026-10-24\ta\uFFFDb\nOverdue\n", result.Out, StringComparison.Ordinal);
     }
 
     // 169 AC-5: unreadable calendar files and a failed feed give current's stderr lines and exit 1; no link shown.

@@ -56,7 +56,11 @@
         }
         @if (result is { } done)
         {
-            @if (done.Kind == ActionKind.Done && done.NextDue is { } moved)
+            @if (done.Kind == ActionKind.Done && done.Reason == ActionReason.DoneLogLeft)
+            {
+                <p class="red meeting-todo-result" role="status">@DesktopActions.DoneLogLeftText</p>
+            }
+            else if (done.Kind == ActionKind.Done && done.NextDue is { } moved)
             {
                 <p class="accent meeting-todo-result" role="status">Moved to @moved.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture).</p>
             }
@@ -280,7 +284,7 @@
         try
         {
             ActionResult completed = await Actions.CompleteTodo(todo, confirmed);
-            result = completed.Kind == ActionKind.Done ? null : completed;
+            result = completed.Kind == ActionKind.Done && completed.Reason != ActionReason.DoneLogLeft ? null : completed;
         }
         finally
         {

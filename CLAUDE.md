@@ -215,12 +215,35 @@ Every factory agent reads this file before working on Context. Keep it short and
   - **Review view (job 169):** `ReviewView.Build(notes, todos, calendar, feed, today)` in Core (`ReviewView.cs`) holds
     `From` (today-6) and `To` (today), the calendar's `Zone`, `ChangedNotes` (`ChangedNote`: name and last-write time
     converted to the zone; no sensitive notes; days From..To in the zone; newest first, then name ignoring case),
-    `DoneTodos` (done From..To in the zone, `ListDone` order; `DoneDate(todo)`), `Overdue` (open, due < today, `List`
-    order), `TodosUnreadable` (both lists empty, the rest still filled), seven `ReviewDay`s today+1..today+7
+    `Done` (job 293: the done log's entries dated From..To, in `DoneLogView` order; `todos.json` done todos are no
+    longer shown), `DoneLogUnreadable` (`Done` empty, the rest still filled), `Overdue` (open, due < today, `List`
+    order), `TodosUnreadable` (only `Overdue` empty, the rest still filled), seven `ReviewDay`s today+1..today+7
     (`CalendarStore.Day` with the feed's events; `TimeText` as `CurrentView.Time`), and `Folder`,
     `UnreadableCalendarFiles` (each once), `Status`, `CachedAtUtc`, `Reason` like the current view. The feed is fetched
     once per build; it never opens `context.db`. `context review` prints it; the desktop's `ReviewPanel` (`/review`)
     draws it.
+  - **Done log (job 293):** `DoneLog.cs` in Core. Every completed todo is appended to the ordinary note `done.md`
+    (`DoneLog.NoteName` `done`, found in any case) as `DoneLog.Line(day, text, due)`: `- yyyy-MM-dd <text>` (text
+    through `Inbox.Clean`, tags kept) plus ` (due yyyy-MM-dd)` when the todo had a due date. `DoneLog.Append(store,
+    day, text, due)` shares the inbox capture's loop (`Inbox.AppendLine`: a missing note is created as `# done\n` plus
+    the line, a missing final newline added first, every other byte kept, CRLF and BOM included, `MaxRetries` retries
+    on a change on disk; a sealed `done.ctxs` ends as `ChangedOnDisk`) and returns `DoneLogResult` (`Appended`,
+    `ChangedOnDisk`, `TooLarge`, `Failed`); it never throws (an internal overload takes a `beforeSave` hook for tests).
+    `DoneLog.Read`/`Parse` take the lines outside fences that are `- yyyy-MM-dd <text>` with a real date as
+    `DoneEntry(Date, Text, Due?, Line)`; a trailing ` (due <real date>)` with text before it is the due date.
+    `DoneLogView.Build(store)` groups them into `DoneWeek(Monday, Entries)` (Monday to Sunday), newest week first,
+    inside a week by date then line descending; `Unreadable` (no weeks) when the note can't be read. The desktop's
+    `CompleteTodoNow`/`CompleteNoteTodoNow` append after a Done with the local day (`localNow`); a failed append keeps
+    `ActionKind.Done` with `ActionReason.DoneLogLeft`, and `TodoPanel`/`MeetingTodosPanel` show the red
+    `DesktopActions.DoneLogLeftText` `Done, but it couldn't be added to the done log.` (`BeforeDoneLogSave` is the
+    test hook). CLI `todo done` (stored and note todos) appends after its Done; a failed append writes
+    `Couldn't add it to the done log.` to stderr, exit 0. A todo that isn't completed appends nothing. `DonePanel`
+    (`section.page.done-panel`, `Page.Done`, palette `/donelog`, argument ignored) draws `DesktopState.DoneWeeks()`
+    (off the UI thread, never throws: on an error an unreadable view): `Done log`, the icon-only close button, an
+    `h3.done-week` `Week of yyyy-MM-dd` per week, `li.done-entry` with the date, the one-line text and `due
+    yyyy-MM-dd` when set (`app.css` lays the rows out like the review's todo rows); grey `Nothing done yet.` without entries, red `Can't read the done log.` when unreadable;
+    it reloads on `State.Changed` (also when `done.md` changes on disk) keeping the shown rows. `done.md` is an
+    ordinary note: it is listed, searched and indexed like any other.
   - **Current view:** all relevant information for now: today's appointments, due todos and linked notes.
     `CurrentView.Build` in Core reads the data (including the untruncated appointments, the time text and the
     calendar's `Zone`, in which a front end shows the cache time); `context current` prints it as text; the desktop
@@ -617,7 +640,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     write.
     `context todo add <yyyy-MM-dd|today|tomorrow> [HH:mm] <text>` (a time-shaped word after the date is the time; a bad
     one is the usage error `That time isn't valid. ...`), `context todo add every <weekday|day|month> <text>` and the desktop's entry row add (text at most 200 chars, past dates allowed); `context todo done <text>` picks the
-    todo by its text and marks it done by its id; the desktop marks the ticked todo done by its id.
+    todo by its text and marks it done by its id (job 293: then appends it to the done log); the desktop marks the ticked todo done by its id.
     **No todo numbers anywhere** (command line and desktop alike): a todo is shown as date and text, picked
     by its text and marked done by its hidden id. `TodoPicker.Pick(todos, query)` (Core, used by `context
     todo done`) compares the trimmed query, ignoring case (ordinal), with each todo's one-line text
@@ -660,9 +683,11 @@ Every factory agent reads this file before working on Context. Keep it short and
   `Due`, `Linked notes`; no row caps, `Due` lines as
   `<date>\t<text>`; its error lines go to stderr and make the exit code 1), `review` (job 169, see Review view:
   `Review, <from> to <to>` (`yyyy-MM-dd`), then `Changed notes` (`<yyyy-MM-dd HH:mm>\t<name>`), `Done todos`
-  (`<done date>\t<text>`), `Overdue` (`<due>\t<text>`) and `Next week` (`<date>\t<time>\t<title> (<location>)`,
-  `(no title)`), every heading always printed; the offline line on stdout like `current`; unreadable calendar files,
-  the failed feed and `Can't read todos.json.` on stderr, exit 1, the rest still printed; any argument is a usage
+  (job 293: the done log's entries, `<done date>\t<text>`, or `No todos done.`; the heading is left out when
+  `done.md` can't be read), `Overdue` (`<due>\t<text>`) and `Next week` (`<date>\t<time>\t<title> (<location>)`,
+  `(no title)`), every other heading always printed; the offline line on stdout like `current`; unreadable calendar
+  files, the failed feed, `Can't read todos.json.` and then `Can't read the done log.` on stderr, exit 1, the rest
+  still printed; any argument is a usage
   error before the folder is read), `today` (the daily note, see Daily
   note: prints it like `note show`, creating it first when it is missing; a sensitive one is `Cli.SensitiveText`,
   exit 1; a failed write is `Can't write <name>.`, exit 1; no arguments, `--json` is a usage error),
@@ -711,8 +736,8 @@ Every factory agent reads this file before working on Context. Keep it short and
   has plain's stderr line and exit code; `leaving` `null` until left, `leftMinutes` an int, can be negative; absent = `null`, tags raw without `#`, times `yyyy-MM-ddTHH:mm:sszzz` in the zone; `due`/`linkedNotes` `null` when
   unreadable, `related` `null` when `context.db` can't be read),
   `{from,to,changedNotes:[{name,modified}],doneTodos:[{due,done,text}],overdue:[{due,text}],appointments:[{start,end,
-  allDay,title,location}],calendar:{status,cachedAt,unreadableFiles}}` (`review`; `doneTodos`/`overdue` `null` when
-  `todos.json` is unreadable). Names and order are a public contract (`CliJsonTests`, README). Errors stay text; with `help` or a
+  allDay,title,location}],calendar:{status,cachedAt,unreadableFiles}}` (`review`; `doneTodos` from the done log, `due` `null`
+  without a due date, `null` when `done.md` is unreadable; `overdue` `null` when `todos.json` is unreadable). Names and order are a public contract (`CliJsonTests`, README). Errors stay text; with `help` or a
   write command it is a usage error before anything is read. `README.md` has PowerShell examples.
   - **Removed secret option (job 273):** an argument that starts with the removed secret option is a usage error in any position (ignoring case), checked before anything else, `--json`, `help` and `version` included: `That option was removed. Run 'context help'.`, exit 2, never echoed, the folder untouched.
 - **Stack:** .NET 10 (`net10.0`), C# with nullable reference types and implicit usings on.
@@ -893,7 +918,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `[[note link]]` parsing in `NoteLinkParser.cs`, link rewriting on rename in `NoteLinkRewriter.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the desktop's recently opened notes (`recent.json`) in `RecentNotes.cs`, its pinned notes (`pinned.json`) in `PinnedNotes.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; over the cap it throws `FileTooLargeException : IOException` (`Too large.`); job 275: every full read of `.ics` files and the feed cache (`CalendarStore.ReadText`, `MaxFileBytes`), `todos.json` (`TodoStore.MaxFileBytes`, 5 MB; a directory named `todos.json` can't be read), `calendar-link.txt` (`CalendarLink.MaxFileBytes`, 4096) and notes (`NoteStore.Read`) goes through it; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
-    `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs` (the agenda carry-over in `MeetingCarryOver.cs`), the Mail digest's rules in `MailDigest.cs`, note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs` (its triage queue, remove and snooze in `InboxTriage.cs`), the day's end in `DayEnd.cs` (Times' day file in `TimesDay.cs`, today's Times bookings in `TimesNow.cs`, `settings.json` in `SettingsStore.cs`), the morning briefing in `Briefing.cs` (Times' flexitime balance in `TimesBalance.cs`), the todo input rules (`TryParseDate`,
+    `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs` (the agenda carry-over in `MeetingCarryOver.cs`), the Mail digest's rules in `MailDigest.cs`, note templates in `NoteTemplates.cs`, the done log in `DoneLog.cs` (job 293), the inbox capture in `Inbox.cs` (its triage queue, remove and snooze in `InboxTriage.cs`), the day's end in `DayEnd.cs` (Times' day file in `TimesDay.cs`, today's Times bookings in `TimesNow.cs`, `settings.json` in `SettingsStore.cs`), the morning briefing in `Briefing.cs` (Times' flexitime balance in `TimesBalance.cs`), the todo input rules (`TryParseDate`,
     `MaxTextLength`, `TryParseRepeat`, `NextDue`) in `TodoInput.cs`, the todo repeat in `TodoRepeat.cs`, waiting-for todos in `WaitingFor.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`), `SearchView.cs` (`search`), `TagFilter.cs` (tag filters), `DecisionsView.cs` (`decisions`, with `DecisionParser.cs`), `SimilarNotes.cs` (similar notes), `BoardView.cs` (tag boards), `ReviewView.cs` (the weekly review) and `CalendarLinkView.cs`
     (the calendar link), and the command ranking for the desktop palette in `CommandMatcher.cs`; the notes list is `NoteStore.List()` itself.
   - **Data step in Core, drawing in the front end:** a view's Core data step returns plain types (a kind plus raw
@@ -1016,7 +1041,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     file bytes, read through `BoundedFile`): a bigger or non-seekable note can't be opened (`Can't read <name>.`), a save
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
-    `/board`, `/briefing`, `/capture`, `/decisions`, `/done`, `/export`, `/find`, `/import`, `/meeting`, `/new`, `/open`, `/review`, `/save`, `/search`, `/settings`, `/share`, `/similar`, `/standup`, `/tags`, `/today`, `/todo`, `/triage` (no `/current` since job 216) with `CommandMatcher` (in Core; ties
+    `/board`, `/briefing`, `/capture`, `/decisions`, `/done`, `/donelog`, `/export`, `/find`, `/import`, `/meeting`, `/new`, `/open`, `/review`, `/save`, `/search`, `/settings`, `/share`, `/similar`, `/standup`, `/tags`, `/today`, `/todo`, `/triage` (no `/current` since job 216) with `CommandMatcher` (in Core; ties
     in Levenshtein score are ordered by `SwapDistance`, which counts an adjacent swap as one edit, so `/opne` runs `/open`).
     `/todo every <weekday|day|month> <text>` (job 168) adds a recurring todo (`TryParseRepeat`, then `AddTodo`), accent
     `Added: <text>`; a missing or bad unit or missing text is red `Type /todo every <weekday|day|month> <text>.`; a bad
@@ -1177,10 +1202,10 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Agree` and creates no key. Both reads run off the UI thread and never throw.
     **Review:** `ReviewPanel` (`/review`, argument ignored; `Main`'s `reviewShown`, at the top of the main region
     under the top bar) draws `DesktopState.Review()` (off the UI thread, never throws: on an error an empty view
-    with `TodosUnreadable`): heading `Week review`, `Close`, the grey range, then `Changed notes` (date and a
-    `note-button` through `RequestOpen`), `Done todos`, `Overdue` (`overdue` dates), `Next week` (an `h4` per day with
+    with `TodosUnreadable` and `DoneLogUnreadable`): heading `Week review`, `Close`, the grey range, then `Changed notes` (date and a
+    `note-button` through `RequestOpen`), `Done todos` (job 293: the done-log entries, date and text), `Overdue` (`overdue` dates), `Next week` (an `h4` per day with
     appointments: time, title, location), the grey empty texts (`No notes changed.`, `No todos done.`,
-    `Nothing overdue.`, `No appointments next week.`), red `Can't read todos.json.` in both todo sections and the
+    `Nothing overdue.`, `No appointments next week.`), red `Can't read the done log.` in Done todos, red `Can't read todos.json.` in Overdue and the
     calendar texts (as `DayAppointmentsPanel`'s feed line). It reloads on `State.Changed` keeping the shown rows;
     `Close`, opening a note or `Today` hides it.
     **Board (job 242):** `BoardPanel` (`section.page.board-panel`, `/board <tag>` or `TagPanel`'s `button.board-open`;
@@ -1881,12 +1906,12 @@ Every factory agent reads this file before working on Context. Keep it short and
     tracked private key), plus shared helpers such as
     `RemovedFeature.cs` and `RemovedConsole.cs` (the names of the removed whole-folder protection and of the removed
     terminal console, spelled in pieces; `RemovedFeatureSourceTests.cs` fails when `src/`, `tests/` or this file
-    names either again) and `FakeHttpHandler.cs` (canned HTTP responses). The view tests (`CurrentViewTests`, `ReviewViewTests`, `TagsViewTests`, `LinksViewTests`, `FindViewTests`, `SearchViewTests`, `DecisionsViewTests`, `CalendarLinkViewTests`) check the view data field by field. Note, todo, tag and calendar tests use their
+    names either again) and `FakeHttpHandler.cs` (canned HTTP responses). The view tests (`CurrentViewTests`, `ReviewViewTests`, `DoneLogTests` (the done log), `DoneLogViewTests` (its weeks), `TagsViewTests`, `LinksViewTests`, `FindViewTests`, `SearchViewTests`, `DecisionsViewTests`, `CalendarLinkViewTests`) check the view data field by field. Note, todo, tag and calendar tests use their
     own temp folder (deleted in `Dispose`), never the real app data folder.
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `LinkCreateActionsTests` (`CreateLinkedNote`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `MailDigestPanelTests` (the Mail digest page and `/digest` through `Main`, with `FakeOutlookSource`) and `MailDigestActionsTests` (`AcceptSuggestion`, `SetMailDigestEnabled`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `ShareActionsTests` (`ShareNote`) and `ShareDialogTests` (Share through `Main`), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `PeoplePanelTests`, `ReviewPanelTests`, `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StandupActionsTests` (`WriteStandup`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `LinkCreateActionsTests` (`CreateLinkedNote`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `MailDigestPanelTests` (the Mail digest page and `/digest` through `Main`, with `FakeOutlookSource`) and `MailDigestActionsTests` (`AcceptSuggestion`, `SetMailDigestEnabled`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `ShareActionsTests` (`ShareNote`) and `ShareDialogTests` (Share through `Main`), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `PeoplePanelTests`, `ReviewPanelTests`, `DoneLogActionsTests` (the done-log append on completion) and `DonePanelTests` (the Done log page and `/donelog` through `Main`), `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StandupActionsTests` (`WriteStandup`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
     CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules, the transfer calls and no file system class in `.razor`), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),

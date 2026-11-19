@@ -25,6 +25,8 @@ internal sealed class Cli
 
     private const string StandupForm = "Type: context standup.";
     private const string TodosUnreadable = "Can't read todos.json.";
+    private const string DoneLogFailed = "Couldn't add it to the done log.";
+    private const string DoneLogUnreadable = "Can't read the done log.";
     private const string IndexUnreadable = "Can't read context.db.";
     private const string FindForm = "Type: context find <attribute> <value>.";
     private const string SearchForm = "Type: context search <text>.";
@@ -677,6 +679,7 @@ internal sealed class Cli
             return Error("The todo list changed. Nothing was done.");
         }
 
+        LogDone(session, done.Text, done.Due);
         if (next is null)
         {
             return Done($"Done: {OneLine(done.Text)}");
@@ -690,13 +693,28 @@ internal sealed class Cli
     private int DoneNoteTodo(Session session, NoteTodo todo)
     {
         string note = OneLine(todo.Note);
-        return NoteTodos.Complete(session.Notes, todo) switch
+        NoteTodoResult result = NoteTodos.Complete(session.Notes, todo);
+        if (result == NoteTodoResult.Done)
+        {
+            LogDone(session, todo.Text, todo.Due);
+        }
+
+        return result switch
         {
             NoteTodoResult.Done => Done($"Done: {OneLine(todo.Text)}"),
             NoteTodoResult.Missing => Error(NoteTodos.MissingText(note)),
             NoteTodoResult.Failed => Error(NoteTodos.FailedText(note)),
             _ => Error(NoteTodos.ChangedText(note)),
         };
+    }
+
+    // Appends a completed todo to the done log; a failure is one stderr line and keeps the exit code.
+    private void LogDone(Session session, string text, DateOnly? due)
+    {
+        if (DoneLog.Append(session.Notes, today(), text, due) != DoneLogResult.Appended)
+        {
+            Err(DoneLogFailed);
+        }
     }
 
     private int Notes(Session session)
@@ -1351,10 +1369,18 @@ internal sealed class Cli
             Out($"{note.Modified.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}\t{OneLine(note.Name)}");
         }
 
-        Out("Done todos");
-        foreach (TodoItem todo in view.DoneTodos)
+        if (!view.DoneLogUnreadable)
         {
-            Out($"{Date(view.DoneDate(todo))}\t{OneLine(todo.Text)}");
+            Out("Done todos");
+            foreach (DoneEntry entry in view.Done)
+            {
+                Out($"{Date(entry.Date)}\t{OneLine(entry.Text)}");
+            }
+
+            if (view.Done.Count == 0)
+            {
+                Out("No todos done.");
+            }
         }
 
         Out("Overdue");
@@ -1384,7 +1410,7 @@ internal sealed class Cli
         return ReviewErrors(view);
     }
 
-    // review's stderr lines (calendar files, a failed feed, todos.json), in that order, and its exit code.
+    // review's stderr lines (calendar files, a failed feed, todos.json, the done log), in that order, and its exit code.
     private int ReviewErrors(ReviewView view)
     {
         bool failed = false;
@@ -1404,6 +1430,12 @@ internal sealed class Cli
         {
             failed = true;
             Err(TodosUnreadable);
+        }
+
+        if (view.DoneLogUnreadable)
+        {
+            failed = true;
+            Err(DoneLogUnreadable);
         }
 
         return failed ? ExitError : ExitOk;
@@ -1433,24 +1465,39 @@ internal sealed class Cli
             }
 
             w.WriteEndArray();
-            if (view.TodosUnreadable)
+            if (view.DoneLogUnreadable)
             {
                 w.WriteNull("doneTodos");
-                w.WriteNull("overdue");
             }
             else
             {
                 w.WriteStartArray("doneTodos");
-                foreach (TodoItem todo in view.DoneTodos)
+                foreach (DoneEntry entry in view.Done)
                 {
                     w.WriteStartObject();
-                    w.WriteString("due", Date(todo.Due));
-                    w.WriteString("done", Date(view.DoneDate(todo)));
-                    w.WriteString("text", OneLine(todo.Text));
+                    if (entry.Due is { } due)
+                    {
+                        w.WriteString("due", Date(due));
+                    }
+                    else
+                    {
+                        w.WriteNull("due");
+                    }
+
+                    w.WriteString("done", Date(entry.Date));
+                    w.WriteString("text", OneLine(entry.Text));
                     w.WriteEndObject();
                 }
 
                 w.WriteEndArray();
+            }
+
+            if (view.TodosUnreadable)
+            {
+                w.WriteNull("overdue");
+            }
+            else
+            {
                 w.WriteStartArray("overdue");
                 foreach (TodoItem todo in view.Overdue)
                 {

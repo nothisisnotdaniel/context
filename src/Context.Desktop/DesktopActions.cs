@@ -61,6 +61,9 @@ internal enum ActionReason
 
     /// <summary>A note was renamed, but the links in some other notes could not be updated.</summary>
     LinksLeft,
+
+    /// <summary>A todo was done, but its line could not be added to the done log (<c>done.md</c>).</summary>
+    DoneLogLeft,
 }
 
 /// <summary>
@@ -157,6 +160,7 @@ internal sealed class DesktopActions
     public const string NotConfirmedText = "Not confirmed. Nothing was done.";
     public const string NotOnBoardText = "That column is not on the board. Nothing was moved.";
     public const string TodosChangedText = "The todo list changed. Nothing was done.";
+    public const string DoneLogLeftText = "Done, but it couldn't be added to the done log.";
     public const string TodosUnreadableText =
         "Can't read todos.json, so nothing was changed. Fix or move the file and try again.";
     public const string TodosWriteFailedText = "Can't write todos.json. Nothing was done.";
@@ -723,6 +727,9 @@ internal sealed class DesktopActions
     /// <summary>Test hook: runs before every save attempt of <see cref="CaptureText"/>, after the inbox was read.</summary>
     internal Action? BeforeCaptureSave { get; set; }
 
+    /// <summary>Test hook: runs before every save attempt of the done-log append after a completed todo.</summary>
+    internal Action? BeforeDoneLogSave { get; set; }
+
     /// <summary>
     /// Test hook: runs before every save attempt of the inbox in a triage action (removing or snoozing the line),
     /// after the inbox was read.
@@ -809,6 +816,9 @@ internal sealed class DesktopActions
     /// <see cref="TodoStore.Complete(Guid, DateOnly, out TodoItem?)"/> in one read and write, but only when the user
     /// <paramref name="confirmed"/> it. A recurring todo is added again in the same write; its due date comes back in
     /// <see cref="ActionResult.NextDue"/>. A todo that is no longer stored is refused as <see cref="ActionReason.Changed"/>.
+    /// After a completion the line is appended to the done log (<see cref="DoneLog.Append(NoteStore, DateOnly, string, DateOnly?)"/>,
+    /// today from the local clock, the todo's due date); when that fails the result is still Done, with
+    /// <see cref="ActionReason.DoneLogLeft"/>.
     /// </summary>
     public Task<ActionResult> CompleteTodo(TodoItem todo, Confirmation? confirmed) =>
         Run(() => CompleteTodoNow(todo, confirmed));
@@ -819,6 +829,7 @@ internal sealed class DesktopActions
     /// todo's line as indexed, its first <c>[ ]</c> becomes <c>[x]</c> (every other byte kept, the previous bytes kept
     /// as a version). A changed line is refused as <see cref="ActionReason.Changed"/>, a gone note as
     /// <see cref="ActionReason.Missing"/>; nothing is written then. The result's text is the todo's text when done.
+    /// The done log gets the line as for <see cref="CompleteTodo"/> (the note todo's due date, which may be null).
     /// </summary>
     public Task<ActionResult> CompleteNoteTodo(NoteTodo todo, Confirmation? confirmed) =>
         Run(() => CompleteNoteTodoNow(todo, confirmed));
@@ -2183,10 +2194,14 @@ internal sealed class DesktopActions
 
         try
         {
-            TodoItem? done = todos.Complete(todo.Id, DateOnly.FromDateTime(localNow()), out TodoItem? next);
-            return done is null
-                ? Refused(ActionReason.Changed, TodosChangedText)
-                : new ActionResult(ActionKind.Done, ActionReason.None, done.Text, nextDue: next?.Due);
+            DateOnly day = DateOnly.FromDateTime(localNow());
+            TodoItem? done = todos.Complete(todo.Id, day, out TodoItem? next);
+            if (done is null)
+            {
+                return Refused(ActionReason.Changed, TodosChangedText);
+            }
+
+            return new ActionResult(ActionKind.Done, LogDone(day, done.Text, done.Due), done.Text, nextDue: next?.Due);
         }
         catch (TodoStoreException)
         {
@@ -2209,12 +2224,19 @@ internal sealed class DesktopActions
         string note = DesktopText.OneLine(todo.Note);
         return NoteTodos.Complete(notes, todo, state.HistoryStore) switch
         {
-            NoteTodoResult.Done => new ActionResult(ActionKind.Done, ActionReason.None, todo.Text),
+            NoteTodoResult.Done => new ActionResult(
+                ActionKind.Done, LogDone(DateOnly.FromDateTime(localNow()), todo.Text, todo.Due), todo.Text),
             NoteTodoResult.Missing => Refused(ActionReason.Missing, NoteTodos.MissingText(note)),
             NoteTodoResult.Failed => Failed(ActionReason.WriteFailed, NoteTodos.FailedText(note)),
             _ => Refused(ActionReason.Changed, NoteTodos.ChangedText(note)),
         };
     }
+
+    // Appends a completed todo to the done log (never throws): None when it was added, else DoneLogLeft.
+    private ActionReason LogDone(DateOnly day, string text, DateOnly? due) =>
+        DoneLog.Append(notes, day, text, due, BeforeDoneLogSave) == DoneLogResult.Appended
+            ? ActionReason.None
+            : ActionReason.DoneLogLeft;
 
     private ActionResult CompleteTopicNow(NoteTopic topic, Confirmation? confirmed)
     {

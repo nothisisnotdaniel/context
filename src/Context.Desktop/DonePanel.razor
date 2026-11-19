@@ -1,0 +1,73 @@
+@inherits StateComponent
+@* The done log (DesktopState.DoneWeeks): the lines of done.md grouped by Monday-to-Sunday week, newest week first. It
+   reads only, and reloads whenever the state changes (also when done.md changes on disk), keeping the shown rows
+   meanwhile. *@
+
+<section class="page done-panel" aria-label="Done log">
+    <div class="panel-bar">
+        <h2>Done log</h2>
+        <button type="button" class="close" aria-label="Close" title="Close" @onclick="() => OnClose.InvokeAsync()"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" /></svg></button>
+    </div>
+    @if (view is null)
+    {
+        <p class="grey" role="status">Loading…</p>
+    }
+    else if (view.Unreadable)
+    {
+        <p class="red" role="status">Can't read the done log.</p>
+    }
+    else if (view.Weeks.Count == 0)
+    {
+        <p class="grey" role="status">Nothing done yet.</p>
+    }
+    else
+    {
+        @foreach (DoneWeek week in view.Weeks)
+        {
+            <h3 class="done-week">Week of @Date(week.Monday)</h3>
+            <ul class="done-entries">
+                @foreach (DoneEntry entry in week.Entries)
+                {
+                    string text = DesktopText.OneLine(entry.Text);
+                    <li class="done-entry">
+                        <span class="date grey">@Date(entry.Date)</span>
+                        <span class="text cut" title="@text">@text</span>
+                        @if (entry.Due is { } due)
+                        {
+                            <span class="due grey">due @Date(due)</span>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+    }
+</section>
+
+@code {
+    private DoneLogView? view;
+    private int request;
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    protected override Task OnInitializedAsync() => Load();
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    // Keeps the shown log while it reloads; only the newest request's result is used.
+    private async Task Load()
+    {
+        int mine = ++request;
+        DoneLogView result = await State.DoneWeeks();
+        if (mine == request)
+        {
+            view = result;
+        }
+    }
+
+    private static string Date(DateOnly date) => date.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture);
+}

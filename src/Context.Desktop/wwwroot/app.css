@@ -2171,6 +2171,43 @@ nav.saved-searches ul {
     min-width: 4em;
 }
 
+/* The done log (job 293): a week heading per Monday, then one row per entry, laid out like the review's todo rows. */
+.done-panel {
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+}
+
+.done-panel h3.done-week {
+    font-variant-numeric: tabular-nums;
+    margin: 12px 0 4px;
+}
+
+.done-entries {
+    list-style: none;
+    margin: 0 0 8px;
+    padding: 0;
+}
+
+.done-entry {
+    align-items: baseline;
+    display: flex;
+    gap: 10px;
+    min-width: 0;
+    padding: 3px 0;
+}
+
+.done-entry .date,
+.done-entry .due {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+}
+
+.done-entry .text {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
 .history-panel {
     border-top: 1px solid var(--line);
     margin-top: 16px;

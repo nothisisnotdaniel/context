@@ -227,10 +227,15 @@ through PowerShell, so it may show `Windows PowerShell` as its source.
 ### Weekly review
 
 `context review` prints one page for a weekly review: `Review, <from> to <to>` (the last 7 days, today included), then
-`Changed notes` (when each note was last written, newest first; sensitive notes are left out), `Done todos` (done in
-those 7 days), `Overdue` (open todos due before today) and `Next week` (the appointments from tomorrow to 7 days
-ahead, one line per day an appointment touches). Every heading is printed, also when its section is empty. It never
+`Changed notes` (when each note was last written, newest first; sensitive notes are left out), `Done todos` (the
+lines of the done log dated in those 7 days, or `No todos done.`), `Overdue` (open todos due before today) and
+`Next week` (the appointments from tomorrow to 7 days ahead, one line per day an appointment touches). Every heading
+is printed, also when its section is empty; only `Done todos` is left out when `done.md` can't be read. It never
 opens `context.db`. In the desktop app, `/review` in the command palette shows the same page; click a note to open it.
+
+Each todo you mark done (in the app or with `context todo done`) is added to the note `done.md` as
+`- yyyy-MM-dd <text>`, plus ` (due yyyy-MM-dd)` when it had a due date. It is an ordinary note you can edit. In the
+desktop app, `/donelog` shows it grouped by week, newest week first.
 
 ### Work items
 
@@ -387,7 +392,7 @@ $current.appointments | ForEach-Object { "$($_.title): $(($_.related | ForEach-O
 
 `current` writes its document even when part of the data can't be read: then it exits 1, its error lines are on
 stderr, and `due` or `linkedNotes` is `null` (and each appointment's `related` when `context.db` can't be read).
-`review` does the same: `doneTodos` and `overdue` are `null` when `todos.json` can't be read.
+`review` does the same: `overdue` is `null` when `todos.json` can't be read, and `doneTodos` (the entries of the done log `done.md`, `due` `null` without a due date) is `null` when `done.md` can't be read.
 
 `related` lists up to three notes per appointment that share a tag or a title word with the appointment's title or
 attendee names (meeting prep): `tags` are the matching tags (raw, without `#`), `words` the shared title words. Only
