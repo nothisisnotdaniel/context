@@ -556,6 +556,25 @@ internal sealed class TagIndex
     }
 
     /// <summary>
+    /// Every <c>(note, body)</c> row of <c>note_text</c> in one <c>SELECT</c> (no parameters), sorted by note
+    /// (ordinal): the whole text of each plain note the last <see cref="Sync"/> could read. Sensitive notes, notes that
+    /// couldn't be read and notes over <see cref="NoteStore.MaxEditBytes"/> have no row. Used by
+    /// <see cref="SimilarNotesView.Build"/>.
+    /// </summary>
+    public IReadOnlyList<(string Note, string Body)> NoteTexts() => Run(connection =>
+    {
+        List<(string Note, string Body)> rows = [];
+        using SqliteCommand command = Command(connection, null, "SELECT note, body FROM note_text");
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            rows.Add((reader.GetString(0), reader.GetString(1)));
+        }
+
+        return (IReadOnlyList<(string Note, string Body)>)rows.OrderBy(r => r.Note, StringComparer.Ordinal).ToList();
+    });
+
+    /// <summary>
     /// Every row of <c>note_decisions</c> with its note's stored last-write time (UTC), unsorted. With a non-blank
     /// <paramref name="tag"/> (normalized by <see cref="NormalizeTag"/>, reaching SQL only as a parameter) only the
     /// decisions of notes that have that tag. A note without a stored time (it couldn't be read) has no rows.

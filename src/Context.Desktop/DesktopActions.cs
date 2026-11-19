@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 
 namespace Context;
 
@@ -588,6 +589,68 @@ internal sealed class DesktopActions
     public static string LinksInvalidText(string oldName, string newName) =>
         $"Links to {oldName} can't be written with the name {newName}. Nothing was renamed.";
 
+    /// <summary>The Done text of a merge that changed no other note.</summary>
+    public static string MergedText(string source, string target) => $"Merged {source} into {target}.";
+
+    /// <summary>The Done text of a merge that updated the links in <paramref name="count"/> other notes.</summary>
+    public static string MergedLinksText(string source, string target, int count) =>
+        $"Merged {source} into {target}. Updated links in {NotesText(count)}.";
+
+    /// <summary>
+    /// The Done/<see cref="ActionReason.LinksLeft"/> text of a merge whose links in <paramref name="left"/> couldn't be
+    /// updated (at most 3 names, then <c>and &lt;m&gt; more</c>).
+    /// </summary>
+    public static string MergeLinksLeftText(string source, string target, IReadOnlyList<string> left)
+    {
+        string shown = string.Join(", ", left.Take(MaxLinksLeftNames));
+        string more = left.Count > MaxLinksLeftNames
+            ? $" and {(left.Count - MaxLinksLeftNames).ToString(CultureInfo.InvariantCulture)} more"
+            : string.Empty;
+        return $"Merged {source} into {target}, but links in {NotesText(left.Count)} couldn't be updated: {shown}{more}.";
+    }
+
+    /// <summary>The Refused/<see cref="ActionReason.Invalid"/> text of a merge whose rewritten links would not read back.</summary>
+    public static string MergeLinksInvalidText(string source, string target) =>
+        $"Links to {source} can't be written with the name {target}. Nothing was merged.";
+
+    /// <summary>The Refused/<see cref="ActionReason.Missing"/> text of a merge whose note is gone.</summary>
+    public static string MergeMissingText(string name) => $"{name} no longer exists. Nothing was merged.";
+
+    /// <summary>The Refused/<see cref="ActionReason.Invalid"/> text of a merge of a note into itself.</summary>
+    public const string MergeSameText = "Can't merge a note into itself. Nothing was merged.";
+
+    /// <summary>The Refused/<see cref="ActionReason.Locked"/> text of a merge with a sensitive note.</summary>
+    public const string MergeSensitiveText = "Sensitive notes can't be merged.";
+
+    /// <summary>The Refused/<see cref="ActionReason.Invalid"/> text of a merge whose source has subpages.</summary>
+    public static string MergeSubpagesText(string source) =>
+        $"{source} has subpages, so it can't be merged. Nothing was merged.";
+
+    /// <summary>The Refused/<see cref="ActionReason.Invalid"/> text of a merge whose source links attachments in another folder.</summary>
+    public static string MergeAttachmentsText(string source) =>
+        $"{source} has attachments in another folder, so it can't be merged. Nothing was merged.";
+
+    /// <summary>The Refused/<see cref="ActionReason.Invalid"/> text of a merge whose text would be over the edit limit.</summary>
+    public const string MergeTooBigText = "The merged note would be too big. Nothing was merged.";
+
+    /// <summary>The Failed text of a merge whose source version couldn't be kept.</summary>
+    public static string MergeKeepFailedText(string source) =>
+        $"Can't keep the history of {source}. Nothing was merged.";
+
+    /// <summary>The Refused/<see cref="ActionReason.ChangedOnDisk"/> text of a merge whose note changed while merging.</summary>
+    public static string MergeChangedText(string name) => $"{name} changed on disk. Nothing was merged.";
+
+    /// <summary>The Failed text of a merge that could not write the target.</summary>
+    public static string MergeFailedText(string target) => $"Can't write {target}. Nothing was merged.";
+
+    /// <summary>The merge question (both names through <see cref="DesktopText.OneLine"/>).</summary>
+    public static string MergeQuestion(string source, string target, int count)
+    {
+        string from = DesktopText.OneLine(source);
+        string into = DesktopText.OneLine(target);
+        return $"Merge {from} into {into}? Its text is added to {into}, links in {NotesText(count)} are updated and {from} stays in its history.";
+    }
+
     /// <summary>The rename question when links in <paramref name="count"/> notes will change.</summary>
     public static string RenameQuestion(string oldName, string newName, int count) =>
         $"Rename {DesktopText.OneLine(oldName)} to {DesktopText.OneLine(newName)}? Links in {NotesText(count)} will be updated.";
@@ -814,6 +877,24 @@ internal sealed class DesktopActions
     /// </summary>
     public Task<ActionResult> RenameNote(string name, string newTitle, Confirmation? confirmed) =>
         Run(() => RenameNoteNow(name, newTitle, confirmed));
+
+    /// <summary>
+    /// Merges the plain note <paramref name="source"/> into the plain note <paramref name="target"/> (job 268): the
+    /// target's text, with its trailing line breaks removed, then a blank line and the source's text (its byte order
+    /// mark dropped), both with their links to the source rewritten to the target, is saved through
+    /// <see cref="NoteStore.SaveIfUnchanged(EditableNote, string, out EditableNote?, NoteHistory?)"/> with the history
+    /// (the target's CRLF and BOM kept, a target version kept). The source's current bytes are kept as a version first
+    /// (<see cref="NoteHistory.Keep"/>); after the save the source is removed with its history and attachments left in
+    /// place, and the links to it in the other plain notes are rewritten like <see cref="RenameNote"/>'s. Refused with
+    /// nothing written: no confirmation, either note gone (<see cref="MergeMissingText"/>), the same note, either note
+    /// sensitive (<see cref="MergeSensitiveText"/>, no key-store call), a source with subpages, a source that links an
+    /// attachment while the notes are in different folders, a failed link round trip, a merged text over
+    /// <see cref="NoteStore.MaxEditBytes"/>. Done texts: <see cref="MergedText"/>, <see cref="MergedLinksText"/>, or
+    /// <see cref="ActionReason.LinksLeft"/> with <see cref="MergeLinksLeftText"/>. The result's
+    /// <see cref="ActionResult.Name"/> is the target's full name when done.
+    /// </summary>
+    public Task<ActionResult> MergeNotes(string target, string source, Confirmation? confirmed) =>
+        Run(() => MergeNotesNow(target, source, confirmed));
 
     /// <summary>
     /// Creates the subpage <paramref name="title"/> of the note <paramref name="parent"/> through
@@ -2604,6 +2685,174 @@ internal sealed class DesktopActions
 
         string text = updated == 0 ? RenamedText(renamedName) : RenamedLinksText(renamedName, updated);
         return new ActionResult(ActionKind.Done, ActionReason.None, text, name: renamedName);
+    }
+
+    private ActionResult MergeNotesNow(string target, string source, Confirmation? confirmed)
+    {
+        if (confirmed is null)
+        {
+            return Refused(ActionReason.NotConfirmed, NotConfirmedText);
+        }
+
+        if (string.Equals(target.Trim(), source.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return Refused(ActionReason.Invalid, MergeSameText);
+        }
+
+        try
+        {
+            // A sensitive note is never opened here: no key-store call.
+            if ((notes.TryFindSensitive(target, out NoteInfo? lockedTarget) && lockedTarget is not null)
+                || (notes.TryFindSensitive(source, out NoteInfo? lockedSource) && lockedSource is not null))
+            {
+                return Refused(ActionReason.Locked, MergeSensitiveText);
+            }
+
+            if (!notes.TryFind(target, out NoteInfo? kept) || kept is null)
+            {
+                return Refused(ActionReason.Missing, MergeMissingText(target));
+            }
+
+            if (!notes.TryFind(source, out NoteInfo? merged) || merged is null)
+            {
+                return Refused(ActionReason.Missing, MergeMissingText(source));
+            }
+
+            if (string.Equals(kept.Name, merged.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                return Refused(ActionReason.Invalid, MergeSameText);
+            }
+
+            if (notes.Descendants(merged.Name) > 0)
+            {
+                return Refused(ActionReason.Invalid, MergeSubpagesText(merged.Name));
+            }
+
+            EditableNote keptText = notes.ReadForEdit(kept);
+            EditableNote mergedText = notes.ReadForEdit(merged);
+            if (NoteAttachments.LinkedNames(mergedText.Text).Count > 0
+                && !string.Equals(Path.GetDirectoryName(kept.Path), Path.GetDirectoryName(merged.Path), StringComparison.Ordinal))
+            {
+                return Refused(ActionReason.Invalid, MergeAttachmentsText(merged.Name));
+            }
+
+            LinkRenamePlan plan = LinkRenamePlan.ForMerge(notes, kept.Name, merged.Name);
+            if (plan.Invalid
+                || !NoteLinkRewriter.TryRewrite(keptText.Text, plan.Before, plan.After, plan.OldName, plan.NewName, out string keptRewritten)
+                || !NoteLinkRewriter.TryRewrite(mergedText.Text, plan.Before, plan.After, plan.OldName, plan.NewName, out string mergedRewritten))
+            {
+                return Refused(ActionReason.Invalid, MergeLinksInvalidText(merged.Name, kept.Name));
+            }
+
+            string combined = keptRewritten.TrimEnd('\n') + "\n\n" + mergedRewritten;
+            string onDisk = keptText.HadCrlf ? combined.Replace("\n", "\r\n", StringComparison.Ordinal) : combined;
+            long size = Encoding.UTF8.GetByteCount(onDisk) + (keptText.HadBom ? 3 : 0);
+            if (size > NoteStore.MaxEditBytes)
+            {
+                return Refused(ActionReason.Invalid, MergeTooBigText);
+            }
+
+            // The source's bytes as they were read are its last version; a file changed since then is not merged.
+            byte[] sourceBytes;
+            try
+            {
+                sourceBytes = BoundedFile.Read(merged.Path, NoteStore.MaxEditBytes);
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                return Refused(ActionReason.Missing, MergeMissingText(merged.Name));
+            }
+
+            if (!string.Equals(EditableNote.Hash(sourceBytes), mergedText.Version, StringComparison.Ordinal))
+            {
+                return Refused(ActionReason.ChangedOnDisk, MergeChangedText(merged.Name));
+            }
+
+            try
+            {
+                state.HistoryStore.Keep(merged.Path, sourceBytes);
+            }
+            catch (Exception)
+            {
+                return Failed(ActionReason.WriteFailed, MergeKeepFailedText(merged.Name));
+            }
+
+            NoteSaveResult saved;
+            try
+            {
+                saved = notes.SaveIfUnchanged(keptText, combined, out _, state.HistoryStore);
+            }
+            catch (Exception)
+            {
+                return Failed(ActionReason.WriteFailed, MergeFailedText(kept.Name));
+            }
+
+            switch (saved)
+            {
+                case NoteSaveResult.Saved:
+                case NoteSaveResult.Unchanged:
+                    break;
+                case NoteSaveResult.ChangedOnDisk:
+                    return Refused(ActionReason.ChangedOnDisk, MergeChangedText(kept.Name));
+                case NoteSaveResult.Missing:
+                    return Refused(ActionReason.Missing, MergeMissingText(kept.Name));
+                case NoteSaveResult.TooLarge:
+                    return Refused(ActionReason.Invalid, MergeTooBigText);
+                default:
+                    return Failed(ActionReason.WriteFailed, MergeFailedText(kept.Name));
+            }
+
+            // A source edited after it was read keeps that text as a newer version before it goes.
+            try
+            {
+                byte[] now = BoundedFile.Read(merged.Path, NoteStore.MaxEditBytes);
+                state.HistoryStore.Keep(merged.Path, now);
+            }
+            catch (Exception)
+            {
+                // The merged text is saved and the version read first is kept; the source is removed anyway below.
+            }
+
+            notes.Delete(merged.Name, removeHistory: false, removeAttachments: false);
+            string mergedName = merged.Name;
+            ChangeRecent(list => RecentNotes.Removed(list, mergedName));
+            return UpdateMergeLinks(plan, merged.Name, kept.Name);
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, MergeFailedText(target));
+        }
+    }
+
+    // After a merge: rewrites the links in every planned note. Never throws; a note that can't be updated is named in
+    // the LinksLeft text and the others are still updated.
+    private ActionResult UpdateMergeLinks(LinkRenamePlan plan, string source, string target)
+    {
+        int updated = 0;
+        List<string> left = [];
+        foreach (string planned in plan.Notes)
+        {
+            switch (UpdateLinksIn(plan, planned))
+            {
+                case NoteSaveResult.Saved:
+                    updated++;
+                    break;
+                case NoteSaveResult.Unchanged:
+                    break;
+                default:
+                    left.Add(planned);
+                    break;
+            }
+        }
+
+        if (left.Count > 0)
+        {
+            return new ActionResult(
+                ActionKind.Done, ActionReason.LinksLeft, MergeLinksLeftText(source, target, left), name: target);
+        }
+
+        string text = updated == 0 ? MergedText(source, target) : MergedLinksText(source, target, updated);
+        return new ActionResult(ActionKind.Done, ActionReason.None, text, name: target);
     }
 
     // One note's link update: read, rewrite, save with the history; read again when it changed on disk in between.

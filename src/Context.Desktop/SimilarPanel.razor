@@ -1,0 +1,197 @@
+@using System.Globalization
+@inherits StateComponent
+@* Pairs of plain notes that look like near-duplicates (DesktopState.Similar, job 268): nearly the same title or largely
+   the same text. Clicking a note opens it; a Keep button merges the other note into the kept one after a confirmation
+   (DesktopActions.MergeNotes). Main can hold a merge back (Guard: either note is open with unsaved changes) and hears
+   which notes were merged (OnMerged). Apart from the Keep buttons' bound handlers it reads only, and reloads whenever
+   the state changes. *@
+
+<section class="similar-panel" aria-label="Similar notes">
+    <div class="panel-bar">
+        <h2 class="cut">Similar notes</h2>
+        <button type="button" class="close" @onclick="() => OnClose.InvokeAsync()">Close</button>
+    </div>
+    @if (view is null)
+    {
+        <p class="grey" role="status">Loading…</p>
+    }
+    else if (view.Kind is SimilarNotesKind.IndexUnreadable)
+    {
+        <p class="red" role="status">Can't read the notes index.</p>
+    }
+    else if (view.Pairs.Count == 0)
+    {
+        <p class="grey" role="status">No similar notes.</p>
+    }
+    else
+    {
+        bool busy = running || asking is not null;
+        <ul class="similar-rows">
+            @foreach (SimilarPair pair in view.Pairs.Take(MaxRows))
+            {
+                string first = pair.First;
+                string second = pair.Second;
+                string firstShown = DesktopText.OneLine(first);
+                string secondShown = DesktopText.OneLine(second);
+                <li>
+                    <button type="button" class="note-button cut" title="@firstShown" @onclick="() => OnOpen.InvokeAsync(first)">@firstShown</button>
+                    <button type="button" class="note-button cut" title="@secondShown" @onclick="() => OnOpen.InvokeAsync(second)">@secondShown</button>
+                    <span class="reason grey">@Reason(pair)</span>
+                    <span class="similar-buttons">
+                        <button type="button" class="keep-first cut" disabled="@busy" title="@($"Keep {firstShown}")"
+                                @onclick="() => Ask(first, second)">Keep @firstShown</button>
+                        <button type="button" class="keep-second cut" disabled="@busy" title="@($"Keep {secondShown}")"
+                                @onclick="() => Ask(second, first)">Keep @secondShown</button>
+                    </span>
+                </li>
+            }
+        </ul>
+        @if (view.Pairs.Count > MaxRows)
+        {
+            <p class="grey more">@More(view.Pairs.Count)</p>
+        }
+    }
+    @if (result is { } shown)
+    {
+        <p class="similar-result cut @(resultDone ? "accent" : "red")" role="status" title="@shown">@shown</p>
+    }
+    @if (asking is { } asked)
+    {
+        <ConfirmDialog Question="@DesktopActions.MergeQuestion(asked.Source, asked.Target, asked.Count)" ConfirmLabel="Merge"
+                       Busy="running" OnConfirm="MergeAsked" OnCancel="CloseDialog" />
+    }
+</section>
+
+@code {
+    /// <summary>At most this many pairs are shown; a grey <c>… N more</c> line follows when there are more.</summary>
+    internal const int MaxRows = 100;
+
+    private SimilarNotesView? view;
+    private int request;
+    private bool running;
+    private (string Target, string Source, int Count)? asking;
+    private string? result;
+    private bool resultDone;
+
+    /// <summary>Called with a note's name when it is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    /// <summary>
+    /// Asked with the kept and the merged note's full names before the question; a text (shown in red) holds the
+    /// merge back, <c>null</c> lets it go on.
+    /// </summary>
+    [Parameter]
+    public Func<string, string, Task<string?>>? Guard { get; set; }
+
+    /// <summary>Called with the kept (target) and the merged (source) note's full names after a merge.</summary>
+    [Parameter]
+    public EventCallback<(string Target, string Source)> OnMerged { get; set; }
+
+    // The fixed reason texts of a pair: the title match, then the share of same text rounded down.
+    private static string Reason(SimilarPair pair)
+    {
+        string? title = pair.TitleMatch switch
+        {
+            TitleMatchKind.Same => "same title",
+            TitleMatchKind.Similar => "similar title",
+            _ => null,
+        };
+        string? text = pair.ContentScore is { } score
+            ? $"{((int)Math.Floor(score * 100)).ToString(CultureInfo.InvariantCulture)}% same text"
+            : null;
+        return string.Join(", ", new[] { title, text }.OfType<string>());
+    }
+
+    private static string More(int count) =>
+        $"{CurrentView.Outside} {(count - MaxRows).ToString(CultureInfo.InvariantCulture)} more";
+
+    protected override Task OnInitializedAsync() => Load();
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    // Keeps the shown rows while it reloads. An older request's result is dropped.
+    private async Task Load()
+    {
+        int mine = ++request;
+        SimilarNotesView loaded = await State.Similar();
+        if (mine == request)
+        {
+            view = loaded;
+        }
+    }
+
+    // A Keep button: the guard first, then the number of notes whose links change, then the question.
+    private async Task Ask(string target, string source)
+    {
+        if (running || asking is not null)
+        {
+            return;
+        }
+
+        running = true;
+        result = null;
+        try
+        {
+            if (Guard is not null && await Guard(target, source) is { } held)
+            {
+                Show(held, false);
+                return;
+            }
+
+            int count = await State.MergeLinkCount(target, source);
+            asking = (target, source, count);
+        }
+        finally
+        {
+            running = false;
+        }
+    }
+
+    private void CloseDialog()
+    {
+        if (!running)
+        {
+            asking = null;
+        }
+    }
+
+    private async Task MergeAsked(Confirmation confirmed)
+    {
+        if (asking is not { } asked || running)
+        {
+            return;
+        }
+
+        running = true;
+        try
+        {
+            ActionResult merged = await Actions.MergeNotes(asked.Target, asked.Source, confirmed);
+            Show(merged.Text, merged.Kind == ActionKind.Done);
+            if (merged.Kind == ActionKind.Done)
+            {
+                await OnMerged.InvokeAsync((merged.Name ?? asked.Target, asked.Source));
+            }
+        }
+        finally
+        {
+            running = false;
+            asking = null;
+        }
+
+        await Load();
+    }
+
+    private void Show(string text, bool done)
+    {
+        result = DesktopText.OneLine(text);
+        resultDone = done;
+    }
+}

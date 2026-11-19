@@ -86,6 +86,35 @@ internal sealed class LinkRenamePlan
             oldName, newName, before, after, changed.Select(c => c.Name).ToList(), invalid);
     }
 
+    /// <summary>
+    /// The plan for merging the plain note <paramref name="source"/> into the plain note <paramref name="target"/>:
+    /// links to the source are rewritten to the target's full name, with the source gone from the names after.
+    /// <see cref="Notes"/> holds the other plain notes whose links change (never the two notes themselves); the plan
+    /// is <see cref="Invalid"/> when any rewrite, the two notes' own included, fails the check. Empty when either note
+    /// is not a plain note or they are the same note ignoring case.
+    /// </summary>
+    public static LinkRenamePlan ForMerge(NoteStore notes, string target, string source)
+    {
+        if (!notes.TryFind(target, out NoteInfo? kept) || kept is null
+            || !notes.TryFind(source, out NoteInfo? merged) || merged is null
+            || string.Equals(kept.Name, merged.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            return Empty;
+        }
+
+        IReadOnlyList<NoteInfo> plain = notes.List();
+        List<string> names = plain.Concat(notes.ListSensitive()).Select(n => n.Name).ToList();
+        NameLookup before = new(names);
+        NameLookup after = new(names.Where(n => !string.Equals(n, merged.Name, StringComparison.Ordinal)));
+        List<(string Name, bool Valid)> changed = Changed(notes, plain, before, after, merged.Name, kept.Name).ToList();
+        bool invalid = changed.Any(c => !c.Valid);
+        List<string> others = changed
+            .Select(c => c.Name)
+            .Where(n => !string.Equals(n, merged.Name, StringComparison.Ordinal) && !string.Equals(n, kept.Name, StringComparison.Ordinal))
+            .ToList();
+        return new LinkRenamePlan(merged.Name, kept.Name, before, after, others, invalid);
+    }
+
     // The plain notes whose links change, with false when their rewrite fails the check; unreadable notes are left out.
     private static IEnumerable<(string Name, bool Valid)> Changed(
         NoteStore notes, IReadOnlyList<NoteInfo> plain, NameLookup before, NameLookup after, string oldName, string newName)

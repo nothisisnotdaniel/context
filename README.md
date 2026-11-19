@@ -79,6 +79,16 @@ day the note was last changed. `context decisions work` (or `#work`, `[project a
 notes with that tag. Sensitive notes are never listed, and a text is cut at 1000 characters. In the desktop app,
 `/decisions` or `/decisions #work` in the command palette lists the same decisions; click a note to open it.
 
+### Similar notes
+
+In the desktop app, `/similar` in the command palette lists pairs of notes that look like duplicates: nearly the same
+title (one typo in a short title, two in a longer one; titles that differ only in numbers, like `Notes 1` and `Notes 2`,
+don't count) or at least half the same text. Click a note to open it. `Keep <name>` merges the other note into the
+kept one after you confirm: its text is added at the end of the kept note, links to it in other notes point to the kept
+note, and the merged note is removed. Sensitive notes, notes with subpages and notes whose attachments are in another
+folder can't be merged. Nothing is lost: the merged note's last text stays in its history. To get it back, create a
+note with its old name and open History from the More actions menu.
+
 ### Daily note
 
 `context today` prints today's note, named after the date (for example `2026-10-29`). When it doesn't exist yet it
