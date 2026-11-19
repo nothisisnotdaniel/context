@@ -85,6 +85,8 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
             "\n# ", "\n## ", "soft\nwrapped", "\n- ", "\n  - ", "\n1. ", "- [ ] ", "- [x] ", "*em*", "**strong**", "`inline code`",
             "```\n#not-a-tag [[Not a link]]", "\n> ", "[link](https://example.com/page)", "#tag", "#[tag with spaces]",
             "[[Note]]", "[[Note|alias]]", "C#", "#1", "a_b", "Literal [ bracket",
+            // 290 AC-3: escapes.md and escaped-pipe.md keep their escapes and entities.
+            "\\*", "\\`", "\\_", "\\#", "\\[", "\\\\", "&amp;", "a \\| b",
         ];
 
         Assert.All(needed, n => Assert.Contains(n, all, StringComparison.Ordinal));
@@ -229,7 +231,6 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
         Assert.Contains("* star item", all, StringComparison.Ordinal);
         Assert.Contains("\n=====", all, StringComparison.Ordinal);
         Assert.Contains("__bold__", all, StringComparison.Ordinal);
-        Assert.Contains("\\|", all, StringComparison.Ordinal);
     }
 
     // Images are an image node (shown as a grey placeholder by the schema), not text the editor drops.
@@ -916,7 +917,7 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
     [Fact]
     public void TypedBlock_NoMention_InCodeBlock()
     {
-        using JsonDocument doc = JsonDocument.Parse(TypedBlock("```\n@[Anna]"));
+        using JsonDocument doc = JsonDocument.Parse(TypedBlock("``` \n@[Anna]"));
 
         Assert.Equal("code_block", Type(Assert.Single(doc.RootElement.GetProperty("content").EnumerateArray())));
         Assert.DoesNotContain(Nodes(doc.RootElement), n => Type(n) == "mention");
@@ -965,7 +966,7 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
     [Fact]
     public void TypedMarkdown_CodeBlock_AsTyped()
     {
-        Assert.Equal("```\n\n@[Anna]\n```\n", TypedMarkdown("```\n@[Anna]"));
+        Assert.Equal("```\n\n@[Anna]\n```\n", TypedMarkdown("``` \n@[Anna]"));
         Assert.Equal("```\n\n@[Anna]\n```\n", bundle.Call("roundTrip", "```\n\n@[Anna]\n```\n"));
     }
 

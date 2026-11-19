@@ -75,24 +75,13 @@ public sealed class SmartPasteBundleTests : IClassFixture<EditorBundle>
             Paste("a\tb\n1\t2", start: "x\n\nhello world\n", cursor: 3, end: 8));
     }
 
-    // AC-2: a cell such as *x* is escaped like typed text; parsing the saved Markdown gives the cell text as pasted
-    // (a tag or note link in a cell opens as its chip, as typed text does, with the same raw text).
+    // AC-2 (job 290): a cell such as *x* is saved as pasted, with no backslash added, like typed text.
     [Fact]
-    public void Table_CellsEscaped_ParseBackAsPasted()
+    public void Table_CellsSavedAsPasted()
     {
         string? markdown = Paste("*x*\t[[n]]\n#t\t`c`").Markdown;
 
-        Assert.NotNull(markdown);
-        Assert.Contains("\\*x\\*", markdown, StringComparison.Ordinal);
-        using JsonDocument doc = JsonDocument.Parse(bundle.Call("docJson", markdown));
-        JsonElement paragraph = Assert.Single(doc.RootElement.GetProperty("content").EnumerateArray());
-        JsonElement[] children = paragraph.GetProperty("content").EnumerateArray().ToArray();
-        Assert.All(children, c => Assert.False(c.TryGetProperty("marks", out _)));
-        Assert.Equal(
-            "| *x* | [[n]] |\n| --- | --- |\n| #t | `c` |",
-            string.Concat(children.Select(c => c.TryGetProperty("text", out JsonElement t)
-                ? t.GetString()
-                : c.GetProperty("attrs").GetProperty("raw").GetString())));
+        Assert.Equal("| *x* | [[n]] |\n| --- | --- |\n| #t | `c` |", markdown);
     }
 
     // AC-3: the hook's answer for the default paste is exactly the null pair.
@@ -181,10 +170,10 @@ public sealed class SmartPasteBundleTests : IClassFixture<EditorBundle>
         Assert.Equal(NoPaste, Paste(url + "a"));
     }
 
-    // AC-6: the title link text parses back to the same text and href, escaped, never HTML.
+    // AC-6: the title link text parses back to the same text and href, never HTML.
     [Theory]
     [InlineData("A [b] page")]
-    [InlineData("<b>*x*</b> & `y` _z_")]
+    [InlineData("<b>x</b> & y")]
     [InlineData("Issue #12 - C# tips")]
     public void TitledMarkdown_ParsesBack(string title)
     {
@@ -200,9 +189,10 @@ public sealed class SmartPasteBundleTests : IClassFixture<EditorBundle>
         Assert.Equal("https://e.x/a", mark.GetProperty("attrs").GetProperty("href").GetString());
     }
 
-    // AC-6: an empty title, or one that would not open again as the same link (a tag, a note link, a link end),
-    // leaves the URL text alone.
+    // AC-6: an empty title, or one that would not open again as the same link (a tag, a note link, a link end, and
+    // since job 290 markup, as the text is no longer escaped), leaves the URL text alone.
     [Theory]
+    [InlineData("<b>*x*</b> & `y` _z_")]
     [InlineData("  ")]
     [InlineData("Read #later")]
     [InlineData("See [[Note]]")]

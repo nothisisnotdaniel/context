@@ -312,6 +312,170 @@ public sealed class CodeBlockBundleTests : IClassFixture<EditorBundle>
     }
 
     // The text of the first block that opens with start, up to its matching brace.
+    // ---- 290: typing backticks, and text saved as typed (no escapes added) ----
+
+    // 290 AC-1: text typed through the input rules is saved character for character, with no backslash added.
+    [Theory]
+    [InlineData("*a*")]
+    [InlineData("**b**")]
+    [InlineData("_c_")]
+    [InlineData("a_b")]
+    [InlineData("[x](y)")]
+    [InlineData("[x]")]
+    [InlineData("<http://a>")]
+    [InlineData("&amp;")]
+    [InlineData("\\")]
+    [InlineData("\\*")]
+    [InlineData("|")]
+    [InlineData("~~~")]
+    [InlineData("a # b")]
+    [InlineData("1)")]
+    [InlineData("a ` b")]
+    [InlineData("x *a* **b** _c_ a_b [x](y) <http://a> &amp; \\ \\* | ~~~ # 1) ` end")]
+    public void Typed_SavedAsTyped(string typed)
+    {
+        Assert.Equal(typed + "\n", TypedMd(typed));
+    }
+
+    // 290 AC-2: text typed at a line start is not escaped, nor are the characters around typed text.
+    [Theory]
+    [InlineData("+ x")]
+    [InlineData("---x")]
+    [InlineData("=")]
+    [InlineData("[a]: b")]
+    public void TypedAtLineStart_SavedAsTyped(string typed)
+    {
+        Assert.Equal(typed + "\n", Typed("⟦\n", typed));
+    }
+
+    // 290 AC-2: typing into an existing note escapes nothing around the typed text.
+    [Fact]
+    public void TypedIntoNote_NeighboursNotEscaped()
+    {
+        Assert.Equal("a *b\n", Typed("a ⟦b\n", "*"));
+    }
+
+    // 290 AC-3: a parsed escape or entity is text that keeps its source characters.
+    [Fact]
+    public void Parsed_EscapesStayAsText()
+    {
+        string markdown = "\\*a\\* \\` \\_ \\# \\[ \\\\ &amp; &#35; &lt;\n";
+
+        Assert.Equal(["text|\\*a\\* \\` \\_ \\# \\[ \\\\ &amp; &#35; &lt;"], Inline(Doc(markdown)));
+        Assert.Equal(markdown, bundle.Call("roundTrip", markdown));
+    }
+
+    // 290 AC-4: the closing backtick makes the span inline code without its backticks; the next character is plain.
+    [Fact]
+    public void InlineCodeRule_MakesCode()
+    {
+        Assert.Equal(["text|code|code"], Inline(TypedDoc("`code`")));
+        Assert.Equal("`code`\n", TypedMd("`code`"));
+        Assert.Equal(["text|a ", "text|b|code", "text| c"], Inline(TypedDoc("a `b` c")));
+        Assert.Equal("a `b` c\n", TypedMd("a `b` c"));
+    }
+
+    // 290 AC-4: the closing backtick fires the rule, not the next character.
+    [Fact]
+    public void InlineCodeRule_FiresOnTheClosingBacktick()
+    {
+        Assert.Equal(["text|`x"], Inline(TypedDoc("`x")));
+        Assert.Equal(["text|x|code"], Inline(TypedDoc("`x`")));
+    }
+
+    // 290 AC-5: no inline code for an empty span, a span after a backtick or a backslash, or a span over a chip; the
+    // text stays plain and saves as typed.
+    [Theory]
+    [InlineData("``")]
+    [InlineData("``a`")]
+    [InlineData("\\`a`")]
+    [InlineData("` #tag x`")]
+    [InlineData("`[[Note]]`")]
+    [InlineData("` @[Anna] x`")]
+    public void InlineCodeRule_DoesNotFire(string typed)
+    {
+        Assert.DoesNotContain(Inline(TypedDoc(typed)), c => c.EndsWith("|code", StringComparison.Ordinal));
+        Assert.Equal(typed + "\n", TypedMd(typed));
+    }
+
+    // 290 AC-5: no inline code in a code block.
+    [Fact]
+    public void InlineCodeRule_NotInCodeBlock()
+    {
+        Assert.Equal(["code_block||\n`a`"], Blocks(TypedDoc("``` \n`a`")));
+    }
+
+    // 290 AC-5: no rule over text that already has the code mark: the backticks stay in the code text.
+    [Fact]
+    public void InlineCodeRule_NotInCodeText()
+    {
+        string markdown = Typed("`` `a⟦ ``\n", "`");
+
+        Assert.Equal("`` `a` ``\n", markdown);
+        Assert.Equal(["text|`a`|code"], Inline(Doc(markdown)));
+    }
+
+    // 290 AC-6: ``` and an optional language, then Space, at the start of an empty paragraph give an empty code block.
+    [Theory]
+    [InlineData("``` ", "")]
+    [InlineData("```js ", "js")]
+    [InlineData("```c# ", "c#")]
+    public void FenceRule_Space_MakesCodeBlock(string typed, string language)
+    {
+        Assert.Equal([$"code_block|{language}|"], Blocks(TypedDoc(typed)));
+        string markdown = "```" + language + "\n\n```\n";
+        Assert.Equal(markdown, TypedMd(typed));
+        Assert.Equal(markdown, bundle.Call("roundTrip", markdown));
+    }
+
+    // 290 AC-6: ``` alone stays paragraph text.
+    [Fact]
+    public void FenceRule_BackticksAlone_StayText()
+    {
+        Assert.Equal(["paragraph|```"], Blocks(TypedDoc("```")));
+        Assert.Equal(["paragraph|```js"], Blocks(TypedDoc("```js")));
+    }
+
+    // 290 AC-7: Enter on a fence line makes it a code block with that language, caret inside, nothing split off.
+    [Fact]
+    public void FenceEnter_MakesCodeBlock()
+    {
+        string markdown = Command("⟦\n", "Enter", "x = 1", "```py");
+
+        Assert.Equal("```py\nx = 1\n```\n", markdown);
+        Assert.Equal("[\"code_block\"]", BlockTypes(markdown));
+        Assert.Equal("```\n\n```\n", Command("⟦\n", "Enter", "", "```"));
+        Assert.Equal(["code_block||"], Blocks(bundle.Call("docJson", Command("⟦\n", "Enter", "", "```"))));
+        Assert.Equal("text\n\n```c#\nint x;\n```\n", Command("text\n\n⟦\n", "Enter", "int x;", "```c#"));
+    }
+
+    // 290 AC-7: Enter on any other paragraph splits it as before.
+    [Theory]
+    [InlineData("a⟦b\n", "", "", "a\n\nb\n")]
+    [InlineData("⟦\n", "x", "a```", "a```\n\nx\n")]
+    [InlineData("⟦\n", "x", "``", "``\n\nx\n")]
+    [InlineData("⟦\n", "x", "```a`", "```a`\n\nx\n")]
+    public void FenceEnter_OtherParagraph_Splits(string markdown, string typed, string before, string expected)
+    {
+        Assert.Equal(expected, Command(markdown, "Enter", typed, before));
+    }
+
+    // 290 AC-7: Enter on ``` with the code mark splits the paragraph, it makes no code block.
+    [Fact]
+    public void FenceEnter_InlineCode_Splits()
+    {
+        Assert.Equal("[\"paragraph\",\"paragraph\"]", BlockTypes(Command("`` ```⟦ ``\n", "Enter", "x")));
+    }
+
+    // 290 AC-8: the fence rule does not fire mid-line, in a code block or in inline code.
+    [Fact]
+    public void FenceRule_DoesNotFire()
+    {
+        Assert.Equal(["paragraph|a ``` x"], Blocks(TypedDoc("a ``` x")));
+        Assert.Equal(["code_block||\n``` "], Blocks(TypedDoc("``` \n``` ")));
+        Assert.Equal("[\"paragraph\"]", BlockTypes(Command("⟦", "Mod-e", "``` x")));
+    }
+
     private static string Block(string css, string start)
     {
         int at = css.IndexOf(start, StringComparison.Ordinal);
@@ -334,6 +498,63 @@ public sealed class CodeBlockBundleTests : IClassFixture<EditorBundle>
 
     private string Command(string markdown, string key, string typed = "") =>
         JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.commandMarkdown({Js(markdown)}, {Js(key)}, {Js(typed)})"))!;
+
+    private string Command(string markdown, string key, string typed, string before) =>
+        JsonSerializer.Deserialize<string>(bundle.Json(
+            $"ContextEditor.commandMarkdown({Js(markdown)}, {Js(key)}, {Js(typed)}, {Js(before)})"))!;
+
+    private string TypedMd(string typed) =>
+        JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.typedMarkdown({Js(typed)})"))!;
+
+    private string TypedDoc(string typed) =>
+        JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.typedBlock({Js(typed)})"))!;
+
+    private string Doc(string markdown) => bundle.Call("docJson", markdown);
+
+    // The inline nodes of every block of a doc JSON as "text|<text>" (with "|<mark>" per mark) or "<type>".
+    private static List<string> Inline(string json)
+    {
+        using JsonDocument doc = JsonDocument.Parse(json);
+        List<string> list = [];
+        foreach (JsonElement block in doc.RootElement.GetProperty("content").EnumerateArray())
+        {
+            if (!block.TryGetProperty("content", out JsonElement content))
+            {
+                continue;
+            }
+
+            foreach (JsonElement node in content.EnumerateArray())
+            {
+                string type = node.GetProperty("type").GetString()!;
+                if (type != "text")
+                {
+                    list.Add(type);
+                    continue;
+                }
+
+                string marks = node.TryGetProperty("marks", out JsonElement m)
+                    ? string.Concat(m.EnumerateArray().Select(x => "|" + x.GetProperty("type").GetString()))
+                    : "";
+                list.Add("text|" + node.GetProperty("text").GetString() + marks);
+            }
+        }
+
+        return list;
+    }
+
+    // The blocks of a doc JSON as "code_block|<params>|<text>" or "<type>|<text>".
+    private static List<string> Blocks(string json)
+    {
+        using JsonDocument doc = JsonDocument.Parse(json);
+        return doc.RootElement.GetProperty("content").EnumerateArray().Select(block =>
+        {
+            string type = block.GetProperty("type").GetString()!;
+            string text = block.TryGetProperty("content", out JsonElement content)
+                ? string.Concat(content.EnumerateArray().Select(n => n.TryGetProperty("text", out JsonElement t) ? t.GetString() : "\ufffc"))
+                : "";
+            return type == "code_block" ? $"{type}|{block.GetProperty("attrs").GetProperty("params").GetString()}|{text}" : $"{type}|{text}";
+        }).ToList();
+    }
 
     private string Typed(string markdown, string typed) =>
         JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.typedAtMarkdown({Js(markdown)}, {Js(typed)})"))!;
