@@ -318,6 +318,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#362](backlog/362-notes-refuse-a-note-swapped-for.md) Notes: refuse a note swapped for a symlink between listing and reading
 - [?] [#363](backlog/363-calendar-skip-symlinked-ics-files.md) Calendar: skip symlinked .ics files
 - [?] [#364](backlog/364-times-panel-narrow-the-catch-in.md) Times panel: narrow the catch in DesktopState.TimesNow
+- [?] [#365](backlog/365-pin-icon-contrast-on-the-open.md) Pin icon contrast on the open note row
+- [?] [#366](backlog/366-pinned-list-roll-back-the-in.md) Pinned list: roll back the in-memory change when the file write fails
 
 ## Dropped with the terminal UI
 
