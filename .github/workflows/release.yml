@@ -17,8 +17,8 @@
 #   - the desktop app for macOS as Context-<version>-osx-arm64.zip and Context-<version>-osx-x64.zip (a
 #     Context.app built by .github/scripts/macos-app.sh), from the desktop-macos job;
 #   - the desktop app for Windows, packed by vpk (Velopack), from the desktop-windows job: Setup.exe, the
-#     portable zip, this version's full .nupkg, a delta .nupkg when an earlier release of the channel could be
-#     downloaded, and the feed files (releases.<channel>.json, assets.<channel>.json, RELEASES*).
+#     portable zip, this version's full .nupkg, a delta .nupkg when an earlier published release of the channel
+#     could be downloaded, and the feed files (releases.<channel>.json, assets.<channel>.json, RELEASES*).
 #   Both desktop jobs need the release job: they take its version, tag and commit (job outputs) and upload to
 #   the draft it created; re-running a desktop job replaces its own assets (--clobber).
 # - The release is a draft until the publish job runs. publish needs all three other jobs, checks that the
@@ -28,6 +28,19 @@
 #   This is what makes immutable releases work: GitHub refuses uploads into a published immutable release,
 #   so every asset is uploaded before the release is published. A draft has no git tag yet (develop and
 #   release-PR runs); GitHub creates the tag on the draft's commit when it is published.
+# - One run at a time: the workflow-level concurrency group "release" (cancel-in-progress: false) covers all
+#   three triggers, so two runs never create, upload, publish or prune at once. GitHub keeps only one pending
+#   run per group: a newer run cancels an older pending one (for example a queued release-PR run); re-run it.
+#   Each job has a timeout (release 30 minutes, desktop-macos 60, desktop-windows 45, publish 15).
+# - Stale drafts: before it creates the draft, the release job deletes every draft of this run's tag (left by
+#   an earlier failed run), so re-running the whole workflow works. Drafts of other tags are left alone.
+# - The Windows delta base is an earlier published release only (gh release list --exclude-drafts, and
+#   --exclude-pre-releases for a proper release), never a draft, never this run's own tag.
+# - The tag check: before it publishes, the publish job reads the tag from the repository (git ls-remote, the
+#   token only through gh auth git-credential). When the tag already exists and points at another commit than
+#   the draft's, nothing is published. A tag pushed between that check and the publish is not caught.
+# - Every version, tag and target that reaches $GITHUB_ENV, $GITHUB_OUTPUT or a later job is refused when it
+#   holds a line break; the publish step counts only fully uploaded assets.
 # - Two update channels: a prerelease version (X.Y.Z-develop.<n>) is packed with --channel develop, a proper
 #   release with vpk's default channel (win). A copy installed by Setup.exe looks at start-up for a newer
 #   build on the channel it was installed from and puts it in place after the app closes (when the app stays
@@ -86,11 +99,17 @@ on:
 permissions:
   contents: write
 
+# One run at a time across all three triggers; a running job is never cancelled (see the header).
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     # Every push runs; a pull_request event runs only for a merged PR from develop in this repository.
     if: github.event_name == 'push' || (github.event.pull_request.merged == true && github.event.pull_request.head.ref == 'develop' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # The macOS signing switch (a repository variable, no secret): the release notes say which build ships.
     env:
       MACOS_SIGNING: ${{ vars.MACOS_SIGNING }}
@@ -185,6 +204,14 @@ jobs:
             TAG="$GITHUB_REF_NAME"
             TARGET="$GITHUB_SHA"
           fi
+          # A line break would let a second line past the line-based SemVer check below and into $GITHUB_ENV or
+          # $GITHUB_OUTPUT (for example a tag 'v1.2.3<LF>X=y'), so it is refused before anything is written.
+          case "$VERSION$TAG$TARGET" in
+            *[$'\n\r']*)
+              echo "The version, tag or target holds a line break; nothing is released" >&2
+              exit 1
+              ;;
+          esac
           # Check the version where it enters, before it reaches msbuild (-p: would split on ';').
           # LC_ALL=C: the [A-Za-z] ranges mean ASCII letters only, whatever the runner's locale.
           if ! printf '%s' "$VERSION" | LC_ALL=C grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
@@ -245,6 +272,29 @@ jobs:
           esac
           # The header says how to open the desktop builds; a switch value other than empty, off or on fails here.
           sh .github/scripts/release-notes.sh "$MACOS_SIGNING" > "$RUNNER_TEMP/release-notes.md"
+          # Drafts of this exact tag left by an earlier failed run go first, so this run's draft is the only one
+          # (and re-running the whole workflow works). Every id is checked before the first delete.
+          if ! DRAFTS="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '.[] | select(.draft == true and .tag_name == env.TAG) | .id')"; then
+            echo "Can't list the drafts of $TAG; nothing is created" >&2
+            exit 1
+          fi
+          if [ -n "$DRAFTS" ]; then
+            while IFS= read -r ID; do
+              case "$ID" in
+                '' | *[!0-9]*)
+                  echo "A listed draft id of $TAG is not a number; nothing is deleted or created" >&2
+                  exit 1
+                  ;;
+              esac
+            done <<< "$DRAFTS"
+            while IFS= read -r ID; do
+              if ! gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$ID" > /dev/null; then
+                echo "Can't delete stale draft $ID of $TAG; nothing is created" >&2
+                exit 1
+              fi
+              echo "Deleted stale draft $ID of $TAG"
+            done <<< "$DRAFTS"
+          fi
           gh release create "$TAG" "nupkg/Context.$VERSION.nupkg" --title "Context $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" --generate-notes --target "$TARGET" --draft $PRERELEASE
 
   # The desktop app for macOS: one Context.app per architecture, zipped and added to the release. Signed and
@@ -252,6 +302,7 @@ jobs:
   desktop-macos:
     needs: release
     runs-on: macos-latest
+    timeout-minutes: 60
     # The release job's outputs and the signing switch reach the scripts only as environment variables.
     env:
       VERSION: ${{ needs.release.outputs.version }}
@@ -268,6 +319,13 @@ jobs:
 
       - name: Check version
         run: |
+          # A line break would let a second line past the line-based SemVer check, so it is refused first.
+          case "$VERSION$TAG" in
+            *[$'\n\r']*)
+              echo "The version or tag holds a line break" >&2
+              exit 1
+              ;;
+          esac
           # The version came from another job: check it again before it reaches msbuild or a file name.
           if ! printf '%s' "$VERSION" | LC_ALL=C grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
             echo "Version '$VERSION' is not SemVer" >&2
@@ -404,6 +462,7 @@ jobs:
   desktop-windows:
     needs: release
     runs-on: windows-latest
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash
@@ -422,6 +481,13 @@ jobs:
 
       - name: Check version
         run: |
+          # A line break would let a second line past the line-based SemVer check, so it is refused first.
+          case "$VERSION$TAG" in
+            *[$'\n\r']*)
+              echo "The version or tag holds a line break" >&2
+              exit 1
+              ;;
+          esac
           # The version came from another job: check it again before it reaches msbuild or a file name.
           if ! printf '%s' "$VERSION" | LC_ALL=C grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
             echo "Version '$VERSION' is not SemVer" >&2
@@ -451,16 +517,48 @@ jobs:
           export PATH="$HOME/.dotnet/tools:$PATH"
           # A prerelease goes to the develop channel; a proper release to vpk's default channel (win).
           CHANNEL=""
-          PRE=""
+          NAME="win"
+          EXCLUDE="--exclude-pre-releases"
           case "$VERSION" in
             *-*)
               CHANNEL="--channel develop"
-              PRE="--pre"
+              NAME="develop"
+              EXCLUDE=""
               ;;
           esac
-          # The newest earlier release of the same channel, so vpk can make a delta against it. When there is
-          # none yet (or the download fails) the pack goes on without a delta.
-          vpk download github --repoUrl "https://github.com/$GITHUB_REPOSITORY" --token "$GH_TOKEN" --outputDir Releases $CHANNEL $PRE || echo "::warning::No earlier release downloaded; packing without a delta"
+          # The newest earlier published release of the same channel, so vpk can make a delta against it: only
+          # published releases (never a draft, so a stale draft can't become the base), only v+SemVer tags, never
+          # this run's own tag. Each try must bring down the channel's feed and a full package; else Releases/ is
+          # emptied and the next tag is tried. With none, the pack goes on without a delta.
+          has_full() {
+            for FILE in Releases/ContextDesktop-*-full.nupkg; do
+              if [ -f "$FILE" ]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+          BASE=""
+          if TAGS="$(gh release list --exclude-drafts $EXCLUDE --limit 10 --json tagName --jq '.[].tagName')"; then
+            while IFS= read -r CANDIDATE; do
+              case "$CANDIDATE" in
+                v*) ;;
+                *) continue ;;
+              esac
+              if [ "$CANDIDATE" = "$TAG" ] || ! printf '%s' "${CANDIDATE#v}" | LC_ALL=C grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+                continue
+              fi
+              if gh release download "$CANDIDATE" --pattern "releases.$NAME.json" --pattern "ContextDesktop-*-full.nupkg" --dir Releases && [ -f "Releases/releases.$NAME.json" ] && has_full; then
+                BASE="$CANDIDATE"
+                break
+              fi
+              rm -rf Releases
+            done <<< "$TAGS"
+          fi
+          if [ -z "$BASE" ]; then
+            rm -rf Releases
+            echo "::warning::No earlier release downloaded; packing without a delta"
+          fi
           # The pack needs no credential.
           unset GH_TOKEN
           vpk pack --packId ContextDesktop --packVersion "$VERSION" --packDir publish/win-x64 --mainExe Context.Desktop.exe --packTitle Context --runtime win-x64 --outputDir Releases $CHANNEL
@@ -501,6 +599,7 @@ jobs:
       - desktop-macos
       - desktop-windows
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # The release job's outputs reach the scripts only as environment variables.
     env:
       VERSION: ${{ needs.release.outputs.version }}
@@ -510,13 +609,20 @@ jobs:
       - name: Check out
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          # Everything goes through gh (GH_TOKEN), so the write token is not left in .git/config.
+          # gh and the tag check get the token from GH_TOKEN, so the write token is not left in .git/config.
           persist-credentials: false
           # The commit the release was made on (the prune step runs its script from there).
           ref: ${{ needs.release.outputs.target }}
 
       - name: Check version
         run: |
+          # A line break would let a second line past the line-based SemVer check, so it is refused first.
+          case "$VERSION$TAG" in
+            *[$'\n\r']*)
+              echo "The version or tag holds a line break" >&2
+              exit 1
+              ;;
+          esac
           # The version came from another job: check it again before it reaches a file name.
           if ! printf '%s' "$VERSION" | LC_ALL=C grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
             echo "Version '$VERSION' is not SemVer" >&2
@@ -541,8 +647,9 @@ jobs:
               PRE="--prerelease"
               ;;
           esac
-          # One read: line 1 is the draft flag, line 2 the commit the release sits on, then one asset name a line.
-          INFO="$(gh release view "$TAG" --json isDraft,targetCommitish,assets --jq '.isDraft, .targetCommitish, .assets[].name')"
+          # One read: line 1 is the draft flag, line 2 the commit the release sits on, then one asset name a line
+          # (only fully uploaded assets: the parentheses matter, | binds looser than ,).
+          INFO="$(gh release view "$TAG" --json isDraft,targetCommitish,assets --jq '.isDraft, .targetCommitish, (.assets[] | select(.state == "uploaded") | .name)')"
           DRAFT="$(sed -n '1p' <<< "$INFO")"
           COMMIT="$(sed -n '2p' <<< "$INFO")"
           ASSETS="$(sed -n '3,$p' <<< "$INFO")"
@@ -562,6 +669,27 @@ jobs:
               exit 1
             fi
           done
+          # The tag, when it already exists (a pushed tag, or one made by hand), must point at the draft's commit:
+          # GitHub would publish the draft on the tag as it is. git reads the token from GH_TOKEN through gh,
+          # never from argv, and never prompts (GIT_TERMINAL_PROMPT=0). A tag pushed after this check is not caught.
+          if ! REFS="$(GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c 'credential.helper=!gh auth git-credential' ls-remote "https://github.com/$GITHUB_REPOSITORY" "refs/tags/$TAG" "refs/tags/$TAG^{}")"; then
+            echo "Can't read tag $TAG; nothing is published" >&2
+            exit 1
+          fi
+          PLAIN=""
+          PEELED=""
+          while read -r SHA REF; do
+            if [ "$REF" = "refs/tags/$TAG^{}" ]; then
+              PEELED="$SHA"
+            elif [ "$REF" = "refs/tags/$TAG" ]; then
+              PLAIN="$SHA"
+            fi
+          done <<< "$REFS"
+          TAGGED="${PEELED:-$PLAIN}"
+          if [ -n "$TAGGED" ] && [ "$TAGGED" != "$TARGET" ]; then
+            echo "Tag $TAG points at $TAGGED, not at $TARGET; nothing is published" >&2
+            exit 1
+          fi
           gh release edit "$TAG" --draft=false $PRE
 
       # Housekeeping after a proper release: delete the -develop prereleases (and their tags) whose

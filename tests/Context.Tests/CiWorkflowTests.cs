@@ -64,11 +64,35 @@ public sealed class CiWorkflowTests
     {
         string text = Workflow();
 
-        Assert.DoesNotContain("setup-node", text, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("npm", text, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("node", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(NodeUse(text));
         Assert.DoesNotContain("continue-on-error", text, StringComparison.OrdinalIgnoreCase);
     }
+
+    // 272 AC-1: only the code part of a line counts, and only the whole words node, npm and npx (or setup-node).
+    [Theory]
+    [InlineData("      # Runs on many nodes.\n", true)]
+    [InlineData("      # Node is not needed here.\n", true)]
+    [InlineData("      # No npm either.\n", true)]
+    [InlineData("        run: dotnet test --filter nodes\n", true)]
+    [InlineData("        uses: actions/setup-node@0123456789abcdef0123456789abcdef01234567 # v4\n", false)]
+    [InlineData("        run: npm ci\n", false)]
+    [InlineData("        run: node x.js\n", false)]
+    [InlineData("        run: npx y\n", false)]
+    [InlineData("        run: NPM ci # nodes\n", false)]
+    public void NodeCheck_LooksOnlyAtCode_AndWholeWords(string line, bool passes)
+    {
+        string text = Workflow() + line;
+
+        Assert.Equal(passes, NodeUse(text) is null);
+    }
+
+    /// <summary>The first line whose code part (the text before the first <c>#</c>) uses Node, else null.</summary>
+    internal static string? NodeUse(string text) =>
+        text.Split('\n')
+            .Select(line => line.Split('#')[0])
+            .FirstOrDefault(code =>
+                code.Contains("setup-node", StringComparison.OrdinalIgnoreCase)
+                || Regex.IsMatch(code, @"\b(node|npm|npx)\b", RegexOptions.IgnoreCase));
 
     // AC-5
     [Fact]
