@@ -102,6 +102,8 @@ internal static class MeetingCarryOver
                 inFence = !inFence;
             }
 
+            // A heading of the same or higher level ends the open section; the check below may then start a new one at
+            // this same heading (another Open points). A deeper heading falls through and is copied as a section line.
             if (text is not null && sectionLevel > 0 && level <= sectionLevel)
             {
                 Keep(lines, section, kept);
