@@ -12,6 +12,8 @@
     <!-- CS8002: Photino.Blazor and Photino.NET have no strong name. The app is public-signed only so that Core's
          InternalsVisibleTo can name it by key; .NET does not check strong names when it loads assemblies. -->
     <NoWarn>$(NoWarn);CS8002</NoWarn>
+    <!-- The exe icon (job 284); Assets/README.md says how the icon files are made from Assets/context-icon.svg. -->
+    <ApplicationIcon>Assets\Context.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -27,6 +29,15 @@
   <ItemGroup>
     <Content Update="wwwroot\**">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- The icon files ship next to the app (AppIcon, macos-app.sh); the SVG source and the README do not. -->
+  <ItemGroup>
+    <None Remove="Assets\**" />
+    <Content Include="Assets\Context.icns;Assets\Context.ico;Assets\Context.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
   </ItemGroup>
 

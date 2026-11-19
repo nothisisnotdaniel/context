@@ -177,6 +177,21 @@ internal static class Program
             .SetSize(1100, 750)
             .SetGrantBrowserPermissions(false)
             .SetDevToolsEnabled(DevTools);
+        // The window icon (job 284) comes only from the app's own folder; a missing file or a Photino failure keeps
+        // the default icon and never stops start-up.
+        string? iconFile = AppIcon.File(AppContext.BaseDirectory, OperatingSystem.IsWindows());
+        if (iconFile is not null)
+        {
+            try
+            {
+                app.MainWindow.SetIconFile(iconFile);
+            }
+            catch (Exception)
+            {
+                // The default icon stays.
+            }
+        }
+
         dialog.Window = app.MainWindow;
         window = app.MainWindow;
 

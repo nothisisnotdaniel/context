@@ -792,7 +792,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     SQLite native library fails the release. Nothing goes to nuget.org. (2) The desktop app for macOS:
     `Context-<version>-osx-arm64.zip` and `Context-<version>-osx-x64.zip`, each a `Context.app` built by
     `.github/scripts/macos-app.sh <publish-dir> <version> <out-dir>` (Info.plist + all published files in
-    `Contents/MacOS/`; it neither signs nor zips), then either ad-hoc signed (`codesign -s -`) and zipped with
+    `Contents/MacOS/` + `Contents/Resources/Context.icns`, refusing a publish folder without `Assets/Context.icns`; it neither signs nor zips), then either ad-hoc signed (`codesign -s -`) and zipped with
     `ditto`, or signed with a Developer ID and notarized (see Signing); the asset names are the same either way. (3) The desktop app for Windows, packed by `vpk` (`--packId ContextDesktop`, `--mainExe
     Context.Desktop.exe`): `Setup.exe`, the portable zip, this version's full `.nupkg`, a delta `.nupkg` when an
     earlier published release of the channel came down, and the feed
@@ -891,7 +891,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `src/Context.Desktop/`: the desktop app (`Microsoft.NET.Sdk.Razor`, `WinExe`, references `Context.Core`
     only, never the command-line project; components and classes in `namespace Context`). `Program.cs` only wires
     things up (stores built like `Cli`'s, Photino window `Context` 1100x750, dev tools
-    only in Debug). `LinkRenamePlan.cs` (job 206) works out, read-only, which plain notes a rename's link rewrite
+    only in Debug). App icon (job 284): `Assets/` holds `context-icon.svg` and the committed `Context.icns`/`.ico`/`.png` made from it by `Assets/make-icons.sh` (macOS only, never run by the build; see `Assets/README.md`); the three are content in the output and publish folders, `Context.ico` is the `ApplicationIcon` and `vpk pack --icon`, `macos-app.sh` copies `Context.icns` to `Contents/Resources/` (`CFBundleIconFile` `Context`), and `Program.cs` calls `SetIconFile` with `AppIcon.File(AppContext.BaseDirectory, OperatingSystem.IsWindows())` (`.ico` on Windows, else `.png`; null or a Photino failure keeps the default icon). `LinkRenamePlan.cs` (job 206) works out, read-only, which plain notes a rename's link rewrite
     changes (for `DesktopState.LinkUpdateCount` and `DesktopActions.RenameNote`). `DesktopState` builds a `DesktopSnapshot` (`Failed`, `Today`, `CurrentView? Current`,
     `Todos`, `Notes`, unreadable flags, `Folder`) off the UI thread with `Refresh()` (one at a time; requests during a run
     coalesce into one more run) and raises `Changed`; `Tick()` refreshes when the day changed or 5 min passed.
