@@ -53,7 +53,7 @@ public sealed class PageTitleTests
         Assert.Equal("Café", await Fetch(Ok(content), Url));
     }
 
-    // Control characters become spaces; a long title is cut to 200 characters, never inside a surrogate pair.
+    // Control characters become spaces, bidi controls are removed; a long title is cut to 200 characters, never inside a surrogate pair.
     [Fact]
     public async Task LongTitle_CutTo200()
     {
@@ -61,6 +61,7 @@ public sealed class PageTitleTests
         string emoji = new string('b', 199) + "\U0001F600" + "c";
         Assert.Equal(new string('b', 199), await Fetch(Ok(Html("<title>" + emoji + "</title>")), Url));
         Assert.Equal("a b", await Fetch(Ok(Html("<title>a&#1;\u0007b</title>")), Url));
+        Assert.Equal("ab c", await Fetch(Ok(Html("<title>a\u202Eb&#x2066; \u200Fc</title>")), Url));
     }
 
     // A title within the first 256 KiB of a bigger body is found; one after it is not read.

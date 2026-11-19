@@ -1362,7 +1362,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `markdown.js` no longer escapes `|` (`RoundTrip/lossless/table.md`, `lossy/escaped-pipe.md`). Core `PageTitle.cs`:
     `IPageTitleSource`, `PageTitleFetcher(handler, timeout)` (one GET, `Accept` HTML, 2xx, final URI http(s), media type
     absent/`text/html`/`application/xhtml+xml`, first `MaxBodyBytes` 256 KiB, declared charset else UTF-8, first
-    `<title>` HTML-decoded, control/whitespace runs one space, cut to 200; user info or a padded URL refused; never
+    `<title>` HTML-decoded, bidi controls removed, control/whitespace runs one space, cut to 200; user info or a padded URL refused; never
     throws, never logs). `SettingsStore.ReadFetchTitles` (exactly `"paste":{"fetchTitles":true}`, a broken file
     throws) / `SaveFetchTitles` (other keys kept). `DesktopState.FetchTitlesSetting()` (false on error) and
     `PageTitle(url, token)` (null when off, cancelled or no source); `Program.cs` passes its own `SocketsHttpHandler`

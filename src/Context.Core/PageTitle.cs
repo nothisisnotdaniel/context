@@ -36,6 +36,10 @@ internal sealed class PageTitleFetcher : IPageTitleSource
     private static readonly Regex Blank = new(
         @"[\s\p{Cc}]+", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
+    // Bidi marks, embeddings, overrides and isolates: removed, so a title can't make its text read differently.
+    private static readonly Regex Bidi = new(
+        @"[\u200E\u200F\u202A-\u202E\u2066-\u2069]", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
     private readonly HttpClient client;
     private readonly TimeSpan timeout;
 
@@ -93,8 +97,8 @@ internal sealed class PageTitleFetcher : IPageTitleSource
 
     /// <summary>
     /// The title in <paramref name="html"/> as it is inserted: the first <c>&lt;title&gt;</c>'s text, HTML-decoded,
-    /// control characters and whitespace runs made one space, trimmed, cut to <see cref="MaxTitleLength"/>
-    /// (never inside a surrogate pair); <c>null</c> for none or an empty one.
+    /// bidi controls removed, control characters and whitespace runs made one space, trimmed, cut to
+    /// <see cref="MaxTitleLength"/> (never inside a surrogate pair); <c>null</c> for none or an empty one.
     /// </summary>
     public static string? TitleOf(string html)
     {
@@ -104,7 +108,7 @@ internal sealed class PageTitleFetcher : IPageTitleSource
             return null;
         }
 
-        string title = Blank.Replace(WebUtility.HtmlDecode(match.Groups[1].Value), " ").Trim();
+        string title = Blank.Replace(Bidi.Replace(WebUtility.HtmlDecode(match.Groups[1].Value), ""), " ").Trim();
         if (title.Length > MaxTitleLength)
         {
             int cut = char.IsHighSurrogate(title[MaxTitleLength - 1]) ? MaxTitleLength - 1 : MaxTitleLength;
