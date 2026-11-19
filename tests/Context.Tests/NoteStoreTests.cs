@@ -453,9 +453,192 @@ public sealed class NoteStoreTests : IDisposable
         Assert.True(store.Contains(Path.Combine(root, "x.md")));
         Assert.True(store.Contains(Path.Combine(root, "sub", "..", "x.md")));
         Assert.True(store.Contains(Path.Combine(link, "x.md")));
-        Assert.True(store.Contains(Path.Combine(root.ToUpperInvariant(), "x.md")));
         Assert.False(store.Contains(Path.Combine(parent, "x.md")));
         Assert.False(store.Contains(root + "-other"));
+    }
+
+    // 298 AC-5: the answers for the root, inside, `..`, a link, the parent and a sibling don't depend on IgnoresCase.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Contains_RootInsideAndOutside_DoNotDependOnIgnoresCase(bool ignoresCase)
+    {
+        Directory.CreateDirectory(root);
+        NoteStore store = new NoteStore(root) { IgnoresCase = _ => ignoresCase };
+        string link = Path.Combine(parent, "link");
+        Directory.CreateSymbolicLink(link, root);
+
+        Assert.True(store.Contains(root));
+        Assert.True(store.Contains(Path.Combine(root, "x.md")));
+        Assert.True(store.Contains(Path.Combine(root, "sub", "..", "x.md")));
+        Assert.True(store.Contains(Path.Combine(link, "x.md")));
+        Assert.False(store.Contains(parent));
+        Assert.False(store.Contains(Path.Combine(parent, "x.md")));
+        Assert.False(store.Contains(root + "-other"));
+        Assert.False(store.Contains(Path.Combine(root + "-other", "x.md")));
+    }
+
+    // 298 AC-6: a path that matches the root only when case is ignored is inside only when the file system ignores case.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Contains_CaseChangedRoot_FollowsIgnoresCase(bool ignoresCase)
+    {
+        Directory.CreateDirectory(root);
+        string? seen = null;
+        NoteStore store = new NoteStore(root)
+        {
+            IgnoresCase = folder =>
+            {
+                seen = folder;
+                return ignoresCase;
+            },
+        };
+        string caseChanged = Path.Combine(parent, "CONTEXT", "x.md");
+
+        Assert.Equal(ignoresCase, store.Contains(caseChanged));
+        Assert.NotNull(seen);
+        Assert.EndsWith("Context", seen, StringComparison.Ordinal);
+    }
+
+    // 298 AC-7: the default probe agrees with what the file system does in the same folder.
+    [Fact]
+    public void IgnoresCase_Default_AgreesWithFileSystem()
+    {
+        NoteStore store = new NoteStore(root);
+        Directory.CreateDirectory(Path.Combine(parent, "probe-a"));
+        bool groundTruth = Directory.Exists(Path.Combine(parent, "probe-A"));
+
+        Assert.Equal(groundTruth, store.IgnoresCase(parent));
+        Assert.Equal(groundTruth, store.IgnoresCase(Path.Combine(parent, "probe-a")));
+    }
+
+    // 298 AC-8: when SameEntry throws, the default probe answers true (the more refusing answer).
+    [Fact]
+    public void IgnoresCase_SameEntryThrowsIOException_IsTrue()
+    {
+        NoteStore store = new NoteStore(root) { SameEntry = (_, _) => throw new IOException("probe failed") };
+
+        Assert.True(store.IgnoresCase(parent));
+    }
+
+    // 298 AC-8
+    [Fact]
+    public void IgnoresCase_SameEntryThrowsUnauthorizedAccess_IsTrue()
+    {
+        NoteStore store = new NoteStore(root) { SameEntry = (_, _) => throw new UnauthorizedAccessException("denied") };
+
+        Assert.True(store.IgnoresCase(parent));
+    }
+
+    // 298 AC-8: a path with no letter to flip (the file system root) can't be probed, so it answers true; a folder
+    // without a letter is probed through the nearest folder above it that has one.
+    [Fact]
+    public void IgnoresCase_NoLetterToFlip_IsTrue_ElseProbesFolderAbove()
+    {
+        string digits = Path.Combine(parent, "123");
+        Directory.CreateDirectory(digits);
+        List<string> probed = [];
+        NoteStore store = new NoteStore(root)
+        {
+            SameEntry = (original, _) =>
+            {
+                probed.Add(original);
+                return false;
+            },
+        };
+
+        Assert.True(store.IgnoresCase(Path.GetPathRoot(parent)!));
+        Assert.Empty(probed);
+        Assert.False(store.IgnoresCase(digits));
+        Assert.Equal([parent], probed);
+    }
+
+    // 298 AC-1 / AC-2: the temp name stays short for any valid title and keeps short titles whole.
+    [Theory]
+    [InlineData("Shopping list")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab")]
+    [InlineData("cjk100")]
+    [InlineData("emoji50")]
+    [InlineData("cjk72")]
+    public void TempPath_IsInFolder_Short_AndWholeRunes(string title)
+    {
+        title = title switch
+        {
+            "cjk100" => new string('漢', 100),
+            "cjk72" => new string('漢', 72),
+            "emoji50" => string.Concat(Enumerable.Repeat("😀", 50)),
+            _ => title,
+        };
+        Assert.Null(NoteStore.ValidateTitle(title));
+
+        string temp = NoteStore.TempPath(root, title);
+        string name = Path.GetFileName(temp);
+
+        Assert.Equal(root, Path.GetDirectoryName(temp));
+        Assert.True(System.Text.Encoding.UTF8.GetByteCount(name) <= 255);
+        Assert.StartsWith(".", name, StringComparison.Ordinal);
+        Assert.EndsWith(".tmp", name, StringComparison.Ordinal);
+        Assert.Matches(@"\.md\.[0-9a-f]{32}\.tmp$", name);
+        for (int i = 0; i < name.Length; i++)
+        {
+            if (char.IsHighSurrogate(name[i]))
+            {
+                Assert.True(i + 1 < name.Length && char.IsLowSurrogate(name[i + 1]));
+                i++;
+            }
+            else
+            {
+                Assert.False(char.IsLowSurrogate(name[i]));
+            }
+        }
+
+        string prefix = name[1..name.LastIndexOf(".md.", StringComparison.Ordinal)];
+        Assert.True(System.Text.Encoding.UTF8.GetByteCount(prefix) <= NoteStore.MaxTempPrefixBytes);
+        Assert.StartsWith(prefix, title, StringComparison.Ordinal);
+        if (System.Text.Encoding.UTF8.GetByteCount(title) <= NoteStore.MaxTempPrefixBytes)
+        {
+            Assert.Matches("^" + System.Text.RegularExpressions.Regex.Escape("." + title + ".md.") + "[0-9a-f]{32}\\.tmp$", name);
+        }
+    }
+
+    // 298 AC-3: a 72-character CJK title saves, replaces and leaves no temp file.
+    [Fact]
+    public void Save_LongMultiByteTitle_CreatesAndReplaces_NoTempLeft()
+    {
+        NoteStore store = new NoteStore(root);
+        string title = new string('漢', 72);
+        byte[] first = System.Text.Encoding.UTF8.GetBytes("# first\n");
+        byte[] second = System.Text.Encoding.UTF8.GetBytes("# second\n");
+
+        (NoteInfo note, bool replaced) = store.Save(title, first);
+
+        string path = Path.Combine(root, title + ".md");
+        Assert.False(replaced);
+        Assert.Equal(title, note.Name);
+        Assert.Equal(first, File.ReadAllBytes(path));
+        Assert.Empty(Directory.GetFiles(root, "*.tmp"));
+
+        (_, bool replacedAgain) = store.Save(title, second);
+
+        Assert.True(replacedAgain);
+        Assert.Equal(second, File.ReadAllBytes(path));
+        Assert.Empty(Directory.GetFiles(root, "*.tmp"));
+    }
+
+    // 298 AC-4: CreateWithText with a 72-character CJK title succeeds and leaves no temp file.
+    [Fact]
+    public void CreateWithText_LongMultiByteTitle_NoTempLeft()
+    {
+        NoteStore store = new NoteStore(root);
+        string title = new string('漢', 72);
+
+        NoteInfo note = store.CreateWithText(title, "# text\n");
+
+        Assert.Equal("# text\n", File.ReadAllText(note.Path));
+        Assert.Equal(Path.Combine(root, title + ".md"), note.Path);
+        Assert.Empty(Directory.GetFiles(root, "*.tmp"));
     }
 
     [Fact]

@@ -479,8 +479,14 @@ Every factory agent reads this file before working on Context. Keep it short and
     `note show` / `export` print `Can't read <name>: it is over 5 MB.`
     `context note show` on an unreadable note answers `Can't read <name>.`
     `context export <note> <path>` writes the note's plain
-    text (UTF-8, no BOM, `FileMode.CreateNew`) outside the root (`NoteStore.Contains` resolves links and ignores
-    case). `context import <path>` reads a
+    text (UTF-8, no BOM, `FileMode.CreateNew`) outside the root (`NoteStore.Contains` resolves links and compares
+    ordinally; a match only when case is ignored counts when the root's file system ignores case: job 298, internal
+    seams `IgnoresCase(path)` (default probe: flip one ASCII letter in the deepest existing folder, or the nearest
+    folder above with a letter, and ask `SameEntry(original, flipped)`: same real path and the folder above doesn't list
+    both spellings) and `SameEntry`; no letter, or an IO/access error, answers true). A note temp file
+    (`NoteStore.TempPath(folder, title)`, used by `Save`, `CreateWithText` and `SaveIfUnchanged`) is
+    `.{prefix}.md.{32 hex}.tmp` with the title cut to at most 64 UTF-8 bytes on a whole-rune boundary
+    (`MaxTempPrefixBytes`), so a long multi-byte title stays under the 255-byte file name limit. `context import <path>` reads a
     file outside the root (at most 5 MB, never changed) and stores it as the note
     `NormalizeTitle(file name)` via `NoteStore.Save` (create, or replace an existing note through temp + move);
     the answer says to delete the source. The desktop does both through `DesktopActions` (see Import and export).

@@ -26,6 +26,22 @@ public sealed class NoteStoreEditTests : IDisposable
         }
     }
 
+    // 298 AC-4: SaveIfUnchanged with a 72-character CJK title succeeds and leaves no temp file.
+    [Fact]
+    public void SaveIfUnchanged_LongMultiByteTitle_NoTempLeft()
+    {
+        string title = new string('漢', 72);
+        NoteInfo note = Write(title, Encoding.UTF8.GetBytes("# old\n"));
+        EditableNote opened = store.ReadForEdit(note);
+
+        NoteSaveResult result = store.SaveIfUnchanged(opened, "# new\n", out EditableNote? saved);
+
+        Assert.Equal(NoteSaveResult.Saved, result);
+        Assert.NotNull(saved);
+        Assert.Equal("# new\n", File.ReadAllText(note.Path));
+        Assert.Empty(Directory.GetFiles(root, "*.tmp"));
+    }
+
     [Fact]
     public void ReadForEdit_PlainLf_TextAndVersion()
     {

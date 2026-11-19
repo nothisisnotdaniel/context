@@ -101,6 +101,8 @@ internal sealed class NoteStore
     public NoteStore(string root)
     {
         this.root = Path.GetFullPath(root);
+        IgnoresCase = ProbeIgnoresCase;
+        SameEntry = DefaultSameEntry;
     }
 
     /// <summary>The folder notes live in.</summary>
@@ -621,7 +623,7 @@ internal sealed class NoteStore
         string folder = Path.GetDirectoryName(opened.Path) ?? root;
         // Named after the last segment: a subpage's name holds a '/', its file name doesn't.
         string title = opened.Name[(opened.Name.LastIndexOf('/') + 1)..];
-        string temp = Path.Combine(folder, $".{title}{Extension}.{Guid.NewGuid():N}.tmp");
+        string temp = TempPath(folder, title);
         try
         {
             using (FileStream stream = PrivateFile.OpenNew(temp))
@@ -702,7 +704,7 @@ internal sealed class NoteStore
         PrivateFile.CreateFolder(root);
         string name = existing?.Name ?? title;
         string path = existing?.Path ?? Path.Combine(root, title + Extension);
-        string temp = Path.Combine(root, $".{name}{Extension}.{Guid.NewGuid():N}.tmp");
+        string temp = TempPath(root, name);
         try
         {
             using (FileStream stream = PrivateFile.OpenNew(temp))
@@ -746,7 +748,7 @@ internal sealed class NoteStore
 
         PrivateFile.CreateFolder(root);
         string path = Path.Combine(root, title + Extension);
-        string temp = Path.Combine(root, $".{title}{Extension}.{Guid.NewGuid():N}.tmp");
+        string temp = TempPath(root, title);
         try
         {
             using (FileStream stream = PrivateFile.OpenNew(temp))
@@ -796,16 +798,139 @@ internal sealed class NoteStore
 
     /// <summary>
     /// True when <paramref name="path"/> is the root itself or anywhere inside it, after resolving symbolic links
-    /// in the existing part of both paths and ignoring case, so a plain copy can't land in the data folder
-    /// through a link or another spelling.
+    /// in the existing part of both paths, so a plain copy can't land in the data folder through a link or another
+    /// spelling. Paths are compared ordinally; a match that only holds when case is ignored counts when the root's
+    /// file system ignores case (<see cref="IgnoresCase"/>).
     /// </summary>
     public bool Contains(string path)
     {
         string wanted = RealPath(Path.GetFullPath(path));
         string folder = RealPath(root);
+        if (IsAtOrInside(wanted, folder, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return IsAtOrInside(wanted, folder, StringComparison.OrdinalIgnoreCase) && IgnoresCase(folder);
+    }
+
+    private static bool IsAtOrInside(string wanted, string folder, StringComparison comparison)
+    {
         string withSeparator = Path.EndsInDirectorySeparator(folder) ? folder : folder + Path.DirectorySeparatorChar;
-        return string.Equals(wanted, folder, StringComparison.OrdinalIgnoreCase)
-            || wanted.StartsWith(withSeparator, StringComparison.OrdinalIgnoreCase);
+        return string.Equals(wanted, folder, comparison) || wanted.StartsWith(withSeparator, comparison);
+    }
+
+    /// <summary>
+    /// Test seam: true when the file system holding the given path ignores case. By default it probes the deepest
+    /// existing folder of the path (<see cref="ProbeIgnoresCase"/>); any doubt answers true.
+    /// </summary>
+    internal Func<string, bool> IgnoresCase { get; set; }
+
+    /// <summary>
+    /// Test seam: true when the two spellings (the second with one letter's case flipped) name the same entry.
+    /// Used by the default <see cref="IgnoresCase"/>.
+    /// </summary>
+    internal Func<string, string, bool> SameEntry { get; set; }
+
+    // Flips the case of one ASCII letter in the deepest existing folder of the path (or the nearest folder above it
+    // with a letter) and asks SameEntry whether both spellings name one entry. When it can't tell (no letter to flip,
+    // nothing exists, an IO or access error) it answers true, the more refusing answer for Contains.
+    private bool ProbeIgnoresCase(string path)
+    {
+        try
+        {
+            string? current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+            while (current is not null && !Directory.Exists(current))
+            {
+                current = Path.GetDirectoryName(current);
+            }
+
+            while (current is not null)
+            {
+                string name = Path.GetFileName(current);
+                int at = name.AsSpan().IndexOfAny(AsciiLetters);
+                string? folderAbove = Path.GetDirectoryName(current);
+                if (at >= 0 && folderAbove is not null)
+                {
+                    char letter = name[at];
+                    char flippedLetter = char.IsAsciiLetterUpper(letter) ? char.ToLowerInvariant(letter) : char.ToUpperInvariant(letter);
+                    string flipped = Path.Combine(folderAbove, string.Concat(name.AsSpan(0, at), [flippedLetter], name.AsSpan(at + 1)));
+                    return SameEntry(current, flipped);
+                }
+
+                current = folderAbove;
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
+            or NotSupportedException or System.Security.SecurityException)
+        {
+            return true;
+        }
+    }
+
+    private static readonly System.Buffers.SearchValues<char> AsciiLetters =
+        System.Buffers.SearchValues.Create("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
+
+    // The flipped spelling names the same folder when it exists, resolves to the same real path (ignoring case) and
+    // the folder above does not list both spellings as separate entries.
+    private static bool DefaultSameEntry(string original, string flipped)
+    {
+        if (!Directory.Exists(flipped))
+        {
+            return false;
+        }
+
+        if (!string.Equals(RealPath(original), RealPath(flipped), StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        string? folderAbove = Path.GetDirectoryName(original);
+        if (folderAbove is null)
+        {
+            return true;
+        }
+
+        string originalName = Path.GetFileName(original);
+        string flippedName = Path.GetFileName(flipped);
+        bool sawOriginal = false;
+        bool sawFlipped = false;
+        foreach (string entry in Directory.EnumerateFileSystemEntries(folderAbove))
+        {
+            string entryName = Path.GetFileName(entry);
+            sawOriginal |= string.Equals(entryName, originalName, StringComparison.Ordinal);
+            sawFlipped |= string.Equals(entryName, flippedName, StringComparison.Ordinal);
+        }
+
+        return !(sawOriginal && sawFlipped);
+    }
+
+    /// <summary>The longest UTF-8 prefix of a title a temp file name keeps.</summary>
+    internal const int MaxTempPrefixBytes = 64;
+
+    /// <summary>
+    /// A new temp file path in <paramref name="folder"/>: <c>.{prefix}.md.{guid}.tmp</c>, where the prefix is
+    /// <paramref name="title"/> cut to at most <see cref="MaxTempPrefixBytes"/> UTF-8 bytes on a whole-rune
+    /// boundary, so the name stays far below the 255-byte file name limit.
+    /// </summary>
+    internal static string TempPath(string folder, string title)
+    {
+        StringBuilder prefix = new StringBuilder(title.Length);
+        int bytes = 0;
+        foreach (Rune rune in title.EnumerateRunes())
+        {
+            bytes += rune.Utf8SequenceLength;
+            if (bytes > MaxTempPrefixBytes)
+            {
+                break;
+            }
+
+            prefix.Append(rune.ToString());
+        }
+
+        return Path.Combine(folder, $".{prefix}{Extension}.{Guid.NewGuid():N}.tmp");
     }
 
     /// <summary>
