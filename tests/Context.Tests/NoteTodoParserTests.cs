@@ -132,4 +132,18 @@ public sealed class NoteTodoParserTests
         Assert.Equal(nameof(NoteTodo), new NoteTodo("Plan", 1, "secret", null, "- [ ] secret").ToString());
         Assert.Equal(nameof(TodoEntry), new TodoEntry(new NoteTodo("Plan", 1, "secret", null, "- [ ] secret")).ToString());
     }
+
+    // 253 AC-2: a topic line is no note todo; an ordinary todo mentioning the person still is.
+    [Fact]
+    public void Parse_TopicLine_IsNoTodo()
+    {
+        Assert.Empty(NoteTodoParser.Parse("- [ ] next: @[Ann Lee] budget"));
+        Assert.Empty(NoteTodoParser.Parse("  * [ ] NEXT:@[Ann Lee] budget"));
+
+        ParsedNoteTodo todo = Assert.Single(NoteTodoParser.Parse("- [ ] call @[Ann Lee]"));
+        Assert.Equal("call @[Ann Lee]", todo.Text);
+
+        // Not a topic (no text after the mention), so it stays a todo.
+        Assert.Single(NoteTodoParser.Parse("- [ ] next: @[Ann Lee]"));
+    }
 }

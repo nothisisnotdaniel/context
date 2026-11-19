@@ -1,7 +1,8 @@
 @inherits StateComponent
 @* The person page of the open note (DesktopState.Person): the notes that mention the person with @[...], the
    appointments from the calendar files and the cached published calendar that mention them or list them as an
-   attendee, then the waiting-for todos and the open and the done todos that mention them, with one red line above them per alias on the page
+   attendee, then the open topics for the next 1:1 (job 253, each with a checkbox that ticks it off in its note after a
+   confirmation), the waiting-for todos and the open and the done todos that mention them, with one red line above them per alias on the page
    that links to no one or to another person. It reads only (no download), and reloads whenever the state changes. *@
 
 <section class="person-panel" aria-label="Person">
@@ -20,6 +21,10 @@
             @if (view.IndexUnreadable)
             {
                 <p class="red" role="status">Can't read the mentions.</p>
+            }
+            else if (view.Topics.Count > 0)
+            {
+                @TopicsSection(view)
             }
             else if (!view.TodosUnreadable)
             {
@@ -65,6 +70,7 @@
                     }
                 </ul>
             }
+            @TopicsSection(view)
             @if (view.Waiting.Count > 0)
             {
                 <h2>Waiting for</h2>
@@ -113,10 +119,22 @@
             <p class="red" role="status">Can't read the todos.</p>
         }
     }
+    @if (topicResult is { Kind: not ActionKind.Done } failed)
+    {
+        <p class="red topic-result" role="status">@DesktopText.OneLine(failed.Text)</p>
+    }
+    @if (askingTopic is { } topicAsked)
+    {
+        <ConfirmDialog Question="@($"Mark this topic done? {topicAsked.Text}")" ConfirmLabel="Mark done"
+                       Busy="running" OnConfirm="CompleteTopicAsked" OnCancel="CloseDialog" />
+    }
 </section>
 
 @code {
     private PersonView? view;
+    private NoteTopic? askingTopic;
+    private ActionResult? topicResult;
+    private bool running;
     private string? loaded;
     private int request;
 
@@ -129,6 +147,65 @@
     [Parameter]
     public EventCallback<string> OnOpen { get; set; }
 
+    // The open topics (job 253): a checkbox asks first, the text, and the note's name opening the note.
+    private RenderFragment TopicsSection(PersonView shown) => __builder =>
+    {
+        @if (shown.Topics.Count > 0)
+        {
+            <h2>Topics</h2>
+            <ul class="person-todos topics-list">
+                @foreach (NoteTopic topic in shown.Topics)
+                {
+                    string text = DesktopText.OneLine(topic.Text);
+                    string noteName = DesktopText.OneLine(topic.Note);
+                    <li class="person-todo topic">
+                        <label class="topic-line">
+                            <input type="checkbox" class="done" checked="@(askingTopic == topic)" disabled="@running"
+                                   @onchange="() => AskTopic(topic)" />
+                            <span class="text cut" title="@text">@text</span>
+                        </label>
+                        <button type="button" class="topic-note cut" title="@noteName" @onclick="() => OnOpen.InvokeAsync(topic.Note)">@noteName</button>
+                    </li>
+                }
+            </ul>
+        }
+    };
+
+    private void AskTopic(NoteTopic topic)
+    {
+        if (!running)
+        {
+            askingTopic = topic;
+        }
+    }
+
+    private void CloseDialog()
+    {
+        if (!running)
+        {
+            askingTopic = null;
+        }
+    }
+
+    private async Task CompleteTopicAsked(Confirmation confirmed)
+    {
+        if (askingTopic is not { } topic || running)
+        {
+            return;
+        }
+
+        running = true;
+        try
+        {
+            topicResult = await Actions.CompleteTopic(topic, confirmed);
+        }
+        finally
+        {
+            running = false;
+            askingTopic = null;
+        }
+    }
+
     protected override Task OnParametersSetAsync()
     {
         if (string.Equals(loaded, Person, StringComparison.Ordinal))
@@ -139,6 +216,7 @@
         // Another person: their rows are not known yet, so the old ones go.
         loaded = Person;
         view = null;
+        topicResult = null;
         return Load();
     }
 

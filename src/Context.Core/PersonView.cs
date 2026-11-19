@@ -42,7 +42,8 @@ internal sealed record PersonView
         IReadOnlyList<TodoItem>? openTodos = null,
         IReadOnlyList<TodoItem>? doneTodos = null,
         bool todosUnreadable = false,
-        IReadOnlyList<TodoItem>? waiting = null)
+        IReadOnlyList<TodoItem>? waiting = null,
+        IReadOnlyList<NoteTopic>? topics = null)
     {
         Kind = kind;
         Person = person;
@@ -57,6 +58,7 @@ internal sealed record PersonView
         DoneTodos = doneTodos ?? [];
         TodosUnreadable = todosUnreadable;
         Waiting = waiting ?? [];
+        Topics = topics ?? [];
     }
 
     /// <summary>
@@ -126,6 +128,12 @@ internal sealed record PersonView
     /// </summary>
     public IReadOnlyList<TodoItem> Waiting { get; }
 
+    /// <summary>
+    /// The open topics for the next 1:1 with the person (job 253, <see cref="MeetingTopics.For"/> through the aliases).
+    /// Empty when the index can't be read. They don't count for <see cref="Kind"/>: their note mentions the person.
+    /// </summary>
+    public IReadOnlyList<NoteTopic> Topics { get; }
+
     /// <summary>The matching done todos, in <see cref="TodoStore.ListDone"/> order (latest done first).</summary>
     public IReadOnlyList<TodoItem> DoneTodos { get; }
 
@@ -173,6 +181,7 @@ internal sealed record PersonView
         PersonAliases? aliases = null;
         string? person = null;
         IReadOnlyList<string> notes = [];
+        IReadOnlyList<NoteTopic> allTopics = [];
         bool indexUnreadable = false;
         try
         {
@@ -180,11 +189,13 @@ internal sealed record PersonView
             aliases = index.Aliases();
             notes = index.NotesMentioning(typed);
             person = index.PersonName(typed);
+            allTopics = index.Topics();
         }
         catch (TagIndexException)
         {
             indexUnreadable = true;
             notes = [];
+            allTopics = [];
         }
 
         aliases ??= PersonAliases.Load(store);
@@ -242,7 +253,7 @@ internal sealed record PersonView
             : PersonViewKind.Mentions;
         return new PersonView(
             kind, person, notes, appointments, all.Unreadable, indexUnreadable, calendar.Zone, clashes, resolved.Titles,
-            openTodos, doneTodos, todosUnreadable, waiting);
+            openTodos, doneTodos, todosUnreadable, waiting, MeetingTopics.For(allTopics, aliases, [typed]));
     }
 
     private static bool Mentions(Appointment appointment, PersonAliases aliases, string key) =>

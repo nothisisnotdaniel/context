@@ -325,6 +325,100 @@ public sealed class AppointmentPanelTests : IDisposable
         Assert.Equal(3, cut.FindAll(".day-appointments .appointment-item").Count);
     }
 
+    private static string[] TopicRows(IRenderedComponent<Main> cut) =>
+        cut.FindAll(".appointment-page section.topics li.topic .text").Select(t => t.TextContent).ToArray();
+
+    // 253 AC-8: the open topics of the attendees (both Budget occurrences: Anna, then Bob) show in section.topics above
+    // Notes; ticking one removes it.
+    [Fact]
+    public async Task Topics_AboveNotes_TickRemoves()
+    {
+        WriteDay();
+        data.WriteNote("Plan", "next: @[Anna] budget\n- next: @[anna] hiring\nnext: @[Bob] travel\n");
+        IRenderedComponent<Main> cut = await RenderMain();
+
+        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        WaitForPage(cut);
+
+        IElement section = cut.Find(".appointment-page section.topics");
+        Assert.Equal("appointment-topics-heading", section.GetAttribute("aria-labelledby"));
+        Assert.Equal("Topics", section.QuerySelector("h3")!.TextContent);
+        Assert.Equal(["Anna: budget", "anna: hiring", "Bob: travel"], TopicRows(cut));
+        Assert.True(Before(section, cut.Find("#appointment-notes-heading")));
+
+        cut.FindAll(".appointment-page li.topic input.done")[0].Change(true);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+        // "section.topics has no row with budget".
+        cut.WaitForAssertion(() => Assert.Equal(["anna: hiring", "Bob: travel"], TopicRows(cut)), Wait);
+        Assert.Equal(
+            "- [x] next: @[Anna] budget\n- next: @[anna] hiring\nnext: @[Bob] travel\n",
+            File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+        Assert.Empty(cut.FindAll(".appointment-page p.topic-result"));
+    }
+
+    // 253 AC-8: an appointment without matching attendees has no section.topics.
+    [Fact]
+    public async Task Topics_NoMatchingAttendee_NoSection()
+    {
+        WriteDay();
+        data.WriteNote("Plan", "next: @[Carl] budget\n");
+        IRenderedComponent<Main> cut = await RenderMain();
+
+        await Item(cut, 1).ClickAsync(new MouseEventArgs());
+        WaitForPage(cut);
+        Assert.Equal("Retro", cut.Find(".appointment-page h2").TextContent);
+        Assert.Empty(cut.FindAll(".appointment-page section.topics"));
+
+        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("Budget", cut.Find(".appointment-page h2").TextContent), Wait);
+        WaitForPage(cut);
+        Assert.Empty(cut.FindAll(".appointment-page section.topics"));
+    }
+
+    // 253 AC-8: a bad context.db shows the existing red line and no topics.
+    [Fact]
+    public async Task Topics_CorruptIndex_RedLineNoTopics()
+    {
+        WriteDay();
+        data.WriteNote("Plan", "next: @[Anna] budget\n");
+        data.WriteFile(TagIndex.FileName, NotADatabase);
+        IRenderedComponent<Main> cut = await RenderMain();
+
+        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        WaitForPage(cut);
+
+        Assert.Equal("Can't read the related notes.", cut.Find(".appointment-page p.red").TextContent);
+        Assert.Empty(cut.FindAll(".appointment-page section.topics"));
+    }
+
+    // 253 AC-9: "Create a new note" creates the meeting note with the Topics section.
+    [Fact]
+    public async Task Topics_CreateLink_NoteHasTopicsSection()
+    {
+        data.WriteCalendar("work.ics", DesktopFixture.Calendar(
+            Event("Weekly", "20261029T110000", "20261029T120000", "Ann Lee"),
+            Event("Retro", "20261029T130000", "20261029T140000"),
+            Event("Other", "20261029T150000", "20261029T160000")));
+        data.WriteNote("Plan", "next: @[Ann Lee] budget\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await RenderMain();
+
+        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        WaitForPage(cut);
+        Assert.Equal(["Ann Lee: budget"], TopicRows(cut));
+
+        await cut.Find(".appointment-page button.create-note-link").ClickAsync(new MouseEventArgs());
+
+        const string Name = "Meetings/Weekly/2026-10-29";
+        cut.WaitForAssertion(() => Assert.Equal(Name, cut.Find(".note-title").GetAttribute("title")), Wait);
+        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
+        Assert.EndsWith(
+            "\n## Topics\n\n- @[Ann Lee]: budget (from [[Plan]])\n",
+            File.ReadAllText(Path.Combine(data.Root, "Meetings", "Weekly", "2026-10-29.md")),
+            StringComparison.Ordinal);
+    }
+
     private async Task<IRenderedComponent<Main>> RenderMain()
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();

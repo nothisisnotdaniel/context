@@ -567,14 +567,17 @@ internal sealed class DesktopState
 
             IReadOnlyList<(string Note, string Tag)> noteTags;
             IReadOnlyList<NoteInfo> listed;
+            IReadOnlyList<NoteTopic> topics;
             lock (indexGate)
             {
                 index.Sync(notes);
                 noteTags = index.NoteTags();
                 listed = notes.List();
+                topics = attendees.Count == 0 ? [] : MeetingTopics.For(index.Topics(), index.Aliases(), attendees);
             }
 
-            return new AppointmentPageView(title, day, MeetingPrep.Related(merged, listed, noteTags, null), first, false);
+            return new AppointmentPageView(
+                title, day, MeetingPrep.Related(merged, listed, noteTags, null), first, false, topics);
         }
         catch (Exception)
         {
@@ -582,6 +585,31 @@ internal sealed class DesktopState
             return new AppointmentPageView(title, day, [], first, true);
         }
     });
+
+    /// <summary>
+    /// The open topics for the next 1:1 with <paramref name="names"/> (<see cref="MeetingTopics.For"/>) after syncing
+    /// the index under its lock, on the calling thread. Reads only and never throws: none when the index can't be read.
+    /// </summary>
+    internal IReadOnlyList<NoteTopic> TopicsFor(IReadOnlyList<string> names)
+    {
+        if (names.Count == 0)
+        {
+            return [];
+        }
+
+        try
+        {
+            lock (indexGate)
+            {
+                index.Sync(notes);
+                return MeetingTopics.For(index.Topics(), index.Aliases(), names);
+            }
+        }
+        catch (Exception)
+        {
+            return [];
+        }
+    }
 
     // The day's appointments from the calendar files, the feed's cached copy and Outlook's; never downloads.
     private CalendarDay ReadDay(DateOnly day, IReadOnlyList<Appointment> fromOutlook)

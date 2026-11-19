@@ -242,7 +242,8 @@ ol {
     white-space: nowrap;
 }
 
-.todo .todo-note:focus-visible {
+.todo .todo-note:focus-visible,
+.topic .topic-note:focus-visible {
     outline: 2px solid var(--accent-strong);
     outline-offset: 2px;
 }
@@ -2074,4 +2075,47 @@ nav.saved-searches ul {
 
 .crash-hint .red {
     flex: 0 0 auto;
+}
+
+/* Topics for the next 1:1 (job 253) on the person and appointment pages: a checkbox and the text in one label, then
+   the note the topic comes from as a link-like button (outside the label, so its click never ticks the box). */
+.topics-list {
+    list-style: none;
+    margin: 0 0 12px;
+    padding: 0;
+}
+
+.topic {
+    align-items: baseline;
+    display: flex;
+    gap: 10px;
+    min-width: 0;
+    padding: 3px 0;
+}
+
+.topic .topic-line {
+    align-items: baseline;
+    display: flex;
+    flex: 1 1 auto;
+    gap: 8px;
+    min-width: 0;
+}
+
+.topic .text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.topic .topic-note {
+    background: none;
+    border: none;
+    color: var(--grey);
+    cursor: pointer;
+    flex: 0 1 auto;
+    font: inherit;
+    font-size: 12px;
+    max-width: 12em;
+    min-width: 0;
+    padding: 0;
+    text-decoration: underline;
 }

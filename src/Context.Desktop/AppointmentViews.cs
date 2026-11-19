@@ -52,8 +52,14 @@ internal sealed record DayAppointmentsView
 internal sealed record AppointmentPageView
 {
     public AppointmentPageView(
-        string title, DateOnly day, IReadOnlyList<RelatedNote> related, Appointment? first, bool indexUnreadable)
+        string title,
+        DateOnly day,
+        IReadOnlyList<RelatedNote> related,
+        Appointment? first,
+        bool indexUnreadable,
+        IReadOnlyList<NoteTopic>? topics = null)
     {
+        Topics = topics ?? [];
         Title = title;
         Day = day;
         Related = related;
@@ -73,6 +79,12 @@ internal sealed record AppointmentPageView
 
     /// <summary>True when <c>context.db</c> (or the note list) can't be read.</summary>
     public bool IndexUnreadable { get; }
+
+    /// <summary>
+    /// The open topics for the attendees of these appointments (job 253, <see cref="MeetingTopics.For"/> in attendee
+    /// order); empty when there are none or when <see cref="IndexUnreadable"/> is set.
+    /// </summary>
+    public IReadOnlyList<NoteTopic> Topics { get; }
 
     /// <summary>Returns only the type name, so formatting the view never prints note or calendar text.</summary>
     public override string ToString() => nameof(AppointmentPageView);

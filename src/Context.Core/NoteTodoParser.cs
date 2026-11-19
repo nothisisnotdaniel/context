@@ -49,7 +49,8 @@ internal static class NoteTodoParser
     /// <c>*</c> or <c>+</c>, one space, <c>[ ]</c>, one space, then text. The first whitespace-delimited token
     /// <c>due:yyyy-MM-dd</c> (ASCII digits, a real date, not inside a code span) sets <see cref="ParsedNoteTodo.Due"/>
     /// and is removed from the text; the text is then trimmed and collapsed (<see cref="TagParser.Collapse"/>) and cut
-    /// to <see cref="MaxTextLength"/>. An empty text is no todo.
+    /// to <see cref="MaxTextLength"/>. An empty text is no todo, and a line <see cref="TopicParser"/> reads as a
+    /// topic is no todo.
     /// </summary>
     public static IReadOnlyList<ParsedNoteTodo> Parse(string markdown)
     {
@@ -81,6 +82,12 @@ internal static class NoteTodoParser
             || line[i + 1] != ' '
             || string.CompareOrdinal(line, i + 2, OpenBox, 0, OpenBox.Length) != 0
             || line[i + 5] != ' ')
+        {
+            return null;
+        }
+
+        // A topic for the next 1:1 (job 253) written as an open task is a topic, not a todo.
+        if (TopicParser.ParseLine(number, line) is not null)
         {
             return null;
         }
