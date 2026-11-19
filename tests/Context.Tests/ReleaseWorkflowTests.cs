@@ -54,7 +54,7 @@ public sealed class ReleaseWorkflowTests
 
     // 272 AC-9: the tag check, with gh as the only credential helper.
     private const string LsRemoteCommand =
-        "git -c credential.helper= -c 'credential.helper=!gh auth git-credential' ls-remote"
+        "GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c 'credential.helper=!gh auth git-credential' ls-remote"
         + " \"https://github.com/$GITHUB_REPOSITORY\" \"refs/tags/$TAG\" \"refs/tags/$TAG^{}\"";
 
     // The non-comment lines of the create step (135 AC-1, 272 AC-6): list and delete this tag's drafts, then create.

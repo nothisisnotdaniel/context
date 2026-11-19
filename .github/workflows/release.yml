@@ -671,8 +671,8 @@ jobs:
           done
           # The tag, when it already exists (a pushed tag, or one made by hand), must point at the draft's commit:
           # GitHub would publish the draft on the tag as it is. git reads the token from GH_TOKEN through gh,
-          # never from argv. A tag pushed after this check is not caught.
-          if ! REFS="$(git -c credential.helper= -c 'credential.helper=!gh auth git-credential' ls-remote "https://github.com/$GITHUB_REPOSITORY" "refs/tags/$TAG" "refs/tags/$TAG^{}")"; then
+          # never from argv, and never prompts (GIT_TERMINAL_PROMPT=0). A tag pushed after this check is not caught.
+          if ! REFS="$(GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c 'credential.helper=!gh auth git-credential' ls-remote "https://github.com/$GITHUB_REPOSITORY" "refs/tags/$TAG" "refs/tags/$TAG^{}")"; then
             echo "Can't read tag $TAG; nothing is published" >&2
             exit 1
           fi
