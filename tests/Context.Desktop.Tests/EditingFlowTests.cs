@@ -126,7 +126,7 @@ public sealed class EditingFlowTests : IDisposable
         Assert.Single(js.Calls("ContextEditor.mount"));
         SortedDictionary<string, string> after = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         Assert.Equal(before, after);
-        Assert.DoesNotContain(before.Keys.Concat(after.Keys), k => Path.GetFileName(k).StartsWith(".recent.json.", StringComparison.Ordinal));
+        Assert.DoesNotContain(Directory.EnumerateFiles(data.Root), f => Path.GetFileName(f).StartsWith(".recent.json.", StringComparison.Ordinal));
     }
 
     // AC-9: a tag click lists the notes with that tag, sorted ignoring case; clicking one opens it.
