@@ -525,15 +525,16 @@ public sealed class DesktopSourceTests
     [Fact]
     public void Css_KeepsTheFocusRingsOfOtherControls()
     {
-        // Job 213 added one more: the calendar's focus day.
+        // Job 213 added one more: the calendar's focus day; job 289 two: the sidebar's heading button and its Today buttons.
         const int RingsInAppCssBefore211 = 9;
         const int CalendarDayRing = 1;
+        const int SidebarDayPickerRings = 2;
         string root = RepoFiles.Root();
         string css = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "app.css"));
         string editorCss = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "editor", "editor.css"));
 
         Assert.Equal(
-            RingsInAppCssBefore211 + CalendarDayRing,
+            RingsInAppCssBefore211 + CalendarDayRing + SidebarDayPickerRings,
             System.Text.RegularExpressions.Regex.Matches(css, @"outline: 2px solid var\(--accent-strong\)").Count);
         Assert.Contains(
             "outline: 2px solid var(--accent-strong);",
@@ -2833,8 +2834,12 @@ public sealed class DesktopSourceTests
         Assert.Contains("width: 18px;", svg);
         Assert.Contains("height: 18px;", svg);
         Assert.DoesNotContain("http", razor, StringComparison.Ordinal);
-        // Capture, Search (job 218), Today, Pick a day, and (job 213) the calendar's Previous and Next month arrows.
-        Assert.Equal(6, Regex.Matches(razor, "stroke=\"currentColor\"").Count);
+        // Capture, Search (job 218), Today, Pick a day, and (job 213) the calendar's Previous and Next month arrows,
+        // which job 289 moved into DayPicker.razor.
+        string picker = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "DayPicker.razor"));
+        Assert.Equal(4, Regex.Matches(razor, "stroke=\"currentColor\"").Count);
+        Assert.Equal(2, Regex.Matches(picker, "stroke=\"currentColor\"").Count);
+        Assert.DoesNotContain("http", picker, StringComparison.Ordinal);
     }
 
     // 199 AC-1, AC-8, AC-9: the Capture icon is inline (no URL, no img), the popover is styled like the day pick, and
