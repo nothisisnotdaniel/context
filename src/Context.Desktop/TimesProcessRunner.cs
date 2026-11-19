@@ -75,7 +75,15 @@ internal sealed class TimesProcessRunner : ITimesRunner
             LastProcessId = process.Id;
             try
             {
-                process.StandardInput.Close();
+                try
+                {
+                    process.StandardInput.Close();
+                }
+                catch (Exception)
+                {
+                    // tm already exited and closed its end; its output is still read below.
+                }
+
                 Task<string> stdout = ReadCappedAsync(process.StandardOutput.BaseStream);
                 Task<string> stderr = ReadCappedAsync(process.StandardError.BaseStream);
                 using CancellationTokenSource cancel = new CancellationTokenSource(timeout);

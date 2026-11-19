@@ -39,6 +39,7 @@
         for (var i = 0; i < items.length; i++) {
             var row = document.createElement('li');
             row.setAttribute('role', 'option');
+            row.id = 'suggestion-' + i;
             row.setAttribute('aria-selected', i === picked ? 'true' : 'false');
             var label = document.createElement('span');
             label.className = 'label';
@@ -52,6 +53,11 @@
         }
 
         line.setAttribute('aria-expanded', items.length > 0 ? 'true' : 'false');
+        if (items.length > 0) {
+            line.setAttribute('aria-activedescendant', 'suggestion-' + picked);
+        } else {
+            line.removeAttribute('aria-activedescendant');
+        }
     }
 
     function receive(json) {

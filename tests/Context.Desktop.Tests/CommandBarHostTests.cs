@@ -190,6 +190,8 @@ public sealed class CommandBarHostTests
     [InlineData(1, "\u001b[1;31mNo session.\u001b[0m", "x", "error", "No session.")]
     [InlineData(1, "a\u0007b\u202Ec", "", "error", "a\uFFFDb\uFFFDc")]
     [InlineData(0, "\r\nBooked.\r\n", "", "ok", "Booked.")]
+    [InlineData(0, "\u001b]8;;https://x.test\u0007Booked\u001b]8;;\u0007.", "", "ok", "Booked.")]
+    [InlineData(0, "\u001b]0;title\u001b\\Booked.", "", "ok", "Booked.")]
     [InlineData(1, "   \r\n", "\u001b[2Kstill", "error", "still")]
     public void TimesResult_Lines(int exit, string stdout, string stderr, string kind, string text)
     {

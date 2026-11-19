@@ -115,7 +115,7 @@ internal sealed partial class CommandBarHost
 
     /// <summary>
     /// The one line shown for a Times run: the first non-empty line of stdout, else of stderr, without ANSI CSI
-    /// sequences, through <see cref="Shorten"/>, cut to <see cref="MaxResultLength"/> plus <c>…</c>.
+    /// and OSC sequences, through <see cref="Shorten"/>, cut to <see cref="MaxResultLength"/> plus <c>…</c>.
     /// </summary>
     public static CommandBarResult TimesResult(TimesRunResult result)
     {
@@ -166,7 +166,7 @@ internal sealed partial class CommandBarHost
 
     private static string FirstLine(string output)
     {
-        string plain = AnsiCsi().Replace(output ?? string.Empty, string.Empty);
+        string plain = AnsiCsi().Replace(AnsiOsc().Replace(output ?? string.Empty, string.Empty), string.Empty);
         foreach (string raw in plain.Split(['\r', '\n']))
         {
             string line = Shorten(raw);
@@ -306,4 +306,8 @@ internal sealed partial class CommandBarHost
 
     [GeneratedRegex(@"\x1B\[[0-?]*[ -/]*[@-~]")]
     private static partial Regex AnsiCsi();
+
+    // An OSC sequence (a hyperlink or a window title), ended by BEL or ESC \: dropped with its payload.
+    [GeneratedRegex(@"\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)")]
+    private static partial Regex AnsiOsc();
 }
