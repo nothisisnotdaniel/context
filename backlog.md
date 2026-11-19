@@ -297,6 +297,11 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#340](backlog/340-briefing-links-for-note-names-with.md) Briefing links for note names with brackets
 - [?] [#342](backlog/342-cap-the-screenshot-folder-watcher-s.md) Cap the screenshot folder watcher's seen set
 - [h] [#343](backlog/343-check-the-screenshot-hotkey-and-watched.md) Check the screenshot hotkey and watched folder on macOS
+- [?] [#344](backlog/344-harden-the-mermaid-svg-blob-url.md) Harden the mermaid SVG blob: URL
+- [?] [#345](backlog/345-check-the-spacing-of-the-drawing.md) Check the spacing of the Drawing diagram hint
+- [?] [#346](backlog/346-redraw-diagrams-when-the-system-theme.md) Redraw diagrams when the system theme changes
+- [?] [#347](backlog/347-keep-the-old-diagram-while-it.md) Keep the old diagram while it redraws
+- [?] [#348](backlog/348-descriptive-alt-text-for-diagrams.md) Descriptive alt text for diagrams
 
 ## Dropped with the terminal UI
 
