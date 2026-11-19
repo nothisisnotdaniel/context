@@ -1309,9 +1309,10 @@ public sealed class TagIndexTests : IDisposable
         using (SqliteConnection connection = Open())
         using (SqliteCommand command = connection.CreateCommand())
         {
-            // 295: an orphan text row is one whose note_text_rows entry names no note.
+            // 295: an orphan text row with no note_text_rows entry, and one whose entry names no note.
             command.CommandText = "INSERT INTO note_text(note, body) VALUES('Ghost', 'boo'); "
-                + "INSERT INTO note_text_rows(note, row) VALUES('Ghost', last_insert_rowid())";
+                + "INSERT INTO note_text(note, body) VALUES('Ghost2', 'boo'); "
+                + "INSERT INTO note_text_rows(note, row) VALUES('Ghost2', last_insert_rowid())";
             command.ExecuteNonQuery();
         }
 
@@ -2149,6 +2150,69 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal(text, map);
         string source = File.ReadAllText(Path.Combine(RepoRoot(), "src", "Context.Core", "TagIndex.cs"));
         Assert.DoesNotContain("DELETE FROM note_text WHERE note", source, StringComparison.Ordinal);
+    }
+
+    // 295 (security review): text rows an older version left (no mapping, or a mapping to a row that is gone or names
+    // another note) are dropped on the next sync; a deleted note's plain text is not found any more, a note still there
+    // is re-parsed and has exactly one mapped row.
+    [Fact]
+    public void Sync_UnmappedAndStaleTextRows_RepairedAndNotFound()
+    {
+        WriteNote("Plan", "plan current");
+        WriteNote("Other", "otherword text");
+        WriteNote("Keep", "keepword text");
+        WriteNote("Stay", "stayword text");
+        index.Sync(store);
+        using (SqliteConnection connection = Open())
+        using (SqliteCommand command = connection.CreateCommand())
+        {
+            // Plan: an extra row with no mapping. Other: its mapping points at Keep's row. Stay: an extra unmapped row
+            // with old text and a mapping to a rowid that doesn't exist.
+            command.CommandText = """
+                INSERT INTO note_text(note, body) VALUES('Plan', 'secretword plan');
+                UPDATE note_text_rows SET row = (SELECT row FROM note_text_rows WHERE note = 'Keep') WHERE note = 'Other';
+                INSERT INTO note_text(note, body) VALUES('Stay', 'oldword text');
+                UPDATE note_text_rows SET row = 999999 WHERE note = 'Stay';
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        File.Delete(Path.Combine(root, "Plan.md"));
+        File.Delete(Path.Combine(root, "Other.md"));
+        index.Sync(store);
+
+        Assert.Empty(index.Search("secretword", (note, _) => note));
+        Assert.Empty(index.Search("plan current", (note, _) => note));
+        Assert.Empty(index.Search("otherword", (note, _) => note));
+        Assert.Empty(index.Search("oldword", (note, _) => note));
+        Assert.Equal(["Keep"], index.Search("keepword", (note, _) => note));
+        Assert.Equal(["Stay"], index.Search("stayword", (note, _) => note));
+        (List<(long Row, string Note)> text, List<(long Row, string Note)> map) = TextRowIds();
+        Assert.Equal(["Keep", "Stay"], text.Select(r => r.Note).Order(StringComparer.Ordinal));
+        Assert.Equal(text, map);
+    }
+
+    // 295 (security review): an unmapped row of a note that is not edited is dropped and the note re-parsed in the same
+    // sync, so search finds only its current text, once.
+    [Fact]
+    public void Sync_UnmappedRowOfUnchangedNote_ReparsedOnce()
+    {
+        WriteNote("Stay", "stayword text");
+        index.Sync(store);
+        using (SqliteConnection connection = Open())
+        using (SqliteCommand command = connection.CreateCommand())
+        {
+            command.CommandText = "DELETE FROM note_text_rows; INSERT INTO note_text(note, body) VALUES('Stay', 'stayword old')";
+            command.ExecuteNonQuery();
+        }
+
+        index.Sync(store);
+
+        Assert.Equal(["Stay"], index.Search("stayword", (note, _) => note));
+        Assert.Equal([("Stay", "stayword text")], TextRows());
+        (List<(long Row, string Note)> text, List<(long Row, string Note)> map) = TextRowIds();
+        Assert.Equal(text, map);
+        Assert.Single(text);
     }
 
     // 295 AC-8: a database at user_version 13 (old note_links, no note_text_rows or note_skipped) is upgraded by the

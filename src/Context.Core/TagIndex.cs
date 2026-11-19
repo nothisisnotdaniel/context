@@ -307,7 +307,11 @@ internal sealed class TagIndex
     /// file (<see cref="BoundedFile.Read"/> stops in its read loop), a UTF-8 BOM and invalid UTF-8 bytes included, never
     /// the length of the decoded text: a note of exactly <see cref="NoteStore.MaxNoteBytes"/> bytes is indexed, one byte
     /// more is not. A note over the cap gets a <c>note_skipped</c> row (<see cref="Skipped"/>), which goes once it is
-    /// back under the cap, unreadable for another reason, or gone. Link targets are stored as written and resolved against note names only when queried. A re-parsed
+    /// back under the cap, unreadable for another reason, or gone. Link targets are stored as written and resolved
+    /// against note names only when queried. Each <c>note_text</c> row's rowid is kept in <c>note_text_rows</c> and the
+    /// row is deleted by that rowid; a sync first drops every <c>note_text</c> row that is not its note's mapped row and
+    /// every mapping whose row is gone or names another note (written by an older version, for example), and re-parses
+    /// those notes. A re-parsed
     /// note's text is written to <c>note_text</c> again (no row for a note that can't be read or is over
     /// <see cref="NoteStore.MaxNoteBytes"/>); sensitive notes are never listed, so never indexed.
     /// Throws <see cref="TagIndexException"/> if the database can't be opened or isn't valid.
@@ -336,6 +340,10 @@ internal sealed class TagIndex
                 Execute(connection, transaction, "UPDATE notes SET modified = NULL");
                 Execute(connection, transaction, "DELETE FROM note_text");
                 Execute(connection, transaction, "DELETE FROM note_text_rows");
+            }
+            else
+            {
+                RepairText(connection, transaction);
             }
 
             Dictionary<string, long?> stored = new(StringComparer.Ordinal);
@@ -532,8 +540,7 @@ internal sealed class TagIndex
                     Execute(
                         connection,
                         transaction,
-                        "INSERT INTO note_text_rows(note, row) VALUES($note, last_insert_rowid()) "
-                            + "ON CONFLICT(note) DO UPDATE SET row = excluded.row",
+                        "INSERT INTO note_text_rows(note, row) VALUES($note, last_insert_rowid())",
                         ("$note", note.Name));
                 }
 
@@ -1270,6 +1277,7 @@ internal sealed class TagIndex
     private static string? LinkKey(string text) => text.Length == 0 ? null : text.ToUpperInvariant();
 
     // Deletes the note's note_text row by its rowid (from note_text_rows), so the FTS table is never scanned by note.
+    // The row goes only if it still names the note; the mapping goes either way.
     private static void DeleteText(SqliteConnection connection, SqliteTransaction transaction, string note)
     {
         object? row;
@@ -1281,28 +1289,89 @@ internal sealed class TagIndex
 
         if (row is long rowid)
         {
-            Execute(connection, transaction, "DELETE FROM note_text WHERE rowid = $row", ("$row", rowid));
+            Execute(
+                connection,
+                transaction,
+                "DELETE FROM note_text WHERE rowid = $row AND note = $note",
+                ("$row", rowid),
+                ("$note", note));
             Execute(connection, transaction, "DELETE FROM note_text_rows WHERE note = $note", ("$note", note));
         }
     }
 
-    // The note_text rows of notes whose note row is missing (edited by hand) go by rowid, through note_text_rows.
-    private static void PruneOrphanText(SqliteConnection connection, SqliteTransaction transaction)
+    // Once per sync, before the notes are read: a note_text row that is not its note's mapped row (none, or a
+    // mapping to another row) goes by rowid, and so does a mapping whose row is gone or names another note. An older
+    // version writing the same context.db leaves such rows. The notes they belonged to lose their stored time, so
+    // this sync re-parses those still there and writes their text and mapping again.
+    private static void RepairText(SqliteConnection connection, SqliteTransaction transaction)
     {
-        List<long> rows = [];
+        List<(long Row, string Note)> extra = [];
         using (SqliteCommand select = Command(
-            connection, transaction, "SELECT row FROM note_text_rows WHERE note NOT IN (SELECT name FROM notes)"))
+            connection,
+            transaction,
+            "SELECT t.rowid, t.note FROM note_text t WHERE NOT EXISTS "
+                + "(SELECT 1 FROM note_text_rows r WHERE r.note = t.note AND r.row = t.rowid)"))
         using (SqliteDataReader reader = select.ExecuteReader())
         {
             while (reader.Read())
             {
-                rows.Add(reader.GetInt64(0));
+                extra.Add((reader.GetInt64(0), reader.GetString(1)));
             }
         }
 
-        foreach (long row in rows)
+        List<string> stale = [];
+        using (SqliteCommand select = Command(
+            connection,
+            transaction,
+            "SELECT r.note FROM note_text_rows r WHERE NOT EXISTS "
+                + "(SELECT 1 FROM note_text t WHERE t.rowid = r.row AND t.note = r.note)"))
+        using (SqliteDataReader reader = select.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                stale.Add(reader.GetString(0));
+            }
+        }
+
+        foreach ((long row, _) in extra)
         {
             Execute(connection, transaction, "DELETE FROM note_text WHERE rowid = $row", ("$row", row));
+        }
+
+        foreach (string note in stale)
+        {
+            Execute(connection, transaction, "DELETE FROM note_text_rows WHERE note = $note", ("$note", note));
+        }
+
+        foreach (string note in extra.Select(e => e.Note).Concat(stale).Distinct(StringComparer.Ordinal))
+        {
+            Execute(connection, transaction, "UPDATE notes SET modified = NULL WHERE name = $note", ("$note", note));
+        }
+    }
+
+    // The note_text rows of notes whose note row is missing (edited by hand) go by rowid, through note_text_rows,
+    // only while the row still names that note.
+    private static void PruneOrphanText(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        List<(long Row, string Note)> rows = [];
+        using (SqliteCommand select = Command(
+            connection, transaction, "SELECT row, note FROM note_text_rows WHERE note NOT IN (SELECT name FROM notes)"))
+        using (SqliteDataReader reader = select.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                rows.Add((reader.GetInt64(0), reader.GetString(1)));
+            }
+        }
+
+        foreach ((long row, string note) in rows)
+        {
+            Execute(
+                connection,
+                transaction,
+                "DELETE FROM note_text WHERE rowid = $row AND note = $note",
+                ("$row", row),
+                ("$note", note));
         }
 
         if (rows.Count > 0)
@@ -1463,6 +1532,11 @@ internal sealed class TagIndex
     // at the same time; then its column is the one kept. The column name is one of three constants, never user input.
     private static void EnsureLinkColumn(SqliteConnection connection, string column)
     {
+        if (column is not ("heading" or "whole_key" or "part_key"))
+        {
+            throw new ArgumentException("Not a note_links column: " + column, nameof(column));
+        }
+
         if (LinksHaveColumn(connection, column))
         {
             return;
