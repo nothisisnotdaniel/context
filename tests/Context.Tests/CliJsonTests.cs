@@ -325,7 +325,7 @@ public sealed class CliJsonTests : IDisposable
                 + "{\"start\":\"2026-10-29T11:00:00\\u002B01:00\",\"end\":\"2026-10-29T12:00:00\\u002B01:00\",\"allDay\":false,\"title\":\"Review\",\"location\":\"Room 1\",\"related\":[]}],"
                 + "\"calendar\":{\"status\":\"notConfigured\",\"cachedAt\":null,\"unreadableFiles\":[]},"
                 + "\"due\":[{\"due\":\"2026-10-28\",\"text\":\"late #work\",\"overdue\":true},{\"due\":\"2026-10-29\",\"text\":\"now\",\"overdue\":false}],"
-                + "\"linkedNotes\":[{\"name\":\"A\",\"tags\":[\"work\"]},{\"name\":\"B\",\"tags\":[\"work\"]}]}\n",
+                + "\"linkedNotes\":[{\"name\":\"A\",\"tags\":[\"work\"]},{\"name\":\"B\",\"tags\":[\"work\"]}],\"times\":null}\n",
             result.Out);
         AssertDocument(result);
     }
@@ -340,7 +340,7 @@ public sealed class CliJsonTests : IDisposable
         Assert.Equal((0, string.Empty), (result.Code, result.Err));
         Assert.Equal(
             "{\"today\":\"2026-10-29\",\"appointments\":[],"
-                + "\"calendar\":{\"status\":\"notConfigured\",\"cachedAt\":null,\"unreadableFiles\":[]},\"due\":[],\"linkedNotes\":[]}\n",
+                + "\"calendar\":{\"status\":\"notConfigured\",\"cachedAt\":null,\"unreadableFiles\":[]},\"due\":[],\"linkedNotes\":[],\"times\":null}\n",
             result.Out);
     }
 
@@ -436,7 +436,7 @@ public sealed class CliJsonTests : IDisposable
         Result result = Run("current", "--json");
 
         Assert.Equal((plain.Code, plain.Err), (result.Code, result.Err));
-        Assert.EndsWith("\"due\":[],\"linkedNotes\":[]}\n", result.Out, StringComparison.Ordinal);
+        Assert.EndsWith("\"due\":[],\"linkedNotes\":[],\"times\":null}\n", result.Out, StringComparison.Ordinal);
     }
 
     // 160 AC-7: each current appointment has related:[{name,tags,words}], tags raw without #.

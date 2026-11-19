@@ -143,7 +143,7 @@ internal sealed class DesktopFixture : IDisposable
     /// <summary>A path next to the data folder (outside it) for import sources and export targets; nothing is there yet.</summary>
     public string Outside(string name) => Path.Combine(parent, name);
 
-    /// <summary>Times' data folder for the day's end, outside the data folder; nothing is there yet.</summary>
+    /// <summary>Times' data folder for the day's end and the sidebar's Times line, outside the data folder; nothing is there yet.</summary>
     public string TimesFolder => Path.Combine(parent, "Times");
 
     public DesktopState? State { get; private set; }
@@ -255,7 +255,8 @@ internal sealed class DesktopFixture : IDisposable
             Outlook,
             OutlookTimeout,
             PageTitles,
-            IsMac);
+            IsMac,
+            TimesFolder);
         Actions = new DesktopActions(
             Notes, Todos, State, Launcher, link, feed, () => LocalNow, new CalendarStore(Root, Zone), TimesFolder, Notifier,
             ScreenCapture);

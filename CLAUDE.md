@@ -188,6 +188,14 @@ Every factory agent reads this file before working on Context. Keep it short and
     tags. Flags instead of exceptions: `TodosUnreadable` for a bad `todos.json` (the day and the appointments are
     still there) and `IndexUnreadable` for a bad `context.db` (the due todos are still there). With no appointment
     and nothing due the index is not synced. Order in both front ends: day, appointments, due todos, linked notes.
+    **Times today** (job 277, Core `TimesNow.cs`): `TimesNow.Read(folder, today, now)` (never throws, never writes)
+    gives `Kind` (`None`: null folder, no file, an absence day or no arrival; `Unreadable` (`TimesDay.Read`'s);
+    `Booked`), `Arrival`, `Leaving` (only when `HasLeft`), `Left` (`TimesBalance.ReadTarget` minus
+    `TimesDay.WorkTimeAt(now)`: `WorkTime` plus `now - last entry` while `IsWorking` and `now` is after it; can be
+    negative) and `Checkpoint` (`TimesCheckpoint(WorkItem, Name)`: the last checkpoint with no later checkpoint, break
+    start or leaving; else null). `FormatLeft` is Times' `H:mm`, truncated to whole minutes, `-` for negative, `0:00`
+    for zero. It is not part of `CurrentView`: `context current` reads it for `today()` and `now()`, the desktop through
+    `DesktopState.TimesNow()` (see Sidebar Times).
     **Meeting prep** (job 160, `MeetingPrep.cs`): `Related` (parallel to `Appointments`, same count and order) holds
     up to `MeetingPrep.MaxRelated` (3) `RelatedNote(Name, Tags, Words)` per appointment (the 3-argument `Related`; the
     overload with `int? max`, `null` uncapped, serves the desktop's appointment page, job 214). `MeetingPrep.Words(text)`:
@@ -588,7 +596,10 @@ Every factory agent reads this file before working on Context. Keep it short and
   `TodoPicker.Pick`, see Todos: `Done: <text>`, plus `Next: <yyyy-MM-dd>` for a recurring todo, or exit 1 with the no-todos, no-match or several-matches line;
   no text is a usage error), `notes`, `note show <name...>`,
   `tags [tag...]` (`<tag>\t<count>` or note names), `current` (the
-  current view's sections as text: `Today, <date>`, `Appointments`, `Due`, `Linked notes`; no row caps, `Due` lines as
+  current view's sections as text: `Today, <date>`, `Times` (job 277, only when `Booked`: `arrival\tHH:mm`,
+  `leaving\tHH:mm` only when left, `left\t<H:mm>`, `checkpoint\t[#<n> ]<name>` only when open, each value one line;
+  `Unreadable` writes `Can't read Times' day file for <date>.` to stderr, exit 1, the rest unchanged), `Appointments`,
+  `Due`, `Linked notes`; no row caps, `Due` lines as
   `<date>\t<text>`; its error lines go to stderr and make the exit code 1), `review` (job 169, see Review view:
   `Review, <from> to <to>` (`yyyy-MM-dd`), then `Changed notes` (`<yyyy-MM-dd HH:mm>\t<name>`), `Done todos`
   (`<done date>\t<text>`), `Overdue` (`<due>\t<text>`) and `Next week` (`<date>\t<time>\t<title> (<location>)`,
@@ -636,8 +647,9 @@ Every factory agent reads this file before working on Context. Keep it short and
   (`CliJson.cs`, `Utf8JsonWriter` with the default encoder, so `+ & ' <` and non-ASCII are `\uXXXX`): `{version}`,
   `{todos:[{due,time,text}]}` (`time` `HH:mm` or `null`), `{notes:[{name,locked}]}`, `{name,text}`, `{tags:[{tag,count}]}` or `{tag,notes:[]}`,
   `{key,value,notes:[]}` (`find`), `{query,results:[{note,line,text}]}` (`search`; `line` an int), `{today,appointments:[{start,end,allDay,
-  title,location,related:[{name,tags,words}]}],calendar:{status,cachedAt,unreadableFiles},due:[{due,text,overdue}],linkedNotes:[{name,tags}]}`
-  (absent = `null`, tags raw without `#`, times `yyyy-MM-ddTHH:mm:sszzz` in the zone; `due`/`linkedNotes` `null` when
+  title,location,related:[{name,tags,words}]}],calendar:{status,cachedAt,unreadableFiles},due:[{due,text,overdue}],linkedNotes:[{name,tags}],
+  times:{arrival,leaving,leftMinutes,checkpoint:{workItem,name}}}` (job 277: `times` `null` for None and Unreadable, which
+  has plain's stderr line and exit code; `leaving` `null` until left, `leftMinutes` an int, can be negative; absent = `null`, tags raw without `#`, times `yyyy-MM-ddTHH:mm:sszzz` in the zone; `due`/`linkedNotes` `null` when
   unreadable, `related` `null` when `context.db` can't be read),
   `{from,to,changedNotes:[{name,modified}],doneTodos:[{due,done,text}],overdue:[{due,text}],appointments:[{start,end,
   allDay,title,location}],calendar:{status,cachedAt,unreadableFiles}}` (`review`; `doneTodos`/`overdue` `null` when
@@ -807,7 +819,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `[[note link]]` parsing in `NoteLinkParser.cs`, link rewriting on rename in `NoteLinkRewriter.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the desktop's recently opened notes (`recent.json`) in `RecentNotes.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; over the cap it throws `FileTooLargeException : IOException` (`Too large.`); job 275: every full read of `.ics` files and the feed cache (`CalendarStore.ReadText`, `MaxFileBytes`), `todos.json` (`TodoStore.MaxFileBytes`, 5 MB; a directory named `todos.json` can't be read), `calendar-link.txt` (`CalendarLink.MaxFileBytes`, 4096) and notes (`NoteStore.Read`) goes through it; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
-    `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs` (the agenda carry-over in `MeetingCarryOver.cs`), note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs` (its triage queue, remove and snooze in `InboxTriage.cs`), the day's end in `DayEnd.cs` (Times' day file in `TimesDay.cs`, `settings.json` in `SettingsStore.cs`), the morning briefing in `Briefing.cs` (Times' flexitime balance in `TimesBalance.cs`), the todo input rules (`TryParseDate`,
+    `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs` (the agenda carry-over in `MeetingCarryOver.cs`), note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs` (its triage queue, remove and snooze in `InboxTriage.cs`), the day's end in `DayEnd.cs` (Times' day file in `TimesDay.cs`, today's Times bookings in `TimesNow.cs`, `settings.json` in `SettingsStore.cs`), the morning briefing in `Briefing.cs` (Times' flexitime balance in `TimesBalance.cs`), the todo input rules (`TryParseDate`,
     `MaxTextLength`, `TryParseRepeat`, `NextDue`) in `TodoInput.cs`, the todo repeat in `TodoRepeat.cs`, waiting-for todos in `WaitingFor.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`), `SearchView.cs` (`search`), `TagFilter.cs` (tag filters), `DecisionsView.cs` (`decisions`, with `DecisionParser.cs`), `SimilarNotes.cs` (similar notes), `BoardView.cs` (tag boards), `ReviewView.cs` (the weekly review) and `CalendarLinkView.cs`
     (the calendar link), and the command ranking for the desktop palette in `CommandMatcher.cs`; the notes list is `NoteStore.List()` itself.
   - **Data step in Core, drawing in the front end:** a view's Core data step returns plain types (a kind plus raw
@@ -832,7 +844,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `DataWatcher` (one `FileSystemWatcher` with subfolders, `IsRelevant` filter: the top-level files as before, plus
     a `.md` at any depth except under a folder starting with `.` or under the top-level `calendar/`, and the top-level
     `settings.json` (job 207: saved searches edited outside the app; any case, not in a subfolder); 300 ms
-    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `PeoplePanel`, `LinksPanel`, `OutlinePanel`, `DayAppointmentsPanel`, `AppointmentPanel`, `PersonPanel`, `ReviewPanel`, `TriagePanel`, `ToReviewPanel`, `SimilarPanel`)
+    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `PeoplePanel`, `LinksPanel`, `OutlinePanel`, `DayAppointmentsPanel`, `TimesTodayPanel`, `AppointmentPanel`, `PersonPanel`, `ReviewPanel`, `TriagePanel`, `ToReviewPanel`, `SimilarPanel`)
     inherit `StateComponent`, which injects the state and `DesktopActions` (internal types can't be
     public parameters). `DesktopActions` (with `ActionResult`: `ActionKind` `Done`/`Refused`/`Failed`, `ActionReason`,
     raw text) is the only write path: it never throws, runs one action at a time (`Busy`), refreshes the state after a change and has the test
@@ -996,7 +1008,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `<ApplicationData>/Times`; anything else `null`). `TimesDay.Read(folder, day)` reads `<folder>/yyyy-MM-dd.json`
     read-only through `BoundedFile` (64 KiB, BOM dropped, duplicate properties refused; never throws): `Missing`,
     `Unreadable`, `Absence` or `Entries` (Times' entries format or the legacy `arrival`/`leaving` one) with `Arrival`,
-    `Leaving`, `HasLeft`, `WorkTime` and `Groups` (per work item or name, in first-booked order). Nothing ever writes
+    `Leaving`, `HasLeft`, `WorkTime`, `IsWorking`, `WorkTimeAt(now)` (job 277) and `Groups` (per work item or name, in first-booked order). Nothing ever writes
     into the Times folder. `DayEnd(notes, todos, calendar, feed, timesFolder, settings?)`: `RefreshWorked(D)` replaces
     or adds D's `## Worked` section (`- Arrived HH:mm, left HH:mm, worked h:mm`, a missing arrival `--:--`, one line
     per group; or the missing/unreadable/absent/not-left line), creating the daily note through `DailyNote.Ensure`;
@@ -1478,7 +1490,15 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Zone` as `LocalNow`) through `AppointmentList.Shown` (Core, pure: on today the last past appointment, `End <= now`,
     last in `CalendarStore.Day` order, plus every one not yet past; other days all) as `button.appointment-item`
     (`CurrentView.Time` for that day, `OneLine` title or `(no title)`); grey `No appointments.`, red
-    `Can't read calendar/<file>`; it reloads on `State.Changed` keeping the rows, a day change shows `Loading…`. A click
+    `Can't read calendar/<file>`; it reloads on `State.Changed` keeping the rows, a day change shows `Loading…`.
+    **Sidebar Times** (job 277): `TimesTodayPanel` (a `StateComponent`) is right after `DayAppointmentsPanel` in
+    `aside.todos-region`. `DesktopState` takes the optional `timesFolder` (`Program.cs` resolves it once and passes it to
+    the state and the actions); `TimesNow()` (`Task.Run`, never throws) reads `TimesNow.Read` for today and now from the
+    state's UTC clock in `Zone`, and every `Tick()` raises `TimesChanged`. The panel renders nothing for `None` and
+    before its first load; else `section.times-today` (`aria-label="Times"`) with one grey `p.times-line` (cut, line in
+    `title`): `Arrived HH:mm[ · Left HH:mm] · Time left H:mm[ · #<n> <name>| · <name>]` (names through `OneLine`), or
+    `Can't read Times' day file.`. It reloads on `State.Changed` and `TimesChanged` keeping the shown line (no
+    `Loading…`); no buttons, never takes focus. `StateComponent.OnDisposing` is the hook to drop extra subscriptions. A click
     goes to `Main.OpenAppointment` (save first, else `Discard changes to <name>?`; Discard drops the note and shows the page
     over the placeholder): `Page.Appointment` shows `AppointmentPanel` (`section.page.appointment-page`, `h2` title, icon-only × `button.close`, `h3 Notes` above every state, the list `aria-labelledby` it;
     the outline is hidden, opening any note closes it). Same-titled appointments (ordinal) on the day share one page (a

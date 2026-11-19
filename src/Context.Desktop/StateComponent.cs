@@ -22,7 +22,13 @@ public abstract class StateComponent : ComponentBase, IDisposable
     public void Dispose()
     {
         State.Changed -= OnChanged;
+        OnDisposing();
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Called once from <see cref="Dispose"/>; a component that subscribed to more state events unsubscribes here.</summary>
+    protected virtual void OnDisposing()
+    {
     }
 
     protected override void OnInitialized() => State.Changed += OnChanged;

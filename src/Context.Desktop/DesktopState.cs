@@ -30,6 +30,7 @@ internal sealed class DesktopState
     private readonly Func<DateTime> utcNow;
     private readonly IOutlookSource outlook;
     private readonly IPageTitleSource? pageTitles;
+    private readonly string? timesFolder;
 
     // Guards the Outlook cache: one call per day (appointments), each with its start time.
     private readonly object outlookGate = new();
@@ -67,9 +68,11 @@ internal sealed class DesktopState
         IOutlookSource? outlook = null,
         TimeSpan? outlookTimeout = null,
         IPageTitleSource? pageTitles = null,
-        bool? isMac = null)
+        bool? isMac = null,
+        string? timesFolder = null)
     {
         IsMac = isMac ?? OperatingSystem.IsMacOS();
+        this.timesFolder = timesFolder;
         this.pageTitles = pageTitles;
         this.outlook = outlook ?? new UnsupportedOutlookSource();
         OutlookTimeout = outlookTimeout ?? DefaultOutlookTimeout;
@@ -123,6 +126,12 @@ internal sealed class DesktopState
 
     /// <summary>Raised (on a background thread) after every refresh, once <see cref="Snapshot"/> is set.</summary>
     public event Action? Changed;
+
+    /// <summary>
+    /// Raised (on the calling thread) by every <see cref="Tick"/>, whether or not it refreshes, so the sidebar's Times
+    /// line (<see cref="TimesNow()"/>) keeps its time left current between refreshes (job 277).
+    /// </summary>
+    public event Action? TimesChanged;
 
     /// <summary>The OS key store of sensitive notes (one that supports nothing unless one was given).</summary>
     public IKeyStore KeyStore { get; }
@@ -222,6 +231,36 @@ internal sealed class DesktopState
     /// does nothing. Returns true when it started (or joined) a refresh.
     /// </summary>
     public bool Tick()
+    {
+        try
+        {
+            return TickOnce();
+        }
+        finally
+        {
+            TimesChanged?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Today's Times bookings (<see cref="Context.TimesNow.Read"/>) off the calling thread, for today and now on the
+    /// state's UTC clock in <see cref="Zone"/>. Only reads the Times folder; never throws (a failure is
+    /// <see cref="TimesNowKind.Unreadable"/>).
+    /// </summary>
+    public Task<TimesNow> TimesNow() => Task.Run(() =>
+    {
+        try
+        {
+            DateTime local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc), calendar.Zone);
+            return Context.TimesNow.Read(timesFolder, DateOnly.FromDateTime(local), TimeOnly.FromDateTime(local));
+        }
+        catch (Exception)
+        {
+            return new TimesNow(TimesNowKind.Unreadable, null, null, TimeSpan.Zero, null);
+        }
+    });
+
+    private bool TickOnce()
     {
         DateOnly day;
         DateTime now;

@@ -111,12 +111,13 @@ internal static class Program
         };
         PageTitleFetcher pageTitles = new PageTitleFetcher(titleHttp, TimeSpan.FromSeconds(3));
         SensitiveSession session = new SensitiveSession(() => DateTime.UtcNow);
+        string? timesFolder = TimesFolder.Resolve(Environment.GetEnvironmentVariable(TimesFolder.VariableName));
         DesktopState state = new DesktopState(
             notes, todos, index, calendar, feed, Today, () => DateTime.UtcNow, KeyStore(), session, calendarLink, Outlook(),
-            pageTitles: pageTitles);
+            pageTitles: pageTitles, timesFolder: timesFolder);
         DesktopActions actions = new DesktopActions(
             notes, todos, state, new ShellNoteLauncher(), calendarLink, feed, () => DateTime.Now, calendar,
-            TimesFolder.Resolve(Environment.GetEnvironmentVariable(TimesFolder.VariableName)), new SystemNotifier(),
+            timesFolder, new SystemNotifier(),
             ScreenCapture(folder));
 
         PhotinoBlazorAppBuilder builder = PhotinoBlazorAppBuilder.CreateDefault(args);

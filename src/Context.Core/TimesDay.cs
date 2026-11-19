@@ -170,6 +170,24 @@ internal sealed class TimesDay
     /// <summary>True when the day has a leaving and its walk ends off work.</summary>
     public bool HasLeft => Leaving is not null && FinalState() == State.Off;
 
+    /// <summary>True when the day's walk ends working: arrived (or back from a break) and not yet left or on a break.</summary>
+    public bool IsWorking => FinalState() == State.Working;
+
+    /// <summary>
+    /// The work time up to <paramref name="now"/>, by Times' rule: <see cref="WorkTime"/>, plus the time since the last
+    /// entry while <see cref="IsWorking"/> and <paramref name="now"/> is after that entry; else <see cref="WorkTime"/>.
+    /// </summary>
+    public TimeSpan WorkTimeAt(TimeOnly now)
+    {
+        TimeSpan total = WorkTime;
+        if (IsWorking && Entries.Count > 0 && now > Entries[^1].Time)
+        {
+            total += now - Entries[^1].Time;
+        }
+
+        return total;
+    }
+
     /// <summary>
     /// The work time, by Times' walk: off, then an arrival starts working, a break start pauses it, a break end
     /// resumes it and a leaving stops it (also an open break). Time counts only while working, up to the last entry.

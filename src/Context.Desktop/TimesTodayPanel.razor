@@ -1,0 +1,74 @@
+@inherits StateComponent
+@* Today's Times bookings in the right sidebar, right after the appointments (job 277): one grey line
+   "Arrived HH:mm[ · Left HH:mm] · Time left H:mm[ · #n name]" from DesktopState.TimesNow (read only, never a write
+   into Times' folder). Nothing at all when Times has nothing for today, one grey line when its day file can't be read.
+   It reloads on every state change and every Tick (TimesChanged), keeping the shown line meanwhile, so no Loading…
+   ever shows. It takes no focus and has no buttons. *@
+
+@if (view is { Kind: TimesNowKind.Booked } booked)
+{
+    string line = Line(booked);
+    <section class="times-today" aria-label="Times">
+        <p class="grey times-line cut" title="@line">@line</p>
+    </section>
+}
+else if (view is { Kind: TimesNowKind.Unreadable })
+{
+    <section class="times-today" aria-label="Times">
+        <p class="grey times-line">Can't read Times' day file.</p>
+    </section>
+}
+
+@code {
+    private TimesNow? view;
+    private int request;
+
+    /// <summary>The panel's one line for a booked day; every Times name through <see cref="DesktopText.OneLine"/>.</summary>
+    internal static string Line(TimesNow times)
+    {
+        string arrived = "Arrived " + Time(times.Arrival);
+        string left = times.Leaving is { } leaving ? " · Left " + Time(leaving) : string.Empty;
+        string timeLeft = " · Time left " + TimesNow.FormatLeft(times.Left);
+        string open = string.Empty;
+        if (times.Checkpoint is { } checkpoint)
+        {
+            string name = DesktopText.OneLine(checkpoint.Name);
+            open = " · " + (checkpoint.WorkItem is { } n ? $"#{n.ToString(CultureInfo.InvariantCulture)} {name}" : name);
+        }
+
+        return arrived + left + timeLeft + open;
+    }
+
+    private static string Time(TimeOnly? time) => time?.ToString("HH:mm", CultureInfo.InvariantCulture) ?? string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.TimesChanged += OnTimesChanged;
+        await Load();
+    }
+
+    protected override void OnDisposing() => State.TimesChanged -= OnTimesChanged;
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    private void OnTimesChanged() => _ = InvokeAsync(async () =>
+    {
+        await Load();
+        StateHasChanged();
+    });
+
+    // Keeps the shown line while it reloads; an older request's result is dropped.
+    private async Task Load()
+    {
+        int mine = ++request;
+        TimesNow result = await State.TimesNow();
+        if (mine == request)
+        {
+            view = result;
+        }
+    }
+}

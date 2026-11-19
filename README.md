@@ -296,7 +296,7 @@ plain ASCII; any JSON parser, `ConvertFrom-Json` included, reads them back.
 | `tags <tag>` | `{"tag":"work","notes":["A"]}` |
 | `find <key> <value>` | `{"key":"role","value":"Bereichsleiter","notes":["people/Anna Schmidt"]}` |
 | `search <text>` | `{"query":"budget","results":[{"note":"A","line":3,"text":"Budget 2027"}]}` |
-| `current` | `{"today":"...","appointments":[{"start":"...","end":"...","allDay":false,"title":"ACME kickoff","location":null,"related":[{"name":"projects/ACME Rollout","tags":["acme"],"words":["acme"]}]}],"calendar":{...},"due":[...],"linkedNotes":[...]}` |
+| `current` | `{"today":"...","appointments":[{"start":"...","end":"...","allDay":false,"title":"ACME kickoff","location":null,"related":[{"name":"projects/ACME Rollout","tags":["acme"],"words":["acme"]}]}],"calendar":{...},"due":[...],"linkedNotes":[...],"times":{"arrival":"08:00","leaving":null,"leftMinutes":330,"checkpoint":{"workItem":1234,"name":"Review"}}}` (`times` is `null` without Times bookings today) |
 | `review` | `{"from":"...","to":"...","changedNotes":[{"name":"A","modified":"..."}],"doneTodos":[{"due":"...","done":"...","text":"..."}],"overdue":[{"due":"...","text":"..."}],"appointments":[...],"calendar":{...}}` |
 
 PowerShell examples:
@@ -313,6 +313,7 @@ $todos | Where-Object { [datetime]$_.due -le (Get-Date).AddDays(7) } | ForEach-O
 $current = context current --json | ConvertFrom-Json
 $current.appointments | ForEach-Object { "$($_.start) $($_.title)" }
 if ($null -eq $current.due) { Write-Warning 'todos.json could not be read' }
+if ($current.times) { "Time left: $($current.times.leftMinutes) min" }
 
 # Meeting prep: the notes related to each of today's appointments
 $current.appointments | ForEach-Object { "$($_.title): $(($_.related | ForEach-Object { $_.name }) -join ', ')" }
