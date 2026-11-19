@@ -162,14 +162,14 @@ public sealed class TagsPanelTests : IDisposable
         data.WriteNote("Plan", "#work\n");
         data.AddTodo("Due #work", DesktopFixture.Today);
         await data.RefreshAsync();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         IRenderedComponent<TagsPanel> cut = data.Bunit.Render<TagsPanel>();
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-list button")), Wait);
         await data.State!.Refresh();
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-list button")), Wait);
 
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // AC-9: neither new panel can write: no call into the actions.

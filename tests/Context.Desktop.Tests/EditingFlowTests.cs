@@ -47,7 +47,7 @@ public sealed class EditingFlowTests : IDisposable
         await Open(cut, js, "Plan");
         js.EditUnsavable("# Plan\n\nUnsaved\n");
 
-        await NameButton(cut, "Other").ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, "Other");
 
         IElement dialog = cut.Find("[role=dialog]");
         Assert.Equal("Discard changes to Plan?", dialog.QuerySelector(".question")!.TextContent);
@@ -56,7 +56,7 @@ public sealed class EditingFlowTests : IDisposable
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         Assert.Single(js.Calls("ContextEditor.mount"));
 
-        await NameButton(cut, "Other").ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, "Other");
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.mount").Count), Wait);
@@ -75,7 +75,7 @@ public sealed class EditingFlowTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
 
-        await NameButton(cut, "Other").ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, "Other");
 
         Assert.Empty(cut.FindAll("[role=dialog]"));
         cut.WaitForAssertion(() => Assert.Equal("Other", cut.Find(".note-title").TextContent), Wait);
@@ -100,14 +100,14 @@ public sealed class EditingFlowTests : IDisposable
         await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
 
         await Open(cut, js, "Plan");
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         await RunPalette(cut, "/current");
 
         Assert.Equal("No matching command.", cut.Find(".palette p.none").TextContent);
         Assert.Equal(string.Empty, cut.Find(".main-status").TextContent);
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         Assert.Single(js.Calls("ContextEditor.mount"));
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // AC-9: a tag click lists the notes with that tag, sorted ignoring case; clicking one opens it.
@@ -452,6 +452,7 @@ public sealed class EditingFlowTests : IDisposable
     public async Task NotesPanel_NameButtonCallsOnOpen()
     {
         data.WriteNote("Plan", "x");
+        data.WriteRecent("Plan");
         List<string> opened = [];
         await data.RefreshAsync();
         IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OnOpen, (string name) => opened.Add(name)));
@@ -463,8 +464,6 @@ public sealed class EditingFlowTests : IDisposable
         Assert.Equal(["Plan"], opened);
     }
 
-    private static IElement NameButton(IRenderedComponent<Main> cut, string name) =>
-        cut.FindAll(".notes-region button.name").Single(b => b.TextContent == name);
 
     private static IElement TagButton(IRenderedComponent<Main> cut, string label) =>
         cut.FindAll(".tags-panel .tag-list button").Single(b => b.TextContent == label);
@@ -472,7 +471,7 @@ public sealed class EditingFlowTests : IDisposable
     private static async Task Open(IRenderedComponent<Main> cut, EditorJs js, string name)
     {
         int mounts = js.Calls("ContextEditor.mount").Count;
-        await NameButton(cut, name).ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, name);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
     }

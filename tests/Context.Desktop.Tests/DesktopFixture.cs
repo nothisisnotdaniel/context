@@ -18,6 +18,9 @@ internal sealed class DesktopFixture : IDisposable
         TimeZoneInfo.CreateCustomTimeZone("Test+01", TimeSpan.FromHours(1), "Test+01", "Test+01");
 
     private readonly string parent;
+
+    // False for a fixture over another one's root (job 240), which deletes nothing.
+    private readonly bool ownsFolder = true;
     private DateTime created = new(2026, 10, 1, 9, 0, 0, DateTimeKind.Utc);
 
     public DesktopFixture()
@@ -25,6 +28,19 @@ internal sealed class DesktopFixture : IDisposable
         parent = Path.Combine(Path.GetTempPath(), "context-desktop-" + Guid.NewGuid().ToString("N"));
         Root = Path.Combine(parent, "Context");
         Directory.CreateDirectory(parent);
+        Bunit = new BunitContext();
+        Guard = new CloseGuard(Close);
+    }
+
+    /// <summary>
+    /// A second app over <paramref name="other"/>'s data folder (job 240: the window reopened over the same root),
+    /// with its own state, actions and bunit context. It deletes nothing; <paramref name="other"/> still owns the folder.
+    /// </summary>
+    public DesktopFixture(DesktopFixture other)
+    {
+        parent = other.parent;
+        Root = other.Root;
+        ownsFolder = false;
         Bunit = new BunitContext();
         Guard = new CloseGuard(Close);
     }
@@ -139,9 +155,12 @@ internal sealed class DesktopFixture : IDisposable
 
         // A panel's index read may still run on a pool thread; it writes context.db, so wait for it to finish
         // (and keep later ones out) while the folder is deleted.
+        // 240: a recent.json write may still run off the renderer too; it never creates the folder, so once the folder
+        // is gone a later write only fails.
+        lock (Actions is null ? new object() : RecentWriteGate(Actions))
         lock (State is null ? new object() : IndexGate(State))
         {
-            if (Directory.Exists(parent))
+            if (ownsFolder && Directory.Exists(parent))
             {
                 Directory.Delete(parent, recursive: true);
             }
@@ -151,6 +170,10 @@ internal sealed class DesktopFixture : IDisposable
     /// <summary>The lock every index read of the state takes; a test holds it to keep a load waiting.</summary>
     public static object IndexGate(DesktopState state) =>
         typeof(DesktopState).GetField("indexGate", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(state)!;
+
+    /// <summary>The lock every recent.json write of the actions takes (job 240).</summary>
+    public static object RecentWriteGate(DesktopActions actions) =>
+        typeof(DesktopActions).GetField("recentWriteGate", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(actions)!;
 
     /// <summary>Builds the state and the actions (once) and registers both with <see cref="Bunit"/>.</summary>
     public DesktopState CreateState()
@@ -223,6 +246,12 @@ internal sealed class DesktopFixture : IDisposable
         TodoStore store = new TodoStore(Root, () => created = created.AddMinutes(1));
         store.Add(text, due, repeat, time);
     }
+
+    /// <summary>
+    /// Writes recent.json with <paramref name="names"/>, newest first (job 240); the state reads it once when it is
+    /// built, so call this before <see cref="CreateState"/>.
+    /// </summary>
+    public void WriteRecent(params string[] names) => new RecentNotesStore(Root).Write(names);
 
     public void WriteFile(string relative, string text)
     {

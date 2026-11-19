@@ -73,7 +73,8 @@ public sealed class MainTests : IDisposable
         Assert.Equal(
             ["notes-region", "current-region", "todos-region"],
             cut.Find(".layout").Children.Select(c => c.ClassName ?? string.Empty).ToArray());
-        Assert.Contains("Alpha", cut.Find(".notes-region").TextContent);
+        // 240: the sidebar lists recently opened notes; Alpha was never opened.
+        Assert.Contains("No recently opened notes.", cut.Find(".notes-region").TextContent);
         Assert.Empty(cut.FindAll(".locked"));
     }
 
@@ -141,13 +142,13 @@ public sealed class MainTests : IDisposable
         data.WriteNote("Meeting", "# Meeting\n");
         data.WriteFile(Path.Combine(NoteTemplates.FolderName, "meeting.md"), "# {{title}}\n");
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         await RunPalette(cut, line);
 
         cut.WaitForAssertion(() => Assert.Equal(text, cut.Find(".main-status").TextContent), Wait);
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 165 AC-8: --template inside a word is part of the title, so /new without the token behaves as before.
@@ -278,7 +279,7 @@ public sealed class MainTests : IDisposable
         _ = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await NameButton(cut, "Big").ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, "Big");
 
         cut.WaitForAssertion(() => Assert.Equal("Can't read Big.", cut.Find(".unreadable").TextContent), Wait);
         await OpenMenuAsync(cut);
@@ -358,7 +359,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         js.EditUnsavable("# Plan\n\nUnsaved\n");
 
         await ChooseAsync(cut, "rename");
@@ -366,7 +367,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal("Save Plan first.", cut.Find(".main-status").TextContent);
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
         Assert.Empty(cut.FindAll(".rename-title"));
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 134 AC-8: an edit made while the name field is open is caught when saving the name.
@@ -420,7 +421,7 @@ public sealed class MainTests : IDisposable
         await Open(cut, js, "Plan");
         await ChooseAsync(cut, "rename");
         await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
@@ -428,7 +429,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal("Rename Plan to Project? Links in 1 note will be updated.", cut.Find("[role=dialog] .question").TextContent);
         Assert.Equal("Rename", cut.Find("[role=dialog] button.confirm").TextContent);
         AssertFocused(cut, "[role=dialog] button.cancel");
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
 
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
@@ -454,7 +455,7 @@ public sealed class MainTests : IDisposable
         await Open(cut, js, "Plan");
         await ChooseAsync(cut, "rename");
         await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Project" });
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForElement("[role=dialog]", Wait);
 
@@ -470,7 +471,7 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("[role=dialog]")), Wait);
         Assert.Equal("Project", cut.Find(".rename-title").GetAttribute("value"));
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 206 AC-9: links left after the rename show the Done text in red; the editor still opens the new name.
@@ -509,7 +510,7 @@ public sealed class MainTests : IDisposable
         await Open(cut, js, "Plan");
         await ChooseAsync(cut, "rename");
         await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Pro#ject" });
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForElement("[role=dialog]", Wait);
 
@@ -521,7 +522,7 @@ public sealed class MainTests : IDisposable
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal("Pro#ject", cut.Find(".rename-title").GetAttribute("value"));
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 134 AC-8: Delete asks in ConfirmDialog; Cancel deletes nothing.
@@ -698,7 +699,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await NameButton(cut, "Secret").ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, "Secret");
 
         cut.WaitForAssertion(() => Assert.Equal("Can't unlock Secret.", cut.Find(".unreadable").TextContent), Wait);
         Assert.Equal("Sensitive notes have no links.", cut.Find(".links-panel p[role=status]").TextContent);
@@ -715,7 +716,7 @@ public sealed class MainTests : IDisposable
         data.AddTodo("Due #work", DesktopFixture.Today);
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         await Open(cut, js, "Plan");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".links-panel .link-row")), Wait);
@@ -727,7 +728,7 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".links-panel .link-row")), Wait);
 
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 138 AC-1: the Settings button and /settings show the settings at the top of the main region (140: right under
@@ -941,7 +942,7 @@ public sealed class MainTests : IDisposable
         Assert.Single(cut.FindAll(".note-editor"));
 
         await cut.Find("button.tags-open").ClickAsync(new MouseEventArgs());
-        await NameButton(cut, "Other").ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, "Other");
         Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() =>
@@ -980,7 +981,7 @@ public sealed class MainTests : IDisposable
         // The note that is already open hides them too.
         await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
         Assert.Single(cut.FindAll(".settings-panel"));
-        await NameButton(cut, "Plan").ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, "Plan");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".settings-panel")), Wait);
 
         await RunPalette(cut, "/settings");
@@ -1015,8 +1016,6 @@ public sealed class MainTests : IDisposable
         Assert.Equal(0, data.Keys.Agrees);
     }
 
-    private static IElement NameButton(IRenderedComponent<Main> cut, string name) =>
-        cut.FindAll(".notes-region button.name").Single(b => b.TextContent == name);
 
     // 139 AC-8 / AC-9: Export (button or palette) asks the OS where to save, suggesting <name>.md, and writes the
     // saved text there; a typed argument is never a path.
@@ -1032,7 +1031,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         if (palette)
         {
@@ -1055,7 +1054,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal($"Exported Plan to {target}", status.TextContent);
         Assert.Equal(status.TextContent, status.GetAttribute("title"));
         Assert.True(status.ClassList.Contains("accent"));
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 139 AC-8: a cancelled save dialog does nothing; a refusal shows the action's red text.
@@ -1141,10 +1140,11 @@ public sealed class MainTests : IDisposable
         await RunPalette(cut, "/import " + typed);
 
         Assert.Equal(1, data.Dialog.ImportOpens);
-        Assert.Equal(["Chosen.md"], FileSnapshot.Take(data.Root, TagIndex.FileName).Keys);
+        Assert.Equal(["Chosen.md"], FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName).Keys);
         cut.WaitForAssertion(() => Assert.StartsWith(
             "Imported Chosen.", Assert.Single(cut.FindAll(".import-result p")).TextContent, StringComparison.Ordinal), Wait);
-        cut.WaitForAssertion(() => Assert.Contains("Chosen", cut.Find(".note-list").TextContent), Wait);
+        // 240: importing opens nothing, so the sidebar of recently opened notes stays empty.
+        Assert.Empty(cut.FindAll(".recent-notes"));
     }
 
     // 139 AC-9: /import with a cancelled dialog changes nothing; a replacing file asks in the same dialog as the button.
@@ -1272,23 +1272,11 @@ public sealed class MainTests : IDisposable
             Wait);
     }
 
-    // Opens a note by its full name: expands its ancestors in the tree, then clicks its row.
+    // Opens a note by its full name through /open (since job 240 the sidebar lists only recently opened notes).
     private static async Task OpenFull(IRenderedComponent<Main> cut, EditorJs js, string name)
     {
-        int slash = name.IndexOf('/');
-        while (slash > 0)
-        {
-            string ancestor = name[..slash];
-            if (cut.FindAll($".notes-region button.toggle[aria-label='Expand {ancestor}']").Count > 0)
-            {
-                await cut.Find($".notes-region button.toggle[aria-label='Expand {ancestor}']").ClickAsync(new MouseEventArgs());
-            }
-
-            slash = name.IndexOf('/', slash + 1);
-        }
-
         int mounts = js.Calls("ContextEditor.mount").Count;
-        await cut.FindAll(".notes-region button.name").Single(b => b.GetAttribute("title") == name).ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, name);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
 
@@ -1620,7 +1608,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Meetings");
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         await ChooseAsync(cut, "new-subpage");
         await cut.Find(".subpage-title").InputAsync(new ChangeEventArgs { Value = "meeting 1" });
 
@@ -1642,7 +1630,7 @@ public sealed class MainTests : IDisposable
         Assert.Empty(cut.FindAll(".subpage-title"));
         Assert.Empty(cut.FindAll(".note-toolbar"));
         Assert.False(cut.Find("button.page-menu-open").HasAttribute("disabled"));
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 152 AC-15 / AC-16: with unsaved changes New subpage and Move are refused before any field opens.
@@ -1655,14 +1643,14 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await OpenFull(cut, js, "Meetings/Meeting 1");
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         js.EditUnsavable("# Meeting 1\n\nUnsaved\n");
 
         await ChooseAsync(cut, button);
 
         Assert.Equal("Save Meetings/Meeting 1 first.", cut.Find(".main-status").TextContent);
         Assert.Empty(cut.FindAll(".note-toolbar input"));
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 152 AC-16: Move is prefilled with the parent; Move here reopens the note under its new name.
@@ -1729,7 +1717,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Archive");
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         await ChooseAsync(cut, "move");
         await cut.Find(".move-parent").InputAsync(new ChangeEventArgs { Value = "Nowhere" });
 
@@ -1748,7 +1736,7 @@ public sealed class MainTests : IDisposable
 
         Assert.Empty(cut.FindAll(".move-parent"));
         Assert.Equal("Archive", cut.Find(".note-title").TextContent);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 152 AC-16: Rename of a subpage prefills its title and reopens it under the new full name.
@@ -1805,7 +1793,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await NameButton(cut, "Secret").ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, "Secret");
 
         cut.WaitForAssertion(() => Assert.Contains(cut.FindAll(".links-panel p"), p => p.TextContent == "Sensitive notes have no links."), Wait);
         Assert.Empty(cut.FindAll(".note-toolbar"));
@@ -1898,7 +1886,7 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
         await ChooseFirstVersion(cut);
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         await cut.Find("button.restore-version").ClickAsync(new MouseEventArgs());
         await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
@@ -1909,7 +1897,7 @@ public sealed class MainTests : IDisposable
 
         Assert.Equal("Save Plan first.", cut.Find(".main-status").TextContent);
         Assert.Empty(cut.FindAll("[role=dialog]"));
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 203 AC-7: with unsaved changes, opening another note, a mention, /today and /briefing save first; the target
@@ -1931,7 +1919,7 @@ public sealed class MainTests : IDisposable
         switch (how)
         {
             case "open":
-                await NameButton(cut, "Other").ClickAsync(new MouseEventArgs());
+                await NoteOpener.OpenAsync(cut, "Other");
                 break;
             case "mention":
                 await cut.InvokeAsync(() => js.Page().OnPerson("@[Anna]"));
@@ -1959,7 +1947,7 @@ public sealed class MainTests : IDisposable
         js.Edit("# Plan\n\nMine\n");
         data.WriteNote("Plan", "# Plan\n\nElsewhere\n");
 
-        await NameButton(cut, "Other").ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, "Other");
 
         cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
         Assert.Equal(DesktopActions.ChangedOnDiskText("Plan"), cut.Find(".note-editor .status").TextContent);
@@ -2160,7 +2148,7 @@ public sealed class MainTests : IDisposable
     private static async Task Open(IRenderedComponent<Main> cut, EditorJs js, string name)
     {
         int mounts = js.Calls("ContextEditor.mount").Count;
-        await NameButton(cut, name).ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, name);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
 
@@ -2248,7 +2236,7 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, name);
         js.EditUnsavable("# inbox\n\nUnsaved\n");
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         int mounts = js.Calls("ContextEditor.mount").Count;
 
         await RunPalette(cut, "/capture call Anna");
@@ -2256,7 +2244,7 @@ public sealed class MainTests : IDisposable
 
         Assert.Equal($"Save {name} first.", status.TextContent);
         Assert.True(status.ClassList.Contains("red"));
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
         Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
     }
 
@@ -2806,7 +2794,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         int mounts = js.Calls("ContextEditor.mount").Count;
 
         await cut.InvokeAsync(() => js.Page().OnLink("[[a:b]]"));
@@ -2816,7 +2804,7 @@ public sealed class MainTests : IDisposable
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 233 AC-10: when the open note's save fails the click asks to discard first; Keep editing creates nothing and
@@ -2917,7 +2905,7 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         await cut.InvokeAsync(() => js.Page().OnPerson("@[Anna]"));
 
@@ -2925,12 +2913,12 @@ public sealed class MainTests : IDisposable
             cut.FindAll(".red"),
             e => e.TextContent == "@[Anna] is an alias of more than one person: Anna Berg, Anna Schmidt."), Wait);
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
 
         await cut.InvokeAsync(() => js.Page().OnPerson("@[AS]"));
 
         cut.WaitForAssertion(() => Assert.Equal("Anna Schmidt", cut.Find(".note-title").TextContent), Wait);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 157 AC-10: the palette lists /find with its usage.
@@ -3273,7 +3261,7 @@ public sealed class MainTests : IDisposable
 
         await RunPalette(cut, "/review");
         Assert.Single(cut.FindAll(".review-panel"));
-        await NameButton(cut, "Plan").ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, "Plan");
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".review-panel")), Wait);
 
         await RunPalette(cut, "/review");
@@ -3382,13 +3370,13 @@ public sealed class MainTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         await TodayAndOpen(cut, js);
 
         Assert.Equal("# mine\n", js.MountedText());
         Assert.Equal(string.Empty, cut.Find(".main-status").TextContent);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 216 AC-2: with today's note open (clean or dirty), Today keeps the editor and its unsaved text, and closes a
@@ -3412,7 +3400,7 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".appointment-page")), Wait);
         Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
         js.EditUnsavable("# 2026-10-29\n\nUnsaved\n");
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".settings-panel")), Wait);
@@ -3436,7 +3424,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
         Assert.True(js.Dirty);
         Assert.Empty(cut.FindAll("[role=dialog]"));
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 216 AC-2: another dirty note is saved first, then today's note opens.
@@ -3668,12 +3656,12 @@ public sealed class MainTests : IDisposable
         data.WriteNote("2026-11-20", "# mine\n");
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         await PickAndOpen(cut, js, "2026-11-20", "2026-11-20");
 
         Assert.Equal("# mine\n", js.MountedText());
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
         Assert.DoesNotContain("Created", cut.Find(".main-status").TextContent, StringComparison.Ordinal);
     }
 
@@ -3685,13 +3673,13 @@ public sealed class MainTests : IDisposable
         data.WriteSensitive("2026-11-20", "# secret day\n");
         data.Keys.AgreeThrows = true;
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         await PickDate(cut, "2026-11-20");
 
         cut.WaitForAssertion(() => Assert.Equal("Can't unlock 2026-11-20.", cut.Find(".unreadable").TextContent), Wait);
         Assert.Equal(1, data.Keys.Agrees);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
         Assert.False(File.Exists(Path.Combine(data.Root, "2026-11-20.md")));
         Assert.DoesNotContain("Created", cut.Find(".main-status").TextContent, StringComparison.Ordinal);
     }
@@ -3821,13 +3809,13 @@ public sealed class MainTests : IDisposable
         await TodayAndOpen(cut, js);
         int mounts = js.Calls("ContextEditor.mount").Count;
         js.EditUnsavable("# 2026-10-29\n\nUnsaved\n");
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         await ChooseAsync(cut, "end-day");
 
         cut.WaitForAssertion(() => Assert.Equal("Save 2026-10-29 first.", cut.Find("p.main-status").TextContent), Wait);
         Assert.True(cut.Find("p.main-status").ClassList.Contains("red"));
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
         Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
         Assert.True(js.Dirty);
     }
@@ -3913,7 +3901,7 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await PickAndOpen(cut, js, "2026-11-20", "2026-11-20");
         js.EditUnsavable("# 2026-11-20\n\nUnsaved\n");
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         await PickDate(cut, "2026-11-20");
 
@@ -3923,7 +3911,7 @@ public sealed class MainTests : IDisposable
         Assert.Single(js.Calls("ContextEditor.mount"));
         Assert.True(js.Dirty);
         Assert.Empty(js.Calls("ContextEditor.getMarkdown"));
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 212 AC-6: a day note that can't be written gives the red line, opens no editor and keeps the shown view.
@@ -3968,7 +3956,7 @@ public sealed class MainTests : IDisposable
         data.WriteNote("Plan", "# Plan\n");
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
         Assert.Equal("October 2026", cut.Find(".day-pick table[role=grid]").GetAttribute("aria-label"));
@@ -3976,7 +3964,7 @@ public sealed class MainTests : IDisposable
         Assert.Single(cut.FindAll(".day-pick button.day.today"));
         Assert.Equal("Thursday, 29 October 2026", cut.Find(".day-pick button.day[tabindex='0']").GetAttribute("aria-label"));
         await cut.Find(".day-pick-backdrop").ClickAsync(new MouseEventArgs());
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
 
         await Open(cut, js, "Plan");
         await cut.Find("button.day-pick-open").ClickAsync(new MouseEventArgs());
@@ -4199,7 +4187,7 @@ public sealed class MainTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "inbox");
         js.EditUnsavable("# inbox\n\nUnsaved\n");
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         await CaptureByIcon(cut, "buy milk");
 
@@ -4207,7 +4195,7 @@ public sealed class MainTests : IDisposable
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
         Assert.Single(cut.FindAll(".capture-pop"));
         Assert.Equal("buy milk", cut.Find(".capture-pop input").GetAttribute("value"));
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 199 AC-6: a clean open inbox is reloaded after the capture and shows the new line.
@@ -4268,7 +4256,7 @@ public sealed class MainTests : IDisposable
         data.Keys = FakeKeyStore.Ready();
         data.WriteSensitive("inbox", "# inbox\n");
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         await CaptureByIcon(cut, "buy milk");
 
@@ -4277,7 +4265,7 @@ public sealed class MainTests : IDisposable
         Assert.Equal(0, data.Keys.Agrees);
         Assert.Single(cut.FindAll(".capture-pop"));
         Assert.Equal("buy milk", cut.Find(".capture-pop input").GetAttribute("value"));
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 199 AC-7: a failed save is a red line; popover and text kept.

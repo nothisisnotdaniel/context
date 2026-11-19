@@ -71,12 +71,12 @@ public sealed class NoteTodoActionsTests : IDisposable
     {
         Write("Meeting", Utf8("- [ ] call Anna\n"));
         NoteTodo todo = Assert.Single((await data.RefreshAsync()).NoteTodos);
-        SortedDictionary<string, string> files = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> files = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         ActionResult result = await data.Actions!.CompleteNoteTodo(todo, null);
 
         AssertRefused(result, ActionKind.Refused, ActionReason.NotConfirmed, DesktopActions.NotConfirmedText);
-        Assert.Equal(files, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(files, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // AC-7: an edited, moved or already ticked line is refused with the fixed text; the file bytes stay.
@@ -89,13 +89,13 @@ public sealed class NoteTodoActionsTests : IDisposable
         Write("Meeting", Utf8("- [ ] call Anna\n"));
         NoteTodo todo = Assert.Single((await data.RefreshAsync()).NoteTodos);
         Write("Meeting", Utf8(now));
-        SortedDictionary<string, string> files = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> files = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         ActionResult result = await data.Actions!.CompleteNoteTodo(todo, new Confirmation());
 
         AssertRefused(
             result, ActionKind.Refused, ActionReason.Changed, "The todo's line in Meeting changed. Open the note and tick it there.");
-        Assert.Equal(files, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(files, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // AC-6: a BeforeWrite hook that edits the todo's line in between gives Changed and keeps the other writer's bytes.

@@ -309,5 +309,5 @@ public sealed class RenameLinkActionsTests : IDisposable
     private string Read(string relative) =>
         Encoding.UTF8.GetString(File.ReadAllBytes(Path.Combine([data.Root, .. relative.Split('/')])));
 
-    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName);
+    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 }

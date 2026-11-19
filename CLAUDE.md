@@ -740,7 +740,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     assembly is public-signed with the committed `Context.snk`, see **Strong name**). `Context` grants only
     `Context.Tests` and `Context.Desktop` only `Context.Desktop.Tests`, the same way; no `InternalsVisibleTo` is name-only.
     It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, picking a todo by its text in `TodoPicker.cs`, todos inside notes in `NoteTodoParser.cs` and `NoteTodo.cs`, tag parsing in `TagParser.cs`,
-    `[[note link]]` parsing in `NoteLinkParser.cs`, link rewriting on rename in `NoteLinkRewriter.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
+    `[[note link]]` parsing in `NoteLinkParser.cs`, link rewriting on rename in `NoteLinkRewriter.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the desktop's recently opened notes (`recent.json`) in `RecentNotes.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
     `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs`, note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs` (its triage queue, remove and snooze in `InboxTriage.cs`), the day's end in `DayEnd.cs` (Times' day file in `TimesDay.cs`, `settings.json` in `SettingsStore.cs`), the morning briefing in `Briefing.cs` (Times' flexitime balance in `TimesBalance.cs`), the todo input rules (`TryParseDate`,
@@ -1077,7 +1077,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     a dirty editor is refused with `Save <name> first.`, else `SaveExportFile("<name>.md")` and `ExportNote`'s text
     in the main status line. Rules (`DesktopSourceTests`): `WritePlainCopy` and `ReadImport` are named in
     `Context.Desktop` only in `DesktopActions.cs`, and no `.razor` file matches `\b(File|Directory|Path)\.`.
-    **Sidebar bar (job 197):** `NotesPanel`'s bar holds only the icon buttons (`.notes-bar-buttons`: triage, people, tags, settings; Search moved to the top bar in job 218, `NotesPanel.OnSearch` stays for saved searches), right-aligned (`justify-content: flex-end`); no logo and no visible "Notes" heading, the top-level `ul.note-list` carries `aria-label="Notes"`. Between the bar and the list, `nav.saved-searches` (job 207, `aria-label="Saved searches"`, only with entries; `DesktopSnapshot.SavedSearches`) has per entry `button.saved-search` (name through `OneLine`, cut, `title` the query; `OnSearch(query)`) and `button.saved-search-remove` (`×`, `aria-label`/`title` `Remove <name>`; `Actions.RemoveSavedSearch`, result in grey/red `p.saved-search-result`); `SavedSearchesUnreadable` shows red `Can't read saved searches.` instead. **Placeholders:** a box's placeholder says only what it is for (`New todo`, `Capture to inbox`), never a `Return to …` hint; Return still submits and there are no submit buttons.
+    **Sidebar bar (job 197):** `NotesPanel`'s bar holds only the icon buttons (`.notes-bar-buttons`: triage, people, tags, settings; Search moved to the top bar in job 218, `NotesPanel.OnSearch` stays for saved searches), right-aligned (`justify-content: flex-end`); no logo and no visible "Notes" heading, the list `ul.note-list.recent-notes` carries `aria-label="Recent notes"` (job 240). Between the bar and the list, `nav.saved-searches` (job 207, `aria-label="Saved searches"`, only with entries; `DesktopSnapshot.SavedSearches`) has per entry `button.saved-search` (name through `OneLine`, cut, `title` the query; `OnSearch(query)`) and `button.saved-search-remove` (`×`, `aria-label`/`title` `Remove <name>`; `Actions.RemoveSavedSearch`, result in grey/red `p.saved-search-result`); `SavedSearchesUnreadable` shows red `Can't read saved searches.` instead. **Placeholders:** a box's placeholder says only what it is for (`New todo`, `Capture to inbox`), never a `Return to …` hint; Return still submits and there are no submit buttons.
     **Tidy layout (job 192):** the Triage, People (job 239), Tags and Settings buttons in `NotesPanel`'s bar are icon-only (inline `svg`, `aria-hidden`, `currentColor`; `aria-label` and `title` carry the name), note rows show no modified date, and `.top-bar` is a band (`--panel` background, `--line` bottom border).
     **Top bar (job 198):** `TopBar` replaces the capture box as the first child of `Main`'s `main.current-region` (not with
     `Can't read the data folder.`): an empty `.top-bar-start` and right-aligned `.top-bar-buttons` with icon buttons
@@ -1175,11 +1175,26 @@ Every factory agent reads this file before working on Context. Keep it short and
     field (Enter or `Save name` renames and reopens the note under the new name; Esc or `Cancel` closes the form;
     a dirty editor is refused with red `Save <name> first.`), `Delete` asks `Delete <name>? This can't be undone.`
     (`ConfirmDialog`, confirm label `Delete`; on confirm the main region shows the `p.no-note` placeholder) and `Open in
-    default editor` calls `OpenExternally` (red text on failure). Subpages (job 152): `NotesPanel` draws the notes
-    as nested `ul.note-list` lists (`note-children` below the top), each row showing `Title` with the full name in
-    `title`, and a toggle `<button>` (`aria-expanded`, `aria-label` `Expand <name>`/`Collapse <name>`) for a note with
-    subpages; notes start collapsed, `Main` passes `OpenName` so opening a note expands its ancestors, and the
-    expanded set survives `State.Changed`. An open subpage shows `<nav class="breadcrumb" aria-label="Breadcrumb">`
+    default editor` calls `OpenExternally` (red text on failure). Recently opened notes (job 240, replacing job 152's tree):
+    `NotesPanel` draws only the notes opened most recently, one flat `ul.note-list.recent-notes` (no toggles, no nested
+    lists): the entries of `State.Recent` that name an existing note (ordinal match against `Snapshot.Notes` or
+    `Snapshot.Sensitive`), newest first, at most `RecentNotes.MaxCount` (10). Each `li.note` holds a `button.name.cut`
+    with `DesktopText.NoteName(Title)`, for a subpage followed by a grey `span.note-parent` with the parent's full name
+    (through `OneLine`); its `title` is the full name, the row of `OpenName` has `aria-current="page"`, and a sensitive
+    note keeps the visible `locked`. With notes but no listed entry it shows grey `No recently opened notes.`
+    (`p.recent-empty`); `No notes yet` and the red unreadable line stay. Core `RecentNotes.cs` holds the pure steps
+    (`Touch`, `Renamed`, `Removed`, `IsValidName`) and `RecentNotesStore`: `<root>/recent.json`,
+    `{"recent":[…]}` UTF-8 without BOM, relaxed escaping, temp file then move, never creating the root; read through
+    `BoundedFile` (64 KiB), anything broken, of another shape or with an invalid name reads as empty and the next write
+    replaces it. `DataWatcher` ignores the file; the CLI never names it. `DesktopState` loads the list once
+    (`Recent`, `ChangeRecent`). `Main.ShowNote` calls `Actions.RecordOpened(name)` whenever the open name becomes a
+    different non-null name (every route, also today's note at start), except the reopen after a rename or move of the
+    open note (`record: false`), since the action already applied `Renamed`. `RecordOpened` runs outside `Run` (never
+    Busy), never refreshes or throws, raises `Changed` and writes the file on `Task.Run` under its own lock (a failed
+    write is swallowed, the in-memory list stays); it is the one `Actions.` call `DesktopSourceTests` lets a non-handler
+    method make. `RenameNote`/`MoveNote` apply `Renamed` and `DeleteNote` applies `Removed` when Done. In tests,
+    `NoteOpener.OpenAsync` opens a note through `/open`, and `DesktopFixture.WriteRecent` seeds the file before the
+    state is built. An open subpage shows `<nav class="breadcrumb" aria-label="Breadcrumb">`
     as the first child of `.note-area`: each ancestor a `button.crumb` opening it through `RequestOpen`, the last item a span with
     `aria-current="page"`.
     Below `NoteEditor`, before `HistoryPanel`, `PersonPanel` and `LinksPanel`, a note with subpages shows `<nav

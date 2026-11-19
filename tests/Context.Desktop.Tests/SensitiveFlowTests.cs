@@ -20,13 +20,15 @@ public sealed class SensitiveFlowTests : IDisposable
 
     public void Dispose() => data.Dispose();
 
-    // AC-7: sensitive notes are in the list with the plain ones, sorted by name, with a text marker.
+    // AC-7: sensitive notes are in the list with the plain ones (since job 240 in recently opened order), with a
+    // text marker.
     [Fact]
     public async Task NotesPanel_ListsSensitiveNotesSortedWithALockedMarker()
     {
         data.WriteNote("Beta", "b");
         data.WriteSensitive("alpha", "a");
         data.WriteSensitive("Gamma", "c");
+        data.WriteRecent("alpha", "Beta", "Gamma");
 
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
@@ -91,7 +93,7 @@ public sealed class SensitiveFlowTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await NameButton(cut, "Plan").ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, "Plan");
 
         cut.WaitForAssertion(() => Assert.Equal("Can't unlock Plan.", cut.Find(".unreadable").TextContent), Wait);
         Assert.Contains("red", cut.Find(".unreadable").ClassList);
@@ -110,7 +112,7 @@ public sealed class SensitiveFlowTests : IDisposable
         js.Fail("ContextEditor.mount", new Microsoft.JSInterop.JSException("boom-143"));
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        await NameButton(cut, "Plan").ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, "Plan");
 
         cut.WaitForAssertion(() => Assert.Equal(
             "The editor couldn't start. Plan was not changed.", Assert.Single(cut.FindAll(".editor-failed")).TextContent), Wait);
@@ -427,14 +429,14 @@ public sealed class SensitiveFlowTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
         js.EditUnsavable("unsaved\n");
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         await MainTests.ChooseAsync(cut, button);
 
         Assert.Equal("Save Plan first.", cut.Find(".main-status").TextContent);
         Assert.Contains("red", cut.Find(".main-status").ClassList);
         Assert.Empty(cut.FindAll("[role=dialog]"));
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // AC-7: Make plain asks first, then the note is a plain note again, open in the editor.
@@ -500,7 +502,8 @@ public sealed class SensitiveFlowTests : IDisposable
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Equal(["Other.md"], RootFiles()), Wait);
-        cut.WaitForAssertion(() => Assert.Equal(["Other"], cut.FindAll("li.note button.name").Select(b => b.TextContent).ToArray()), Wait);
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("li.note button.name")), Wait);
+        Assert.Equal("No recently opened notes.", cut.Find(".recent-empty").TextContent);
         Assert.Empty(cut.FindAll(".note-editor"));
         Assert.Equal(1, data.Keys.Agrees);
     }
@@ -584,19 +587,17 @@ public sealed class SensitiveFlowTests : IDisposable
         return labels;
     }
 
-    private string[] RootFiles() => FileSnapshot.Take(data.Root, TagIndex.FileName).Keys.ToArray();
+    private string[] RootFiles() => FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName).Keys.ToArray();
 
     // The note's text, opened with the machine key outside the app's session.
     private string Unsealed(string name) => SealedNote.Open(
         name, File.ReadAllBytes(Path.Combine(data.Root, name + ".ctxs")), data.Keys.MachinePublicKey()!, data.Keys.Agree);
 
-    private static IElement NameButton(IRenderedComponent<Main> cut, string name) =>
-        cut.FindAll(".notes-region button.name").Single(b => b.TextContent == name);
 
     private static async Task Open(IRenderedComponent<Main> cut, EditorJs js, string name)
     {
         int mounts = js.Calls("ContextEditor.mount").Count;
-        await NameButton(cut, name).ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, name);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
     }

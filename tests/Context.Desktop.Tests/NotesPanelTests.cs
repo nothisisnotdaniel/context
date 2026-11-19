@@ -12,39 +12,51 @@ public sealed class NotesPanelTests : IDisposable
 
     public void Dispose() => data.Dispose();
 
-    // AC-4: NoteStore.List() names in order; 192 AC-4: rows show no date.
+    // 240 AC-1: the stored entries that name an existing note, newest first; an entry naming no note (deleted or
+    // renamed outside the app) is left out. 192 AC-4: rows show no date.
     [Fact]
-    public async Task Render_Notes_NamesInListOrder_NoDate()
+    public async Task Render_Recent_StoredOrder_MissingLeftOut_NoDate()
     {
         data.WriteNote("beta", "b");
         data.WriteNote("Alpha", "a");
-        data.WriteFile(Path.Combine("sub", "Hidden.md"), "x");
+        data.WriteNote("Gamma", "c");
+        data.WriteRecent("beta", "Gone", "Alpha", "alpha");
 
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
         IReadOnlyList<IElement> items = cut.FindAll("li.note");
-        Assert.Equal(["Alpha", "beta"], items.Select(i => i.QuerySelector(".name")!.TextContent).ToArray());
-        Assert.Equal("Alpha", items[0].QuerySelector(".name")!.GetAttribute("title"));
+        Assert.Equal(["beta", "Alpha"], items.Select(i => i.QuerySelector(".name")!.TextContent).ToArray());
+        Assert.Equal("beta", items[0].QuerySelector(".name")!.GetAttribute("title"));
+        Assert.Equal("Recent notes", Assert.Single(cut.FindAll("ul.note-list")).GetAttribute("aria-label"));
+        Assert.True(cut.Find("ul.note-list").ClassList.Contains("recent-notes"));
         Assert.Empty(cut.FindAll("li.note .time"));
         Assert.DoesNotMatch(@"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", cut.Find(".note-list").TextContent);
     }
 
-    // 192 AC-4: toggle, name, then locked, in that order, without a time.
+    // 192 AC-4, 240 AC-1 / AC-3: a row is the name button, then locked for a sensitive note, without a time; there
+    // is no toggle and no nested list, even for a note with subpages.
     [Fact]
-    public async Task Row_Order_ToggleNameLocked_NoTime()
+    public async Task Row_NameThenLocked_NoToggle_NoTime()
     {
         data.WriteNote("Plan", "p");
         data.WriteFile(Path.Combine("Plan", "Sub.md"), "s");
         data.Keys = FakeKeyStore.Ready();
         data.WriteSensitive("Secret", "x");
+        data.WriteRecent("Plan", "Secret", "Plan/Sub");
 
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
-        IElement plan = cut.FindAll("li.note > .note-row")[0];
-        Assert.Equal(["toggle", "name"], plan.Children.Select(c => c.ClassList.First()).Where(c => c is "toggle" or "name" or "locked" or "time").ToArray());
-        IElement secret = cut.FindAll("li.note > .note-row")[1];
-        Assert.Equal(["toggle-space", "name", "locked"], secret.Children.Select(c => c.ClassList.First()).ToArray());
-        Assert.Empty(cut.FindAll(".note-row .time"));
+        IReadOnlyList<IElement> rows = cut.FindAll("li.note");
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(["name"], rows[0].Children.Select(c => c.ClassList.First()).ToArray());
+        Assert.Equal(["name", "locked"], rows[1].Children.Select(c => c.ClassList.First()).ToArray());
+        Assert.Equal("locked", rows[1].QuerySelector(".locked")!.TextContent);
+        Assert.Equal(["name"], rows[2].Children.Select(c => c.ClassList.First()).ToArray());
+        Assert.All(rows, r => Assert.True(r.QuerySelector("button.name")!.ClassList.Contains("cut")));
+        Assert.All(rows, r => Assert.Equal("button", r.QuerySelector("button.name")!.GetAttribute("type")));
+        Assert.Empty(cut.FindAll("button.toggle"));
+        Assert.Empty(cut.FindAll("ul.note-children"));
+        Assert.Empty(cut.FindAll("li.note .time"));
     }
 
     // 197 AC-1, AC-3: the bar holds only the icon buttons; the list keeps its label.
@@ -53,6 +65,7 @@ public sealed class NotesPanelTests : IDisposable
     {
         data.WriteNote("Plan", "p");
         data.WriteFile(Path.Combine("Plan", "Sub.md"), "s");
+        data.WriteRecent("Plan/Sub", "Plan");
 
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
@@ -63,9 +76,8 @@ public sealed class NotesPanelTests : IDisposable
         Assert.All(bar.QuerySelectorAll("svg"), s => Assert.NotNull(s.Closest(".notes-bar-buttons")));
         Assert.DoesNotContain(cut.FindAll("h2"), h => h.TextContent.Contains("Notes"));
         Assert.DoesNotContain("Notes", bar.TextContent);
-        Assert.Equal("Notes", cut.Find("ul.note-list:not(.note-children)").GetAttribute("aria-label"));
-        await cut.Find("button.toggle[aria-label='Expand Plan']").ClickAsync(new MouseEventArgs());
-        Assert.DoesNotContain(cut.FindAll("ul.note-children"), u => u.HasAttribute("aria-label"));
+        Assert.Equal("Recent notes", Assert.Single(cut.FindAll("ul.note-list")).GetAttribute("aria-label"));
+        Assert.Empty(cut.FindAll("ul.note-children"));
         AssertBarButtons(bar);
     }
 
@@ -135,6 +147,7 @@ public sealed class NotesPanelTests : IDisposable
             SettingsStore.FileName,
             "{\"x\":1,\"savedSearches\":[{\"name\":\"Open  job1234\",\"query\":\"#job1234 and not #done\"},"
             + "{\"name\":\"<b>Budget</b>\",\"query\":\"budget\"}]}");
+        data.WriteRecent("Plan");
         List<string> searched = [];
         await data.RefreshAsync();
         IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OnSearch, (string text) => searched.Add(text)));
@@ -190,6 +203,7 @@ public sealed class NotesPanelTests : IDisposable
     {
         data.WriteNote("Plan", "p");
         data.WriteFile(SettingsStore.FileName, json);
+        data.WriteRecent("Plan");
 
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
@@ -253,7 +267,7 @@ public sealed class NotesPanelTests : IDisposable
         Assert.False(Directory.Exists(data.Root));
     }
 
-    // AC-4: a listing that throws shows the fixed red line.
+    // AC-4, 240 AC-6: a listing that throws shows the fixed red line.
     [Fact]
     public async Task Render_ListingThrows_RedLine()
     {
@@ -264,6 +278,7 @@ public sealed class NotesPanelTests : IDisposable
 
         Directory.CreateDirectory(data.Root);
         data.WriteNote("Alpha", "a");
+        data.WriteRecent("Alpha");
         File.SetUnixFileMode(data.Root, UnixFileMode.UserWrite);
         try
         {
@@ -280,22 +295,30 @@ public sealed class NotesPanelTests : IDisposable
         }
     }
 
-    // AC-5: a hostile note name is encoded text with control chars shown as U+FFFD.
+    // AC-5: a hostile note name is encoded text, in the title and in a subpage's parent. (240: recent.json only holds
+    // names that pass the note name rules, so a name with a control character or a backslash is never listed.)
     [Fact]
     public async Task Render_HostileName_Encoded()
     {
         if (OperatingSystem.IsWindows())
         {
-            return; // Windows file names can't hold < > or control chars.
+            return; // Windows file names can't hold < or >.
         }
 
-        data.WriteNote("<script>alert(1)<\\script> <img src=x onerror=alert(1)> \u0007", "x");
+        const string Hostile = "<script>alert(1)<script> <img src=x onerror=alert(1)>";
+        data.WriteNote(Hostile, "x");
+        data.WriteFile(Path.Combine(Hostile, "<img src=y>.md"), "y");
+        data.WriteRecent(Hostile + "/<img src=y>", Hostile);
 
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
         Assert.Empty(cut.FindAll("script"));
         Assert.Empty(cut.FindAll("img"));
-        Assert.Equal("<script>alert(1)<\\script> <img src=x onerror=alert(1)> �", cut.Find(".name").TextContent);
+        IReadOnlyList<IElement> names = cut.FindAll(".name");
+        Assert.Equal("<img src=y>", Title(names[0]));
+        Assert.Equal(Hostile, names[0].QuerySelector(".note-parent")!.TextContent);
+        Assert.Equal(Hostile, names[1].TextContent);
+        Assert.Equal(Hostile, names[1].GetAttribute("title"));
     }
 
     // 134 AC-7: the entry row is a plain text field (no @bind) and a New note button.
@@ -336,7 +359,10 @@ public sealed class NotesPanelTests : IDisposable
         Assert.Equal("Created Plan", status.TextContent);
         Assert.True(status.ClassList.Contains("accent"));
         Assert.Equal("status", status.GetAttribute("role"));
-        cut.WaitForAssertion(() => Assert.Contains("Plan", cut.Find(".note-list").TextContent), Wait);
+
+        // 240: OnOpen is the test's handler here, so nothing records the open; RecentNotesActionsTests covers the
+        // New note field through Main (AC-9).
+        cut.WaitForAssertion(() => Assert.Equal("No recently opened notes.", cut.Find(".recent-empty").TextContent), Wait);
     }
 
     // 134 AC-7: a refusal shows the fixed red text, keeps the typed title and opens nothing.
@@ -473,8 +499,9 @@ public sealed class NotesPanelTests : IDisposable
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal(["Alpha.md", "Beta.md"], Files().Keys);
         Assert.Equal("b\n", File.ReadAllText(Path.Combine(data.Root, "Beta.md")));
-        cut.WaitForAssertion(() => Assert.Equal(
-            ["Alpha", "Beta"], cut.FindAll("li.note button.name").Select(n => n.TextContent).ToArray()), Wait);
+        // 240: importing opens nothing, so the imported notes are not listed as recently opened.
+        cut.WaitForAssertion(() => Assert.Equal("No recently opened notes.", cut.Find(".recent-empty").TextContent), Wait);
+        Assert.Empty(cut.FindAll("li.note"));
     }
 
     // 139 AC-6: more than 100 files are refused as a whole.
@@ -611,7 +638,7 @@ public sealed class NotesPanelTests : IDisposable
         return path;
     }
 
-    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName);
+    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(20);
 
@@ -623,82 +650,115 @@ public sealed class NotesPanelTests : IDisposable
         data.WriteNote("Plan", "p");
     }
 
-    private static string[] Titles(IRenderedComponent<NotesPanel> cut) =>
-        cut.FindAll("li.note .name").Select(b => b.TextContent).ToArray();
+    // A row's title: the button's own text, without the parent span.
+    private static string Title(IElement button) =>
+        string.Concat(button.ChildNodes.Where(n => n.NodeType == NodeType.Text).Select(n => n.TextContent));
 
-    // 152 AC-13: notes start collapsed; a note with subpages has a toggle button with aria-expanded and aria-label.
+    private static string[] Titles(IRenderedComponent<NotesPanel> cut) =>
+        cut.FindAll("li.note .name").Select(Title).ToArray();
+
+    // 240 AC-3: a subpage row shows its title and its parent's full name in a grey span; its title attribute is the
+    // full name. A top-level row has no parent span.
     [Fact]
-    public async Task Tree_StartsCollapsed_ToggleButtons()
+    public async Task Recent_SubpageRow_TitleParentAndFullName()
     {
         WriteTree();
+        data.WriteRecent("Meetings/Meeting 1/Notes", "Plan", "Meetings/Meeting 1");
 
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
-        Assert.Equal(["Meetings", "Plan"], Titles(cut));
-        IElement toggle = Assert.Single(cut.FindAll("button.toggle"));
-        Assert.Equal("button", toggle.GetAttribute("type"));
-        Assert.Equal("false", toggle.GetAttribute("aria-expanded"));
-        Assert.Equal("Expand Meetings", toggle.GetAttribute("aria-label"));
+        Assert.Equal(["Notes", "Plan", "Meeting 1"], Titles(cut));
+        IReadOnlyList<IElement> names = cut.FindAll("li.note button.name");
+        Assert.Equal(["Meetings/Meeting 1/Notes", "Plan", "Meetings/Meeting 1"], names.Select(b => b.GetAttribute("title")!).ToArray());
+        Assert.Equal("Meetings/Meeting 1", names[0].QuerySelector("span.note-parent")!.TextContent);
+        Assert.Null(names[1].QuerySelector(".note-parent"));
+        Assert.Equal("Meetings", names[2].QuerySelector("span.note-parent")!.TextContent);
+        Assert.Empty(cut.FindAll("button.toggle"));
         Assert.Empty(cut.FindAll("ul.note-children"));
     }
 
-    // 152 AC-13: expanding shows nested lists with each row's title and the full name in title; collapsing hides them.
+    // 240 AC-3: two subpages with the same title under different parents can be told apart.
     [Fact]
-    public async Task Tree_Toggle_ShowsNestedLists_TitleAndFullName()
+    public async Task Recent_SameTitleTwoParents_ToldApart()
     {
-        WriteTree();
+        data.WriteNote("A", "a");
+        data.WriteFile(Path.Combine("A", "Notes.md"), "an");
+        data.WriteNote("B", "b");
+        data.WriteFile(Path.Combine("B", "Notes.md"), "bn");
+        data.WriteRecent("A/Notes", "B/Notes");
+
         IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
-        await cut.Find("button.toggle[aria-label='Expand Meetings']").ClickAsync(new MouseEventArgs());
-        await cut.Find("button.toggle[aria-label='Expand Meetings/Meeting 1']").ClickAsync(new MouseEventArgs());
-
-        Assert.Equal(["Meetings", "Meeting 1", "Notes", "Plan"], Titles(cut));
-        IElement deep = cut.Find("ul.note-children ul.note-children li.note .name");
-        Assert.Equal("Notes", deep.TextContent);
-        Assert.Equal("Meetings/Meeting 1/Notes", deep.GetAttribute("title"));
-        IElement top = cut.Find("button.toggle[aria-label='Collapse Meetings']");
-        Assert.Equal("true", top.GetAttribute("aria-expanded"));
-
-        await top.ClickAsync(new MouseEventArgs());
-
-        Assert.Equal(["Meetings", "Plan"], Titles(cut));
-        Assert.Equal("false", cut.Find("button.toggle").GetAttribute("aria-expanded"));
+        IReadOnlyList<IElement> names = cut.FindAll("li.note button.name");
+        Assert.Equal(["Notes", "Notes"], Titles(cut));
+        Assert.Equal(["A", "B"], names.Select(b => b.QuerySelector(".note-parent")!.TextContent).ToArray());
+        Assert.Equal(["A/Notes", "B/Notes"], names.Select(b => b.GetAttribute("title")!).ToArray());
     }
 
-    // 152 AC-13: clicking a subpage opens it by full name.
+    // 240 AC-3: the open note's row, and only that one, has aria-current="page".
     [Fact]
-    public async Task Tree_ClickSubpage_OpensFullName()
+    public async Task Recent_OpenRow_AriaCurrentPage()
     {
         WriteTree();
+        data.WriteRecent("Plan", "Meetings/Meeting 1", "Meetings");
+        await data.RefreshAsync();
+
+        IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OpenName, "Meetings/Meeting 1"));
+
+        Assert.Equal(
+            ["-", "page", "-"],
+            cut.FindAll("li.note button.name").Select(b => b.GetAttribute("aria-current") ?? "-").ToArray());
+    }
+
+    // 240: clicking a row opens it by its full name.
+    [Fact]
+    public async Task Recent_ClickSubpage_OpensFullName()
+    {
+        WriteTree();
+        data.WriteRecent("Plan", "Meetings/Meeting 1");
         List<string> opened = [];
         await data.RefreshAsync();
         IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OnOpen, (string name) => opened.Add(name)));
 
-        await cut.Find("button.toggle").ClickAsync(new MouseEventArgs());
         await cut.Find("button.name[title='Meetings/Meeting 1']").ClickAsync(new MouseEventArgs());
 
         Assert.Equal(["Meetings/Meeting 1"], opened);
     }
 
-    // 152 AC-13: opening a note expands its ancestors; the expanded state survives State.Changed.
-    [Fact]
-    public async Task Tree_OpenNameExpandsAncestors_SurvivesChanged()
+    // 240 AC-6: notes but no listed entry (no file, a broken file, or only names of missing notes) show the grey empty
+    // line and no error.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("{")]
+    [InlineData("{\"recent\":\"Plan\"}")]
+    [InlineData("{\"recent\":[\"Gone\"]}")]
+    public async Task Recent_NothingListed_GreyEmptyLine(string? json)
     {
         WriteTree();
-        await data.RefreshAsync();
-        IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OpenName, "Meetings/Meeting 1/Notes"));
+        if (json is not null)
+        {
+            data.WriteFile(RecentNotesStore.FileName, json);
+        }
 
-        Assert.Equal(["Meetings", "Meeting 1", "Notes", "Plan"], Titles(cut));
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
 
-        data.WriteNote("Alpha", "a");
-        await data.State!.Refresh();
-
-        cut.WaitForAssertion(() => Assert.Equal(["Alpha", "Meetings", "Meeting 1", "Notes", "Plan"], Titles(cut)), Wait);
-
-        await cut.Find("button.toggle[aria-label='Collapse Meetings']").ClickAsync(new MouseEventArgs());
-        await data.State.Refresh();
-
-        cut.WaitForAssertion(() => Assert.Equal(["Alpha", "Meetings", "Plan"], Titles(cut)), Wait);
+        IElement line = cut.Find("p.recent-empty");
+        Assert.Equal("No recently opened notes.", line.TextContent);
+        Assert.True(line.ClassList.Contains("grey"));
+        Assert.Empty(cut.FindAll("ul.note-list"));
+        Assert.Empty(cut.FindAll(".red"));
     }
 
+    // 240 AC-6: with no notes at all the empty state stays "No notes yet", whatever recent.json holds.
+    [Fact]
+    public async Task Recent_NoNotes_NoNotesYet()
+    {
+        Directory.CreateDirectory(data.Root);
+        data.WriteRecent("Plan");
+
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        Assert.Equal("No notes yet", cut.Find(".notes p").TextContent);
+        Assert.Empty(cut.FindAll("p.recent-empty"));
+    }
 }

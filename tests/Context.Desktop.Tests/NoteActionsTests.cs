@@ -748,6 +748,6 @@ public sealed class NoteActionsTests : IDisposable
         File.WriteAllBytes(path, bytes);
     }
 
-    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName);
+    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 }
 

@@ -84,14 +84,14 @@ public sealed class LinkCreateActionsTests : IDisposable
         data.WriteNote("Projects", "# Projects\n");
         data.WriteFile(Path.Combine("Projects", "Alpha.md"), "# Alpha\n");
         await data.RefreshAsync();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         ActionResult result = await data.Actions!.CreateLinkedNote(target);
 
         Assert.Equal(ActionKind.Done, result.Kind);
         Assert.Equal(ActionReason.Unchanged, result.Reason);
         Assert.Equal(expected, result.Text);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // AC-4: an existing top-level sensitive note (any case) is opened as it is: nothing written, no key-store call.
@@ -101,14 +101,14 @@ public sealed class LinkCreateActionsTests : IDisposable
         data.Keys = FakeKeyStore.Ready();
         data.WriteSensitive("Diary", "# Diary\n");
         await data.RefreshAsync();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         ActionResult result = await data.Actions!.CreateLinkedNote("diary");
 
         Assert.Equal(ActionKind.Done, result.Kind);
         Assert.Equal(ActionReason.Unchanged, result.Reason);
         Assert.Equal("Diary", result.Text);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
         AssertNoKeyCalls();
     }
 
@@ -197,14 +197,14 @@ public sealed class LinkCreateActionsTests : IDisposable
     private async Task AssertRefused(string target, ActionReason reason, string text)
     {
         await data.RefreshAsync();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         ActionResult result = await data.Actions!.CreateLinkedNote(target);
 
         Assert.Equal(ActionKind.Refused, result.Kind);
         Assert.Equal(reason, result.Reason);
         Assert.Equal(text, result.Text);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
         AssertNoKeyCalls();
     }
 

@@ -25,7 +25,7 @@ public sealed class FindPanelTests : IDisposable
         data.WriteNote("bob", "Affiliation:: acme\n");
         data.WriteNote("Carl", "affiliation:: Other\n");
         await data.RefreshAsync();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         List<string> opened = [];
         int closed = 0;
 
@@ -46,7 +46,7 @@ public sealed class FindPanelTests : IDisposable
 
         Assert.Equal(["people/Anna"], opened);
         Assert.Equal(1, closed);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // AC-10: no match shows the grey line.

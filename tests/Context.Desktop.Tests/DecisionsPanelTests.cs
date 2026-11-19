@@ -25,7 +25,7 @@ public sealed class DecisionsPanelTests : IDisposable
         data.WriteFile(Path.Combine("meetings", "2026-11-10 Weekly sync.md"), "# x\nDecision: ship it with @[Anna] and @[Bo]\n");
         data.WriteNote("2026-11-12", "- decision: paint the wall\n");
         await data.RefreshAsync();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         List<string> opened = [];
         int closed = 0;
 
@@ -58,7 +58,7 @@ public sealed class DecisionsPanelTests : IDisposable
 
         Assert.Equal(["meetings/2026-11-10 Weekly sync"], opened);
         Assert.Equal(1, closed);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // AC-8: a tag filters and is in the heading.

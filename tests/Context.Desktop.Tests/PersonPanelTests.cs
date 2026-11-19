@@ -24,7 +24,7 @@ public sealed class PersonPanelTests : IDisposable
     {
         WriteAnna();
         await data.RefreshAsync();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         List<string> opened = [];
 
         IRenderedComponent<PersonPanel> cut = data.Bunit.Render<PersonPanel>(p => p
@@ -44,7 +44,7 @@ public sealed class PersonPanelTests : IDisposable
         await cut.FindAll(".person-notes button")[1].ClickAsync(new MouseEventArgs());
 
         Assert.Equal(["Review"], opened);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // AC-11: nothing found shows the grey line.

@@ -50,12 +50,12 @@ public sealed class StartNoteActionsTests : IDisposable
         data.WriteNote("2026-10-29", "# mine\n");
         await data.RefreshAsync();
         int builds = data.State!.Builds;
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         ActionResult result = await data.Actions!.AutoOpenToday();
 
         Assert.Equal((ActionKind.Done, ActionReason.Unchanged, "2026-10-29"), (result.Kind, result.Reason, result.Text));
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
         Assert.True(data.State.Builds > builds);
         Assert.Equal("2026-10-29", data.State.TakeStartNote());
     }

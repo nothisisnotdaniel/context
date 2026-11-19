@@ -406,8 +406,7 @@ public sealed class MeetingNoteActionsTests : IDisposable
     private static async Task Open(IRenderedComponent<Main> cut, EditorJs js, string name)
     {
         int mounts = js.Calls("ContextEditor.mount").Count;
-        IElement button = cut.FindAll(".notes-region button.name").Single(b => b.TextContent == name);
-        await button.ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, name);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
     }

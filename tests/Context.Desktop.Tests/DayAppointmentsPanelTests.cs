@@ -172,7 +172,7 @@ public sealed class DayAppointmentsPanelTests : IDisposable
         WaitForItems(cut, 2);
 
         int mounts = js.Calls("ContextEditor.mount").Count;
-        await cut.FindAll(".notes-region button.name").Single(b => b.TextContent == "Plan").ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, "Plan");
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);
         WaitForItems(cut, 2);

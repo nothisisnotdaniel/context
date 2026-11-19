@@ -247,14 +247,14 @@ public sealed class LinksPanelTests : IDisposable
         WriteLinkedNotes();
         data.AddTodo("Due #work", DesktopFixture.Today);
         await data.RefreshAsync();
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         IRenderedComponent<LinksPanel> cut = Render("Plan");
         cut.WaitForAssertion(() => Assert.Equal(5, cut.FindAll(".link-row").Count), Wait);
         await data.State!.Refresh();
         cut.WaitForAssertion(() => Assert.Equal(5, cut.FindAll(".link-row").Count), Wait);
 
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // AC-10: names from disk are text, never markup; controls become U+FFFD; the full text is in the title.

@@ -294,7 +294,7 @@ public sealed class TodoPanelTests : IDisposable
         return await data.RenderAsync<TodoPanel>();
     }
 
-    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName);
+    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
     private static string Line(IElement item) =>
         string.Join(" ", item.QuerySelectorAll("span").Select(c => c.TextContent));

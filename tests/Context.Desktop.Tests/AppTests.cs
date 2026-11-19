@@ -41,5 +41,5 @@ public sealed class AppTests : IDisposable
     }
 
     // context.db* is the tag index a refresh keeps up to date; it is not user data.
-    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName);
+    private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 }

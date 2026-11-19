@@ -420,14 +420,14 @@ public sealed class TriagePanelTests : IDisposable
         js.EditUnsavable("# Plan\n\nUnsaved\n");
         await cut.Find("button.triage-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".triage-panel .triage-item")), Wait);
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         await cut.Find(".triage-panel").KeyDownAsync(new KeyboardEventArgs { Key = "a" });
         await cut.Find("input.triage-target").InputAsync(new ChangeEventArgs { Value = "Plan" });
         await cut.Find("input.triage-target").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
         Assert.Equal("Save Plan first.", cut.Find(".triage-status").TextContent);
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
     // 203 AC-8: an open target with unsaved changes is saved first; then the line is added and the editor remounted.
@@ -511,7 +511,7 @@ public sealed class TriagePanelTests : IDisposable
     private static async Task Open(IRenderedComponent<Main> cut, EditorJs js, string name)
     {
         int mounts = js.Calls("ContextEditor.mount").Count;
-        await cut.FindAll(".note-list button.name").Single(b => b.TextContent == name).ClickAsync(new MouseEventArgs());
+        await NoteOpener.OpenAsync(cut, name);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
     }
