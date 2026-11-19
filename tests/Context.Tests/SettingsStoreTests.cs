@@ -435,6 +435,153 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(before, File.ReadAllBytes(FilePath));
     }
 
+    // 244 AC-9: a missing file or section, or anything but exactly {"fetchTitles":true}, is off; nothing is created.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("{}")]
+    [InlineData("{\"paste\":{\"fetchTitles\":false}}")]
+    [InlineData("{\"paste\":true}")]
+    [InlineData("{\"paste\":{}}")]
+    [InlineData("{\"paste\":{\"fetchTitles\":\"true\"}}")]
+    [InlineData("{\"paste\":{\"fetchTitles\":true,\"x\":1}}")]
+    [InlineData("{\"outlook\":{\"enabled\":true}}")]
+    public void ReadFetchTitles_MissingOrOther_IsOff(string? text)
+    {
+        if (text is not null)
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllText(FilePath, text);
+        }
+
+        Assert.False(new SettingsStore(root).ReadFetchTitles());
+        Assert.Equal(text is not null, Directory.Exists(root));
+    }
+
+    // 244 AC-9: a broken file throws on read.
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("[1]")]
+    public void ReadFetchTitles_Broken_Throws(string text)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, text);
+
+        Assert.Throws<SettingsStoreException>(() => new SettingsStore(root).ReadFetchTitles());
+    }
+
+    // 244 AC-9: SaveFetchTitles round-trips, writes exactly {"fetchTitles":<bool>} and keeps dayEnd, savedSearches,
+    // boards, outlook and every other property equal in value.
+    [Fact]
+    public void SaveFetchTitles_RoundTrip_KeepsOthers()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(
+            FilePath,
+            "{\"theme\":\"dark\",\"dayEnd\":{\"worked\":\"2026-11-14T17:00\",\"moved\":\"2026-11-14\"},"
+            + "\"savedSearches\":[{\"name\":\"Work\",\"query\":\"#work\"}],"
+            + "\"boards\":[{\"tag\":\"work\",\"columns\":[\"todo\",\"done\"]}],\"outlook\":{\"enabled\":true}}");
+        SettingsStore store = new SettingsStore(root);
+        System.Text.Json.Nodes.JsonNode before = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(FilePath))!;
+
+        store.SaveFetchTitles(true);
+
+        Assert.True(store.ReadFetchTitles());
+        System.Text.Json.Nodes.JsonNode on = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(FilePath))!;
+        foreach (string key in new[] { "theme", "dayEnd", "savedSearches", "boards", "outlook" })
+        {
+            Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(before[key], on[key]), key);
+        }
+
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(
+            System.Text.Json.Nodes.JsonNode.Parse("{\"fetchTitles\":true}"), on["paste"]));
+        Assert.Equal([SettingsStore.FileName], Directory.GetFiles(root).Select(f => Path.GetFileName(f)!).ToArray());
+
+        store.SaveFetchTitles(false);
+
+        Assert.False(store.ReadFetchTitles());
+        System.Text.Json.Nodes.JsonNode off = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(FilePath))!;
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(before["boards"], off["boards"]));
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(
+            System.Text.Json.Nodes.JsonNode.Parse("{\"fetchTitles\":false}"), off["paste"]));
+        Assert.Single(store.ReadBoards());
+    }
+
+    // 244 AC-9: a save creates the file when there is none.
+    [Fact]
+    public void SaveFetchTitles_CreatesTheFile()
+    {
+        SettingsStore store = new SettingsStore(root);
+
+        store.SaveFetchTitles(true);
+
+        Assert.True(store.ReadFetchTitles());
+    }
+
+    // 244 AC-9: a broken settings.json is never overwritten by SaveFetchTitles.
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("{\"dayEnd\":{\"moved\":5}}")]
+    [InlineData("{\"savedSearches\":5}")]
+    public void SaveFetchTitles_Broken_Throws_AndIsNeverOverwritten(string text)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, text);
+        byte[] before = File.ReadAllBytes(FilePath);
+
+        Assert.Throws<SettingsStoreException>(() => new SettingsStore(root).SaveFetchTitles(true));
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+    }
+
+    // 244 AC-9: a folder that can't be written makes the save throw, and the file stays as it was.
+    [Fact]
+    public void SaveFetchTitles_ReadOnlyFolder_Throws_Unchanged()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, "{\"theme\":\"dark\"}");
+        byte[] before = File.ReadAllBytes(FilePath);
+        File.SetUnixFileMode(root, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            if (CanWriteIn(root))
+            {
+                // Running as root: the folder stays writable, nothing to check.
+                return;
+            }
+
+            Exception thrown = Assert.ThrowsAny<Exception>(() => new SettingsStore(root).SaveFetchTitles(true));
+            Assert.True(thrown is IOException or UnauthorizedAccessException, thrown.GetType().Name);
+            Assert.Equal(before, File.ReadAllBytes(FilePath));
+        }
+        finally
+        {
+            File.SetUnixFileMode(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    private static bool CanWriteIn(string folder)
+    {
+        string probe = Path.Combine(folder, "probe-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            File.WriteAllText(probe, "x");
+            File.Delete(probe);
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+    }
+
     // 242 AC-1: no file or no boards property gives no boards, and nothing is created.
     [Fact]
     public void ReadBoards_MissingFileOrProperty_GivesEmpty()

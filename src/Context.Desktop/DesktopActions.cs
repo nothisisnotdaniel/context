@@ -228,6 +228,9 @@ internal sealed class DesktopActions
     public const string OutlookOnText = "Outlook on.";
     public const string OutlookOffText = "Outlook off.";
     public const string OutlookUnavailableText = "Outlook can't be read on this computer.";
+    public const string FetchTitlesOnText = "Page titles on.";
+    public const string FetchTitlesOffText = "Page titles off.";
+    public const string SettingsNotSavedText = "Can't save settings.json.";
     public const string SearchGoneText = "That saved search is gone. Nothing was done.";
     public const string SearchesNotRemovedText = "Can't read settings.json. Nothing was removed.";
     public const string SearchesRemoveFailedText = "Can't write settings.json. Nothing was removed.";
@@ -1160,6 +1163,36 @@ internal sealed class DesktopActions
         }
 
         return new ActionResult(ActionKind.Done, ActionReason.None, on ? OutlookOnText : OutlookOffText);
+    }
+
+    /// <summary>
+    /// Stores whether a pasted link's page may be downloaded for its title (<c>"paste":{"fetchTitles":…}</c> in
+    /// <c>settings.json</c>, every other property kept). Done with <see cref="FetchTitlesOnText"/> or
+    /// <see cref="FetchTitlesOffText"/>; a file that can't be read, would be too large or can't be written is not
+    /// changed: Refused or Failed with <see cref="SettingsNotSavedText"/>.
+    /// </summary>
+    public Task<ActionResult> SetFetchTitles(bool on) => Run(() => SetFetchTitlesNow(on));
+
+    private ActionResult SetFetchTitlesNow(bool on)
+    {
+        try
+        {
+            settings.SaveFetchTitles(on);
+        }
+        catch (SettingsTooLargeException)
+        {
+            return Refused(ActionReason.Invalid, SettingsNotSavedText);
+        }
+        catch (SettingsStoreException)
+        {
+            return Failed(ActionReason.Unreadable, SettingsNotSavedText);
+        }
+        catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+        {
+            return Failed(ActionReason.WriteFailed, SettingsNotSavedText);
+        }
+
+        return new ActionResult(ActionKind.Done, ActionReason.None, on ? FetchTitlesOnText : FetchTitlesOffText);
     }
 
     private static ActionResult Refused(ActionReason reason, string text) => new(ActionKind.Refused, reason, text);

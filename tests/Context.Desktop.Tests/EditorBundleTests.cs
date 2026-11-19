@@ -217,7 +217,7 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
         Assert.Contains("* star item", all, StringComparison.Ordinal);
         Assert.Contains("\n=====", all, StringComparison.Ordinal);
         Assert.Contains("__bold__", all, StringComparison.Ordinal);
-        Assert.Contains("|---|", all, StringComparison.Ordinal);
+        Assert.Contains("\\|", all, StringComparison.Ordinal);
     }
 
     // Images are an image node (shown as a grey placeholder by the schema), not text the editor drops.
@@ -576,7 +576,7 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
     public void Sources_NeverSetLevelOne()
     {
         string folder = Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "editor", "src");
-        string[] files = ["index.js", "markdown.js", "schema.js", "view.js"];
+        string[] files = ["index.js", "markdown.js", "paste.js", "schema.js", "view.js"];
         Assert.Equal(files, Directory.EnumerateFiles(folder, "*.js").Select(f => Path.GetFileName(f)).Order(StringComparer.Ordinal).ToArray());
 
         foreach (string file in files)

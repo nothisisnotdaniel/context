@@ -1,6 +1,7 @@
 @inherits StateComponent
 @* The settings: the Exchange calendar link (set, replace, remove), whether Context reads classic Outlook (Windows
-   only; DesktopState.OutlookSetting) and the key that opens sensitive notes. The link
+   only; DesktopState.OutlookSetting), whether a pasted link's page title may be downloaded
+   (DesktopState.FetchTitlesSetting, off by default) and the key that opens sensitive notes. The link
    is a bearer secret: it is typed into a password field that has no value, kept in one field of this component
    until it is saved or the panel closes, handed only to DesktopActions and never rendered back; what is shown is
    the masked link from DesktopState.CalendarLinkSetting. Every section reloads whenever the state changes. *@
@@ -60,6 +61,21 @@
         <p class="outlook-hint grey">@OutlookHintText</p>
     }
     <p class="outlook-result @outlookResultClass" role="status">@outlookResultText</p>
+    <h3>Pasting</h3>
+    @if (fetchTitles is not bool fetchOn)
+    {
+        <p class="fetch-titles-state grey">Loading…</p>
+    }
+    else
+    {
+        <label class="fetch-titles-line" @key="fetchTitlesKey">
+            <input type="checkbox" class="fetch-titles" checked="@fetchOn" disabled="@busy"
+                   @onchange="ToggleFetchTitles" />
+            @FetchTitlesLabel
+        </label>
+        <p class="fetch-titles-hint grey">@FetchTitlesHintText</p>
+    }
+    <p class="fetch-titles-result @fetchTitlesResultClass" role="status">@fetchTitlesResultText</p>
     <h3>Sensitive notes</h3>
     @if (key is null)
     {
@@ -115,6 +131,8 @@
     public const string OutlookNotInstalledText =
         "Classic Outlook isn't installed. The new Outlook can't be read; use a calendar link instead.";
     public const string OutlookHintText = "Outlook may ask whether Context may access it.";
+    public const string FetchTitlesLabel = "Fetch page titles for pasted links";
+    public const string FetchTitlesHintText = "When on, Context downloads a pasted link's page to read its title.";
     public const string RemoveQuestion = "Remove the calendar link? The downloaded calendar copy is deleted too.";
 
     private const string TimeFormat = "yyyy-MM-dd HH:mm";
@@ -125,6 +143,12 @@
     private OutlookSettingView? outlook;
     private string outlookResultText = string.Empty;
     private string outlookResultClass = string.Empty;
+    private bool? fetchTitles;
+    private string fetchTitlesResultText = string.Empty;
+    private string fetchTitlesResultClass = string.Empty;
+
+    // Changes after every toggle, so the checkbox is built anew and shows what is stored, also after a failed save.
+    private int fetchTitlesKey;
     private int request;
 
     // The typed link: never rendered, cleared once it is saved and when the panel closes.
@@ -167,11 +191,13 @@
         int mine = ++request;
         CalendarLinkView linkNow = await State.CalendarLinkSetting();
         OutlookSettingView outlookNow = await State.OutlookSetting();
+        bool fetchTitlesNow = await State.FetchTitlesSetting();
         SensitiveKeyView keyNow = await State.SensitiveKey();
         if (mine == request)
         {
             link = linkNow;
             outlook = outlookNow;
+            fetchTitles = fetchTitlesNow;
             key = keyNow;
         }
     }
@@ -288,6 +314,32 @@
 
         outlookResultText = DesktopText.OneLine(result.Text);
         outlookResultClass = result.Kind == ActionKind.Done ? "accent" : "red";
+        await Load();
+    }
+
+    // The pasting checkbox: stores the new value, then shows what is stored (the old value when the save failed).
+    private async Task ToggleFetchTitles(ChangeEventArgs e)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        bool on = e.Value is bool value ? value : string.Equals(e.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.SetFetchTitles(on);
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        fetchTitlesResultText = DesktopText.OneLine(result.Text);
+        fetchTitlesResultClass = result.Kind == ActionKind.Done ? "accent" : "red";
+        fetchTitlesKey++;
         await Load();
     }
 

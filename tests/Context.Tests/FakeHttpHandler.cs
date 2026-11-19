@@ -113,6 +113,21 @@ internal sealed class FakeHttpHandler : HttpMessageHandler
             return Task.FromResult(response);
         });
 
+    /// <summary>
+    /// A 200 with <paramref name="content"/>, but the final request (after a redirect) went to <paramref name="uri"/>,
+    /// any address at all (<c>ftp:</c> included).
+    /// </summary>
+    public static FakeHttpHandler RedirectTo(string uri, HttpContent content) =>
+        new((_, _) =>
+        {
+            HttpResponseMessage response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = content,
+                RequestMessage = new HttpRequestMessage(HttpMethod.Get, new Uri(uri, UriKind.Absolute)),
+            };
+            return Task.FromResult(response);
+        });
+
     private static HttpResponseMessage Response(HttpRequestMessage request, HttpStatusCode status, HttpContent content) =>
         new(status) { Content = content, RequestMessage = request };
 

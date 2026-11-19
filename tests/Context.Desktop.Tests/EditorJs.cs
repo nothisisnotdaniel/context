@@ -10,7 +10,7 @@ namespace Context.Tests;
 /// the desktop since job 210) returns true, so a test can check it is never asked. markClean
 /// makes the editor clean; markCleanIf does so only when its Markdown is the editor's current one, and returns that.
 /// attributes returns <c>[]</c> (or what <see cref="SetAttributeRows"/> sets); setAttributes makes the editor dirty and
-/// returns true.
+/// returns true. setLinkTitle (job 244) returns true and is recorded (<see cref="LinkTitles"/>).
 /// </summary>
 internal sealed class EditorJs
 {
@@ -36,7 +36,12 @@ internal sealed class EditorJs
         js.Setup<bool>("ContextEditor.scrollToHeading", _ => true).SetResult(true);
         js.Setup<string>("ContextEditor.attributes", _ => true).SetResult("[]");
         js.Setup<bool>("ContextEditor.setAttributes", _ => SetAttributes()).SetResult(true);
+        js.Setup<bool>("ContextEditor.setLinkTitle", _ => true).SetResult(true);
     }
+
+    /// <summary>The (url, title) pairs passed to <c>ContextEditor.setLinkTitle</c> so far, in order.</summary>
+    public IReadOnlyList<(string Url, string Title)> LinkTitles() =>
+        Calls("ContextEditor.setLinkTitle").Select(c => ((string)c.Arguments[1]!, (string)c.Arguments[2]!)).ToList();
 
     /// <summary>Makes every later <c>ContextEditor.attributes</c> call return <paramref name="json"/>.</summary>
     public void SetAttributeRows(string json) => js.Setup<string>("ContextEditor.attributes", _ => true).SetResult(json);

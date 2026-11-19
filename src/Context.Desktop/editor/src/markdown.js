@@ -365,7 +365,6 @@ export function escapeText(text, lineStart, after) {
         break;
       case "`":
       case "*":
-      case "|":
         line += "\\" + c;
         break;
       case "_":

@@ -1141,23 +1141,23 @@ public sealed class DesktopSourceTests
     }
 
     // 094 AC-9: the [JSInvokable] methods only raise EditorInterop's events; none calls Actions or DesktopActions.
-    // 156 AC-10: OnPerson is one more of them. 177 AC-6, AC-9: OnDrop and OnAttachment too.
+    // 156 AC-10: OnPerson is one more of them. 177 AC-6, AC-9: OnDrop and OnAttachment too. 244 AC-4: OnPasteLink too.
     [Fact]
     public void JSInvokable_MethodsChangeNothing()
     {
         string text = File.ReadAllText(Path.Combine(RepoFiles.Root(), InteropFile));
         MatchCollection invokable = Regex.Matches(
             text,
-            @"\[JSInvokable\]\s*public\s+Task\s+(\w+)\((?:string raw|bool dirty|int count, DroppedFile\[\] files|string href|)\)\s*=>\s*([^;]*);");
+            @"\[JSInvokable\]\s*public\s+Task\s+(\w+)\((?:string raw|bool dirty|int count, DroppedFile\[\] files|string href|string url|)\)\s*=>\s*([^;]*);");
 
         // 203: OnChanged (no parameters) only raises Changed; the editor decides when to save.
         Assert.Equal(
-            ["OnTag", "OnLink", "OnPerson", "OnDirty", "OnDrop", "OnAttachment", "OnChanged"],
+            ["OnTag", "OnLink", "OnPerson", "OnDirty", "OnDrop", "OnAttachment", "OnChanged", "OnPasteLink"],
             invokable.Select(m => m.Groups[1].Value).ToArray());
-        Assert.Equal(7, Regex.Matches(text, @"\[JSInvokable").Count);
+        Assert.Equal(8, Regex.Matches(text, @"\[JSInvokable").Count);
         Assert.All(invokable, m => Assert.Matches(
             @"^\s*(TagClicked\?\.Invoke\(raw\)|LinkClicked\?\.Invoke\(raw\)|PersonClicked\?\.Invoke\(raw\)|DirtyChanged\?\.Invoke\(dirty\)"
-            + @"|FilesDropped\?\.Invoke\(new DroppedFiles\(count, files\)\)|AttachmentClicked\?\.Invoke\(href\)|Changed\?\.Invoke\(\)) \?\? Task\.CompletedTask$",
+            + @"|FilesDropped\?\.Invoke\(new DroppedFiles\(count, files\)\)|AttachmentClicked\?\.Invoke\(href\)|LinkPasted\?\.Invoke\(url\)|Changed\?\.Invoke\(\)) \?\? Task\.CompletedTask$",
             m.Groups[2].Value));
         Assert.Equal(
             "DirtyChanged?.Invoke(dirty) ?? Task.CompletedTask",
@@ -1200,8 +1200,8 @@ public sealed class DesktopSourceTests
     }
 
     // 142 AC-5: Enter on a focused chip goes through a keydown handler in the source and in the committed bundle,
-    // and the page still calls back only through OnTag, OnLink, (141) OnDirty, (156) OnPerson and (177) OnDrop and
-    // OnAttachment.
+    // and the page still calls back only through OnTag, OnLink, (141) OnDirty, (156) OnPerson, (177) OnDrop and
+    // OnAttachment and (244) OnPasteLink.
     [Theory]
     [InlineData("editor/src/view.js")]
     [InlineData("wwwroot/editor/editor.js")]
@@ -1212,7 +1212,7 @@ public sealed class DesktopSourceTests
         Assert.Matches(@"handleDOMEvents:\s*\{\s*(?://[^\n]*\n\s*)*keydown\(", text);
         Assert.Contains("opensChip", text, StringComparison.Ordinal);
         Assert.Equal(
-            ["OnAttachment", "OnChanged", "OnDirty", "OnDrop", "OnLink", "OnPerson", "OnTag"],
+            ["OnAttachment", "OnChanged", "OnDirty", "OnDrop", "OnLink", "OnPasteLink", "OnPerson", "OnTag"],
             Regex.Matches(text, @"invokeMethodAsync\(""(\w+)""").Select(m => m.Groups[1].Value).Distinct().Order(StringComparer.Ordinal));
     }
 
