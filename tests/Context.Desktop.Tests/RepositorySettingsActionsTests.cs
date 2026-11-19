@@ -79,6 +79,8 @@ public sealed class RepositorySettingsActionsTests : IDisposable
         await data.RefreshAsync();
         byte[] before = File.ReadAllBytes(SettingsPath);
         string missing = Path.Combine(repos, "missing");
+        // 281: a folder that exists and differs from existing only in case.
+        string upper = Repo("APP");
 
         (string Typed, ActionReason Reason, string Text)[] cases =
         [
@@ -86,7 +88,7 @@ public sealed class RepositorySettingsActionsTests : IDisposable
             (Path.Combine("relative", "app"), ActionReason.Invalid, DesktopActions.RepositoryRelativeText),
             (missing, ActionReason.Missing, DesktopActions.RepositoryMissingText(missing)),
             (existing, ActionReason.Exists, DesktopActions.RepositoryDuplicateText(existing)),
-            (existing.ToUpperInvariant(), ActionReason.Exists, DesktopActions.RepositoryDuplicateText(existing.ToUpperInvariant())),
+            (upper, ActionReason.Exists, DesktopActions.RepositoryDuplicateText(upper)),
             (new string('a', 401), ActionReason.Invalid, DesktopActions.RepositoryTooLongText),
         ];
         foreach ((string typed, ActionReason reason, string text) in cases)

@@ -16,6 +16,14 @@ public sealed class MainTests : IDisposable
 
     public void Dispose() => data.Dispose();
 
+    // 281 (as 279): "the reload count is 0", then the element is found and clicked in one dispatcher call, so no
+    // render can replace its handler ID between the find and the click.
+    private async Task Click(IRenderedComponent<Main> cut, Func<IElement> find)
+    {
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        await cut.InvokeAsync(() => find().ClickAsync(new MouseEventArgs()));
+    }
+
     // AC-4 layout: notes on the left, the main region in the middle, todos on the right.
     [Fact]
     public async Task Render_ThreeRegions()
@@ -2869,7 +2877,7 @@ public sealed class MainTests : IDisposable
         Assert.True(region.Children.Index().Single(c => c.Item.ClassList.Contains("note-editor")).Index < person);
         Assert.True(person < region.Children.Index().Single(c => c.Item.ClassList.Contains("links-panel")).Index);
 
-        await cut.Find(".person-panel .note-button").ClickAsync(new MouseEventArgs());
+        await Click(cut, () => cut.Find(".person-panel .note-button"));
 
         cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-title").TextContent), Wait);
         Assert.Empty(cut.FindAll(".person-panel"));

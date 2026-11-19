@@ -107,7 +107,10 @@ public sealed class RepositorySettingsTests : IDisposable
         Assert.Equal(RepositoryCheck.TooLong, Repositories.CheckAdd([], Path.Combine(parent, new string('x', 401)), out _));
         Assert.Equal(RepositoryCheck.Relative, Repositories.CheckAdd([], "relative/path", out _));
         Assert.Equal(RepositoryCheck.Missing, Repositories.CheckAdd([], Path.Combine(parent, "nope"), out _));
-        Assert.Equal(RepositoryCheck.Duplicate, Repositories.CheckAdd([a], " " + a.ToUpperInvariant() + " ", out _));
+        // 281: a folder that exists and differs from a only in case (on a case-insensitive disk it is the same folder).
+        string upper = Folder("A");
+        Assert.NotEqual(a, upper, StringComparer.Ordinal);
+        Assert.Equal(RepositoryCheck.Duplicate, Repositories.CheckAdd([a], " " + upper + " ", out _));
         string[] full = [.. Enumerable.Range(0, 20).Select(i => Path.Combine(parent, "r" + i))];
         Assert.Equal(RepositoryCheck.Full, Repositories.CheckAdd(full, a, out _));
         Assert.Equal(RepositoryCheck.Ok, Repositories.CheckAdd([], "  " + a + " ", out string folder));
