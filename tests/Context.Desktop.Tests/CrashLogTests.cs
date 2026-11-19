@@ -443,4 +443,35 @@ public sealed class CrashLogTests : IDisposable
 
         Assert.True(Directory.Exists(SessionPath));
     }
+
+    // Job 274 AC-6: a crash log and the session marker are 0600, the crash folder 0700, and a 0644 marker is 0600 once
+    // it is rewritten; no temp file is left behind.
+    [Fact]
+    public void Write_AndSession_AreOwnerOnly()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        const UnixFileMode PrivateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        CrashLog log = Create();
+        Assert.Null(log.Begin());
+        string? path = log.Write("test", Thrown(new InvalidOperationException("boom")));
+
+        Assert.NotNull(path);
+        Assert.Equal(PrivateMode, File.GetUnixFileMode(path));
+        Assert.Equal(PrivateMode, File.GetUnixFileMode(SessionPath));
+        Assert.Equal(PrivateMode | UnixFileMode.UserExecute, File.GetUnixFileMode(Logs));
+
+        File.SetUnixFileMode(
+            SessionPath, PrivateMode | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+        log.End();
+
+        Assert.Equal("clean " + Stamp(now), File.ReadAllText(SessionPath));
+        Assert.Equal(PrivateMode, File.GetUnixFileMode(SessionPath));
+        Assert.Equal(
+            [Path.GetFileName(path)!, CrashLog.SessionFileName],
+            Directory.GetFiles(Logs).Select(p => Path.GetFileName(p)!).Order(StringComparer.Ordinal).ToArray());
+    }
 }

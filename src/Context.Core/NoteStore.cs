@@ -198,12 +198,12 @@ internal sealed class NoteStore
             throw new NoteExistsException(title);
         }
 
-        Directory.CreateDirectory(root);
+        PrivateFile.CreateFolder(root);
         string path = Path.Combine(root, title + Extension);
         byte[] content = Utf8NoBom.GetBytes($"# {title}\n");
         try
         {
-            using FileStream stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            using FileStream stream = PrivateFile.OpenNew(path);
             stream.Write(content);
         }
         catch (IOException) when (File.Exists(path))
@@ -254,12 +254,12 @@ internal sealed class NoteStore
         }
 
         string folder = ChildFolderFor(owner);
-        Directory.CreateDirectory(folder);
+        PrivateFile.CreateFolder(folder);
         string path = Path.Combine(folder, title + Extension);
         byte[] content = Utf8NoBom.GetBytes($"# {title}\n" + body);
         try
         {
-            using FileStream stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            using FileStream stream = PrivateFile.OpenNew(path);
             stream.Write(content);
         }
         catch (IOException) when (File.Exists(path))
@@ -373,7 +373,7 @@ internal sealed class NoteStore
 
         string folder = owner is null ? root : ChildFolderFor(owner);
         bool created = !Directory.Exists(folder);
-        Directory.CreateDirectory(folder);
+        PrivateFile.CreateFolder(folder);
         string target = Path.Combine(folder, title + Extension);
         try
         {
@@ -622,7 +622,7 @@ internal sealed class NoteStore
         string temp = Path.Combine(folder, $".{title}{Extension}.{Guid.NewGuid():N}.tmp");
         try
         {
-            using (FileStream stream = new FileStream(temp, PrivateTempOptions()))
+            using (FileStream stream = PrivateFile.OpenNew(temp))
             {
                 stream.Write(plain);
             }
@@ -697,13 +697,13 @@ internal sealed class NoteStore
         }
 
         NoteInfo? existing = Find(List(), title);
-        Directory.CreateDirectory(root);
+        PrivateFile.CreateFolder(root);
         string name = existing?.Name ?? title;
         string path = existing?.Path ?? Path.Combine(root, title + Extension);
         string temp = Path.Combine(root, $".{name}{Extension}.{Guid.NewGuid():N}.tmp");
         try
         {
-            using (FileStream stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using (FileStream stream = PrivateFile.OpenNew(temp))
             {
                 stream.Write(content);
             }
@@ -742,12 +742,12 @@ internal sealed class NoteStore
             throw new NoteExistsException(title);
         }
 
-        Directory.CreateDirectory(root);
+        PrivateFile.CreateFolder(root);
         string path = Path.Combine(root, title + Extension);
         string temp = Path.Combine(root, $".{title}{Extension}.{Guid.NewGuid():N}.tmp");
         try
         {
-            using (FileStream stream = new FileStream(temp, PrivateTempOptions()))
+            using (FileStream stream = PrivateFile.OpenNew(temp))
             {
                 stream.Write(Utf8NoBom.GetBytes(text));
             }
@@ -787,23 +787,6 @@ internal sealed class NoteStore
         using MemoryStream stream = new MemoryStream(bytes, writable: false);
         using StreamReader reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         return reader.ReadToEnd();
-    }
-
-    // A new temp file only the owner can read and write (mode 0600 off Windows).
-    internal static FileStreamOptions PrivateTempOptions()
-    {
-        FileStreamOptions options = new FileStreamOptions
-        {
-            Mode = FileMode.CreateNew,
-            Access = FileAccess.Write,
-            Share = FileShare.None,
-        };
-        if (!OperatingSystem.IsWindows())
-        {
-            options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
-        }
-
-        return options;
     }
 
     /// <summary>

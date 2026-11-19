@@ -276,8 +276,8 @@ internal sealed class CalendarFeed
         string temp = Path.Combine(root, $".{CacheFileName}.{Guid.NewGuid():N}.tmp");
         try
         {
-            Directory.CreateDirectory(root);
-            CalendarLink.WritePrivate(temp, Utf8.GetBytes(text));
+            PrivateFile.CreateFolder(root);
+            PrivateFile.Write(temp, Utf8.GetBytes(text));
             File.SetLastWriteTimeUtc(temp, DateTime.SpecifyKind(now, DateTimeKind.Utc));
             File.Move(temp, CachePath, overwrite: true);
         }

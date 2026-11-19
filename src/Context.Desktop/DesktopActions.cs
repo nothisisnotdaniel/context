@@ -3600,24 +3600,6 @@ internal sealed class DesktopActions
     private static bool IsSealedPath(string path) =>
         string.Equals(Path.GetExtension(path), NoteStore.SensitiveExtension, StringComparison.OrdinalIgnoreCase);
 
-    // A new file only the owner can read and write (mode 0600 off Windows); never an existing one.
-    private static void WritePrivate(string path, byte[] bytes)
-    {
-        FileStreamOptions options = new FileStreamOptions
-        {
-            Mode = FileMode.CreateNew,
-            Access = FileAccess.Write,
-            Share = FileShare.None,
-        };
-        if (!OperatingSystem.IsWindows())
-        {
-            options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
-        }
-
-        using FileStream stream = new FileStream(path, options);
-        stream.Write(bytes);
-    }
-
     private static void Remove(string path)
     {
         try
@@ -3652,7 +3634,7 @@ internal sealed class DesktopActions
         string temp = Path.Combine(Path.GetDirectoryName(target) ?? string.Empty, tempName);
         try
         {
-            WritePrivate(temp, bytes);
+            PrivateFile.Write(temp, bytes);
             if (!stillValid())
             {
                 return false;
@@ -4155,7 +4137,7 @@ internal sealed class DesktopActions
             byte[] file = RecoveryFile.Create(password, out publicKey);
             try
             {
-                WritePrivate(target, file);
+                PrivateFile.Write(target, file);
             }
             catch (IOException) when (File.Exists(target))
             {

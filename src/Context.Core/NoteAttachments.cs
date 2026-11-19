@@ -296,7 +296,7 @@ internal sealed class NoteAttachments
             return new AttachmentAdd(AttachmentAddKind.Unsafe, type, null, null);
         }
 
-        Directory.CreateDirectory(folder);
+        PrivateFile.CreateFolder(folder);
         if (!IsSafeFolder(folder) || !notes.Contains(folder))
         {
             return new AttachmentAdd(AttachmentAddKind.Unsafe, type, null, null);
@@ -317,7 +317,7 @@ internal sealed class NoteAttachments
         string temp = Path.Combine(folder, $".{Guid.NewGuid():N}.tmp");
         try
         {
-            using (FileStream stream = new FileStream(temp, NoteStore.PrivateTempOptions()))
+            using (FileStream stream = PrivateFile.OpenNew(temp))
             {
                 stream.Write(bytes);
             }
@@ -633,7 +633,7 @@ internal sealed class NoteAttachments
 
             undo.LevelCreated = !Directory.Exists(level) ? level : null;
             undo.FolderCreated = !Directory.Exists(target) ? target : null;
-            Directory.CreateDirectory(target);
+            PrivateFile.CreateFolder(target);
             if (!IsSafeFolder(target) || !notes.Contains(target))
             {
                 throw new IOException("The target .attachments is not a real folder.");
@@ -871,7 +871,7 @@ internal sealed class NoteAttachments
         string temp = Path.Combine(Path.GetDirectoryName(path) ?? string.Empty, $".{Guid.NewGuid():N}.tmp");
         try
         {
-            using (FileStream stream = new FileStream(temp, NoteStore.PrivateTempOptions()))
+            using (FileStream stream = PrivateFile.OpenNew(temp))
             {
                 stream.Write(output.ToArray());
             }
