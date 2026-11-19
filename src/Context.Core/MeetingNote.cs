@@ -213,9 +213,12 @@ internal static class MeetingNote
     /// that appeared in between counts as existing. Throws <see cref="IOException"/> when a sensitive top-level
     /// <c>Meetings</c> is in the way, and <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> when
     /// the folder can't be read or written. <paramref name="beforeCreate"/> (tests only) runs after the checks, just
-    /// before the first create.
+    /// before the first create. A created note also gets <see cref="MeetingCarryOver"/>'s <c>## From last time</c>
+    /// section with the open points of the previous occurrence's note (see <see cref="CarryOver"/>);
+    /// <paramref name="beforeReadPrevious"/> (tests only) runs just before that note is read.
     /// </summary>
-    public static MeetingNoteResult Ensure(NoteStore notes, Appointment appointment, Action? beforeCreate = null)
+    public static MeetingNoteResult Ensure(
+        NoteStore notes, Appointment appointment, Action? beforeCreate = null, Action<NoteInfo>? beforeReadPrevious = null)
     {
         string part = TitlePartFor(appointment);
         string date = Date(appointment.Start);
@@ -243,6 +246,7 @@ internal static class MeetingNote
             NoteInfo meeting = Parent(notes, folder.Name, part);
             try
             {
+                body += CarryOver(notes, meeting.Name, DateOnly.FromDateTime(appointment.Start), beforeReadPrevious);
                 NoteInfo created = notes.CreateChild(meeting.Name, date, body);
                 return new MeetingNoteResult(MeetingNoteKind.Created, created.Name);
             }
@@ -259,6 +263,34 @@ internal static class MeetingNote
             // A parent that went away in between or can't hold subpages: the note can't be written.
             throw new IOException("The meeting note can't be created.", ex);
         }
+    }
+
+    /// <summary>
+    /// The carry-over section for a new note of <paramref name="date"/> under <paramref name="meetingPage"/>, or the
+    /// empty text when there is no previous note, it is over <see cref="MeetingCarryOver.MaxPreviousBytes"/>, it can't
+    /// be read or it has no open points. The previous note is only read.
+    /// </summary>
+    internal static string CarryOver(NoteStore notes, string meetingPage, DateOnly date, Action<NoteInfo>? beforeRead = null)
+    {
+        NoteInfo? previous = MeetingCarryOver.Previous(notes, meetingPage, date);
+        if (previous is null)
+        {
+            return string.Empty;
+        }
+
+        string text;
+        try
+        {
+            beforeRead?.Invoke(previous);
+            text = NoteStore.DecodeText(BoundedFile.Read(previous.Path, MeetingCarryOver.MaxPreviousBytes));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return string.Empty;
+        }
+
+        IReadOnlyList<string> lines = MeetingCarryOver.Extract(text);
+        return lines.Count == 0 ? string.Empty : MeetingCarryOver.Section(previous.Name, lines);
     }
 
     /// <summary>

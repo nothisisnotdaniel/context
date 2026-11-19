@@ -758,7 +758,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `[[note link]]` parsing in `NoteLinkParser.cs`, link rewriting on rename in `NoteLinkRewriter.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the desktop's recently opened notes (`recent.json`) in `RecentNotes.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
-    `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs`, note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs` (its triage queue, remove and snooze in `InboxTriage.cs`), the day's end in `DayEnd.cs` (Times' day file in `TimesDay.cs`, `settings.json` in `SettingsStore.cs`), the morning briefing in `Briefing.cs` (Times' flexitime balance in `TimesBalance.cs`), the todo input rules (`TryParseDate`,
+    `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs` (the agenda carry-over in `MeetingCarryOver.cs`), note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs` (its triage queue, remove and snooze in `InboxTriage.cs`), the day's end in `DayEnd.cs` (Times' day file in `TimesDay.cs`, `settings.json` in `SettingsStore.cs`), the morning briefing in `Briefing.cs` (Times' flexitime balance in `TimesBalance.cs`), the todo input rules (`TryParseDate`,
     `MaxTextLength`, `TryParseRepeat`, `NextDue`) in `TodoInput.cs`, the todo repeat in `TodoRepeat.cs`, waiting-for todos in `WaitingFor.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`), `SearchView.cs` (`search`), `TagFilter.cs` (tag filters), `DecisionsView.cs` (`decisions`, with `DecisionParser.cs`), `BoardView.cs` (tag boards), `ReviewView.cs` (the weekly review) and `CalendarLinkView.cs`
     (the calendar link), and the command ranking for the desktop palette in `CommandMatcher.cs`; the notes list is `NoteStore.List()` itself.
   - **Data step in Core, drawing in the front end:** a view's Core data step returns plain types (a kind plus raw
@@ -915,7 +915,17 @@ Every factory agent reads this file before working on Context. Keep it short and
     (`# Meetings\n`) and `Meetings/<part>` (`# <part>\n`) through `Create`/`CreateChild` (existing ones in any case are
     reused, their spelling kept) and the note through `CreateChild` (a race counts as existing). A sensitive
     top-level `Meetings` throws a plain `IOException` (the `Can't write <name>.` line). Existing legacy notes are
-    never moved. `Today(calendar, feed, day)` gives the numbered list (`CurrentView` order: files plus feed).
+    never moved. **Carry-over** (job 245, `MeetingCarryOver.cs`): only when `Ensure` creates the note, it appends
+    `MeetingCarryOver.Section` for the previous occurrence: `Previous(notes, meetingPage, date)` is the latest direct
+    subpage of the same `Meetings/<part>` page (any case) titled exactly `yyyy-MM-dd` (a real date) before the day;
+    `Extract(markdown)` gives, in line order, every open `NoteTodoParser` todo (`Raw`, leading spaces/tabs removed)
+    and the lines of every ATX `Open points` section (ignoring case, outside fences, up to the next heading of the same
+    or higher level outside fences; copied as written without its heading, outer blank lines dropped; a todo in it once),
+    `\r` dropped; `Section(name, lines)` writes `\n## From last time\n\nFrom [[<name>]]:\n\n` (plain `From <name>:`
+    for a name with `[`, `]`, `#` or a backtick) and at most `MaxLines` (200) lines, then `- … and <k> more in the
+    previous note.`. The previous note is read through `BoundedFile` at `MaxPreviousBytes` (1 MiB), never written; too
+    large, unreadable (`IOException`, `UnauthorizedAccessException`) or nothing open: no section. `Ensure`'s
+    `beforeReadPrevious` is the test hook. `Today(calendar, feed, day)` gives the numbered list (`CurrentView` order: files plus feed).
     **Daily note:** `DailyNote` (Core) names the note `yyyy-MM-dd` (invariant) for the local day. `Ensure(notes, day,
     compose)` returns `Existing` or `Sensitive` for a note of that name without calling `compose` or writing, else
     creates the top-level note through `CreateWithText` (a `NoteExistsException` race counts as existing).
