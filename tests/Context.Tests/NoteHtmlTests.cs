@@ -137,6 +137,13 @@ public sealed class NoteHtmlTests
             "<p><code>#Work [[Plan]] @[Ann]</code></p>\n<pre><code>#Work [[Plan]] @[Ann]</code></pre>\n", body);
     }
 
+    // 263 AC-10: a Mermaid fence is still shared as plain code with its text, never as a diagram.
+    [Fact]
+    public void Render_MermaidFence_IsPlainCode()
+    {
+        Assert.Equal("<pre><code>graph TD\n  A --&gt; B</code></pre>\n", Body("```mermaid\ngraph TD\n  A --> B\n```\n"));
+    }
+
     // AC-5: http, https and mailto (any case) become links; the text inside is encoded.
     [Theory]
     [InlineData("https://example.com/a?b=1&c=2", "https://example.com/a?b=1&amp;c=2")]

@@ -289,7 +289,7 @@ const parser = new MarkdownParser(schema, tokenizer, {
   ordered_list: { block: "ordered_list", getAttrs: (tok, tokens, i) => ({ order: +tok.attrGet("start") || 1, tight: listIsTight(tokens, i) }) },
   heading: { block: "heading", getAttrs: tok => ({ level: +tok.tag.slice(1) }) },
   code_block: { block: "code_block", noCloseToken: true },
-  fence: { block: "code_block", getAttrs: tok => ({ params: tok.info || "" }), noCloseToken: true },
+  fence: { block: "code_block", getAttrs: tok => ({ params: tok.info || "", fence: tok.markup || "" }), noCloseToken: true },
   hr: { node: "horizontal_rule" },
   image: {
     node: "image",
@@ -408,7 +408,21 @@ const base = defaultMarkdownSerializer.nodes;
 
 const serializer = new MarkdownSerializer({
   blockquote: base.blockquote,
-  code_block: base.code_block,
+  // A fence keeps its character (``` or ~~~) and its length, made longer than any run of that character inside.
+  code_block(state, node) {
+    const char = node.attrs.fence[0] === "~" ? "~" : "`";
+    const runs = node.textContent.match(char === "~" ? /~{3,}/g : /`{3,}/g) || [];
+    let length = Math.max(3, node.attrs.fence.length);
+    for (const run of runs) {
+      length = Math.max(length, run.length + 1);
+    }
+    const fence = char.repeat(length);
+    state.write(fence + (node.attrs.params || "") + "\n");
+    state.text(node.textContent, false);
+    state.write("\n");
+    state.write(fence);
+    state.closeBlock(node);
+  },
   heading: base.heading,
   horizontal_rule(state, node) {
     state.write("---");

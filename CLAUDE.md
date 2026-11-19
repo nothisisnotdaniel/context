@@ -626,7 +626,10 @@ Every factory agent reads this file before working on Context. Keep it short and
   Editor bundle: `src/Context.Desktop/editor/` is an npm project (exact versions in `package.json`, `package-lock.json`;
   ProseMirror + prosemirror-markdown/markdown-it, esbuild; licenses in `THIRD-PARTY-LICENSES.txt`, update it when a
   package changes). After changing `editor/src/*`, run `cd src/Context.Desktop/editor && npm install && npm run build`
-  (Node from `brew install node`) and commit the rebuilt `wwwroot/editor/editor.js` and `editor.css`; `dotnet build`
+  (Node from `brew install node`) and commit the rebuilt `wwwroot/editor/editor.js` and `editor.css`, and
+  `wwwroot/mermaid/mermaid-frame.js` (job 263: the build's second bundle, `mermaid` 12.3.0 MIT, from
+  `src/mermaid-frame.js`; `THIRD-PARTY-LICENSES.txt` has a second part for it that lists every package with bytes in
+  that bundle, nested copies included, so regenerate that part when `mermaid` changes); `dotnet build`
   and `dotnet test` never need Node. `node_modules` is ignored and `editor/**` is excluded from the C# project.
 - **Build:** `dotnet build` (must stay at 0 warnings)
 - **Strong name:** (job 161) every assembly is public-signed (`PublicSign`) with the committed `Context.snk`, which
@@ -1327,8 +1330,23 @@ Every factory agent reads this file before working on Context. Keep it short and
     (`1 subpage` for one). The palette's `/new <title>` does what the entry row
     does (`/new` alone: red `Type /new <title>.`). The page editor is `wwwroot/editor/editor.js`
     (`globalThis.ContextEditor`), built from `editor/src/` (`schema.js`, `markdown.js` with markdown-it `html: false`,
-    `view.js`, `index.js`); the JS `isLossless` stays for the bundle tests, but the desktop never calls it (job 210: no
+    `view.js`, `index.js`, `mermaid.js`, `paste.js`); the JS `isLossless` stays for the bundle tests, but the desktop never calls it (job 210: no
     reformat line, no `.lossy`, no `EditorInterop.IsLosslessAsync`).
+    Job 263 (Mermaid): `code_block` keeps its opening fence in the `fence` attr, so ```` ``` ````, `~~~` and longer fences
+    round-trip for every code block (the serializer keeps the fence character and makes it longer than any run of it in
+    the text). A fence whose first info word is `mermaid` (any ASCII case, `isMermaidFence`) gets the node view in
+    `mermaid.js`: the code (contentDOM), a grey hint (`Drawing diagram…`, `Can't draw this diagram.`) and the diagram as
+    an `<img alt="Diagram">` from a `blob:` URL (revoked on redraw and destroy); the code is hidden while drawn unless the
+    selection is in the block (`mermaid-editing` decoration), and a click on the diagram moves the cursor there. Mermaid
+    runs only in one lazily made hidden iframe per page, `wwwroot/mermaid/frame.html` (hand-written; its own CSP
+    `default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action
+    'none'`; one script `mermaid-frame.js`), with `sandbox="allow-scripts"` only: never `allow-same-origin`, never loosen
+    its `script-src`. Messages are checked by `event.source` both ways and posted with target `"*"` (the frame's origin
+    is opaque); the page takes only `mermaidResult`-checked SVG strings (`<svg`, at most 5,000,000 chars) and sends
+    only text that passes `shouldRender` (not blank, at most 50,000 chars), one request per block at a time. Mermaid
+    is initialised with `securityLevel: "strict"` and no HTML labels; its error text never leaves the frame. The frame
+    element's off-screen rule `.mermaid-frame` is in `app.css` (`editor.css` styles only `.note-editor-body`).
+    Share HTML, export and the CLI show Mermaid fences as code.
     Job 202: `NoteEditor` passes `Name` to `mount` (5th argument); `splitTitle(markdown, name)` keeps a
     first line `# <name>` (ignoring case and surrounding spaces, or the name's last segment) and the blank lines after
     it as a hidden head that is never parsed and that `getMarkdown`/`roundTrip` put back byte for byte, and inside the
@@ -1510,7 +1528,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     informational version). `VelopackUpdateSource` is the one real source: Velopack's `UpdateManager` over
     `GithubSource` with the fixed repository URL, no access token (so it can never list a draft release), no explicit channel and no downgrade; installed
     means Windows, installed by `Setup.exe` and not the portable copy. There is no update UI.
-    `wwwroot/index.html` (CSP meta tag, `img-src 'self' blob:` for attachment images, only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
+    `wwwroot/index.html` (CSP meta tag, `img-src 'self' blob:` for attachment images, `frame-src 'self'` for the Mermaid frame (job 263), only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
     and `wwwroot/editor/editor.css`.
   - **Desktop rules:** the Core writing calls (`Create`, `Save`, `SaveIfUnchanged`, `Add`, `Complete` (also `NoteTodos.Complete`), `Set`, `Clear`, `Delete`,
     `Rename`, `CreateChild`, `Move`, `MoveWithNote`, `RemoveUnlinked` (`NoteAttachments`), `ClearCache`, `Capture` (`Inbox.Capture`), `MarkNotified` (named only in `TodoStore.cs` and `DesktopActions.cs`), `Snooze` (`InboxTriage.Snooze`; `InboxTriage.Remove` is checked on its own, since components remove from their own lists), `Ensure` (`DailyNote.Ensure`, `MeetingNote.Ensure`, `Briefing.Ensure`), the note history (`Keep`, `RemoveHistory`, `RestoreVersion`; only the call `Actions.RestoreVersion(` in a `.razor` file is allowed), `CreateWithText` (`CreateNoteFromTemplate`), the day's end (`CloseDay`, `RefreshWorked`, `MoveTodos`, `AutoClose`, `MoveDue`, `SaveDayEnd`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,

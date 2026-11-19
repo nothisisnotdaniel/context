@@ -576,7 +576,7 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
     public void Sources_NeverSetLevelOne()
     {
         string folder = Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "editor", "src");
-        string[] files = ["index.js", "markdown.js", "paste.js", "schema.js", "view.js"];
+        string[] files = ["index.js", "markdown.js", "mermaid-frame.js", "mermaid.js", "paste.js", "schema.js", "view.js"];
         Assert.Equal(files, Directory.EnumerateFiles(folder, "*.js").Select(f => Path.GetFileName(f)).Order(StringComparer.Ordinal).ToArray());
 
         foreach (string file in files)
@@ -998,6 +998,141 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
 
     private string TypedBlock(string text) =>
         JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.typedBlock({Js(text)})"))!;
+
+    // 263 AC-1: a fence is a Mermaid fence when the first word of its info is "mermaid" in any ASCII case.
+    [Theory]
+    [InlineData("mermaid", true)]
+    [InlineData(" Mermaid title", true)]
+    [InlineData("MERMAID", true)]
+    [InlineData("mermaid\ttitle=\"x\"", true)]
+    [InlineData("mermaidx", false)]
+    [InlineData("", false)]
+    [InlineData("js", false)]
+    [InlineData("mer maid", false)]
+    [InlineData("x mermaid", false)]
+    public void Mermaid_IsMermaidFence(string info, bool expected)
+    {
+        Assert.Equal(expected ? "true" : "false", bundle.Json($"ContextEditor.isMermaidFence({Js(info)})"));
+    }
+
+    // 263 AC-2: only a matching "rendered" reply with a bounded string that starts with <svg is drawn.
+    [Theory]
+    [InlineData("""{"type":"rendered","id":7,"svg":"<svg viewBox=\"0 0 1 1\"></svg>"}""", "svg")]
+    [InlineData("""{"type":"rendered","id":7,"svg":"  \n<svg></svg>"}""", "svg")]
+    [InlineData("""{"type":"failed","id":7}""", "failed")]
+    [InlineData("""{"type":"rendered","id":7}""", "failed")]
+    [InlineData("""{"type":"rendered","id":7,"svg":null}""", "failed")]
+    [InlineData("""{"type":"rendered","id":7,"svg":42}""", "failed")]
+    [InlineData("""{"type":"rendered","id":7,"svg":"<img src=x onerror=alert(1)>"}""", "failed")]
+    [InlineData("""{"type":"rendered","id":7,"svg":"text <svg></svg>"}""", "failed")]
+    [InlineData("""{"type":"rendered","id":8,"svg":"<svg></svg>"}""", "ignore")]
+    [InlineData("""{"type":"failed","id":"7"}""", "ignore")]
+    [InlineData("""{"type":"rendered","svg":"<svg></svg>"}""", "ignore")]
+    [InlineData("""{"type":"other","id":7,"svg":"<svg></svg>"}""", "ignore")]
+    [InlineData("""{"id":7,"svg":"<svg></svg>"}""", "ignore")]
+    [InlineData("null", "ignore")]
+    [InlineData("7", "ignore")]
+    [InlineData("\"<svg></svg>\"", "ignore")]
+    [InlineData("""[{"type":"rendered","id":7,"svg":"<svg></svg>"}]""", "ignore")]
+    [InlineData("not json", "ignore")]
+    public void Mermaid_ResultKind(string json, string kind)
+    {
+        Assert.Equal(Js(kind), bundle.Json($"ContextEditor.mermaidResultJson({Js(json)}, 7).kind"));
+    }
+
+    // 263 AC-2: a drawn result carries the svg unchanged, and a failed one carries nothing else.
+    [Fact]
+    public void Mermaid_ResultShapes()
+    {
+        string svg = """{"type":"rendered","id":3,"svg":"<svg><text>x</text></svg>"}""";
+        Assert.Equal("""{"kind":"svg","svg":"<svg><text>x</text></svg>"}""", bundle.Json($"ContextEditor.mermaidResultJson({Js(svg)}, 3)"));
+        Assert.Equal("""{"kind":"failed"}""", bundle.Json($"ContextEditor.mermaidResultJson({Js("""{"type":"failed","id":3,"error":"Parse error"}""")}, 3)"));
+    }
+
+    // 263 AC-2: the svg may be at most 5,000,000 chars.
+    [Theory]
+    [InlineData(5_000_000, "svg")]
+    [InlineData(5_000_001, "failed")]
+    public void Mermaid_ResultSvgSizeLimit(int length, string kind)
+    {
+        string expression = "ContextEditor.mermaidResultJson(JSON.stringify({ type: \"rendered\", id: 1, svg: \"<svg\" + \"a\".repeat("
+            + (length - 4) + ") }), 1).kind";
+        Assert.Equal(Js(kind), bundle.Json(expression));
+    }
+
+    // 263 AC-3: text over 50,000 chars, empty or whitespace-only text is never sent to the frame.
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(50_000, true)]
+    [InlineData(50_001, false)]
+    public void Mermaid_ShouldRenderLimit(int length, bool expected)
+    {
+        Assert.Equal(expected ? "true" : "false", bundle.Json($"ContextEditor.shouldRender(\"a\".repeat({length}))"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("\n\t  \n")]
+    public void Mermaid_ShouldRender_NotForBlankText(string text)
+    {
+        Assert.Equal("false", bundle.Json($"ContextEditor.shouldRender({Js(text)})"));
+    }
+
+    // 263 AC-5: the Mermaid fixture covers backtick and tilde fences, longer fences and info words after "mermaid", and
+    // round-trips byte for byte (Lossless_RoundTripsByteForByte runs it too).
+    [Fact]
+    public void Mermaid_FixtureRoundTrips()
+    {
+        string markdown = Read(Path.Combine("lossless", "mermaid.md"));
+        string[] needed = ["```mermaid\n", "```Mermaid title=", "~~~mermaid\n", "~~~~mermaid\n", "````mermaid\n", "```mermaidx\n"];
+
+        Assert.All(needed, n => Assert.Contains(n, markdown, StringComparison.Ordinal));
+        Assert.Equal(markdown, bundle.Call("roundTrip", markdown));
+        Assert.Equal("true", bundle.Call("isLossless", markdown));
+    }
+
+    // 263 AC-5: tilde and longer fences are kept for every code block, and a fence grows past a run of its own character.
+    [Theory]
+    [InlineData("~~~\ncode\n~~~\n")]
+    [InlineData("~~~js\ncode\n~~~\n")]
+    [InlineData("~~~~~mermaid\ngraph TD\n~~~~~\n")]
+    [InlineData("````\n```\ninner\n```\n````\n")]
+    [InlineData("~~~mermaid\nA --> B\n~~~")]
+    public void Fences_RoundTrip(string markdown)
+    {
+        Assert.Equal(markdown, bundle.Call("roundTrip", markdown));
+    }
+
+    // 263 AC-5: a CRLF note with Mermaid fences reaches the editor as LF (NoteStore.ReadForEdit), round-trips byte for
+    // byte there, and saving that unchanged text writes nothing, so the file keeps its CRLF bytes.
+    [Fact]
+    public void Mermaid_CrlfNote_RoundTripsAndStaysUnchanged()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "context-mermaid-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string lf = Read(Path.Combine("lossless", "mermaid.md"));
+            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(lf.Replace("\n", "\r\n", StringComparison.Ordinal));
+            string path = Path.Combine(root, "Diagrams.md");
+            File.WriteAllBytes(path, bytes);
+            NoteStore store = new(root);
+
+            EditableNote opened = store.ReadForEdit(new NoteInfo("Diagrams", File.GetLastWriteTime(path), path));
+            string edited = bundle.Call("roundTrip", opened.Text);
+
+            Assert.Equal(lf, opened.Text);
+            Assert.True(opened.HadCrlf);
+            Assert.Equal(opened.Text, edited);
+            Assert.Equal(NoteSaveResult.Unchanged, store.SaveIfUnchanged(opened, edited, out _));
+            Assert.Equal(bytes, File.ReadAllBytes(path));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
 
     private static string Js(string text) => JsonSerializer.Serialize(text);
 

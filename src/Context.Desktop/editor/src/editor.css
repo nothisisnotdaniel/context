@@ -142,3 +142,35 @@
   border: none;
   border-top: 1px solid var(--line);
 }
+
+/* Mermaid diagrams (job 263): a drawn block shows the diagram and hides its code until the selection is inside it. */
+.note-editor-body .mermaid-block {
+  margin: 0 0 10px;
+}
+
+.note-editor-body .mermaid-block.drawn:not(.mermaid-editing) > pre {
+  display: none;
+}
+
+.note-editor-body .mermaid-hint {
+  color: var(--grey);
+  font-size: 0.9em;
+  font-style: italic;
+  margin: -6px 0 10px;
+}
+
+.note-editor-body .mermaid-hint[hidden],
+.note-editor-body .mermaid-block:not(.drawn) > .mermaid-diagram {
+  display: none;
+}
+
+.note-editor-body .mermaid-diagram {
+  cursor: text;
+  overflow-x: auto;
+}
+
+.note-editor-body .mermaid-diagram img {
+  display: block;
+  height: auto;
+  max-width: 100%;
+}

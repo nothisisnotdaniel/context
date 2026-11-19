@@ -2202,3 +2202,16 @@ nav.saved-searches ul {
     padding: 0;
     text-decoration: underline;
 }
+
+/* 263: the page's one hidden Mermaid renderer frame (made by the editor bundle, appended to body): laid out off screen,
+   since Mermaid measures text, and never seen, clicked or focused. */
+.mermaid-frame {
+    border: 0;
+    height: 768px;
+    left: -10000px;
+    pointer-events: none;
+    position: fixed;
+    top: 0;
+    visibility: hidden;
+    width: 1024px;
+}

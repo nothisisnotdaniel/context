@@ -64,7 +64,8 @@ export const schema = new Schema({
       code: true,
       defining: true,
       marks: "",
-      attrs: { params: { default: "" } },
+      // fence: the opening fence as written ("~~~" keeps a tilde fence); "" for an indented block or a typed one.
+      attrs: { params: { default: "" }, fence: { default: "" } },
       parseDOM: [{ tag: "pre", preserveWhitespace: "full" }],
       toDOM() { return ["pre", ["code", 0]]; },
     },
