@@ -69,7 +69,8 @@ public sealed class RecentNotesActionsTests : IDisposable
         await Open(cut, js, "N11");
 
         WaitListed(cut, names[1..].Reverse().ToArray());
-        cut.WaitForAssertion(() => Assert.Equal(names[1..].Reverse().ToArray(), new RecentNotesStore(data.Root).Read()), Wait);
+        data.WaitForRecentWrites();
+        Assert.Equal(names[1..].Reverse().ToArray(), new RecentNotesStore(data.Root).Read());
     }
 
     // AC-4: renaming, then moving, the open note updates it and its subpages in place; it does not jump to the top.
@@ -91,7 +92,8 @@ public sealed class RecentNotesActionsTests : IDisposable
         await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
         cut.WaitForAssertion(() => Assert.Equal("D", cut.Find(".note-title").TextContent), Wait);
         WaitListed(cut, "D", "C", "D/Sub");
-        cut.WaitForAssertion(() => Assert.Equal(["D", "C", "D/Sub"], new RecentNotesStore(data.Root).Read()), Wait);
+        data.WaitForRecentWrites();
+        Assert.Equal(["D", "C", "D/Sub"], new RecentNotesStore(data.Root).Read());
 
         await MainTests.ChooseAsync(cut, "move");
         await cut.Find(".move-parent").InputAsync(new ChangeEventArgs { Value = "C" });
@@ -99,7 +101,8 @@ public sealed class RecentNotesActionsTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal("Moved to C/D", cut.Find(".main-status").TextContent), Wait);
         WaitListed(cut, "C/D", "C", "C/D/Sub");
         Assert.Equal("page", cut.Find("ul.recent-notes button.name[title='C/D']").GetAttribute("aria-current"));
-        cut.WaitForAssertion(() => Assert.Equal(["C/D", "C", "C/D/Sub"], new RecentNotesStore(data.Root).Read()), Wait);
+        data.WaitForRecentWrites();
+        Assert.Equal(["C/D", "C", "C/D/Sub"], new RecentNotesStore(data.Root).Read());
     }
 
     // AC-4: the reopen after renaming or moving the open note records nothing, so an open note that is not first
@@ -150,7 +153,8 @@ public sealed class RecentNotesActionsTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.False(File.Exists(Path.Combine(data.Root, "A.md"))), Wait);
         WaitListed(cut, "B");
-        cut.WaitForAssertion(() => Assert.Equal(["B"], new RecentNotesStore(data.Root).Read()), Wait);
+        data.WaitForRecentWrites();
+        Assert.Equal(["B"], new RecentNotesStore(data.Root).Read());
     }
 
     // AC-4: a note deleted or renamed outside the app is left out of the list.
@@ -187,7 +191,8 @@ public sealed class RecentNotesActionsTests : IDisposable
         WaitListed(cut, "B", "Café", "B/Sub");
         byte[] expected = Encoding.UTF8.GetBytes("{\"recent\":[\"B\",\"Café\",\"B/Sub\"]}\n");
         string file = Path.Combine(data.Root, RecentNotesStore.FileName);
-        cut.WaitForAssertion(() => Assert.Equal(expected, File.ReadAllBytes(file)), Wait);
+        data.WaitForRecentWrites();
+        Assert.Equal(expected, File.ReadAllBytes(file));
         cut.Dispose();
 
         using DesktopFixture again = new DesktopFixture(data);
@@ -223,8 +228,8 @@ public sealed class RecentNotesActionsTests : IDisposable
         await Open(cut, js, "Plan");
 
         WaitListed(cut, "Plan");
-        cut.WaitForAssertion(() => Assert.Equal(
-            "{\"recent\":[\"Plan\"]}\n", File.ReadAllText(Path.Combine(data.Root, RecentNotesStore.FileName))), Wait);
+        data.WaitForRecentWrites();
+        Assert.Equal("{\"recent\":[\"Plan\"]}\n", File.ReadAllText(Path.Combine(data.Root, RecentNotesStore.FileName)));
     }
 
     // AC-7: recording an open is not refused while another action is Busy; the note is listed first meanwhile.
@@ -248,7 +253,8 @@ public sealed class RecentNotesActionsTests : IDisposable
         {
             await NoteOpener.OpenAsync(cut, "Plan");
             WaitListed(cut, "Plan");
-            cut.WaitForAssertion(() => Assert.Equal(["Plan"], new RecentNotesStore(data.Root).Read()), Wait);
+            data.WaitForRecentWrites();
+            Assert.Equal(["Plan"], new RecentNotesStore(data.Root).Read());
             Assert.False(busy.IsCompleted);
         }
         finally
