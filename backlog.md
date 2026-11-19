@@ -169,7 +169,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#117](backlog/117-make-the-github-repo-public.md) Make the GitHub repo public
 - [ ] [#233](backlog/233-sensitive-notes-recovery-rules.md) Sensitive-notes recovery rules
 - [ ] [#129](backlog/129-pin-the-windows-certificate-by-thumbprint.md) Pin the Windows certificate by thumbprint
-- [?] [#131](backlog/131-check-the-sensitive-setup-dialog-input.md) Check the sensitive-setup dialog input widths by eye
+- [ ] [#131](backlog/131-check-the-sensitive-setup-dialog-input.md) Check the sensitive-setup dialog input widths by eye
 - [h] [#133](backlog/133-run-the-sensitive-notes-manual-checks.md) Run the sensitive-notes manual checks on macOS and Windows
 - [ ] [#228](backlog/228-tags-and-links-panel-fixes.md) Tags and links panel fixes
 - [?] [#138](backlog/138-look-at-the-tags-and-links.md) Look at the tags and links panels in a running window
