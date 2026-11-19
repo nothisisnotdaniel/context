@@ -666,26 +666,37 @@ Every factory agent reads this file before working on Context. Keep it short and
   has three triggers: a push to `develop`, a merged `develop` -> `main` pull request titled exactly `release vX.Y.Z`,
   and a pushed `vX.Y.Z` tag. Four jobs: `release` (`ubuntu-latest`), then `desktop-macos` (`macos-latest`) and
   `desktop-windows` (`windows-latest`, `shell: bash`), which both `needs: release`, then `publish` (`ubuntu-latest`,
-  `needs` all three). Steps of `release`: check out,
+  `needs` all three). Each job has a `timeout-minutes` (`release` 30, `desktop-macos` 60, `desktop-windows` 45,
+  `publish` 15). The workflow-level `concurrency` group `release` (`cancel-in-progress: false`) covers all three
+  triggers, so two runs never create, upload, publish or prune at once; GitHub keeps only one pending run per group, so
+  a newer push cancels an older pending run (for example a queued release-PR run): re-run the cancelled run. The
+  Version step and the three `Check version` steps refuse a version, tag or target that holds a line feed or carriage
+  return before anything is written to `$GITHUB_ENV`/`$GITHUB_OUTPUT`. The root `nuget.config` has `<clear />`, the
+  one source `nuget.org` and a `packageSourceMapping` of `*` to it (a second source needs its own patterns). Steps of
+  `release`: check out,
   set up .NET, Version, `dotnet test -c Release`,
   `dotnet pack src/Context -c Release -p:Version="$VERSION"`, smoke check, create the GitHub release (notes start
   with the output of `.github/scripts/release-notes.sh <macos>`, written to `$RUNNER_TEMP/release-notes.md`: how to
-  open the desktop builds), created with `--draft`.
+  open the desktop builds), created with `--draft`. Before the create, stale-draft deletion: the step lists the drafts
+  of this exact tag (`gh api "repos/$GITHUB_REPOSITORY/releases" --paginate`, jq `select(.draft == true and .tag_name
+  == env.TAG)`), checks every id is all digits, deletes each (`gh api -X DELETE`, printing `Deleted stale draft <id> of
+  <tag>`) and fails before the create when the list, a check or a delete fails; drafts of other tags stay.
   - **Draft, then publish:** The release is a draft until `publish` runs: `release` creates it, the desktop jobs upload
     into the draft, and `publish` (no `if:`, so it is skipped when a needed job fails) makes it public. Its steps: check
     out, the version re-check, `Publish GitHub release`, `Prune old prereleases`. The publish step reads the release
-    once (`gh release view "$TAG" --json isDraft,targetCommitish,assets`) and fails, publishing nothing, unless it is
+    once (`gh release view "$TAG" --json isDraft,targetCommitish,assets`, counting only assets whose `state` is
+    `uploaded`) and fails, publishing nothing, unless it is
     a draft whose `targetCommitish` is the release's commit and that holds `Context.<version>.nupkg`, both macOS zips,
-    the Windows `Setup.exe`, this version's full `.nupkg` and `releases.<channel>.json`; only then it runs
+    the Windows `Setup.exe`, this version's full `.nupkg` and `releases.<channel>.json`. Then the tag check: `git ls-remote` of `refs/tags/$TAG` (the token only through `gh auth
+    git-credential` as the credential helper, never in argv); when the tag exists and its commit (the peeled `^{}` one
+    when present) is not the draft's, it prints `Tag <tag> points at <sha>, not at <target>; nothing is published` and
+    fails. A tag pushed between that check and the publish is not caught. Only then it runs
     `gh release edit "$TAG" --draft=false` (plus `--prerelease` for a prerelease version). A failed desktop job leaves
     an unpublished draft that neither users nor the updater see (re-run the failed job; `publish` then runs). This is
     what makes immutable releases work: GitHub refuses uploads into a published immutable release, so every asset is
     uploaded first. A draft has no git tag until it is published (develop and release-PR runs); GitHub then creates
-    the tag on the draft's commit. Stale drafts of failed runs are not cleaned up, and re-running the whole workflow
-    over an existing draft is not supported. The Windows `vpk download github --token` call can see drafts (Velopack
-    1.2.161 reads the newest 10 releases and has no draft filter), so a stale draft that holds a higher Windows
-    package of the channel becomes the delta base; an installed copy that can't apply a delta falls back to the full
-    package. Delete stale drafts by hand.
+    the tag on the draft's commit. Re-running the whole workflow works: the release job deletes this tag's stale draft
+    first.
   - **Versions:** a `develop` push makes a prerelease `X.Y.(Z+1)-develop.<run number>`, one patch above the highest
     release tag (`.github/scripts/develop-version.sh`; `0.0.1-develop.<n>` while there is no tag). A push whose changes
     are all in the root `backlog.md` and/or `backlog/**` (the user stories) is skipped (`paths-ignore`) and makes no
@@ -704,9 +715,15 @@ Every factory agent reads this file before working on Context. Keep it short and
     `.github/scripts/macos-app.sh <publish-dir> <version> <out-dir>` (Info.plist + all published files in
     `Contents/MacOS/`; it neither signs nor zips), then either ad-hoc signed (`codesign -s -`) and zipped with
     `ditto`, or signed with a Developer ID and notarized (see Signing); the asset names are the same either way. (3) The desktop app for Windows, packed by `vpk` (`--packId ContextDesktop`, `--mainExe
-    Context.Desktop.exe`): `Setup.exe`, the portable zip, this version's full `.nupkg`, a delta `.nupkg` when
-    `vpk download github` found an earlier release of the channel (a failed download only warns), and the feed
+    Context.Desktop.exe`): `Setup.exe`, the portable zip, this version's full `.nupkg`, a delta `.nupkg` when an
+    earlier published release of the channel came down, and the feed
     files (`releases.<channel>.json`, `assets.<channel>.json`, `RELEASES*`); never a package of an older version.
+    The delta base is published-only: `Pack` lists `gh release list --exclude-drafts --limit 10` (plus
+    `--exclude-pre-releases` for a proper release), skips lines that are not `v`+SemVer and the run's own tag, and
+    runs `gh release download <tag> --pattern "releases.<channel>.json" --pattern "ContextDesktop-*-full.nupkg"
+    --dir Releases` per tag until one exits 0 with both kinds of file (else `Releases/` is emptied and the next tag
+    tried). With none it warns `No earlier release downloaded; packing without a delta` and still packs; `vpk pack`
+    runs without `GH_TOKEN`; no `--token` appears anywhere in the workflow.
     The desktop jobs get version, tag and commit from the `release` job's outputs (job-level `env:` `VERSION`,
     `TAG`; checkout `ref`), re-check the version against SemVer before any `dotnet` call, and upload with
     `gh release upload "$TAG" ... --clobber`, so re-running a failed desktop job works.
@@ -758,10 +775,10 @@ Every factory agent reads this file before working on Context. Keep it short and
     and higher prereleases stay. With immutable releases on, GitHub may refuse the delete; the step then only warns.
   - **Rules:** actions pinned to commit SHAs (the same two as `ci.yml`, tag in the trailing comment); no `${{ }}`
     inside a `run:` script: PR fields, refs and the token reach the shell only through `env:` and the runner's own
-    variables. `github.token` is the only credential of every other step than the signing step (the create, publish and prune steps, the Windows `vpk download` and the two uploads). The new scripts are POSIX `sh` in the style of `macos-app.sh` (`set -eu`, usage refusal before anything is created, arguments never evaluated, no `set -x`). The three version scripts are Times' (`release-pr-version.sh` differs in one pattern: it refuses every prerelease label, Times' only `-develop`). `ReleaseWorkflowTests.cs` reads `release.yml`
+    variables. `github.token` is the only credential of every other step than the signing step (the create, publish and prune steps, the Windows `Pack` and the two uploads). The new scripts are POSIX `sh` in the style of `macos-app.sh` (`set -eu`, usage refusal before anything is created, arguments never evaluated, no `set -x`). The three version scripts are Times' (`release-pr-version.sh` differs in one pattern: it refuses every prerelease label, Times' only `-develop`). `ReleaseWorkflowTests.cs` reads `release.yml`
     only through the small YAML reader `tests/Context.Tests/WorkflowYaml.cs` (block mappings and sequences, plain and
     quoted scalars, `|` and `>` blocks, comments; anything else throws), so reformatting the YAML does not break the
-    tests, and it runs the scripts with `bash` (also the Windows `Pack` and `Upload` steps and the publish step, against stub `vpk` and `gh` commands, and the macOS signing step and scripts against stub `codesign`, `security`, `xcrun`, `spctl` and `ditto` that log their calls and can fail or answer `Invalid`; never a real keychain, certificate or Apple account). `/factory release --project Context` opens the release PR.
+    tests, and it runs the scripts with `bash` (also the Version, `Check version` and create steps, the Windows `Pack` and `Upload` steps and the publish step, against stub `vpk`, `gh` and `git` commands, and the macOS signing step and scripts against stub `codesign`, `security`, `xcrun`, `spctl` and `ditto` that log their calls and can fail or answer `Invalid`; never a real keychain, certificate or Apple account). `/factory release --project Context` opens the release PR.
 - **Run:** `dotnet run --project src/Context -- help` (command line; any `Cli` command after `--`), `dotnet run --project src/Context.Desktop` (desktop window)
 - **Layout:**
   - `Context.slnx`: the solution. `Directory.Build.props` turns on `EnforceCodeStyleInBuild`, lock files and locked restore on CI,

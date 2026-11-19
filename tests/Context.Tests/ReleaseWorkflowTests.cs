@@ -10,7 +10,7 @@ namespace Context.Tests;
 /// <summary>
 /// Checks the release flow: <c>.github/workflows/release.yml</c> (read only through <see cref="WorkflowYaml"/>), the
 /// scripts in <c>.github/scripts/</c> and the Windows pack and upload steps and the publish step (run with
-/// <c>bash</c>, no network; the steps against stub <c>vpk</c> and <c>gh</c> commands), the tool packaging in <c>Context.csproj</c>, the Velopack
+/// <c>bash</c>, no network; the steps against stub <c>vpk</c>, <c>gh</c> and <c>git</c> commands), the tool packaging in <c>Context.csproj</c>, the Velopack
 /// version in <c>Context.Desktop.csproj</c> and the release entry in <c>CLAUDE.md</c>.
 /// </summary>
 public sealed class ReleaseWorkflowTests
@@ -45,7 +45,36 @@ public sealed class ReleaseWorkflowTests
 
     private const string ViewCommand =
         "gh release view \"$TAG\" --json isDraft,targetCommitish,assets"
-        + " --jq '.isDraft, .targetCommitish, .assets[].name'";
+        + " --jq '.isDraft, .targetCommitish, (.assets[] | select(.state == \"uploaded\") | .name)'";
+
+    // 272 AC-6: the drafts of this exact tag, listed before the create.
+    private const string DraftsCommand =
+        "gh api \"repos/$GITHUB_REPOSITORY/releases\" --paginate"
+        + " --jq '.[] | select(.draft == true and .tag_name == env.TAG) | .id'";
+
+    // 272 AC-9: the tag check, with gh as the only credential helper.
+    private const string LsRemoteCommand =
+        "git -c credential.helper= -c 'credential.helper=!gh auth git-credential' ls-remote"
+        + " \"https://github.com/$GITHUB_REPOSITORY\" \"refs/tags/$TAG\" \"refs/tags/$TAG^{}\"";
+
+    // The non-comment lines of the create step (135 AC-1, 272 AC-6): list and delete this tag's drafts, then create.
+    private static readonly string[] CreateScriptLines =
+    [
+        "PRERELEASE=\"\"", "case \"$VERSION\" in", "*-*) PRERELEASE=\"--prerelease\" ;;", "esac", NotesCommand,
+        "if ! DRAFTS=\"$(" + DraftsCommand + ")\"; then",
+        "echo \"Can't list the drafts of $TAG; nothing is created\" >&2", "exit 1", "fi",
+        "if [ -n \"$DRAFTS\" ]; then",
+        "while IFS= read -r ID; do", "case \"$ID\" in", "'' | *[!0-9]*)",
+        "echo \"A listed draft id of $TAG is not a number; nothing is deleted or created\" >&2", "exit 1", ";;", "esac",
+        "done <<< \"$DRAFTS\"",
+        "while IFS= read -r ID; do",
+        "if ! gh api -X DELETE \"repos/$GITHUB_REPOSITORY/releases/$ID\" > /dev/null; then",
+        "echo \"Can't delete stale draft $ID of $TAG; nothing is created\" >&2", "exit 1", "fi",
+        "echo \"Deleted stale draft $ID of $TAG\"",
+        "done <<< \"$DRAFTS\"",
+        "fi",
+        ReleaseCommand,
+    ];
 
     private const string ReleaseTarget = "0123456789abcdef0123456789abcdef01234567";
 
@@ -207,8 +236,9 @@ public sealed class ReleaseWorkflowTests
             codesign);
     }
 
-    // 146 AC-10: the Windows job is byte-for-byte what it was before signing came to the macOS job, and nothing
-    // in the workflow signs a Windows build.
+    // 146 AC-10: the Windows job is byte-for-byte what it was before signing came to the macOS job (272 changed it
+    // on purpose: timeout, line-break check, gh-based delta download), and nothing in the workflow signs a Windows
+    // build.
     [Fact]
     public void WindowsJob_IsUnchanged_AndNothingSignsForWindows()
     {
@@ -219,7 +249,7 @@ public sealed class ReleaseWorkflowTests
         string job = workflow[start..end];
 
         Assert.Equal(
-            "DF58DE1BFB2167C2B48D34C9B1DEC048D443E5E7DF06BCD62930328E6B9795EF",
+            "CFC517FB55D319D88BB4C2247F6CD5FC9383356F6E5EBEF1D6343AF7C6B77094",
             Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(job))));
         Assert.All(AllRunScripts(workflow), script =>
         {
@@ -277,6 +307,14 @@ public sealed class ReleaseWorkflowTests
     [InlineData("release not created as a draft")]
     [InlineData("second script that publishes")]
     [InlineData("prune before publish")]
+    [InlineData("no concurrency")]
+    [InlineData("concurrency per ref")]
+    [InlineData("concurrency cancels")]
+    [InlineData("job-level concurrency instead")]
+    [InlineData("release without a timeout")]
+    [InlineData("publish without a timeout")]
+    [InlineData("desktop job without a timeout")]
+    [InlineData("another timeout")]
     public void StructureCheck_FailsOnUnsafeCopy(string change)
     {
         string workflow = ReadWorkflow();
@@ -368,6 +406,21 @@ public sealed class ReleaseWorkflowTests
                 ReplaceOnce(workflow, "      - name: Publish GitHub release\n", "      - name: Prune old prereleases\n"),
                 "      - name: Prune old prereleases\n        continue-on-error: true\n",
                 "      - name: Publish GitHub release\n        continue-on-error: true\n"),
+            // 272 AC-2, AC-3: one workflow-level group that never cancels, and a timeout on every job.
+            "no concurrency" => ReplaceOnce(
+                workflow, "concurrency:\n  group: release\n  cancel-in-progress: false\n", string.Empty),
+            "concurrency per ref" => ReplaceOnce(
+                workflow, "  group: release\n", "  group: release-${{ github.ref }}\n"),
+            "concurrency cancels" => ReplaceOnce(
+                workflow, "  cancel-in-progress: false\n", "  cancel-in-progress: true\n"),
+            "job-level concurrency instead" => ReplaceOnce(
+                ReplaceOnce(workflow, "concurrency:\n  group: release\n  cancel-in-progress: false\n", string.Empty),
+                "    timeout-minutes: 30\n",
+                "    timeout-minutes: 30\n    concurrency: release\n"),
+            "release without a timeout" => ReplaceOnce(workflow, "    timeout-minutes: 30\n", string.Empty),
+            "publish without a timeout" => ReplaceOnce(workflow, "    timeout-minutes: 15\n", string.Empty),
+            "desktop job without a timeout" => ReplaceOnce(workflow, "    timeout-minutes: 45\n", string.Empty),
+            "another timeout" => ReplaceOnce(workflow, "    timeout-minutes: 60\n", "    timeout-minutes: 360\n"),
             "pull_request_target" => ReplaceOnce(workflow, "\n  pull_request:\n", "\n  pull_request_target:\n"),
             "extra trigger" => ReplaceOnce(workflow, "\non:\n", "\non:\n  workflow_dispatch:\n"),
             "expression in run" => ReplaceOnce(
@@ -442,12 +495,52 @@ public sealed class ReleaseWorkflowTests
             "re-run the failed job",
             "the publish job deletes every -develop prerelease below X.Y.Z",
             "This is what makes immutable releases work",
+            // 272 AC-11: the concurrency group, the timeouts, stale-draft deletion, the delta base and the tag check.
+            "concurrency group \"release\" (cancel-in-progress: false) covers all three triggers",
+            "a newer run cancels an older pending one",
+            "re-run it",
+            "Each job has a timeout (release 30 minutes, desktop-macos 60, desktop-windows 45, publish 15)",
+            "the release job deletes every draft of this run's tag",
+            "The Windows delta base is an earlier published release only",
+            "gh release list --exclude-drafts",
+            "The tag check",
+            "gh auth git-credential",
+            "A tag pushed between that check and the publish is not caught",
+            "holds a line break",
+            "only fully uploaded assets",
         ];
         Assert.All(expected, text => Assert.Contains(text, flat, StringComparison.Ordinal));
         Assert.DoesNotContain("there is no desktop build", flat, StringComparison.Ordinal);
         Assert.DoesNotContain("leaves a release with fewer assets", flat, StringComparison.Ordinal);
         Assert.DoesNotContain("Nothing is signed", flat, StringComparison.Ordinal);
         Assert.DoesNotContain("release-notes-header", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("vpk download", workflow, StringComparison.Ordinal);
+    }
+
+    // 272 AC-10: restore sees only nuget.org, and every package (Velopack and the vpk tool included) maps to it.
+    [Fact]
+    public void NugetConfig_ClearsSources_AndMapsEveryPackageToNugetOrg()
+    {
+        XDocument config = XDocument.Load(Path.Combine(RepoRoot, "nuget.config"));
+        XElement root = Assert.IsType<XElement>(config.Root);
+        Assert.Equal("configuration", root.Name.LocalName);
+        Assert.Equal(["packageSources", "packageSourceMapping"], root.Elements().Select(element => element.Name.LocalName));
+
+        XElement sources = root.Element("packageSources")!;
+        Assert.Equal(["clear", "add"], sources.Elements().Select(element => element.Name.LocalName));
+        XElement add = sources.Element("add")!;
+        Assert.Equal(["key=nuget.org", "value=https://api.nuget.org/v3/index.json"], add.Attributes().Select(a => a.Name + "=" + a.Value));
+
+        XElement mapping = root.Element("packageSourceMapping")!;
+        XElement source = Assert.Single(mapping.Elements());
+        Assert.Equal("packageSource", source.Name.LocalName);
+        Assert.Equal("nuget.org", (string?)source.Attribute("key"));
+        XElement package = Assert.Single(source.Elements());
+        Assert.Equal("package", package.Name.LocalName);
+        Assert.Equal("*", (string?)package.Attribute("pattern"));
+
+        string comments = string.Join(" ", config.DescendantNodes().OfType<XComment>().Select(comment => comment.Value));
+        Assert.Contains("A second source must get its own patterns", Regex.Replace(comments, @"\s+", " "), StringComparison.Ordinal);
     }
 
     // AC-2: the version is set first, the tests run on the normal build, then the pack takes the version.
@@ -612,6 +705,123 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("echo \"tag=$TAG\" >> \"$GITHUB_OUTPUT\"", script[check..], StringComparison.Ordinal);
         Assert.Contains("echo \"target=$TARGET\" >> \"$GITHUB_OUTPUT\"", script[check..], StringComparison.Ordinal);
         Assert.Equal(3, Regex.Matches(script, Regex.Escape(">> \"$GITHUB_OUTPUT\"")).Count);
+    }
+
+    // 272 AC-4: the Version step (tag branch, stub git) refuses a tag or commit with a line feed or carriage return
+    // and writes nothing to $GITHUB_ENV or $GITHUB_OUTPUT; the line-based SemVer check alone would let 'v1.2.3<LF>X=y'
+    // through. A valid tag still writes the six lines.
+    [Theory]
+    [InlineData("v1.2.3\nX=y", "")]
+    [InlineData("v1.2.3\rX=y", "")]
+    [InlineData("v1.2.3\n", "")]
+    [InlineData("v1.2.3\r", "")]
+    [InlineData("v1.2.3", "\nX=y")]
+    [InlineData("v1.2.3", "\r")]
+    [InlineData("v1.2.3", "")]
+    public async Task VersionStep_RefusesLineBreaksBeforeAnyWrite(string refName, string shaSuffix)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        bool valid = refName == "v1.2.3" && shaSuffix.Length == 0;
+        string folder = NewTempFolder();
+        try
+        {
+            string env = Path.Combine(folder, "github-env");
+            string output = Path.Combine(folder, "github-output");
+            File.WriteAllText(env, string.Empty);
+            File.WriteAllText(output, string.Empty);
+            ScriptResult result = await RunStep(
+                folder,
+                VersionScript(),
+                "unused",
+                extra: new Dictionary<string, string>
+                {
+                    ["GITHUB_EVENT_NAME"] = "push",
+                    ["GITHUB_REF_TYPE"] = "tag",
+                    ["GITHUB_REF_NAME"] = refName,
+                    ["GITHUB_SHA"] = ReleaseTarget + shaSuffix,
+                    ["GITHUB_ENV"] = env,
+                    ["GITHUB_OUTPUT"] = output,
+                });
+
+            Assert.Equal(
+                "git [token] merge-base --is-ancestor " + ReleaseTarget + shaSuffix + " origin/main\n",
+                File.ReadAllText(Path.Combine(folder, "stub.log")));
+            if (valid)
+            {
+                Assert.True(result.Code == 0, "Version exit " + result.Code + ": " + result.Err);
+                Assert.Equal(["VERSION=1.2.3", "TAG=v1.2.3", "TARGET=" + ReleaseTarget], File.ReadAllLines(env));
+                Assert.Equal(["version=1.2.3", "tag=v1.2.3", "target=" + ReleaseTarget], File.ReadAllLines(output));
+            }
+            else
+            {
+                Assert.NotEqual(0, result.Code);
+                Assert.Contains("line break", result.Err, StringComparison.Ordinal);
+                Assert.Equal(string.Empty, File.ReadAllText(env));
+                Assert.Equal(string.Empty, File.ReadAllText(output));
+            }
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 272 AC-5: each Check version step refuses a version or tag with a line feed or carriage return as its first
+    // check (the SemVer check reads only the first line); a valid version still passes.
+    [Theory]
+    [InlineData("desktop-macos", "1.2.3\nX=y", null)]
+    [InlineData("desktop-macos", "1.2.3", "v1.2.3\r")]
+    [InlineData("desktop-macos", "1.2.3\r", null)]
+    [InlineData("desktop-macos", "1.2.3", null)]
+    [InlineData("desktop-windows", "1.2.3\nX=y", null)]
+    [InlineData("desktop-windows", "1.2.3", "v1.2.3\nX=y")]
+    [InlineData("desktop-windows", "1.2.4-develop.7\r", null)]
+    [InlineData("desktop-windows", "1.2.3", null)]
+    [InlineData("publish", "1.2.3\nX=y", null)]
+    [InlineData("publish", "1.2.3", "v1.2.3\r")]
+    [InlineData("publish", "1.2.3\r", null)]
+    [InlineData("publish", "1.2.4-develop.7", null)]
+    public async Task CheckVersion_RefusesLineBreaksFirst(string job, string version, string? tag)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        bool valid = !version.Contains('\n', StringComparison.Ordinal) && !version.Contains('\r', StringComparison.Ordinal)
+            && tag is null;
+        Dictionary<string, string> extra = new Dictionary<string, string> { ["MACOS_SIGNING"] = "" };
+        if (tag is not null)
+        {
+            extra["TAG"] = tag;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            ScriptResult result = await RunStep(folder, JobScript(job, "Check version"), version, extra: extra);
+
+            if (valid)
+            {
+                Assert.True(result.Code == 0, "Check exit " + result.Code + ": " + result.Err);
+                Assert.Equal(string.Empty, result.Err);
+            }
+            else
+            {
+                Assert.NotEqual(0, result.Code);
+                Assert.Equal("The version or tag holds a line break\n", result.Err);
+            }
+
+            Assert.Empty(StubLog(folder));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
     }
 
     // AC-5
@@ -883,10 +1093,89 @@ public sealed class ReleaseWorkflowTests
             script => script.Contains("gh release create", StringComparison.Ordinal));
         string[] lines = [.. release.Split('\n').Select(line => line.Trim()).Where(line => line.Length > 0)];
 
-        Assert.Equal(
-            ["PRERELEASE=\"\"", "case \"$VERSION\" in", "*-*) PRERELEASE=\"--prerelease\" ;;", "esac", NotesCommand, ReleaseCommand],
-            lines.Where(line => !line.StartsWith('#')));
+        Assert.Equal(CreateScriptLines, lines.Where(line => !line.StartsWith('#')));
         Assert.DoesNotContain("$GITHUB_SHA", release, StringComparison.Ordinal);
+    }
+
+    // 272 AC-6: the create step, run with bash against a stub gh: it lists this tag's drafts, checks every id, deletes
+    // each and only then creates; a failed list, a non-numeric id (before any delete) or a failed delete stops it
+    // before the create.
+    [Theory]
+    [InlineData("1.2.3", "none")]
+    [InlineData("1.2.3", "one")]
+    [InlineData("1.2.3", "two")]
+    [InlineData("1.2.4-develop.7", "two")]
+    [InlineData("1.2.3", "list fails")]
+    [InlineData("1.2.3", "delete fails")]
+    [InlineData("1.2.3", "not digits")]
+    [InlineData("1.2.3", "empty id")]
+    public async Task ReleaseStep_DeletesThisTagsStaleDraftsBeforeTheCreate(string version, string situation)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string tag = "v" + version;
+        (string drafts, int draftsExit, string deleteFails, string[] deleted, bool creates) = situation switch
+        {
+            "none" => ("", 0, "", Array.Empty<string>(), true),
+            "one" => ("101\n", 0, "", ["101"], true),
+            "two" => ("101\n102\n", 0, "", ["101", "102"], true),
+            "list fails" => ("101\n", 1, "", [], false),
+            "delete fails" => ("101\n102\n103\n", 0, "102\n", ["101", "102"], false),
+            "not digits" => ("101\n12;x\n", 0, "", [], false),
+            _ => ("101\n\n102\n", 0, "", [], false),
+        };
+
+        string folder = NewTempFolder();
+        try
+        {
+            string scripts = Path.Combine(folder, ".github", "scripts");
+            Directory.CreateDirectory(scripts);
+            File.Copy(
+                Path.Combine(RepoRoot, ".github", "scripts", "release-notes.sh"), Path.Combine(scripts, "release-notes.sh"));
+            ScriptResult result = await RunStep(
+                folder,
+                Scalar(Step(ReadWorkflow(), "Create GitHub release")["run"]),
+                version,
+                drafts: drafts,
+                draftsExit: draftsExit,
+                deleteFails: deleteFails,
+                extra: new Dictionary<string, string> { ["MACOS_SIGNING"] = "" });
+
+            List<string> expected =
+            [
+                "gh [token] api repos/owner/repo/releases --paginate"
+                    + " --jq .[] | select(.draft == true and .tag_name == env.TAG) | .id",
+                .. deleted.Select(id => "gh [token] api -X DELETE repos/owner/repo/releases/" + id),
+            ];
+            if (creates)
+            {
+                expected.Add(
+                    "gh [token] release create " + tag + " nupkg/Context." + version + ".nupkg --title Context " + version
+                    + " --notes-file " + Path.Combine(folder, "release-notes.md") + " --generate-notes --target "
+                    + ReleaseTarget + " --draft" + (version.Contains('-', StringComparison.Ordinal) ? " --prerelease" : ""));
+            }
+
+            Assert.Equal(expected, StubLog(folder));
+            Assert.Equal(
+                deleted.Where(id => creates || id != deleteFails.Trim()).Select(id => "Deleted stale draft " + id + " of " + tag),
+                result.Out.Split('\n', StringSplitOptions.RemoveEmptyEntries));
+            if (creates)
+            {
+                Assert.True(result.Code == 0, "Create exit " + result.Code + ": " + result.Err);
+            }
+            else
+            {
+                Assert.NotEqual(0, result.Code);
+                Assert.DoesNotContain("12;x", result.Err, StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
     }
 
     // AC-9: the prune step skips prereleases, fails on a failed listing and deletes only filtered tags.
@@ -1101,6 +1390,22 @@ public sealed class ReleaseWorkflowTests
     [InlineData("`gh release edit \"$TAG\" --draft=false`")]
     [InlineData("runs in `publish`")]
     [InlineData("This is what makes immutable releases work")]
+    // 272 AC-11: the concurrency group, the timeouts, stale-draft deletion, the published-only delta base, the tag
+    // check and the cancelled pending run.
+    [InlineData("concurrency` group `release` (`cancel-in-progress: false`) covers all three triggers")]
+    [InlineData("a newer push cancels an older pending run")]
+    [InlineData("re-run the cancelled run")]
+    [InlineData("`timeout-minutes` (`release` 30, `desktop-macos` 60, `desktop-windows` 45, `publish` 15)")]
+    [InlineData("stale-draft deletion")]
+    [InlineData("Deleted stale draft <id> of <tag>")]
+    [InlineData("Re-running the whole workflow works")]
+    [InlineData("The delta base is published-only")]
+    [InlineData("--exclude-drafts")]
+    [InlineData("the tag check")]
+    [InlineData("A tag pushed between that check and the publish is not caught")]
+    [InlineData("`state` is `uploaded`")]
+    [InlineData("line feed or carriage return")]
+    [InlineData("`nuget.config`")]
     public void ClaudeMd_DescribesTheReleaseFlow(string expected)
     {
         string text = File.ReadAllText(Path.Combine(RepoRoot, "CLAUDE.md")).ReplaceLineEndings("\n");
@@ -1118,6 +1423,12 @@ public sealed class ReleaseWorkflowTests
         Assert.DoesNotContain("only the root `backlog.md` is skipped", Regex.Replace(text, @"\s+", " "), StringComparison.Ordinal);
         Assert.DoesNotContain("release-notes-header", text, StringComparison.Ordinal);
         Assert.DoesNotContain("builds are only ad-hoc signed", Regex.Replace(text, @"\s+", " "), StringComparison.Ordinal);
+        // 272 AC-11: stale drafts are cleaned up now, and the Windows job no longer downloads through vpk.
+        string flat = Regex.Replace(text, @"\s+", " ");
+        Assert.DoesNotContain("Stale drafts of failed runs are not cleaned up", flat, StringComparison.Ordinal);
+        Assert.DoesNotContain("is not supported", entry, StringComparison.Ordinal);
+        Assert.DoesNotContain("Delete stale drafts by hand", flat, StringComparison.Ordinal);
+        Assert.DoesNotContain("vpk download", flat, StringComparison.Ordinal);
     }
 
     // 133 AC-2: both architectures are published self-contained with the version, then bundled, ad-hoc signed,
@@ -1381,15 +1692,17 @@ public sealed class ReleaseWorkflowTests
             Lines(JobScript("desktop-windows", "Publish")));
     }
 
-    // 133 AC-4, AC-5: the Pack step, run with bash against a stub vpk: an earlier release of the same channel is
-    // downloaded first (with the token), then the pack runs without the token; --channel develop exactly for a
-    // version with a prerelease label.
+    // 133 AC-4, AC-5, 272 AC-7: the Pack step, run with bash against stub gh and vpk: the newest earlier published
+    // release of the same channel is listed and downloaded through gh (with the token in env), then the pack runs
+    // without the token; --channel develop exactly for a version with a prerelease label, and only a proper release
+    // leaves prereleases out of the list.
     [Theory]
-    [InlineData("1.2.3", "")]
-    [InlineData("1.2.4-develop.7", " --channel develop")]
-    [InlineData("0.0.1-develop.1", " --channel develop")]
-    [InlineData("2.0.0", "")]
-    public async Task WindowsPackStep_UsesTheDevelopChannelOnlyForPrereleases(string version, string channel)
+    [InlineData("1.2.3", "", "win", " --exclude-pre-releases")]
+    [InlineData("1.2.4-develop.7", " --channel develop", "develop", "")]
+    [InlineData("0.0.1-develop.1", " --channel develop", "develop", "")]
+    [InlineData("2.0.0", "", "win", " --exclude-pre-releases")]
+    public async Task WindowsPackStep_UsesTheDevelopChannelOnlyForPrereleases(
+        string version, string channel, string name, string exclude)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -1399,20 +1712,28 @@ public sealed class ReleaseWorkflowTests
         string folder = NewTempFolder();
         try
         {
-            ScriptResult result = await RunStep(folder, JobScript("desktop-windows", "Pack"), version, downloadExit: 0);
+            ScriptResult result = await RunStep(
+                folder,
+                JobScript("desktop-windows", "Pack"),
+                version,
+                list: "v0.9.0\n",
+                downloads: "v0.9.0 0 releases." + name + ".json ContextDesktop-0.9.0-full.nupkg\n");
 
             Assert.True(result.Code == 0, "Pack exit " + result.Code + ": " + result.Err);
-            string pre = channel.Length > 0 ? " --pre" : string.Empty;
             Assert.Equal(
                 [
-                    "vpk [token] download github --repoUrl https://github.com/owner/repo --token stub-token"
-                        + " --outputDir Releases" + channel + pre,
+                    "gh [token] release list --exclude-drafts" + exclude + " --limit 10 --json tagName --jq .[].tagName",
+                    "gh [token] release download v0.9.0 --pattern releases." + name + ".json"
+                        + " --pattern ContextDesktop-*-full.nupkg --dir Releases",
                     "vpk [no token] pack --packId ContextDesktop --packVersion " + version
                         + " --packDir publish/win-x64 --mainExe Context.Desktop.exe --packTitle Context"
                         + " --runtime win-x64 --outputDir Releases" + channel,
                 ],
                 StubLog(folder));
             Assert.DoesNotContain("::warning::", result.Out, StringComparison.Ordinal);
+            Assert.Equal(
+                ["ContextDesktop-0.9.0-full.nupkg", "releases." + name + ".json"],
+                Sorted(Directory.GetFiles(Path.Combine(folder, "Releases")).Select(path => Path.GetFileName(path)!)));
         }
         finally
         {
@@ -1420,34 +1741,129 @@ public sealed class ReleaseWorkflowTests
         }
     }
 
-    // 133 AC-5: no earlier release (the download fails) only warns: the pack still runs and the step passes. A
-    // failed pack fails the step.
+    // 272 AC-7: tags are tried in list order until one download exits 0 with the feed and a full package; a failed or
+    // partial try empties Releases/; junk lines and the run's own tag are never downloaded; a failed list or no working
+    // tag only warns, and the pack still runs.
     [Theory]
-    [InlineData("1.2.3")]
-    [InlineData("1.2.4-develop.7")]
-    public async Task WindowsPackStep_AFailedDownloadOnlyWarns_AFailedPackFails(string version)
+    [InlineData("1.2.3", "first works")]
+    [InlineData("1.2.3", "first fails")]
+    [InlineData("1.2.3", "feed only")]
+    [InlineData("1.2.3", "full package only")]
+    [InlineData("1.2.3", "junk and own tag")]
+    [InlineData("1.2.3", "list fails")]
+    [InlineData("1.2.3", "none work")]
+    [InlineData("1.2.4-develop.7", "first fails")]
+    [InlineData("1.2.4-develop.7", "junk and own tag")]
+    [InlineData("1.2.4-develop.7", "none work")]
+    public async Task WindowsPackStep_TriesPublishedTagsInOrder(string version, string situation)
     {
         if (OperatingSystem.IsWindows())
         {
             return;
         }
 
+        string name = version.Contains('-', StringComparison.Ordinal) ? "develop" : "win";
+        string feed = "releases." + name + ".json";
+        string Works(string tag, int code = 0) =>
+            tag + " " + code + " " + feed + " ContextDesktop-" + tag[1..] + "-full.nupkg\n";
+        string list = "v1.0.1\nv1.0.0\n";
+        int listExit = 0;
+        string downloads = Works("v1.0.1") + Works("v1.0.0");
+        string[] tried = ["v1.0.1"];
+        string? kept = "v1.0.1";
+        switch (situation)
+        {
+            case "first fails":
+                downloads = Works("v1.0.1", 1) + Works("v1.0.0");
+                tried = ["v1.0.1", "v1.0.0"];
+                kept = "v1.0.0";
+                break;
+            case "feed only":
+                downloads = "v1.0.1 0 " + feed + "\n" + Works("v1.0.0");
+                tried = ["v1.0.1", "v1.0.0"];
+                kept = "v1.0.0";
+                break;
+            case "full package only":
+                downloads = "v1.0.1 0 ContextDesktop-1.0.1-full.nupkg releases.other.json\n" + Works("v1.0.0");
+                tried = ["v1.0.1", "v1.0.0"];
+                kept = "v1.0.0";
+                break;
+            case "junk and own tag":
+                list = "v" + version + "\n\nlatest\n1.0.2\nv1.0\nv01.0.0\nv1.0.2;x\nv1.0.2 x\nv1.0.0\n";
+                downloads = Works("v" + version) + Works("v1.0.2") + Works("v1.0.0");
+                tried = ["v1.0.0"];
+                kept = "v1.0.0";
+                break;
+            case "list fails":
+                listExit = 1;
+                tried = [];
+                kept = null;
+                break;
+            case "none work":
+                downloads = Works("v1.0.1", 1) + "v1.0.0 0 " + feed + "\n";
+                tried = ["v1.0.1", "v1.0.0"];
+                kept = null;
+                break;
+        }
+
         string folder = NewTempFolder();
         try
         {
-            string script = JobScript("desktop-windows", "Pack");
-            ScriptResult result = await RunStep(folder, script, version, downloadExit: 1);
+            ScriptResult result = await RunStep(
+                folder, JobScript("desktop-windows", "Pack"), version, list: list, listExit: listExit, downloads: downloads);
 
             Assert.True(result.Code == 0, "Pack exit " + result.Code + ": " + result.Err);
-            Assert.Contains("::warning::", result.Out, StringComparison.Ordinal);
             List<string> log = StubLog(folder);
-            Assert.Equal(2, log.Count);
-            Assert.StartsWith("vpk [token] download github ", log[0], StringComparison.Ordinal);
-            Assert.StartsWith("vpk [no token] pack ", log[1], StringComparison.Ordinal);
+            Assert.StartsWith("gh [token] release list --exclude-drafts ", log[0], StringComparison.Ordinal);
+            Assert.Equal(
+                tried.Select(tag => "gh [token] release download " + tag + " --pattern " + feed
+                    + " --pattern ContextDesktop-*-full.nupkg --dir Releases"),
+                log.Skip(1).SkipLast(1));
+            Assert.StartsWith("vpk [no token] pack ", log[^1], StringComparison.Ordinal);
+            string releases = Path.Combine(folder, "Releases");
+            if (kept is null)
+            {
+                Assert.Contains(
+                    "::warning::No earlier release downloaded; packing without a delta", result.Out, StringComparison.Ordinal);
+                Assert.False(Directory.Exists(releases) && Directory.EnumerateFileSystemEntries(releases).Any());
+            }
+            else
+            {
+                Assert.DoesNotContain("::warning::", result.Out, StringComparison.Ordinal);
+                Assert.Equal(
+                    ["ContextDesktop-" + kept[1..] + "-full.nupkg", feed],
+                    Sorted(Directory.GetFiles(releases).Select(path => Path.GetFileName(path)!)));
+            }
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
 
-            File.Delete(Path.Combine(folder, "stub.log"));
-            ScriptResult failed = await RunStep(folder, script, version, downloadExit: 0, packExit: 1);
+    // 133 AC-5, 272 AC-7: a failed pack fails the step; nothing in the workflow downloads through vpk or passes a token
+    // on a command line.
+    [Theory]
+    [InlineData("1.2.3")]
+    [InlineData("1.2.4-develop.7")]
+    public async Task WindowsPackStep_AFailedPackFails_AndNoTokenIsAnArgument(string version)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string workflow = ReadWorkflow();
+        Assert.DoesNotContain("--token", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("vpk download", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("--pre ", workflow, StringComparison.Ordinal);
+
+        string folder = NewTempFolder();
+        try
+        {
+            ScriptResult failed = await RunStep(folder, JobScript("desktop-windows", "Pack"), version, packExit: 1);
             Assert.NotEqual(0, failed.Code);
+            Assert.StartsWith("vpk [no token] pack ", StubLog(folder)[^1], StringComparison.Ordinal);
         }
         finally
         {
@@ -1571,8 +1987,9 @@ public sealed class ReleaseWorkflowTests
             Assert.True(result.Code == 0, "Publish exit " + result.Code + ": " + result.Err);
             Assert.Equal(
                 [
-                    "gh [token] release view v" + version
-                        + " --json isDraft,targetCommitish,assets --jq .isDraft, .targetCommitish, .assets[].name",
+                    "gh [token] release view v" + version + " --json isDraft,targetCommitish,assets"
+                        + " --jq .isDraft, .targetCommitish, (.assets[] | select(.state == \"uploaded\") | .name)",
+                    LsRemoteLog(version),
                     "gh [token] release edit v" + version + " --draft=false" + prerelease,
                 ],
                 StubLog(folder));
@@ -1706,7 +2123,84 @@ public sealed class ReleaseWorkflowTests
                 editExit: 1);
 
             Assert.NotEqual(0, result.Code);
-            Assert.Equal(2, StubLog(folder).Count);
+            Assert.Equal(3, StubLog(folder).Count);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 272 AC-9: the tag check before the edit, against a stub git: no tag line goes on; a plain or peeled line on the
+    // draft's commit goes on (the peeled one wins over the plain one); another commit, or a failed ls-remote, fails
+    // without the edit; lines for other refs are ignored. git gets the token only from env, through gh.
+    [Theory]
+    [InlineData("1.2.3", "no tag line")]
+    [InlineData("1.2.3", "plain match")]
+    [InlineData("1.2.3", "peeled match")]
+    [InlineData("1.2.3", "plain mismatch")]
+    [InlineData("1.2.3", "peeled mismatch")]
+    [InlineData("1.2.3", "other refs only")]
+    [InlineData("1.2.3", "ls-remote fails")]
+    [InlineData("1.2.4-develop.7", "no tag line")]
+    [InlineData("1.2.4-develop.7", "plain mismatch")]
+    public async Task PublishStep_ChecksTheTagBeforeTheEdit(string version, string situation)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        const string Other = "76543210fedcba9876543210fedcba9876543210";
+        string tag = "v" + version;
+        (string refs, int gitExit, string? tagged) = situation switch
+        {
+            "no tag line" => ("", 0, null),
+            "plain match" => (ReleaseTarget + "\trefs/tags/" + tag + "\n", 0, null),
+            "peeled match" => (Other + "\trefs/tags/" + tag + "\n" + ReleaseTarget + "\trefs/tags/" + tag + "^{}\n", 0, null),
+            "plain mismatch" => (Other + "\trefs/tags/" + tag + "\n", 0, Other),
+            "peeled mismatch" => (ReleaseTarget + "\trefs/tags/" + tag + "\n" + Other + "\trefs/tags/" + tag + "^{}\n", 0, Other),
+            "other refs only" => (
+                Other + "\trefs/tags/x/refs/tags/" + tag + "\n" + Other + "\trefs/tags/" + tag + "x\n"
+                    + Other + "\trefs/heads/" + tag + "\n",
+                0,
+                null),
+            _ => ("", 128, null),
+        };
+        bool publishes = gitExit == 0 && tagged is null;
+
+        string folder = NewTempFolder();
+        try
+        {
+            ScriptResult result = await RunStep(
+                folder,
+                JobScript("publish", "Publish GitHub release"),
+                version,
+                view: ReleaseView("true", ReleaseTarget, PublishAssets(version)),
+                lsRemote: refs,
+                gitExit: gitExit);
+
+            List<string> log = StubLog(folder);
+            Assert.Equal(LsRemoteLog(version), log[1]);
+            Assert.DoesNotContain(log, line => line.Contains("stub-token", StringComparison.Ordinal));
+            if (publishes)
+            {
+                Assert.True(result.Code == 0, "Publish exit " + result.Code + ": " + result.Err);
+                Assert.Equal(3, log.Count);
+                Assert.StartsWith("gh [token] release edit " + tag + " ", log[2], StringComparison.Ordinal);
+            }
+            else
+            {
+                Assert.NotEqual(0, result.Code);
+                Assert.Equal(2, log.Count);
+                if (tagged is not null)
+                {
+                    Assert.Contains(
+                        "Tag " + tag + " points at " + tagged + ", not at " + ReleaseTarget + "; nothing is published",
+                        result.Err,
+                        StringComparison.Ordinal);
+                }
+            }
         }
         finally
         {
@@ -2830,7 +3324,10 @@ public sealed class ReleaseWorkflowTests
         YamlMapping root = Map(WorkflowYaml.Parse(yaml));
 
         // Exact key sets: no workflow- or job-level env:, defaults:, container: or services: next to the write token.
-        Assert.Equal(["jobs", "name", "on", "permissions"], Sorted(root.Keys));
+        Assert.Equal(["concurrency", "jobs", "name", "on", "permissions"], Sorted(root.Keys));
+
+        // 272 AC-2: one run at a time across all three triggers; a running job is never cancelled.
+        Assert.Equal(["cancel-in-progress=false", "group=release"], Pairs(root["concurrency"]));
 
         YamlMapping on = Map(root["on"]);
         Assert.Equal(["pull_request", "push"], Sorted(on.Keys));
@@ -2849,7 +3346,11 @@ public sealed class ReleaseWorkflowTests
         YamlMapping jobs = Map(root["jobs"]);
         Assert.Equal(JobNames, jobs.Keys);
         YamlMapping job = Map(jobs["release"]);
-        Assert.Equal(["env", "if", "outputs", "runs-on", "steps"], Sorted(job.Keys));
+        Assert.Equal(["env", "if", "outputs", "runs-on", "steps", "timeout-minutes"], Sorted(job.Keys));
+        // 272 AC-3: every job has a timeout.
+        Assert.Equal(
+            ["30", "60", "45", "15"],
+            JobNames.Select(name => Scalar(Map(jobs[name])["timeout-minutes"])));
         // 146 AC-1: the signing switch is the only job-level variable of the release job (no secret).
         Assert.Equal(["MACOS_SIGNING=" + SigningVariable], Pairs(job["env"]));
         Assert.Equal(JobIf, Regex.Replace(Scalar(job["if"]), @"\s+", " ").Trim());
@@ -2908,9 +3409,7 @@ public sealed class ReleaseWorkflowTests
         Assert.Equal(7, steps.Count);
         Assert.Equal(["env", "name", "run"], Sorted(release.Keys));
         Assert.Equal(["GH_TOKEN=${{ github.token }}"], Pairs(release["env"]));
-        Assert.Equal(
-            ["PRERELEASE=\"\"", "case \"$VERSION\" in", "*-*) PRERELEASE=\"--prerelease\" ;;", "esac", NotesCommand, ReleaseCommand],
-            Lines(Scalar(release["run"])).Where(line => !line.StartsWith('#')));
+        Assert.Equal(CreateScriptLines, Lines(Scalar(release["run"])).Where(line => !line.StartsWith('#')));
 
         // Event fields, refs and the token reach a script only as environment variables.
         Assert.All(
@@ -2952,7 +3451,7 @@ public sealed class ReleaseWorkflowTests
     private static void AssertPublishJob(YamlNode root)
     {
         YamlMapping job = Map(Map(Map(root)["jobs"])["publish"]);
-        Assert.Equal(["env", "needs", "runs-on", "steps"], Sorted(job.Keys));
+        Assert.Equal(["env", "needs", "runs-on", "steps", "timeout-minutes"], Sorted(job.Keys));
         Assert.Equal(["release", "desktop-macos", "desktop-windows"], Strings(job["needs"]));
         Assert.Equal("ubuntu-latest", Scalar(job["runs-on"]));
         Assert.Equal(["TAG=" + TagOutput, "TARGET=" + TargetOutput, "VERSION=" + VersionOutput], Pairs(job["env"]));
@@ -2971,7 +3470,7 @@ public sealed class ReleaseWorkflowTests
         Assert.Equal(["name", "uses", "with"], Sorted(steps[0].Keys));
         Assert.Equal(["persist-credentials=false", "ref=" + TargetOutput], Pairs(steps[0]["with"]));
 
-        AssertVersionCheck(steps[1]);
+        AssertVersionCheck(steps[1], 3);
 
         YamlMapping publish = steps[2];
         Assert.Equal(["env", "name", "run"], Sorted(publish.Keys));
@@ -2988,7 +3487,14 @@ public sealed class ReleaseWorkflowTests
         Assert.Equal("gh release edit \"$TAG\" --draft=false $PRE", lines[^1]);
         Assert.Single(lines, line => line.Contains("gh release edit", StringComparison.Ordinal));
         Assert.Equal("INFO=\"$(" + ViewCommand + ")\"", Assert.Single(lines, line => line.Contains("gh release view", StringComparison.Ordinal)));
-        Assert.Equal(2, Regex.Matches(script, @"\bgh ").Count);
+        // 272 AC-9: the tag check comes after the asset checks and right before the edit; gh is git's only
+        // credential helper and the token is never named in the script (it stays in env).
+        Assert.Equal(3, Regex.Matches(CodeOnly(script), @"\bgh ").Count);
+        int lsRemote = lines.FindIndex(line => line.Contains("ls-remote", StringComparison.Ordinal));
+        Assert.Equal("if ! REFS=\"$(" + LsRemoteCommand + ")\"; then", Assert.Single(lines, line => line.Contains("ls-remote", StringComparison.Ordinal)));
+        Assert.True(lsRemote > lines.IndexOf("done"), "the tag check runs after the asset checks");
+        Assert.DoesNotContain("GH_TOKEN", CodeOnly(script), StringComparison.Ordinal);
+        Assert.DoesNotContain("--token", ReadWorkflow(), StringComparison.Ordinal);
         Assert.DoesNotContain("||", script, StringComparison.Ordinal);
         Assert.DoesNotContain("--draft=false", Scalar(prune["run"]), StringComparison.Ordinal);
         Assert.Contains("old-prereleases.sh", Scalar(prune["run"]), StringComparison.Ordinal);
@@ -3000,13 +3506,17 @@ public sealed class ReleaseWorkflowTests
     }
 
     /// <summary>The SemVer and tag re-check that every job after <c>release</c> runs as its first script.</summary>
-    private static void AssertVersionCheck(YamlMapping step, int exits = 2)
+    private static void AssertVersionCheck(YamlMapping step, int exits)
     {
         Assert.Equal(["name", "run"], Sorted(step.Keys));
         string check = Scalar(step["run"]);
         Assert.Contains("if ! printf '%s' \"$VERSION\" | " + SemVerGrep + "; then", check, StringComparison.Ordinal);
         Assert.Contains("if [ \"$TAG\" != \"v$VERSION\" ]; then", check, StringComparison.Ordinal);
         Assert.Equal(exits, Regex.Matches(check, @"(?m)^\s*exit 1\s*$").Count);
+        // 272 AC-5: the line-break check is the first command.
+        Assert.Equal(
+            ["case \"$VERSION$TAG\" in", "*[$'\\n\\r']*)", "echo \"The version or tag holds a line break\" >&2", "exit 1", ";;", "esac"],
+            Lines(check).Take(6));
         Assert.DoesNotContain("dotnet", check, StringComparison.Ordinal);
         Assert.DoesNotContain("gh ", check, StringComparison.Ordinal);
         Assert.DoesNotContain("||", check, StringComparison.Ordinal);
@@ -3023,7 +3533,7 @@ public sealed class ReleaseWorkflowTests
         YamlMapping job = Map(Map(Map(root)["jobs"])[name]);
         List<string> keys = Sorted(job.Keys);
         keys.Remove("defaults");
-        Assert.Equal(["env", "needs", "runs-on", "steps"], keys);
+        Assert.Equal(["env", "needs", "runs-on", "steps", "timeout-minutes"], keys);
         Assert.Equal("release", Scalar(job["needs"]));
         Assert.Equal(runner, Scalar(job["runs-on"]));
         bool mac = name == "desktop-macos";
@@ -3055,13 +3565,13 @@ public sealed class ReleaseWorkflowTests
         Assert.Equal(["dotnet-version=10.0.x"], Pairs(steps[2]["with"]));
 
         // The SemVer re-check is the first script, so it runs before any dotnet call (and before setup-dotnet).
-        AssertVersionCheck(steps[1], mac ? 3 : 2);
+        AssertVersionCheck(steps[1], mac ? 4 : 3);
         if (mac)
         {
             // 146 AC-1: the switch is checked in the first script: only empty, off or on.
             Assert.Equal(
                 ["case \"$MACOS_SIGNING\" in", "'' | off | on) ;;", "*)", "echo \"MACOS_SIGNING must be empty, 'off' or 'on'\" >&2", "exit 1", ";;", "esac"],
-                Lines(Scalar(steps[1]["run"])).SkipWhile(line => !line.StartsWith("case ", StringComparison.Ordinal)));
+                Lines(Scalar(steps[1]["run"])).SkipWhile(line => line != "case \"$MACOS_SIGNING\" in"));
         }
 
         foreach (YamlMapping step in steps.Skip(3))
@@ -3230,6 +3740,9 @@ public sealed class ReleaseWorkflowTests
     private static readonly string MacAppScript = Path.Combine(FindRepoRoot(), ".github", "scripts", "macos-app.sh");
 
     /// <summary>The trimmed, non-empty, non-comment lines of a script.</summary>
+    private static string CodeOnly(string script) =>
+        string.Join("\n", script.Split('\n').Where(line => !line.TrimStart().StartsWith('#')));
+
     private static string[] Lines(string script) =>
         [.. script.Split('\n').Select(line => line.Trim()).Where(line => line.Length > 0 && !line.StartsWith('#'))];
 
@@ -3305,6 +3818,11 @@ public sealed class ReleaseWorkflowTests
     }
 
     /// <summary>The lines the stub commands logged: <c>&lt;command&gt; [token|no token] &lt;arguments&gt;</c>.</summary>
+    /// <summary>What the stub git logs for the publish step's tag check (272 AC-9): token in env, never in argv.</summary>
+    private static string LsRemoteLog(string version) =>
+        "git [token] -c credential.helper= -c credential.helper=!gh auth git-credential ls-remote"
+        + " https://github.com/owner/repo refs/tags/v" + version + " refs/tags/v" + version + "^{}";
+
     private static List<string> StubLog(string folder)
     {
         string path = Path.Combine(folder, "stub.log");
@@ -3334,33 +3852,61 @@ public sealed class ReleaseWorkflowTests
 
     /// <summary>
     /// Runs a workflow step's script the way the runner does (<c>bash --noprofile --norc -eo pipefail</c>) in
-    /// <paramref name="folder"/>, with <c>$HOME</c> there and stub <c>vpk</c> (in <c>$HOME/.dotnet/tools</c>) and
-    /// <c>gh</c> commands that only log their arguments and whether <c>GH_TOKEN</c> was set (<c>gh release view</c>
-    /// also prints <paramref name="view"/>, what the real one prints after its <c>--jq</c>). No network, no real tool.
+    /// <paramref name="folder"/>, with <c>$HOME</c> there and stub <c>vpk</c> (in <c>$HOME/.dotnet/tools</c>),
+    /// <c>gh</c> and <c>git</c> commands that log their arguments and whether <c>GH_TOKEN</c> was set. No network,
+    /// no real tool. <c>gh release view</c> prints <paramref name="view"/> (what the real one prints after its
+    /// <c>--jq</c>); <c>gh release list</c> prints <paramref name="list"/>; <c>gh release download &lt;tag&gt;</c>
+    /// looks up the line of <paramref name="downloads"/> that starts with the tag (<c>&lt;tag&gt; &lt;exit&gt;
+    /// &lt;files…&gt;</c>), creates those files in <c>Releases/</c> and exits with that code (no line: exit 1);
+    /// <c>gh api</c> prints <paramref name="drafts"/>, and <c>gh api -X DELETE …/&lt;id&gt;</c> fails for the ids in
+    /// <paramref name="deleteFails"/>; <c>git</c> prints <paramref name="lsRemote"/>.
     /// </summary>
     private static async Task<ScriptResult> RunStep(
-        string folder, string script, string version, int downloadExit = 0, int packExit = 0, string view = "",
-        int viewExit = 0, int editExit = 0)
+        string folder, string script, string version, int packExit = 0, string view = "",
+        int viewExit = 0, int editExit = 0, string list = "", int listExit = 0, string downloads = "",
+        string drafts = "", int draftsExit = 0, string deleteFails = "", string lsRemote = "", int gitExit = 0,
+        int createExit = 0, IDictionary<string, string>? extra = null)
     {
         string tools = Path.Combine(folder, ".dotnet", "tools");
         string bin = Path.Combine(folder, "stub-bin");
         Directory.CreateDirectory(tools);
         Directory.CreateDirectory(bin);
-        string stub = "#!/bin/sh\n"
+        string log = "#!/bin/sh\n"
             + "token='no token'\n"
             + "if [ -n \"${GH_TOKEN-}\" ]; then token='token'; fi\n"
-            + "printf '%s [%s] %s\\n' \"$(basename \"$0\")\" \"$token\" \"$*\" >> \"$STUB_LOG\"\n"
+            + "printf '%s [%s] %s\\n' \"$(basename \"$0\")\" \"$token\" \"$*\" >> \"$STUB_LOG\"\n";
+        string stub = log
             + "case \"$1\" in\n"
-            + "  download) exit \"$STUB_DOWNLOAD_EXIT\" ;;\n"
             + "  pack) exit \"$STUB_PACK_EXIT\" ;;\n"
+            + "  api)\n"
+            + "    if [ \"$2\" = -X ]; then\n"
+            + "      if grep -Fxq -- \"${4##*/}\" \"$STUB_DELETE_FAILS\"; then exit 1; fi\n"
+            + "      exit 0\n"
+            + "    fi\n"
+            + "    cat \"$STUB_DRAFTS\"; exit \"$STUB_DRAFTS_EXIT\" ;;\n"
             + "esac\n"
             + "case \"$2\" in\n"
             + "  view) cat \"$STUB_VIEW\"; exit \"$STUB_VIEW_EXIT\" ;;\n"
             + "  edit) exit \"$STUB_EDIT_EXIT\" ;;\n"
+            + "  create) exit \"$STUB_CREATE_EXIT\" ;;\n"
+            + "  list) cat \"$STUB_LIST\"; exit \"$STUB_LIST_EXIT\" ;;\n"
+            + "  download)\n"
+            + "    line=\"$(awk -v tag=\"$3\" '$1 == tag' \"$STUB_DOWNLOADS\" | head -n 1)\"\n"
+            + "    if [ -z \"$line\" ]; then exit 1; fi\n"
+            + "    set -- $line\n"
+            + "    code=\"$2\"\n"
+            + "    shift 2\n"
+            + "    mkdir -p Releases\n"
+            + "    for file in \"$@\"; do : > \"Releases/$file\"; done\n"
+            + "    exit \"$code\" ;;\n"
             + "esac\n";
-        foreach (string path in new[] { Path.Combine(tools, "vpk"), Path.Combine(bin, "gh") })
+        string git = log + "cat \"$STUB_LS_REMOTE\"\nexit \"$STUB_GIT_EXIT\"\n";
+        foreach ((string path, string text) in new[]
         {
-            File.WriteAllText(path, stub);
+            (Path.Combine(tools, "vpk"), stub), (Path.Combine(bin, "gh"), stub), (Path.Combine(bin, "git"), git),
+        })
+        {
+            File.WriteAllText(path, text);
             if (!OperatingSystem.IsWindows())
             {
                 File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -3369,8 +3915,14 @@ public sealed class ReleaseWorkflowTests
 
         string file = Path.Combine(folder, "step.sh");
         File.WriteAllText(file, script);
-        string viewFile = Path.Combine(folder, "stub-view.txt");
-        File.WriteAllText(viewFile, view);
+        string StubFile(string name, string text)
+        {
+            string path = Path.Combine(folder, name);
+            File.WriteAllText(path, text);
+            return path;
+        }
+
+        static string Code(int code) => code.ToString(System.Globalization.CultureInfo.InvariantCulture);
         Dictionary<string, string> environment = new Dictionary<string, string>
         {
             ["HOME"] = folder,
@@ -3380,13 +3932,27 @@ public sealed class ReleaseWorkflowTests
             ["TARGET"] = ReleaseTarget,
             ["GH_TOKEN"] = "stub-token",
             ["GITHUB_REPOSITORY"] = "owner/repo",
+            ["RUNNER_TEMP"] = folder,
             ["STUB_LOG"] = Path.Combine(folder, "stub.log"),
-            ["STUB_DOWNLOAD_EXIT"] = downloadExit.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["STUB_PACK_EXIT"] = packExit.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["STUB_VIEW"] = viewFile,
-            ["STUB_VIEW_EXIT"] = viewExit.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["STUB_EDIT_EXIT"] = editExit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["STUB_PACK_EXIT"] = Code(packExit),
+            ["STUB_VIEW"] = StubFile("stub-view.txt", view),
+            ["STUB_VIEW_EXIT"] = Code(viewExit),
+            ["STUB_EDIT_EXIT"] = Code(editExit),
+            ["STUB_CREATE_EXIT"] = Code(createExit),
+            ["STUB_LIST"] = StubFile("stub-list.txt", list),
+            ["STUB_LIST_EXIT"] = Code(listExit),
+            ["STUB_DOWNLOADS"] = StubFile("stub-downloads.txt", downloads),
+            ["STUB_DRAFTS"] = StubFile("stub-drafts.txt", drafts),
+            ["STUB_DRAFTS_EXIT"] = Code(draftsExit),
+            ["STUB_DELETE_FAILS"] = StubFile("stub-delete-fails.txt", deleteFails),
+            ["STUB_LS_REMOTE"] = StubFile("stub-ls-remote.txt", lsRemote),
+            ["STUB_GIT_EXIT"] = Code(gitExit),
         };
+        foreach (KeyValuePair<string, string> variable in extra ?? new Dictionary<string, string>())
+        {
+            environment[variable.Key] = variable.Value;
+        }
+
         return await RunBash(folder, ["--noprofile", "--norc", "-eo", "pipefail", file], environment);
     }
 
