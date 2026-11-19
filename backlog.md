@@ -339,6 +339,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#381](backlog/381-mail-digest-keep-mail-text-inert.md) Mail digest: keep mail text inert in meeting notes
 - [?] [#382](backlog/382-mail-digest-strip-unicode-format-characters.md) Mail digest: strip Unicode format characters from suggestions
 - [?] [#383](backlog/383-mail-digest-keep-read-mail-disabled.md) Mail digest: keep Read mail disabled while a timed-out read still runs
+- [?] [#386](backlog/386-meeting-todos-cap-and-clean-a.md) Meeting todos: cap and clean a stored meeting title on read
+- [?] [#387](backlog/387-meeting-todos-move-focus-to-the.md) Meeting todos: move focus to the meeting picker when Push finds no next meeting
 
 ## Dropped with the terminal UI
 
