@@ -1,14 +1,15 @@
 @using System.Globalization
 @inherits StateComponent
-@* The notes whose text contains the typed text (DesktopState.Search), each with its first matching line, or the notes
-   that match a tag filter (DesktopState.TagFilter); clicking a note opens it. The input runs another search on
-   Return; the shown search can be saved under a name (DesktopActions.SaveSearch). It reloads whenever the state
-   changes. *@
+@* The Search page (job 285, in place of the note area): the notes whose text contains the typed text
+   (DesktopState.Search), each with its type, date and first matching line with the match marked, or the notes that
+   match a tag filter (DesktopState.TagFilter); clicking a note, or Return on it, opens it. Arrow keys move between the
+   input and the result buttons (one roving tab stop). The input runs another search on Return; the shown search can
+   be saved under a name (DesktopActions.SaveSearch). It reloads whenever the state changes. *@
 
-<section class="search-panel" aria-label="Notes containing this text">
+<section class="page search-panel" aria-label="Notes containing this text">
     <div class="panel-bar">
         <h2 class="cut" title="@Heading">@Heading</h2>
-        <button type="button" class="close" @onclick="() => OnClose.InvokeAsync()">Close</button>
+        <button type="button" class="close" aria-label="Close" title="Close" @onclick="() => OnClose.InvokeAsync()"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" /></svg></button>
     </div>
     <input type="text" class="search-input" value="@typed" maxlength="200" aria-label="Search"
            placeholder="Search notes" @ref="input" @oninput="SearchTyped" @onkeydown="SearchKey" />
@@ -41,12 +42,15 @@
         else
         {
             <ul class="search-hits">
-                @foreach (string note in tagView.Notes.Take(MaxRows))
+                @foreach ((string note, int i) in tagView.Notes.Take(MaxRows).Select((n, i) => (n, i)))
                 {
                     string name = note;
-                    string shown = DesktopText.OneLine(name);
+                    int index = i;
+                    string shown = DesktopText.NoteName(name);
                     <li>
-                        <button type="button" class="note-button cut" title="@shown" @onclick="() => OnOpen.InvokeAsync(name)">@shown</button>
+                        <button type="button" class="note-button cut" title="@shown" tabindex="@(index == Active ? "0" : "-1")"
+                                @ref="rowButtons[index]" @onfocus="() => active = index" @onkeydown="e => RowKey(e, index, name)"
+                                @onkeyup="RowKeyUp" @onclick="() => RowClick(index, name)">@shown</button>
                     </li>
                 }
             </ul>
@@ -77,14 +81,28 @@
         else
         {
             <ul class="search-hits">
-                @foreach (SearchHit hit in textView.Hits.Take(MaxRows))
+                @foreach ((SearchHit hit, int i) in textView.Hits.Take(MaxRows).Select((h, i) => (h, i)))
                 {
                     string name = hit.Note;
-                    string shown = DesktopText.OneLine(name);
+                    int index = i;
+                    string shown = DesktopText.NoteName(name);
                     string line = DesktopText.OneLine(hit.Line);
+                    Snippet snippet = SnippetOf(hit, current.Trim().Length);
                     <li>
-                        <button type="button" class="note-button cut" title="@shown" @onclick="() => OnOpen.InvokeAsync(name)">@shown</button>
-                        <span class="line grey cut" title="@line">@line</span>
+                        <div class="hit-head">
+                            <button type="button" class="note-button cut" title="@shown" tabindex="@(index == Active ? "0" : "-1")"
+                                    @ref="rowButtons[index]" @onfocus="() => active = index" @onkeydown="e => RowKey(e, index, name)"
+                                    @onkeyup="RowKeyUp" @onclick="() => RowClick(index, name)">@shown</button>
+                            @if (hit.Types.Count > 0)
+                            {
+                                <span class="type grey cut" title="@DesktopText.OneLine(string.Join(", ", hit.Types))">@DesktopText.OneLine(string.Join(", ", hit.Types))</span>
+                            }
+                            @if (hit.Modified is { } modified)
+                            {
+                                <span class="date grey">@DateText(modified)</span>
+                            }
+                        </div>
+                        <span class="line grey cut" title="@line">@snippet.Before<mark>@snippet.Match</mark>@snippet.After</span>
                     </li>
                 }
             </ul>
@@ -120,6 +138,18 @@
     /// <summary>At most this many hits are shown; a grey <c>… N more</c> line follows when there are more.</summary>
     internal const int MaxRows = 100;
 
+    /// <summary>At most this many characters of the line come before the match; more are cut to <c>…</c> and the last ones.</summary>
+    internal const int MaxBefore = 40;
+
+    // The result buttons (at most MaxRows) and the one with the tab stop; a pending row focus (-1: none); the note
+    // whose row takes the focus once this request's rows arrive; the row whose Return just opened it, so the click the
+    // browser sends after that Return opens nothing more.
+    private readonly ElementReference[] rowButtons = new ElementReference[MaxRows];
+    private int active;
+    private int focusRow = -1;
+    private string? focusNote;
+    private int? enterOpened;
+
     private SearchView? view;
     private TagFilterView? filter;
     private string? loaded;
@@ -151,9 +181,19 @@
     [Parameter]
     public int Request { get; set; }
 
-    /// <summary>Called with a note's name when it is clicked.</summary>
+    /// <summary>
+    /// Called with a note's name and the query whose results were shown (raw, as searched) when it is clicked or
+    /// Return is pressed on it.
+    /// </summary>
     [Parameter]
-    public EventCallback<string> OnOpen { get; set; }
+    public EventCallback<(string Note, string Text)> OnOpen { get; set; }
+
+    /// <summary>
+    /// The note whose row gets the tab stop and the focus once this request's results show (Back to search); the
+    /// first row when it is no longer there. <c>null</c>: the input gets the focus.
+    /// </summary>
+    [Parameter]
+    public string? Focus { get; set; }
 
     [Parameter]
     public EventCallback OnClose { get; set; }
@@ -183,7 +223,8 @@
         saveOpen = false;
         saveName = string.Empty;
         saved = null;
-        focusInput = true;
+        focusNote = Focus;
+        focusInput = Focus is null;
         return Start();
     }
 
@@ -193,6 +234,16 @@
         {
             focusInput = false;
             await input.FocusAsync();
+        }
+
+        if (focusRow >= 0)
+        {
+            int index = focusRow;
+            focusRow = -1;
+            if (index < RowCount)
+            {
+                await rowButtons[index].FocusAsync();
+            }
         }
 
         if (focusSave && saveOpen)
@@ -215,6 +266,17 @@
 
     private async Task SearchKey(KeyboardEventArgs e)
     {
+        if (e.Key == "ArrowDown")
+        {
+            if (RowCount > 0)
+            {
+                active = 0;
+                focusRow = 0;
+            }
+
+            return;
+        }
+
         if (e.Key == "Escape")
         {
             await OnClose.InvokeAsync();
@@ -281,12 +343,129 @@
         }
     }
 
-    // A new query: the old rows go until its own arrive.
+    // Keys on a result button: ArrowDown moves to the next one (staying on the last), ArrowUp to the one before or, on
+    // the first, back to the input; Return opens the note.
+    private async Task RowKey(KeyboardEventArgs e, int index, string name)
+    {
+        enterOpened = null;
+        switch (e.Key)
+        {
+            case "ArrowDown":
+                active = Math.Min(index + 1, RowCount - 1);
+                focusRow = active;
+                break;
+            case "ArrowUp":
+                if (index == 0)
+                {
+                    active = 0;
+                    focusInput = true;
+                }
+                else
+                {
+                    active = index - 1;
+                    focusRow = active;
+                }
+
+                break;
+            case "Enter":
+                enterOpened = index;
+                await Open(name);
+                break;
+        }
+    }
+
+    private void RowKeyUp() => enterOpened = null;
+
+    // A click on a result opens it, unless it is the click the browser sends right after Return opened that row.
+    private async Task RowClick(int index, string name)
+    {
+        if (enterOpened == index)
+        {
+            enterOpened = null;
+            return;
+        }
+
+        enterOpened = null;
+        active = index;
+        await Open(name);
+    }
+
+    private Task Open(string name) => OnOpen.InvokeAsync((name, current));
+
+    // How many result buttons are shown.
+    private int RowCount =>
+        filter is { } f ? Math.Min(f.Notes.Count, MaxRows)
+        : view is { } v ? Math.Min(v.Hits.Count, MaxRows)
+        : 0;
+
+    // The row with the tab stop, kept inside the shown rows.
+    private int Active => Math.Clamp(active, 0, Math.Max(RowCount - 1, 0));
+
+    private string DateText(DateTime modifiedUtc) =>
+        TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(modifiedUtc, DateTimeKind.Utc), State.Zone)
+            .ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture);
+
+    /// <summary>A hit's line split around its match, each piece one line of plain text.</summary>
+    internal readonly record struct Snippet(string Before, string Match, string After);
+
+    /// <summary>
+    /// Splits the raw line at the match (<paramref name="length"/> characters from <see cref="SearchHit.MatchStart"/>),
+    /// then cleans each piece (<see cref="DesktopText.OneLine"/>). More than <see cref="MaxBefore"/> characters before
+    /// the match become <c>…</c> and the last ones, never starting inside a surrogate pair.
+    /// </summary>
+    internal static Snippet SnippetOf(SearchHit hit, int length)
+    {
+        string raw = hit.Line;
+        int start = Math.Clamp(hit.MatchStart, 0, raw.Length);
+        int end = Math.Clamp(start + length, start, raw.Length);
+        string before = raw[..start];
+        if (before.Length > MaxBefore)
+        {
+            int cut = before.Length - MaxBefore;
+            if (char.IsLowSurrogate(before[cut]) && char.IsHighSurrogate(before[cut - 1]))
+            {
+                cut++;
+            }
+
+            before = CurrentView.Outside + DesktopText.OneLine(before[cut..]);
+        }
+        else
+        {
+            before = DesktopText.OneLine(before);
+        }
+
+        return new Snippet(before, DesktopText.OneLine(raw[start..end]), DesktopText.OneLine(raw[end..]));
+    }
+
+    // A new query: the old rows go until its own arrive, and the first row gets the tab stop.
     private Task Start()
     {
         view = null;
         filter = null;
+        active = 0;
+        enterOpened = null;
         return Load();
+    }
+
+    // Back to search: once this request's rows show, the opened note's row (or the first) takes the tab stop and the
+    // focus; with no rows the input takes it.
+    private void FocusPending(IEnumerable<string> names)
+    {
+        if (focusNote is not { } note)
+        {
+            return;
+        }
+
+        focusNote = null;
+        if (RowCount == 0)
+        {
+            focusInput = true;
+            return;
+        }
+
+        int index = names.Take(MaxRows).TakeWhile(n => !string.Equals(n, note, StringComparison.Ordinal)).Count();
+        active = index < RowCount ? index : 0;
+        focusRow = active;
     }
 
     // Keeps the shown rows while it reloads. A result for another query, or an older request's result, is dropped. A
@@ -297,6 +476,12 @@
         string text = current;
         if (text.Trim().Length == 0)
         {
+            if (focusNote is not null)
+            {
+                focusNote = null;
+                focusInput = true;
+            }
+
             return;
         }
 
@@ -307,6 +492,7 @@
             {
                 filter = result;
                 view = null;
+                FocusPending(result.Notes);
             }
         }
         else
@@ -316,6 +502,7 @@
             {
                 view = result;
                 filter = null;
+                FocusPending(result.Hits.Select(h => h.Note));
             }
         }
     }

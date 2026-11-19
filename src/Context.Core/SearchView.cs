@@ -23,10 +23,19 @@ internal enum SearchViewKind
 internal sealed record SearchHit
 {
     public SearchHit(string note, int lineNumber, string line)
+        : this(note, lineNumber, line, 0, [], null)
+    {
+    }
+
+    public SearchHit(
+        string note, int lineNumber, string line, int matchStart, IReadOnlyList<string> types, DateTime? modified)
     {
         Note = note;
         LineNumber = lineNumber;
         Line = line;
+        MatchStart = matchStart;
+        Types = types;
+        Modified = modified;
     }
 
     /// <summary>
@@ -42,6 +51,18 @@ internal sealed record SearchHit
 
     /// <summary>The first line holding the text, without its line ending (raw).</summary>
     public string Line { get; }
+
+    /// <summary>The index in <see cref="Line"/> of the first match of the query, ignoring case (ordinal).</summary>
+    public int MatchStart { get; }
+
+    /// <summary>
+    /// The note's types (<see cref="PageTypes.TypesOf"/>: its <c>type::</c> values, or <c>person</c> for an untyped
+    /// person page), read from the same text; empty when it has none.
+    /// </summary>
+    public IReadOnlyList<string> Types { get; }
+
+    /// <summary>The note file's last-write time, UTC; <c>null</c> when the note is no longer listed.</summary>
+    public DateTime? Modified { get; }
 }
 
 /// <summary>
@@ -81,7 +102,9 @@ internal sealed record SearchView
     /// Trims <paramref name="text"/> and checks its length (<c>TooShort</c>, <c>TooLong</c>, without opening the
     /// index), then syncs the index and searches <c>note_text</c> (<see cref="TagIndex.Search"/>). Each note's hit is
     /// its first line (split at <c>\n</c>, a trailing <c>\r</c> dropped) that contains the query ignoring case
-    /// (ordinal); a note with no such line is dropped. Never throws for an unreadable index.
+    /// (ordinal); a note with no such line is dropped. Each hit also carries where the match starts in its line, the
+    /// note's types (from the same text) and its file's last-write time (UTC, from <see cref="NoteStore.List"/>).
+    /// Never throws for an unreadable index.
     /// </summary>
     public static SearchView Build(TagIndex index, NoteStore store, string text)
     {
@@ -116,6 +139,25 @@ internal sealed record SearchView
                 }
             }
 
+            if (hits.Count > 0)
+            {
+                Dictionary<string, DateTime> modified = new(StringComparer.Ordinal);
+                foreach (NoteInfo info in store.List())
+                {
+                    modified[info.Name] = info.Modified.ToUniversalTime();
+                }
+
+                hits = hits
+                    .Select(h => new SearchHit(
+                        h.Note,
+                        h.LineNumber,
+                        h.Line,
+                        h.MatchStart,
+                        h.Types,
+                        modified.TryGetValue(h.Note, out DateTime time) ? time : null))
+                    .ToList();
+            }
+
             List<SearchHit> sorted = hits
                 .OrderBy(h => h.Note, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(h => h.Note, StringComparer.Ordinal)
@@ -143,9 +185,11 @@ internal sealed record SearchView
                 line = line[..^1];
             }
 
-            if (line.Contains(query, StringComparison.OrdinalIgnoreCase))
+            int match = line.IndexOf(query, StringComparison.OrdinalIgnoreCase);
+            if (match >= 0)
             {
-                return new SearchHit(note, number, line);
+                IReadOnlyList<string> types = PageTypes.TypesOf(note, AttributeParser.Parse(body));
+                return new SearchHit(note, number, line, match, types, null);
             }
 
             if (end < 0)

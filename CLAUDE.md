@@ -157,7 +157,9 @@ Every factory agent reads this file before working on Context. Keep it short and
   - **Full-text search** (job 170, `SearchView.cs`): `SearchView.Build(index, store, text)` trims the text; under
     `MinQueryLength` (3) is `TooShort`, over `MaxQueryLength` (200) `TooLong`, both without opening the index; else
     `Sync`, `TagIndex.Search` (the trigram match is only a pre-filter), and per row the first line (split at `\n`, a
-    trailing `\r` dropped) containing the query by `OrdinalIgnoreCase` as `SearchHit(Note, LineNumber, Line)` (1-based); a
+    trailing `\r` dropped) containing the query by `OrdinalIgnoreCase` as `SearchHit(Note, LineNumber, Line)` (1-based; job 285 adds `MatchStart`, the match's index in `Line`, `Types`,
+    `PageTypes.TypesOf` of the body, and `Modified`, the `store.List()` last-write time converted to UTC, null when not
+    listed); a
     row with no such line is dropped (so no match across lines). Hits sorted by note ignoring case, then ordinal;
     `TagIndexException` gives `IndexUnreadable`; kinds `Found`, `NoMatches`. The command line has `context search
     <text...>`, the desktop `/search` (`SearchPanel`). Out of scope: sensitive notes, todos, calendar, ranking,
@@ -1135,7 +1137,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     state change) and opens the page when no note has unsaved changes and no dialog or edit field is open; otherwise the
     editor is left alone and the accent status reads `Today's briefing is ready: briefings/<day>. Type /briefing to open
     it.`. The page is a snapshot, never refreshed.
-    **Pages (job 193):** `Main` holds one `page` (none, triage, people, tags, settings, appointment); opening one replaces another. The note area
+    **Pages (job 193):** `Main` holds one `page` (none, triage, people, tags, settings, appointment, board, search); opening one replaces another. The note area
     (`div.note-area`: breadcrumb to `LinksPanel`, or with no note open only the grey `p.no-note` `No note open. Click
     Today to open today's note.`, job 216) gets `hidden` while a page shows, but stays mounted so
     unsaved editor text survives. Each page's root has class `page` and an icon-only `button.close` (aria-label and title
@@ -1203,21 +1205,32 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Loading…`, grey `No notes have <key>:: <value>.`, red `Can't read the attributes.` (red usage line for an `InvalidQuery`); same read-only,
     `indexGate`, reload and stale-result rules. Opening a note closes it.
     `SearchPanel` (job 170, `/search <text>`, the top bar's Search popover (job 218) and saved searches through
-    `Main.ShowSearch(text)`, which bumps `searchRequest` so the same text starts over; `Main`'s `searchShown`, after
-    `FindPanel`) has the heading `Search: <text>` (`Search` when blank) and `Close`, then `input[type=text].search-input`
+    `Main.ShowSearch(text)`, which bumps `searchRequest` so the same text starts over; job 285: `Main`'s `Page.Search` with `searchShown`, a page in place of the note area, so the
+    outline is not rendered; another page, Esc or the icon × closes it) has the heading `Search: <text>` (`Search` when blank) and the icon-only × (`Close`), then `input[type=text].search-input`
     (job 207; `aria-label="Search"`, placeholder `Search notes`, maxlength 200, focused on every request; Return searches
     the typed text, Esc closes). A tag filter (`TagFilter.IsTagFilter`) lists `DesktopState.TagFilter(text)` (under
     `indexGate`, never throws) as `note-button`s with no line: grey `No notes match <filter>.`, red `Type a tag filter
     like #project and not #done.` for `Invalid`, red `Search text can be at most 200 characters.` for `TooLong`. Other
     text lists `DesktopState.Search(text)` (`SearchView.Build` under `indexGate`, never
-    throws): per hit a `note-button` (through `OnOpen`, full name in `title`) and the grey one-line `span.line` (cut by
-    CSS, full text in `title`); at most `MaxRows` (100), then grey `… <n> more` (both kinds). Grey `Loading…`, grey `No notes contain
+    throws): per hit (job 285) an `li` with `div.hit-head` (the `note-button`, text `DesktopText.NoteName`, full name in `title`;
+    grey `span.type`, `Types` joined by `, ` through `OneLine`, only with types; grey `span.date`, `Modified` as
+    `yyyy-MM-dd` in `State.Zone`) and the grey `span.line` (cut by CSS, full text in `title`): `SearchPanel.SnippetOf`
+    splits the raw line at `MatchStart` into before, `<mark>` (the matched characters) and after, each through
+    `OneLine`; more than `MaxBefore` (40) characters before it become `…` and the last 40, the cut moved past a
+    surrogate pair; tag-filter rows stay name-only; at most `MaxRows` (100), then grey `… <n> more` (both kinds). Grey `Loading…`, grey `No notes contain
     <text>.`, red `Can't read the search index.`, grey `Type text or a tag filter like #project and not #done.` for blank (nothing read), red `Type at least
     3 characters to search.` and `Search text can be at most 200 characters.`. When results show (`Found`/`NoMatches`
     of either kind) `button.search-save` `Save search` opens `input.search-save-name` (`aria-label`/placeholder `Search
     name`, maxlength 50, focused): Return calls `Actions.SaveSearch(name, trimmed query)` (its only action), Esc hides
     it; the result is `p.search-save-result` (`role=status`, accent on Done, else red). Reload and stale-result rules as
     the other panels. Opening a note or `Today` closes it.
+    Keyboard (job 285): the result buttons are a roving tab stop (`tabindex` 0 on one, `-1` on the rest; ArrowDown in
+    the input focuses the first, ArrowDown/ArrowUp move and stop at the last, ArrowUp on the first goes back to the
+    input; Enter opens, and the click the browser sends after it is ignored until keyup). `OnOpen` carries `(Note,
+    Text)`, the shown query; `Main.OpenFromSearch` opens the note through `RequestOpen` (save or discard flow) and
+    then shows `button.search-back` (`Back to search`) above the breadcrumb; it shows the page again for that text
+    with `Focus` = the note (that row, else the first, is the tab stop and gets the focus). It goes when another note,
+    Today, a day or any page opens, the Search page included.
     `DecisionsPanel` (job 180, `/decisions [tag]`; `Main`'s `decisionsShown`, after `SearchPanel`) has the heading
     `Decisions` (with a tag `Decisions: #tag`) and `Close`, and lists `DesktopState.Decisions(tag)` (`DecisionsView.Build`
     under `indexGate`, never throws): per decision a grey `span.date`, a `note-button` (through `OnOpen`, full name in
