@@ -154,6 +154,7 @@ internal sealed class DesktopActions
 {
     public const string BusyText = "Another change is still running. Nothing was done.";
     public const string NotConfirmedText = "Not confirmed. Nothing was done.";
+    public const string NotOnBoardText = "That column is not on the board. Nothing was moved.";
     public const string TodosChangedText = "The todo list changed. Nothing was done.";
     public const string TodosUnreadableText =
         "Can't read todos.json, so nothing was changed. Fix or move the file and try again.";
@@ -653,6 +654,18 @@ internal sealed class DesktopActions
     /// </summary>
     public Task<ActionResult> CompleteNoteTodo(NoteTodo todo, Confirmation? confirmed) =>
         Run(() => CompleteNoteTodoNow(todo, confirmed));
+
+    /// <summary>
+    /// Moves a board card (job 242) to <paramref name="column"/> through
+    /// <see cref="BoardView.Move(NoteStore, BoardCard, string, NoteHistory?)"/>: only the card's
+    /// <c>#status/&lt;column&gt;</c> token changes (or one is appended), every other byte is kept and the previous bytes
+    /// are kept as a version. The current column is Done/<see cref="ActionReason.Unchanged"/> with nothing written; a
+    /// column not on the card's board is Refused/<see cref="ActionReason.Invalid"/>; a changed token or line is
+    /// Refused/<see cref="ActionReason.Changed"/>, a gone note Refused/<see cref="ActionReason.Missing"/>, a failed
+    /// read or write Failed. The texts name the note through <see cref="DesktopText.OneLine"/>.
+    /// </summary>
+    public Task<ActionResult> MoveBoardCard(BoardCard card, string column) =>
+        Run(() => MoveBoardCardNow(card, column));
 
     /// <summary>
     /// Saves <paramref name="text"/> over the note <paramref name="opened"/> came from through
@@ -1389,6 +1402,24 @@ internal sealed class DesktopActions
             NoteTodoResult.Missing => Refused(ActionReason.Missing, NoteTodos.MissingText(note)),
             NoteTodoResult.Failed => Failed(ActionReason.WriteFailed, NoteTodos.FailedText(note)),
             _ => Refused(ActionReason.Changed, NoteTodos.ChangedText(note)),
+        };
+    }
+
+    private ActionResult MoveBoardCardNow(BoardCard card, string column)
+    {
+        if (!card.Columns.Contains(column, StringComparer.Ordinal))
+        {
+            return Refused(ActionReason.Invalid, NotOnBoardText);
+        }
+
+        string note = DesktopText.OneLine(card.Note);
+        return BoardView.Move(notes, card, column, state.HistoryStore) switch
+        {
+            BoardMoveResult.Done => new ActionResult(ActionKind.Done, ActionReason.None, note),
+            BoardMoveResult.Unchanged => new ActionResult(ActionKind.Done, ActionReason.Unchanged, note),
+            BoardMoveResult.Missing => Refused(ActionReason.Missing, BoardView.MissingText(note)),
+            BoardMoveResult.Failed => Failed(ActionReason.WriteFailed, BoardView.FailedText(note)),
+            _ => Refused(ActionReason.Changed, BoardView.ChangedText(note)),
         };
     }
 

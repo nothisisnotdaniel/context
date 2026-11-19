@@ -167,8 +167,31 @@ internal static class SavedSearches
 }
 
 /// <summary>
+/// A board (job 242): the tag whose notes and note todos it shows and its columns in order, both normalized
+/// (<see cref="TagIndex.NormalizeTag"/>, lower-cased columns). Set by hand in <c>settings.json</c>; never written.
+/// </summary>
+internal sealed record BoardSetting
+{
+    public BoardSetting(string tag, IReadOnlyList<string> columns)
+    {
+        Tag = tag;
+        Columns = columns;
+    }
+
+    /// <summary>The tag, normalized, without <c>#</c>.</summary>
+    public string Tag { get; }
+
+    /// <summary>The columns in settings order, lower-cased, distinct (<see cref="BoardView.NormalizeColumn"/>).</summary>
+    public IReadOnlyList<string> Columns { get; }
+
+    /// <summary>Only the type name, like the view records.</summary>
+    public override string ToString() => nameof(BoardSetting);
+}
+
+/// <summary>
 /// <c>&lt;root&gt;/settings.json</c>: <c>{"dayEnd":{"worked":"yyyy-MM-ddTHH:mm","moved":"yyyy-MM-dd"}}</c>, both values
-/// optional, <c>"savedSearches":[{"name":"…","query":"…"}]</c> and <c>"outlook":{"enabled":true|false}</c>. Read through <see cref="BoundedFile"/>; written as UTF-8 without BOM through a temp file and a move,
+/// optional, <c>"savedSearches":[{"name":"…","query":"…"}]</c>, <c>"outlook":{"enabled":true|false}</c> and
+/// <c>"boards":[{"tag":"…","columns":["…"]}]</c> (read only, see <see cref="ReadBoards"/>). Read through <see cref="BoundedFile"/>; written as UTF-8 without BOM through a temp file and a move,
 /// keeping every other property. The automatic day's end (<see cref="DayEnd.AutoClose"/>) and the saved searches use it.
 /// </summary>
 internal sealed class SettingsStore
@@ -189,6 +212,15 @@ internal sealed class SettingsStore
     private const string QueryKey = "query";
     private const string OutlookKey = "outlook";
     private const string EnabledKey = "enabled";
+    private const string BoardsKey = "boards";
+    private const string TagKey = "tag";
+    private const string ColumnsKey = "columns";
+
+    /// <summary>The most boards.</summary>
+    public const int MaxBoards = 50;
+
+    /// <summary>The most columns of one board.</summary>
+    public const int MaxColumns = 12;
 
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
@@ -296,6 +328,16 @@ internal sealed class SettingsStore
         document[OutlookKey] = new JsonObject { [EnabledKey] = enabled };
         Write(document);
     }
+
+    /// <summary>
+    /// The boards in saved order; a missing file or <c>boards</c> property gives an empty list. Each tag goes through
+    /// <see cref="TagIndex.NormalizeTag"/> and each column is lower-cased. Throws <see cref="SettingsStoreException"/>
+    /// when the file can't be read, or <c>boards</c> isn't an array of at most <see cref="MaxBoards"/> objects with
+    /// exactly a string <c>tag</c> (a valid tag, unique ignoring case) and an array <c>columns</c> of 1 to
+    /// <see cref="MaxColumns"/> strings that are columns (<see cref="BoardView.NormalizeColumn"/>), distinct once lower-cased. No write of this
+    /// store changes <c>boards</c>: every other write keeps it as it is.
+    /// </summary>
+    public IReadOnlyList<BoardSetting> ReadBoards() => BoardsOf(ReadRoot());
 
     // Non-ASCII text is written as is rather than as six-byte \uXXXX escapes, so the rules' longest names and queries
     // stay well under MaxBytes. Only the file is written this way; it is never put into HTML.
@@ -469,6 +511,55 @@ internal sealed class SettingsStore
         }
 
         return searches;
+    }
+
+    private static List<BoardSetting> BoardsOf(JsonObject document)
+    {
+        if (!document.TryGetPropertyValue(BoardsKey, out JsonNode? node))
+        {
+            return [];
+        }
+
+        if (node is not JsonArray array || array.Count > MaxBoards)
+        {
+            throw new SettingsStoreException("Bad boards.");
+        }
+
+        List<BoardSetting> boards = [];
+        HashSet<string> tags = new(StringComparer.OrdinalIgnoreCase);
+        foreach (JsonNode? item in array)
+        {
+            if (item is not JsonObject entry
+                || entry.Count != 2
+                || !entry.TryGetPropertyValue(TagKey, out JsonNode? tagNode)
+                || !entry.TryGetPropertyValue(ColumnsKey, out JsonNode? columnsNode)
+                || StringOf(tagNode) is not { } rawTag
+                || !BoardView.TryNormalizeTag(rawTag, out string tag)
+                || !tags.Add(tag)
+                || columnsNode is not JsonArray columnArray
+                || columnArray.Count < 1
+                || columnArray.Count > MaxColumns)
+            {
+                throw new SettingsStoreException("Bad board.");
+            }
+
+            List<string> columns = [];
+            foreach (JsonNode? columnNode in columnArray)
+            {
+                if (StringOf(columnNode) is not { } rawColumn
+                    || BoardView.NormalizeColumn(rawColumn) is not { } column
+                    || columns.Contains(column, StringComparer.Ordinal))
+                {
+                    throw new SettingsStoreException("Bad board column.");
+                }
+
+                columns.Add(column);
+            }
+
+            boards.Add(new BoardSetting(tag, columns));
+        }
+
+        return boards;
     }
 
     // The stored value of "outlook", or null when it is missing or anything other than exactly {"enabled":<bool>}.
