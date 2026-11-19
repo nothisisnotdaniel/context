@@ -165,6 +165,21 @@ internal static class DailyNote
             text.Append("- No appointments.\n");
         }
 
+        AppendAppointmentLines(text, day, appointments, unreadableCalendarFiles, status, reason);
+    }
+
+    /// <summary>
+    /// The <c>## Appointments</c> lines without the heading and without <c>- No appointments.</c>: one per
+    /// appointment, then one per unreadable calendar file and one for a failed feed. Shared with the standup.
+    /// </summary>
+    internal static void AppendAppointmentLines(
+        StringBuilder text,
+        DateOnly day,
+        IReadOnlyList<Appointment> appointments,
+        IReadOnlyList<string> unreadableCalendarFiles,
+        CalendarFeedStatus status,
+        string? reason)
+    {
         DateTime from = day.ToDateTime(TimeOnly.MinValue);
         foreach (Appointment appointment in appointments)
         {
@@ -205,15 +220,21 @@ internal static class DailyNote
         {
             foreach (DueTodo todo in due)
             {
-                text.Append("- ").Append(OneLine(todo.Text));
-                if (todo.Overdue)
-                {
-                    text.Append(" (due ").Append(NameFor(todo.Due)).Append(')');
-                }
-
-                text.Append('\n');
+                AppendTodoLine(text, todo);
             }
         }
+    }
+
+    /// <summary>One <c>## Todos</c> line: <c>- &lt;text&gt;</c>, <c> (due yyyy-MM-dd)</c> when overdue. Shared with the standup.</summary>
+    internal static void AppendTodoLine(StringBuilder text, DueTodo todo)
+    {
+        text.Append("- ").Append(OneLine(todo.Text));
+        if (todo.Overdue)
+        {
+            text.Append(" (due ").Append(NameFor(todo.Due)).Append(')');
+        }
+
+        text.Append('\n');
     }
 
     private static string OneLine(string text) => SafeText.Clean(text).Replace('\n', ' ');

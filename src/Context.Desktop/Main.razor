@@ -1261,6 +1261,47 @@ else
                 // The argument is ignored; the same as the Today button.
                 await ShowToday();
                 break;
+            case "/standup":
+            {
+                // The argument is ignored. With today's note open it runs the Standup item (unsaved text saved first);
+                // otherwise the standup is written first (creating the note when missing) and today's note then opens
+                // like /today, so its new editor loads the written section instead of racing the write.
+                string todayName = Actions.DailyNoteName();
+                if (page == Page.None && string.Equals(openName, todayName, StringComparison.Ordinal)
+                    && Snapshot is { } shown && string.Equals(todayName, DailyNote.NameFor(shown.Today), StringComparison.Ordinal))
+                {
+                    await RunPageAction("standup");
+                    break;
+                }
+
+                if (string.Equals(openName, todayName, StringComparison.Ordinal))
+                {
+                    // Today's note is open behind a page: close the page, keep the editor, then run the item.
+                    await ShowToday();
+                    await RunPageAction("standup");
+                    break;
+                }
+
+                if (running || Snapshot is not { } current)
+                {
+                    break;
+                }
+
+                running = true;
+                ActionResult standup;
+                try
+                {
+                    standup = await Actions.WriteStandup(current.Today);
+                }
+                finally
+                {
+                    running = false;
+                }
+
+                await ShowToday();
+                ShowStandup(standup);
+                break;
+            }
             case "/meeting":
                 // The number of today's appointment in the snapshot's current view, numbered as `context current`.
                 if (!MeetingNote.TryParseNumber(rest, out int meetingNumber))
@@ -2207,7 +2248,7 @@ else
     }
 
     // The shown page's actions for the top bar's More actions menu: a plain or sensitive note's, with End the day
-    // first on today's daily note; none with no note open or on a page (Triage, People, Tags, Settings, an appointment).
+    // and Standup first on today's daily note; none with no note open or on a page (Triage, People, Tags, Settings, an appointment).
     private IReadOnlyList<PageAction> PageActionsFor(DesktopSnapshot snapshot)
     {
         if (page != Page.None || openName is not { } name)
@@ -2217,7 +2258,7 @@ else
 
         IReadOnlyList<PageAction> actions = NoteActionsFor(snapshot);
         return string.Equals(name, DailyNote.NameFor(snapshot.Today), StringComparison.Ordinal)
-            ? [new PageAction("end-day", "End the day"), .. actions]
+            ? [new PageAction("end-day", "End the day"), new PageAction("standup", "Standup"), .. actions]
             : actions;
     }
 
@@ -2369,7 +2410,54 @@ else
 
                 break;
             }
+            case "standup":
+            {
+                // Today's daily note only, like end-day: unsaved text is saved first, then the section is written and
+                // the editor reloads to show it.
+                if (running || page != Page.None || openName is not { } name || Snapshot is not { } snapshot
+                    || !string.Equals(name, DailyNote.NameFor(snapshot.Today), StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                if (await KeptUnsaved())
+                {
+                    ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
+                    return;
+                }
+
+                if (running || !string.Equals(openName, name, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                running = true;
+                ActionResult written;
+                try
+                {
+                    written = await Actions.WriteStandup(snapshot.Today);
+                }
+                finally
+                {
+                    running = false;
+                }
+
+                ShowStandup(written);
+                if (editor is not null && string.Equals(openName, name, StringComparison.Ordinal))
+                {
+                    await editor.ReloadAsync();
+                }
+
+                break;
+            }
         }
+    }
+
+    // The standup's answer in the main status line: grey when written, else red.
+    private void ShowStandup(ActionResult written)
+    {
+        bool ok = written.Kind == ActionKind.Done && (written.Reason is ActionReason.None or ActionReason.Unchanged);
+        ShowStatus(DesktopText.OneLine(written.Text), ok ? "grey" : "red");
     }
 
     // The open note and where to write it, or null (with the reason in the status line) when there is nothing to

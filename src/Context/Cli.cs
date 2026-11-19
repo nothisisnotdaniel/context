@@ -22,6 +22,8 @@ internal sealed class Cli
 
     private const string DateFormat = "yyyy-MM-dd";
     private const string HelpHint = "Run 'context help'.";
+
+    private const string StandupForm = "Type: context standup.";
     private const string TodosUnreadable = "Can't read todos.json.";
     private const string IndexUnreadable = "Can't read context.db.";
     private const string FindForm = "Type: context find <attribute> <value>.";
@@ -50,6 +52,7 @@ internal sealed class Cli
         ("review", "The last 7 days' changed notes and done todos, overdue todos and the next 7 days' appointments."),
         ("today", "Print today's note, creating it with the day's appointments and due todos."),
         ("dayend [today|yyyy-MM-dd]", "Write Times' worked hours into the day's note and move its due todos to the next day."),
+        ("standup", "Print a standup: the last workday's bookings and done todos, today's plan and what is blocked."),
         ("meeting <n>", "Print the note for today's appointment n (as listed by current), creating it first."),
         ("new <title...> [--template <name>]", "Create a note, from templates/<name>.md if given."),
         ("import <path>", "Store a Markdown file as a note."),
@@ -140,6 +143,12 @@ internal sealed class Cli
 
         string name = args[0].ToLowerInvariant();
         string[] rest = args[1..];
+        if (name == "standup" && (json || rest.Length > 0))
+        {
+            // Checked before the json rule: any argument, --json included, is this usage error, before the folder is read.
+            return Usage(StandupForm);
+        }
+
         if (json && (name is "help" or "--help" or "-h" or "capture" or "todo" or "today" or "decisions" or "dayend" or "meeting" or "new" or "import" or "export"))
         {
             // Checked before any argument: nothing is written and the folder is not created.
@@ -244,6 +253,9 @@ internal sealed class Cli
                 return NoArguments("today", args, out usage, Today);
             case "dayend":
                 return ParseDayEnd(args, out usage);
+            case "standup":
+                // Arguments were refused in RunCommand.
+                return Standup;
             case "meeting":
                 if (args.Length != 1 || !MeetingNote.TryParseNumber(args[0], out int number))
                 {
@@ -740,6 +752,16 @@ internal sealed class Cli
             default:
                 return Error($"Can't write {OneLine(result.Name)}.");
         }
+    }
+
+    // Prints today's standup (job 265). Writes nothing apart from Migrate; never opens context.db or settings.json.
+    private int Standup(Session session)
+    {
+        MigrateTodos(session);
+        string text = Context.Standup.Compose(
+            session.Todos, session.Calendar, session.Feed, timesFolder, today(), zone, out bool todosUnreadable);
+        stdout.Write(text);
+        return todosUnreadable ? Error(TodosUnreadable) : ExitOk;
     }
 
     // Prints the note for today's appointment number (1-based, current view order) like note show, creating it first

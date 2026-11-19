@@ -26,7 +26,7 @@ public sealed class DesktopSourceTests
     private static readonly Regex Writes = new(
         @"(?:(?<!\bActions)|(?!\.\s*RestoreVersion\s*\())\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
         + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture|CreateChild|Move|Ensure|CreateWithText"
-        + @"|CloseDay|RefreshWorked|MoveTodos|AutoClose|MoveDue|SaveDayEnd|SaveSavedSearches|Keep|RemoveHistory|RestoreVersion|MoveWithNote|RemoveUnlinked|MarkNotified|Snooze|SaveOutlook|SaveScreenshotFolder|RemoveScreenshotFolder)\s*\(",
+        + @"|CloseDay|RefreshWorked|RefreshStandup|MoveTodos|AutoClose|MoveDue|SaveDayEnd|SaveSavedSearches|Keep|RemoveHistory|RestoreVersion|MoveWithNote|RemoveUnlinked|MarkNotified|Snooze|SaveOutlook|SaveScreenshotFolder|RemoveScreenshotFolder)\s*\(",
         RegexOptions.CultureInvariant);
 
     // 136: the real key stores and the real file dialog, spelled in pieces: no test file may hold their names (see
@@ -1415,6 +1415,7 @@ public sealed class DesktopSourceTests
     [InlineData("notes.CreateWithText(prepared.Title, prepared.Text)")]
     [InlineData("dayEnd.CloseDay(day)")]
     [InlineData("dayEnd.RefreshWorked(day)")]
+    [InlineData("dayEnd.RefreshStandup(day, calendar.Zone)")]
     [InlineData("dayEnd.MoveTodos(day)")]
     [InlineData("dayEnd.AutoClose(today, now)")]
     [InlineData("todos.MoveDue(day, day.AddDays(1))")]

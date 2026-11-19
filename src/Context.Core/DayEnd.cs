@@ -72,6 +72,9 @@ internal sealed class DayEnd
     /// <summary>The heading of the moved list in the closed day's note.</summary>
     public const string MovedToHeading = "## Moved to tomorrow";
 
+    /// <summary>The heading of the standup section (job 265).</summary>
+    public const string StandupHeading = "## Standup";
+
     /// <summary>How many times a note write re-reads and retries when the note changed on disk in between.</summary>
     public const int MaxRetries = 3;
 
@@ -147,23 +150,56 @@ internal sealed class DayEnd
             .Append(", worked ").Append(FormatDuration(day.WorkTime)).Append('\n');
         foreach (TimesGroup group in day.Groups)
         {
-            text.Append("- ");
-            string names = string.Join(", ", group.Names.Select(OneLine));
-            if (group.WorkItem is { } item)
-            {
-                text.Append('#').Append(item.ToString(CultureInfo.InvariantCulture)).Append(' ');
-            }
-
-            text.Append(names).Append(": ").Append(FormatDuration(group.Total));
-            if (group.Open)
-            {
-                text.Append(" (open)");
-            }
-
-            text.Append('\n');
+            text.Append(FormatGroup(group));
         }
 
         return text.ToString();
+    }
+
+    /// <summary>
+    /// One checkpoint group as a worked line: <c>- #n a, b: H:mm</c> or <c>- name: H:mm</c>, <c> (open)</c> for an open
+    /// group, ending in <c>\n</c>. Every name is cleaned to one line. Shared with the standup.
+    /// </summary>
+    internal static string FormatGroup(TimesGroup group)
+    {
+        StringBuilder text = new StringBuilder();
+        text.Append("- ");
+        string names = string.Join(", ", group.Names.Select(OneLine));
+        if (group.WorkItem is { } item)
+        {
+            text.Append('#').Append(item.ToString(CultureInfo.InvariantCulture)).Append(' ');
+        }
+
+        text.Append(names).Append(": ").Append(FormatDuration(group.Total));
+        if (group.Open)
+        {
+            text.Append(" (open)");
+        }
+
+        return text.Append('\n').ToString();
+    }
+
+    /// <summary>
+    /// Writes the <c>## Standup</c> section of <paramref name="day"/>'s daily note: <c>## Standup</c>, a blank line and
+    /// <see cref="Standup.Compose(TodoStore, CalendarStore, CalendarFeed?, string?, DateOnly, TimeZoneInfo)"/>'s text
+    /// for that day in <paramref name="zone"/>. The note is created first (<see cref="DailyNote.Ensure"/>) when it is
+    /// missing; an existing section (the line that is exactly <c>## Standup</c>, up to the next <c>## </c> line) is
+    /// replaced, else one is appended after a blank line; the rest of the note is unchanged. A sensitive note gives
+    /// <see cref="DayEndKind.Sensitive"/> with nothing read. An unreadable <c>todos.json</c> is a line of the text,
+    /// not an error. Never reads or writes <c>settings.json</c>, Times' folder or <c>todos.json</c>. Never throws.
+    /// </summary>
+    public DayEndResult RefreshStandup(DateOnly day, TimeZoneInfo zone)
+    {
+        string name = DailyNote.NameFor(day);
+        DateOnly to = day.AddDays(1);
+        if (IsSensitive(day))
+        {
+            return new DayEndResult(DayEndKind.Sensitive, name, [], to, false);
+        }
+
+        string section = StandupHeading + "\n\n" + Standup.Compose(todos, calendar, feed, timesFolder, day, zone);
+        NoteEdit edit = Edit(day, text => ReplaceSection(text, StandupHeading, section));
+        return new DayEndResult(edit.Kind, name, [], to, edit.Changed);
     }
 
     /// <summary>

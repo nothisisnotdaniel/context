@@ -104,6 +104,14 @@ folder; it is only read. In the desktop app, `End the day` is the first item of 
 while today's note is open, and the app closes the day by
 itself after you book your leaving in Times (the todos move once, at a leaving at 17:00 or later).
 
+### Standup
+
+`context standup` prints a standup to paste into a chat, in three blocks: `Yesterday (<date>)` with the last workday's
+Times bookings (the latest of the last 7 days with bookings) and the todos done since then, `Today` with today's
+appointments and due todos, and `Blocked` with every open waiting-for todo and its follow-up date. It only reads.
+In the desktop app, `Standup` (right after `End the day` in the More actions menu of today's note) and `/standup`
+write the same text into today's daily note as a `## Standup` section, replacing an earlier one.
+
 ### Saving
 
 The desktop app saves the open note by itself one second after you stop typing; the line under the note says
