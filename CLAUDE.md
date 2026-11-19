@@ -125,7 +125,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Total`) and `Commits` (date, repo, 7-char hash, subject), each only with rows; grey `Times isn't set up, so no
     hours.`, `Set repository folders in Settings to see commits.`, `No notes, todos or meetings mention #<n>.`; red
     `Can't read the mentions.`, `Can't read the todos.`, `Skipped <k> unreadable Times day file(s).`, `Can't run git, so
-    no commits.`, `Can't read commits in <repo>.`; the `PersonPanel` read-only, `indexGate`, reload and stale-result
+    no commits.`, `Can't read commits in <repo>.`, plus `Can't read Times' folder.` (`Unlistable`) and `Can't read settings.json.`; the `PersonPanel` read-only, `indexGate`, reload and stale-result
     rules (`DesktopState.Item(n)`). `DesktopActions.OpenItem(n)` and `AddRepository`/`RemoveRepository` (the
     Settings *Repository folders* section: text field + Add, Remove per row) are the writers. **Open from the command
     line:** `context item <n>` prints `Item #<n>`, `Notes`, `Todos`, `People`, `Meetings`, `Hours`, `Commits` (every

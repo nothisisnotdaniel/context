@@ -142,8 +142,8 @@ internal sealed class GitCommitLog : ICommitLog
         using (process)
         {
             process.StandardInput.Close();
-            process.ErrorDataReceived += static (_, _) => { };
-            process.BeginErrorReadLine();
+            // stderr is drained into nothing, so it is never buffered and git never blocks on a full pipe.
+            _ = process.StandardError.BaseStream.CopyToAsync(Stream.Null);
             Task<byte[]> reading = ReadCappedAsync(process.StandardOutput.BaseStream);
             bool finished;
             try
