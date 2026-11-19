@@ -398,7 +398,7 @@
         await Load();
     }
 
-    // The checkbox: stores the new value, then shows what is stored.
+    // The digest checkbox (job 286): stores the new value, then shows what is stored.
     private async Task ToggleMailDigest(ChangeEventArgs e)
     {
         if (busy)
@@ -423,6 +423,7 @@
         await Load();
     }
 
+    // The checkbox: stores the new value, then shows what is stored.
     private async Task ToggleOutlook(ChangeEventArgs e)
     {
         if (busy)

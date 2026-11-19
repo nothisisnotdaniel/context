@@ -240,6 +240,8 @@ public sealed class MailDigestPanelTests : IDisposable
         Assert.Equal(["Accept", "Accept", "Accept"], cut.FindAll(".digest-row button.digest-accept").Select(b => b.TextContent).ToArray());
         Assert.Equal(["Dismiss", "Dismiss", "Dismiss"], cut.FindAll(".digest-row button.digest-dismiss").Select(b => b.TextContent).ToArray());
         Assert.All(cut.FindAll(".mail-digest-panel button"), b => Assert.Equal("button", b.GetAttribute("type")));
+        Assert.Equal("Accept: Planning", cut.FindAll(".digest-row button.digest-accept")[2].GetAttribute("aria-label"));
+        Assert.Equal("Dismiss: Planning", cut.FindAll(".digest-row button.digest-dismiss")[2].GetAttribute("aria-label"));
     }
 
     // AC-7, AC-10: reading and dismissing write nothing: the data folder's files and bytes are unchanged.

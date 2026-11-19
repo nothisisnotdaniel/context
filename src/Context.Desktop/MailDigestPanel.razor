@@ -48,8 +48,8 @@
                         <span class="digest-text">@DesktopText.OneLine(s.Text)</span>
                         <span class="digest-source grey">@SourceText(s)</span>
                         <span class="digest-buttons">
-                            <button type="button" class="digest-accept" disabled="@running" @ref="row.AcceptButton" @onclick="() => Accept(row, index)">Accept</button>
-                            <button type="button" class="digest-dismiss" disabled="@running" @onclick="() => Dismiss(row, index)">Dismiss</button>
+                            <button type="button" class="digest-accept" aria-label="@("Accept: " + DesktopText.OneLine(s.Text))" disabled="@running" @ref="row.AcceptButton" @onclick="() => Accept(row, index)">Accept</button>
+                            <button type="button" class="digest-dismiss" aria-label="@("Dismiss: " + DesktopText.OneLine(s.Text))" disabled="@running" @onclick="() => Dismiss(row, index)">Dismiss</button>
                         </span>
                         @if (row.Result is { } result)
                         {

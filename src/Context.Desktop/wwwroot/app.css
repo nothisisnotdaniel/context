@@ -2007,6 +2007,10 @@ nav.saved-searches ul {
     display: none;
 }
 
+.settings-panel .mail-digest-line {
+    margin-top: 8px;
+}
+
 /* Mail digest (job 286): the Read mail button, its status line and one row per suggestion with Accept and Dismiss. */
 .mail-digest-panel {
     border-bottom: 1px solid var(--line);

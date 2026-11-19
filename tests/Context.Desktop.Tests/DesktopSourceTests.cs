@@ -2102,7 +2102,7 @@ public sealed class DesktopSourceTests
         Assert.Single(Regex.Matches(read, @"\bBody\b"));
         int body = read.IndexOf("item.Body", StringComparison.Ordinal);
         int cap = read.IndexOf("body.Length > MailDigest.MaxBodyLength", StringComparison.Ordinal);
-        int cut = read.IndexOf("body[..MailDigest.MaxBodyLength]", StringComparison.Ordinal);
+        int cut = read.IndexOf("body = body[..keep]", StringComparison.Ordinal);
         Assert.True(body >= 0 && cap > body && cut > cap);
         Assert.Equal(4000, MailDigest.MaxBodyLength);
     }

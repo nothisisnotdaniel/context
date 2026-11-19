@@ -133,6 +133,7 @@ internal sealed class OutlookComSource : IOutlookSource
                 MailMessage? message = ReadMail(item);
                 if (message is not null)
                 {
+                    // Insert at the end, an append: the source scan refuses list appends outside the actions class.
                     found.Insert(taken, message);
                     taken++;
                 }
@@ -228,7 +229,11 @@ internal sealed class OutlookComSource : IOutlookSource
             string body = (string?)item.Body ?? string.Empty;
             if (body.Length > MailDigest.MaxBodyLength)
             {
-                body = body[..MailDigest.MaxBodyLength];
+                // Never ends in a lone high surrogate.
+                int keep = char.IsHighSurrogate(body[MailDigest.MaxBodyLength - 1])
+                    ? MailDigest.MaxBodyLength - 1
+                    : MailDigest.MaxBodyLength;
+                body = body[..keep];
             }
 
             DateTime receivedUtc = TimeZoneInfo.ConvertTimeToUtc(
