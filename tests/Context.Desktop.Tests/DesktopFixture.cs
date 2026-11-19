@@ -310,6 +310,12 @@ internal sealed class DesktopFixture : IDisposable
     /// </summary>
     public void WriteRecent(params string[] names) => new RecentNotesStore(Root).Write(names);
 
+    /// <summary>
+    /// Writes pinned.json with <paramref name="names"/> in pinned order (job 278); the state reads it once when it is
+    /// built, so call this before <see cref="CreateState"/>.
+    /// </summary>
+    public void WritePinned(params string[] names) => new PinnedNotesStore(Root).Write(names);
+
     public void WriteFile(string relative, string text)
     {
         string path = Path.Combine(Root, relative);

@@ -816,7 +816,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     assembly is public-signed with the committed `Context.snk`, see **Strong name**). `Context` grants only
     `Context.Tests` and `Context.Desktop` only `Context.Desktop.Tests`, the same way; no `InternalsVisibleTo` is name-only.
     It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, picking a todo by its text in `TodoPicker.cs`, todos inside notes in `NoteTodoParser.cs` and `NoteTodo.cs`, topics for the next 1:1 in `TopicParser.cs` and `MeetingTopics.cs`, review dates in `ReviewDateParser.cs` and `NoteReviews.cs`, tag parsing in `TagParser.cs`, the shared HTML page of a note in `NoteHtml.cs`,
-    `[[note link]]` parsing in `NoteLinkParser.cs`, link rewriting on rename in `NoteLinkRewriter.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the desktop's recently opened notes (`recent.json`) in `RecentNotes.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
+    `[[note link]]` parsing in `NoteLinkParser.cs`, link rewriting on rename in `NoteLinkRewriter.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the desktop's recently opened notes (`recent.json`) in `RecentNotes.cs`, its pinned notes (`pinned.json`) in `PinnedNotes.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; over the cap it throws `FileTooLargeException : IOException` (`Too large.`); job 275: every full read of `.ics` files and the feed cache (`CalendarStore.ReadText`, `MaxFileBytes`), `todos.json` (`TodoStore.MaxFileBytes`, 5 MB; a directory named `todos.json` can't be read), `calendar-link.txt` (`CalendarLink.MaxFileBytes`, 4096) and notes (`NoteStore.Read`) goes through it; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
     `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs` (the agenda carry-over in `MeetingCarryOver.cs`), note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs` (its triage queue, remove and snooze in `InboxTriage.cs`), the day's end in `DayEnd.cs` (Times' day file in `TimesDay.cs`, today's Times bookings in `TimesNow.cs`, `settings.json` in `SettingsStore.cs`), the morning briefing in `Briefing.cs` (Times' flexitime balance in `TimesBalance.cs`), the todo input rules (`TryParseDate`,
@@ -1404,7 +1404,19 @@ Every factory agent reads this file before working on Context. Keep it short and
     thread of its own (job 246). `FileSnapshot.Take` also leaves out the temp files of every ignored file
     (`.<name>.<anything>.tmp` in that file's own folder, checked on the path before any read), so a snapshot that
     ignores `recent.json` never sees or reads a write in flight; a test that proves no temp file is left lists the
-    folder itself (job 267). A whole-folder snapshot that includes `context.db` while panels may still load goes
+    folder itself (job 267). Pinned notes (job 278): the note menu's `pin` item (`menuitemcheckbox` `Pinned`, after
+    `History`, `aria-checked` from `State.Pinned`; only with a note open, plain or sensitive) calls
+    `Actions.SetPinned(name, pinned)` (`Run`, `refresh: false`): an already matching state is Done/Unchanged, a 21st pin
+    Refused with red `You can pin at most 20 notes.`, a failed write Failed with red `Can't write pinned.json.` (the file
+    is written first, `DesktopState.ChangePinned` only after, so the in-memory list stays). `NotesPanel` draws
+    `ul.note-list.pinned-notes` (`aria-label="Pinned notes"`, pinned order, existing notes only) above the recent list
+    with the same rows plus an inline svg `span.pin-icon` (`role="img"`, `aria-label`/`<title>` `Pinned`,
+    `currentColor`) after the name; the recent list leaves pinned notes out (all pinned: grey `No recently opened
+    notes.`). Core `PinnedNotes.cs` holds the pure steps (`Pin`, `Unpin`, `Renamed`, `Removed`, at most 20) and
+    `PinnedNotesStore` (`<root>/pinned.json`, `{"pinned":[…]}`), sharing `NameListFile` (in `RecentNotes.cs`) with
+    `RecentNotesStore`, so it has the same read and write rules. Rename/move apply `Renamed`, delete/merge `Removed`,
+    writing the file only when the list changes (so tests that never pin never see it). `DataWatcher` ignores it; the
+    CLI never names it. `DesktopFixture.WritePinned` seeds the file before the state is built. A whole-folder snapshot that includes `context.db` while panels may still load goes
     through `DesktopFixture.SnapshotUnderIndexGate(syncFirst)` (under `IndexGate`; `syncFirst: true` for "before"), since
     reading the file during a panel's index sync fails on macOS. An open subpage shows `<nav class="breadcrumb" aria-label="Breadcrumb">`
     as the first child of `.note-area`: each ancestor a `button.crumb` opening it through `RequestOpen`, the last item a span with

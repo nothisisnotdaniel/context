@@ -761,4 +761,144 @@ public sealed class NotesPanelTests : IDisposable
         Assert.Equal("No notes yet", cut.Find(".notes p").TextContent);
         Assert.Empty(cut.FindAll("p.recent-empty"));
     }
+
+    // 278 AC-5: the pinned list sits above the recent list, in pinned order; an entry naming no note is left out.
+    [Fact]
+    public async Task Pinned_AboveRecent_PinnedOrder_MissingLeftOut()
+    {
+        WriteTree();
+        data.WriteRecent("Meetings");
+        data.WritePinned("Plan", "Gone", "Meetings/Meeting 1/Notes", "plan");
+
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        IReadOnlyList<IElement> lists = cut.FindAll("ul.note-list");
+        Assert.Equal(2, lists.Count);
+        Assert.True(lists[0].ClassList.Contains("pinned-notes"));
+        Assert.Equal("Pinned notes", lists[0].GetAttribute("aria-label"));
+        Assert.True(lists[1].ClassList.Contains("recent-notes"));
+        Assert.Equal(
+            ["Plan", "Meetings/Meeting 1/Notes"],
+            lists[0].QuerySelectorAll("button.name").Select(b => b.GetAttribute("title")!).ToArray());
+        Assert.Equal(["Meetings"], lists[1].QuerySelectorAll("button.name").Select(b => b.GetAttribute("title")!).ToArray());
+    }
+
+    // 278 AC-5: without a pinned entry that names an existing note there is no pinned list.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Pinned_NoneListed_NoPinnedList(bool gone)
+    {
+        WriteTree();
+        data.WriteRecent("Plan");
+        if (gone)
+        {
+            data.WritePinned("Gone");
+        }
+
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        Assert.Empty(cut.FindAll("ul.pinned-notes"));
+        Assert.Empty(cut.FindAll(".pin-icon"));
+        Assert.Single(cut.FindAll("ul.recent-notes li.note"));
+    }
+
+    // 278 AC-5, AC-6: a pinned row has the recent row's markup (cut name button, title, grey parent, aria-current on
+    // the open note, locked for a sensitive note) with the pin icon right after the name button.
+    [Fact]
+    public async Task Pinned_RowMarkup_PinIconAfterTheName()
+    {
+        WriteTree();
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("Secret", "x");
+        data.WritePinned("Meetings/Meeting 1", "Secret");
+        await data.RefreshAsync();
+
+        IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OpenName, "Meetings/Meeting 1"));
+
+        IReadOnlyList<IElement> rows = cut.FindAll("ul.pinned-notes li.note");
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(["name", "pin-icon"], rows[0].Children.Select(c => c.ClassList.First()).ToArray());
+        Assert.Equal(["name", "pin-icon", "locked"], rows[1].Children.Select(c => c.ClassList.First()).ToArray());
+        IElement button = rows[0].QuerySelector("button.name")!;
+        Assert.True(button.ClassList.Contains("cut"));
+        Assert.Equal("button", button.GetAttribute("type"));
+        Assert.Equal("Meetings/Meeting 1", button.GetAttribute("title"));
+        Assert.Equal("Meeting 1", Title(button));
+        Assert.Equal("Meetings", button.QuerySelector("span.note-parent")!.TextContent);
+        Assert.Equal("page", button.GetAttribute("aria-current"));
+        Assert.Null(rows[1].QuerySelector("button.name")!.GetAttribute("aria-current"));
+        Assert.Equal("locked", rows[1].QuerySelector(".locked")!.TextContent);
+    }
+
+    // 278 AC-6: the pin icon is an inline svg with an accessible name, drawn in currentColor only; recent rows have none.
+    [Fact]
+    public async Task Pinned_PinIcon_InlineSvg_CurrentColor_RecentRowsWithout()
+    {
+        WriteTree();
+        data.WriteRecent("Meetings");
+        data.WritePinned("Plan");
+
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        IElement icon = cut.Find("ul.pinned-notes li.note span.pin-icon");
+        IElement svg = Assert.Single(icon.Children);
+        Assert.Equal("svg", svg.LocalName);
+        Assert.Equal("img", svg.GetAttribute("role"));
+        Assert.Equal("Pinned", svg.GetAttribute("aria-label"));
+        Assert.Equal("Pinned", svg.QuerySelector("title")!.TextContent);
+        Assert.Equal("currentColor", svg.GetAttribute("stroke"));
+        Assert.Equal("none", svg.GetAttribute("fill"));
+        Assert.DoesNotMatch("#[0-9a-fA-F]{3,8}|rgb|hsl", icon.InnerHtml);
+        Assert.Empty(icon.QuerySelectorAll("img, use, image"));
+        Assert.DoesNotContain("href", icon.InnerHtml);
+        Assert.Empty(cut.FindAll("ul.recent-notes .pin-icon"));
+    }
+
+    // 278 AC-5: clicking a pinned row opens it through OnOpen by its full name.
+    [Fact]
+    public async Task Pinned_Click_OpensFullName()
+    {
+        WriteTree();
+        data.WritePinned("Meetings/Meeting 1");
+        List<string> opened = [];
+        await data.RefreshAsync();
+        IRenderedComponent<NotesPanel> cut = data.Bunit.Render<NotesPanel>(p => p.Add(n => n.OnOpen, (string name) => opened.Add(name)));
+
+        await cut.Find("ul.pinned-notes button.name[title='Meetings/Meeting 1']").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(["Meetings/Meeting 1"], opened);
+    }
+
+    // 278 AC-7: the recent list leaves out pinned notes; when every recent entry is pinned it shows the grey empty line.
+    [Fact]
+    public async Task Pinned_LeftOutOfRecent_AllPinned_GreyEmptyLine()
+    {
+        WriteTree();
+        data.WriteRecent("Plan", "Meetings");
+        data.WritePinned("Meetings", "Plan");
+
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        Assert.Equal(["Meetings", "Plan"], cut.FindAll("ul.pinned-notes button.name").Select(b => b.GetAttribute("title")!).ToArray());
+        Assert.Empty(cut.FindAll("ul.recent-notes"));
+        IElement line = cut.Find("p.recent-empty");
+        Assert.Equal("No recently opened notes.", line.TextContent);
+        Assert.True(line.ClassList.Contains("grey"));
+    }
+
+    // 278 AC-7: only the pinned ones are left out of the recent list; the rest keeps its order.
+    [Fact]
+    public async Task Pinned_SomePinned_RestOfRecentInOrder()
+    {
+        WriteTree();
+        data.WriteRecent("Plan", "Meetings", "Meetings/Meeting 1");
+        data.WritePinned("Meetings");
+
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        Assert.Equal(
+            ["Plan", "Meetings/Meeting 1"],
+            cut.FindAll("ul.recent-notes button.name").Select(b => b.GetAttribute("title")!).ToArray());
+    }
 }

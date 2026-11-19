@@ -46,7 +46,8 @@ internal static class RecentNotes
         && name.Length <= NoteStore.MaxNameLength
         && name.Split('/').All(part => NoteStore.ValidateTitle(part) is null);
 
-    private static bool IsBelow(string name, string ancestor) =>
+    /// <summary>True when <paramref name="name"/> is a subpage at any depth below <paramref name="ancestor"/> (ordinal).</summary>
+    internal static bool IsBelow(string name, string ancestor) =>
         name.Length > ancestor.Length + 1
         && name[ancestor.Length] == '/'
         && name.StartsWith(ancestor, StringComparison.Ordinal);
@@ -68,14 +69,6 @@ internal sealed class RecentNotesStore
 
     private const string RecentKey = "recent";
 
-    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
-
-    // Non-ASCII names are written as they are. Only the file is written this way; it is never put into HTML.
-    private static readonly JsonSerializerOptions WriteOptions = new()
-    {
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-    };
-
     private readonly string root;
 
     public RecentNotesStore(string root)
@@ -91,15 +84,47 @@ internal sealed class RecentNotesStore
     /// valid JSON or not of the stated shape (more than <see cref="RecentNotes.MaxCount"/> names, a duplicate, or a name
     /// that fails <see cref="RecentNotes.IsValidName"/>). Never throws.
     /// </summary>
-    public IReadOnlyList<string> Read()
+    public IReadOnlyList<string> Read() => NameListFile.Read(FilePath, RecentKey, RecentNotes.MaxCount, MaxBytes);
+
+    /// <summary>
+    /// Writes <paramref name="names"/> (newest first) through a temp file and a move, replacing whatever the file held.
+    /// Throws an <see cref="IOException"/> (or <see cref="UnauthorizedAccessException"/>) when it can't be written, for
+    /// example when the root folder is missing or read-only.
+    /// </summary>
+    public void Write(IReadOnlyList<string> names) => NameListFile.Write(root, FileName, RecentKey, names);
+}
+
+/// <summary>
+/// An app-owned JSON file in the root holding one list of note names, <c>{"&lt;key&gt;":["&lt;full name&gt;", …]}</c>
+/// (<c>recent.json</c>, job 240; <c>pinned.json</c>, job 278). Read through <see cref="BoundedFile"/>; anything broken
+/// or of another shape reads as empty. Written as UTF-8 without BOM, relaxed escaping, through a temp file
+/// (<c>.&lt;file&gt;.&lt;guid&gt;.tmp</c>) and a move; the root folder is never created here.
+/// </summary>
+internal static class NameListFile
+{
+    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+
+    // Non-ASCII names are written as they are. Only the file is written this way; it is never put into HTML.
+    private static readonly JsonSerializerOptions WriteOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    /// <summary>
+    /// The names under <paramref name="key"/>, in order. Empty when the file is missing, unreadable, over
+    /// <paramref name="maxBytes"/>, not valid JSON, has another key or more keys, holds more than
+    /// <paramref name="maxCount"/> names, a duplicate (ordinal) or a name that fails <see cref="RecentNotes.IsValidName"/>.
+    /// Never throws.
+    /// </summary>
+    public static IReadOnlyList<string> Read(string path, string key, int maxCount, long maxBytes)
     {
         try
         {
-            byte[] bytes = BoundedFile.Read(FilePath, MaxBytes);
+            byte[] bytes = BoundedFile.Read(path, maxBytes);
             if (JsonNode.Parse(bytes) is not JsonObject document
                 || document.Count != 1
-                || document[RecentKey] is not JsonArray array
-                || array.Count > RecentNotes.MaxCount)
+                || document[key] is not JsonArray array
+                || array.Count > maxCount)
             {
                 return [];
             }
@@ -128,11 +153,11 @@ internal sealed class RecentNotesStore
     }
 
     /// <summary>
-    /// Writes <paramref name="names"/> (newest first) through a temp file and a move, replacing whatever the file held.
-    /// Throws an <see cref="IOException"/> (or <see cref="UnauthorizedAccessException"/>) when it can't be written, for
-    /// example when the root folder is missing or read-only.
+    /// Writes <paramref name="names"/> under <paramref name="key"/> to <c>&lt;root&gt;/&lt;fileName&gt;</c> through a temp
+    /// file and a move, replacing whatever the file held. Throws an <see cref="IOException"/> (or
+    /// <see cref="UnauthorizedAccessException"/>) when it can't be written; no temp file is left behind.
     /// </summary>
-    public void Write(IReadOnlyList<string> names)
+    public static void Write(string root, string fileName, string key, IReadOnlyList<string> names)
     {
         JsonArray array = new();
         foreach (string name in names)
@@ -140,9 +165,9 @@ internal sealed class RecentNotesStore
             array.Add(name);
         }
 
-        JsonObject document = new() { [RecentKey] = array };
+        JsonObject document = new() { [key] = array };
         byte[] bytes = Utf8NoBom.GetBytes(document.ToJsonString(WriteOptions) + "\n");
-        string temp = Path.Combine(root, $".{FileName}.{Guid.NewGuid():N}.tmp");
+        string temp = Path.Combine(root, $".{fileName}.{Guid.NewGuid():N}.tmp");
         try
         {
             using (FileStream stream = PrivateFile.OpenNew(temp))
@@ -150,7 +175,7 @@ internal sealed class RecentNotesStore
                 stream.Write(bytes);
             }
 
-            File.Move(temp, FilePath, overwrite: true);
+            File.Move(temp, Path.Combine(root, fileName), overwrite: true);
         }
         finally
         {

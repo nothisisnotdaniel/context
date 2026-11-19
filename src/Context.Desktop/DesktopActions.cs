@@ -289,6 +289,11 @@ internal sealed class DesktopActions
 
     // recent.json writes started by RecordOpened and not finished yet (job 246); only Interlocked touches it.
     private int pendingRecentWrites;
+
+    private readonly PinnedNotesStore pinnedStore;
+
+    // One change and write of pinned.json at a time (job 278).
+    private readonly object pinnedWriteGate = new();
     private readonly string? timesFolder;
     private readonly INotifier? notifier;
     private readonly IScreenCapture? screenCapture;
@@ -320,6 +325,7 @@ internal sealed class DesktopActions
         this.calendar = calendar ?? new CalendarStore(notes.Root, TimeZoneInfo.Local);
         settings = new SettingsStore(notes.Root);
         recentStore = new RecentNotesStore(notes.Root);
+        pinnedStore = new PinnedNotesStore(notes.Root);
         dayEnd = new DayEnd(notes, todos, this.calendar, calendarFeed, timesFolder, settings);
         this.timesFolder = timesFolder;
         this.calendarLink = calendarLink;
@@ -1155,6 +1161,87 @@ internal sealed class DesktopActions
             catch (Exception)
             {
                 // The in-memory list stays; the sidebar keeps showing it.
+            }
+        }
+    }
+
+    /// <summary>The Refused text of <see cref="SetPinned"/> for a 21st pin.</summary>
+    public const string PinLimitText = "You can pin at most 20 notes.";
+
+    /// <summary>The Failed text of <see cref="SetPinned"/> when <c>pinned.json</c> can't be written.</summary>
+    public const string PinWriteFailedText = "Can't write pinned.json.";
+
+    /// <summary>The Refused text of <see cref="SetPinned"/> for a name that could not name a note.</summary>
+    public const string PinInvalidText = "That note can't be pinned.";
+
+    /// <summary>
+    /// Pins (<paramref name="pinned"/> true: appended at the end of <see cref="DesktopState.Pinned"/>) or unpins the note
+    /// <paramref name="name"/> (a full name) and writes <c>pinned.json</c> (job 278). Done with the name; Done/
+    /// <see cref="ActionReason.Unchanged"/> when it already was (un)pinned, nothing written. A 21st pin is Refused
+    /// (<see cref="PinLimitText"/>), a failed write Failed (<see cref="PinWriteFailedText"/>); both leave the file and the
+    /// in-memory list as they were. Raises <see cref="DesktopState.Changed"/> after a change; never refreshes.
+    /// </summary>
+    public Task<ActionResult> SetPinned(string name, bool pinned) => Run(() => SetPinnedNow(name, pinned), refresh: false);
+
+    private ActionResult SetPinnedNow(string name, bool pinned)
+    {
+        if (!PinnedNotes.IsValidName(name))
+        {
+            return Refused(ActionReason.Invalid, PinInvalidText);
+        }
+
+        lock (pinnedWriteGate)
+        {
+            IReadOnlyList<string> current = state.Pinned;
+            bool listed = current.Contains(name, StringComparer.Ordinal);
+            if (listed == pinned)
+            {
+                return new ActionResult(ActionKind.Done, ActionReason.Unchanged, name);
+            }
+
+            if (pinned && current.Count >= PinnedNotes.MaxCount)
+            {
+                return Refused(ActionReason.Invalid, PinLimitText);
+            }
+
+            IReadOnlyList<string> next = pinned ? PinnedNotes.Pin(current, name) : PinnedNotes.Unpin(current, name);
+            try
+            {
+                pinnedStore.Write(next);
+            }
+            catch (Exception)
+            {
+                return Failed(ActionReason.WriteFailed, PinWriteFailedText);
+            }
+
+            state.ChangePinned(_ => next);
+        }
+
+        state.RaiseChanged();
+        return new ActionResult(ActionKind.Done, ActionReason.None, name);
+    }
+
+    // Changes the pinned list after a rename, move, merge or delete (on the action's worker thread) and writes it when
+    // it changed. Never throws; a failed write is swallowed and the in-memory list follows the note anyway.
+    private void ChangePinned(Func<IReadOnlyList<string>, IReadOnlyList<string>> step)
+    {
+        lock (pinnedWriteGate)
+        {
+            try
+            {
+                IReadOnlyList<string> current = state.Pinned;
+                IReadOnlyList<string> next = step(current);
+                if (next.SequenceEqual(current, StringComparer.Ordinal))
+                {
+                    return;
+                }
+
+                state.ChangePinned(_ => next);
+                pinnedStore.Write(next);
+            }
+            catch (Exception)
+            {
+                // The in-memory list stays changed; the next pin writes the file again.
             }
         }
     }
@@ -2635,6 +2722,7 @@ internal sealed class DesktopActions
             {
                 string oldName = source.Name;
                 ChangeRecent(list => RecentNotes.Renamed(list, oldName, renamedName));
+                ChangePinned(list => PinnedNotes.Renamed(list, oldName, renamedName));
             }
 
             return UpdateLinks(plan, renamedName);
@@ -2816,6 +2904,7 @@ internal sealed class DesktopActions
             notes.Delete(merged.Name, removeHistory: false, removeAttachments: false);
             string mergedName = merged.Name;
             ChangeRecent(list => RecentNotes.Removed(list, mergedName));
+            ChangePinned(list => PinnedNotes.Removed(list, mergedName));
             return UpdateMergeLinks(plan, merged.Name, kept.Name);
         }
         catch (Exception)
@@ -3160,6 +3249,7 @@ internal sealed class DesktopActions
             {
                 string oldName = source.Name;
                 ChangeRecent(list => RecentNotes.Renamed(list, oldName, moved.Name));
+                ChangePinned(list => PinnedNotes.Renamed(list, oldName, moved.Name));
             }
 
             return new ActionResult(ActionKind.Done, ActionReason.None, moved.Name);
@@ -3202,6 +3292,7 @@ internal sealed class DesktopActions
                     // Never throws; a file it can't remove stays and the delete is still done.
                     attachments.RemoveUnlinked(plain, linked);
                     ChangeRecent(list => RecentNotes.Removed(list, plain.Name));
+                    ChangePinned(list => PinnedNotes.Removed(list, plain.Name));
                 }
 
                 return new ActionResult(ActionKind.Done, ActionReason.None, name);
@@ -3212,6 +3303,7 @@ internal sealed class DesktopActions
             {
                 state.Session.Close(locked.Name);
                 ChangeRecent(list => RecentNotes.Removed(list, locked.Name));
+                ChangePinned(list => PinnedNotes.Removed(list, locked.Name));
                 return new ActionResult(ActionKind.Done, ActionReason.None, name);
             }
 

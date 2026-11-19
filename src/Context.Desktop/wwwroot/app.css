@@ -1601,6 +1601,19 @@ input[type="password"]:disabled {
     font-weight: 600;
 }
 
+/* 278: the pinned notes above the recent list; each pinned row has a small pin icon in the theme's grey. */
+.note-list.pinned-notes {
+    margin-bottom: 8px;
+}
+
+.note-list .note .pin-icon {
+    align-self: center;
+    color: var(--grey);
+    display: inline-flex;
+    flex: none;
+    margin-left: 4px;
+}
+
 /* 207: saved searches between the sidebar bar and the note list: a cut name per row and an icon remove button. */
 nav.saved-searches ul {
     list-style: none;

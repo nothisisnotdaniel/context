@@ -261,13 +261,14 @@ public sealed class MainTests : IDisposable
         await OpenMenuAsync(cut);
         IReadOnlyList<IElement> items = cut.FindAll(".page-menu button");
         Assert.Equal(
-            ["rename", "delete", "history", "new-subpage", "move", "open-external", "export", "share", "mark-sensitive"],
+            ["rename", "delete", "history", "pin", "new-subpage", "move", "open-external", "export", "share", "mark-sensitive"],
             items.Select(b => b.ClassName ?? string.Empty).ToArray());
         Assert.Equal(
-            ["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export", "Share", "Mark sensitive"], items.Select(b => b.TextContent).ToArray());
+            ["Rename", "Delete", "History", "Pinned", "New subpage", "Move", "Open in default editor", "Export", "Share", "Mark sensitive"], items.Select(b => b.TextContent).ToArray());
         Assert.All(items, b => Assert.Equal("button", b.GetAttribute("type")));
         Assert.Equal("menuitemcheckbox", cut.Find(".page-menu button.history").GetAttribute("role"));
-        Assert.All(items.Where(b => b.ClassName != "history"), b => Assert.Equal("menuitem", b.GetAttribute("role")));
+        Assert.Equal("menuitemcheckbox", cut.Find(".page-menu button.pin").GetAttribute("role"));
+        Assert.All(items.Where(b => b.ClassName is not ("history" or "pin")), b => Assert.Equal("menuitem", b.GetAttribute("role")));
     }
 
     // 134 AC-8: the toolbar also shows when the note can't be read, and Delete still works there.
@@ -283,7 +284,7 @@ public sealed class MainTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Equal("Can't read Big.", cut.Find(".unreadable").TextContent), Wait);
         await OpenMenuAsync(cut);
-        Assert.Equal(9, cut.FindAll(".page-menu button").Count);
+        Assert.Equal(10, cut.FindAll(".page-menu button").Count);
     }
 
     // 134 AC-8: Rename swaps in a prefilled field; Enter or Save name renames and the editor shows the new name.
@@ -1797,7 +1798,7 @@ public sealed class MainTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Contains(cut.FindAll(".links-panel p"), p => p.TextContent == "Sensitive notes have no links."), Wait);
         Assert.Empty(cut.FindAll(".note-toolbar"));
-        Assert.Equal(["rename", "delete", "history", "make-plain", "lock"], await MenuIdsAsync(cut));
+        Assert.Equal(["rename", "delete", "history", "pin", "make-plain", "lock"], await MenuIdsAsync(cut));
     }
 
     // 152 AC-14 / AC-16: Export of a subpage suggests its title as the file name.
@@ -2172,6 +2173,124 @@ public sealed class MainTests : IDisposable
 
         // 200: the links panel loads behind Task.Run; wait until it is in before the menu is opened or compared.
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);
+    }
+
+    // 278 AC-3: the Pinned item is a menuitemcheckbox after History; choosing it pins the open note (pinned.json), the
+    // item then shows checked, and choosing it again unpins.
+    [Fact]
+    public async Task Pin_MenuItem_PinsThenUnpins()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+
+        await OpenMenuAsync(cut);
+        IElement item = cut.Find(".page-menu button.pin");
+        Assert.Equal("menuitemcheckbox", item.GetAttribute("role"));
+        Assert.Equal("Pinned", item.TextContent);
+        Assert.Equal("false", item.GetAttribute("aria-checked"));
+        string[] ids = cut.FindAll(".page-menu button").Select(b => b.ClassName ?? string.Empty).ToArray();
+        Assert.Equal(Array.IndexOf(ids, "history") + 1, Array.IndexOf(ids, "pin"));
+        await item.ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll("ul.pinned-notes button.name[title='Plan']")), Wait);
+        Assert.Equal(["Plan"], new PinnedNotesStore(data.Root).Read());
+        Assert.Equal(["Plan"], data.State!.Pinned);
+        await OpenMenuAsync(cut);
+        Assert.Equal("true", cut.Find(".page-menu button.pin").GetAttribute("aria-checked"));
+        await cut.Find(".page-menu button.pin").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("ul.pinned-notes")), Wait);
+        Assert.Empty(new PinnedNotesStore(data.Root).Read());
+        Assert.Equal("{\"pinned\":[]}\n", File.ReadAllText(Path.Combine(data.Root, PinnedNotesStore.FileName)));
+        await OpenMenuAsync(cut);
+        Assert.Equal("false", cut.Find(".page-menu button.pin").GetAttribute("aria-checked"));
+        Assert.Empty(cut.FindAll(".main-status.red"));
+    }
+
+    // 278 AC-3: a sensitive note has the item too and is pinned the same way.
+    [Fact]
+    public async Task Pin_SensitiveNote_Pinned()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("Secret", "text\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Secret");
+
+        await OpenMenuAsync(cut);
+        Assert.Equal("false", cut.Find(".page-menu button.pin").GetAttribute("aria-checked"));
+        await cut.Find(".page-menu button.pin").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll("ul.pinned-notes button.name[title='Secret']")), Wait);
+        Assert.Equal("locked", cut.Find("ul.pinned-notes li.note .locked").TextContent);
+        Assert.Equal(["Secret"], new PinnedNotesStore(data.Root).Read());
+        await OpenMenuAsync(cut);
+        Assert.Equal("true", cut.Find(".page-menu button.pin").GetAttribute("aria-checked"));
+    }
+
+    // 278 AC-3: with no note open, or while a page is shown, there is no Pinned item.
+    [Fact]
+    public async Task Pin_NoNoteOrPage_NoItem()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        Assert.Empty(cut.FindAll("button.page-menu-open"));
+        Assert.Empty(cut.FindAll("button.pin"));
+
+        await Open(cut, js, "Plan");
+        await cut.Find("button.tags-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tags-panel")), Wait);
+
+        Assert.Empty(cut.FindAll("button.page-menu-open"));
+        Assert.Empty(cut.FindAll("button.pin"));
+    }
+
+    // 278 AC-4: a 21st pin leaves pinned.json as it was and shows the red limit line.
+    [Fact]
+    public async Task Pin_TwentyFirst_Refused_FileUnchanged()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        data.WritePinned(Enumerable.Range(1, 20).Select(i => $"N{i}").ToArray());
+        string file = Path.Combine(data.Root, PinnedNotesStore.FileName);
+        byte[] before = File.ReadAllBytes(file);
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+
+        await ChooseAsync(cut, "pin");
+
+        cut.WaitForAssertion(() => Assert.Equal("You can pin at most 20 notes.", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Equal(before, File.ReadAllBytes(file));
+        Assert.Equal(20, data.State!.Pinned.Count);
+        Assert.DoesNotContain("Plan", data.State.Pinned);
+        await OpenMenuAsync(cut);
+        Assert.Equal("false", cut.Find(".page-menu button.pin").GetAttribute("aria-checked"));
+    }
+
+    // 278 AC-4: a failed write (pinned.json is a folder) shows the red write line; the in-memory list stays as it was.
+    [Fact]
+    public async Task Pin_WriteFails_RedLine_ListUnchanged()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        Directory.CreateDirectory(Path.Combine(data.Root, PinnedNotesStore.FileName));
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+
+        await ChooseAsync(cut, "pin");
+
+        cut.WaitForAssertion(() => Assert.Equal("Can't write pinned.json.", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Empty(data.State!.Pinned);
+        Assert.Empty(cut.FindAll("ul.pinned-notes"));
+        Assert.True(Directory.Exists(Path.Combine(data.Root, PinnedNotesStore.FileName)));
+        Assert.Empty(Directory.GetFiles(data.Root, ".pinned.json.*"));
+        await OpenMenuAsync(cut);
+        Assert.Equal("false", cut.Find(".page-menu button.pin").GetAttribute("aria-checked"));
     }
 
     // 200: opens the top bar's More actions menu.
@@ -3850,7 +3969,7 @@ public sealed class MainTests : IDisposable
         await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal("Can't unlock 2026-10-29.", cut.Find(".unreadable").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Contains(cut.FindAll(".links-panel p"), p => p.TextContent == "Sensitive notes have no links."), Wait);
-        Assert.Equal(["end-day", "standup", "rename", "delete", "history", "make-plain", "lock"], await MenuIdsAsync(cut));
+        Assert.Equal(["end-day", "standup", "rename", "delete", "history", "pin", "make-plain", "lock"], await MenuIdsAsync(cut));
         int agrees = data.Keys.Agrees;
         byte[] bytes = File.ReadAllBytes(Path.Combine(data.Root, "2026-10-29.ctxs"));
 
@@ -4213,13 +4332,13 @@ public sealed class MainTests : IDisposable
 
         await PickAndOpen(cut, js, "2026-11-20", "2026-11-20");
         Assert.Equal(
-            ["rename", "delete", "history", "new-subpage", "move", "open-external", "export", "share", "mark-sensitive"],
+            ["rename", "delete", "history", "pin", "new-subpage", "move", "open-external", "export", "share", "mark-sensitive"],
             await MenuIdsAsync(cut));
 
         await PickDate(cut, "2026-11-21");
         cut.WaitForAssertion(() => Assert.Equal("2026-11-21", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Contains(cut.FindAll(".links-panel p"), p => p.TextContent == "Sensitive notes have no links."), Wait);
-        Assert.Equal(["rename", "delete", "history", "make-plain", "lock"], await MenuIdsAsync(cut));
+        Assert.Equal(["rename", "delete", "history", "pin", "make-plain", "lock"], await MenuIdsAsync(cut));
     }
 
     // 199 AC-1, 241: Today is the first icon button, then Search (218), Capture and Pick a day; no popover at first. (216: with no note
