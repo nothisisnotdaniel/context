@@ -172,9 +172,9 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#131](backlog/131-check-the-sensitive-setup-dialog-input.md) Check the sensitive-setup dialog input widths by eye
 - [h] [#133](backlog/133-run-the-sensitive-notes-manual-checks.md) Run the sensitive-notes manual checks on macOS and Windows
 - [ ] [#228](backlog/228-tags-and-links-panel-fixes.md) Tags and links panel fixes
-- [?] [#138](backlog/138-look-at-the-tags-and-links.md) Look at the tags and links panels in a running window
+- [h] [#138](backlog/138-look-at-the-tags-and-links.md) Look at the tags and links panels in a running window
 - [ ] [#225](backlog/225-settings-calendar-link-field.md) Settings calendar link field
-- [?] [#145](backlog/145-look-at-the-notes-bar-buttons.md) Look at the notes bar buttons in a narrow sidebar
+- [h] [#145](backlog/145-look-at-the-notes-bar-buttons.md) Look at the notes bar buttons in a narrow sidebar
 - [h] [#146](backlog/146-check-desktop-settings-key-details-on.md) Check desktop settings key details on Windows and macOS
 - [?] [#151](backlog/151-clear-the-capture-status-line-on.md) Clear the capture status line on new input
 - [h] [#152](backlog/152-check-the-capture-row-at-the.md) Check the capture row at the minimum window size
@@ -244,16 +244,16 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#255](backlog/255-decisions-longer-than-one-line-a.md) Numbered #!d decisions: a marked paragraph, referenced as #!d1234
 - [x] [#256](backlog/256-no-prerelease-for-backlog-only-pushes.md) No prerelease for backlog-only pushes → 231-no-prerelease-backlog-pushes
 - [ ] [#257](backlog/257-web-links-work-in-the-note.md) Web links work in the note editor
-- [?] [#259](backlog/259-check-the-capture-popover-in-a.md) Check the Capture popover in a narrow window
+- [h] [#259](backlog/259-check-the-capture-popover-in-a.md) Check the Capture popover in a narrow window
 - [?] [#260](backlog/260-return-focus-to-the-button-after.md) Return focus to the … button after a menu item or outside click
 - [?] [#261](backlog/261-check-context-db-in-the-todo.md) Check context.db in the todo done tests for note todos
 - [?] [#262](backlog/262-rename-a-note-update-its-title.md) Rename a note: update its # title line too
 - [?] [#263](backlog/263-show-the-error-when-saving-on.md) Show the error when saving on window close fails
-- [?] [#264](backlog/264-check-auto-save-by-hand-in.md) Check auto save by hand in the desktop app
+- [h] [#264](backlog/264-check-auto-save-by-hand-in.md) Check auto save by hand in the desktop app
 - [?] [#265](backlog/265-rename-ask-again-when-the-link.md) Rename: ask again when the link count changed before Confirm
 - [?] [#266](backlog/266-tag-filters-decide-on-number-tags.md) Tag filters: decide on number tags like #1234
 - [?] [#267](backlog/267-saved-searches-icon-for-the-remove.md) Saved searches: icon for the × remove button
-- [?] [#273](backlog/273-check-outline-link-contrast-in-the.md) Check outline link contrast in the right sidebar
+- [h] [#273](backlog/273-check-outline-link-contrast-in-the.md) Check outline link contrast in the right sidebar
 - [?] [#274](backlog/274-visible-heading-for-the-sidebar-outline.md) Visible heading for the sidebar outline
 - [?] [#275](backlog/275-one-helper-for-opening-a-daily.md) One helper for opening a daily note in Main.razor
 - [?] [#276](backlog/276-feedback-when-a-day-pick-is.md) Feedback when a day pick is ignored while busy
@@ -269,8 +269,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#301](backlog/301-meeting-note-title-shows-the-meeting.md) Meeting note title shows the meeting name, not only the date
 - [?] [#302](backlog/302-one-path-to-endreload-in-statecomponent.md) One path to EndReload in StateComponent
 - [?] [#304](backlog/304-same-selector-for-the-re-found.md) Same selector for the re-found note button in ReviewPanelTests
-- [?] [#308](backlog/308-check-right-click-in-a-release.md) Check right click in a Release build on macOS and Windows
-- [?] [#309](backlog/309-check-the-narrower-pick-a-day.md) Check the narrower Pick a day popover in light and dark mode
+- [h] [#308](backlog/308-check-right-click-in-a-release.md) Check right click in a Release build on macOS and Windows
+- [h] [#309](backlog/309-check-the-narrower-pick-a-day.md) Check the narrower Pick a day popover in light and dark mode
 - [ ] [#310](backlog/310-choose-light-dark-or-system-theme.md) Choose light, dark or system theme in Settings
 - [?] [#311](backlog/311-skip-one-outlook-item-when-its.md) Skip one Outlook item when its Sensitivity can't be read
 - [?] [#312](backlog/312-ask-before-a-link-with-creates.md) Ask before a link with # creates a note
@@ -305,7 +305,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#342](backlog/342-cap-the-screenshot-folder-watcher-s.md) Cap the screenshot folder watcher's seen set
 - [h] [#343](backlog/343-check-the-screenshot-hotkey-and-watched.md) Check the screenshot hotkey and watched folder on macOS
 - [?] [#344](backlog/344-harden-the-mermaid-svg-blob-url.md) Harden the mermaid SVG blob: URL
-- [?] [#345](backlog/345-check-the-spacing-of-the-drawing.md) Check the spacing of the Drawing diagram hint
+- [h] [#345](backlog/345-check-the-spacing-of-the-drawing.md) Check the spacing of the Drawing diagram hint
 - [?] [#346](backlog/346-redraw-diagrams-when-the-system-theme.md) Redraw diagrams when the system theme changes
 - [?] [#347](backlog/347-keep-the-old-diagram-while-it.md) Keep the old diagram while it redraws
 - [?] [#348](backlog/348-descriptive-alt-text-for-diagrams.md) Descriptive alt text for diagrams
