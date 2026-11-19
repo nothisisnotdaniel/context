@@ -193,6 +193,27 @@ internal sealed class DesktopFixture : IDisposable
     }
 
     /// <summary>
+    /// A <see cref="FileSnapshot"/> of the whole data folder that is safe while panels still load (job 246 round 2).
+    /// A panel's index load syncs <c>context.db</c> on a pool thread under <see cref="IndexGate"/>, and a read of
+    /// the file during that sync's lock fails with "being used by another process" (macOS shares the lock between
+    /// SQLite and .NET). So the snapshot is taken under the gate. With <paramref name="syncFirst"/> the index is first
+    /// brought up to date under the same gate, so a load still waiting for the gate finds nothing to write and cannot
+    /// change <c>context.db</c> after the snapshot. Use it for the "before" snapshot, not the "after" one.
+    /// </summary>
+    public SortedDictionary<string, string> SnapshotUnderIndexGate(bool syncFirst, params string[] ignorePrefixes)
+    {
+        lock (IndexGate(State!))
+        {
+            if (syncFirst)
+            {
+                new TagIndex(Root).Sync(Notes!);
+            }
+
+            return FileSnapshot.Take(Root, ignorePrefixes);
+        }
+    }
+
+    /// <summary>
     /// Holds <see cref="RecentWriteGate"/> on a thread of its own until <see cref="HeldRecentWrites.Release"/> or
     /// dispose (job 246). A Monitor must be left by the thread that entered it, so the test thread, which may resume
     /// elsewhere after an await, never takes the lock itself. Returns once the gate is held.

@@ -446,14 +446,14 @@ public sealed class MeetingNoteActionsTests : IDisposable
 
         data.WaitForRecentWrites();
         await released.WaitAsync(Wait);
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
+        SortedDictionary<string, string> before = data.SnapshotUnderIndexGate(syncFirst: true);
 
         await RunPalette(cut, "/meeting 3");
 
         cut.WaitForAssertion(
             () => Assert.Equal("There is no appointment 3 today.", cut.Find(".main-status").TextContent), Wait);
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
-        Assert.Equal(before, FileSnapshot.Take(data.Root));
+        Assert.Equal(before, data.SnapshotUnderIndexGate(syncFirst: false));
         Assert.False(Directory.Exists(PathOf("Meetings/Doctor", string.Empty)));
     }
 }
