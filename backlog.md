@@ -154,7 +154,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#76](backlog/076-done-log.md) Done log → 293-done-log
 - [ ] [#23](backlog/023-voice-capture-spike.md) Voice capture spike
 - [ ] [#24](backlog/024-voice-notes.md) Voice notes (after: #23)
-- [ ] [#27](backlog/027-todo-dates-with-years.md) Todo dates with years
+- [x] [#27](backlog/027-todo-dates-with-years.md) Todo dates with years → 294-todo-dates-years
 - [ ] [#232](backlog/232-search-index-limits-and-accessibility.md) Search index limits and accessibility
 - [ ] [#37](backlog/037-note-store-cleanup.md) Note store cleanup
 - [?] [#92](backlog/092-times-inside-the-context-desktop-app.md) Times inside the Context desktop app
