@@ -80,6 +80,12 @@ internal sealed class DesktopFixture : IDisposable
     /// <summary>The notifier the actions show reminders through; it only records them.</summary>
     public FakeNotifier Notifier { get; } = new();
 
+    /// <summary>The screen-area picker of the screenshot hotkey (job 260); it returns set bytes and never touches the screen.</summary>
+    public FakeScreenCapture ScreenCapture { get; } = new();
+
+    /// <summary>Whether the state reports macOS (job 260); set it before <see cref="CreateState"/>.</summary>
+    public bool IsMac { get; set; } = true;
+
     /// <summary>The key store the state uses: in memory, supported, without keys. Set another before <see cref="CreateState"/>.</summary>
     public FakeKeyStore Keys { get; set; } = new();
 
@@ -248,9 +254,11 @@ internal sealed class DesktopFixture : IDisposable
             link,
             Outlook,
             OutlookTimeout,
-            PageTitles);
+            PageTitles,
+            IsMac);
         Actions = new DesktopActions(
-            Notes, Todos, State, Launcher, link, feed, () => LocalNow, new CalendarStore(Root, Zone), TimesFolder, Notifier);
+            Notes, Todos, State, Launcher, link, feed, () => LocalNow, new CalendarStore(Root, Zone), TimesFolder, Notifier,
+            ScreenCapture);
         Bunit.Services.AddSingleton(State);
         Bunit.Services.AddSingleton(Actions);
         Bunit.Services.AddTransient<EditorInterop>();

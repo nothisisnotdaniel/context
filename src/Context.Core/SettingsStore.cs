@@ -217,6 +217,11 @@ internal sealed class SettingsStore
     private const string BoardsKey = "boards";
     private const string TagKey = "tag";
     private const string ColumnsKey = "columns";
+    private const string ScreenshotsKey = "screenshots";
+    private const string FolderKey = "folder";
+
+    /// <summary>The longest screenshot folder path.</summary>
+    public const int MaxScreenshotFolderLength = 1024;
 
     /// <summary>The most boards.</summary>
     public const int MaxBoards = 50;
@@ -350,6 +355,62 @@ internal sealed class SettingsStore
         document[PasteKey] = new JsonObject { [FetchTitlesKey] = enabled };
         Write(document);
     }
+
+    /// <summary>
+    /// The watched screenshot folder (job 260), or null when the file or <c>screenshots</c> is missing. Throws
+    /// <see cref="SettingsStoreException"/> when the file can't be read, or <c>screenshots</c> isn't an object with
+    /// exactly a string <c>folder</c> that is a fully qualified path of at most
+    /// <see cref="MaxScreenshotFolderLength"/> characters without control characters.
+    /// </summary>
+    public string? ReadScreenshotFolder() => ScreenshotFolderOf(ReadRoot());
+
+    /// <summary>
+    /// Writes <c>"screenshots":{"folder":<paramref name="folder"/>}</c>, replacing whatever <c>screenshots</c> held and
+    /// keeping every other property. Throws <see cref="ArgumentException"/> for a folder
+    /// <see cref="IsValidScreenshotFolder"/> refuses, otherwise like <see cref="SaveOutlook"/>.
+    /// </summary>
+    public void SaveScreenshotFolder(string folder)
+    {
+        if (!IsValidScreenshotFolder(folder))
+        {
+            throw new ArgumentException("Not a valid screenshot folder.", nameof(folder));
+        }
+
+        JsonObject document = ReadRoot();
+        DayEndOf(document);
+        SavedSearchesOf(document);
+        document[ScreenshotsKey] = new JsonObject { [FolderKey] = folder };
+        Write(document);
+    }
+
+    /// <summary>
+    /// Removes <c>screenshots</c>, keeping every other property; writes nothing when it is not there. Returns whether
+    /// it was there. Throws like <see cref="SaveOutlook"/>.
+    /// </summary>
+    public bool RemoveScreenshotFolder()
+    {
+        JsonObject document = ReadRoot();
+        if (!document.ContainsKey(ScreenshotsKey))
+        {
+            return false;
+        }
+
+        DayEndOf(document);
+        SavedSearchesOf(document);
+        document.Remove(ScreenshotsKey);
+        Write(document);
+        return true;
+    }
+
+    /// <summary>
+    /// True for a stored screenshot folder's shape: fully qualified, 1 to <see cref="MaxScreenshotFolderLength"/>
+    /// characters, no control characters. Whether it exists is not checked.
+    /// </summary>
+    public static bool IsValidScreenshotFolder(string folder) =>
+        folder.Length > 0
+        && folder.Length <= MaxScreenshotFolderLength
+        && !folder.Any(char.IsControl)
+        && Path.IsPathFullyQualified(folder);
 
     /// <summary>
     /// The boards in saved order; a missing file or <c>boards</c> property gives an empty list. Each tag goes through
@@ -582,6 +643,25 @@ internal sealed class SettingsStore
         }
 
         return boards;
+    }
+
+    private static string? ScreenshotFolderOf(JsonObject document)
+    {
+        if (!document.TryGetPropertyValue(ScreenshotsKey, out JsonNode? node))
+        {
+            return null;
+        }
+
+        if (node is not JsonObject section
+            || section.Count != 1
+            || !section.TryGetPropertyValue(FolderKey, out JsonNode? folderNode)
+            || StringOf(folderNode) is not string folder
+            || !IsValidScreenshotFolder(folder))
+        {
+            throw new SettingsStoreException("Not a valid screenshots value.");
+        }
+
+        return folder;
     }
 
     // The stored value of "outlook", or null when it is missing or anything other than exactly {"enabled":<bool>}.

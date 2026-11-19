@@ -66,6 +66,27 @@ internal static class Program
             return new UnsupportedOutlookSource();
         }
 
+        // The screenshot hotkey's area picker and the hotkey itself (job 260): macOS only; other systems have neither.
+        static IScreenCapture? ScreenCapture(string root)
+        {
+            if (OperatingSystem.IsMacOS())
+            {
+                return new MacScreenCapture(root);
+            }
+
+            return null;
+        }
+
+        static IGlobalHotkey? Hotkey()
+        {
+            if (OperatingSystem.IsMacOS())
+            {
+                return new MacGlobalHotkey();
+            }
+
+            return null;
+        }
+
         string folder = NoteStore.DefaultFolder();
         NoteStore notes = new NoteStore(folder);
         TagIndex index = new TagIndex(folder);
@@ -95,7 +116,8 @@ internal static class Program
             pageTitles: pageTitles);
         DesktopActions actions = new DesktopActions(
             notes, todos, state, new ShellNoteLauncher(), calendarLink, feed, () => DateTime.Now, calendar,
-            TimesFolder.Resolve(Environment.GetEnvironmentVariable(TimesFolder.VariableName)), new SystemNotifier());
+            TimesFolder.Resolve(Environment.GetEnvironmentVariable(TimesFolder.VariableName)), new SystemNotifier(),
+            ScreenCapture(folder));
 
         PhotinoBlazorAppBuilder builder = PhotinoBlazorAppBuilder.CreateDefault(args);
         builder.Services.AddSingleton(state);
@@ -173,6 +195,16 @@ internal static class Program
 
         using DataWatcher watcher = new DataWatcher(folder, state);
         watcher.Start();
+
+        // Screenshots into the inbox (job 260): the watched folder from the settings page follows every state change, and
+        // on macOS Control+Option+Shift+S opens the area picker. Both write only through the actions.
+        using ScreenshotFolderWatcher screenshots = new ScreenshotFolderWatcher(
+            new SettingsStore(folder), state, (path, lastTry) => actions.ImportScreenshot(path, lastTry));
+        screenshots.Start();
+        IGlobalHotkey? hotkey = Hotkey();
+        using ScreenshotHotkey? screenshotHotkey =
+            hotkey is null ? null : new ScreenshotHotkey(hotkey, () => actions.CaptureScreenshot());
+        _ = screenshotHotkey?.Register();
         _ = state.Refresh();
 
         // Installed Windows copies only: look for a newer build in the background; it is put in place after exit.

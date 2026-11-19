@@ -707,4 +707,95 @@ public sealed class SettingsStoreTests : IDisposable
             System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(FilePath))!["boards"]));
         Assert.Equal(["todo", "doing"], store.ReadBoards()[0].Columns);
     }
+
+    // 260 AC-8: the screenshot folder.
+    private string ShotFolder => Path.Combine(parent, "shots");
+
+    [Fact]
+    public void ReadScreenshotFolder_MissingFileOrKey_GivesNull()
+    {
+        Assert.Null(new SettingsStore(root).ReadScreenshotFolder());
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, "{\"theme\":\"dark\"}");
+
+        Assert.Null(new SettingsStore(root).ReadScreenshotFolder());
+    }
+
+    [Fact]
+    public void SaveAndRemoveScreenshotFolder_KeepOtherProperties()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(
+            FilePath,
+            "{\"theme\":\"dark\",\"dayEnd\":{\"worked\":\"2026-11-14T17:30\"},"
+                + "\"savedSearches\":[{\"name\":\"Open\",\"query\":\"todo\"}],"
+                + "\"boards\":[{\"tag\":\"work\",\"columns\":[\"todo\"]}],\"paste\":{\"fetchTitles\":true}}");
+        SettingsStore store = new SettingsStore(root);
+
+        store.SaveScreenshotFolder(ShotFolder);
+
+        Assert.Equal(ShotFolder, store.ReadScreenshotFolder());
+        AssertOthersKept(store);
+
+        Assert.True(store.RemoveScreenshotFolder());
+
+        Assert.Null(store.ReadScreenshotFolder());
+        Assert.DoesNotContain("screenshots", File.ReadAllText(FilePath), StringComparison.Ordinal);
+        AssertOthersKept(store);
+    }
+
+    private void AssertOthersKept(SettingsStore store)
+    {
+        Assert.Contains("\"theme\": \"dark\"", File.ReadAllText(FilePath), StringComparison.Ordinal);
+        Assert.Equal("2026-11-14T17:30", store.ReadDayEnd().Worked);
+        Assert.Equal("Open", Assert.Single(store.ReadSavedSearches()).Name);
+        Assert.Equal("work", Assert.Single(store.ReadBoards()).Tag);
+        Assert.True(store.ReadFetchTitles());
+    }
+
+    [Fact]
+    public void RemoveScreenshotFolder_NotSet_WritesNothing()
+    {
+        Assert.False(new SettingsStore(root).RemoveScreenshotFolder());
+        Assert.False(Directory.Exists(root));
+
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, "{\"theme\":\"dark\"}");
+        Assert.False(new SettingsStore(root).RemoveScreenshotFolder());
+        Assert.Equal("{\"theme\":\"dark\"}", File.ReadAllText(FilePath));
+    }
+
+    [Theory]
+    [InlineData("42")]
+    [InlineData("\"x\"")]
+    [InlineData("{}")]
+    [InlineData("{\"folder\":42}")]
+    [InlineData("{\"folder\":\"relative/shots\"}")]
+    [InlineData("{\"folder\":\"\"}")]
+    [InlineData("{\"folder\":\"/a\\u0001b\",\"x\":1}")]
+    public void ReadScreenshotFolder_BrokenValue_Throws(string value)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, "{\"screenshots\":" + value + "}");
+
+        Assert.Throws<SettingsStoreException>(() => new SettingsStore(root).ReadScreenshotFolder());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("relative/shots")]
+    [InlineData("long")]
+    [InlineData("control")]
+    public void SaveScreenshotFolder_InvalidShape_ThrowsAndWritesNothing(string kind)
+    {
+        string folder = kind switch
+        {
+            "long" => Path.Combine(parent, new string('a', SettingsStore.MaxScreenshotFolderLength)),
+            "control" => Path.Combine(parent, "a\u0007b"),
+            _ => kind,
+        };
+
+        Assert.Throws<ArgumentException>(() => new SettingsStore(root).SaveScreenshotFolder(folder));
+        Assert.False(Directory.Exists(root));
+    }
 }

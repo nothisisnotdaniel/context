@@ -231,6 +231,23 @@ internal sealed class DesktopActions
     public const string FetchTitlesOnText = "Page titles on.";
     public const string FetchTitlesOffText = "Page titles off.";
     public const string SettingsNotSavedText = "Can't save settings.json.";
+    public const string ScreenshotAddedText = "Screenshot added to inbox.";
+    public const string ScreenshotFolderSavedText = "Screenshot folder saved.";
+    public const string ScreenshotFolderRemovedText = "Screenshot folder removed.";
+    public const string ScreenshotFolderNotAbsoluteText = "Type the folder's full path.";
+    public const string ScreenshotFolderTooLongText = "A folder path can be at most 1024 characters.";
+    public const string ScreenshotFolderMissingText = "That folder doesn't exist.";
+    public const string ScreenshotFolderInsideText = "Pick a folder outside the Context folder.";
+    public const string ScreenshotNotSetText = "No screenshot folder is set.";
+    public const string ScreenshotIgnoredText = "Not a screenshot in the screenshot folder.";
+    public const string ScreenshotTooLargeReason = "it is over 10 MB";
+    public const string ScreenshotUnsupportedReason = "it is not a PNG, JPEG, GIF or WebP image";
+    public const string ScreenshotInboxTooLargeReason = "inbox is too large";
+    public const string ScreenshotChangedReason = "inbox kept changing on disk";
+    public const string ScreenshotWriteFailedReason = "can't write inbox";
+    public const string ScreenshotUnreadableReason = "can't read the file";
+    public const string ScreenshotBusyReason = "another change is still running";
+    public const string ScreenshotNoCaptureReason = "the screen can't be captured here";
     public const string SearchGoneText = "That saved search is gone. Nothing was done.";
     public const string SearchesNotRemovedText = "Can't read settings.json. Nothing was removed.";
     public const string SearchesRemoveFailedText = "Can't write settings.json. Nothing was removed.";
@@ -273,6 +290,7 @@ internal sealed class DesktopActions
     private int pendingRecentWrites;
     private readonly string? timesFolder;
     private readonly INotifier? notifier;
+    private readonly IScreenCapture? screenCapture;
     private int running;
 
     // Plain fields: only AutoBriefingNow touches them, and Run lets one action run at a time.
@@ -292,8 +310,10 @@ internal sealed class DesktopActions
         Func<DateTime>? localNow = null,
         CalendarStore? calendar = null,
         string? timesFolder = null,
-        INotifier? notifier = null)
+        INotifier? notifier = null,
+        IScreenCapture? screenCapture = null)
     {
+        this.screenCapture = screenCapture;
         this.notifier = notifier;
         this.localNow = localNow ?? (() => DateTime.Now);
         this.calendar = calendar ?? new CalendarStore(notes.Root, TimeZoneInfo.Local);
@@ -1269,6 +1289,263 @@ internal sealed class DesktopActions
         }
 
         return new ActionResult(ActionKind.Done, ActionReason.None, on ? FetchTitlesOnText : FetchTitlesOffText);
+    }
+
+    /// <summary>The notification and result text for a screenshot that was not stored: <c>Screenshot not saved: &lt;reason&gt;.</c></summary>
+    public static string ScreenshotNotSavedText(string reason) => $"Screenshot not saved: {reason}.";
+
+    /// <summary>
+    /// The screenshot hotkey (job 260): refuses a sensitive inbox first (<see cref="CaptureSensitiveText"/>, no
+    /// key-store call, no area picker), then lets the user pick a screen area through <see cref="IScreenCapture"/>.
+    /// Cancelled: Done/<see cref="ActionReason.Unchanged"/>, nothing written or shown. Else the PNG is stored as
+    /// <c>screenshot-yyyyMMdd-HHmmss.png</c> (local clock) through <see cref="ScreenshotInbox.Add(NoteStore, NoteAttachments, string, byte[], DateTime)"/>
+    /// and the result is shown as one notification: <see cref="ScreenshotAddedText"/> or
+    /// <see cref="ScreenshotNotSavedText"/>. Never throws.
+    /// </summary>
+    public async Task<ActionResult> CaptureScreenshot()
+    {
+        ActionResult result;
+        try
+        {
+            if (notes.TryFindSensitive(Inbox.NoteName, out _))
+            {
+                result = Refused(ActionReason.Exists, CaptureSensitiveText);
+                Notify(result.Text);
+                return result;
+            }
+
+            if (screenCapture is null)
+            {
+                result = Refused(ActionReason.Invalid, ScreenshotNotSavedText(ScreenshotNoCaptureReason));
+                Notify(result.Text);
+                return result;
+            }
+
+            byte[]? bytes = await screenCapture.CaptureAreaAsync().ConfigureAwait(false);
+            if (bytes is null || bytes.Length == 0)
+            {
+                return new ActionResult(ActionKind.Done, ActionReason.Unchanged, string.Empty);
+            }
+
+            result = await Run(() => StoreScreenshotNow(ScreenshotInbox.HotkeyName(localNow()), bytes, false))
+                .ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // The area picker failed (StoreScreenshotNow catches its own errors).
+            result = Failed(ActionReason.WriteFailed, ScreenshotNotSavedText(ScreenshotNoCaptureReason));
+        }
+
+        if (result.Reason == ActionReason.Busy)
+        {
+            result = Refused(ActionReason.Busy, ScreenshotNotSavedText(ScreenshotBusyReason));
+        }
+
+        Notify(result.Text);
+        return result;
+    }
+
+    /// <summary>
+    /// Imports a new image from the watched screenshot folder (job 260) as an attachment of <c>inbox</c> under its
+    /// <see cref="NoteAttachments.CleanName"/>, with the same inbox line as <see cref="CaptureScreenshot"/>; the source
+    /// file stays. A path that is not a direct child of the saved folder, a name starting with <c>.</c>, another
+    /// extension than <see cref="ScreenshotFolderWatcher.Extensions"/>, a link or a missing file is
+    /// Refused/<see cref="ActionReason.Missing"/> (<see cref="ScreenshotIgnoredText"/>) and shows nothing. A file that
+    /// can't be read (<see cref="ActionReason.Locked"/>), isn't a whole image (<see cref="ActionReason.Unreadable"/>) or
+    /// meets another running action (<see cref="ActionReason.Busy"/>) may work later: those show their
+    /// <see cref="ScreenshotNotSavedText"/> only when <paramref name="lastTry"/>. Every other result is shown.
+    /// </summary>
+    public async Task<ActionResult> ImportScreenshot(string path, bool lastTry = true)
+    {
+        ActionResult result = await Run(() => ImportScreenshotNow(path)).ConfigureAwait(false);
+        if (result.Reason == ActionReason.Busy)
+        {
+            result = Refused(ActionReason.Busy, ScreenshotNotSavedText(ScreenshotBusyReason));
+        }
+
+        bool quiet = result.Reason == ActionReason.Missing
+            || (result.Kind != ActionKind.Done && ScreenshotFolderWatcher.IsRetryable(result.Reason) && !lastTry);
+        if (!quiet)
+        {
+            Notify(result.Text);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Saves the watched screenshot folder (job 260, <c>"screenshots":{"folder":…}</c>, every other property kept).
+    /// The trimmed text must be a fully qualified path without control characters
+    /// (<see cref="ScreenshotFolderNotAbsoluteText"/>), at most <see cref="SettingsStore.MaxScreenshotFolderLength"/>
+    /// characters (<see cref="ScreenshotFolderTooLongText"/>), an existing folder (<see cref="ScreenshotFolderMissingText"/>)
+    /// and not the Context folder or inside it (<see cref="ScreenshotFolderInsideText"/>); each refusal writes nothing.
+    /// Done: <see cref="ScreenshotFolderSavedText"/> and a refresh, which restarts the watcher. Settings errors as in
+    /// <see cref="SetFetchTitles"/>.
+    /// </summary>
+    public Task<ActionResult> SetScreenshotFolder(string folder) => Run(() => SetScreenshotFolderNow(folder));
+
+    /// <summary>
+    /// Removes the watched screenshot folder (every other property kept); Done with
+    /// <see cref="ScreenshotFolderRemovedText"/> and a refresh, which stops the watcher. None set:
+    /// Done/<see cref="ActionReason.Unchanged"/>, nothing written. Settings errors as in <see cref="SetFetchTitles"/>.
+    /// </summary>
+    public Task<ActionResult> ClearScreenshotFolder() => Run(ClearScreenshotFolderNow);
+
+    private ActionResult SetScreenshotFolderNow(string folder)
+    {
+        string trimmed = (folder ?? string.Empty).Trim();
+        if (trimmed.Length > SettingsStore.MaxScreenshotFolderLength)
+        {
+            return Refused(ActionReason.Invalid, ScreenshotFolderTooLongText);
+        }
+
+        if (!SettingsStore.IsValidScreenshotFolder(trimmed))
+        {
+            return Refused(ActionReason.Invalid, ScreenshotFolderNotAbsoluteText);
+        }
+
+        if (!Directory.Exists(trimmed))
+        {
+            return Refused(ActionReason.Missing, ScreenshotFolderMissingText);
+        }
+
+        try
+        {
+            // Contains resolves links, so a link that leads into the data folder counts as inside.
+            if (notes.Contains(trimmed))
+            {
+                return Refused(ActionReason.Invalid, ScreenshotFolderInsideText);
+            }
+
+            settings.SaveScreenshotFolder(trimmed);
+        }
+        catch (SettingsTooLargeException)
+        {
+            return Refused(ActionReason.Invalid, SettingsNotSavedText);
+        }
+        catch (SettingsStoreException)
+        {
+            return Failed(ActionReason.Unreadable, SettingsNotSavedText);
+        }
+        catch (Exception e) when (e is IOException || e is UnauthorizedAccessException || e is ArgumentException)
+        {
+            return Failed(ActionReason.WriteFailed, SettingsNotSavedText);
+        }
+
+        return new ActionResult(ActionKind.Done, ActionReason.None, ScreenshotFolderSavedText);
+    }
+
+    private ActionResult ClearScreenshotFolderNow()
+    {
+        try
+        {
+            if (!settings.RemoveScreenshotFolder())
+            {
+                return new ActionResult(ActionKind.Done, ActionReason.Unchanged, ScreenshotNotSetText);
+            }
+        }
+        catch (SettingsTooLargeException)
+        {
+            return Refused(ActionReason.Invalid, SettingsNotSavedText);
+        }
+        catch (SettingsStoreException)
+        {
+            return Failed(ActionReason.Unreadable, SettingsNotSavedText);
+        }
+        catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+        {
+            return Failed(ActionReason.WriteFailed, SettingsNotSavedText);
+        }
+
+        return new ActionResult(ActionKind.Done, ActionReason.None, ScreenshotFolderRemovedText);
+    }
+
+    private ActionResult ImportScreenshotNow(string path)
+    {
+        string? folder;
+        try
+        {
+            folder = settings.ReadScreenshotFolder();
+        }
+        catch (SettingsStoreException)
+        {
+            return Refused(ActionReason.Missing, ScreenshotIgnoredText);
+        }
+
+        byte[] bytes;
+        string name;
+        try
+        {
+            // The setting may be edited by hand: a folder inside the data folder is never imported from.
+            if (folder is null || !Path.IsPathFullyQualified(path) || notes.Contains(folder))
+            {
+                return Refused(ActionReason.Missing, ScreenshotIgnoredText);
+            }
+
+            string full = Path.GetFullPath(path);
+            name = Path.GetFileName(full);
+            string? parent = Path.GetDirectoryName(full);
+            if (parent is null
+                || !string.Equals(
+                    Path.TrimEndingDirectorySeparator(parent),
+                    Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder)),
+                    StringComparison.Ordinal)
+                || name.Length == 0
+                || name.StartsWith('.')
+                || !ScreenshotFolderWatcher.HasImageExtension(name))
+            {
+                return Refused(ActionReason.Missing, ScreenshotIgnoredText);
+            }
+
+            FileInfo info = new FileInfo(full);
+            if (!info.Exists
+                || info.LinkTarget is not null
+                || (info.Attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0)
+            {
+                return Refused(ActionReason.Missing, ScreenshotIgnoredText);
+            }
+
+            if (info.Length > NoteAttachments.MaxBytes)
+            {
+                return Refused(ActionReason.Invalid, ScreenshotNotSavedText(ScreenshotTooLargeReason));
+            }
+
+            bytes = BoundedFile.Read(full, NoteAttachments.MaxBytes);
+        }
+        catch (Exception e) when (e is IOException || e is UnauthorizedAccessException || e is ArgumentException
+            || e is NotSupportedException)
+        {
+            return Failed(ActionReason.Locked, ScreenshotNotSavedText(ScreenshotUnreadableReason));
+        }
+
+        return StoreScreenshotNow(name, bytes, true);
+    }
+
+    // The shared store step: ScreenshotInbox.Add with the local clock and the capture hook, mapped to a result.
+    private ActionResult StoreScreenshotNow(string fileName, byte[] bytes, bool imported)
+    {
+        try
+        {
+            ScreenshotAdd added = ScreenshotInbox.Add(notes, attachments, fileName, bytes, localNow(), BeforeCaptureSave);
+            return added.Kind switch
+            {
+                ScreenshotAddKind.Added => new ActionResult(ActionKind.Done, ActionReason.None, ScreenshotAddedText),
+                ScreenshotAddKind.Sensitive => Refused(ActionReason.Exists, CaptureSensitiveText),
+                ScreenshotAddKind.TooLarge => Refused(ActionReason.Invalid, ScreenshotNotSavedText(ScreenshotTooLargeReason)),
+                ScreenshotAddKind.Unsupported => Refused(
+                    imported ? ActionReason.Unreadable : ActionReason.Invalid,
+                    ScreenshotNotSavedText(ScreenshotUnsupportedReason)),
+                ScreenshotAddKind.InboxTooLarge => Refused(
+                    ActionReason.Invalid, ScreenshotNotSavedText(ScreenshotInboxTooLargeReason)),
+                ScreenshotAddKind.ChangedOnDisk => Refused(
+                    ActionReason.ChangedOnDisk, ScreenshotNotSavedText(ScreenshotChangedReason)),
+                _ => Failed(ActionReason.WriteFailed, ScreenshotNotSavedText(ScreenshotWriteFailedReason)),
+            };
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, ScreenshotNotSavedText(ScreenshotWriteFailedReason));
+        }
     }
 
     private static ActionResult Refused(ActionReason reason, string text) => new(ActionKind.Refused, reason, text);

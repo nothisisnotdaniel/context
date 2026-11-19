@@ -21,7 +21,7 @@ public sealed class DesktopSourceTests
     private static readonly Regex Writes = new(
         @"(?:(?<!\bActions)|(?!\.\s*RestoreVersion\s*\())\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
         + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture|CreateChild|Move|Ensure|CreateWithText"
-        + @"|CloseDay|RefreshWorked|MoveTodos|AutoClose|MoveDue|SaveDayEnd|SaveSavedSearches|Keep|RemoveHistory|RestoreVersion|MoveWithNote|RemoveUnlinked|MarkNotified|Snooze|SaveOutlook)\s*\(",
+        + @"|CloseDay|RefreshWorked|MoveTodos|AutoClose|MoveDue|SaveDayEnd|SaveSavedSearches|Keep|RemoveHistory|RestoreVersion|MoveWithNote|RemoveUnlinked|MarkNotified|Snooze|SaveOutlook|SaveScreenshotFolder|RemoveScreenshotFolder)\s*\(",
         RegexOptions.CultureInvariant);
 
     // 136: the real key stores and the real file dialog, spelled in pieces: no test file may hold their names (see
@@ -31,6 +31,13 @@ public sealed class DesktopSourceTests
     private const string RealFileDialog = "Photino" + "FileDialog";
     private const string RealWindowsStoreFile = "src/Context.Desktop/" + RealWindowsStore + ".cs";
     private const string RealMacStoreFile = "src/Context.Desktop/" + RealMacStore + ".cs";
+
+    // 260: the real area picker (runs screencapture) and the real hotkey (Carbon), spelled in pieces: no test file may
+    // hold their names.
+    private const string RealScreenCapture = "Mac" + "ScreenCapture";
+    private const string RealHotkey = "Mac" + "GlobalHotkey";
+    private const string RealScreenCaptureFile = "src/Context.Desktop/" + RealScreenCapture + ".cs";
+    private const string RealHotkeyFile = "src/Context.Desktop/" + RealHotkey + ".cs";
 
     // 136: SealedNote.cs makes P-256 keys in memory with .NET's ECDiffieHellman.Create; that writes no data.
     private const string SealedNoteFile = "src/Context.Desktop/SealedNote.cs";
@@ -1509,7 +1516,7 @@ public sealed class DesktopSourceTests
             RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs"));
     }
 
-    // 134 AC-9, 178: only the real launcher and the real notifier start a process; Process and System.Diagnostics appear
+    // 134 AC-9, 178, 260: only the real launcher, the real notifier and the real area picker start a process; Process and System.Diagnostics appear
     // nowhere else in the app.
     [Fact]
     public void Sources_UseProcessOnlyInTheLauncher()
@@ -1520,7 +1527,9 @@ public sealed class DesktopSourceTests
             .Where(f => process.IsMatch(File.ReadAllText(Path.Combine(root, f))))
             .ToList();
 
-        Assert.Equal([RealLauncherFile, RealNotifierFile], found.Order(StringComparer.Ordinal));
+        Assert.Equal(
+            new[] { RealLauncherFile, RealNotifierFile, RealScreenCaptureFile }.Order(StringComparer.Ordinal),
+            found.Order(StringComparer.Ordinal));
     }
 
     // 134 AC-9: the real launcher is named only by itself and Program.cs, which wires it into the actions.
@@ -1551,7 +1560,9 @@ public sealed class DesktopSourceTests
         string[] calls = Regex.Matches(program, @"\bactions\s*\.\s*(\w+)\s*\(")
             .Select(m => m.Groups[1].Value)
             .ToArray();
-        Assert.Equal(["AutoDayEnd", "AutoBriefing", "AutoReminders", "AutoOpenToday", "AutoReminders"], calls);
+        Assert.Equal(
+            ["AutoDayEnd", "AutoBriefing", "AutoReminders", "AutoOpenToday", "AutoReminders", "ImportScreenshot", "CaptureScreenshot"],
+            calls);
         Assert.Contains(
             "static Task AutoWrites(DesktopActions actions) =>\n            actions.AutoDayEnd().ContinueWith("
             + "_ => actions.AutoBriefing(), TaskScheduler.Default).Unwrap();\n",
@@ -1654,8 +1665,9 @@ public sealed class DesktopSourceTests
 
         Assert.Equal([ProgramFile, RealNotifierFile], found);
         Assert.Contains(
-            "TimesFolder.Resolve(Environment.GetEnvironmentVariable(TimesFolder.VariableName)), new " + RealNotifier + "());",
-            File.ReadAllText(Path.Combine(root, ProgramFile)),
+            "TimesFolder.Resolve(Environment.GetEnvironmentVariable(TimesFolder.VariableName)), new " + RealNotifier + "(),\n"
+                + "            ScreenCapture(folder));",
+            File.ReadAllText(Path.Combine(root, ProgramFile)).ReplaceLineEndings("\n"),
             StringComparison.Ordinal);
     }
 
@@ -1755,7 +1767,61 @@ public sealed class DesktopSourceTests
             .Where(f => native.Any(n => File.ReadAllText(Path.Combine(root, f)).Contains(n, StringComparison.Ordinal)))
             .ToList();
 
-        Assert.Equal([RealMacStoreFile, RealOutlookFile], found.Order(StringComparer.Ordinal));
+        Assert.Equal(
+            new[] { RealHotkeyFile, RealMacStoreFile, RealOutlookFile }.Order(StringComparer.Ordinal),
+            found.Order(StringComparer.Ordinal));
+    }
+
+    // 260 AC-10, AC-11: the real area picker and hotkey are named only by themselves and Program.cs, which picks them
+    // on macOS only.
+    [Theory]
+    [InlineData(RealScreenCapture, RealScreenCaptureFile, "return new " + RealScreenCapture + "(root);")]
+    [InlineData(RealHotkey, RealHotkeyFile, "return new " + RealHotkey + "();")]
+    public void Sources_NameTheScreenshotPartsOnlyInThemselvesAndProgram(string name, string file, string made)
+    {
+        string root = RepoFiles.Root();
+        List<string> found = RepoFiles.Sources(root, "src", ".cs", ".razor")
+            .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains(name, StringComparison.Ordinal))
+            .ToList();
+
+        Assert.Equal(new[] { file, ProgramFile }.Order(StringComparer.Ordinal), found.Order(StringComparer.Ordinal));
+        string program = File.ReadAllText(Path.Combine(root, ProgramFile));
+        Assert.Single(Regex.Matches(program, @"\bnew " + name + @"\b"));
+        Assert.Matches(@"if \(OperatingSystem\.IsMacOS\(\)\)\s*\{\s*" + Regex.Escape(made), program);
+    }
+
+    // 260 AC-11: no test names the real area picker or hotkey (they would open the screen picker or register a
+    // system-wide key); tests use FakeScreenCapture and FakeGlobalHotkey.
+    [Fact]
+    public void Tests_NeverReferenceTheRealScreenshotParts()
+    {
+        string root = RepoFiles.Root();
+        List<string> found = [];
+        foreach (string folder in new[] { "tests/Context.Tests", "tests/Context.Desktop.Tests" })
+        {
+            found.AddRange(RepoFiles.Sources(root, folder, ".cs", ".csproj")
+                .Where(f =>
+                {
+                    string text = File.ReadAllText(Path.Combine(root, f));
+                    return text.Contains(RealScreenCapture, StringComparison.Ordinal)
+                        || text.Contains(RealHotkey, StringComparison.Ordinal);
+                }));
+        }
+
+        Assert.True(found.Count == 0, "Tests name the real screenshot parts: " + string.Join(", ", found));
+    }
+
+    // 260: the area picker runs only the fixed screencapture program with fixed arguments and an app-made temp path,
+    // without a shell.
+    [Fact]
+    public void ScreenCapture_RunsAFixedProgramWithoutAShell()
+    {
+        string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), RealScreenCaptureFile));
+
+        Assert.Contains("\"/usr/sbin/screencapture\"", source, StringComparison.Ordinal);
+        Assert.Contains("UseShellExecute = false", source, StringComparison.Ordinal);
+        Assert.Contains("\"-i\", \"-x\", temp", source, StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(source, @"\bnew ProcessStartInfo\b"));
     }
 
     // 217 AC-8: the Outlook COM source is named only by itself and Program.cs, which picks it on Windows.
