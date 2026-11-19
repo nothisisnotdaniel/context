@@ -1,4 +1,4 @@
-# 098 Sharing notes with key exchange
+# 098 Sharing notes with key exchange spike
 
 As the user, I want to plan end-to-end encrypted note sharing before approving it, so that notes can be shared without the server ever seeing them.
 
