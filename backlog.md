@@ -287,6 +287,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [h] [#331](backlog/331-check-cmd-shift-v-plain-paste.md) Check Cmd+Shift+V plain paste in the macOS app
 - [?] [#332](backlog/332-carry-over-and-k-more-line.md) Carry-over: "… and k more" line is not an open point
 - [ ] [#333](backlog/333-fix-flaky-editingflowtests-palettecurrent-isnocomm.md) Fix flaky EditingFlowTests.PaletteCurrent_IsNoCommand test
+- [?] [#334](backlog/334-fix-flaky-sensitiveflowtests-markandmakeplain-dirt.md) Fix flaky SensitiveFlowTests.MarkAndMakePlain_Dirty_AskToSaveFirst test
+- [?] [#335](backlog/335-fix-flaky-open-anyroute-putsitfirst-once.md) Fix flaky Open_AnyRoute_PutsItFirst_Once test
 
 ## Dropped with the terminal UI
 
