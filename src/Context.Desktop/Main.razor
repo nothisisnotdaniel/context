@@ -2456,7 +2456,7 @@ else
     // The standup's answer in the main status line: grey when written, else red.
     private void ShowStandup(ActionResult written)
     {
-        bool ok = written.Kind == ActionKind.Done && written.Reason is ActionReason.None or ActionReason.Unchanged;
+        bool ok = written.Kind == ActionKind.Done && (written.Reason is ActionReason.None or ActionReason.Unchanged);
         ShowStatus(DesktopText.OneLine(written.Text), ok ? "grey" : "red");
     }
 
