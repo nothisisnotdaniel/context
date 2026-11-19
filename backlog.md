@@ -350,6 +350,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#393](backlog/393-tests-find-the-rare-unnamed-debug.md) Tests: find the rare unnamed Debug failure in Context.Desktop.Tests
 - [?] [#394](backlog/394-search-index-skip-the-full-note.md) Search index: skip the full note_text repair pass when nothing needs it
 - [?] [#396](backlog/396-reproduce-the-recent-json-test-race.md) Reproduce the recent.json test race on a slow runner
+- [?] [#397](backlog/397-notestore-contains-match-unicode-normalised-paths.md) NoteStore.Contains: match Unicode-normalised paths
 
 ## Dropped with the terminal UI
 
