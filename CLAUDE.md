@@ -241,7 +241,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     (`section.page.done-panel`, `Page.Done`, palette `/donelog`, argument ignored) draws `DesktopState.DoneWeeks()`
     (off the UI thread, never throws: on an error an unreadable view): `Done log`, the icon-only close button, an
     `h3.done-week` `Week of yyyy-MM-dd` per week, `li.done-entry` with the date, the one-line text and `due
-    yyyy-MM-dd` when set; grey `Nothing done yet.` without entries, red `Can't read the done log.` when unreadable;
+    yyyy-MM-dd` when set (`app.css` lays the rows out like the review's todo rows); grey `Nothing done yet.` without entries, red `Can't read the done log.` when unreadable;
     it reloads on `State.Changed` (also when `done.md` changes on disk) keeping the shown rows. `done.md` is an
     ordinary note: it is listed, searched and indexed like any other.
   - **Current view:** all relevant information for now: today's appointments, due todos and linked notes.

@@ -50,6 +50,31 @@ public sealed class DonePanelTests : IDisposable
         Assert.Empty(cut.FindAll(".done-panel"));
     }
 
+    // AC-9: the panel's rows are styled like the review's: a plain list, flex rows, fixed date and due, a cut text; no
+    // colour literals.
+    [Fact]
+    public void AppCss_DonePanelRules()
+    {
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+
+        Assert.Contains("list-style: none;", Block(css, ".done-entries {"), StringComparison.Ordinal);
+        Assert.Contains("display: flex;", Block(css, ".done-entry {"), StringComparison.Ordinal);
+        Assert.Contains("margin: 12px 0 4px;", Block(css, ".done-panel h3.done-week {"), StringComparison.Ordinal);
+        Assert.Contains("flex: none;", Block(css, ".done-entry .due {"), StringComparison.Ordinal);
+        Assert.Contains("min-width: 0;", Block(css, ".done-entry .text {"), StringComparison.Ordinal);
+        Assert.Contains("border-bottom: 1px solid var(--line);", Block(css, ".done-panel {"), StringComparison.Ordinal);
+        Assert.DoesNotMatch(
+            @"#[0-9a-fA-F]{3,8}\b|\b(rgb|rgba|hsl|hsla)\(|\b(white|black|red|green|blue|gray|grey|transparent)\b",
+            string.Concat(new[] { ".done-panel {", ".done-panel h3.done-week {", ".done-entries {", ".done-entry {", ".done-entry .due {", ".done-entry .text {" }.Select(s => Block(css, s))));
+    }
+
+    private static string Block(string css, string selector)
+    {
+        int at = css.IndexOf("\n" + selector, StringComparison.Ordinal);
+        Assert.True(at >= 0, selector);
+        return css[at..css.IndexOf('}', at)];
+    }
+
     // AC-9: no done.md, or one with no entries, shows the grey empty line.
     [Theory]
     [InlineData(null)]
