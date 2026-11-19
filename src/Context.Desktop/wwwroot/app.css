@@ -1258,6 +1258,56 @@ input[type="password"]:disabled {
     display: none;
 }
 
+/* The repository folders of work item pages (job 280): one row per folder with Remove, then the entry row. */
+.repository-list {
+    list-style: none;
+    margin: 0 0 8px;
+    padding: 0;
+}
+
+.repository-row {
+    align-items: baseline;
+    display: flex;
+    gap: 8px;
+    min-width: 0;
+    padding: 2px 0;
+}
+
+.repository-row .repository-folder {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.repository-row .repository-remove {
+    flex: none;
+}
+
+.repository-entry {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.repository-entry .repository-field {
+    flex: 1 1 240px;
+    min-width: 0;
+}
+
+.repository-entry .repository-add {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: var(--on-accent);
+    flex: none;
+}
+
+.settings-panel .repository-result {
+    margin: 6px 0 0;
+}
+
+.settings-panel .repository-result:empty {
+    display: none;
+}
+
 .settings-panel .settings-result {
     margin: 6px 0 0;
 }
@@ -1512,6 +1562,31 @@ input[type="password"]:disabled {
 .person-appointment .location {
     flex: 0 1 auto;
     min-width: 4em;
+}
+
+/* The work item page's panel above the linked notes (job 280): the notes, todos, people and meetings that mention the
+   item, its Times hours and its commits. Rows reuse the person page's list styles. */
+.item-panel {
+    border-top: 1px solid var(--line);
+    margin-top: 16px;
+    padding-top: 12px;
+}
+
+.item-panel h2 {
+    margin-top: 0;
+}
+
+.item-commit .repo {
+    flex: 0 1 auto;
+    max-width: 12em;
+    min-width: 3em;
+}
+
+.item-commit .hash,
+.item-people .count,
+.item-hours .text {
+    flex: none;
+    font-variant-numeric: tabular-nums;
 }
 
 /* The linked notes under the open note: name, link text, shared tags. */

@@ -233,6 +233,11 @@ internal sealed class TagIndex
             due TEXT NOT NULL,
             raw TEXT NOT NULL,
             PRIMARY KEY(note));
+        CREATE TABLE IF NOT EXISTS note_items(
+            note TEXT NOT NULL,
+            item INTEGER NOT NULL,
+            PRIMARY KEY(note, item));
+        CREATE INDEX IF NOT EXISTS note_items_item ON note_items(item);
         CREATE VIRTUAL TABLE IF NOT EXISTS note_text USING fts5(note UNINDEXED, body, tokenize='trigram');
         """;
 
@@ -244,9 +249,10 @@ internal sealed class TagIndex
     /// that runs into a code span is no link. 7: note text (the full-text table <c>note_text</c>). 8: <c>Decision:</c> lines
     /// (<c>note_decisions</c>). 9: open <c>- [ ]</c> todos (<c>note_todos</c>). 10: the heading of a
     /// <c>[[Note#Heading]]</c> link (<c>note_links.heading</c>). 11: <c>next: @[Name]</c> topics (<c>note_topics</c>),
-    /// which are no longer note todos. 12: <c>review:yyyy-MM-dd</c> lines (<c>note_reviews</c>).
+    /// which are no longer note todos. 12: <c>review:yyyy-MM-dd</c> lines (<c>note_reviews</c>). 13: <c>#&lt;n&gt;</c> work item references
+    /// (<c>note_items</c>).
     /// </summary>
-    public const int ParserVersion = 12;
+    public const int ParserVersion = 13;
 
     /// <summary>
     /// How long opening <c>context.db</c> and starting <see cref="Sync"/>'s write transaction wait while another
@@ -341,6 +347,7 @@ internal sealed class TagIndex
                 IReadOnlyList<ParsedNoteTodo> noteTodos;
                 IReadOnlyList<ParsedTopic> topics;
                 ParsedReview? review;
+                IReadOnlyList<int> items;
                 string? body;
                 long? newModified = modified;
                 try
@@ -356,6 +363,7 @@ internal sealed class TagIndex
                     noteTodos = NoteTodoParser.Parse(text);
                     topics = TopicParser.Parse(text);
                     review = ReviewDateParser.Parse(text);
+                    items = WorkItemParser.Parse(text);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
@@ -367,6 +375,7 @@ internal sealed class TagIndex
                     noteTodos = [];
                     topics = [];
                     review = null;
+                    items = [];
                     body = null;
                     newModified = null;
                 }
@@ -472,6 +481,17 @@ internal sealed class TagIndex
                         ("$raw", review.Raw));
                 }
 
+                Execute(connection, transaction, "DELETE FROM note_items WHERE note = $note", ("$note", note.Name));
+                foreach (int item in items)
+                {
+                    Execute(
+                        connection,
+                        transaction,
+                        "INSERT INTO note_items(note, item) VALUES($note, $item)",
+                        ("$note", note.Name),
+                        ("$item", item));
+                }
+
                 if (!upgrade)
                 {
                     Execute(connection, transaction, "DELETE FROM note_text WHERE note = $note", ("$note", note.Name));
@@ -506,6 +526,7 @@ internal sealed class TagIndex
                 Execute(connection, transaction, "DELETE FROM note_todos WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_topics WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_reviews WHERE note = $note", ("$note", gone));
+                Execute(connection, transaction, "DELETE FROM note_items WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_text WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM notes WHERE name = $note", ("$note", gone));
             }
@@ -519,6 +540,7 @@ internal sealed class TagIndex
             Execute(connection, transaction, "DELETE FROM note_todos WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_topics WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_reviews WHERE note NOT IN (SELECT name FROM notes)");
+            Execute(connection, transaction, "DELETE FROM note_items WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_text WHERE note NOT IN (SELECT name FROM notes)");
             if (upgrade)
             {
@@ -775,6 +797,50 @@ internal sealed class TagIndex
             return SortNames(names);
         });
     }
+
+    /// <summary>
+    /// The notes that mention the work item <c>#<paramref name="item"/></c> (<see cref="WorkItemParser"/>), sorted by
+    /// name ignoring case, then ordinal. Never the item's own page (<see cref="WorkItems.ItemOf"/>).
+    /// </summary>
+    public IReadOnlyList<string> NotesWithItem(int item) => Run(connection =>
+    {
+        List<string> names = [];
+        using SqliteCommand command = Command(connection, null, "SELECT note FROM note_items WHERE item = $item");
+        command.Parameters.AddWithValue("$item", item);
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            string note = reader.GetString(0);
+            if (WorkItems.ItemOf(note) != item)
+            {
+                names.Add(note);
+            }
+        }
+
+        return (IReadOnlyList<string>)SortNames(names);
+    });
+
+    /// <summary>
+    /// The stored mention spellings (<c>@[...]</c>) of each of <paramref name="notes"/>, as <c>(note, spelling)</c> rows
+    /// in no order.
+    /// </summary>
+    public IReadOnlyList<(string Note, string Spelling)> MentionsIn(IReadOnlyCollection<string> notes) => Run(connection =>
+    {
+        HashSet<string> wanted = new(notes, StringComparer.Ordinal);
+        List<(string Note, string Spelling)> found = [];
+        using SqliteCommand command = Command(connection, null, "SELECT note, spelling FROM note_people");
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            string note = reader.GetString(0);
+            if (wanted.Contains(note))
+            {
+                found.Add((note, reader.GetString(1)));
+            }
+        }
+
+        return (IReadOnlyList<(string Note, string Spelling)>)found;
+    });
 
     /// <summary>
     /// The notes with the attribute <paramref name="key"/><c>::</c> <paramref name="value"/>, matched by the key as

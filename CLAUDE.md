@@ -23,7 +23,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Pooling=False`, parameterized SQL only): `notes(name, modified)` (last-write UTC ticks, NULL for a
     note that couldn't be read so it is retried), `note_tags(note, tag)`, `note_links(note, target, heading)` (job 205: `heading` is the text after the first `#` or NULL; primary key stays `(note, target)`; a database without the column gets it through `ALTER TABLE` on every open, before any query), `note_people(note, person, spelling)`, `note_decisions(note, line, text)` (job 180, primary key `(note, line)`; one row per `DecisionParser` line, written and pruned with the note's other rows), `note_todos(note, line, due, text, raw)` (job 201, primary key `(note, line)`; one row per open `NoteTodoParser` line, `due` `yyyy-MM-dd` or NULL, written and pruned like `note_decisions`), `note_topics(note, line, person, text, raw)` (job 253, primary key `(note, line)`; one row per `TopicParser` line, written and pruned like `note_decisions`; read by `Topics()`, plain notes only), `note_reviews(note, line, due, raw)` (job 256, primary key `(note)`; the first `ReviewDateParser` line of a plain note, `due` `yyyy-MM-dd`, written and pruned like `note_decisions`; read by `Reviews()`) and `note_attributes(note, key, value_key, value)` (job 157, primary key `(note, key, value_key)`, index on `(key, value_key)`) and `note_text` (job 170: FTS5 `fts5(note UNINDEXED, body, tokenize='trigram')` with FTS5 `secure-delete` on, set once in `Sync` after checking `note_text_config`; one row per plain note with its whole text, none for a note that can't be read or is over `NoteStore.MaxNoteBytes` (job 275: such a note is treated as unreadable, so it has no tag, link, people, attribute, decision, todo, topic, review or text rows and a NULL stored time); sensitive notes are never listed, so never indexed; every connection sets `PRAGMA secure_delete = ON`, so a deleted note's text doesn't linger in free pages of `context.db`; the rollback journal `context.db-journal` briefly holds the old pages and is unlinked, not zeroed, after each commit, which is outside this guarantee). `Sync(NoteStore)` updates it
     in one transaction and only re-parses files whose time changed. `PRAGMA user_version` holds the parser
-    version (`TagIndex.ParserVersion`, now 12: `review:yyyy-MM-dd` lines in `note_reviews`; 11 was `next: @[Name] topic` lines in `note_topics`, no longer note todos; 10 was the heading of a `[[Note#Heading]]` link in `note_links.heading`; 9 was open `- [ ]` lines in `note_todos`; 8 was `Decision:` lines in `note_decisions`; 7 was note text in `note_text`; 6 was a link target that runs into a code span is no link); when it is lower, `Sync` clears every stored time and empties `note_text` in the same
+    version (`TagIndex.ParserVersion`, now 13: `#<n>` work item references in `note_items`; 12 was `review:yyyy-MM-dd` lines in `note_reviews`; 11 was `next: @[Name] topic` lines in `note_topics`, no longer note todos; 10 was the heading of a `[[Note#Heading]]` link in `note_links.heading`; 9 was open `- [ ]` lines in `note_todos`; 8 was `Decision:` lines in `note_decisions`; 7 was note text in `note_text`; 6 was a link target that runs into a code span is no link); when it is lower, `Sync` clears every stored time and empties `note_text` in the same
     transaction (so all notes are re-parsed and their text written once) and then sets it. Bump it whenever parsing changes. Queries: `Tags()`, `Reviews()`, `NotesWithTag`,
     `NoteTags()`, `FindNote`, `Links`, `People()`, `NotesMentioning`, `NotesWithAttribute(key, value)` (by `AttributeParser.ValueKey`), `NotesWithoutAttribute(key)`, `Search(text)` (`(Note, Body)` rows for `note_text MATCH $q`, `$q` the text as one FTS5 phrase: `"` + text with `"` doubled + `"`, always a parameter, so FTS syntax is literal), `Decisions(tag?)` (`(Note, Line, Text, Modified)` rows of `note_decisions` joined to `notes` with a stored time, `Modified` UTC; a tag keeps the notes with that `note_tags` row), `NoteTodos()` (`NoteTodo` rows of `note_todos` joined to `notes` with a stored time). A database that can't be opened or isn't valid throws `TagIndexException` (an
     `IOException`) and is never deleted or overwritten. The file database waits up to `TagIndex.BusyTimeout` (5 s; an
@@ -100,6 +100,48 @@ Every factory agent reads this file before working on Context. Keep it short and
     appointment title/location mentions and attendee names the same way, and has `AliasClashes` (when the name is a
     person page) and `AmbiguousWith`. `OpenPerson` opens the resolved person's page and refuses an
     ambiguous name (`ActionReason.Ambiguous`, the hint as text, nothing written).
+  - **Work items** (job 280, `WorkItemParser.cs`, `WorkItemView.cs`, `GitCommitLog.cs`, `DesktopRequest.cs`):
+    `WorkItemParser.Parse` finds `#<n>` (Times' work item numbers) at line start or after whitespace: 1 to 9 ASCII
+    digits, the first 1-9, not followed by a letter, digit, `-`, `_` or `#`; outside fences and code spans (shared
+    helpers); distinct, first-seen order; never a tag. `TryParseNumber` reads a typed number (optional `#`).
+    `note_items(note, item)` holds them per plain note (written and pruned like `note_decisions`);
+    `TagIndex.NotesWithItem(n)` leaves out the item's own page. A work item's page is `items/<n>` (`WorkItems.PageNote`,
+    `ItemOf`: a direct subpage of the top-level `items`, ignoring case); `WorkItems.EnsurePage` creates `items`
+    (`# items\n`) and the page (`# <n>\n`) when missing, refusing a sensitive top-level `items` with nothing written.
+    `WorkItemView.Build(index, store, todos, calendar, feed, timesFolder, repositories, ICommitLog, n)` never throws:
+    `Notes`, `OpenTodos`/`DoneTodos` (`todos.json` texts), `People` (resolved through `Aliases()`, count desc, then
+    name), `Meetings` (files plus cached feed, no download, latest first), `Hours` (Times day files, `WorkItem == n`
+    groups per `ISOWeek` `yyyy-Www`, newest first, `Total`, `SkippedFiles`; the Times folder is never written),
+    `Commits` (repo folder name, hash, date, subject; newest first) and the flags `IndexUnreadable`,
+    `TodosUnreadable`, `TimesKind` (`NotSetUp`/`Unlistable`/`Read`), `CommitsKind` (`NotSetUp`/`GitMissing`/`Read`),
+    `FailedRepos`. `GitCommitLog` runs `git --no-pager -c core.fsmonitor=false -C <folder> log --all --no-color -F
+    --grep=#<n> -n 500 --format=...` through `ArgumentList` (no shell), `GIT_TERMINAL_PROMPT=0`, a 10 s timeout (killed)
+    and a 1 MB output cap, re-checks each message with the parser and keeps at most 100 per repo; tests use
+    `FakeCommitLog` (and one real temp repo in `GitCommitLogTests`). The repository folders are
+    `"repositories":["<absolute folder>"]` in `settings.json` (`SettingsStore.ReadRepositories`/`SaveRepositories`,
+    `Repositories.CheckAdd`: trimmed, absolute, at most 400 chars, existing, distinct ignoring case, at most 20; other
+    properties kept, a broken file never overwritten). Desktop: `ItemPanel` sits above `LinksPanel` on `items/<n>` with
+    `Notes` (`RequestOpen`), `Open todos`, `Done todos`, `People` (`OpenMention`), `Meetings`, `Hours` (week rows and
+    `Total`) and `Commits` (date, repo, 7-char hash, subject), each only with rows; grey `Times isn't set up, so no
+    hours.`, `Set repository folders in Settings to see commits.`, `No notes, todos or meetings mention #<n>.`; red
+    `Can't read the mentions.`, `Can't read the todos.`, `Skipped <k> unreadable Times day file(s).`, `Can't run git, so
+    no commits.`, `Can't read commits in <repo>.`, plus `Can't read Times' folder.` (`Unlistable`) and `Can't read settings.json.`; the `PersonPanel` read-only, `indexGate`, reload and stale-result
+    rules (`DesktopState.Item(n)`). `DesktopActions.OpenItem(n)` and `AddRepository`/`RemoveRepository` (the
+    Settings *Repository folders* section: text field + Add, Remove per row) are the writers. **Open from the command
+    line:** `context item <n>` prints `Item #<n>`, `Notes`, `Todos`, `People`, `Meetings`, `Hours`, `Commits` (every
+    heading always; not set up `- Times isn't set up.` / `- No repository folders set.`; read errors on stderr, exit
+    1, the rest printed; a bad or second number is a usage error before the folder is read); `--json` writes
+    `{item,notes,todos,people,meetings,hours,commits}` (see `CliJsonTests`). `--open` (not with `--json`) ensures the
+    page (`Created items/<n>.`), writes `<root>/.desktop/open-request` (`item <n>\n`, `PrivateFile` temp + move,
+    `0600`, folder `0700`; never a path) and, when `<root>/.desktop/running.lock` can be opened (no desktop holds it),
+    calls `IDesktopLauncher` (`ProcessDesktopLauncher`: macOS `open -b com.nothisisnotdaniel.context`, Windows the
+    installed `%LOCALAPPDATA%\ContextDesktop\current\Context.Desktop.exe`, else unsupported; failure `Can't start the
+    desktop app.`, exit 1, the request stays), then `Opened #<n>.`. The desktop's `Program.cs` holds the lock open
+    (`PrivateFile.OpenLock`) while it runs, and `OpenRequestWatcher` (one non-recursive watcher on `.desktop`, also at
+    start) takes each request through `DesktopRequest.TryTake` (at most 64 bytes through `BoundedFile`, deleted, only
+    exactly `item <n>` raises `ItemRequested`), then `DesktopActions.OpenRequestedItem` offers the page
+    (`DesktopState.OfferItemPage`/`TakeItemPage`) and `Main` opens it through `RequestOpen` (unsaved text saved first,
+    else the discard dialog). Tests wait on the watcher's `Processed` count with a bounded `SpinWait`.
   - **Attributes and page types:** (job 157) `AttributeParser.Parse` finds `key:: value` lines outside fences (key at
     column 0: a letter, then letters, digits, `-`, `_`, at most 50, lower-cased invariant, directly followed by `::`;
     value trimmed, whitespace runs one space, 1 to 400 chars, so `role::` is no attribute); a key may repeat, pairs
@@ -269,7 +311,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   `context.db` are never sealed.
 - **Owner-only files** (job 274): off Windows every data file Context writes is `0600` and every data folder it creates
   (missing parents too) `0700`, both through `PrivateFile` (`Create`/`Write` with `CreateNew`, `CreateFolder`; `Tighten` sets
-  an existing `context.db` with group or other bits to `0600` before SQLite opens it). `PrivateFileSourceTests` fails on
+  an existing `context.db` with group or other bits to `0600` before SQLite opens it; `OpenLock(path)` (job 280) opens a lock file `OpenOrCreate` with `FileShare.None`, `0600` off Windows). `PrivateFileSourceTests` fails on
   any other `Directory.CreateDirectory(`, `File.WriteAll` or writing `new FileStream(` in `src/`, apart from its allow-list
   (`NoteStore.WritePlainCopy`: a path the user picks). Existing files Context doesn't rewrite keep their mode.
 - **Sensitive notes:** (job 136, desktop only) a single note can be marked sensitive; it is then a sealed top-level
@@ -634,6 +676,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   `Create`; an invalid title or an existing note gives the `ValidateTitle` text or `Note <name> already exists.`, every
   refusal one stderr line, exit 1; a failed write `Can't write <name>.`; no title, `--template` without a name or
   `--json` is a usage error before the folder is read),
+  `item <n> [--json] [--open]` (job 280, see Work items),
   `import <path>`, `export <note> <path>` (paths relative to the current directory, no `~`). When `Migrate(out n)`
   replaced bad todo ids, `todos`, `todo add`, `todo done`, `current` and `review` first write one extra stderr line,
   `Fixed a bad todo id in todos.json.` or `Fixed <n> bad todo ids in todos.json.` (fixed text, the bad value is never
@@ -643,7 +686,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   (one-line fields also `\n` to space). Tests (`CliTests`) use the
   internal constructor with a fixed zone.
   **`--json`** (job 148; exact token ignoring case, any position, repeats allowed, removed before parsing) makes
-  `version`, `todos`, `notes`, `note show`, `tags`, `find`, `search`, `current` and `review` write one compact object + `\n`
+  `version`, `todos`, `notes`, `note show`, `tags`, `find`, `search`, `current`, `review` and `item` write one compact object + `\n`
   (`CliJson.cs`, `Utf8JsonWriter` with the default encoder, so `+ & ' <` and non-ASCII are `\uXXXX`): `{version}`,
   `{todos:[{due,time,text}]}` (`time` `HH:mm` or `null`), `{notes:[{name,locked}]}`, `{name,text}`, `{tags:[{tag,count}]}` or `{tag,notes:[]}`,
   `{key,value,notes:[]}` (`find`), `{query,results:[{note,line,text}]}` (`search`; `line` an int), `{today,appointments:[{start,end,allDay,
@@ -815,7 +858,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Context.Desktop` and `Context.Desktop.Tests`, each by name and `PublicKey` (`Key="$(ContextPublicKey)"`; every
     assembly is public-signed with the committed `Context.snk`, see **Strong name**). `Context` grants only
     `Context.Tests` and `Context.Desktop` only `Context.Desktop.Tests`, the same way; no `InternalsVisibleTo` is name-only.
-    It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, picking a todo by its text in `TodoPicker.cs`, todos inside notes in `NoteTodoParser.cs` and `NoteTodo.cs`, topics for the next 1:1 in `TopicParser.cs` and `MeetingTopics.cs`, review dates in `ReviewDateParser.cs` and `NoteReviews.cs`, tag parsing in `TagParser.cs`, the shared HTML page of a note in `NoteHtml.cs`,
+    It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, picking a todo by its text in `TodoPicker.cs`, todos inside notes in `NoteTodoParser.cs` and `NoteTodo.cs`, topics for the next 1:1 in `TopicParser.cs` and `MeetingTopics.cs`, review dates in `ReviewDateParser.cs` and `NoteReviews.cs`, work items in `WorkItemParser.cs`, `WorkItemView.cs` and `GitCommitLog.cs`, the desktop open request in `DesktopRequest.cs`, tag parsing in `TagParser.cs`, the shared HTML page of a note in `NoteHtml.cs`,
     `[[note link]]` parsing in `NoteLinkParser.cs`, link rewriting on rename in `NoteLinkRewriter.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the desktop's recently opened notes (`recent.json`) in `RecentNotes.cs`, its pinned notes (`pinned.json`) in `PinnedNotes.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; over the cap it throws `FileTooLargeException : IOException` (`Too large.`); job 275: every full read of `.ics` files and the feed cache (`CalendarStore.ReadText`, `MaxFileBytes`), `todos.json` (`TodoStore.MaxFileBytes`, 5 MB; a directory named `todos.json` can't be read), `calendar-link.txt` (`CalendarLink.MaxFileBytes`, 4096) and notes (`NoteStore.Read`) goes through it; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
@@ -844,7 +887,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `DataWatcher` (one `FileSystemWatcher` with subfolders, `IsRelevant` filter: the top-level files as before, plus
     a `.md` at any depth except under a folder starting with `.` or under the top-level `calendar/`, and the top-level
     `settings.json` (job 207: saved searches edited outside the app; any case, not in a subfolder); 300 ms
-    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `PeoplePanel`, `LinksPanel`, `OutlinePanel`, `DayAppointmentsPanel`, `TimesTodayPanel`, `AppointmentPanel`, `PersonPanel`, `ReviewPanel`, `TriagePanel`, `ToReviewPanel`, `SimilarPanel`)
+    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `PeoplePanel`, `LinksPanel`, `OutlinePanel`, `DayAppointmentsPanel`, `TimesTodayPanel`, `AppointmentPanel`, `PersonPanel`, `ItemPanel`, `ReviewPanel`, `TriagePanel`, `ToReviewPanel`, `SimilarPanel`)
     inherit `StateComponent`, which injects the state and `DesktopActions` (internal types can't be
     public parameters). `DesktopActions` (with `ActionResult`: `ActionKind` `Done`/`Refused`/`Failed`, `ActionReason`,
     raw text) is the only write path: it never throws, runs one action at a time (`Busy`), refreshes the state after a change and has the test
@@ -1087,7 +1130,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     unsaved editor text survives. Each page's root has class `page` and an icon-only `button.close` (aria-label and title
     `Close`) last in `.panel-bar`; `TagPanel` keeps its text `Close`.
     **Settings:** `SettingsPanel` (the `Settings` button in `NotesPanel`, or `/settings`; `Main`'s `page`;
-    a page in place of the note area; the × (job 193), opening a note or `Today` hides it) has two sections, both
+    a page in place of the note area; the × (job 193), opening a note or `Today` hides it) has these sections (the *Repository folders* one is job 280's, see Work items), all
     reloaded after every `State.Changed`. *Exchange calendar* shows `DesktopState.CalendarLinkSetting()`
     (`CalendarLinkView.Show`: grey `No calendar link set.`, the masked link with the last download in the calendar's
     zone, or red `Can't read calendar-link.txt. …`), one `<input type="password">` (no `value`, no `@bind`,
@@ -1672,7 +1715,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Environment.GetEnvironmentVariable`, `args` or `Console.`, so an update never touches the data folder; no test
     references `VelopackUpdateSource` (tests use `FakeUpdateSource`, never the network).
     **Launcher rule:** `Process` / `System.Diagnostics` appear only in `ShellNoteLauncher.cs`, (job 178)
-    `SystemNotifier.cs` and (job 260) `MacScreenCapture.cs`, each named only in itself and in `Program.cs`; no test
+    `SystemNotifier.cs` and (job 260) `MacScreenCapture.cs`, each named only in itself and in `Program.cs`, and (job 280)
+    outside the desktop only in Core's `GitCommitLog.cs` and the command line's `ProcessDesktopLauncher.cs` (both
+    `ArgumentList` only, never a shell; `WorkItemSourceTests`); no test names `ProcessDesktopLauncher`; no test
     names `MacScreenCapture` or `MacGlobalHotkey` (tests use `FakeScreenCapture` and `FakeGlobalHotkey`); no test names `SystemNotifier` (tests use
     `FakeNotifier`, which records `(title, body)` and can throw), and the notifier passes the text only as arguments or
     environment values. The only path `ShellNoteLauncher` ever gets is a checked note or attachment path (a note from `List()`, or an

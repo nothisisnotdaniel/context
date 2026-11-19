@@ -166,6 +166,95 @@ internal static class SavedSearches
     }
 }
 
+/// <summary>Why a repository folder can't be added (<see cref="Repositories.CheckAdd"/>).</summary>
+internal enum RepositoryCheck
+{
+    /// <summary>The folder can be added.</summary>
+    Ok,
+
+    /// <summary>Nothing was typed.</summary>
+    Blank,
+
+    /// <summary>The path is not absolute (fully qualified).</summary>
+    Relative,
+
+    /// <summary>The path is over <see cref="Repositories.MaxPathLength"/> characters or holds a control character.</summary>
+    TooLong,
+
+    /// <summary>No directory exists at the path.</summary>
+    Missing,
+
+    /// <summary>The folder is already in the list (ignoring case).</summary>
+    Duplicate,
+
+    /// <summary>The list already holds <see cref="Repositories.MaxCount"/> folders.</summary>
+    Full,
+}
+
+/// <summary>
+/// The rules for the repository folders in <c>settings.json</c> (job 280): each entry trimmed, fully qualified, at most
+/// <see cref="MaxPathLength"/> characters without control characters, distinct ignoring case, at most
+/// <see cref="MaxCount"/> entries. Only <see cref="CheckAdd"/> checks that the folder exists.
+/// </summary>
+internal static class Repositories
+{
+    /// <summary>The most repository folders.</summary>
+    public const int MaxCount = 20;
+
+    /// <summary>The longest repository folder path.</summary>
+    public const int MaxPathLength = 400;
+
+    /// <summary>True for a stored entry's shape: trimmed, fully qualified, 1 to 400 characters, no control characters.</summary>
+    public static bool IsValidStored(string folder) =>
+        folder.Length > 0
+        && folder.Length <= MaxPathLength
+        && string.Equals(folder, folder.Trim(), StringComparison.Ordinal)
+        && !folder.Any(char.IsControl)
+        && Path.IsPathFullyQualified(folder);
+
+    /// <summary>True when every entry has the stored shape, no two are equal ignoring case and there are at most 20.</summary>
+    public static bool IsValidList(IReadOnlyList<string> folders) =>
+        folders.Count <= MaxCount
+        && folders.All(IsValidStored)
+        && folders.Distinct(StringComparer.OrdinalIgnoreCase).Count() == folders.Count;
+
+    /// <summary>
+    /// Checks the typed <paramref name="typed"/> (trimmed into <paramref name="folder"/>) against the rules and the
+    /// list <paramref name="current"/>, in this order: blank, too long, relative, missing, duplicate, full.
+    /// </summary>
+    public static RepositoryCheck CheckAdd(IReadOnlyList<string> current, string? typed, out string folder)
+    {
+        folder = (typed ?? string.Empty).Trim();
+        if (folder.Length == 0)
+        {
+            return RepositoryCheck.Blank;
+        }
+
+        if (folder.Length > MaxPathLength || folder.Any(char.IsControl))
+        {
+            return RepositoryCheck.TooLong;
+        }
+
+        if (!Path.IsPathFullyQualified(folder))
+        {
+            return RepositoryCheck.Relative;
+        }
+
+        if (!Directory.Exists(folder))
+        {
+            return RepositoryCheck.Missing;
+        }
+
+        string candidate = folder;
+        if (current.Any(f => string.Equals(f, candidate, StringComparison.OrdinalIgnoreCase)))
+        {
+            return RepositoryCheck.Duplicate;
+        }
+
+        return current.Count >= MaxCount ? RepositoryCheck.Full : RepositoryCheck.Ok;
+    }
+}
+
 /// <summary>
 /// A board (job 242): the tag whose notes and note todos it shows and its columns in order, both normalized
 /// (<see cref="TagIndex.NormalizeTag"/>, lower-cased columns). Set by hand in <c>settings.json</c>; never written.
@@ -219,6 +308,7 @@ internal sealed class SettingsStore
     private const string ColumnsKey = "columns";
     private const string ScreenshotsKey = "screenshots";
     private const string FolderKey = "folder";
+    private const string RepositoriesKey = "repositories";
 
     /// <summary>The longest screenshot folder path.</summary>
     public const int MaxScreenshotFolderLength = 1024;
@@ -411,6 +501,48 @@ internal sealed class SettingsStore
         && folder.Length <= MaxScreenshotFolderLength
         && !folder.Any(char.IsControl)
         && Path.IsPathFullyQualified(folder);
+
+    /// <summary>
+    /// The repository folders (job 280) in saved order; a missing file or <c>repositories</c> property gives an empty
+    /// list. Throws <see cref="SettingsStoreException"/> when the file can't be read, or <c>repositories</c> isn't an
+    /// array of at most <see cref="Repositories.MaxCount"/> strings of the stored shape
+    /// (<see cref="Repositories.IsValidStored"/>), distinct ignoring case. Whether each folder exists is not checked.
+    /// </summary>
+    public IReadOnlyList<string> ReadRepositories() => RepositoriesOf(ReadRoot());
+
+    /// <summary>
+    /// Writes <paramref name="folders"/> as <c>repositories</c>, in order (an empty list removes the property),
+    /// keeping every other property. Throws <see cref="ArgumentException"/> for a list that breaks the stored rules,
+    /// otherwise like <see cref="SaveOutlook"/>; the file's <c>repositories</c> is re-checked too.
+    /// </summary>
+    public void SaveRepositories(IReadOnlyList<string> folders)
+    {
+        if (!Repositories.IsValidList(folders))
+        {
+            throw new ArgumentException("Bad repository folders.", nameof(folders));
+        }
+
+        JsonObject document = ReadRoot();
+        DayEndOf(document);
+        SavedSearchesOf(document);
+        RepositoriesOf(document);
+        if (folders.Count == 0)
+        {
+            document.Remove(RepositoriesKey);
+        }
+        else
+        {
+            JsonArray array = [];
+            foreach (string folder in folders)
+            {
+                array.Add(folder);
+            }
+
+            document[RepositoriesKey] = array;
+        }
+
+        Write(document);
+    }
 
     /// <summary>
     /// The boards in saved order; a missing file or <c>boards</c> property gives an empty list. Each tag goes through
@@ -662,6 +794,37 @@ internal sealed class SettingsStore
         }
 
         return folder;
+    }
+
+    private static List<string> RepositoriesOf(JsonObject document)
+    {
+        List<string> folders = [];
+        if (!document.TryGetPropertyValue(RepositoriesKey, out JsonNode? node))
+        {
+            return folders;
+        }
+
+        if (node is not JsonArray array || array.Count > Repositories.MaxCount)
+        {
+            throw new SettingsStoreException("Not a valid repositories value.");
+        }
+
+        foreach (JsonNode? item in array)
+        {
+            if (StringOf(item) is not string folder || !Repositories.IsValidStored(folder))
+            {
+                throw new SettingsStoreException("Not a valid repositories value.");
+            }
+
+            folders.Add(folder);
+        }
+
+        if (!Repositories.IsValidList(folders))
+        {
+            throw new SettingsStoreException("Not a valid repositories value.");
+        }
+
+        return folders;
     }
 
     // The stored value of "outlook", or null when it is missing or anything other than exactly {"enabled":<bool>}.

@@ -7,7 +7,7 @@ namespace Context.Tests;
 public sealed class CliJsonTests : IDisposable
 {
     private const string JsonOnly =
-        "--json works only with version, todos, notes, note show, tags, find, search, current and review. Run 'context help'.";
+        "--json works only with version, todos, notes, note show, tags, find, search, current, review and item. Run 'context help'.";
 
     private static readonly DateOnly Today = new(2026, 10, 29);
     private static readonly DateTime Now = new(2026, 10, 29, 9, 0, 0, DateTimeKind.Utc);
@@ -616,7 +616,7 @@ public sealed class CliJsonTests : IDisposable
         AssertError(
             Run("capture", "x", "--json"),
             Cli.ExitUsage,
-            "--json works only with version, todos, notes, note show, tags, find, search, current and review. Run 'context help'.");
+            "--json works only with version, todos, notes, note show, tags, find, search, current, review and item. Run 'context help'.");
         Assert.False(Directory.Exists(root));
     }
 
@@ -659,7 +659,7 @@ public sealed class CliJsonTests : IDisposable
             Assert.Contains($"context {command} --json | ConvertFrom-Json", readme, StringComparison.Ordinal);
         }
 
-        string[] reads = ["version", "todos", "notes", "note show", "tags", "find", "current", "review"];
+        string[] reads = ["version", "todos", "notes", "note show", "tags", "find", "current", "review", "item"];
         string[] jsonLines = [.. readme.Split('\n').Where(l => l.Contains("--json", StringComparison.Ordinal) && l.Contains("context ", StringComparison.Ordinal))];
         Assert.NotEmpty(jsonLines);
         foreach (string line in jsonLines)

@@ -31,6 +31,8 @@ internal sealed class DesktopState
     private readonly IOutlookSource outlook;
     private readonly IPageTitleSource? pageTitles;
     private readonly string? timesFolder;
+    private readonly ICommitLog commitLog;
+    private string? offeredItemPage;
 
     // Guards the Outlook cache: one call per day (appointments), each with its start time.
     private readonly object outlookGate = new();
@@ -73,10 +75,12 @@ internal sealed class DesktopState
         TimeSpan? outlookTimeout = null,
         IPageTitleSource? pageTitles = null,
         bool? isMac = null,
-        string? timesFolder = null)
+        string? timesFolder = null,
+        ICommitLog? commitLog = null)
     {
         IsMac = isMac ?? OperatingSystem.IsMacOS();
         this.timesFolder = timesFolder;
+        this.commitLog = commitLog ?? new GitCommitLog();
         this.pageTitles = pageTitles;
         this.outlook = outlook ?? new UnsupportedOutlookSource();
         OutlookTimeout = outlookTimeout ?? DefaultOutlookTimeout;
@@ -192,6 +196,15 @@ internal sealed class DesktopState
 
     /// <summary>The offered start note's name once, then <c>null</c> until the next offer.</summary>
     public string? TakeStartNote() => Interlocked.Exchange(ref offeredStartNote, null);
+
+    /// <summary>
+    /// Offers the work item page asked for from the command line (job 280); <c>Main</c> takes it after the next
+    /// <see cref="Changed"/> and opens it, saving or asking about unsaved changes first. A newer offer replaces it.
+    /// </summary>
+    public void OfferItemPage(string name) => Interlocked.Exchange(ref offeredItemPage, name);
+
+    /// <summary>The offered work item page's name once, then <c>null</c> until the next offer.</summary>
+    public string? TakeItemPage() => Interlocked.Exchange(ref offeredItemPage, null);
 
     /// <summary>Counts one more running reload; called before a <see cref="Changed"/> handler dispatches it.</summary>
     internal void BeginReload() => Interlocked.Increment(ref reloads);
@@ -609,6 +622,59 @@ internal sealed class DesktopState
         catch (Exception)
         {
             return new PersonView(PersonViewKind.NoMentions, name, [], [], [], true, calendar.Zone);
+        }
+    });
+
+    /// <summary>
+    /// The work item page's data (job 280, <see cref="WorkItemView.Build"/>) for <c>#<paramref name="item"/></c>, under
+    /// the index lock, off the calling thread. The repository folders come from <c>settings.json</c>; an unreadable
+    /// file gives no commits and <see cref="WorkItemPageView.SettingsUnreadable"/>. Reads only (git and the Times folder too)
+    /// and never throws: any other failure gives an empty view with <see cref="WorkItemView.IndexUnreadable"/>.
+    /// </summary>
+    public Task<WorkItemPageView> Item(int item) => Task.Run(() =>
+    {
+        bool settingsUnreadable = false;
+        IReadOnlyList<string> repositories = [];
+        try
+        {
+            repositories = new SettingsStore(notes.Root).ReadRepositories();
+        }
+        catch (Exception)
+        {
+            settingsUnreadable = true;
+        }
+
+        try
+        {
+            lock (indexGate)
+            {
+                return new WorkItemPageView(
+                    WorkItemView.Build(index, notes, todos, calendar, feed, timesFolder, repositories, commitLog, item),
+                    settingsUnreadable);
+            }
+        }
+        catch (Exception)
+        {
+            WorkItemView empty = new WorkItemView(
+                item, [], [], [], [], [], new WorkItemHours([], TimeSpan.Zero, 0), [], true, false,
+                WorkItemTimesKind.NotSetUp, WorkItemCommitsKind.NotSetUp, [], calendar.Zone);
+            return new WorkItemPageView(empty, settingsUnreadable);
+        }
+    });
+
+    /// <summary>
+    /// The repository folders saved in <c>settings.json</c> (job 280), in saved order, for the settings page, off the
+    /// calling thread; never throws: a broken or unreadable file gives an empty list with the flag set.
+    /// </summary>
+    public Task<RepositoryFoldersView> RepositoryFolders() => Task.Run(() =>
+    {
+        try
+        {
+            return new RepositoryFoldersView(new SettingsStore(notes.Root).ReadRepositories(), false);
+        }
+        catch (Exception)
+        {
+            return new RepositoryFoldersView([], true);
         }
     });
 

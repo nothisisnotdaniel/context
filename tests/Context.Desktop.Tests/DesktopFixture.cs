@@ -228,6 +228,9 @@ internal sealed class DesktopFixture : IDisposable
 
     private static readonly TimeSpan RecentWriteWait = TimeSpan.FromSeconds(30);
 
+    /// <summary>The commit log the state reads work item commits through (job 280); it never runs git.</summary>
+    public FakeCommitLog CommitLog { get; } = new FakeCommitLog();
+
     /// <summary>Builds the state and the actions (once) and registers both with <see cref="Bunit"/>.</summary>
     public DesktopState CreateState()
     {
@@ -256,7 +259,8 @@ internal sealed class DesktopFixture : IDisposable
             OutlookTimeout,
             PageTitles,
             IsMac,
-            TimesFolder);
+            TimesFolder,
+            CommitLog);
         Actions = new DesktopActions(
             Notes, Todos, State, Launcher, link, feed, () => LocalNow, new CalendarStore(Root, Zone), TimesFolder, Notifier,
             ScreenCapture);

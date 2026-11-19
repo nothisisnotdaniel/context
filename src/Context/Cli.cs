@@ -29,12 +29,15 @@ internal sealed class Cli
     private const string FindForm = "Type: context find <attribute> <value>.";
     private const string SearchForm = "Type: context search <text>.";
     private const string DecisionsForm = "Type: context decisions [tag].";
+    private const string ItemForm = "Type: context item <n> [--json] [--open] with the work item's number.";
+    private const string OpenFlag = "--open";
+    private const string LaunchFailed = "Can't start the desktop app.";
 
     // Job 273: refused anywhere on the line. Spelled in pieces: the whole word must not appear in the source.
     private const string RemovedSecretOption = "--pass" + "phrase";
 
     private const string JsonOnly =
-        "--json works only with version, todos, notes, note show, tags, find, search, current and review.";
+        "--json works only with version, todos, notes, note show, tags, find, search, current, review and item.";
 
     // Every command with its usage and what it does, in the order help lists them.
     private static readonly (string Usage, string Description)[] Commands =
@@ -61,7 +64,8 @@ internal sealed class Cli
         ("new <title...> [--template <name>]", "Create a note, from templates/<name>.md if given."),
         ("import <path>", "Store a Markdown file as a note."),
         ("export <note> <path>", "Write a note to a new plain file."),
-        ("<command> --json", "Print one JSON object: version, todos, notes, note show, tags, find, search, current, review."),
+        ("item <n> [--open]", "What mentions work item #n: notes, todos, people, meetings, Times hours, commits; --open opens its page in the desktop app."),
+        ("<command> --json", "Print one JSON object: version, todos, notes, note show, tags, find, search, current, review, item."),
     ];
 
     private readonly TextWriter stdout;
@@ -72,6 +76,8 @@ internal sealed class Cli
     private readonly HttpMessageHandler http;
     private readonly TimeZoneInfo zone;
     private readonly string? timesFolder;
+    private readonly IDesktopLauncher? launcher;
+    private readonly ICommitLog commitLog;
 
     /// <param name="stdout">Where results go.</param>
     /// <param name="stderr">Where error and warning lines go.</param>
@@ -80,19 +86,24 @@ internal sealed class Cli
     /// <param name="now">The local time, for capture lines and the calendar download.</param>
     /// <param name="http">The handler the Exchange calendar download goes through.</param>
     /// <param name="timesFolder">Times' data folder (<see cref="TimesFolder.Resolve(string?)"/>), only ever read; <c>null</c> for none.</param>
-    public Cli(
+    /// <param name="launcher">Starts the desktop app for <c>item &lt;n&gt; --open</c>.</param>
+    internal Cli(
         TextWriter stdout,
         TextWriter stderr,
         string folder,
         Func<DateOnly> today,
         Func<DateTime> now,
         HttpMessageHandler http,
-        string? timesFolder)
-        : this(stdout, stderr, folder, today, now, http, TimeZoneInfo.Local, timesFolder)
+        string? timesFolder,
+        IDesktopLauncher launcher)
+        : this(stdout, stderr, folder, today, now, http, TimeZoneInfo.Local, timesFolder, launcher, new GitCommitLog())
     {
     }
 
-    /// <summary>Like the public constructor with a fixed zone (tests).</summary>
+    /// <summary>
+    /// Like the other constructor with a fixed zone (tests). Without a launcher <c>--open</c> can't start the desktop
+    /// app; without a commit log <c>git</c> is run.
+    /// </summary>
     internal Cli(
         TextWriter stdout,
         TextWriter stderr,
@@ -101,8 +112,12 @@ internal sealed class Cli
         Func<DateTime> now,
         HttpMessageHandler http,
         TimeZoneInfo zone,
-        string? timesFolder = null)
+        string? timesFolder = null,
+        IDesktopLauncher? launcher = null,
+        ICommitLog? commitLog = null)
     {
+        this.launcher = launcher;
+        this.commitLog = commitLog ?? new GitCommitLog();
         this.stdout = stdout;
         this.stderr = stderr;
         this.folder = folder;
@@ -158,6 +173,12 @@ internal sealed class Cli
         {
             // Checked before the json rule: any argument, --json included, is this usage error, before the folder is read.
             return Usage(StandupForm);
+        }
+
+        if (json && name == "item" && rest.Any(IsOpenFlag))
+        {
+            // The page opens in the desktop app; there is nothing to print as JSON.
+            return Usage(ItemForm);
         }
 
         if (json && (name is "help" or "--help" or "-h" or "capture" or "todo" or "today" or "decisions" or "dayend" or "meeting" or "new" or "import" or "export"))
@@ -293,6 +314,8 @@ internal sealed class Cli
                 }
 
                 return s => Export(s, args[0], args[1]);
+            case "item":
+                return ParseItem(args, out usage);
             default:
                 return null;
         }
@@ -1467,6 +1490,315 @@ internal sealed class Cli
         return exit;
     }
 
+    private static bool IsOpenFlag(string arg) => string.Equals(arg, OpenFlag, StringComparison.OrdinalIgnoreCase);
+
+    // item <n> [--open]: exactly one number (1 to 9 digits, first 1-9, an optional #) and the flag at most once.
+    private Func<Session, int>? ParseItem(string[] args, out string? usage)
+    {
+        usage = null;
+        bool open = args.Count(IsOpenFlag) == 1;
+        string[] numbers = [.. args.Where(a => !IsOpenFlag(a))];
+        if (args.Count(IsOpenFlag) > 1 || numbers.Length != 1 || !WorkItemParser.TryParseNumber(numbers[0], out int item))
+        {
+            usage = ItemForm;
+            return null;
+        }
+
+        return open ? s => OpenItem(s, item) : s => Item(s, item);
+    }
+
+    private int Item(Session session, int item)
+    {
+        MigrateTodos(session);
+        IReadOnlyList<string> repositories;
+        bool settingsUnreadable = false;
+        try
+        {
+            repositories = session.Settings.ReadRepositories();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            repositories = [];
+            settingsUnreadable = true;
+        }
+
+        WorkItemView view = WorkItemView.Build(
+            session.Index, session.Notes, session.Todos, session.Calendar, session.Feed, timesFolder, repositories, commitLog, item);
+        int exit = view.IndexUnreadable || view.TodosUnreadable || settingsUnreadable || view.Hours.SkippedFiles > 0
+            || view.CommitsKind == WorkItemCommitsKind.GitMissing || view.FailedRepos.Count > 0
+            ? ExitError
+            : ExitOk;
+        if (session.Json)
+        {
+            ItemJson(view);
+        }
+        else
+        {
+            ItemText(view, settingsUnreadable);
+        }
+
+        // The error lines, after what could be read; the same for both outputs.
+        if (view.IndexUnreadable)
+        {
+            Err(IndexUnreadable);
+        }
+
+        if (view.TodosUnreadable)
+        {
+            Err(TodosUnreadable);
+        }
+
+        if (view.Hours.SkippedFiles > 0)
+        {
+            Err($"Skipped {view.Hours.SkippedFiles.ToString(CultureInfo.InvariantCulture)} unreadable Times day file(s).");
+        }
+
+        if (settingsUnreadable)
+        {
+            Err("Can't read settings.json.");
+        }
+
+        if (view.CommitsKind == WorkItemCommitsKind.GitMissing)
+        {
+            Err("Can't run git.");
+        }
+
+        foreach (string repo in view.FailedRepos)
+        {
+            Err($"Can't read commits in {OneLine(repo)}.");
+        }
+
+        return exit;
+    }
+
+    private void ItemText(WorkItemView view, bool settingsUnreadable)
+    {
+        Out($"Item #{view.Item.ToString(CultureInfo.InvariantCulture)}");
+        Out("Notes");
+        foreach (string note in view.Notes)
+        {
+            Out(OneLine(note));
+        }
+
+        Out("Todos");
+        foreach (TodoItem todo in view.OpenTodos)
+        {
+            Out($"{Date(todo.Due)}\t{OneLine(todo.Text)}");
+        }
+
+        foreach (TodoItem todo in view.DoneTodos)
+        {
+            Out($"done\t{Date(view.DoneDate(todo))}\t{OneLine(todo.Text)}");
+        }
+
+        Out("People");
+        foreach (WorkItemPerson person in view.People)
+        {
+            Out($"{OneLine(person.Name)}\t{person.Count.ToString(CultureInfo.InvariantCulture)}");
+        }
+
+        Out("Meetings");
+        foreach (Appointment meeting in view.Meetings)
+        {
+            string when = meeting.AllDay
+                ? meeting.Start.ToString(DateFormat, CultureInfo.InvariantCulture)
+                : meeting.Start.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+            string title = meeting.Title.Length == 0 ? "(no title)" : meeting.Title;
+            string where = meeting.Location is null ? string.Empty : $" ({meeting.Location})";
+            Out($"{when}\t{OneLine(title + where)}");
+        }
+
+        Out("Hours");
+        if (view.TimesKind == WorkItemTimesKind.NotSetUp)
+        {
+            Out("- Times isn't set up.");
+        }
+        else if (view.TimesKind == WorkItemTimesKind.Read)
+        {
+            foreach (WorkItemWeek week in view.Hours.Weeks)
+            {
+                Out($"{week.Week}\t{TimesNow.FormatLeft(week.Total)}");
+            }
+
+            Out($"total\t{TimesNow.FormatLeft(view.Hours.Total)}");
+        }
+
+        Out("Commits");
+        if (view.CommitsKind == WorkItemCommitsKind.NotSetUp && !settingsUnreadable)
+        {
+            Out("- No repository folders set.");
+        }
+
+        foreach (WorkItemCommit commit in view.Commits)
+        {
+            string hash = commit.Hash.Length > 7 ? commit.Hash[..7] : commit.Hash;
+            Out($"{Date(commit.Date)}\t{OneLine(commit.Repo)}\t{OneLine(hash)}\t{OneLine(commit.Subject)}");
+        }
+    }
+
+    // {item,notes,todos,people,meetings,hours,commits}; a part that couldn't be read is null.
+    private void ItemJson(WorkItemView view)
+    {
+        stdout.Write(CliJson.Document(w =>
+        {
+            w.WriteNumber("item", view.Item);
+            if (view.IndexUnreadable)
+            {
+                w.WriteNull("notes");
+            }
+            else
+            {
+                CliJson.Strings(w, "notes", view.Notes.Select(OneLine));
+            }
+
+            if (view.TodosUnreadable)
+            {
+                w.WriteNull("todos");
+            }
+            else
+            {
+                w.WriteStartArray("todos");
+                foreach (TodoItem todo in view.OpenTodos.Concat(view.DoneTodos))
+                {
+                    w.WriteStartObject();
+                    w.WriteString("due", Date(todo.Due));
+                    CliJson.WriteTime(w, "time", todo.Time);
+                    w.WriteString("text", OneLine(todo.Text));
+                    if (todo.Done is null)
+                    {
+                        w.WriteNull("done");
+                    }
+                    else
+                    {
+                        w.WriteString("done", Date(view.DoneDate(todo)));
+                    }
+
+                    w.WriteEndObject();
+                }
+
+                w.WriteEndArray();
+            }
+
+            if (view.IndexUnreadable)
+            {
+                w.WriteNull("people");
+            }
+            else
+            {
+                w.WriteStartArray("people");
+                foreach (WorkItemPerson person in view.People)
+                {
+                    w.WriteStartObject();
+                    w.WriteString("name", OneLine(person.Name));
+                    w.WriteNumber("count", person.Count);
+                    w.WriteEndObject();
+                }
+
+                w.WriteEndArray();
+            }
+
+            w.WriteStartArray("meetings");
+            foreach (Appointment meeting in view.Meetings)
+            {
+                WriteAppointment(w, meeting, view.Zone);
+            }
+
+            w.WriteEndArray();
+            if (view.TimesKind != WorkItemTimesKind.Read)
+            {
+                w.WriteNull("hours");
+            }
+            else
+            {
+                w.WriteStartObject("hours");
+                w.WriteStartArray("weeks");
+                foreach (WorkItemWeek week in view.Hours.Weeks)
+                {
+                    w.WriteStartObject();
+                    w.WriteString("week", week.Week);
+                    w.WriteNumber("minutes", week.Total.Ticks / TimeSpan.TicksPerMinute);
+                    w.WriteEndObject();
+                }
+
+                w.WriteEndArray();
+                w.WriteNumber("totalMinutes", view.Hours.Total.Ticks / TimeSpan.TicksPerMinute);
+                w.WriteNumber("skippedFiles", view.Hours.SkippedFiles);
+                w.WriteEndObject();
+            }
+
+            if (view.CommitsKind != WorkItemCommitsKind.Read)
+            {
+                w.WriteNull("commits");
+            }
+            else
+            {
+                w.WriteStartArray("commits");
+                foreach (WorkItemCommit commit in view.Commits)
+                {
+                    w.WriteStartObject();
+                    w.WriteString("repo", OneLine(commit.Repo));
+                    w.WriteString("hash", OneLine(commit.Hash));
+                    w.WriteString("date", Date(commit.Date));
+                    w.WriteString("subject", OneLine(commit.Subject));
+                    w.WriteEndObject();
+                }
+
+                w.WriteEndArray();
+            }
+        }));
+    }
+
+    // item <n> --open: the page is created when missing, the request written, and the desktop app started when it
+    // doesn't hold its lock.
+    private int OpenItem(Session session, int item)
+    {
+        WorkItemPage page;
+        try
+        {
+            page = WorkItems.EnsurePage(session.Notes, item);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return Error($"Can't write {OneLine(WorkItems.PageNote(item))}.");
+        }
+
+        if (page.Kind == WorkItemPageKind.Sensitive)
+        {
+            return Error(SensitiveText(OneLine(page.Name)));
+        }
+
+        if (page.Kind == WorkItemPageKind.Created)
+        {
+            Out($"Created {OneLine(page.Name)}.");
+        }
+
+        bool start;
+        try
+        {
+            DesktopRequest.WriteItem(folder, item);
+            start = DesktopRequest.IsLockFree(folder);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Error(LaunchFailed);
+        }
+
+        if (start)
+        {
+            try
+            {
+                (launcher ?? throw new PlatformNotSupportedException()).Launch();
+            }
+            catch (Exception)
+            {
+                // The request stays: the desktop app opens the page when it is started by hand.
+                return Error(LaunchFailed);
+            }
+        }
+
+        return Done($"Opened #{item.ToString(CultureInfo.InvariantCulture)}.");
+    }
+
     private int NewNote(Session session, string title)
     {
         string? invalid = NoteStore.ValidateTitle(NoteStore.NormalizeTitle(title));
@@ -1693,6 +2025,7 @@ internal sealed class Cli
             Calendar = new CalendarStore(cli.folder, cli.zone);
             CalendarLink link = new CalendarLink(cli.folder);
             Feed = new CalendarFeed(cli.folder, link, cli.http, () => cli.now().ToUniversalTime());
+            Settings = new SettingsStore(cli.folder);
         }
 
         /// <summary>True when the command writes one JSON document instead of plain text.</summary>
@@ -1707,5 +2040,7 @@ internal sealed class Cli
         public CalendarStore Calendar { get; }
 
         public CalendarFeed Feed { get; }
+
+        public SettingsStore Settings { get; }
     }
 }
