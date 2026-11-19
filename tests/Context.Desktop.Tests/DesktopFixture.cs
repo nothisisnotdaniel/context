@@ -178,6 +178,29 @@ internal sealed class DesktopFixture : IDisposable
     public static object RecentWriteGate(DesktopActions actions) =>
         typeof(DesktopActions).GetField("recentWriteGate", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(actions)!;
 
+    /// <summary>
+    /// Waits (bounded at 30 s) until every recent.json write <see cref="DesktopActions.RecordOpened"/> started has
+    /// finished (job 246), so a folder snapshot taken next cannot catch the write or its temp file half-way. It polls
+    /// the count rather than using <c>cut.WaitForAssertion</c>: bUnit re-checks an assertion only when the component
+    /// renders, and a finished write renders nothing.
+    /// </summary>
+    public void WaitForRecentWrites()
+    {
+        if (!SpinWait.SpinUntil(() => Actions!.PendingRecentWrites == 0, RecentWriteWait))
+        {
+            Assert.Fail($"{Actions!.PendingRecentWrites} recent.json write(s) still pending after {RecentWriteWait}.");
+        }
+    }
+
+    /// <summary>
+    /// Holds <see cref="RecentWriteGate"/> on a thread of its own until <see cref="HeldRecentWrites.Release"/> or
+    /// dispose (job 246). A Monitor must be left by the thread that entered it, so the test thread, which may resume
+    /// elsewhere after an await, never takes the lock itself. Returns once the gate is held.
+    /// </summary>
+    public HeldRecentWrites HoldRecentWrites() => new(RecentWriteGate(Actions!), RecentWriteWait);
+
+    private static readonly TimeSpan RecentWriteWait = TimeSpan.FromSeconds(30);
+
     /// <summary>Builds the state and the actions (once) and registers both with <see cref="Bunit"/>.</summary>
     public DesktopState CreateState()
     {
@@ -293,5 +316,49 @@ internal sealed class DesktopFixture : IDisposable
         }
 
         return UtcNow;
+    }
+}
+
+/// <summary>The recent.json write gate held on its own thread (see <see cref="DesktopFixture.HoldRecentWrites"/>).</summary>
+internal sealed class HeldRecentWrites : IDisposable
+{
+    private readonly ManualResetEventSlim held = new();
+    private readonly ManualResetEventSlim release = new();
+    private readonly Thread thread;
+    private readonly TimeSpan wait;
+
+    public HeldRecentWrites(object gate, TimeSpan wait)
+    {
+        this.wait = wait;
+        thread = new Thread(() =>
+        {
+            lock (gate)
+            {
+                held.Set();
+                release.Wait(wait);
+            }
+        })
+        {
+            IsBackground = true,
+        };
+        thread.Start();
+        if (!held.Wait(wait))
+        {
+            throw new TimeoutException("The recent.json write gate was not taken in time.");
+        }
+    }
+
+    /// <summary>Lets the holding thread leave the gate and waits until it has.</summary>
+    public void Release()
+    {
+        release.Set();
+        thread.Join(wait);
+    }
+
+    public void Dispose()
+    {
+        Release();
+        held.Dispose();
+        release.Dispose();
     }
 }

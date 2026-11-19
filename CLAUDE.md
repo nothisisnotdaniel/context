@@ -1243,7 +1243,10 @@ Every factory agent reads this file before working on Context. Keep it short and
     write is swallowed, the in-memory list stays); it is the one `Actions.` call `DesktopSourceTests` lets a non-handler
     method make. `RenameNote`/`MoveNote` apply `Renamed` and `DeleteNote` applies `Removed` when Done. In tests,
     `NoteOpener.OpenAsync` opens a note through `/open`, and `DesktopFixture.WriteRecent` seeds the file before the
-    state is built. An open subpage shows `<nav class="breadcrumb" aria-label="Breadcrumb">`
+    state is built. A test that snapshots the data folder after an open first calls `DesktopFixture.WaitForRecentWrites()`,
+    a bounded poll until the internal `DesktopActions.PendingRecentWrites` (writes `RecordOpened` started, counted with
+    `Interlocked`, uncounted in the task's `finally`) is 0; `DesktopFixture.HoldRecentWrites()` holds the write gate on a
+    thread of its own (job 246). An open subpage shows `<nav class="breadcrumb" aria-label="Breadcrumb">`
     as the first child of `.note-area`: each ancestor a `button.crumb` opening it through `RequestOpen`, the last item a span with
     `aria-current="page"`.
     Below `NoteEditor`, before `HistoryPanel`, `PersonPanel` and `LinksPanel`, a note with subpages shows `<nav

@@ -83,8 +83,15 @@ public sealed class EditingFlowTests : IDisposable
 
     // 216 AC-6: /current is no palette command any more: it is never ranked (typing /c ranks the other commands),
     // and Enter on it runs nothing and writes nothing.
+    // 246: before the snapshot it waits until the open's recent.json write has finished (#333).
     [Fact]
-    public async Task PaletteCurrent_IsNoCommand()
+    public async Task PaletteCurrent_IsNoCommand() => await PaletteCurrent(hold: false);
+
+    // 246 AC-4: the same with the open's recent.json write held up until after the test starts waiting for it.
+    [Fact]
+    public async Task PaletteCurrent_IsNoCommand_WriteHeld() => await PaletteCurrent(hold: true);
+
+    private async Task PaletteCurrent(bool hold)
     {
         data.WriteNote("Plan", "# Plan\n");
         EditorJs js = new EditorJs(data.Bunit);
@@ -99,7 +106,17 @@ public sealed class EditingFlowTests : IDisposable
         Assert.DoesNotContain("/current", ranked);
         await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
 
+        using HeldRecentWrites? held = hold ? data.HoldRecentWrites() : null;
         await Open(cut, js, "Plan");
+        Task released = Task.CompletedTask;
+        if (held is not null)
+        {
+            Assert.True(data.Actions!.PendingRecentWrites >= 1);
+            released = Task.Run(held.Release);
+        }
+
+        data.WaitForRecentWrites();
+        await released.WaitAsync(Wait);
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         await RunPalette(cut, "/current");
 
@@ -107,7 +124,9 @@ public sealed class EditingFlowTests : IDisposable
         Assert.Equal(string.Empty, cut.Find(".main-status").TextContent);
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         Assert.Single(js.Calls("ContextEditor.mount"));
-        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
+        SortedDictionary<string, string> after = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
+        Assert.Equal(before, after);
+        Assert.DoesNotContain(before.Keys.Concat(after.Keys), k => Path.GetFileName(k).StartsWith(".recent.json.", StringComparison.Ordinal));
     }
 
     // AC-9: a tag click lists the notes with that tag, sorted ignoring case; clicking one opens it.

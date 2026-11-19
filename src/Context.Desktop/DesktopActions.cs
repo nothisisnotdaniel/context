@@ -268,6 +268,9 @@ internal sealed class DesktopActions
 
     // One write of recent.json at a time; each writes the list as it is when the write starts, so the last one wins.
     private readonly object recentWriteGate = new();
+
+    // recent.json writes started by RecordOpened and not finished yet (job 246); only Interlocked touches it.
+    private int pendingRecentWrites;
     private readonly string? timesFolder;
     private readonly INotifier? notifier;
     private int running;
@@ -935,17 +938,42 @@ internal sealed class DesktopActions
             }
 
             state.ChangeRecent(list => RecentNotes.Touch(list, name));
-            return Task.Run(() =>
-            {
-                state.RaiseChanged();
-                WriteRecent();
-            });
         }
         catch (Exception)
         {
             return Task.CompletedTask;
         }
+
+        // 246: counted before the task starts and uncounted in the task's finally, so a test can wait until the
+        // write has finished; if the task cannot even start, it is uncounted here.
+        Interlocked.Increment(ref pendingRecentWrites);
+        try
+        {
+            return Task.Run(() =>
+            {
+                try
+                {
+                    state.RaiseChanged();
+                    WriteRecent();
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref pendingRecentWrites);
+                }
+            });
+        }
+        catch (Exception)
+        {
+            Interlocked.Decrement(ref pendingRecentWrites);
+            return Task.CompletedTask;
+        }
     }
+
+    /// <summary>
+    /// The number of <c>recent.json</c> writes started by <see cref="RecordOpened"/> that have not finished yet
+    /// (job 246). Test-only state: a test waits until it is 0 before it snapshots the data folder.
+    /// </summary>
+    internal int PendingRecentWrites => Volatile.Read(ref pendingRecentWrites);
 
     // Changes the recent list after a rename, move or delete (on the action's worker thread) and writes it. Never throws.
     private void ChangeRecent(Func<IReadOnlyList<string>, IReadOnlyList<string>> step)
