@@ -2,7 +2,8 @@
 # Builds Context.app from a published Context.Desktop folder. It does not sign and does not zip.
 # Usage: sh macos-app.sh <publish-dir> <version> <out-dir>
 # Writes <out-dir>/Context.app/Contents/Info.plist and copies every published file to
-# <out-dir>/Context.app/Contents/MacOS/ (the .NET app expects its files next to the executable).
+# <out-dir>/Context.app/Contents/MacOS/ (the .NET app expects its files next to the executable), and the
+# published Assets/Context.icns to Contents/Resources/Context.icns (the Dock and Finder icon, CFBundleIconFile).
 # The version must be SemVer (X.Y.Z or X.Y.Z-label); the bundle versions are its X.Y.Z core.
 # A wrong or missing argument exits non-zero before anything is created. The version is only ever
 # compared and printed as data, never evaluated.
@@ -45,6 +46,10 @@ if [ ! -f "$publish/Context.Desktop" ]; then
   refuse "no Context.Desktop executable in the publish folder"
 fi
 
+if [ ! -f "$publish/Assets/Context.icns" ]; then
+  refuse "no Assets/Context.icns in the publish folder"
+fi
+
 app="$out/Context.app"
 if [ -e "$app" ]; then
   refuse "Context.app is already in the output folder"
@@ -53,8 +58,9 @@ fi
 # MAJOR.MINOR.PATCH: macOS bundle versions take no prerelease label.
 core="${version%%-*}"
 
-mkdir -p "$app/Contents/MacOS"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp -R "$publish/." "$app/Contents/MacOS/"
+cp "$publish/Assets/Context.icns" "$app/Contents/Resources/Context.icns"
 chmod +x "$app/Contents/MacOS/Context.Desktop"
 
 cat > "$app/Contents/Info.plist" <<PLIST
@@ -65,6 +71,8 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key>
   <string>Context</string>
   <key>CFBundleDisplayName</key>
+  <string>Context</string>
+  <key>CFBundleIconFile</key>
   <string>Context</string>
   <key>CFBundleExecutable</key>
   <string>Context.Desktop</string>

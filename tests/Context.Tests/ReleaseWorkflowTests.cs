@@ -237,8 +237,8 @@ public sealed class ReleaseWorkflowTests
     }
 
     // 146 AC-10: the Windows job is byte-for-byte what it was before signing came to the macOS job (272 changed it
-    // on purpose: timeout, line-break check, gh-based delta download), and nothing in the workflow signs a Windows
-    // build.
+    // on purpose: timeout, line-break check, gh-based delta download; 284 added vpk's --icon), and nothing in the
+    // workflow signs a Windows build.
     [Fact]
     public void WindowsJob_IsUnchanged_AndNothingSignsForWindows()
     {
@@ -249,7 +249,7 @@ public sealed class ReleaseWorkflowTests
         string job = workflow[start..end];
 
         Assert.Equal(
-            "CFC517FB55D319D88BB4C2247F6CD5FC9383356F6E5EBEF1D6343AF7C6B77094",
+            "6DB8CE316BF3AE08046E14DED18725488E28A39C713A861C40BA80708329558F",
             Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(job))));
         Assert.All(AllRunScripts(workflow), script =>
         {
@@ -1473,6 +1473,7 @@ public sealed class ReleaseWorkflowTests
     }
 
     // 133 AC-3: Info.plist with the bundle keys, and every published file under Contents/MacOS.
+    // 284 AC-8: the published Assets/Context.icns also in Contents/Resources, named by CFBundleIconFile.
     [Theory]
     [InlineData("1.2.3", "1.2.3")]
     [InlineData("1.2.4-develop.7", "1.2.4")]
@@ -1495,7 +1496,11 @@ public sealed class ReleaseWorkflowTests
             Assert.True(result.Code == 0, "macos-app.sh exit " + result.Code + ": " + result.Err);
             Assert.Equal(["out", "publish"], result.FilesCreated.Order(StringComparer.Ordinal));
             string contents = Path.Combine(folder, "out", "Context.app", "Contents");
-            Assert.Equal(["Info.plist", "MacOS"], Entries(contents));
+            Assert.Equal(["Info.plist", "MacOS", "Resources"], Entries(contents));
+            Assert.Equal(["Context.icns"], Entries(Path.Combine(contents, "Resources")));
+            Assert.Equal(
+                File.ReadAllBytes(Path.Combine(folder, "publish", "Assets", "Context.icns")),
+                File.ReadAllBytes(Path.Combine(contents, "Resources", "Context.icns")));
 
             Dictionary<string, string> plist = ReadPlist(Path.Combine(contents, "Info.plist"));
             Assert.Equal("Context.Desktop", plist["CFBundleExecutable"]);
@@ -1504,6 +1509,7 @@ public sealed class ReleaseWorkflowTests
             Assert.Equal(core, plist["CFBundleVersion"]);
             Assert.Equal("Context", plist["CFBundleName"]);
             Assert.Equal("APPL", plist["CFBundlePackageType"]);
+            Assert.Equal("Context", plist["CFBundleIconFile"]);
 
             Assert.Equal(RelativeFiles(Path.Combine(folder, "publish")), RelativeFiles(Path.Combine(contents, "MacOS")));
             Assert.Equal(
@@ -1582,6 +1588,7 @@ public sealed class ReleaseWorkflowTests
     [InlineData("empty publish folder")]
     [InlineData("empty out folder")]
     [InlineData("no executable")]
+    [InlineData("no icon")]
     [InlineData("no publish folder")]
     [InlineData("app already there")]
     public async Task MacAppScript_RefusesWrongArguments_AndCreatesNothing(string situation)
@@ -1611,6 +1618,11 @@ public sealed class ReleaseWorkflowTests
                 File.Delete(Path.Combine(folder, "publish", "Context.Desktop"));
             }
 
+            if (situation == "no icon")
+            {
+                File.Delete(Path.Combine(folder, "publish", "Assets", "Context.icns"));
+            }
+
             if (situation == "app already there")
             {
                 Directory.CreateDirectory(Path.Combine(folder, "out", "Context.app"));
@@ -1627,6 +1639,48 @@ public sealed class ReleaseWorkflowTests
         {
             Directory.Delete(folder, recursive: true);
         }
+    }
+
+    // 284 AC-9: a publish folder without Assets/Context.icns is refused with its own line, and no Context.app is made.
+    [Fact]
+    public async Task MacAppScript_RefusesAPublishFolderWithoutTheIcon()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string folder = NewTempFolder();
+        try
+        {
+            WritePublishFolder(folder);
+            File.Delete(Path.Combine(folder, "publish", "Assets", "Context.icns"));
+            Directory.CreateDirectory(Path.Combine(folder, "out"));
+
+            ScriptResult result = await RunBash(folder, [MacAppScript, "publish", "1.2.3", "out"]);
+
+            Assert.NotEqual(0, result.Code);
+            Assert.Equal("no Assets/Context.icns in the publish folder\n", result.Err);
+            Assert.Equal(string.Empty, result.Out);
+            Assert.Empty(Entries(Path.Combine(folder, "out")));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 284 AC-10: Setup.exe gets the app icon, and the icon file vpk is pointed at is in the repository.
+    [Fact]
+    public void WindowsJob_PacksWithTheAppIcon()
+    {
+        string pack = JobScript("desktop-windows", "Pack");
+        string line = Assert.Single(Lines(pack), l => l.StartsWith("vpk pack ", StringComparison.Ordinal));
+
+        Assert.Contains(" --icon src/Context.Desktop/Assets/Context.ico ", line, StringComparison.Ordinal);
+        Assert.True(
+            File.Exists(Path.Combine(RepoRoot, "src", "Context.Desktop", "Assets", "Context.ico")),
+            "src/Context.Desktop/Assets/Context.ico is missing");
     }
 
     // 133 AC-3: the script only builds the bundle (no signing, no zip), and never evaluates its arguments.
@@ -1651,6 +1705,11 @@ public sealed class ReleaseWorkflowTests
             code.IndexOf("grep -Eq \"$semver\"", StringComparison.Ordinal) < code.IndexOf("mkdir", StringComparison.Ordinal),
             "the version must be checked before anything is created");
         Assert.Single(Regex.Matches(code, @"\bmkdir\b"));
+        // 284: the icon check also comes before the first thing the script creates.
+        Assert.True(
+            code.IndexOf("no Assets/Context.icns in the publish folder", StringComparison.Ordinal)
+                < code.IndexOf("mkdir", StringComparison.Ordinal),
+            "the icon must be checked before anything is created");
     }
 
     // 133 AC-4: vpk is installed at an exact version, equal to the Velopack package of Context.Desktop, and no other
@@ -1727,7 +1786,7 @@ public sealed class ReleaseWorkflowTests
                         + " --pattern ContextDesktop-*-full.nupkg --dir Releases",
                     "vpk [no token] pack --packId ContextDesktop --packVersion " + version
                         + " --packDir publish/win-x64 --mainExe Context.Desktop.exe --packTitle Context"
-                        + " --runtime win-x64 --outputDir Releases" + channel,
+                        + " --icon src/Context.Desktop/Assets/Context.ico --runtime win-x64 --outputDir Releases" + channel,
                 ],
                 StubLog(folder));
             Assert.DoesNotContain("::warning::", result.Out, StringComparison.Ordinal);
@@ -2459,7 +2518,7 @@ public sealed class ReleaseWorkflowTests
             string macos = "out/Context.app/Contents/MacOS/";
             Assert.Equal(
                 [
-                    sign + macos + "Context.Desktop.dll " + macos + "wwwroot/editor/editor.js " + macos + "wwwroot/index.html",
+                    sign + macos + "Assets/Context.icns " + macos + "Context.Desktop.dll " + macos + "wwwroot/editor/editor.js " + macos + "wwwroot/index.html",
                     sign + macos + "Context.Desktop",
                     sign + "out/Context.app",
                     "codesign --verify --deep --strict out/Context.app",
@@ -2795,7 +2854,7 @@ public sealed class ReleaseWorkflowTests
                     + " .github/scripts/macos-entitlements.plist -s " + SigningIdentity + " ";
                 expected.AddRange(
                 [
-                    sign + macos + "Context.Desktop.dll " + macos + "wwwroot/editor/editor.js " + macos + "wwwroot/index.html",
+                    sign + macos + "Assets/Context.icns " + macos + "Context.Desktop.dll " + macos + "wwwroot/editor/editor.js " + macos + "wwwroot/index.html",
                     sign + macos + "Context.Desktop",
                     sign + app,
                     "codesign --verify --deep --strict " + app,
@@ -3768,7 +3827,12 @@ public sealed class ReleaseWorkflowTests
         File.WriteAllText(Path.Combine(publish, "Context.Desktop.dll"), "dll");
         File.WriteAllText(Path.Combine(publish, "wwwroot", "index.html"), "<!doctype html>\n");
         File.WriteAllText(Path.Combine(publish, "wwwroot", "editor", "editor.js"), "// editor\n");
+        // 284: the bundle icon as dotnet publish copies it from src/Context.Desktop/Assets (fake bytes).
+        Directory.CreateDirectory(Path.Combine(publish, "Assets"));
+        File.WriteAllBytes(Path.Combine(publish, "Assets", "Context.icns"), FakeIcns);
     }
+
+    private static readonly byte[] FakeIcns = [(byte)'i', (byte)'c', (byte)'n', (byte)'s', 0, 0, 0, 9, 42];
 
     private static void WriteReleases(string folder, IEnumerable<string> files)
     {

@@ -561,7 +561,7 @@ jobs:
           fi
           # The pack needs no credential.
           unset GH_TOKEN
-          vpk pack --packId ContextDesktop --packVersion "$VERSION" --packDir publish/win-x64 --mainExe Context.Desktop.exe --packTitle Context --runtime win-x64 --outputDir Releases $CHANNEL
+          vpk pack --packId ContextDesktop --packVersion "$VERSION" --packDir publish/win-x64 --mainExe Context.Desktop.exe --packTitle Context --icon src/Context.Desktop/Assets/Context.ico --runtime win-x64 --outputDir Releases $CHANNEL
 
       - name: Upload
         env:
