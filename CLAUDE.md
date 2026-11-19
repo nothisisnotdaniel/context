@@ -1080,14 +1080,14 @@ Every factory agent reads this file before working on Context. Keep it short and
     **Sidebar bar (job 197):** `NotesPanel`'s bar holds only the icon buttons (`.notes-bar-buttons`: triage, people, tags, settings; Search moved to the top bar in job 218, `NotesPanel.OnSearch` stays for saved searches), right-aligned (`justify-content: flex-end`); no logo and no visible "Notes" heading, the list `ul.note-list.recent-notes` carries `aria-label="Recent notes"` (job 240). Between the bar and the list, `nav.saved-searches` (job 207, `aria-label="Saved searches"`, only with entries; `DesktopSnapshot.SavedSearches`) has per entry `button.saved-search` (name through `OneLine`, cut, `title` the query; `OnSearch(query)`) and `button.saved-search-remove` (`×`, `aria-label`/`title` `Remove <name>`; `Actions.RemoveSavedSearch`, result in grey/red `p.saved-search-result`); `SavedSearchesUnreadable` shows red `Can't read saved searches.` instead. **Placeholders:** a box's placeholder says only what it is for (`New todo`, `Capture to inbox`), never a `Return to …` hint; Return still submits and there are no submit buttons.
     **Tidy layout (job 192):** the Triage, People (job 239), Tags and Settings buttons in `NotesPanel`'s bar are icon-only (inline `svg`, `aria-hidden`, `currentColor`; `aria-label` and `title` carry the name), note rows show no modified date, and `.top-bar` is a band (`--panel` background, `--line` bottom border).
     **Top bar (job 198):** `TopBar` replaces the capture box as the first child of `Main`'s `main.current-region` (not with
-    `Can't read the data folder.`): an empty `.top-bar-start` and right-aligned `.top-bar-buttons` with icon buttons
-    `button.capture-open` (`Capture`, job 199: a hand-drawn "T" with an I-beam caret; a `.capture-pop` popover with one
-    `input[type=text]` `aria-label="Capture"`, placeholder `Capture to inbox`, maxlength 1000, focused on open, and a
-    `.capture-pop-backdrop`), `button.search-open` (`Search`, job 218: the magnifying glass; a `.search-pop` popover
+    `Can't read the data folder.`): an empty `.top-bar-start` and right-aligned `.top-bar-buttons` with icon buttons in the order Today, Search, Capture, Pick a day, More actions (job 241)
+    `button.today-open` (`Today`), `button.search-open` (`Search`, job 218: the magnifying glass; a `.search-pop` popover
     with a `.search-pop-backdrop`, styled like `.capture-pop`, with one `input[type=text]` `aria-label="Search"`,
     placeholder `Search notes`, maxlength 200, empty and focused on each opening; Return calls `OnSearch(text)` once
     (`Main.ShowSearch`, empty text too) and closes, so the panel's input takes the focus; Esc closes and focuses
-    `button.search-open`), `button.today-open` (`Today`) and `button.day-pick-open` (`Pick a day`; job 213: a `.day-pick` month calendar with a
+    `button.search-open`), `button.capture-open` (`Capture`, job 199: a hand-drawn "T" with an I-beam caret; a `.capture-pop` popover with one
+    `input[type=text]` `aria-label="Capture"`, placeholder `Capture to inbox`, maxlength 1000, focused on open, and a
+    `.capture-pop-backdrop`), and `button.day-pick-open` (`Pick a day`; job 213: a `.day-pick` month calendar with a
     `.day-pick-backdrop` and no input: header `button.day-pick-prev`/`day-pick-next` (icon-only, `Previous month`/`Next
     month`, disabled on January 1900/December 2100) around `.day-pick-month` (`MMMM yyyy`, invariant, also the
     `table[role=grid]`'s `aria-label`); columns an empty week header then `Mo`..`Su`; always 6 rows from the Monday on or

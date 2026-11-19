@@ -1,18 +1,18 @@
-@* The slim bar across the top of the main area: Capture (a "T" with a text caret), Search (magnifying glass), Today
-   (home) and Pick a day (calendar). Capture opens a small popover with one text field; Return hands the text to the
-   parent, which captures it to the inbox and answers in the main status line. Search opens the same kind of popover;
-   Return hands the text to the parent, which shows the search panel, and Esc gives the focus back to the icon. The
-   pick opens a month calendar (Monday-first weeks with ISO week numbers, today and the shown day marked); the picked
-   day is handed to the parent, which opens that day's note (saving unsaved changes first). More actions (three dots,
-   last) opens the shown page's actions as a menu; the chosen item's id goes to the parent, which runs it. At most one
-   of the four popovers is open. *@
+@* The slim bar across the top of the main area: Today (home), Search (magnifying glass), Capture (a "T" with a text
+   caret) and Pick a day (calendar), then More actions. Capture opens a small popover with one text field; Return
+   hands the text to the parent, which captures it to the inbox and answers in the main status line. Search opens the
+   same kind of popover; Return hands the text to the parent, which shows the search panel, and Esc gives the focus
+   back to the icon. The pick opens a month calendar (Monday-first weeks with ISO week numbers, today and the shown
+   day marked); the picked day is handed to the parent, which opens that day's note (saving unsaved changes first).
+   More actions (three dots, last) opens the shown page's actions as a menu; the chosen item's id goes to the parent,
+   which runs it. At most one of the four popovers is open. *@
 
 <div class="top-bar" @onkeydown="Key">
     <div class="top-bar-start"></div>
     <div class="top-bar-buttons">
-        <button type="button" class="capture-open" aria-label="Capture" title="Capture" aria-expanded="@(captureOpen ? "true" : "false")" @onclick="ToggleCapture"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 6h10"/><path d="M9 6v13"/><path d="M19 4v16"/><path d="M17 4h4"/><path d="M17 20h4"/></svg></button>
-        <button type="button" class="search-open" aria-label="Search" title="Search" aria-expanded="@(searchOpen ? "true" : "false")" @ref="searchButton" @onclick="ToggleSearch"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/></svg></button>
         <button type="button" class="today-open" aria-label="Today" title="Today" @onclick="() => OnToday.InvokeAsync()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg></button>
+        <button type="button" class="search-open" aria-label="Search" title="Search" aria-expanded="@(searchOpen ? "true" : "false")" @ref="searchButton" @onclick="ToggleSearch"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/></svg></button>
+        <button type="button" class="capture-open" aria-label="Capture" title="Capture" aria-expanded="@(captureOpen ? "true" : "false")" @onclick="ToggleCapture"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 6h10"/><path d="M9 6v13"/><path d="M19 4v16"/><path d="M17 4h4"/><path d="M17 20h4"/></svg></button>
         <button type="button" class="day-pick-open" aria-label="Pick a day" title="Pick a day" aria-expanded="@(open ? "true" : "false")" @onclick="Toggle"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>
         @if (PageActions.Count > 0)
         {
