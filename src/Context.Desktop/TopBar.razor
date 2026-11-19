@@ -1,11 +1,11 @@
 @* The slim bar across the top of the main area: Today (home), Search (magnifying glass), Capture (a "T" with a text
-   caret) and Pick a day (calendar), then More actions. Capture opens a small popover with one text field; Return hands the text to the
-   parent, which captures it to the inbox and answers in the main status line. Search opens the same kind of popover;
-   Return hands the text to the parent, which shows the search panel, and Esc gives the focus back to the icon. The
-   pick opens a month calendar (Monday-first weeks with ISO week numbers, today and the shown day marked); the picked
-   day is handed to the parent, which opens that day's note (saving unsaved changes first). More actions (three dots,
-   last) opens the shown page's actions as a menu; the chosen item's id goes to the parent, which runs it. At most one
-   of the four popovers is open. *@
+   caret) and Pick a day (calendar), then More actions. Capture opens a small popover with one text field; Return
+   hands the text to the parent, which captures it to the inbox and answers in the main status line. Search opens the
+   same kind of popover; Return hands the text to the parent, which shows the search panel, and Esc gives the focus
+   back to the icon. The pick opens a month calendar (Monday-first weeks with ISO week numbers, today and the shown
+   day marked); the picked day is handed to the parent, which opens that day's note (saving unsaved changes first).
+   More actions (three dots, last) opens the shown page's actions as a menu; the chosen item's id goes to the parent,
+   which runs it. At most one of the four popovers is open. *@
 
 <div class="top-bar" @onkeydown="Key">
     <div class="top-bar-start"></div>
