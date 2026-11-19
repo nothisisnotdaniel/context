@@ -3,6 +3,7 @@ import { roundTrip, isLossless, inlineNodes, docJson, splitTitle, outline, attri
 import { chipDom, headingDom } from "./schema.js";
 import { opensChip, typedBlock, typedMarkdown, mount, getMarkdown, isDirty, markClean, markCleanIf, destroy, focus, insertAttachment, headings, scrollToHeading, attributes, setAttributes, setLinkTitle } from "./view.js";
 import { pastedMarkdown, titledMarkdown } from "./paste.js";
+import { isMermaidFence, mermaidResultJson, shouldRender } from "./mermaid.js";
 
 // A file dropped anywhere in the window must never navigate the web view: the editor handles its own drops.
 if (typeof globalThis.addEventListener === "function") {
@@ -41,6 +42,10 @@ globalThis.ContextEditor = Object.freeze({
   opensChip,
   pastedMarkdown,
   titledMarkdown,
+  // Mermaid diagrams (job 263): the fence test, the frame reply check (over JSON text) and the size rule.
+  isMermaidFence,
+  mermaidResultJson,
+  shouldRender,
   // Need a page.
   mount,
   getMarkdown,

@@ -132,6 +132,19 @@ public sealed class DesktopDependencyTests
         Assert.True(loose.Length == 0, "Editor packages without an exact version: " + string.Join(", ", loose));
     }
 
+    // 263 AC-9: Mermaid is pinned to exactly 12.3.0, and the license file covers the Mermaid frame bundle.
+    [Fact]
+    public void Mermaid_IsPinnedAndLicensed()
+    {
+        string editor = Path.Combine(RepoFiles.Root(), "src/Context.Desktop/editor");
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(Path.Combine(editor, "package.json")));
+        Assert.Equal("12.3.0", document.RootElement.GetProperty("devDependencies").GetProperty("mermaid").GetString());
+
+        string licenses = File.ReadAllText(Path.Combine(editor, "THIRD-PARTY-LICENSES.txt"));
+        Assert.Contains("mermaid 12.3.0 (MIT)", licenses, StringComparison.Ordinal);
+        Assert.Contains("mermaid-frame.js", licenses, StringComparison.Ordinal);
+    }
+
     // 133 AC-4: Velopack (installer and updater) is a package of the desktop app only, at an exact version.
     [Fact]
     public void Velopack_IsReferencedOnlyByTheDesktopProject_AtAnExactVersion()

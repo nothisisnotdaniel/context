@@ -7,7 +7,12 @@ public sealed class DesktopSourceTests
 {
     private const string Csp =
         "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; "
-        + "connect-src 'self'; base-uri 'none'; form-action 'none'";
+        + "connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'";
+
+    // 263 AC-7: the Mermaid renderer frame's own CSP: no network, its one script from its own folder, and the inline
+    // <style> that Mermaid's SVG needs.
+    private const string FrameCsp =
+        "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'";
 
     // The Core calls that change data (AC-8). CalendarLink's real names are Set/Clear; Save/Delete are listed too.
     // 134: NoteStore.Rename and NoteStore.Delete. 136: sealing (SealedNote.Seal, AddRecipient), NoteStore.DeleteSensitive
@@ -214,6 +219,79 @@ public sealed class DesktopSourceTests
         Assert.DoesNotMatch("\\son[a-z]+\\s*=", html);
         Assert.DoesNotContain("http:", html, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("https:", html, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // 263 AC-7: frame.html has exactly its CSP, one external script (mermaid-frame.js) and no inline code or URLs.
+    [Fact]
+    public void FrameHtml_HasCspAndOneScript()
+    {
+        string html = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "mermaid", "frame.html"));
+
+        MatchCollection metas = Regex.Matches(
+            html, "<meta\\s+http-equiv=\"Content-Security-Policy\"\\s+content=\"([^\"]*)\"\\s*/?>",
+            RegexOptions.IgnoreCase);
+        Match meta = Assert.Single(metas);
+        Assert.Equal(FrameCsp, meta.Groups[1].Value);
+        Assert.Single(Regex.Matches(html, "Content-Security-Policy", RegexOptions.IgnoreCase));
+
+        MatchCollection scripts = Regex.Matches(html, "<script\\b([^>]*)>(.*?)</script>", RegexOptions.IgnoreCase
+            | RegexOptions.Singleline);
+        Match script = Assert.Single(scripts);
+        Assert.Equal(" src=\"mermaid-frame.js\"", script.Groups[1].Value);
+        Assert.Equal(string.Empty, script.Groups[2].Value);
+        Assert.Single(Regex.Matches(html, "<script", RegexOptions.IgnoreCase));
+
+        Assert.DoesNotContain("<style", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("style=", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("<link", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotMatch("\\son[a-z]+\\s*=", html);
+        Assert.DoesNotContain("http:", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("https:", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("//", html, StringComparison.Ordinal);
+    }
+
+    // 263 AC-8: nothing grants the renderer frame the page's origin, and the editor sets no sandbox but "allow-scripts".
+    [Fact]
+    public void Sources_NeverAllowSameOrigin_AndSandboxOnlyAllowsScripts()
+    {
+        string root = RepoFiles.Root();
+        string desktop = Path.Combine(root, RepoFiles.DesktopFolder);
+        string editor = Path.Combine(desktop, "editor", "src");
+        List<string> files = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor");
+        files.AddRange(Directory.EnumerateFiles(editor, "*", SearchOption.AllDirectories).Select(f => RepoFiles.Relative(root, f)));
+        files.AddRange(Directory.EnumerateFiles(Path.Combine(desktop, "wwwroot"), "*", SearchOption.AllDirectories)
+            .Where(f => Path.GetExtension(f) is ".js" or ".html" or ".css")
+            .Select(f => RepoFiles.Relative(root, f)));
+        Assert.Contains(RepoFiles.DesktopFolder + "/wwwroot/mermaid/frame.html", files);
+        Assert.Contains(RepoFiles.DesktopFolder + "/wwwroot/mermaid/mermaid-frame.js", files);
+        Assert.Contains(RepoFiles.DesktopFolder + "/editor/src/mermaid.js", files);
+
+        List<string> found = files
+            .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains("allow-same-origin", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        Assert.True(found.Count == 0, "allow-same-origin in: " + string.Join(", ", found));
+
+        // Every sandbox value in the sources: setAttribute("sandbox", "..."), .sandbox = "..." and sandbox="..." alike.
+        string[] sandboxes = Directory.EnumerateFiles(editor, "*.js")
+            .SelectMany(f => Regex.Matches(File.ReadAllText(f), @"\bsandbox[""']?\s*[,=]\s*[""']([^""']*)[""']").Select(m => m.Groups[1].Value))
+            .ToArray();
+        Assert.NotEmpty(sandboxes);
+        Assert.All(sandboxes, value => Assert.Equal("allow-scripts", value));
+        Assert.DoesNotContain(".sandbox.add", string.Concat(Directory.EnumerateFiles(editor, "*.js").Select(File.ReadAllText)), StringComparison.Ordinal);
+    }
+
+    // 263 AC-8: the page's editor bundle holds no Mermaid library code; the frame bundle holds Mermaid in strict mode.
+    [Fact]
+    public void Bundles_KeepMermaidInTheFrameOnly()
+    {
+        string wwwroot = Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot");
+        string editor = File.ReadAllText(Path.Combine(wwwroot, "editor", "editor.js"));
+        string frame = File.ReadAllText(Path.Combine(wwwroot, "mermaid", "mermaid-frame.js"));
+
+        Assert.DoesNotContain("securityLevel", editor, StringComparison.Ordinal);
+        Assert.Contains("mermaid/frame.html", editor, StringComparison.Ordinal);
+        Assert.Contains("securityLevel:\"strict\"", frame, StringComparison.Ordinal);
+        Assert.DoesNotContain("allow-same-origin", frame, StringComparison.Ordinal);
     }
 
     // AC-6 / 094 AC-12: the stylesheets load nothing from outside (no CDN, no external fonts).

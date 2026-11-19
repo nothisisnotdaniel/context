@@ -160,6 +160,16 @@ removes the attachments that only it links in its level; ones another note links
 - An older kept version of a moved note still holds the old attachment names, so restoring it can link a missing or
   different file.
 
+### Diagrams
+
+In the desktop app, a fenced block whose first word is `mermaid` (```` ```mermaid ```` or `~~~mermaid`) is drawn as a
+Mermaid diagram in the page editor. Click the diagram, or move the cursor into the block, to
+see and edit its text above it; the diagram is drawn again as you type. While it is drawn the block says
+`Drawing diagram…`, and a diagram that can't be drawn keeps its text with `Can't draw this diagram.` in grey. Mermaid
+ships with the app and runs in a sealed-off frame with no network; the note file keeps the plain text and is never
+changed by drawing. Share, export and the command line show the block as code. Known limit: if the diagram frame never
+loads or hangs, the block stays at `Drawing diagram…` (there is no timeout).
+
 ### Sharing a note
 
 To send a note to someone who doesn't use Context, choose `Share` in the desktop app's More actions menu (or `/share`

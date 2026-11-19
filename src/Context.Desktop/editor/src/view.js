@@ -11,6 +11,7 @@ import { splitListItem, liftListItem, sinkListItem } from "prosemirror-schema-li
 import { inputRules, wrappingInputRule, textblockTypeInputRule, InputRule } from "prosemirror-inputrules";
 import { schema } from "./schema.js";
 import { smartPaste, linkMeta, linkTitleTransaction } from "./paste.js";
+import { codeBlockView, mermaidEditing } from "./mermaid.js";
 import { parse, serialize, splitTitle, joinTitle, headingList, attributeSplit, attributeBlockRowsJson, editAttributes, normalizePerson, isNetWhite } from "./markdown.js";
 
 const editors = new WeakMap();
@@ -346,6 +347,7 @@ export function mount(element, markdown, dotnet, images, name) {
     doc,
     plugins: [
       rules(),
+      mermaidEditing(),
       history(),
       keymap({
         "Mod-z": undo,
@@ -373,7 +375,7 @@ export function mount(element, markdown, dotnet, images, name) {
   });
   const view = new EditorView(element, {
     state,
-    nodeViews: { list_item: listItemView, image: imageView(editor) },
+    nodeViews: { list_item: listItemView, image: imageView(editor), code_block: codeBlockView },
     attributes: { class: "note-editor-body", spellcheck: "true" },
     dispatchTransaction(tr) {
       view.updateState(view.state.apply(tr));
