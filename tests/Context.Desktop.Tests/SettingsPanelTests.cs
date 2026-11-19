@@ -47,7 +47,7 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.Equal("Close", close.GetAttribute("aria-label"));
         Assert.Equal("Close", close.GetAttribute("title"));
         Assert.NotNull(close.QuerySelector("svg"));
-        Assert.Equal(["Exchange calendar", "Outlook", "Pasting", "Sensitive notes"], cut.FindAll("h3").Select(h => h.TextContent).ToArray());
+        Assert.Equal(["Exchange calendar", "Outlook", "Pasting", "Screenshots", "Sensitive notes"], cut.FindAll("h3").Select(h => h.TextContent).ToArray());
         IElement line = cut.Find(".calendar-link-state");
         Assert.Equal("No calendar link set.", line.TextContent);
         Assert.True(line.ClassList.Contains("grey"));
@@ -65,12 +65,14 @@ public sealed class SettingsPanelTests : IDisposable
     public async Task Field_IsAMaskedInputWithoutAValue_SaveDisabledWhileEmpty()
     {
         // 217: without Outlook here the Outlook section has no checkbox, so (244: besides the Pasting checkbox) the link
-        // field is the only input.
+        // field is the only input (260: besides the screenshot folder field).
         data.Outlook.Available = OutlookAvailability.Unsupported;
         IRenderedComponent<SettingsPanel> cut = await Show();
 
         Assert.Single(cut.FindAll("input[type=checkbox]"), i => i.ClassList.Contains("fetch-titles"));
-        IElement field = Assert.Single(cut.FindAll("input"), i => i.GetAttribute("type") != "checkbox");
+        IElement field = Assert.Single(
+            cut.FindAll("input"),
+            i => i.GetAttribute("type") != "checkbox" && !i.ClassList.Contains("screenshot-folder-field"));
         Assert.Equal("password", field.GetAttribute("type"));
         Assert.Equal("Calendar link", field.GetAttribute("aria-label"));
         Assert.Equal("off", field.GetAttribute("autocomplete"));
@@ -765,6 +767,124 @@ public sealed class SettingsPanelTests : IDisposable
         {
             return false;
         }
+    }
+
+    // 260 AC-10: on macOS the section names the hotkey; elsewhere it says the hotkey works on macOS only.
+    [Theory]
+    [InlineData(true, "Press Control+Option+Shift+S to add a screen area to the inbox.")]
+    [InlineData(false, "The screenshot hotkey works on macOS. On Windows, set the folder to the Snipping Tool's screenshots folder.")]
+    public async Task Screenshots_HotkeyLineFollowsTheOs(bool isMac, string text)
+    {
+        data.IsMac = isMac;
+
+        IRenderedComponent<SettingsPanel> cut = await Show();
+
+        IElement line = cut.Find(".screenshot-hotkey");
+        Assert.Equal(text, line.TextContent);
+        Assert.Contains("grey", line.ClassList);
+    }
+
+    // 260 AC-8, AC-9: no folder: the grey line, the field, Save folder and no Remove folder.
+    [Fact]
+    public async Task Screenshots_NoFolder_GreyLineFieldAndSave()
+    {
+        IRenderedComponent<SettingsPanel> cut = await Show();
+
+        IElement line = cut.Find(".screenshot-folder-state");
+        Assert.Equal(SettingsPanel.ScreenshotNotSetText, line.TextContent);
+        Assert.Contains("grey", line.ClassList);
+        IElement field = cut.Find("input.screenshot-folder-field");
+        Assert.Equal("text", field.GetAttribute("type"));
+        Assert.Equal("Screenshot folder", field.GetAttribute("aria-label"));
+        Assert.Equal("1024", field.GetAttribute("maxlength"));
+        Assert.Equal("Save folder", cut.Find("button.screenshot-folder-save").TextContent);
+        Assert.Empty(cut.FindAll("button.screenshot-folder-remove"));
+        Assert.Equal("status", cut.Find(".screenshot-result").GetAttribute("role"));
+    }
+
+    // 260 AC-8: a broken screenshots value shows the red line.
+    [Fact]
+    public async Task Screenshots_BrokenSetting_RedLine()
+    {
+        data.WriteFile(SettingsStore.FileName, "{\"screenshots\":{\"folder\":42}}");
+
+        IRenderedComponent<SettingsPanel> cut = await Show();
+
+        IElement line = cut.Find(".screenshot-folder-state");
+        Assert.Equal("Can't read the screenshot folder setting.", line.TextContent);
+        Assert.Contains("red", line.ClassList);
+        Assert.NotNull(cut.Find("button.screenshot-folder-remove"));
+    }
+
+    // 260 AC-9: a saved folder that is gone shows its path and the red Folder not found.; nothing creates it.
+    [Fact]
+    public async Task Screenshots_FolderGone_ShownNotFoundNotCreated()
+    {
+        string folder = data.Outside("gone");
+        Directory.CreateDirectory(data.Root);
+        new SettingsStore(data.Root).SaveScreenshotFolder(folder);
+
+        IRenderedComponent<SettingsPanel> cut = await Show();
+
+        Assert.Equal("Folder: " + folder, cut.Find(".screenshot-folder-state").TextContent);
+        IElement missing = cut.Find(".screenshot-folder-missing");
+        Assert.Equal("Folder not found.", missing.TextContent);
+        Assert.Contains("red", missing.ClassList);
+        Assert.False(Directory.Exists(folder));
+    }
+
+    // 260 AC-8, AC-9: Save (button and Enter) stores the folder, shows it and clears the field; Remove takes it out.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Screenshots_SaveThenRemove(bool enter)
+    {
+        string folder = data.Outside("shots");
+        Directory.CreateDirectory(folder);
+        IRenderedComponent<SettingsPanel> cut = await Show();
+
+        await cut.Find("input.screenshot-folder-field").InputAsync(new ChangeEventArgs { Value = folder });
+        if (enter)
+        {
+            await cut.Find("input.screenshot-folder-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        }
+        else
+        {
+            await cut.Find("button.screenshot-folder-save").ClickAsync(new MouseEventArgs());
+        }
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("Screenshot folder saved.", cut.Find(".screenshot-result").TextContent);
+            Assert.Equal("Folder: " + folder, cut.Find(".screenshot-folder-state").TextContent);
+        }, Wait);
+        Assert.Contains("accent", cut.Find(".screenshot-result").ClassList);
+        Assert.Empty(cut.FindAll(".screenshot-folder-missing"));
+        Assert.Equal(folder, new SettingsStore(data.Root).ReadScreenshotFolder());
+
+        await cut.Find("button.screenshot-folder-remove").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("Screenshot folder removed.", cut.Find(".screenshot-result").TextContent);
+            Assert.Equal(SettingsPanel.ScreenshotNotSetText, cut.Find(".screenshot-folder-state").TextContent);
+        }, Wait);
+        Assert.Null(new SettingsStore(data.Root).ReadScreenshotFolder());
+    }
+
+    // 260 AC-8: a refused folder shows its text in red and writes nothing.
+    [Fact]
+    public async Task Screenshots_RelativeFolder_RedTextNothingWritten()
+    {
+        IRenderedComponent<SettingsPanel> cut = await Show();
+
+        await cut.Find("input.screenshot-folder-field").InputAsync(new ChangeEventArgs { Value = "relative/shots" });
+        await cut.Find("button.screenshot-folder-save").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(
+            () => Assert.Equal("Type the folder's full path.", cut.Find(".screenshot-result").TextContent), Wait);
+        Assert.Contains("red", cut.Find(".screenshot-result").ClassList);
+        Assert.False(File.Exists(Path.Combine(data.Root, SettingsStore.FileName)));
     }
 
     private async Task<IRenderedComponent<SettingsPanel>> Show()

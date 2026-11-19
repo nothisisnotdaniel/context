@@ -1,7 +1,8 @@
 @inherits StateComponent
 @* The settings: the Exchange calendar link (set, replace, remove), whether Context reads classic Outlook (Windows
    only; DesktopState.OutlookSetting), whether a pasted link's page title may be downloaded
-   (DesktopState.FetchTitlesSetting, off by default) and the key that opens sensitive notes. The link
+   (DesktopState.FetchTitlesSetting, off by default), the watched screenshot folder and the screenshot hotkey (job 260,
+   DesktopState.ScreenshotFolderSetting) and the key that opens sensitive notes. The link
    is a bearer secret: it is typed into a password field that has no value, kept in one field of this component
    until it is saved or the panel closes, handed only to DesktopActions and never rendered back; what is shown is
    the masked link from DesktopState.CalendarLinkSetting. Every section reloads whenever the state changes. *@
@@ -76,6 +77,40 @@
         <p class="fetch-titles-hint grey">@FetchTitlesHintText</p>
     }
     <p class="fetch-titles-result @fetchTitlesResultClass" role="status">@fetchTitlesResultText</p>
+    <h3>Screenshots</h3>
+    <p class="screenshot-hotkey grey">@(State.IsMac ? ScreenshotHotkeyText : ScreenshotWindowsText)</p>
+    @if (screenshots is null)
+    {
+        <p class="screenshot-folder-state grey">Loading…</p>
+    }
+    else if (screenshots.Kind == ScreenshotFolderKind.Unreadable)
+    {
+        <p class="screenshot-folder-state red">@ScreenshotUnreadableText</p>
+    }
+    else if (screenshots.Kind == ScreenshotFolderKind.Set)
+    {
+        <p class="screenshot-folder-state grey cut" title="@DesktopText.OneLine(screenshots.Folder ?? string.Empty)">Folder: @DesktopText.OneLine(screenshots.Folder ?? string.Empty)</p>
+        @if (!screenshots.Exists)
+        {
+            <p class="screenshot-folder-missing red">@ScreenshotMissingText</p>
+        }
+    }
+    else
+    {
+        <p class="screenshot-folder-state grey">@ScreenshotNotSetText</p>
+    }
+    <div class="screenshot-folder-entry">
+        <input type="text" class="screenshot-folder-field" @key="screenshotFieldKey"
+               maxlength="@SettingsStore.MaxScreenshotFolderLength" autocomplete="off" spellcheck="false"
+               disabled="@busy" aria-label="Screenshot folder" placeholder="Folder's full path"
+               @oninput="ScreenshotFolderTyped" @onkeydown="e => SaveScreenshotFolder(e)" />
+        <button type="button" class="screenshot-folder-save" disabled="@busy" @onclick="() => SaveScreenshotFolder(null)">Save folder</button>
+        @if (screenshots is not null && screenshots.Kind != ScreenshotFolderKind.NotSet)
+        {
+            <button type="button" class="screenshot-folder-remove" disabled="@busy" @onclick="RemoveScreenshotFolder">Remove folder</button>
+        }
+    </div>
+    <p class="screenshot-result @screenshotResultClass" role="status">@screenshotResultText</p>
     <h3>Sensitive notes</h3>
     @if (key is null)
     {
@@ -133,6 +168,12 @@
     public const string OutlookHintText = "Outlook may ask whether Context may access it.";
     public const string FetchTitlesLabel = "Fetch page titles for pasted links";
     public const string FetchTitlesHintText = "When on, Context downloads a pasted link's page to read its title.";
+    public const string ScreenshotHotkeyText = "Press Control+Option+Shift+S to add a screen area to the inbox.";
+    public const string ScreenshotWindowsText =
+        "The screenshot hotkey works on macOS. On Windows, set the folder to the Snipping Tool's screenshots folder.";
+    public const string ScreenshotUnreadableText = "Can't read the screenshot folder setting.";
+    public const string ScreenshotMissingText = "Folder not found.";
+    public const string ScreenshotNotSetText = "No screenshot folder set. New images saved into the folder you set go to the inbox.";
     public const string RemoveQuestion = "Remove the calendar link? The downloaded calendar copy is deleted too.";
 
     private const string TimeFormat = "yyyy-MM-dd HH:mm";
@@ -150,6 +191,11 @@
     // Changes after every toggle, so the checkbox is built anew and shows what is stored, also after a failed save.
     private int fetchTitlesKey;
     private int request;
+    private ScreenshotFolderView? screenshots;
+    private string typedFolder = string.Empty;
+    private int screenshotFieldKey;
+    private string screenshotResultText = string.Empty;
+    private string screenshotResultClass = string.Empty;
 
     // The typed link: never rendered, cleared once it is saved and when the panel closes.
     private string typed = string.Empty;
@@ -192,9 +238,11 @@
         CalendarLinkView linkNow = await State.CalendarLinkSetting();
         OutlookSettingView outlookNow = await State.OutlookSetting();
         bool fetchTitlesNow = await State.FetchTitlesSetting();
+        ScreenshotFolderView screenshotsNow = await State.ScreenshotFolderSetting();
         SensitiveKeyView keyNow = await State.SensitiveKey();
         if (mine == request)
         {
+            screenshots = screenshotsNow;
             link = linkNow;
             outlook = outlookNow;
             fetchTitles = fetchTitlesNow;
@@ -340,6 +388,69 @@
         fetchTitlesResultText = DesktopText.OneLine(result.Text);
         fetchTitlesResultClass = result.Kind == ActionKind.Done ? "accent" : "red";
         fetchTitlesKey++;
+        await Load();
+    }
+
+    private void ScreenshotFolderTyped(ChangeEventArgs e)
+    {
+        typedFolder = e.Value?.ToString() ?? string.Empty;
+        screenshotResultText = string.Empty;
+        screenshotResultClass = string.Empty;
+    }
+
+    // Enter in the folder field or Save folder; a saved folder empties the field.
+    private async Task SaveScreenshotFolder(KeyboardEventArgs? pressed)
+    {
+        if ((pressed is not null && pressed.Key != "Enter") || busy)
+        {
+            return;
+        }
+
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.SetScreenshotFolder(typedFolder);
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        if (result.Kind == ActionKind.Done)
+        {
+            typedFolder = string.Empty;
+            screenshotFieldKey++;
+        }
+
+        await ScreenshotDone(result);
+    }
+
+    private async Task RemoveScreenshotFolder()
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.ClearScreenshotFolder();
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        await ScreenshotDone(result);
+    }
+
+    private async Task ScreenshotDone(ActionResult result)
+    {
+        screenshotResultText = DesktopText.OneLine(result.Text);
+        screenshotResultClass = result.Kind == ActionKind.Done ? "accent" : "red";
         await Load();
     }
 

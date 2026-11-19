@@ -328,7 +328,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     sensitive note `Make plain` and `Lock` instead of `Open in default editor`; both mark and make-plain ask in a
     `ConfirmDialog` and need a saved note.
   - **Rules (tests):** no file in `src/Context.Core/` or `src/Context/` mentions `AesGcm`, `ECDiffieHellman`,
-    `IKeyStore` or `SealedNote`; `DllImport`/`LibraryImport`/`extern ` appear only in `MacKeyStore.cs` and `OutlookComSource.cs`; `X509Store`
+    `IKeyStore` or `SealedNote`; `DllImport`/`LibraryImport`/`extern ` appear only in `MacKeyStore.cs`, `OutlookComSource.cs` and (job 260) `MacGlobalHotkey.cs`; `X509Store`
     and `CngKey` only in `WindowsKeyStore.cs`; no test references `WindowsKeyStore`, `MacKeyStore` or
     `PhotinoFileDialog` (tests use `FakeKeyStore`, which counts `Agree` and can throw, and `FakeFileDialog`), so
     `dotnet test` never touches a real key store, Keychain or file dialog; no new NuGet package.
@@ -1447,6 +1447,30 @@ Every factory agent reads this file before working on Context. Keep it short and
     `DesktopActions.SetFetchTitles(on)`: accent `Page titles on.`/`Page titles off.`, else red `Can't save
     settings.json.` with the box back. Tests use `FakePageTitles` and `FakeHttpHandler` (`RedirectTo`). Manual check:
     Cmd+Shift+V in WKWebView (README).
+    **Screenshots into the inbox** (job 260): Core `ScreenshotInbox.Add(store, attachments, fileName, bytes, now)`
+    (size, then `CleanName` + `Sniff` must give a PNG/JPEG/GIF/WebP whose extension matches, then a sensitive inbox is
+    refused by name, a missing inbox is created as `# inbox\n`, `NoteAttachments.Add` stores the image, and
+    `Inbox.Capture` appends `- yyyy-MM-dd HH:mm Screenshot ![<name>](.attachments/<name>)`; when the capture fails the
+    stored file is deleted again, never through a link). `ScreenshotInbox.HotkeyName(now)` is
+    `screenshot-yyyyMMdd-HHmmss.png`. Settings: `"screenshots":{"folder":<absolute path>}` through
+    `SettingsStore.ReadScreenshotFolder` (null when missing, a broken shape throws) / `SaveScreenshotFolder` (invalid
+    shape: `ArgumentException`) / `RemoveScreenshotFolder` (false and no write when not set), every other key kept.
+    `DesktopActions.CaptureScreenshot()` (sensitive inbox refused before the area picker, cancel writes and shows
+    nothing), `ImportScreenshot(path, lastTry)` (only a direct, non-dot, non-link image child of the saved folder;
+    others are Refused/`Missing` and quiet; the source stays; `Locked`/`Unreadable`/`Busy` show only on the last try),
+    `SetScreenshotFolder` (absolute, at most 1024, existing, outside the Context folder; each refusal its own text) and
+    `ClearScreenshotFolder`; every result goes to the notifier as `Screenshot added to inbox.` or
+    `Screenshot not saved: <reason>.` `ScreenshotFolderWatcher` (one non-recursive `FileSystemWatcher`, Created and
+    Renamed, 300 ms debounce, one file at a time, each path once, 1 + `MaxRetries` 5 tries with the `RetryDelay` hook,
+    `Processed` for tests) follows `DesktopState.Changed`, so saving or removing the folder restarts or stops it; a
+    missing folder is never created. `ScreenshotHotkey` runs one capture per press (a press during a capture is
+    ignored). The real parts are macOS only and picked in `Program.cs`: `MacScreenCapture` (`/usr/sbin/screencapture
+    -i -x <root>/.tmp/screenshot-<guid>.png`, no shell, the temp file removed) and `MacGlobalHotkey` (Carbon
+    `RegisterEventHotKey`, Control+Option+Shift+S); other systems get neither. Settings `h3` `Screenshots` (after
+    Pasting): the hotkey line (`DesktopState.IsMac`, injected by `DesktopFixture.IsMac`), the folder status (grey
+    `Folder: <path>`, red `Folder not found.`, red `Can't read the screenshot folder setting.`), `input.screenshot-folder-field`,
+    `Save folder`, `Remove folder`. Tests: `ScreenshotInboxTests`, `ScreenshotActionsTests`,
+    `ScreenshotFolderWatcherTests` (bounded `SpinWait` on `Processed`), with `FakeScreenCapture` and `FakeGlobalHotkey`.
     **Crash log** (job 237, `CrashLog.cs`, desktop only): `CrashLog(root, utcNow, version, os, home)` writes into
     `<root>/.logs/` (a dot folder, so `List()` and `DataWatcher` ignore it). `Write(source, e)` writes
     `crash-yyyyMMdd-HHmmss-fff.log` (UTC; `-2`..`-99` on a clash, `FileMode.CreateNew`) holding only the UTC time, the
@@ -1514,8 +1538,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     `StartupUpdate.cs`, `VelopackUpdateSource.cs`) never mention `NoteStore`, `DefaultFolder`, `DesktopActions`,
     `Environment.GetEnvironmentVariable`, `args` or `Console.`, so an update never touches the data folder; no test
     references `VelopackUpdateSource` (tests use `FakeUpdateSource`, never the network).
-    **Launcher rule:** `Process` / `System.Diagnostics` appear only in `ShellNoteLauncher.cs` and (job 178)
-    `SystemNotifier.cs`, each named only in itself and in `Program.cs`; no test names `SystemNotifier` (tests use
+    **Launcher rule:** `Process` / `System.Diagnostics` appear only in `ShellNoteLauncher.cs`, (job 178)
+    `SystemNotifier.cs` and (job 260) `MacScreenCapture.cs`, each named only in itself and in `Program.cs`; no test
+    names `MacScreenCapture` or `MacGlobalHotkey` (tests use `FakeScreenCapture` and `FakeGlobalHotkey`); no test names `SystemNotifier` (tests use
     `FakeNotifier`, which records `(title, body)` and can throw), and the notifier passes the text only as arguments or
     environment values. The only path `ShellNoteLauncher` ever gets is a checked note or attachment path (a note from `List()`, or an
     attachment PDF `NoteAttachments.TryResolve` accepted), and the only folder it gets is the fixed crash folder

@@ -66,8 +66,10 @@ internal sealed class DesktopState
         CalendarLink? calendarLink = null,
         IOutlookSource? outlook = null,
         TimeSpan? outlookTimeout = null,
-        IPageTitleSource? pageTitles = null)
+        IPageTitleSource? pageTitles = null,
+        bool? isMac = null)
     {
+        IsMac = isMac ?? OperatingSystem.IsMacOS();
         this.pageTitles = pageTitles;
         this.outlook = outlook ?? new UnsupportedOutlookSource();
         OutlookTimeout = outlookTimeout ?? DefaultOutlookTimeout;
@@ -109,6 +111,9 @@ internal sealed class DesktopState
             return recent;
         }
     }
+
+    /// <summary>Whether the app runs on macOS, where the screenshot hotkey works (job 260); tests inject it.</summary>
+    public bool IsMac { get; }
 
     /// <summary>How long one Outlook source call may take before it counts as timed out.</summary>
     public TimeSpan OutlookTimeout { get; }
@@ -674,6 +679,26 @@ internal sealed class DesktopState
         catch (Exception)
         {
             return new OutlookSettingView(availability, false, true);
+        }
+    });
+
+    /// <summary>
+    /// The watched screenshot folder (job 260) and whether it exists, off the calling thread. Never creates the folder
+    /// and never throws: an unreadable <c>settings.json</c> or <c>screenshots</c> value is
+    /// <see cref="ScreenshotFolderKind.Unreadable"/>.
+    /// </summary>
+    public Task<ScreenshotFolderView> ScreenshotFolderSetting() => Task.Run(() =>
+    {
+        try
+        {
+            string? folder = new SettingsStore(notes.Root).ReadScreenshotFolder();
+            return folder is null
+                ? new ScreenshotFolderView(ScreenshotFolderKind.NotSet, null, false)
+                : new ScreenshotFolderView(ScreenshotFolderKind.Set, folder, Directory.Exists(folder));
+        }
+        catch (Exception)
+        {
+            return new ScreenshotFolderView(ScreenshotFolderKind.Unreadable, null, false);
         }
     });
 

@@ -1190,6 +1190,36 @@ input[type="password"]:disabled {
     flex: none;
 }
 
+.screenshot-folder-entry {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.screenshot-folder-entry .screenshot-folder-field {
+    flex: 1 1 240px;
+    min-width: 0;
+}
+
+.screenshot-folder-entry .screenshot-folder-save {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: var(--on-accent);
+    flex: none;
+}
+
+.screenshot-folder-entry .screenshot-folder-remove {
+    flex: none;
+}
+
+.settings-panel .screenshot-result {
+    margin: 6px 0 0;
+}
+
+.settings-panel .screenshot-result:empty {
+    display: none;
+}
+
 .settings-panel .settings-result {
     margin: 6px 0 0;
 }
