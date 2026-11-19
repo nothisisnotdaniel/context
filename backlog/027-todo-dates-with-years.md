@@ -9,3 +9,7 @@ The sidebar shows due dates as `MM-dd` with no year. Show the year when a todo i
 ## Why
 
 `MM-dd` alone makes a todo due next January or one long overdue look like it's due this year.
+
+## Closed 2026-11-19
+
+Already done: the sidebar and `context todos` show the full yyyy-MM-dd, and the only MM-dd display (the old console) was removed by job 145. Closed by job 294 without a build.
