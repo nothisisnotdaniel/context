@@ -2,16 +2,16 @@
    warns that the copy is not encrypted; Choose file then counts as the confirmation. The Confirmation itself still
    comes from ConfirmDialog. *@
 
-<ConfirmDialog Question="@($"Share {DesktopText.OneLine(Name)} as a web page?")" ConfirmLabel="Choose file…"
+<ConfirmDialog Question="@($"Share {DesktopText.OneLine(Name)} as an HTML page?")" ConfirmLabel="Choose file…"
                Busy="Busy" OnConfirm="Choose" OnCancel="Cancel">
-    <label class="share-option">
-        <input type="checkbox" checked="@leaveOutPrivate" disabled="@Busy" @onchange="Toggle" />
-        Leave out lines tagged #private
-    </label>
     @if (Sensitive)
     {
         <p class="share-warning red">This copy is not encrypted. Anyone with the file can read it.</p>
     }
+    <label class="share-option">
+        <input type="checkbox" checked="@leaveOutPrivate" disabled="@Busy" @onchange="Toggle" />
+        Leave out lines tagged #private
+    </label>
 </ConfirmDialog>
 
 @code {

@@ -2437,7 +2437,7 @@ else
         running = true;
         try
         {
-            ShowExported(await Actions.ShareNote(name, target, choice.LeaveOutPrivate, choice.Confirmed));
+            ShowExported(await Actions.ShareNote(name, target, choice.LeaveOutPrivate, openSensitive ? choice.Confirmed : null));
         }
         finally
         {
