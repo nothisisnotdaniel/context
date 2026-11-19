@@ -344,6 +344,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#387](backlog/387-meeting-todos-move-focus-to-the.md) Meeting todos: move focus to the meeting picker when Push finds no next meeting
 - [?] [#389](backlog/389-appointmentpaneltests-read-both-elements-of-an.md) AppointmentPanelTests: read both elements of an order check at the same moment
 - [?] [#390](backlog/390-sidebar-day-picker-fit-the-calendar.md) Sidebar day picker: fit the calendar in a narrow sidebar
+- [?] [#391](backlog/391-editor-type-an-inline-code-span.md) Editor: type an inline code span that holds a backtick
+- [?] [#392](backlog/392-notes-clean-up-escapes-saved-by.md) Notes: clean up escapes saved by the old editor
 
 ## Dropped with the terminal UI
 
