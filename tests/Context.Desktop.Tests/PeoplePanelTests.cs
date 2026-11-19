@@ -49,6 +49,8 @@ public sealed class PeoplePanelTests : IDisposable
         Assert.All(cut.FindAll("ul.people-list > li > button.person-open"), b => Assert.True(b.ClassList.Contains("cut")));
         Assert.Empty(cut.FindAll("p[role=status]"));
 
+        // The attribute load re-renders the rows and Close with new handlers, so click only once it is done.
+        cut.WaitForState(() => cut.Instance.Loaded, Wait);
         await cut.FindAll("button.person-open").Single(b => b.TextContent == "bob").ClickAsync(new MouseEventArgs());
         await cut.Find("button.close").ClickAsync(new MouseEventArgs());
 

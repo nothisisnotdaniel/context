@@ -913,6 +913,8 @@ public sealed class MainTests : IDisposable
         int mounts = js.Calls("ContextEditor.mount").Count;
 
         await cut.Find("button.people-open").ClickAsync(new MouseEventArgs());
+        // The panel re-renders once its attributes load, which gives each row a new handler, so find the row after.
+        cut.WaitForState(() => cut.FindComponent<PeoplePanel>().Instance.Loaded, Wait);
         await cut.FindAll(".people-panel button.person-open").Single(b => b.TextContent == "Anna").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
