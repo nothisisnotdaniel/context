@@ -333,6 +333,10 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#377](backlog/377-dependency-list-with-licence-links.md) Dependency list with licence links
 - [?] [#378](backlog/378-app-icon-full-bleed-variant-for.md) App icon: full-bleed variant for Windows and Linux
 - [?] [#379](backlog/379-search-page-arrow-keys-move-between.md) Search page: arrow keys move between results without scrolling the page
+- [?] [#380](backlog/380-mail-digest-hint-under-the-settings.md) Mail digest: hint under the Settings checkbox
+- [?] [#381](backlog/381-mail-digest-keep-mail-text-inert.md) Mail digest: keep mail text inert in meeting notes
+- [?] [#382](backlog/382-mail-digest-strip-unicode-format-characters.md) Mail digest: strip Unicode format characters from suggestions
+- [?] [#383](backlog/383-mail-digest-keep-read-mail-disabled.md) Mail digest: keep Read mail disabled while a timed-out read still runs
 
 ## Dropped with the terminal UI
 
