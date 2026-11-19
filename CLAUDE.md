@@ -631,6 +631,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   allDay,title,location}],calendar:{status,cachedAt,unreadableFiles}}` (`review`; `doneTodos`/`overdue` `null` when
   `todos.json` is unreadable). Names and order are a public contract (`CliJsonTests`, README). Errors stay text; with `help` or a
   write command it is a usage error before anything is read. `README.md` has PowerShell examples.
+  - **Removed secret option (job 273):** an argument that starts with the removed secret option is a usage error in any position (ignoring case), checked before anything else, `--json`, `help` and `version` included: `That option was removed. Run 'context help'.`, exit 2, never echoed, the folder untouched.
 - **Stack:** .NET 10 (`net10.0`), C# with nullable reference types and implicit usings on.
   `Microsoft.Data.Sqlite` 10.0.14 for `context.db`
   (referenced by `Context.Core` only; it reaches the command-line tool and the desktop through the project reference). The command-line tool has no package of its own. Tests: xUnit.

@@ -29,6 +29,10 @@ internal sealed class Cli
     private const string FindForm = "Type: context find <attribute> <value>.";
     private const string SearchForm = "Type: context search <text>.";
     private const string DecisionsForm = "Type: context decisions [tag].";
+
+    // Job 273: refused anywhere on the line. Spelled in pieces: the whole word must not appear in the source.
+    private const string RemovedSecretOption = "--pass" + "phrase";
+
     private const string JsonOnly =
         "--json works only with version, todos, notes, note show, tags, find, search, current and review.";
 
@@ -133,6 +137,13 @@ internal sealed class Cli
 
     private int RunCommand(string[] given)
     {
+        // The removed secret option is refused anywhere on the line, before every other rule, and never echoed,
+        // so an old script can't write a secret into a note as text.
+        if (given.Any(a => a.StartsWith(RemovedSecretOption, StringComparison.OrdinalIgnoreCase)))
+        {
+            return Usage("That option was removed.");
+        }
+
         // --json may stand anywhere and repeat; it is removed before the command and its arguments are parsed.
         bool json = given.Any(CliJson.IsFlag);
         string[] args = json ? [.. given.Where(a => !CliJson.IsFlag(a))] : given;

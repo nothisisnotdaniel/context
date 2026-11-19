@@ -168,21 +168,109 @@ public sealed class CliTests : IDisposable
         Assert.DoesNotContain(RemovedFeature.Variable, source, StringComparison.OrdinalIgnoreCase);
     }
 
-    // 132 AC-4: the removed options are unknown options like any other: exit 2, not echoed, folder untouched.
+    private const string OptionRemoved = "That option was removed. Run 'context help'.\n";
+
+    // 132 AC-4: an unknown option is a usage error: exit 2, not echoed, folder untouched. 273 AC-4: the removed
+    // secret option in command position now has its own line.
     [Theory]
-    [InlineData("--frobnicate")]
-    [InlineData(RemovedFeature.Option + "-stdin", "notes")]
-    [InlineData(RemovedFeature.Option, "topSecret55aa", "notes")]
-    [InlineData(RemovedFeature.Option + "=topSecret55aa", "notes")]
-    [InlineData(RemovedFeature.OptionUpper + "=topSecret55aa", "notes")]
-    public void RemovedOptions_AreUsageErrorsLikeAnyUnknownOption(params string[] args)
+    [InlineData("Unknown command: that option. Run 'context help'.\n", "--frobnicate")]
+    [InlineData(OptionRemoved, RemovedFeature.Option + "-stdin", "notes")]
+    [InlineData(OptionRemoved, RemovedFeature.Option, "topSecret55aa", "notes")]
+    [InlineData(OptionRemoved, RemovedFeature.Option + "=topSecret55aa", "notes")]
+    [InlineData(OptionRemoved, RemovedFeature.OptionUpper + "=topSecret55aa", "notes")]
+    public void RemovedOptions_AreUsageErrorsLikeAnyUnknownOption(string expected, params string[] args)
     {
         Result result = Run(args);
 
         AssertUsage(result);
-        Assert.Equal("Unknown command: that option. Run 'context help'.", result.ErrLines[0]);
+        Assert.Equal(expected, result.Err);
         Assert.DoesNotContain("topSecret55aa", result.Out + result.Err, StringComparison.Ordinal);
         Assert.False(Directory.Exists(root));
+    }
+
+    // 273 AC-1, AC-2, AC-5: after a command and among its arguments the removed secret option is refused, nothing
+    // is echoed, and the data folder is neither created nor changed.
+    [Theory]
+    [InlineData("capture", RemovedFeature.Option + "=topSecret55aa")]
+    [InlineData("capture", "hello", RemovedFeature.Option, "topSecret55aa")]
+    [InlineData("capture", RemovedFeature.Option + "-stdin")]
+    [InlineData("todo", "add", "today", RemovedFeature.OptionUpper + "=topSecret55aa")]
+    [InlineData("note", "show", RemovedFeature.Option + "=topSecret55aa")]
+    [InlineData("search", RemovedFeature.Option + "=x")]
+    [InlineData("notes", RemovedFeature.Option + "-stdin")]
+    public void RemovedSecretOption_AfterACommand_IsRefused_AndNothingIsWritten(params string[] args)
+    {
+        Result missing = Run(args);
+
+        Assert.Equal((Cli.ExitUsage, string.Empty, OptionRemoved), (missing.Code, missing.Out, missing.Err));
+        Assert.DoesNotContain("topSecret55aa", missing.Out + missing.Err, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(root));
+
+        WriteNote("inbox", "# inbox\n- 2026-10-28 08:00 old\n");
+        Dictionary<string, string> before = Snapshot();
+
+        Result existing = Run(args);
+
+        Assert.Equal((Cli.ExitUsage, string.Empty, OptionRemoved), (existing.Code, existing.Out, existing.Err));
+        Assert.DoesNotContain("topSecret55aa", existing.Out + existing.Err, StringComparison.Ordinal);
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 273 AC-1: with a folder but no inbox, the inbox is not created.
+    [Fact]
+    public void RemovedSecretOption_InCapture_DoesNotCreateAMissingInbox()
+    {
+        WriteNote("Plan", "# Plan\n");
+        Dictionary<string, string> before = Snapshot();
+
+        Result result = Run("capture", RemovedFeature.Option + "=topSecret55aa");
+
+        Assert.Equal((Cli.ExitUsage, string.Empty, OptionRemoved), (result.Code, result.Out, result.Err));
+        Assert.False(File.Exists(Path.Combine(root, "inbox.md")));
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 273 AC-3, AC-5: the check comes before help, version, standup and the json rules.
+    [Theory]
+    [InlineData("help", RemovedFeature.Option, "x")]
+    [InlineData("version", RemovedFeature.Option + "=x")]
+    [InlineData("standup", RemovedFeature.Option)]
+    [InlineData("notes", "--json", RemovedFeature.Option + "=x")]
+    [InlineData(RemovedFeature.Option + "=x", "--json")]
+    public void RemovedSecretOption_IsCheckedBeforeEveryOtherRule(params string[] args)
+    {
+        Result result = Run(args);
+
+        Assert.Equal((Cli.ExitUsage, string.Empty, OptionRemoved), (result.Code, result.Out, result.Err));
+        Assert.DoesNotContain("topSecret55aa", result.Out + result.Err, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(root));
+    }
+
+    // 273 AC-6: an argument that contains the name without starting with it is still capture text.
+    [Theory]
+    [InlineData("my", "x" + RemovedFeature.Option, "note")]
+    [InlineData("-pass" + "phrase")]
+    public void Capture_TextThatOnlyContainsTheRemovedOption_IsStillCaptured(params string[] words)
+    {
+        Result result = Run(["capture", .. words]);
+
+        Assert.Equal((0, string.Empty), (result.Code, result.Err));
+        Assert.Contains($"- 2026-10-29 09:00 {string.Join(' ', words)}\n", Read("inbox.md"), StringComparison.Ordinal);
+    }
+
+    // 273 AC-7: the conventions file says the removed secret option is refused anywhere.
+    [Fact]
+    public void ClaudeMd_SaysTheRemovedSecretOptionIsRefusedAnywhere()
+    {
+        DirectoryInfo? dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Context.slnx")))
+        {
+            dir = dir.Parent;
+        }
+
+        Assert.NotNull(dir);
+        string text = File.ReadAllText(Path.Combine(dir.FullName, "CLAUDE.md"));
+        Assert.Contains("the removed secret option is a usage error in any position", text, StringComparison.Ordinal);
     }
 
     // 132 AC-7: a note that starts with the old magic bytes is shown like any other note.
