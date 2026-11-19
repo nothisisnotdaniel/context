@@ -2067,7 +2067,7 @@ public sealed class CliTests : IDisposable
         + "{\"start\":\"2026-10-29T10:00:00\\u002B00:00\",\"end\":\"2026-10-29T11:00:00\\u002B00:00\",\"allDay\":false,"
         + "\"title\":\"Review: Q4/plan\",\"location\":\"Room 1\",\"related\":[]}],"
         + "\"calendar\":{\"status\":\"fresh\",\"cachedAt\":\"2026-10-29T09:00:00\\u002B00:00\",\"unreadableFiles\":[]},"
-        + "\"due\":[],\"linkedNotes\":[]}\n";
+        + "\"due\":[],\"linkedNotes\":[],\"times\":null}\n";
 
     // 169 review ---------------------------------------------------------------------------------
 

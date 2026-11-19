@@ -2035,6 +2035,18 @@ nav.saved-searches ul {
     padding-bottom: 8px;
 }
 
+/* Today's Times bookings (TimesTodayPanel, job 277), right after the appointments: one plain grey line, cut, with
+   the whole line in its title. */
+.todos-region .times-today {
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+}
+
+.times-today .times-line {
+    margin: 0;
+}
+
 .day-appointments .day-appointments-bar {
     align-items: center;
     display: flex;

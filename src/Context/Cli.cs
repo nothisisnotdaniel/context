@@ -52,7 +52,7 @@ internal sealed class Cli
         ("find <attribute> <value...>", "List the notes with an attribute line, e.g. find role Bereichsleiter."),
         ("search <text...>", "List the notes whose text contains the text, with the first matching line."),
         ("decisions [tag...]", "List the Decision: lines of all notes, or of the notes with a tag, newest first."),
-        ("current", "Today's appointments, due todos and linked notes."),
+        ("current", "Today's Times bookings, appointments, due todos and linked notes."),
         ("review", "The last 7 days' changed notes and done todos, overdue todos and the next 7 days' appointments."),
         ("today", "Print today's note, creating it with the day's appointments and due todos."),
         ("dayend [today|yyyy-MM-dd]", "Write Times' worked hours into the day's note and move its due todos to the next day."),
@@ -1033,13 +1033,34 @@ internal sealed class Cli
         MigrateTodos(session);
         CurrentView view = CurrentView.Build(
             session.Todos, session.Index, session.Notes, session.Calendar, session.Feed, today());
+        TimesNow times = TimesNow.Read(timesFolder, view.Today, TimeOnly.FromDateTime(now()));
         if (session.Json)
         {
-            return CurrentJson(view);
+            return CurrentJson(view, times);
         }
 
         bool failed = false;
         Out($"Today, {Date(view.Today)}");
+        if (times.Kind == TimesNowKind.Booked)
+        {
+            Out("Times");
+            Out($"arrival\t{TimesTime(times.Arrival)}");
+            if (times.Leaving is not null)
+            {
+                Out($"leaving\t{TimesTime(times.Leaving)}");
+            }
+
+            Out($"left\t{TimesNow.FormatLeft(times.Left)}");
+            if (times.Checkpoint is { } checkpoint)
+            {
+                Out($"checkpoint\t{TimesCheckpointText(checkpoint)}");
+            }
+        }
+        else if (times.Kind == TimesNowKind.Unreadable)
+        {
+            failed = true;
+            Err(TimesUnreadable(view.Today));
+        }
 
         Out("Appointments");
         if (view.Appointments.Count == 0)
@@ -1128,10 +1149,26 @@ internal sealed class Cli
         return failed ? ExitError : ExitOk;
     }
 
+    // Today's Times line texts (job 277): a booked time as HH:mm, a checkpoint as [#<n> ]<name> on one line.
+    private static string TimesTime(TimeOnly? time) =>
+        time?.ToString("HH:mm", CultureInfo.InvariantCulture) ?? string.Empty;
+
+    private static string TimesCheckpointText(TimesCheckpoint checkpoint) =>
+        (checkpoint.WorkItem is { } n ? "#" + n.ToString(CultureInfo.InvariantCulture) + " " : string.Empty)
+        + OneLine(checkpoint.Name);
+
+    private static string TimesUnreadable(DateOnly day) => $"Can't read Times' day file for {Date(day)}.";
+
     // current as one JSON document: the same stderr lines and exit code as plain, no hint texts.
-    private int CurrentJson(CurrentView view)
+    private int CurrentJson(CurrentView view, TimesNow times)
     {
         bool failed = false;
+        if (times.Kind == TimesNowKind.Unreadable)
+        {
+            failed = true;
+            Err(TimesUnreadable(view.Today));
+        }
+
         foreach (string file in view.UnreadableCalendarFiles)
         {
             failed = true;
@@ -1225,8 +1262,54 @@ internal sealed class Cli
 
                 w.WriteEndArray();
             }
+
+            WriteTimes(w, times);
         }));
         return failed ? ExitError : ExitOk;
+    }
+
+    // "times": null unless booked, else {arrival, leaving, leftMinutes, checkpoint:{workItem,name}|null} (job 277).
+    private static void WriteTimes(Utf8JsonWriter w, TimesNow times)
+    {
+        if (times.Kind != TimesNowKind.Booked)
+        {
+            w.WriteNull("times");
+            return;
+        }
+
+        w.WriteStartObject("times");
+        w.WriteString("arrival", TimesTime(times.Arrival));
+        if (times.Leaving is null)
+        {
+            w.WriteNull("leaving");
+        }
+        else
+        {
+            w.WriteString("leaving", TimesTime(times.Leaving));
+        }
+
+        w.WriteNumber("leftMinutes", times.Left.Ticks / TimeSpan.TicksPerMinute);
+        if (times.Checkpoint is { } checkpoint)
+        {
+            w.WriteStartObject("checkpoint");
+            if (checkpoint.WorkItem is { } n)
+            {
+                w.WriteNumber("workItem", n);
+            }
+            else
+            {
+                w.WriteNull("workItem");
+            }
+
+            w.WriteString("name", OneLine(checkpoint.Name));
+            w.WriteEndObject();
+        }
+        else
+        {
+            w.WriteNull("checkpoint");
+        }
+
+        w.WriteEndObject();
     }
 
     private int Review(Session session)

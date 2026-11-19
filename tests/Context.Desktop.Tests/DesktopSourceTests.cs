@@ -1745,7 +1745,11 @@ public sealed class DesktopSourceTests
 
         Assert.Equal([ProgramFile, RealNotifierFile], found);
         Assert.Contains(
-            "TimesFolder.Resolve(Environment.GetEnvironmentVariable(TimesFolder.VariableName)), new " + RealNotifier + "(),\n"
+            "string? timesFolder = TimesFolder.Resolve(Environment.GetEnvironmentVariable(TimesFolder.VariableName));\n",
+            File.ReadAllText(Path.Combine(root, ProgramFile)).ReplaceLineEndings("\n"),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "            timesFolder, new " + RealNotifier + "(),\n"
                 + "            ScreenCapture(folder));",
             File.ReadAllText(Path.Combine(root, ProgramFile)).ReplaceLineEndings("\n"),
             StringComparison.Ordinal);
