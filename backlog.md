@@ -346,6 +346,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#390](backlog/390-sidebar-day-picker-fit-the-calendar.md) Sidebar day picker: fit the calendar in a narrow sidebar
 - [?] [#391](backlog/391-editor-type-an-inline-code-span.md) Editor: type an inline code span that holds a backtick
 - [?] [#392](backlog/392-notes-clean-up-escapes-saved-by.md) Notes: clean up escapes saved by the old editor
+- [?] [#393](backlog/393-tests-find-the-rare-unnamed-debug.md) Tests: find the rare unnamed Debug failure in Context.Desktop.Tests
 
 ## Dropped with the terminal UI
 
