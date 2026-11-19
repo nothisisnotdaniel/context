@@ -189,7 +189,8 @@ function rules() {
     wrappingInputRule(/^(\d+)\.\s$/, schema.nodes.ordered_list, m => ({ order: +m[1] })),
     // "# " gives level 2 too: the page title is the only level-1 heading.
     textblockTypeInputRule(/^(#{1,6})\s$/, schema.nodes.heading, m => ({ level: Math.max(m[1].length, 2) })),
-    textblockTypeInputRule(/^```$/, schema.nodes.code_block),
+    // ``` and an optional language (no whitespace, no backtick) at the start of the line, then Space (job 290).
+    textblockTypeInputRule(/^```([^\s`]*) $/, schema.nodes.code_block, m => ({ params: m[1] })),
   ];
   for (const rule of blockRules) {
     rule.inCodeMark = false;
@@ -197,12 +198,64 @@ function rules() {
   return inputRules({
     rules: [
       ...blockRules,
+      inlineCodeRule(),
       tagRule,
       linkRule,
       mentionRule,
       mentionParenRule,
     ],
   });
+}
+
+// `text` becomes inline code when the closing backtick is typed (job 290): a span of at least one character with no
+// backtick, chip or line break, whose opening backtick follows neither a backtick nor a backslash. Never in a code
+// block, never over text that already has the code mark (inCodeMark false checks the whole span). The next typed
+// character gets no code mark.
+function inlineCodeRule() {
+  const rule = new InputRule(/(^|[^`\\])`([^`\ufffc]+)`$/, (state, match, start, end) => {
+    const from = start + match[1].length;
+    let plain = true;
+    state.doc.nodesBetween(from, end, node => {
+      if (node.isInline && !node.isText) {
+        plain = false;
+      }
+      return true;
+    });
+    if (!plain) {
+      return null;
+    }
+    const marks = state.doc.resolve(from + 1).marks();
+    const code = schema.marks.code.create();
+    const tr = state.tr.replaceWith(from, end, schema.text(match[2], code.addToSet(marks)));
+    return tr.setStoredMarks(code.removeFromSet(marks));
+  });
+  rule.inCodeMark = false;
+  return rule;
+}
+
+// A paragraph whose whole text is ``` or ```lang (lang: no whitespace, no backtick).
+const fenceLine = /^```([^\s`]*)$/;
+
+// Enter on a fence line (job 290): the paragraph becomes an empty code block with that language, caret inside, and
+// nothing is split off. Not for text with the code mark or a paragraph that holds anything but one text node.
+function enterFence(state, dispatch) {
+  const { $from, $to } = state.selection;
+  const para = $from.parent;
+  if (para.type !== schema.nodes.paragraph || !$from.sameParent($to) || para.childCount !== 1) {
+    return false;
+  }
+  const only = para.firstChild;
+  const match = only.isText && only.marks.every(m => !m.type.spec.code) ? fenceLine.exec(only.text) : null;
+  if (!match) {
+    return false;
+  }
+  if (dispatch) {
+    const start = $from.before();
+    const tr = state.tr.replaceWith(start, start + para.nodeSize, schema.nodes.code_block.create({ params: match[1] }));
+    tr.setSelection(TextSelection.create(tr.doc, start + 1));
+    dispatch(tr.scrollIntoView());
+  }
+  return true;
 }
 
 // ---- Code (job 283): inline code and code blocks, their commands, syntax colours and the code-block header. ----
@@ -548,7 +601,7 @@ function editorKeys() {
     "Mod-e": toggleInlineCode,
     "Mod-`": toggleInlineCode,
     "Mod-Alt-c": toggleCodeBlock,
-    "Enter": chainCommands(newlineInCode, splitItem),
+    "Enter": chainCommands(newlineInCode, enterFence, splitItem),
     "Tab": sinkListItem(schema.nodes.list_item),
     "Shift-Tab": liftListItem(schema.nodes.list_item),
     "Shift-Ctrl-0": setBlockType(schema.nodes.paragraph),
@@ -741,16 +794,18 @@ function markedState(markdown) {
 
 /**
  * Test hook: the markdown after running the editor's binding for key (editorKeys, then baseKeymap) on markdown with the
- * selection marked by ⟦ ⟧ (or a caret by a lone ⟦), then typing typed through the input rules. DOM-free.
+ * selection marked by ⟦ ⟧ (or a caret by a lone ⟦), then typing typed through the input rules. before, when given, is
+ * typed through the input rules at the caret before the key runs. DOM-free.
  */
-export function commandMarkdown(markdown, key, typed) {
+export function commandMarkdown(markdown, key, typed, before) {
   const marked = markedState(markdown);
-  let state = marked.state;
-  const command = editorKeys()[key] || baseKeymap[key];
-  if (!command) {
+  let state = before === undefined ? marked.state : typeText(marked.state, marked.plugin, before);
+  const commands = [editorKeys()[key], baseKeymap[key]].filter(Boolean);
+  if (commands.length === 0) {
     throw new Error("No binding for " + key + ".");
   }
-  command(state, tr => { state = state.apply(tr); });
+  // As the page's keymaps: baseKeymap runs only when the editor's own binding does not handle the key.
+  chainCommands(...commands)(state, tr => { state = state.apply(tr); });
   state = typeText(state, marked.plugin, typed === undefined ? "" : typed);
   return serialize(state.doc);
 }

@@ -731,14 +731,18 @@ Every factory agent reads this file before working on Context. Keep it short and
   that bundle, nested copies included, so regenerate that part when `mermaid` changes); `dotnet build`
   and `dotnet test` never need Node. Code in notes (job 283): `toggleInlineCode` (`Mod-e`, also `Mod-`` `) and
   `toggleCodeBlock` (`Mod-Alt-c`; touched paragraphs and headings become one block, a block becomes one paragraph per
-  line) in `view.js`, also run by the `div.format-bar` toolbar (`EditorInterop.ToggleInlineCodeAsync` /
+  line) in `view.js`; typed (job 290): `` `text` `` becomes inline code on the closing backtick (`inlineCodeRule`: no
+  empty span, none after a backtick or backslash, none over a chip or code text; the next character is plain), and
+  ```` ```lang ```` + Space at a line start or Enter on a paragraph that is only ```` ```lang ```` (`enterFence`) makes a
+  code block with that `params`. No text is ever escaped on save (`markdown.js` writes `node.text` as is; the parser
+  keeps `\*` and `&amp;` as their source characters through `keep_escapes`, so they show raw and round-trip). The two toggles are also run by the `div.format-bar` toolbar (`EditorInterop.ToggleInlineCodeAsync` /
   `ToggleCodeBlockAsync`, shown only while mounted and not locked). Enter in a code block is a newline (also in a list
   item); the block input rules carry `inCodeMark = false`. `src/highlight.js` (DOM-free; `lowlight` 3.3.0 MIT and
   `highlight.js` 11.11.2 BSD-3, only the 11 languages of its `Languages` table, no auto-detection) gives `tokens(text,
   lang)`, drawn as class decorations by the `codeHighlight` plugin for the blocks `changedCodeBlocks` names (over
   20,000 chars stay plain). The non-Mermaid code-block view has a header with `select.code-language` (replaces the first
   params word, one undo step) and `button.code-copy` (`copyText`: clipboard, else `execCommand("copy")`). Colours are
-  the `--code-*` variables in both theme blocks of `app.css`. Jint test hooks: `commandMarkdown(markdown, key[, typed])`
+  the `--code-*` variables in both theme blocks of `app.css`. Jint test hooks: `commandMarkdown(markdown, key[, typed[, before]])` (`before` is typed first; the key runs `editorKeys`, then `baseKeymap`)
   and `typedAtMarkdown` (`⟦ ⟧` mark the selection, a lone `⟦` the caret), `changedCodeBlocksJson`, `tokensJson`,
   `languageOptionsJson`, `withLanguage`; `EditorBundle.Settled` waits for a promise. `node_modules` is ignored and `editor/**` is excluded from the C# project.
 - **Build:** `dotnet build` (must stay at 0 warnings)
@@ -1704,7 +1708,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     and `titledMarkdown` (`SmartPasteBundleTests`). `view.js` `handlePaste` treats a paste as plain while Shift is held
     (own keydown/keyup tracking, ProseMirror's rule incl. key 45), records each pasted link (`maxPendingLinks` 20,
     mapped on every transaction) and calls `OnPasteLink(url)`; `setLinkTitle(element, url, title)` applies a title.
-    `markdown.js` no longer escapes `|` (`RoundTrip/lossless/table.md`, `lossy/escaped-pipe.md`). Core `PageTitle.cs`:
+    `markdown.js` escapes no text at all (job 290; `RoundTrip/lossless/table.md`, `escaped-pipe.md`). Core `PageTitle.cs`:
     `IPageTitleSource`, `PageTitleFetcher(handler, timeout)` (one GET, `Accept` HTML, 2xx, final URI http(s), media type
     absent/`text/html`/`application/xhtml+xml`, first `MaxBodyBytes` 256 KiB, declared charset else UTF-8, first
     `<title>` HTML-decoded, bidi controls removed, control/whitespace runs one space, cut to 200; user info or a padded URL refused; never

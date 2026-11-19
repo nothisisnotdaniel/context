@@ -1,6 +1,7 @@
 // Markdown <-> document. markdown-it in CommonMark mode with raw HTML off, plus three inline rules that mirror the C#
 // TagParser, NoteLinkParser and PersonParser. The serializer writes the house style (- bullets, * emphasis, ** strong, ``` fences)
-// and escapes only what would otherwise parse differently, so a note in that style comes back byte for byte.
+// and never escapes text (job 290): what the user typed is what the file gets. The parser keeps a backslash escape
+// (\*) and an entity (&amp;) as their source characters in the text, so a note that holds them comes back byte for byte.
 import MarkdownIt from "markdown-it";
 import { MarkdownParser, MarkdownSerializer, defaultMarkdownSerializer } from "prosemirror-markdown";
 import { schema } from "./schema.js";
@@ -223,17 +224,6 @@ function attachmentLinkRule(state, silent) {
   return true;
 }
 
-// Whether a text node is the whole label of an attachment link written by attachmentLinkRule.
-function isAttachmentLabel(node, parent, index) {
-  const link = node.marks.find(m => m.type.name === "link");
-  if (!link || node.marks.length !== 1 || link.attrs.title || !PlainAlt.test(node.text)
-      || !AttachmentLink.test("[" + node.text + "](" + link.attrs.href + ")")) {
-    return false;
-  }
-  const sameLink = i => i >= 0 && i < parent.childCount && link.isInSet(parent.child(i).marks);
-  return !sameLink(index - 1) && !sameLink(index + 1);
-}
-
 const md = MarkdownIt("commonmark", { html: false, linkify: false, typographer: false });
 md.inline.ruler.before("link", "note_link", noteLinkRule);
 md.inline.ruler.before("link", "attachment_link", attachmentLinkRule);
@@ -269,6 +259,24 @@ function tidy(tokens) {
   }
   return tokens;
 }
+
+// Backslash escapes and entities stay as written: each text_special token (markdown-it 14) becomes its source text
+// before text_join merges it into the text around it.
+function keepEscapes(state) {
+  const visit = tokens => {
+    for (const token of tokens) {
+      if (token.type === "text_special") {
+        token.content = token.markup;
+      }
+      if (token.children) {
+        visit(token.children);
+      }
+    }
+  };
+  visit(state.tokens);
+}
+
+md.core.ruler.before("text_join", "keep_escapes", keepEscapes);
 
 const tokenizer = { parse: (text, env) => tidy(md.parse(text, env)) };
 
@@ -309,96 +317,6 @@ const parser = new MarkdownParser(schema, tokenizer, {
   note_link: { node: "noteLink", getAttrs: tok => ({ raw: tok.content, target: tok.meta.target }) },
   mention: { node: "mention", getAttrs: tok => ({ raw: tok.content, name: tok.meta.name }) },
 });
-
-// ---- Escaping: only what would otherwise parse as something else ----
-
-const AsciiPunct = /^[!-\/:-@\[-`{-~]$/;
-const Autolink = /^<(?:[A-Za-z][A-Za-z0-9.+-]{1,31}:[^<>\x00-\x20]*|[A-Za-z0-9.!#$%&'*+\/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*)>/;
-const Entity = /^&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/;
-const Alnum = /^[\p{L}\p{N}]$/u;
-
-function isAlnum(c) { return c !== undefined && c !== "" && Alnum.test(c); }
-
-// Characters that only matter at the start of a line: headings, list markers, quotes, setext underlines,
-// tilde fences and reference definitions.
-function escapeLineStart(line) {
-  if (/^#{1,6}(?=[ \t]|$)/.test(line)) {
-    return "\\" + line;
-  }
-  if (/^[-+](?=[ \t]|$)/.test(line) || /^-+[ \t]*$/.test(line) || /^=+[ \t]*$/.test(line) || /^>/.test(line) || /^~~~/.test(line)) {
-    return "\\" + line;
-  }
-  const ordered = /^(\d{1,9})([.)])(?=[ \t]|$)/.exec(line);
-  if (ordered) {
-    return ordered[1] + "\\" + line.slice(ordered[1].length);
-  }
-  if (/^\[[^\]]*\]:/.test(line)) {
-    return "\\" + line;
-  }
-  return line;
-}
-
-// Escapes a text node. lineStart: whether the text starts a line; after: the first character written after it
-// ("" when unknown).
-export function escapeText(text, lineStart, after) {
-  // A '[' is escaped only when a link could follow from it: "](" or "][" later in the text.
-  const linkClose = /\]\s*[(\[]/.test(text) || (text.endsWith("]") && (after === "(" || after === "["));
-  let out = "";
-  let line = "";
-  let atLineStart = lineStart;
-  const flush = () => {
-    out += atLineStart ? escapeLineStart(line) : line;
-    line = "";
-  };
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    const prev = i > 0 ? text[i - 1] : "";
-    const next = i + 1 < text.length ? text[i + 1] : after;
-    switch (c) {
-      case "\n":
-        flush();
-        out += "\n";
-        atLineStart = true;
-        break;
-      case "\\":
-        line += next === "" || next === "\n" || AsciiPunct.test(next) ? "\\\\" : c;
-        break;
-      case "`":
-      case "*":
-        line += "\\" + c;
-        break;
-      case "_":
-        line += isAlnum(prev) && isAlnum(next) ? c : "\\_";
-        break;
-      case "[":
-        line += linkClose && text.indexOf("]", i) >= 0 ? "\\[" : c;
-        break;
-      case "<":
-        line += Autolink.test(text.slice(i)) ? "\\<" : c;
-        break;
-      case "&":
-        line += Entity.test(text.slice(i)) ? "\\&" : c;
-        break;
-      default:
-        line += c;
-    }
-  }
-  flush();
-  return out;
-}
-
-function firstChar(node) {
-  if (!node) {
-    return "";
-  }
-  if (node.isText) {
-    return node.text[0];
-  }
-  if (node.type.name === "tag" || node.type.name === "noteLink" || node.type.name === "mention") {
-    return node.attrs.raw[0];
-  }
-  return "";
-}
 
 function taskPrefix(item) {
   return item.attrs.checked === null ? "" : item.attrs.checked ? "[x] " : "[ ] ";
@@ -444,11 +362,9 @@ const serializer = new MarkdownSerializer({
   paragraph: base.paragraph,
   image(state, node) {
     const alt = node.attrs.alt || "";
-    if (PlainAlt.test(alt) && !/[()]/.test(node.attrs.src) && !node.attrs.title) {
-      state.write("![" + alt + "](" + node.attrs.src + ")");
-      return;
-    }
-    base.image(state, node);
+    // The alt text is written as is, like any text (job 290): the parser keeps its escapes.
+    state.write("![" + alt + "](" + node.attrs.src.replace(/[\(\)]/g, "\\$&")
+      + (node.attrs.title ? " \"" + node.attrs.title.replace(/"/g, "\\\"") + "\"" : "") + ")");
   },
   hard_break: base.hard_break,
   tag(state, node) {
@@ -460,14 +376,9 @@ const serializer = new MarkdownSerializer({
   mention(state, node) {
     state.write(node.attrs.raw);
   },
-  text(state, node, parent, index) {
-    if (state.inAutolink || isAttachmentLabel(node, parent, index)) {
-      state.text(node.text, false);
-      return;
-    }
-    const lineStart = state.atBlockStart || state.out === "" || state.out.endsWith("\n");
-    const after = index + 1 < parent.childCount ? firstChar(parent.child(index + 1)) : "";
-    state.text(escapeText(node.text, lineStart, after), false);
+  // Text is written as is, never escaped (job 290).
+  text(state, node) {
+    state.text(node.text, false);
   },
 }, {
   em: { open: "*", close: "*", mixable: true, expelEnclosingWhitespace: true },
