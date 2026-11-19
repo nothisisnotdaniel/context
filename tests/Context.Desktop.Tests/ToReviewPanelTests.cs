@@ -212,11 +212,14 @@ public sealed class ToReviewPanelTests : IDisposable
         await Open(cut, js, "Plan");
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("aside.todos-region li.review-item")), Wait);
         js.Edit("# Plan\nreview:2026-10-01\nTyped\n");
+        // Opening Plan started a recent.json write through a temp file; wait for it so the snapshot cannot catch it.
+        data.WaitForRecentWrites();
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
         await cut.Find("button.review-3m").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Equal("Save Plan first.", cut.Find("p.review-result").TextContent), Wait);
+        data.WaitForRecentWrites();
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
         Assert.Single(cut.FindAll("li.review-item"));
     }
