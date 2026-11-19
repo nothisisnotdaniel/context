@@ -2392,6 +2392,7 @@ nav.saved-searches ul {
     right: auto;
     top: 2em;
     transform: translateX(-50%);
+    width: max-content;
     z-index: 5;
 }
 
@@ -2407,6 +2408,7 @@ nav.saved-searches ul {
     border-radius: 4px;
     color: var(--text);
     display: block;
+    font-size: 0.85em;
     margin: 6px auto 0;
     padding: 2px 10px;
 }
@@ -2531,6 +2533,7 @@ nav.saved-searches ul {
     position: fixed;
     top: 8px;
     transform: translateX(-50%);
+    width: max-content;
     z-index: 5;
 }
 

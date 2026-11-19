@@ -1579,8 +1579,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     `OutlinePanel.MinHeadings` (3) on; a click calls `scrollToHeading` with its index and never takes focus by itself.
     **Sidebar appointments** (job 214): `DayAppointmentsPanel` (`section.day-appointments`, `aria-label="Appointments"`)
     is the first child of `aside.todos-region` in every state. Its `h2.day-appointments-day` reads `Today` for
-    `Snapshot.Today`, else `dddd, d MMM yyyy` (invariant, job 289), `title` always the full `dddd, d MMMM yyyy`; icon-only `button.day-prev`/`day-next` (`Previous day`/`Next day`)
-    step the day, disabled at 1900-01-01/2100-12-31 (the chosen day is in memory only; back on today it follows the
+    `Snapshot.Today`, else `dddd, d MMM yyyy` (invariant, job 289), `title` always the full `dddd, d MMMM yyyy`;
+    icon-only `button.day-prev`/`day-next` (`Previous day`/`Next day`) step the day, disabled at 1900-01-01/2100-12-31 (the chosen day is in memory only; back on today it follows the
     snapshot). Job 289: the `h2` holds one `button.day-appointments-open` (`aria-haspopup="dialog"`, `aria-expanded`)
     that toggles a `DayPicker` (see Top bar) inside the section, on the shown day, with `button.day-pick-today`
     (`Today`); a pick or Today shows that day as the arrows do and closes it; Esc, the backdrop, a pick and Today give
