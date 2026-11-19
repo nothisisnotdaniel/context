@@ -17,6 +17,16 @@
         {
             <span class="dirty-dot" role="img" aria-label="Unsaved changes" title="Unsaved changes"></span>
         }
+        @if (mounted && !locked)
+        {
+            @* 283: mousedown keeps the editor's selection; the command runs in JS and the focus goes back to the editor. *@
+            <div class="format-bar" role="toolbar" aria-label="Formatting">
+                <button type="button" class="format-inline-code" title="@InlineCodeTitle" @onmousedown:preventDefault="true"
+                        @onclick="ToggleInlineCode">Inline code</button>
+                <button type="button" class="format-code-block" title="@CodeBlockTitle" @onmousedown:preventDefault="true"
+                        @onclick="ToggleCodeBlock">Code block</button>
+            </div>
+        }
     </div>
     @if (attributeRows.Count > 0)
     {
@@ -80,6 +90,8 @@
     private bool mounted;
     private bool unreadable;
     private bool editorFailed;
+    // The sensitive session locked: the editor is about to go, so the toolbar goes at once.
+    private bool locked;
     private bool saving;
     private bool dirty;
     private string statusText = string.Empty;
@@ -727,6 +739,34 @@
         }
     }
 
+    // The toolbar's titles name the shortcuts with this platform's modifier names.
+    private string InlineCodeTitle => State.IsMac ? "Inline code (Cmd+E)" : "Inline code (Ctrl+E)";
+
+    private string CodeBlockTitle => State.IsMac ? "Code block (Cmd+Option+C)" : "Code block (Ctrl+Alt+C)";
+
+    private Task ToggleInlineCode() => RunFormat(Interop.ToggleInlineCodeAsync);
+
+    private Task ToggleCodeBlock() => RunFormat(Interop.ToggleCodeBlockAsync);
+
+    // A toolbar command on the mounted editor; its change comes back as an edit like any typed one.
+    private async Task RunFormat(Func<ElementReference, ValueTask> command)
+    {
+        if (!mounted || disposed || locked)
+        {
+            return;
+        }
+
+        Used();
+        try
+        {
+            await command(host);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            // The page is gone; nothing changed.
+        }
+    }
+
     // Ctrl/Cmd+S saves at once; every other key only counts as use.
     private async Task Save(KeyboardEventArgs key)
     {
@@ -793,6 +833,7 @@
 
     private void SessionLocked() => _ = InvokeAsync(async () =>
     {
+        locked = true;
         attributeRows = [];
         StateHasChanged();
         await ClearOutlineAsync();

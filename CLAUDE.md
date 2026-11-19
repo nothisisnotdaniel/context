@@ -713,7 +713,18 @@ Every factory agent reads this file before working on Context. Keep it short and
   `wwwroot/mermaid/mermaid-frame.js` (job 263: the build's second bundle, `mermaid` 12.3.0 MIT, from
   `src/mermaid-frame.js`; `THIRD-PARTY-LICENSES.txt` has a second part for it that lists every package with bytes in
   that bundle, nested copies included, so regenerate that part when `mermaid` changes); `dotnet build`
-  and `dotnet test` never need Node. `node_modules` is ignored and `editor/**` is excluded from the C# project.
+  and `dotnet test` never need Node. Code in notes (job 283): `toggleInlineCode` (`Mod-e`, also `Mod-`` `) and
+  `toggleCodeBlock` (`Mod-Alt-c`; touched paragraphs and headings become one block, a block becomes one paragraph per
+  line) in `view.js`, also run by the `div.format-bar` toolbar (`EditorInterop.ToggleInlineCodeAsync` /
+  `ToggleCodeBlockAsync`, shown only while mounted and not locked). Enter in a code block is a newline (also in a list
+  item); the block input rules carry `inCodeMark = false`. `src/highlight.js` (DOM-free; `lowlight` 3.3.0 MIT and
+  `highlight.js` 11.11.2 BSD-3, only the 11 languages of its `Languages` table, no auto-detection) gives `tokens(text,
+  lang)`, drawn as class decorations by the `codeHighlight` plugin for the blocks `changedCodeBlocks` names (over
+  20,000 chars stay plain). The non-Mermaid code-block view has a header with `select.code-language` (replaces the first
+  params word, one undo step) and `button.code-copy` (`copyText`: clipboard, else `execCommand("copy")`). Colours are
+  the `--code-*` variables in both theme blocks of `app.css`. Jint test hooks: `commandMarkdown(markdown, key[, typed])`
+  and `typedAtMarkdown` (`⟦ ⟧` mark the selection, a lone `⟦` the caret), `changedCodeBlocksJson`, `tokensJson`,
+  `languageOptionsJson`, `withLanguage`; `EditorBundle.Settled` waits for a promise. `node_modules` is ignored and `editor/**` is excluded from the C# project.
 - **Build:** `dotnet build` (must stay at 0 warnings)
 - **Strong name:** (job 161) every assembly is public-signed (`PublicSign`) with the committed `Context.snk`, which
   holds the public key only; no private key exists anywhere, so no real signing happens. Its purpose is that

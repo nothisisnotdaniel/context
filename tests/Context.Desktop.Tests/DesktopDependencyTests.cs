@@ -145,6 +145,25 @@ public sealed class DesktopDependencyTests
         Assert.Contains("mermaid-frame.js", licenses, StringComparison.Ordinal);
     }
 
+    // 283 AC-11: the syntax highlighter's packages are pinned and their licenses ship with editor.js.
+    [Fact]
+    public void Highlighter_IsPinnedAndLicensed()
+    {
+        string editor = Path.Combine(RepoFiles.Root(), "src/Context.Desktop/editor");
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(Path.Combine(editor, "package.json")));
+        JsonElement dev = document.RootElement.GetProperty("devDependencies");
+        Assert.Equal("3.3.0", dev.GetProperty("lowlight").GetString());
+        Assert.Equal("11.11.2", dev.GetProperty("highlight.js").GetString());
+
+        string licenses = File.ReadAllText(Path.Combine(editor, "THIRD-PARTY-LICENSES.txt"));
+        int mermaidPart = licenses.IndexOf("Third-party software bundled into wwwroot/mermaid/mermaid-frame.js", StringComparison.Ordinal);
+        int lowlight = licenses.IndexOf("lowlight 3.3.0 (MIT)", StringComparison.Ordinal);
+        int highlight = licenses.IndexOf("highlight.js 11.11.2 (BSD-3-Clause)", StringComparison.Ordinal);
+        Assert.InRange(lowlight, 0, mermaidPart);
+        Assert.InRange(highlight, 0, mermaidPart);
+        Assert.Contains("Copyright (c) 2006, Ivan Sagalaev.", licenses, StringComparison.Ordinal);
+    }
+
     // 133 AC-4: Velopack (installer and updater) is a package of the desktop app only, at an exact version.
     [Fact]
     public void Velopack_IsReferencedOnlyByTheDesktopProject_AtAnExactVersion()

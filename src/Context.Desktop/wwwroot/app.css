@@ -10,6 +10,17 @@
     --panel: #f5f5f7;
     --line: #d2d2d7;
     --on-accent: #ffffff;
+    /* 283: code in notes (editor.css): its background and the syntax colours. */
+    --code-bg: #eef0f3;
+    --code-text: #1d1d1f;
+    --code-keyword: #cf222e;
+    --code-string: #0a3069;
+    --code-comment: #6e7781;
+    --code-number: #0550ae;
+    --code-title: #8250df;
+    --code-built-in: #953800;
+    --code-literal: #0550ae;
+    --code-attr: #116329;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -22,6 +33,16 @@
         --panel: #242426;
         --line: #3a3a3c;
         --on-accent: #1c1c1e;
+        --code-bg: #2c2c2e;
+        --code-text: #f5f5f7;
+        --code-keyword: #ff7b72;
+        --code-string: #a5d6ff;
+        --code-comment: #8b949e;
+        --code-number: #79c0ff;
+        --code-title: #d2a8ff;
+        --code-built-in: #ffa657;
+        --code-literal: #79c0ff;
+        --code-attr: #7ee787;
     }
 }
 
@@ -351,7 +372,10 @@ button:focus-visible,
     outline-offset: 2px;
 }
 
-input[type="checkbox"]:focus-visible {
+/* 283: the code-block header's language picker (styled in editor.css) has the same ring; its Copy button has the one
+   of every button. */
+input[type="checkbox"]:focus-visible,
+select.code-language:focus-visible {
     outline: 2px solid var(--accent-strong);
     outline-offset: 2px;
 }
@@ -578,6 +602,19 @@ input[type="password"]:disabled {
 /* The dot sits right after the name; space-between would push a lone dot to the right edge. */
 .editor-bar {
     justify-content: flex-start;
+}
+
+/* 283: the formatting toolbar (inline code, code block) after the title. */
+.format-bar {
+    display: flex;
+    flex: none;
+    gap: 6px;
+    margin-left: auto;
+}
+
+.format-bar button {
+    font-size: 13px;
+    padding: 2px 8px;
 }
 
 .dirty-dot {

@@ -33,6 +33,18 @@ public sealed class EditorBundle
             return engine.Evaluate($"JSON.stringify({expression})").AsString();
         }
     }
+
+    /// <summary>
+    /// Evaluates a JavaScript expression that gives a promise of a string and returns the string it settles to; Jint
+    /// runs the promise's jobs until it has settled (no delay, no timer), and a rejection throws.
+    /// </summary>
+    public string Settled(string expression)
+    {
+        lock (engine)
+        {
+            return engine.Evaluate(expression).UnwrapIfPromise().AsString();
+        }
+    }
 }
 
 // 094 AC-1 to AC-4: the editor's Markdown round trip, its tags and links, raw HTML and lossy notes, run on the
@@ -576,7 +588,7 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
     public void Sources_NeverSetLevelOne()
     {
         string folder = Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "editor", "src");
-        string[] files = ["index.js", "markdown.js", "mermaid-frame.js", "mermaid.js", "paste.js", "schema.js", "view.js"];
+        string[] files = ["highlight.js", "index.js", "markdown.js", "mermaid-frame.js", "mermaid.js", "paste.js", "schema.js", "view.js"];
         Assert.Equal(files, Directory.EnumerateFiles(folder, "*.js").Select(f => Path.GetFileName(f)).Order(StringComparer.Ordinal).ToArray());
 
         foreach (string file in files)

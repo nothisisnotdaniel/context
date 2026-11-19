@@ -157,6 +157,12 @@ internal sealed class EditorInterop
     /// <summary>Puts the cursor in the editor.</summary>
     public ValueTask FocusAsync(ElementReference element) => js.InvokeVoidAsync("ContextEditor.focus", element);
 
+    /// <summary>Toggles inline code on the selection (or for the next typed text) and puts the cursor back in the editor.</summary>
+    public ValueTask ToggleInlineCodeAsync(ElementReference element) => js.InvokeVoidAsync("ContextEditor.toggleInlineCode", element);
+
+    /// <summary>Makes the selected blocks one code block, or a code block paragraphs again, and puts the cursor back in the editor.</summary>
+    public ValueTask ToggleCodeBlockAsync(ElementReference element) => js.InvokeVoidAsync("ContextEditor.toggleCodeBlock", element);
+
     /// <summary>The live document's headings, as JSON <c>[{level,text}]</c> (read with <see cref="OutlineHeading.Parse"/>).</summary>
     public ValueTask<string> HeadingsAsync(ElementReference element) =>
         js.InvokeAsync<string>("ContextEditor.headings", element);
