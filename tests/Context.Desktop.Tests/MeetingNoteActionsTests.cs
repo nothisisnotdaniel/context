@@ -413,8 +413,15 @@ public sealed class MeetingNoteActionsTests : IDisposable
 
     // 227 AC-7: a private appointment takes no number: /meeting 2 opens the second public one, /meeting 3 is out of
     // range, and no note is ever made for the private one.
+    // 246: before the snapshot it waits until the open's recent.json write has finished (#321).
     [Fact]
-    public async Task PaletteMeeting_PrivateAppointment_NotNumbered()
+    public async Task PaletteMeeting_PrivateAppointment_NotNumbered() => await PaletteMeetingPrivate(hold: false);
+
+    // 246 AC-3: the same with the open's recent.json write held up until after the test starts waiting for it.
+    [Fact]
+    public async Task PaletteMeeting_PrivateAppointment_NotNumbered_WriteHeld() => await PaletteMeetingPrivate(hold: true);
+
+    private async Task PaletteMeetingPrivate(bool hold)
     {
         data.WriteCalendar("work.ics", DesktopFixture.Calendar(
             DesktopFixture.Event("Standup", "20261029T090000", "20261029T091500"),
@@ -423,19 +430,30 @@ public sealed class MeetingNoteActionsTests : IDisposable
             DesktopFixture.Event("Plan", "20261029T120000", "20261029T130000")));
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        using HeldRecentWrites? held = hold ? data.HoldRecentWrites() : null;
 
         await RunPalette(cut, "/meeting 2");
 
         cut.WaitForAssertion(() => Assert.Equal("Meetings/Plan/2026-10-29", cut.Find(".note-title").GetAttribute("title")), Wait);
         cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
-        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
+        cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
+        Task released = Task.CompletedTask;
+        if (held is not null)
+        {
+            Assert.True(data.Actions!.PendingRecentWrites >= 1);
+            released = Task.Run(held.Release);
+        }
+
+        data.WaitForRecentWrites();
+        await released.WaitAsync(Wait);
+        SortedDictionary<string, string> before = data.SnapshotUnderIndexGate(syncFirst: true);
 
         await RunPalette(cut, "/meeting 3");
 
         cut.WaitForAssertion(
             () => Assert.Equal("There is no appointment 3 today.", cut.Find(".main-status").TextContent), Wait);
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
-        Assert.Equal(before, FileSnapshot.Take(data.Root));
+        Assert.Equal(before, data.SnapshotUnderIndexGate(syncFirst: false));
         Assert.False(Directory.Exists(PathOf("Meetings/Doctor", string.Empty)));
     }
 }

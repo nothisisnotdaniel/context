@@ -280,6 +280,57 @@ public sealed class RecentNotesActionsTests : IDisposable
         Assert.Equal(["Plan"], new RecentNotesStore(data.Root).Read());
     }
 
+    // 246 AC-1: a held write is counted and has not written yet; once the gate is released the count reaches 0 and
+    // recent.json lists the note first.
+    [Fact]
+    public async Task Record_PendingWrites_CountedUntilWritten()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        await data.RefreshAsync();
+        Assert.Equal(0, data.Actions!.PendingRecentWrites);
+        string file = Path.Combine(data.Root, RecentNotesStore.FileName);
+
+        Task recorded;
+        using (data.HoldRecentWrites())
+        {
+            recorded = data.Actions.RecordOpened("Plan");
+
+            Assert.Equal(1, data.Actions.PendingRecentWrites);
+            Assert.False(File.Exists(file));
+        }
+
+        await recorded.WaitAsync(Wait);
+        Assert.Equal(0, data.Actions.PendingRecentWrites);
+        Assert.Equal("Plan", new RecentNotesStore(data.Root).Read()[0]);
+    }
+
+    // 246 AC-2: an invalid name is never counted; a write that fails (the root is gone) still brings the count back
+    // to 0, and nothing is thrown.
+    [Fact]
+    public async Task Record_PendingWrites_InvalidOrFailed_BackToZero()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        await data.RefreshAsync();
+
+        await data.Actions!.RecordOpened("a\\b").WaitAsync(Wait);
+        Assert.Equal(0, data.Actions.PendingRecentWrites);
+        await data.Actions.RecordOpened(string.Empty).WaitAsync(Wait);
+        Assert.Equal(0, data.Actions.PendingRecentWrites);
+
+        Task recorded;
+        using (data.HoldRecentWrites())
+        {
+            recorded = data.Actions.RecordOpened("Plan");
+            Assert.Equal(1, data.Actions.PendingRecentWrites);
+            Directory.Delete(data.Root, recursive: true);
+        }
+
+        await recorded.WaitAsync(Wait);
+        Assert.Equal(0, data.Actions.PendingRecentWrites);
+        Assert.False(Directory.Exists(data.Root));
+        Assert.Equal(["Plan"], data.State!.Recent);
+    }
+
     // AC-7: with a read-only root the write fails; nothing is thrown and the sidebar still lists the note first.
     [Fact]
     public async Task Record_WriteFails_SidebarUpdated_NothingThrown()
