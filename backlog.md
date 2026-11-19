@@ -136,7 +136,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#90](backlog/090-keep-mixed-line-endings.md) Keep mixed line endings → 271-mixed-line-endings
 - [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4; #108)
 - [x] [#234](backlog/234-release-and-ci-workflow-hardening.md) Release and CI workflow hardening → 272-release-ci-hardening
-- [ ] [#113](backlog/113-refuse-removed-secret-options-after-a.md) Refuse removed secret options after a command
+- [x] [#113](backlog/113-refuse-removed-secret-options-after-a.md) Refuse removed secret options after a command → 273-refuse-removed-secret-options
 - [ ] [#114](backlog/114-owner-only-file-mode-for-all.md) Owner-only file mode for all data files
 - [ ] [#231](backlog/231-bounded-reads-of-regular-files-only.md) Bounded reads of regular files only
 - [ ] [#50](backlog/050-times-bookings-in-current.md) Times bookings in /current
