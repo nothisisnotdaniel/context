@@ -155,6 +155,7 @@
                     <OutlinePanel Headings="outline" OnJump="JumpToOutline" />
                 }
                 <TodoPanel @ref="todoPanel" OnPerson="OpenMention" OnOpen="RequestOpen" />
+                <ToReviewPanel Guard="ReviewHeld" OnReviewed="Reviewed" OnOpen="RequestOpen" />
             </aside>
         </div>
         @if (discarding)
@@ -1497,6 +1498,29 @@ else
         }
 
         return null;
+    }
+
+    // Asked before a review date is moved or removed (job 256): the note is open with unsaved changes, which the write
+    // would leave stuck behind "changed on disk". Nothing is saved here; null when the action may run.
+    private async Task<string?> ReviewHeld(string note)
+    {
+        if (openName is { } name && editor is not null && string.Equals(name, note, StringComparison.Ordinal)
+            && await editor.IsDirtyAsync())
+        {
+            return $"Save {name} first.";
+        }
+
+        return null;
+    }
+
+    // After a review date was moved or removed: the open, clean note shows what was written, as after a triage action.
+    private async Task Reviewed(string note)
+    {
+        if (openName is { } name && editor is not null && !openSensitive
+            && string.Equals(name, note, StringComparison.Ordinal) && !await editor.IsDirtyAsync())
+        {
+            await editor.ReloadAsync();
+        }
     }
 
     // After a triage action: an open inbox and an open target show what was written, unless text was typed into the

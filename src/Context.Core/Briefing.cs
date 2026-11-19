@@ -52,17 +52,24 @@ internal static class Briefing
 
     /// <summary>
     /// The briefing's text for <paramref name="today"/>: <c># yyyy-MM-dd</c>, the daily note's <c>## Appointments</c>
-    /// and <c>## Todos</c> sections (<see cref="DailyNote.AppendSections"/>), <c>## Follow-ups</c>, <c>## Open checkpoint</c> and
-    /// <c>## Flexitime balance</c>, each after a blank line. Every Times name is cleaned to one line. <c>\n</c> line
-    /// ends, ending in <c>\n</c>. Never writes.
+    /// and <c>## Todos</c> sections (<see cref="DailyNote.AppendSections"/>), <c>## Follow-ups</c>, <c>## To review</c>
+    /// (job 256: the notes of <paramref name="reviews"/> due by <see cref="NoteReviews.Due"/>; <c>null</c> when the
+    /// index can't be read), <c>## Open checkpoint</c> and <c>## Flexitime balance</c>, each after a blank line. Every
+    /// Times name and note name is cleaned to one line. <c>\n</c> line ends, ending in <c>\n</c>. Never writes.
     /// </summary>
     public static string Compose(
-        TodoStore todos, CalendarStore calendar, CalendarFeed? feed, string? timesFolder, DateOnly today)
+        TodoStore todos,
+        CalendarStore calendar,
+        CalendarFeed? feed,
+        string? timesFolder,
+        DateOnly today,
+        IReadOnlyList<NoteReview>? reviews)
     {
         StringBuilder text = new StringBuilder();
         text.Append("# ").Append(DailyNote.NameFor(today)).Append('\n');
         DailyNote.AppendSections(text, todos, calendar, feed, today);
         AppendFollowUps(text, todos, today);
+        AppendReviews(text, reviews, today);
         AppendOpenCheckpoint(text, timesFolder, today);
         AppendBalance(text, TimesBalance.Compute(timesFolder, today.AddDays(-1)), today.AddDays(-1));
         return text.ToString();
@@ -179,6 +186,35 @@ internal static class Briefing
         if (!any)
         {
             text.Append("- No follow-ups due.\n");
+        }
+    }
+
+    // ## To review: one link per note whose review date is today or earlier; an overdue one with its date.
+    private static void AppendReviews(StringBuilder text, IReadOnlyList<NoteReview>? reviews, DateOnly today)
+    {
+        text.Append("\n## To review\n");
+        if (reviews is null)
+        {
+            text.Append("- Can't read the review dates.\n");
+            return;
+        }
+
+        IReadOnlyList<NoteReview> due = NoteReviews.Due(reviews, today);
+        if (due.Count == 0)
+        {
+            text.Append("- Nothing to review.\n");
+            return;
+        }
+
+        foreach (NoteReview review in due)
+        {
+            text.Append("- [[").Append(OneLine(review.Note)).Append("]]");
+            if (review.Due < today)
+            {
+                text.Append(" (due ").Append(DailyNote.NameFor(review.Due)).Append(')');
+            }
+
+            text.Append('\n');
         }
     }
 

@@ -21,7 +21,9 @@ internal sealed record DesktopSnapshot
         IReadOnlyList<NoteTodo>? noteTodos = null,
         bool noteTodosUnreadable = false,
         IReadOnlyList<SavedSearch>? savedSearches = null,
-        bool savedSearchesUnreadable = false)
+        bool savedSearchesUnreadable = false,
+        IReadOnlyList<NoteReview>? reviews = null,
+        bool reviewsUnreadable = false)
     {
         Failed = failed;
         Today = today;
@@ -38,6 +40,8 @@ internal sealed record DesktopSnapshot
         NoteTodosUnreadable = noteTodosUnreadable;
         SavedSearches = savedSearches ?? [];
         SavedSearchesUnreadable = savedSearchesUnreadable;
+        Reviews = reviews ?? [];
+        ReviewsUnreadable = reviewsUnreadable;
     }
 
     /// <summary>Returns only the type name, so formatting a snapshot never prints its raw text.</summary>
@@ -87,6 +91,15 @@ internal sealed record DesktopSnapshot
 
     /// <summary>True when <c>settings.json</c> or its saved searches can't be read; then <see cref="SavedSearches"/> is empty.</summary>
     public bool SavedSearchesUnreadable { get; }
+
+    /// <summary>
+    /// The plain notes whose review date is today or earlier (<see cref="NoteReviews.Due"/> over
+    /// <see cref="TagIndex.Reviews"/>), read after a <c>Sync</c> (job 256).
+    /// </summary>
+    public IReadOnlyList<NoteReview> Reviews { get; }
+
+    /// <summary>True when <c>context.db</c> can't be read for the review dates; then <see cref="Reviews"/> is empty.</summary>
+    public bool ReviewsUnreadable { get; }
 
     /// <summary>The snapshot shown when building one threw.</summary>
     public static DesktopSnapshot ForFailure(string folder, DateOnly today) =>

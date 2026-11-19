@@ -689,6 +689,29 @@ internal sealed class DesktopActions
     public Task<ActionResult> CompleteTopic(NoteTopic topic, Confirmation? confirmed) =>
         Run(() => CompleteTopicNow(topic, confirmed));
 
+    /// <summary>The Refused/<see cref="ActionReason.Invalid"/> text when a review date would move by no or too many months.</summary>
+    public const string ReviewMonthsText = "Pick 3 months or 1 year.";
+
+    /// <summary>
+    /// Moves a note's review date (job 256) to today (the local clock) plus <paramref name="months"/>
+    /// (<see cref="DateOnly.AddMonths"/>, 1 to 120) through
+    /// <see cref="NoteReviews.Reschedule(NoteStore, NoteReview, DateOnly, NoteHistory?)"/>, by the rules of
+    /// <see cref="CompleteNoteTodo"/>: only when the note's review line is still the one indexed its date changes (every
+    /// other byte kept, the previous bytes kept as a version), then the state is refreshed. A changed line is refused as
+    /// <see cref="ActionReason.Changed"/>, a gone note as <see cref="ActionReason.Missing"/>; nothing is written then.
+    /// The result's text is the note's name when done.
+    /// </summary>
+    public Task<ActionResult> RescheduleReview(NoteReview review, int months) =>
+        Run(() => RescheduleReviewNow(review, months));
+
+    /// <summary>
+    /// Removes a note's review line (job 256), only when the user <paramref name="confirmed"/> it, through
+    /// <see cref="NoteReviews.Remove(NoteStore, NoteReview, NoteHistory?)"/>, by the rules of
+    /// <see cref="RescheduleReview"/>.
+    /// </summary>
+    public Task<ActionResult> RemoveReview(NoteReview review, Confirmation? confirmed) =>
+        Run(() => RemoveReviewNow(review, confirmed));
+
     /// <summary>
     /// Moves a board card (job 242) to <paramref name="column"/> through
     /// <see cref="BoardView.Move(NoteStore, BoardCard, string, NoteHistory?)"/>: only the card's
@@ -1522,6 +1545,39 @@ internal sealed class DesktopActions
         };
     }
 
+    private ActionResult RescheduleReviewNow(NoteReview review, int months)
+    {
+        if (months is < 1 or > 120)
+        {
+            return Refused(ActionReason.Invalid, ReviewMonthsText);
+        }
+
+        DateOnly day = DateOnly.FromDateTime(localNow()).AddMonths(months);
+        return ReviewResult(review, NoteReviews.Reschedule(notes, review, day, state.HistoryStore));
+    }
+
+    private ActionResult RemoveReviewNow(NoteReview review, Confirmation? confirmed)
+    {
+        if (confirmed is null)
+        {
+            return Refused(ActionReason.NotConfirmed, NotConfirmedText);
+        }
+
+        return ReviewResult(review, NoteReviews.Remove(notes, review, state.HistoryStore));
+    }
+
+    private static ActionResult ReviewResult(NoteReview review, NoteTodoResult result)
+    {
+        string note = DesktopText.OneLine(review.Note);
+        return result switch
+        {
+            NoteTodoResult.Done => new ActionResult(ActionKind.Done, ActionReason.None, note),
+            NoteTodoResult.Missing => Refused(ActionReason.Missing, NoteTodos.MissingText(note)),
+            NoteTodoResult.Failed => Failed(ActionReason.WriteFailed, NoteTodos.FailedText(note)),
+            _ => Refused(ActionReason.Changed, NoteTodos.ChangedText(note)),
+        };
+    }
+
     private ActionResult MoveBoardCardNow(BoardCard card, string column)
     {
         if (!card.Columns.Contains(column, StringComparer.Ordinal))
@@ -2012,7 +2068,8 @@ internal sealed class DesktopActions
         }
     }
 
-    private string ComposeBriefing(DateOnly day) => Briefing.Compose(todos, calendar, calendarFeed, timesFolder, day);
+    private string ComposeBriefing(DateOnly day) =>
+        Briefing.Compose(todos, calendar, calendarFeed, timesFolder, day, state.ReviewsForBriefing());
 
     private ActionResult EndDayNow(DateOnly day)
     {
