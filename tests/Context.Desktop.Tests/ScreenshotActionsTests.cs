@@ -159,7 +159,7 @@ public sealed class ScreenshotActionsTests : IDisposable
         ActionResult result = await data.Actions!.CaptureScreenshot();
 
         Assert.Equal(ActionKind.Failed, result.Kind);
-        Assert.Equal([("Context", NotSaved(DesktopActions.ScreenshotUnreadableReason))], data.Notifier.Shown);
+        Assert.Equal([("Context", "Screenshot not saved: the screen can't be captured here.")], data.Notifier.Shown);
         Assert.False(File.Exists(InboxPath));
     }
 
@@ -304,6 +304,24 @@ public sealed class ScreenshotActionsTests : IDisposable
 
         Assert.Equal(ActionReason.Missing, result.Reason);
         Assert.False(File.Exists(InboxPath));
+    }
+
+    // A hand-edited setting that points inside the data folder: nothing is imported from it.
+    [Fact]
+    public async Task ImportScreenshot_FolderInsideTheDataFolder_Ignored()
+    {
+        string folder = Path.Combine(data.Root, "pictures");
+        Directory.CreateDirectory(folder);
+        new SettingsStore(data.Root).SaveScreenshotFolder(folder);
+        string path = Path.Combine(folder, "shot.png");
+        File.WriteAllBytes(path, Png);
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.ImportScreenshot(path);
+
+        Assert.Equal(ActionReason.Missing, result.Reason);
+        Assert.False(File.Exists(InboxPath));
+        Assert.Empty(data.Notifier.Shown);
     }
 
     // No folder set: every path is ignored.

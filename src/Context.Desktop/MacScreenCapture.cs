@@ -62,6 +62,12 @@ internal sealed class MacScreenCapture : IScreenCapture
 
         using FileStream stream = new FileStream(
             path, FileMode.Open, FileAccess.Read, FileShare.Delete, 4096, FileOptions.DeleteOnClose);
+        if (!stream.CanSeek)
+        {
+            // Not a regular file (a FIFO swapped in at the temp path): never block on it.
+            return null;
+        }
+
         byte[] buffer = new byte[NoteAttachments.MaxBytes + 1];
         int total = 0;
         int read;

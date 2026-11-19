@@ -830,6 +830,7 @@ public sealed class SettingsPanelTests : IDisposable
         IElement missing = cut.Find(".screenshot-folder-missing");
         Assert.Equal("Folder not found.", missing.TextContent);
         Assert.Contains("red", missing.ClassList);
+        Assert.Equal("status", missing.GetAttribute("role"));
         Assert.False(Directory.Exists(folder));
     }
 

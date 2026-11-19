@@ -1332,7 +1332,8 @@ internal sealed class DesktopActions
         }
         catch (Exception)
         {
-            result = Failed(ActionReason.WriteFailed, ScreenshotNotSavedText(ScreenshotUnreadableReason));
+            // The area picker failed (StoreScreenshotNow catches its own errors).
+            result = Failed(ActionReason.WriteFailed, ScreenshotNotSavedText(ScreenshotNoCaptureReason));
         }
 
         if (result.Reason == ActionReason.Busy)
@@ -1475,7 +1476,8 @@ internal sealed class DesktopActions
         string name;
         try
         {
-            if (folder is null || !Path.IsPathFullyQualified(path))
+            // The setting may be edited by hand: a folder inside the data folder is never imported from.
+            if (folder is null || !Path.IsPathFullyQualified(path) || notes.Contains(folder))
             {
                 return Refused(ActionReason.Missing, ScreenshotIgnoredText);
             }

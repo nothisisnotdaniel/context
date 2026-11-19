@@ -92,7 +92,7 @@
         <p class="screenshot-folder-state grey cut" title="@DesktopText.OneLine(screenshots.Folder ?? string.Empty)">Folder: @DesktopText.OneLine(screenshots.Folder ?? string.Empty)</p>
         @if (!screenshots.Exists)
         {
-            <p class="screenshot-folder-missing red">@ScreenshotMissingText</p>
+            <p class="screenshot-folder-missing red" role="status">@ScreenshotMissingText</p>
         }
     }
     else
@@ -173,7 +173,7 @@
         "The screenshot hotkey works on macOS. On Windows, set the folder to the Snipping Tool's screenshots folder.";
     public const string ScreenshotUnreadableText = "Can't read the screenshot folder setting.";
     public const string ScreenshotMissingText = "Folder not found.";
-    public const string ScreenshotNotSetText = "No screenshot folder set. New images saved into the folder you set go to the inbox.";
+    public const string ScreenshotNotSetText = "No screenshot folder set. Once one is set, images saved into it are added to the inbox.";
     public const string RemoveQuestion = "Remove the calendar link? The downloaded calendar copy is deleted too.";
 
     private const string TimeFormat = "yyyy-MM-dd HH:mm";
