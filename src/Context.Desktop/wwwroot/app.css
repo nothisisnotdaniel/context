@@ -1800,6 +1800,14 @@ nav.saved-searches ul {
     white-space: nowrap;
 }
 
+/* Many or long types shrink and are cut (full text in title) instead of pushing the row wider. */
+.search-panel .hit-head .type {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .search-panel .search-hits .line {
     margin-top: 2px;
     unicode-bidi: isolate;

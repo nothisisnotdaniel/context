@@ -95,7 +95,7 @@
                                     @onkeyup="RowKeyUp" @onclick="() => RowClick(index, name)">@shown</button>
                             @if (hit.Types.Count > 0)
                             {
-                                <span class="type grey">@DesktopText.OneLine(string.Join(", ", hit.Types))</span>
+                                <span class="type grey cut" title="@DesktopText.OneLine(string.Join(", ", hit.Types))">@DesktopText.OneLine(string.Join(", ", hit.Types))</span>
                             }
                             @if (hit.Modified is { } modified)
                             {

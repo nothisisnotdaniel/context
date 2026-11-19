@@ -193,7 +193,7 @@ public sealed class SearchPageTests : IDisposable
         WaitForNote(cut, js, mounts, "Plan");
 
         data.WriteNote("Plan", "# Plan\nno longer\n");
-        File.SetLastWriteTimeUtc(Path.Combine(data.Root, "Plan.md"), DateTime.UtcNow.AddSeconds(5));
+        File.SetLastWriteTimeUtc(Path.Combine(data.Root, "Plan.md"), new DateTime(2030, 1, 1, 0, 0, 0, DateTimeKind.Utc));
         await data.State!.Refresh();
         await Click(cut, () => cut.Find("button.search-back"));
 

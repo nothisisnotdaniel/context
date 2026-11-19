@@ -471,6 +471,7 @@ public sealed class SearchPanelTests : IDisposable
         Assert.Equal("Plan", plan.QuerySelector(".note-button")!.GetAttribute("title"));
         AngleSharp.Dom.IElement type = plan.QuerySelector("span.type")!;
         Assert.Equal("project, launch", type.TextContent);
+        Assert.Equal("project, launch", type.GetAttribute("title"));
         Assert.True(type.ClassList.Contains("grey"));
         AngleSharp.Dom.IElement date = plan.QuerySelector("span.date")!;
         Assert.Equal("2026-03-05", date.TextContent);
