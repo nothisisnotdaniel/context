@@ -519,7 +519,7 @@ public sealed class DesktopSourceTests
 
     // 215 AC-3: the resolver's inputs: body is 14px, nothing around the editor sets a font-size, and the only app.css
     // heading selectors are the global h1/h2 and the panel ones (219: plus the appointment page's h3 Notes; 243: the
-    // sidebar's Waiting for h3).
+    // sidebar's Waiting for h3; 256: the To review h3).
     [Fact]
     public void EditorHeadings_ResolverInputsHold()
     {
@@ -549,6 +549,22 @@ public sealed class DesktopSourceTests
             ".subpages h2", ".board-column h3", ".todos .waiting-for h3", ".todos-region .to-review h3",
         ];
         Assert.Equal(expected.Order(StringComparer.Ordinal), headings);
+    }
+
+    // 256 review: the To review note name is readable text: --accent-strong (not the light --accent) and underlined,
+    // one line (not the weekly review's flex row), with a focus ring.
+    [Fact]
+    public void ToReviewNote_ReadableTextColour()
+    {
+        (string Selector, string Body)[] rules = CssRules(AppCss())
+            .Where(r => r.Selector.Split(',').Select(sel => sel.Trim()).Contains(".to-review .review-note"))
+            .ToArray();
+        string body = Assert.Single(rules).Body;
+        Assert.Contains("color: var(--accent-strong);", body, StringComparison.Ordinal);
+        Assert.Contains("text-decoration: underline;", body, StringComparison.Ordinal);
+        Assert.Contains("display: inline-block;", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("var(--accent)", AppCss(), StringComparison.Ordinal);
+        Assert.Contains(CssSelectors(AppCss()), sel => sel == ".to-review .review-note:focus-visible");
     }
 
     // 215 AC-4: the three size rules set no colour, and the shared editor heading rule keeps its colour and case.
