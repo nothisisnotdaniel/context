@@ -165,7 +165,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#97](backlog/097-azure-devops-status.md) Azure DevOps status
 - [?] [#98](backlog/098-sharing-notes-with-key-exchange.md) Sharing notes with key exchange
 - [ ] [#236](backlog/236-import-refusals-and-safe-save.md) Import refusals and safe save
-- [?] [#100](backlog/100-revisit-ac-8-texts-with-json.md) Revisit AC-8 texts with --json
+- [ ] [#100](backlog/100-revisit-ac-8-texts-with-json.md) Revisit AC-8 texts with --json
 - [x] [#117](backlog/117-make-the-github-repo-public.md) Make the GitHub repo public
 - [ ] [#233](backlog/233-sensitive-notes-recovery-rules.md) Sensitive-notes recovery rules
 - [?] [#129](backlog/129-pin-the-windows-certificate-by-thumbprint.md) Pin the Windows certificate by thumbprint
