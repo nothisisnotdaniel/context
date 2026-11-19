@@ -145,7 +145,7 @@ internal sealed class RecentNotesStore
         string temp = Path.Combine(root, $".{FileName}.{Guid.NewGuid():N}.tmp");
         try
         {
-            using (FileStream stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using (FileStream stream = PrivateFile.OpenNew(temp))
             {
                 stream.Write(bytes);
             }

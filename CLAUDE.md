@@ -259,6 +259,11 @@ Every factory agent reads this file before working on Context. Keep it short and
 - **Data is plain, except sensitive notes:** every file in the data folder is stored as plain bytes, except the notes
   the desktop user marked sensitive (`<Title>.ctxs`, see Sensitive notes). Todos, the inbox, calendar files and
   `context.db` are never sealed.
+- **Owner-only files** (job 274): off Windows every data file Context writes is `0600` and every data folder it creates
+  (missing parents too) `0700`, both through `PrivateFile` (`Create`/`Write` with `CreateNew`, `CreateFolder`; `Tighten` sets
+  an existing `context.db` with group or other bits to `0600` before SQLite opens it). `PrivateFileSourceTests` fails on
+  any other `Directory.CreateDirectory(`, `File.WriteAll` or writing `new FileStream(` in `src/`, apart from its allow-list
+  (`NoteStore.WritePlainCopy`: a path the user picks). Existing files Context doesn't rewrite keep their mode.
 - **Sensitive notes:** (job 136, desktop only) a single note can be marked sensitive; it is then a sealed top-level
   `<Title>.ctxs` file instead of `<Title>.md`. The command line, `context.db` and search see only its
   name, marked `locked`.

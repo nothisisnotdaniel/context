@@ -78,11 +78,11 @@ internal sealed class CalendarLink
     public Uri Set(string value)
     {
         Uri uri = Validate(value) ?? throw new ArgumentException("Not a valid calendar link.", nameof(value));
-        Directory.CreateDirectory(root);
+        PrivateFile.CreateFolder(root);
         string temp = Path.Combine(root, $".{FileName}.{Guid.NewGuid():N}.tmp");
         try
         {
-            WritePrivate(temp, Utf8NoBom.GetBytes(uri.AbsoluteUri + "\n"));
+            PrivateFile.Write(temp, Utf8NoBom.GetBytes(uri.AbsoluteUri + "\n"));
             File.Move(temp, FilePath, overwrite: true);
         }
         finally
@@ -173,22 +173,4 @@ internal sealed class CalendarLink
 
     /// <summary>The link without its path, query or port: <c>https://&lt;host&gt;/…</c>.</summary>
     public static string Mask(Uri uri) => $"https://{uri.Host}/…";
-
-    /// <summary>Creates <paramref name="path"/> (it must not exist) readable and writable only by the user.</summary>
-    internal static void WritePrivate(string path, byte[] bytes)
-    {
-        FileStreamOptions options = new FileStreamOptions
-        {
-            Mode = FileMode.CreateNew,
-            Access = FileAccess.Write,
-            Share = FileShare.None,
-        };
-        if (!OperatingSystem.IsWindows())
-        {
-            options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
-        }
-
-        using FileStream stream = new FileStream(path, options);
-        stream.Write(bytes);
-    }
 }

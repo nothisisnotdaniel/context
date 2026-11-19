@@ -128,7 +128,7 @@ internal sealed partial class NoteHistory
                 string path = Path.Combine(folder, FileName(id, sealedTitle));
                 try
                 {
-                    WritePrivate(path, bytes);
+                    PrivateFile.Write(path, bytes);
                 }
                 catch (IOException) when (File.Exists(path))
                 {
@@ -168,7 +168,7 @@ internal sealed partial class NoteHistory
             }
 
             string path = Path.Combine(PrepareFolder(notePath), FileName(id, sealedTitle));
-            WritePrivate(path, bytes);
+            PrivateFile.Write(path, bytes);
             return path;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException && e is not NoteHistoryException)
@@ -363,32 +363,7 @@ internal sealed partial class NoteHistory
             return;
         }
 
-        if (OperatingSystem.IsWindows())
-        {
-            Directory.CreateDirectory(folder);
-        }
-        else
-        {
-            Directory.CreateDirectory(folder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
-    }
-
-    // A new file only the owner can read and write (mode 0600 off Windows); never an existing one.
-    private static void WritePrivate(string path, byte[] bytes)
-    {
-        FileStreamOptions options = new FileStreamOptions
-        {
-            Mode = FileMode.CreateNew,
-            Access = FileAccess.Write,
-            Share = FileShare.None,
-        };
-        if (!OperatingSystem.IsWindows())
-        {
-            options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
-        }
-
-        using FileStream stream = new FileStream(path, options);
-        stream.Write(bytes);
+        PrivateFile.CreateFolder(folder);
     }
 
     // The valid versions in a note's history folder (of one kind when extension is set). Missing: empty. A .history or

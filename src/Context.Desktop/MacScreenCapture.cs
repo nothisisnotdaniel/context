@@ -24,7 +24,7 @@ internal sealed class MacScreenCapture : IScreenCapture
     public async Task<byte[]?> CaptureAreaAsync()
     {
         string folder = Path.Combine(root, ".tmp");
-        Directory.CreateDirectory(folder);
+        PrivateFile.CreateFolder(folder);
         string temp = Path.Combine(folder, $"screenshot-{Guid.NewGuid():N}.png");
         try
         {

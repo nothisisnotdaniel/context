@@ -1721,7 +1721,8 @@ public sealed class DesktopSourceTests
         string source = File.ReadAllText(Path.Combine(root, CrashLogFile));
 
         Assert.DoesNotMatch(@"\bNoteStore\b|\bDesktopActions\b|\bConsole\.|\.Move\(|File\.Replace\(", source);
-        Assert.Contains("FileMode.CreateNew", source, StringComparison.Ordinal);
+        // 274: the logs are opened through PrivateFile.OpenNew (FileMode.CreateNew, 0600 off Windows).
+        Assert.Contains("PrivateFile.OpenNew(path)", source, StringComparison.Ordinal);
         Assert.Single(Regex.Matches(source, Regex.Escape(CrashLogDelete)));
 
         string program = File.ReadAllText(Path.Combine(root, ProgramFile)).ReplaceLineEndings("\n");

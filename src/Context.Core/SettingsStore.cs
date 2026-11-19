@@ -443,11 +443,11 @@ internal sealed class SettingsStore
             throw new SettingsTooLargeException($"{FileName} would be over {MaxBytes} bytes.");
         }
 
-        Directory.CreateDirectory(root);
+        PrivateFile.CreateFolder(root);
         string temp = Path.Combine(root, $".{FileName}.{Guid.NewGuid():N}.tmp");
         try
         {
-            using (FileStream stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using (FileStream stream = PrivateFile.OpenNew(temp))
             {
                 stream.Write(bytes);
             }

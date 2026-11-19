@@ -290,7 +290,7 @@ internal sealed class TagIndex
     /// </summary>
     public void Sync(NoteStore store)
     {
-        Directory.CreateDirectory(root);
+        PrivateFile.CreateFolder(root);
         IReadOnlyList<NoteInfo> notes = store.List();
         Run(connection =>
         {
@@ -1190,6 +1190,7 @@ internal sealed class TagIndex
             DefaultTimeout = (int)Math.Max(1, Math.Ceiling(busyTimeout.TotalSeconds)),
         }.ToString();
 
+        PreparePrivateFile();
         try
         {
             using SqliteConnection connection = new SqliteConnection(connectionString);
@@ -1209,6 +1210,43 @@ internal sealed class TagIndex
         catch (SqliteException ex)
         {
             throw new TagIndexException($"Can't read {FileName}.", ex);
+        }
+    }
+
+    // Job 274: before SQLite opens it, context.db is an owner-only (0600 off Windows) file, so its journal, which SQLite
+    // gives the database's mode, is too. A missing file is created empty (SQLite takes an empty file as a new database)
+    // when the root exists; a missing root is left to SQLite as before. An existing file with any group or other bits
+    // is set to 0600 (best effort: a file system that can't change modes still opens).
+    private void PreparePrivateFile()
+    {
+        if (!Directory.Exists(root))
+        {
+            return;
+        }
+
+        try
+        {
+            using (PrivateFile.OpenNew(FilePath))
+            {
+            }
+        }
+        catch (IOException) when (File.Exists(FilePath) || Directory.Exists(FilePath))
+        {
+            // Already there (or made by another process meanwhile).
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new TagIndexException($"Can't read {FileName}.", ex);
+        }
+
+        try
+        {
+            PrivateFile.Tighten(FilePath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Left as it is; the database still opens. Its journal then takes the same loose mode, which exposes
+            // nothing the readable database doesn't already.
         }
     }
 

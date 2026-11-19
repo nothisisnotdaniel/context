@@ -180,7 +180,7 @@ internal sealed class TodoStore
         List<TodoItem> todos = Read();
         TodoItem todo = NewTodo(todos, text, due, repeat, time);
         todos.Add(todo);
-        Directory.CreateDirectory(root);
+        PrivateFile.CreateFolder(root);
         Write(todos);
         return todo;
     }
@@ -537,7 +537,7 @@ internal sealed class TodoStore
         string temp = Path.Combine(root, $".{FileName}.{Guid.NewGuid():N}.tmp");
         try
         {
-            using (FileStream stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using (FileStream stream = PrivateFile.OpenNew(temp))
             {
                 stream.Write(Utf8NoBom.GetBytes(json));
             }

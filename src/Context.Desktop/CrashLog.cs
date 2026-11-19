@@ -197,7 +197,8 @@ internal sealed class CrashLog
                 return;
             }
 
-            File.WriteAllText(SessionPath, kind + " " + Stamp(start));
+            // Rewritten in place as an owner-only file (0600 off Windows), also when it was readable by others.
+            PrivateFile.Rewrite(SessionPath, Encoding.UTF8.GetBytes(kind + " " + Stamp(start)));
         }
         catch (Exception)
         {
@@ -267,7 +268,7 @@ internal sealed class CrashLog
 
             try
             {
-                using (FileStream stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                using (FileStream stream = PrivateFile.OpenNew(path))
                 {
                     stream.Write(bytes, 0, bytes.Length);
                 }
@@ -288,7 +289,7 @@ internal sealed class CrashLog
     // Creates the crash folder when missing; false when it is (or became) a link, a reparse point or not a folder.
     private bool EnsureFolder()
     {
-        Directory.CreateDirectory(Folder);
+        PrivateFile.CreateFolder(Folder);
         return IsPlainFolder(Folder);
     }
 
