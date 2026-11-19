@@ -139,7 +139,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#374](backlog/374-search-results-on-their-own-full.md) Search results on their own full-size page → 285-search-results-page
 - [x] [#388](backlog/388-sidebar-day-picker-back-to-today.md) Sidebar day picker: back to today, a month calendar and a short month name → 289-sidebar-day-picker
 - [x] [#384](backlog/384-type-backticks-for-inline-code-and.md) Type backticks for inline code and code blocks, never auto-escape input → 290-backtick-code-input
-- [ ] [#385](backlog/385-filter-the-people-panel-by-affiliation.md) Filter the People panel by affiliation and role
+- [x] [#385](backlog/385-filter-the-people-panel-by-affiliation.md) Filter the People panel by affiliation and role → 291-people-affiliation-filter
 - [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4; #108)
 - [x] [#234](backlog/234-release-and-ci-workflow-hardening.md) Release and CI workflow hardening → 272-release-ci-hardening
 - [x] [#113](backlog/113-refuse-removed-secret-options-after-a.md) Refuse removed secret options after a command → 273-refuse-removed-secret-options
