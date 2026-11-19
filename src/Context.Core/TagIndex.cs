@@ -227,6 +227,12 @@ internal sealed class TagIndex
             text TEXT NOT NULL,
             raw TEXT NOT NULL,
             PRIMARY KEY(note, line));
+        CREATE TABLE IF NOT EXISTS note_reviews(
+            note TEXT NOT NULL,
+            line INTEGER NOT NULL,
+            due TEXT NOT NULL,
+            raw TEXT NOT NULL,
+            PRIMARY KEY(note));
         CREATE VIRTUAL TABLE IF NOT EXISTS note_text USING fts5(note UNINDEXED, body, tokenize='trigram');
         """;
 
@@ -238,9 +244,9 @@ internal sealed class TagIndex
     /// that runs into a code span is no link. 7: note text (the full-text table <c>note_text</c>). 8: <c>Decision:</c> lines
     /// (<c>note_decisions</c>). 9: open <c>- [ ]</c> todos (<c>note_todos</c>). 10: the heading of a
     /// <c>[[Note#Heading]]</c> link (<c>note_links.heading</c>). 11: <c>next: @[Name]</c> topics (<c>note_topics</c>),
-    /// which are no longer note todos.
+    /// which are no longer note todos. 12: <c>review:yyyy-MM-dd</c> lines (<c>note_reviews</c>).
     /// </summary>
-    public const int ParserVersion = 11;
+    public const int ParserVersion = 12;
 
     /// <summary>
     /// How long opening <c>context.db</c> and starting <see cref="Sync"/>'s write transaction wait while another
@@ -334,6 +340,7 @@ internal sealed class TagIndex
                 IReadOnlyList<ParsedDecision> decisions;
                 IReadOnlyList<ParsedNoteTodo> noteTodos;
                 IReadOnlyList<ParsedTopic> topics;
+                ParsedReview? review;
                 string? body;
                 long? newModified = modified;
                 try
@@ -348,6 +355,7 @@ internal sealed class TagIndex
                     decisions = DecisionParser.Parse(text);
                     noteTodos = NoteTodoParser.Parse(text);
                     topics = TopicParser.Parse(text);
+                    review = ReviewDateParser.Parse(text);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
@@ -358,6 +366,7 @@ internal sealed class TagIndex
                     decisions = [];
                     noteTodos = [];
                     topics = [];
+                    review = null;
                     body = null;
                     newModified = null;
                 }
@@ -450,6 +459,19 @@ internal sealed class TagIndex
                         ("$raw", topic.Raw));
                 }
 
+                Execute(connection, transaction, "DELETE FROM note_reviews WHERE note = $note", ("$note", note.Name));
+                if (review is not null)
+                {
+                    Execute(
+                        connection,
+                        transaction,
+                        "INSERT INTO note_reviews(note, line, due, raw) VALUES($note, $line, $due, $raw)",
+                        ("$note", note.Name),
+                        ("$line", review.Line),
+                        ("$due", review.Due.ToString(DueFormat, System.Globalization.CultureInfo.InvariantCulture)),
+                        ("$raw", review.Raw));
+                }
+
                 if (!upgrade)
                 {
                     Execute(connection, transaction, "DELETE FROM note_text WHERE note = $note", ("$note", note.Name));
@@ -483,6 +505,7 @@ internal sealed class TagIndex
                 Execute(connection, transaction, "DELETE FROM note_decisions WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_todos WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_topics WHERE note = $note", ("$note", gone));
+                Execute(connection, transaction, "DELETE FROM note_reviews WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_text WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM notes WHERE name = $note", ("$note", gone));
             }
@@ -495,6 +518,7 @@ internal sealed class TagIndex
             Execute(connection, transaction, "DELETE FROM note_decisions WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_todos WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_topics WHERE note NOT IN (SELECT name FROM notes)");
+            Execute(connection, transaction, "DELETE FROM note_reviews WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_text WHERE note NOT IN (SELECT name FROM notes)");
             if (upgrade)
             {
@@ -642,6 +666,39 @@ internal sealed class TagIndex
         }
 
         return (IReadOnlyList<NoteTopic>)rows;
+    });
+
+    /// <summary>
+    /// Every row of <c>note_reviews</c> of a note with a stored time, unsorted (<see cref="NoteReviews.Due"/> picks and
+    /// orders them). A row edited by hand out of range (line, a due that is no <c>yyyy-MM-dd</c> date) is skipped.
+    /// </summary>
+    public IReadOnlyList<NoteReview> Reviews() => Run(connection =>
+    {
+        List<NoteReview> rows = [];
+        using SqliteCommand command = Command(
+            connection,
+            null,
+            "SELECT r.note, r.line, r.due, r.raw FROM note_reviews r "
+                + "JOIN notes n ON n.name = r.note WHERE n.modified IS NOT NULL");
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            long line = reader.GetInt64(1);
+            if (line < 1 || line > int.MaxValue
+                || !DateOnly.TryParseExact(
+                    reader.GetString(2),
+                    DueFormat,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None,
+                    out DateOnly due))
+            {
+                continue;
+            }
+
+            rows.Add(new NoteReview(reader.GetString(0), (int)line, due, reader.GetString(3)));
+        }
+
+        return (IReadOnlyList<NoteReview>)rows;
     });
 
     /// <summary>Every tag with the number of notes that have it, sorted by tag (ordinal).</summary>

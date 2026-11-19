@@ -47,8 +47,9 @@ public sealed class BriefingTests : IDisposable
 
     private CalendarStore Calendar() => new(root, IcsParserTests.Zone);
 
-    private string Compose(string? timesFolder = "") =>
-        Briefing.Compose(Todos(), Calendar(), null, timesFolder == string.Empty ? times : timesFolder, Today);
+    private string Compose(string? timesFolder = "", IReadOnlyList<NoteReview>? reviews = null, bool unreadable = false) =>
+        Briefing.Compose(
+            Todos(), Calendar(), null, timesFolder == string.Empty ? times : timesFolder, Today, unreadable ? null : reviews ?? []);
 
     private void WriteTimes(DateOnly day, string json) => WriteTimesFile(DailyNote.NameFor(day) + ".json", json);
 
@@ -72,7 +73,7 @@ public sealed class BriefingTests : IDisposable
     }
 
     private static string Page(string checkpoint, string balance) =>
-        "# 2026-11-13\n\n## Appointments\n- No appointments.\n\n## Todos\n- Nothing due.\n\n## Follow-ups\n- No follow-ups due.\n\n## Open checkpoint\n"
+        "# 2026-11-13\n\n## Appointments\n- No appointments.\n\n## Todos\n- Nothing due.\n\n## Follow-ups\n- No follow-ups due.\n\n## To review\n- Nothing to review.\n\n## Open checkpoint\n"
         + checkpoint + "\n## Flexitime balance\n" + balance;
 
     // AC-3: the exact page: the daily note's sections byte for byte, the open groups and the balance through today-1.
@@ -90,7 +91,7 @@ public sealed class BriefingTests : IDisposable
         string daily = DailyNote.Compose(Todos(), Calendar(), null, Today);
         Assert.StartsWith(daily, text, StringComparison.Ordinal);
         Assert.Equal(
-            "# 2026-11-13\n\n## Appointments\n- No appointments.\n\n## Todos\n- call Anna\n\n## Follow-ups\n- No follow-ups due.\n\n## Open checkpoint\n"
+            "# 2026-11-13\n\n## Appointments\n- No appointments.\n\n## Todos\n- call Anna\n\n## Follow-ups\n- No follow-ups due.\n\n## To review\n- Nothing to review.\n\n## Open checkpoint\n"
             + "- 2026-11-12: #12 A, C line\n\n## Flexitime balance\n- -4:00 through 2026-11-12.\n",
             text);
     }
@@ -200,7 +201,7 @@ public sealed class BriefingTests : IDisposable
         string text = Compose();
 
         Assert.Contains(
-            "\n\n## Follow-ups\n- Bob: contract\uFFFD draft (due 2026-11-11)\n- Anna Schmidt: send the slides\n\n## Open checkpoint\n",
+            "\n\n## Follow-ups\n- Bob: contract\uFFFD draft (due 2026-11-11)\n- Anna Schmidt: send the slides\n\n## To review\n- Nothing to review.\n\n## Open checkpoint\n",
             text,
             StringComparison.Ordinal);
         Assert.StartsWith(DailyNote.Compose(Todos(), Calendar(), null, Today), text, StringComparison.Ordinal);
@@ -213,11 +214,11 @@ public sealed class BriefingTests : IDisposable
     public void Compose_FollowUps_NoneAndUnreadable()
     {
         Todos().Add("waiting: @[Cleo] later", Today.AddDays(1));
-        Assert.Contains("\n\n## Follow-ups\n- No follow-ups due.\n\n## Open checkpoint\n", Compose(), StringComparison.Ordinal);
+        Assert.Contains("\n\n## Follow-ups\n- No follow-ups due.\n\n## To review\n- Nothing to review.\n\n## Open checkpoint\n", Compose(), StringComparison.Ordinal);
 
         File.WriteAllText(Path.Combine(root, TodoStore.FileName), "{ broken");
         string text = Compose();
-        Assert.Contains("\n\n## Follow-ups\n- Can't read todos.json.\n\n## Open checkpoint\n", text, StringComparison.Ordinal);
+        Assert.Contains("\n\n## Follow-ups\n- Can't read todos.json.\n\n## To review\n- Nothing to review.\n\n## Open checkpoint\n", text, StringComparison.Ordinal);
         Assert.StartsWith(DailyNote.Compose(Todos(), Calendar(), null, Today), text, StringComparison.Ordinal);
     }
 
@@ -318,5 +319,37 @@ public sealed class BriefingTests : IDisposable
         }
 
         Assert.Equal(expected, Briefing.ShouldCreate(day, TimesDay.Read(times, day), atStart));
+    }
+
+    // 256 AC-6, AC-9: one link per due note after Follow-ups, overdue ones with their date; future rows are left out.
+    [Fact]
+    public void Compose_ToReview_DueNotesAfterFollowUps()
+    {
+        NoteReview[] reviews =
+        [
+            new("later", 1, Today.AddDays(1), "review:2026-11-14"),
+            new("beta", 2, Today, "review:2026-11-13"),
+            new("Alpha", 3, Today, "review:2026-11-13"),
+            new("Old\nname\u0007", 1, new DateOnly(2026, 10, 1), "review:2026-10-01"),
+        ];
+
+        string text = Compose(reviews: reviews);
+
+        Assert.Contains(
+            "\n\n## Follow-ups\n- No follow-ups due.\n\n## To review\n- [[Old name\uFFFD]] (due 2026-10-01)\n- [[Alpha]]\n- [[beta]]\n\n## Open checkpoint\n",
+            text,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("later", text, StringComparison.Ordinal);
+    }
+
+    // 256 AC-6: nothing due, and an index that can't be read.
+    [Fact]
+    public void Compose_ToReview_NoneAndUnreadable()
+    {
+        Assert.Contains(
+            "\n## To review\n- Nothing to review.\n\n",
+            Compose(reviews: [new("later", 1, Today.AddDays(1), "review:2026-11-14")]),
+            StringComparison.Ordinal);
+        Assert.Contains("\n## To review\n- Can't read the review dates.\n\n", Compose(unreadable: true), StringComparison.Ordinal);
     }
 }

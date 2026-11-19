@@ -121,6 +121,58 @@ ol {
     text-transform: uppercase;
 }
 
+/* The To review panel (job 256): its own block below the todo panel, headed like Waiting for. */
+.todos-region .to-review {
+    border-top: 1px solid var(--line);
+    margin-top: 12px;
+    padding-top: 12px;
+}
+
+.todos-region .to-review h3 {
+    color: var(--grey);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    margin: 0 0 8px;
+    text-transform: uppercase;
+}
+
+.to-review .review-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.to-review .review-item {
+    align-items: baseline;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 4px 0;
+}
+
+.to-review .review-note {
+    /* The weekly review's .review-note row rule is a flex row; this button is one line of text. */
+    background: none;
+    border: none;
+    color: var(--accent-strong);
+    cursor: pointer;
+    display: inline-block;
+    font: inherit;
+    max-width: 100%;
+    overflow: hidden;
+    padding: 0;
+    text-align: left;
+    text-decoration: underline;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.to-review .review-buttons {
+    display: inline-flex;
+    gap: 4px;
+}
+
 .current-region {
     overflow-y: auto;
     padding: 20px 24px;
@@ -243,7 +295,8 @@ ol {
 }
 
 .todo .todo-note:focus-visible,
-.topic .topic-note:focus-visible {
+.topic .topic-note:focus-visible,
+.to-review .review-note:focus-visible {
     outline: 2px solid var(--accent-strong);
     outline-offset: 2px;
 }

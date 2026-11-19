@@ -389,7 +389,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(11, TagIndex.ParserVersion);
+        Assert.Equal(12, TagIndex.ParserVersion);
     }
 
     // 024 AC-6
@@ -438,13 +438,13 @@ public sealed class TagIndexTests : IDisposable
         using (SqliteConnection connection = Open())
         {
             using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 12";
+            command.CommandText = "PRAGMA user_version = 13";
             command.ExecuteNonQuery();
         }
 
         index.Sync(store);
 
-        Assert.Equal(12, UserVersion());
+        Assert.Equal(13, UserVersion());
     }
 
     // 048 AC-4: the old constructor means a tag link only.
@@ -847,7 +847,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(11, TagIndex.ParserVersion);
+        Assert.Equal(12, TagIndex.ParserVersion);
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
         Assert.Equal(["A", "Beta"], NoteRows());
         Assert.Equal([("A", "work"), ("Beta", "home")], Rows());
@@ -1198,7 +1198,7 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal(["Anna|1", "AS|1"], index.People().Select(Describe));
         Assert.Empty(index.NotesMentioning("Anna Schmidt"));
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(11, TagIndex.ParserVersion);
+        Assert.Equal(12, TagIndex.ParserVersion);
     }
 
     // 170 ----------------------------------------------------------------------------------------
@@ -1580,7 +1580,7 @@ public sealed class TagIndexTests : IDisposable
 
         Assert.Equal(["Plan|1|Ann Lee|budget|- [ ] next: @[Ann Lee] budget"], TopicRows(index));
         Assert.Empty(index.NoteTodos());
-        Assert.Equal(11, UserVersion());
+        Assert.Equal(TagIndex.ParserVersion, UserVersion());
     }
 
     // 253 AC-3: a sensitive .ctxs note never has topic rows.
@@ -1596,6 +1596,81 @@ public sealed class TagIndexTests : IDisposable
         using SqliteConnection connection = Open();
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM note_topics WHERE note = 'Plan'";
+        Assert.Equal(0L, (long)command.ExecuteScalar()!);
+    }
+
+    private static IEnumerable<string> ReviewRows(TagIndex index) =>
+        index.Reviews()
+            .Select(r => $"{r.Note}|{r.Line}|{r.Due:yyyy-MM-dd}|{r.Raw}")
+            .Order(StringComparer.Ordinal);
+
+    // 256 AC-2: Sync stores the first review line of each plain note.
+    [Fact]
+    public void Sync_StoresReviews()
+    {
+        WriteNote("Plan", "# Plan\r\n  - Review: 2026-12-01  \r\nreview:2027-01-01\r\n");
+        WriteNote("Other", "```\nreview:2026-01-01\n```\n* REVIEW:\t2026-11-19");
+        WriteNote("None", "review:2026-02-30\n");
+
+        index.Sync(store);
+
+        Assert.Equal(
+            ["Other|4|2026-11-19|* REVIEW:\t2026-11-19", "Plan|2|2026-12-01|  - Review: 2026-12-01  "],
+            ReviewRows(index));
+    }
+
+    // 256 AC-2: editing or deleting the line, or the note, updates or prunes the row on the next Sync.
+    [Fact]
+    public void Sync_Reviews_FollowEditAndDelete()
+    {
+        WriteNote("Plan", "review:2026-12-01\n");
+        WriteNote("Dropped", "x\nreview:2026-12-02\n");
+        WriteNote("Gone", "review:2026-12-03\n");
+        index.Sync(store);
+        Assert.Equal(3, index.Reviews().Count);
+
+        EditNote("Plan", "x\n\nreview: 2027-02-01\n");
+        EditNote("Dropped", "x\n");
+        File.Delete(Path.Combine(root, "Gone.md"));
+        index.Sync(store);
+
+        Assert.Equal(["Plan|3|2027-02-01|review: 2027-02-01"], ReviewRows(index));
+    }
+
+    // 256 AC-2: a database at user_version 11 is re-parsed fully (review rows appear for unchanged notes).
+    [Fact]
+    public void Sync_Version11Database_ReparsedForReviews()
+    {
+        WriteNote("Plan", "review:2026-12-01");
+        File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc));
+        index.Sync(store);
+        using (SqliteConnection connection = Open())
+        {
+            // As the version 11 parser left it: no review table.
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "PRAGMA user_version = 11; DROP TABLE note_reviews;";
+            command.ExecuteNonQuery();
+        }
+
+        index.Sync(store);
+
+        Assert.Equal(["Plan|1|2026-12-01|review:2026-12-01"], ReviewRows(index));
+        Assert.Equal(12, UserVersion());
+    }
+
+    // 256 AC-2, AC-9: a sensitive .ctxs note never has a review row.
+    [Fact]
+    public void Sync_SensitiveNote_HasNoReview()
+    {
+        WriteNote("Other", "review:2026-12-01");
+        File.WriteAllText(Path.Combine(root, "Plan.ctxs"), "review:2026-01-01");
+
+        index.Sync(store);
+
+        Assert.Equal(["Other|1|2026-12-01|review:2026-12-01"], ReviewRows(index));
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM note_reviews WHERE note = 'Plan'";
         Assert.Equal(0L, (long)command.ExecuteScalar()!);
     }
 

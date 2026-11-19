@@ -611,6 +611,32 @@ internal sealed class DesktopState
         }
     }
 
+    /// <summary>
+    /// Every review date of the plain notes (<see cref="TagIndex.Reviews"/>, unsorted) after syncing the index under its
+    /// lock, on the calling thread, for the morning briefing (job 256). None without a notes folder; <c>null</c> when the
+    /// index can't be read. Never throws.
+    /// </summary>
+    internal IReadOnlyList<NoteReview>? ReviewsForBriefing()
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                if (!Directory.Exists(notes.Root))
+                {
+                    return [];
+                }
+
+                index.Sync(notes);
+                return index.Reviews();
+            }
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     // The day's appointments from the calendar files, the feed's cached copy and Outlook's; never downloads.
     private CalendarDay ReadDay(DateOnly day, IReadOnlyList<Appointment> fromOutlook)
     {
@@ -1179,6 +1205,8 @@ internal sealed class DesktopState
             CurrentView current;
             IReadOnlyList<NoteTodo> noteTodos;
             bool noteTodosUnreadable = false;
+            IReadOnlyList<NoteReview> reviews = [];
+            bool reviewsUnreadable = false;
             lock (indexGate)
             {
                 current = CurrentView.Build(todos, index, notes, calendar, feed, day, extra: fromOutlook);
@@ -1191,6 +1219,23 @@ internal sealed class DesktopState
                 {
                     noteTodos = [];
                     noteTodosUnreadable = true;
+                }
+
+                // The review dates come from the same synced index (job 256); a failed sync leaves them unread too.
+                if (noteTodosUnreadable)
+                {
+                    reviewsUnreadable = true;
+                }
+                else if (Directory.Exists(notes.Root))
+                {
+                    try
+                    {
+                        reviews = NoteReviews.Due(index.Reviews(), day);
+                    }
+                    catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+                    {
+                        reviewsUnreadable = true;
+                    }
                 }
             }
 
@@ -1222,7 +1267,7 @@ internal sealed class DesktopState
             return new DesktopSnapshot(
                 false, day, current, todoList, todosUnreadable, noteList, notesUnreadable, folder, sensitive,
                 KeyStore.Supported, RecoveryReady(), noteTodos, noteTodosUnreadable, savedSearches,
-                savedSearchesUnreadable);
+                savedSearchesUnreadable, reviews, reviewsUnreadable);
         }
         catch (Exception)
         {
