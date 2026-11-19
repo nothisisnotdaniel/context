@@ -3883,8 +3883,10 @@ internal sealed class DesktopActions
             return Refused(ActionReason.ChangedOnDisk, ChangedOnDiskText(opened.Name));
         }
 
+        string version = EditableNote.Hash(file);
+        EditableNote reread = SensitiveSession.ToEditable(found, sealedText, version);
         EditableNote saved = new EditableNote(
-            found.Name, found.Path, plainText, EditableNote.Hash(file), opened.HadCrlf, opened.HadBom);
+            found.Name, found.Path, plainText, version, reread.HadCrlf, opened.HadBom, reread.LineCrlf);
         state.Session.Open(saved);
         return new ActionResult(ActionKind.Done, ActionReason.None, opened.Name, saved);
     }
@@ -3977,7 +3979,7 @@ internal sealed class DesktopActions
         }
 
         notes.DeleteSensitive(source.Name);
-        state.Session.Open(new EditableNote(title, target, open.Text, EditableNote.Hash(file), open.HadCrlf, open.HadBom));
+        state.Session.Open(new EditableNote(title, target, open.Text, EditableNote.Hash(file), open.HadCrlf, open.HadBom, open.LineCrlf));
         return new ActionResult(ActionKind.Done, ActionReason.None, title);
     }
 

@@ -268,6 +268,130 @@ public sealed class NoteStoreEditTests : IDisposable
         Assert.Equal(["Meetings.md"], Directory.GetFileSystemEntries(root).Select(f => Path.GetFileName(f)).ToArray());
     }
 
+    // 271 AC-1: a mixed file reads with only \n, one flag per break and the majority ending; uniform files have no flags.
+    [Theory]
+    [InlineData("a\r\nb\nc\nd\r\n", true, "CLLC")]
+    [InlineData("a\nb\nc\r\n", false, "LLC")]
+    [InlineData("a\nb\n", false, null)]
+    [InlineData("a\r\nb\r\n", true, null)]
+    [InlineData("single", false, null)]
+    public void ReadForEdit_MixedEndings_FlagsAndMajority(string content, bool hadCrlf, string? flags)
+    {
+        NoteInfo note = Write("Mixed", [.. Bom, .. Encoding.UTF8.GetBytes(content)]);
+
+        EditableNote opened = store.ReadForEdit(note);
+
+        Assert.Equal(content.Replace("\r\n", "\n", StringComparison.Ordinal), opened.Text);
+        Assert.Equal(hadCrlf, opened.HadCrlf);
+        Assert.True(opened.HadBom);
+        Assert.Equal(flags, opened.LineCrlf is null ? null : new string(opened.LineCrlf.Select(f => f ? 'C' : 'L').ToArray()));
+    }
+
+    // 271 AC-2 / AC-6: one edited line in a mixed note (with a BOM) changes only that line's bytes; the saved note
+    // matches a fresh read, and a second edit still keeps the untouched lines' endings.
+    [Fact]
+    public void SaveIfUnchanged_MixedEdit_KeepsUntouchedEndings_AndSavesAgain()
+    {
+        NoteInfo note = Write("Mixed", [.. Bom, .. Encoding.UTF8.GetBytes("# Mixed\r\none\ntwo\nthree\r\nfour\n")]);
+        EditableNote opened = store.ReadForEdit(note);
+        Assert.False(opened.HadCrlf);
+
+        Assert.Equal(NoteSaveResult.Saved, store.SaveIfUnchanged(opened, "# Mixed\none\nTWO\nthree\nfour\n", out EditableNote? saved));
+
+        Assert.Equal([.. Bom, .. Encoding.UTF8.GetBytes("# Mixed\r\none\nTWO\nthree\r\nfour\n")], File.ReadAllBytes(note.Path));
+        Assert.NotNull(saved);
+        EditableNote fresh = store.ReadForEdit(note);
+        Assert.Equal(fresh.Text, saved.Text);
+        Assert.Equal(fresh.Version, saved.Version);
+        Assert.Equal(fresh.HadCrlf, saved.HadCrlf);
+        Assert.Equal(fresh.HadBom, saved.HadBom);
+        Assert.Equal(fresh.LineCrlf, saved.LineCrlf);
+
+        Assert.Equal(NoteSaveResult.Saved, store.SaveIfUnchanged(saved, "# Mixed\none\nTWO\nthree\nFOUR\nfive\n", out EditableNote? again));
+
+        Assert.Equal([.. Bom, .. Encoding.UTF8.GetBytes("# Mixed\r\none\nTWO\nthree\r\nFOUR\nfive\n")], File.ReadAllBytes(note.Path));
+        Assert.NotNull(again);
+        Assert.Equal(store.ReadForEdit(note).LineCrlf, again.LineCrlf);
+    }
+
+    // 271 AC-2: every line the diff marks Same keeps its own ending; only the edited line's bytes differ.
+    [Fact]
+    public void SaveIfUnchanged_MixedEdit_SameLinesKeepBytes()
+    {
+        string original = "a\r\nb\nc\r\nd\ne\r\nf";
+        NoteInfo note = Write("Mixed", Encoding.UTF8.GetBytes(original));
+        EditableNote opened = store.ReadForEdit(note);
+        string edited = "a\nb\nC!\nd\ne\nf";
+
+        Assert.Equal(NoteSaveResult.Saved, store.SaveIfUnchanged(opened, edited, out _));
+
+        string[] before = original.Split('\n');
+        string[] after = File.ReadAllText(note.Path).Split('\n');
+        List<DiffLine> diff = TextDiff.Lines(opened.Text, edited).Lines.ToList();
+        Assert.Equal(before.Length, after.Length);
+        for (int i = 0; i < before.Length; i++)
+        {
+            if (diff[i].Kind == DiffKind.Same)
+            {
+                Assert.Equal(before[i], after[i]);
+            }
+        }
+
+        Assert.Equal("a\r\nb\nC!\r\nd\ne\r\nf", File.ReadAllText(note.Path));
+    }
+
+    // 271 AC-7: uniform notes, with or without a BOM, are written exactly as before.
+    [Theory]
+    [InlineData("a\nb\n", false, "a\nb\nc\n")]
+    [InlineData("a\nb\n", true, "a\nb\nc\n")]
+    [InlineData("a\r\nb\r\n", false, "a\r\nb\r\nc\r\n")]
+    [InlineData("a\r\nb\r\n", true, "a\r\nb\r\nc\r\n")]
+    public void SaveIfUnchanged_Uniform_AsBefore(string content, bool bom, string expected)
+    {
+        byte[] start = Encoding.UTF8.GetBytes(content);
+        NoteInfo note = Write("Uniform", bom ? [.. Bom, .. start] : start);
+        EditableNote opened = store.ReadForEdit(note);
+
+        Assert.Equal(NoteSaveResult.Saved, store.SaveIfUnchanged(opened, "a\nb\nc\n", out EditableNote? saved));
+
+        byte[] written = Encoding.UTF8.GetBytes(expected);
+        Assert.Equal(bom ? [.. Bom, .. written] : written, File.ReadAllBytes(note.Path));
+        Assert.NotNull(saved);
+        Assert.Null(saved.LineCrlf);
+    }
+
+    // 271 AC-7: a mixed note saved without an edit writes nothing.
+    [Fact]
+    public void SaveIfUnchanged_MixedSameText_WritesNothing()
+    {
+        NoteInfo note = Write("Mixed", Encoding.UTF8.GetBytes("a\r\nb\nc\n"));
+        EditableNote opened = store.ReadForEdit(note);
+        SortedDictionary<string, string> before = FileSnapshot.Take(root);
+
+        Assert.Equal(NoteSaveResult.Unchanged, store.SaveIfUnchanged(opened, opened.Text, out EditableNote? saved));
+
+        Assert.Null(saved);
+        Assert.Equal(before, FileSnapshot.Take(root));
+    }
+
+    // 271 AC-9: the size check counts the bytes after the endings are applied.
+    [Fact]
+    public void SaveIfUnchanged_MixedOverLimitOnDisk_TooLarge()
+    {
+        NoteInfo note = Write("Mixed", Encoding.ASCII.GetBytes("a\r\nb\r\nc\n"));
+        EditableNote opened = store.ReadForEdit(note);
+        Assert.True(opened.HadCrlf);
+        SortedDictionary<string, string> before = FileSnapshot.Take(root);
+        // In plain \n this is under the limit; every added break becomes \r\n on disk, which is over it.
+        string text = "a\nb\nc\n" + new string('\n', (int)(NoteStore.MaxEditBytes / 2));
+        Assert.True(Encoding.UTF8.GetByteCount(text) <= NoteStore.MaxEditBytes);
+
+        Assert.Equal(NoteSaveResult.TooLarge, store.SaveIfUnchanged(opened, text, out EditableNote? saved));
+
+        Assert.Null(saved);
+        Assert.Equal(before, FileSnapshot.Take(root));
+    }
+
     private NoteInfo Write(string name, byte[] bytes)
     {
         string path = Path.Combine(root, name + ".md");

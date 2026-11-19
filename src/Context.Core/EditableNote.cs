@@ -9,6 +9,12 @@ namespace Context;
 internal sealed record EditableNote
 {
     public EditableNote(string name, string path, string text, string version, bool hadCrlf, bool hadBom)
+        : this(name, path, text, version, hadCrlf, hadBom, null)
+    {
+    }
+
+    public EditableNote(
+        string name, string path, string text, string version, bool hadCrlf, bool hadBom, IReadOnlyList<bool>? lineCrlf)
     {
         Name = name;
         Path = path;
@@ -16,6 +22,7 @@ internal sealed record EditableNote
         Version = version;
         HadCrlf = hadCrlf;
         HadBom = hadBom;
+        LineCrlf = lineCrlf;
     }
 
     /// <summary>The note's name (its file name without <c>.md</c>).</summary>
@@ -30,8 +37,14 @@ internal sealed record EditableNote
     /// <summary>The SHA-256 of the file's bytes when it was read, as lowercase hex.</summary>
     public string Version { get; }
 
-    /// <summary>True when the file used <c>\r\n</c> line endings.</summary>
+    /// <summary>True when <c>\r\n</c> is the file's most common line ending (on a tie, the first break's).</summary>
     public bool HadCrlf { get; }
+
+    /// <summary>
+    /// <c>null</c> when the file's line endings are uniform (or it has no line break); otherwise one flag per <c>\n</c>
+    /// in <see cref="Text"/>, in order, true where that break was <c>\r\n</c>.
+    /// </summary>
+    public IReadOnlyList<bool>? LineCrlf { get; }
 
     /// <summary>True when the file started with a UTF-8 byte order mark.</summary>
     public bool HadBom { get; }

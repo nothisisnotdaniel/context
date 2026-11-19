@@ -38,15 +38,14 @@ internal sealed class SensitiveSession
     {
         bool hadBom = sealedText.StartsWith('\uFEFF');
         string text = hadBom ? sealedText[1..] : sealedText;
-        bool hadCrlf = text.Contains("\r\n", StringComparison.Ordinal);
-        return new EditableNote(
-            found.Name, found.Path, text.Replace("\r\n", "\n", StringComparison.Ordinal), version, hadCrlf, hadBom);
+        (string plain, bool hadCrlf, IReadOnlyList<bool>? lineCrlf) = LineEndings.Read(text);
+        return new EditableNote(found.Name, found.Path, plain, version, hadCrlf, hadBom, lineCrlf);
     }
 
-    /// <summary>The text to seal for <paramref name="text"/> (with <c>\n</c>): the line endings and mark <paramref name="opened"/> had.</summary>
+    /// <summary>The text to seal for <paramref name="text"/> (with <c>\n</c>): the mark <paramref name="opened"/> had and its line endings as <see cref="LineEndings.Apply"/> keeps them.</summary>
     public static string ToSealedText(EditableNote opened, string text)
     {
-        string lines = opened.HadCrlf ? text.Replace("\n", "\r\n", StringComparison.Ordinal) : text;
+        string lines = LineEndings.Apply(opened, text);
         return opened.HadBom ? "\uFEFF" + lines : lines;
     }
 
