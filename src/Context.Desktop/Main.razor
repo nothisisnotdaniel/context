@@ -2318,6 +2318,7 @@ else
             new PageAction("rename", "Rename"),
             new PageAction("delete", "Delete"),
             new PageAction("history", "History", historyShown),
+            new PageAction("pin", "Pinned", openName is { } open && State.Pinned.Contains(open, StringComparer.Ordinal)),
         ];
         if (openSensitive)
         {
@@ -2369,6 +2370,36 @@ else
             case "share":
                 await AskShare();
                 break;
+            case "pin":
+            {
+                if (openName is not { } name || running)
+                {
+                    return;
+                }
+
+                bool pin = !State.Pinned.Contains(name, StringComparer.Ordinal);
+                running = true;
+                ActionResult pinned;
+                try
+                {
+                    pinned = await Actions.SetPinned(name, pin);
+                }
+                finally
+                {
+                    running = false;
+                }
+
+                if (pinned.Kind == ActionKind.Done)
+                {
+                    ShowStatus(string.Empty, string.Empty);
+                }
+                else
+                {
+                    ShowStatus(DesktopText.OneLine(pinned.Text), "red");
+                }
+
+                break;
+            }
             case "open-external":
             {
                 if (openName is not { } name || running)

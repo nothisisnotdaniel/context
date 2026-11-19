@@ -2195,6 +2195,25 @@ public sealed class DesktopSourceTests
         Assert.True(found.Count == 0, "The CLI names the recent notes: " + string.Join(", ", found));
     }
 
+    // 278 AC-9: the pinned list belongs to the desktop app; the command-line tool never names it.
+    [Fact]
+    public void Cli_NamesNoPinnedNotes()
+    {
+        string root = RepoFiles.Root();
+        List<string> files = RepoFiles.Sources(root, "src/Context", ".cs", ".csproj", ".json");
+        Assert.Contains("src/Context/Cli.cs", files);
+        List<string> found = files
+            .Where(file =>
+            {
+                string text = File.ReadAllText(Path.Combine(root, file));
+                return text.Contains("pinned.json", StringComparison.OrdinalIgnoreCase)
+                    || text.Contains("PinnedNotes", StringComparison.Ordinal);
+            })
+            .ToList();
+
+        Assert.True(found.Count == 0, "The CLI names the pinned notes: " + string.Join(", ", found));
+    }
+
     // 139 AC-10 (control): whole words only, so RecoveryFile. does not count.
     [Theory]
     [InlineData("File.Exists(path)", true)]

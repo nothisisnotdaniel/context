@@ -46,29 +46,32 @@
         {
             <p class="grey">No notes yet</p>
         }
-        else if (RecentRows(snapshot) is { Count: > 0 } rows)
-        {
-            <ul class="note-list recent-notes" aria-label="Recent notes">
-                @foreach ((NoteInfo note, bool locked) in rows)
-                {
-                    string name = DesktopText.OneLine(note.Name);
-                    string? parent = note.Parent is { } rawParent ? DesktopText.OneLine(rawParent) : null;
-                    bool open = string.Equals(note.Name, OpenName, StringComparison.Ordinal);
-                    <li class="note" @key="note.Name">
-                        <button type="button" class="name cut" title="@name" aria-current="@(open ? "page" : null)"
-                                @onclick="() => OnOpen.InvokeAsync(note.Name)">@DesktopText.NoteName(note.Title)@if (parent is not null)
-                            {<span class="note-parent">@parent</span>}</button>
-                        @if (locked)
-                        {
-                            <span class="locked grey">locked</span>
-                        }
-                    </li>
-                }
-            </ul>
-        }
         else
         {
-            <p class="recent-empty grey">No recently opened notes.</p>
+            List<(NoteInfo Note, bool Locked)> pinnedRows = PinnedRows(snapshot);
+            @if (pinnedRows.Count > 0)
+            {
+                <ul class="note-list pinned-notes" aria-label="Pinned notes">
+                    @foreach ((NoteInfo note, bool locked) in pinnedRows)
+                    {
+                        @NoteRow(note, locked, true)
+                    }
+                </ul>
+            }
+            List<(NoteInfo Note, bool Locked)> recentRows = RecentRows(snapshot);
+            @if (recentRows.Count > 0)
+            {
+                <ul class="note-list recent-notes" aria-label="Recent notes">
+                    @foreach ((NoteInfo note, bool locked) in recentRows)
+                    {
+                        @NoteRow(note, locked, false)
+                    }
+                </ul>
+            }
+            else
+            {
+                <p class="recent-empty grey">No recently opened notes.</p>
+            }
         }
         <div class="note-entry">
             <input type="text" class="note-new-title" value="@newTitle" maxlength="200" disabled="@creating"
@@ -195,9 +198,30 @@
         }
     }
 
-    // The stored recent entries that name an existing plain or sensitive note (exact, ordinal), newest first, each
-    // with whether it is sensitive (job 240). Nothing is read from disk.
-    private List<(NoteInfo Note, bool Locked)> RecentRows(DesktopSnapshot snapshot)
+    // One row of the pinned or recent list (jobs 240, 278): the name button (a subpage's parent in grey), the pin icon
+    // on a pinned row, and the visible "locked" of a sensitive note.
+    private RenderFragment NoteRow(NoteInfo note, bool locked, bool pinned) => __builder =>
+    {
+        string name = DesktopText.OneLine(note.Name);
+        string? parent = note.Parent is { } rawParent ? DesktopText.OneLine(rawParent) : null;
+        bool open = string.Equals(note.Name, OpenName, StringComparison.Ordinal);
+        <li class="note" @key="note.Name">
+            <button type="button" class="name cut" title="@name" aria-current="@(open ? "page" : null)"
+                    @onclick="() => OnOpen.InvokeAsync(note.Name)">@DesktopText.NoteName(note.Title)@if (parent is not null)
+                {<span class="note-parent">@parent</span>}</button>
+            @if (pinned)
+            {
+                <span class="pin-icon"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Pinned" focusable="false"><title>Pinned</title><path d="M12 17v5"/><path d="M9 10.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.2V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.8a2 2 0 0 0-1.1-1.7l-1.8-.9a2 2 0 0 1-1.1-1.8V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg></span>
+            }
+            @if (locked)
+            {
+                <span class="locked grey">locked</span>
+            }
+        </li>
+    };
+
+    // Every plain and sensitive note by its exact full name, with whether it is sensitive. Nothing is read from disk.
+    private static Dictionary<string, (NoteInfo Note, bool Locked)> KnownNotes(DesktopSnapshot snapshot)
     {
         Dictionary<string, (NoteInfo Note, bool Locked)> known = new(StringComparer.Ordinal);
         foreach (NoteInfo note in snapshot.Notes)
@@ -210,8 +234,29 @@
             known.TryAdd(note.Name, (note, true));
         }
 
-        return State.Recent
+        return known;
+    }
+
+    // The stored pinned entries that name an existing plain or sensitive note (exact, ordinal), in pinned order (job 278).
+    private List<(NoteInfo Note, bool Locked)> PinnedRows(DesktopSnapshot snapshot)
+    {
+        Dictionary<string, (NoteInfo Note, bool Locked)> known = KnownNotes(snapshot);
+        return State.Pinned
             .Where(known.ContainsKey)
+            .Distinct(StringComparer.Ordinal)
+            .Take(PinnedNotes.MaxCount)
+            .Select(name => known[name])
+            .ToList();
+    }
+
+    // The stored recent entries that name an existing plain or sensitive note (exact, ordinal) and are not pinned,
+    // newest first, each with whether it is sensitive (jobs 240, 278). Nothing is read from disk.
+    private List<(NoteInfo Note, bool Locked)> RecentRows(DesktopSnapshot snapshot)
+    {
+        Dictionary<string, (NoteInfo Note, bool Locked)> known = KnownNotes(snapshot);
+        HashSet<string> pinned = new(State.Pinned, StringComparer.Ordinal);
+        return State.Recent
+            .Where(name => known.ContainsKey(name) && !pinned.Contains(name))
             .Distinct(StringComparer.Ordinal)
             .Take(RecentNotes.MaxCount)
             .Select(name => known[name])

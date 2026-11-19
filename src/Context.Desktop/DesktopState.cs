@@ -49,6 +49,10 @@ internal sealed class DesktopState
     private readonly object recentGate = new();
     private IReadOnlyList<string> recent;
 
+    // The pinned notes (job 278): read once from pinned.json at start, then changed only through ChangePinned.
+    private readonly object pinnedGate = new();
+    private IReadOnlyList<string> pinned;
+
     // Counts the Changed handlers' reloads that are still running (StateComponent), for tests to wait on.
     private readonly object reloadGate = new();
     private int reloads;
@@ -88,6 +92,32 @@ internal sealed class DesktopState
         Session = session ?? new SensitiveSession(utcNow);
         HistoryStore = new NoteHistory(notes, utcNow);
         recent = new RecentNotesStore(notes.Root).Read();
+        pinned = new PinnedNotesStore(notes.Root).Read();
+    }
+
+    /// <summary>
+    /// The full names of the pinned notes in pinned order (<see cref="PinnedNotes"/>), as read once from
+    /// <c>pinned.json</c> at start and changed by the actions since. Raw names; they may name notes that are gone.
+    /// </summary>
+    public IReadOnlyList<string> Pinned
+    {
+        get
+        {
+            lock (pinnedGate)
+            {
+                return pinned;
+            }
+        }
+    }
+
+    /// <summary>Applies <paramref name="step"/> to <see cref="Pinned"/> in memory (nothing is written) and returns the new list.</summary>
+    internal IReadOnlyList<string> ChangePinned(Func<IReadOnlyList<string>, IReadOnlyList<string>> step)
+    {
+        lock (pinnedGate)
+        {
+            pinned = step(pinned);
+            return pinned;
+        }
     }
 
     /// <summary>

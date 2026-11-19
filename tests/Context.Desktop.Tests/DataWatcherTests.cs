@@ -45,6 +45,8 @@ public sealed class DataWatcherTests : IDisposable
     [InlineData("other.json")]
     [InlineData(RecentNotesStore.FileName)] // 240 AC-8: recording an open never triggers a rescan.
     [InlineData(".recent.json.0123456789abcdef.tmp")]
+    [InlineData(PinnedNotesStore.FileName)] // 278 AC-9: pinning never triggers a rescan.
+    [InlineData(".pinned.json.0123456789abcdef.tmp")]
     [InlineData(RemovedFeature.KeyFileName)]
     [InlineData(".md")]
     [InlineData("")]
