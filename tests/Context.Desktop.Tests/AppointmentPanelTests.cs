@@ -11,6 +11,8 @@ public sealed class AppointmentPanelTests : IDisposable
     // The sidebar list, the page's related notes and an opened note load on Task.Run; every wait passes this timeout.
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
 
+    private const string CloseButton = "section.appointment-page.page > .panel-bar button.close";
+
     private const string NotADatabase = "this is not a database, just some text that fills the header....";
 
     private const string ThreeHeadings =
@@ -52,7 +54,7 @@ public sealed class AppointmentPanelTests : IDisposable
         WriteNotes();
         IRenderedComponent<Main> cut = await RenderMain();
 
-        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        await ClickItem(cut, 0);
         WaitForPage(cut);
 
         IElement page = cut.Find(".current-region section.appointment-page");
@@ -61,7 +63,7 @@ public sealed class AppointmentPanelTests : IDisposable
         Assert.Equal("Budget", page.QuerySelector("h2")!.TextContent);
         Assert.True(cut.Find(".note-area").HasAttribute("hidden"));
         Assert.DoesNotContain(page.QuerySelectorAll("button"), b => b.TextContent.Trim() == "Close");
-        IElement close = Assert.Single(cut.FindAll("section.appointment-page.page > .panel-bar button.close"));
+        IElement close = Assert.Single(cut.FindAll(CloseButton));
         Assert.Equal("button", close.GetAttribute("type"));
         Assert.Equal("Close", close.GetAttribute("aria-label"));
         Assert.Equal("Close", close.GetAttribute("title"));
@@ -71,7 +73,7 @@ public sealed class AppointmentPanelTests : IDisposable
         Assert.Equal("false", svg.GetAttribute("focusable"));
         Assert.Same(close, page.QuerySelector(".panel-bar")!.LastElementChild);
 
-        await close.ClickAsync(new MouseEventArgs());
+        await Click(cut, () => cut.Find(CloseButton));
 
         Assert.Empty(cut.FindAll(".appointment-page"));
         Assert.False(cut.Find(".note-area").HasAttribute("hidden"));
@@ -86,7 +88,7 @@ public sealed class AppointmentPanelTests : IDisposable
         WriteNotes();
         IRenderedComponent<Main> cut = await RenderMain();
 
-        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        await ClickItem(cut, 0);
         WaitForPage(cut);
 
         IElement heading = Assert.Single(cut.FindAll(".appointment-page h3"));
@@ -105,7 +107,7 @@ public sealed class AppointmentPanelTests : IDisposable
         WriteDay();
         IRenderedComponent<Main> cut = await RenderMain();
 
-        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        await ClickItem(cut, 0);
         WaitForPage(cut);
 
         IElement heading = Assert.Single(cut.FindAll(".appointment-page h3"));
@@ -142,7 +144,7 @@ public sealed class AppointmentPanelTests : IDisposable
         data.WriteFile(TagIndex.FileName, NotADatabase);
         IRenderedComponent<Main> cut = await RenderMain();
 
-        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        await ClickItem(cut, 0);
         WaitForPage(cut);
 
         IElement line = cut.Find(".appointment-page p.red");
@@ -178,12 +180,12 @@ public sealed class AppointmentPanelTests : IDisposable
         await OpenFromList(cut, js, "Plan");
         cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("aside.todos-region nav.outline-panel button").Count), Wait);
 
-        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        await ClickItem(cut, 0);
         WaitForPage(cut);
         Assert.Empty(cut.FindAll("nav.outline-panel"));
 
         int mounts = js.Calls("ContextEditor.mount").Count;
-        await cut.FindAll(".appointment-page .note-button").Single(b => b.TextContent == "Anna notes").ClickAsync(new MouseEventArgs());
+        await Click(cut, () => cut.FindAll(".appointment-page .note-button").Single(b => b.TextContent == "Anna notes"));
 
         cut.WaitForAssertion(() => Assert.Equal("Anna notes", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
@@ -201,7 +203,28 @@ public sealed class AppointmentPanelTests : IDisposable
         await OpenFromList(cut, js, "Plan");
         js.Edit("# Plan\n\nSaved first\n");
 
-        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        await ClickItem(cut, 0);
+
+        WaitForPage(cut);
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Equal("# Plan\n\nSaved first\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+    }
+
+    // 279 AC-5: a state reload after the edit re-renders the sidebar; the click still reaches the current row, the
+    // dirty note is saved first and the page opens with no question.
+    [Fact]
+    public async Task DirtyNote_ReloadBeforeClick_SavedFirst()
+    {
+        WriteDay();
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await RenderMain();
+        await OpenFromList(cut, js, "Plan");
+        js.Edit("# Plan\n\nSaved first\n");
+
+        // "Refresh() completed": the sidebar rows are rendered again with new handler IDs.
+        await data.State!.Refresh().WaitAsync(Wait);
+        await ClickItem(cut, 0);
 
         WaitForPage(cut);
         Assert.Empty(cut.FindAll("[role=dialog]"));
@@ -219,15 +242,15 @@ public sealed class AppointmentPanelTests : IDisposable
         await OpenFromList(cut, js, "Plan");
         js.EditUnsavable("# Plan\n\nUnsaved\n");
 
-        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        await ClickItem(cut, 0);
         cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await Click(cut, () => cut.Find("[role=dialog] button.cancel"));
         Assert.Empty(cut.FindAll(".appointment-page"));
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
 
-        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        await ClickItem(cut, 0);
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("[role=dialog]")), Wait);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await Click(cut, () => cut.Find("[role=dialog] button.confirm"));
 
         WaitForPage(cut);
         Assert.Empty(cut.FindAll(".note-editor"));
@@ -243,7 +266,7 @@ public sealed class AppointmentPanelTests : IDisposable
         WriteNotes();
         IRenderedComponent<Main> cut = await RenderMain();
 
-        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        await ClickItem(cut, 0);
         WaitForPage(cut);
         Assert.Equal(
             [("Anna notes", "Anna notes", "anna"), ("Bob stuff", "Bob stuff", "bob"), ("Budget 2027", "Budget 2027", "budget"), ("Zeta", "Zeta", "#budget")],
@@ -251,13 +274,13 @@ public sealed class AppointmentPanelTests : IDisposable
         Assert.All(cut.FindAll(".appointment-page .matches"), m => Assert.Contains("grey", m.ClassList));
         IElement heading = cut.Find(".appointment-page h2");
 
-        await Item(cut, 2).ClickAsync(new MouseEventArgs());
+        await ClickItem(cut, 2);
 
         Assert.DoesNotContain("Loading…", cut.Find(".appointment-page").TextContent, StringComparison.Ordinal);
         Assert.Equal("Budget", cut.Find(".appointment-page h2").TextContent);
         Assert.Equal(4, Notes(cut).Length);
 
-        await Item(cut, 1).ClickAsync(new MouseEventArgs());
+        await ClickItem(cut, 1);
         cut.WaitForAssertion(() => Assert.Equal("Retro", cut.Find(".appointment-page h2").TextContent), Wait);
         WaitForPage(cut);
         Assert.Equal([("Retro ideas", "Retro ideas", "retro")], Notes(cut));
@@ -272,7 +295,7 @@ public sealed class AppointmentPanelTests : IDisposable
         data.WriteFile(Path.Combine("projects", "Retro board.md"), "# Retro board\n");
         IRenderedComponent<Main> cut = await RenderMain();
 
-        await Item(cut, 1).ClickAsync(new MouseEventArgs());
+        await ClickItem(cut, 1);
         WaitForPage(cut);
 
         Assert.Equal([("Retro board", "projects/Retro board", "retro")], Notes(cut));
@@ -287,14 +310,14 @@ public sealed class AppointmentPanelTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await RenderMain();
 
-        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        await ClickItem(cut, 0);
         WaitForPage(cut);
         Assert.Empty(cut.FindAll(".appointment-page .note-button"));
         IElement link = cut.Find(".appointment-page button.create-note-link");
         Assert.Equal("Create a new note", link.TextContent);
         Assert.Equal("button", link.GetAttribute("type"));
 
-        await link.ClickAsync(new MouseEventArgs());
+        await Click(cut, () => cut.Find(".appointment-page button.create-note-link"));
 
         const string Name = "Meetings/Budget/2026-10-29";
         cut.WaitForAssertion(() => Assert.Equal(Name, cut.Find(".note-title").GetAttribute("title")), Wait);
@@ -316,7 +339,7 @@ public sealed class AppointmentPanelTests : IDisposable
         data.WriteFile(TagIndex.FileName, NotADatabase);
         IRenderedComponent<Main> cut = await RenderMain();
 
-        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        await ClickItem(cut, 0);
         WaitForPage(cut);
 
         IElement line = cut.Find(".appointment-page p.red");
@@ -338,7 +361,7 @@ public sealed class AppointmentPanelTests : IDisposable
         data.WriteNote("Plan", "next: @[Anna] budget\n- next: @[anna] hiring\nnext: @[Bob] travel\n");
         IRenderedComponent<Main> cut = await RenderMain();
 
-        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        await ClickItem(cut, 0);
         WaitForPage(cut);
 
         IElement section = cut.Find(".appointment-page section.topics");
@@ -360,7 +383,7 @@ public sealed class AppointmentPanelTests : IDisposable
         data.WriteNote("Plan", "next: @[Anna] budget\n- next: @[anna] hiring\nnext: @[Bob] travel\n");
         IRenderedComponent<Main> cut = await RenderMain();
 
-        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        await ClickItem(cut, 0);
         WaitForPage(cut);
         Assert.Equal(["Anna: budget", "anna: hiring", "Bob: travel"], TopicRows(cut));
 
@@ -383,11 +406,11 @@ public sealed class AppointmentPanelTests : IDisposable
     }
 
     // "the dialog question is Mark this topic done? budget", then the confirm click.
-    private static async Task ConfirmBudget(IRenderedComponent<Main> cut)
+    private async Task ConfirmBudget(IRenderedComponent<Main> cut)
     {
         cut.WaitForAssertion(
             () => Assert.Equal("Mark this topic done? budget", cut.Find("[role=dialog] .question").TextContent), Wait);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await Click(cut, () => cut.Find("[role=dialog] button.confirm"));
     }
 
     private void AssertBudgetDone(IRenderedComponent<Main> cut)
@@ -408,12 +431,12 @@ public sealed class AppointmentPanelTests : IDisposable
         data.WriteNote("Plan", "next: @[Carl] budget\n");
         IRenderedComponent<Main> cut = await RenderMain();
 
-        await Item(cut, 1).ClickAsync(new MouseEventArgs());
+        await ClickItem(cut, 1);
         WaitForPage(cut);
         Assert.Equal("Retro", cut.Find(".appointment-page h2").TextContent);
         Assert.Empty(cut.FindAll(".appointment-page section.topics"));
 
-        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        await ClickItem(cut, 0);
         cut.WaitForAssertion(() => Assert.Equal("Budget", cut.Find(".appointment-page h2").TextContent), Wait);
         WaitForPage(cut);
         Assert.Empty(cut.FindAll(".appointment-page section.topics"));
@@ -428,7 +451,7 @@ public sealed class AppointmentPanelTests : IDisposable
         data.WriteFile(TagIndex.FileName, NotADatabase);
         IRenderedComponent<Main> cut = await RenderMain();
 
-        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        await ClickItem(cut, 0);
         WaitForPage(cut);
 
         Assert.Equal("Can't read the related notes.", cut.Find(".appointment-page p.red").TextContent);
@@ -447,11 +470,11 @@ public sealed class AppointmentPanelTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await RenderMain();
 
-        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        await ClickItem(cut, 0);
         WaitForPage(cut);
         Assert.Equal(["Ann Lee: budget"], TopicRows(cut));
 
-        await cut.Find(".appointment-page button.create-note-link").ClickAsync(new MouseEventArgs());
+        await Click(cut, () => cut.Find(".appointment-page button.create-note-link"));
 
         const string Name = "Meetings/Weekly/2026-10-29";
         cut.WaitForAssertion(() => Assert.Equal(Name, cut.Find(".note-title").GetAttribute("title")), Wait);
@@ -483,6 +506,16 @@ public sealed class AppointmentPanelTests : IDisposable
 
     private static IElement Item(IRenderedComponent<Main> cut, int index) =>
         cut.FindAll(".day-appointments .appointment-item")[index];
+
+    // 279: "the reload count is 0", then the element is found and clicked in one dispatcher call, so no render can
+    // replace its handler ID between the find and the click.
+    private async Task Click(IRenderedComponent<Main> cut, Func<IElement> find)
+    {
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        await cut.InvokeAsync(() => find().ClickAsync(new MouseEventArgs()));
+    }
+
+    private Task ClickItem(IRenderedComponent<Main> cut, int index) => Click(cut, () => Item(cut, index));
 
     private static (string Text, string? Title, string Matches)[] Notes(IRenderedComponent<Main> cut) =>
         cut.FindAll(".appointment-page li")
