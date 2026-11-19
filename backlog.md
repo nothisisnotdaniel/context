@@ -274,7 +274,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#318](backlog/318-attribute-values-show-bidi-controls-as.md) Attribute values show bidi controls as placeholders
 - [?] [#319](backlog/319-crash-hint-bar-doesn-t-cover.md) Crash hint bar doesn't cover the header
 - [?] [#320](backlog/320-crash-log-link-checks-close-the.md) Crash log link checks: close the check-then-act window
-- [ ] [#321](backlog/321-fix-flaky-palettemeeting-privateappointment-notnum.md) Fix flaky PaletteMeeting_PrivateAppointment_NotNumbered test
+- [x] [#321](backlog/321-fix-flaky-palettemeeting-privateappointment-notnum.md) Fix flaky PaletteMeeting_PrivateAppointment_NotNumbered test → 246-flaky-palette-tests
 - [?] [#322](backlog/322-recent-notes-sidebar-keep-the-parent.md) Recent notes sidebar: keep the parent name visible on long titles
 - [?] [#323](backlog/323-tag-board-cache-note-reads-by.md) Tag board: cache note reads by note version
 - [?] [#324](backlog/324-tag-board-show-the-target-column.md) Tag board: show the target column name on the move buttons
