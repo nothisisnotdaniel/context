@@ -840,7 +840,8 @@ internal sealed class DesktopState
             }
 
             DateTime localNow = LocalNow();
-            return MeetingLink.NextOccurrence(link, d => ReadDay(d, OutlookDay(d).Items).Appointments, localNow);
+            string? cached = feed?.ReadCache();
+            return MeetingLink.NextOccurrence(link, d => ReadDay(d, OutlookDay(d).Items, cached).Appointments, localNow);
         }
         catch (Exception)
         {
@@ -857,10 +858,11 @@ internal sealed class DesktopState
         try
         {
             List<Appointment> found = [];
+            string? cached = feed?.ReadCache();
             for (int offset = 0; offset < UpcomingDays; offset++)
             {
                 DateOnly day = today.AddDays(offset);
-                found.AddRange(ReadDay(day, OutlookDay(day).Items).Appointments
+                found.AddRange(ReadDay(day, OutlookDay(day).Items, cached).Appointments
                     .Where(a => MeetingLink.For(a) is not null && DateOnly.FromDateTime(a.Start) == day));
             }
 

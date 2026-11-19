@@ -47,7 +47,8 @@
                                        @onchange="() => Ask(todo)" />
                                 <span class="text cut" title="@text">@text</span>
                             </label>
-                            <button type="button" class="push-todo" disabled="@running" @onclick="() => Push(todo)">Push to next meeting</button>
+                            <button type="button" class="push-todo" disabled="@running" aria-label="@($"Push to next meeting: {text}")"
+                                    @onclick="() => Push(todo)">Push to next meeting</button>
                         </li>
                     }
                 </ul>

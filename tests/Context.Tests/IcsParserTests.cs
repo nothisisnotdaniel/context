@@ -304,4 +304,14 @@ public sealed class IcsParserTests
             new Appointment("Weekly", null, new DateTime(2026, 10, 6, 10, 0, 0), new DateTime(2026, 10, 6, 11, 0, 0), false).GetHashCode(),
             first.GetHashCode());
     }
+
+    // 287: an appointment formats as its type name only, so its Uid and title never leak.
+    [Fact]
+    public void Appointment_ToString_OnlyTypeName()
+    {
+        Appointment appointment = new("secret", "room", new DateTime(2026, 11, 16, 10, 0, 0), new DateTime(2026, 11, 16, 11, 0, 0), false, ["Anna"], "uid-secret");
+
+        Assert.Equal("Appointment", appointment.ToString());
+        Assert.Equal("Appointment", $"{appointment}");
+    }
 }

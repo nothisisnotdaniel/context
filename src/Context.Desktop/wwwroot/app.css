@@ -2572,6 +2572,10 @@ nav.saved-searches ul {
     text-decoration: underline;
 }
 
+.meeting-picker .pick-meeting:hover:not(:disabled) {
+    color: var(--accent-strong);
+}
+
 /* A tied todo's meeting title (cut, full title in its title) and the hint when that occurrence is gone, in grey. */
 .todo .todo-meeting {
     flex: 0 1 auto;

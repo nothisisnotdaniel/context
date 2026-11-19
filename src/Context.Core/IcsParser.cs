@@ -60,6 +60,9 @@ internal sealed record Appointment
     /// </summary>
     public string? Uid { get; }
 
+    /// <summary>Only the type name, so the Uid and the calendar text never leak through formatting.</summary>
+    public override string ToString() => nameof(Appointment);
+
     /// <summary>Equal when every field but <see cref="Uid"/> is, with <see cref="Attendees"/> compared name by name (ordinal).</summary>
     public bool Equals(Appointment? other) =>
         other is not null
