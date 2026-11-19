@@ -282,10 +282,10 @@ internal sealed class TagIndex
     /// Brings the index up to date with the notes in <paramref name="store"/>, in one transaction. Creates
     /// the root folder and the database if missing. A note is re-parsed (tags and <c>[[note links]]</c>) only
     /// when its last-write time (UTC ticks) differs from the stored one. Notes that are gone lose their rows.
-    /// A note that can't be read is kept with no tags, no links and no stored time, so it is retried on the
-    /// next sync. Link targets are stored as written and resolved against note names only when queried. A re-parsed
+    /// A note that can't be read or is over <see cref="NoteStore.MaxNoteBytes"/> is kept with no tags, no links,
+    /// no text and no stored time, so it is retried on the next sync. Link targets are stored as written and resolved against note names only when queried. A re-parsed
     /// note's text is written to <c>note_text</c> again (no row for a note that can't be read or is over
-    /// <see cref="NoteStore.MaxEditBytes"/>); sensitive notes are never listed, so never indexed.
+    /// <see cref="NoteStore.MaxNoteBytes"/>); sensitive notes are never listed, so never indexed.
     /// Throws <see cref="TagIndexException"/> if the database can't be opened or isn't valid.
     /// </summary>
     public void Sync(NoteStore store)
@@ -345,9 +345,9 @@ internal sealed class TagIndex
                 long? newModified = modified;
                 try
                 {
+                    // A note over NoteStore.MaxNoteBytes throws FileTooLargeException and counts as unreadable.
                     string text = store.Read(note);
-                    // The full text only for a note the editor could open too; its tags and links still count.
-                    body = new FileInfo(note.Path).Length <= NoteStore.MaxEditBytes ? text : null;
+                    body = text;
                     tags = TagParser.Parse(text);
                     targets = NoteLinkParser.Parse(text);
                     people = PersonParser.Parse(text);
@@ -558,7 +558,7 @@ internal sealed class TagIndex
     /// <summary>
     /// Every <c>(note, body)</c> row of <c>note_text</c> in one <c>SELECT</c> (no parameters), sorted by note
     /// (ordinal): the whole text of each plain note the last <see cref="Sync"/> could read. Sensitive notes, notes that
-    /// couldn't be read and notes over <see cref="NoteStore.MaxEditBytes"/> have no row. Used by
+    /// couldn't be read and notes over <see cref="NoteStore.MaxNoteBytes"/> have no row. Used by
     /// <see cref="SimilarNotesView.Build"/>.
     /// </summary>
     public IReadOnlyList<(string Note, string Body)> NoteTexts() => Run(connection =>

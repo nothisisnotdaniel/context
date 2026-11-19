@@ -1465,4 +1465,88 @@ public sealed class TodoStoreTests : IDisposable
         Assert.Equal([next!], store.List());
         Assert.Equal([IdB], store.DueReminders(new DateTime(2026, 11, 17, 9, 30, 0)).Select(t => t.Id));
     }
+
+    // 275 AC-2: a todos.json over MaxFileBytes can't be read; reads and Add throw and the file stays as it was.
+    [Fact]
+    public void OverMaxFileBytes_ReadAndAddThrow_FileUnchanged()
+    {
+        Store().Add("Buy milk", new DateOnly(2026, 11, 3));
+        using (FileStream stream = new FileStream(FilePath, FileMode.Append))
+        {
+            stream.Write(Enumerable.Repeat((byte)' ', (int)(TodoStore.MaxFileBytes + 1 - stream.Length)).ToArray());
+        }
+
+        DateTime time = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(FilePath, time);
+        byte[] before = File.ReadAllBytes(FilePath);
+        TodoStore store = Store();
+
+        Assert.Equal("Can't read todos.json.", Assert.Throws<TodoStoreException>(() => store.List()).Message);
+        Assert.Equal("Can't read todos.json.", Assert.Throws<TodoStoreException>(() => store.Add("x", new DateOnly(2026, 11, 3))).Message);
+
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+        Assert.Equal(time, File.GetLastWriteTimeUtc(FilePath));
+    }
+
+    // 275 AC-2: a todos.json of exactly MaxFileBytes (valid JSON padded with spaces) still reads.
+    [Fact]
+    public void AtMaxFileBytes_Reads()
+    {
+        Store().Add("Buy milk", new DateOnly(2026, 11, 3));
+        using (FileStream stream = new FileStream(FilePath, FileMode.Append))
+        {
+            stream.Write(Enumerable.Repeat((byte)' ', (int)(TodoStore.MaxFileBytes - stream.Length)).ToArray());
+        }
+
+        Assert.Equal(TodoStore.MaxFileBytes, new FileInfo(FilePath).Length);
+        Assert.Equal(["Buy milk"], Store().List().Select(t => t.Text));
+    }
+
+    // 275 AC-2: a directory named todos.json doesn't read as empty; reads and Add throw and change nothing.
+    [Fact]
+    public void Directory_ReadAndAddThrow_Unchanged()
+    {
+        Directory.CreateDirectory(FilePath);
+        DateTime time = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        Directory.SetLastWriteTimeUtc(FilePath, time);
+        TodoStore store = Store();
+
+        Assert.Equal("Can't read todos.json.", Assert.Throws<TodoStoreException>(() => store.List()).Message);
+        Assert.Equal("Can't read todos.json.", Assert.Throws<TodoStoreException>(() => store.Add("x", new DateOnly(2026, 11, 3))).Message);
+
+        Assert.True(Directory.Exists(FilePath));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(FilePath));
+        Assert.Equal(time, Directory.GetLastWriteTimeUtc(FilePath));
+        Assert.Equal([FilePath], Directory.GetFileSystemEntries(root));
+    }
+
+    // 275 AC-2: a FIFO todos.json with no writer can't be read and doesn't block; reads and Add throw.
+    [Fact(Timeout = 30_000)]
+    public async Task Fifo_ReadAndAddThrow_WithoutBlocking()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(root);
+        using (System.Diagnostics.Process mkfifo = System.Diagnostics.Process.Start("mkfifo", FilePath))
+        {
+            mkfifo.WaitForExit();
+        }
+
+        DateTime time = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(FilePath, time);
+        TodoStore store = Store();
+
+        TodoStoreException list = await Assert.ThrowsAsync<TodoStoreException>(() => Task.Run(store.List));
+        TodoStoreException add = await Assert.ThrowsAsync<TodoStoreException>(
+            () => Task.Run(() => store.Add("x", new DateOnly(2026, 11, 3))));
+
+        Assert.Equal("Can't read todos.json.", list.Message);
+        Assert.Equal("Can't read todos.json.", add.Message);
+        Assert.Equal(time, File.GetLastWriteTimeUtc(FilePath));
+        Assert.Equal(0, new FileInfo(FilePath).Length);
+        Assert.Equal([FilePath], Directory.GetFileSystemEntries(root));
+    }
 }

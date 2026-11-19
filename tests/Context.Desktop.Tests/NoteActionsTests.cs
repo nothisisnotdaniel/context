@@ -525,6 +525,7 @@ public sealed class NoteActionsTests : IDisposable
     }
 
     // 134 AC-6: a symlinked x.md (to a script outside the root, or to a note inside it) is never launched.
+    // Job 275: a note symlink is no longer listed at all, so it is refused as missing.
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -551,7 +552,7 @@ public sealed class NoteActionsTests : IDisposable
         ActionResult result = await data.Actions!.OpenExternally("x");
 
         Assert.Equal(ActionKind.Refused, result.Kind);
-        Assert.Equal("Can't open x in another app.", result.Text);
+        Assert.Equal("x no longer exists. Nothing was done.", result.Text);
         Assert.Empty(data.Launcher.Launched);
     }
 

@@ -2513,4 +2513,29 @@ public sealed class CliTests : IDisposable
         Assert.Equal(["Type: context standup. Run 'context help'."], result.ErrLines);
         Assert.False(Directory.Exists(root));
     }
+
+    // 275 AC-7: `note show` and `export` of a note over NoteStore.MaxNoteBytes say so, fail and write no export file.
+    [Fact]
+    public void ShowAndExport_NoteOverLimit_SayOver5Mb()
+    {
+        WriteNote("Big", "#work\n");
+        using (FileStream stream = new FileStream(Path.Combine(root, "Big.md"), FileMode.Open))
+        {
+            stream.SetLength(NoteStore.MaxNoteBytes + 1);
+        }
+
+        string target = Path.Combine(outside, "big.md");
+
+        Result show = Run("note", "show", "Big");
+        Result export = Run("export", "Big", target);
+
+        Assert.NotEqual(0, show.Code);
+        Assert.Equal(string.Empty, show.Out);
+        Assert.Equal(["Can't read Big: it is over 5 MB."], show.ErrLines);
+        Assert.NotEqual(0, export.Code);
+        Assert.Equal(string.Empty, export.Out);
+        Assert.Equal(["Can't read Big: it is over 5 MB."], export.ErrLines);
+        Assert.False(File.Exists(target));
+        Assert.Empty(Directory.GetFileSystemEntries(outside));
+    }
 }

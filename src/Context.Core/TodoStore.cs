@@ -84,6 +84,9 @@ internal sealed class TodoStore
     /// <summary>How <see cref="TodoItem.Time"/> is stored and shown.</summary>
     public const string StoredTimeFormat = "HH:mm";
 
+    /// <summary>The largest <c>todos.json</c> that is read (5 MB); a bigger one can't be read.</summary>
+    public const long MaxFileBytes = 5L * 1024 * 1024;
+
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -372,7 +375,7 @@ internal sealed class TodoStore
         allStored = true;
         badIds = 0;
         string path = FilePath;
-        if (!File.Exists(path))
+        if (!File.Exists(path) && !Directory.Exists(path))
         {
             return [];
         }
@@ -380,7 +383,7 @@ internal sealed class TodoStore
         List<TodoJson?>? items;
         try
         {
-            byte[] bytes = File.ReadAllBytes(path);
+            byte[] bytes = BoundedFile.Read(path, MaxFileBytes);
             items = JsonSerializer.Deserialize<List<TodoJson?>>(bytes, JsonOptions);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException
