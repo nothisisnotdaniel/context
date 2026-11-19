@@ -1,5 +1,6 @@
 using AngleSharp.Dom;
 using Bunit;
+using Bunit.Web.AngleSharp;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 
@@ -94,8 +95,12 @@ public sealed class AppointmentPanelTests : IDisposable
         IElement heading = Assert.Single(cut.FindAll(".appointment-page > h3"));
         Assert.Equal("Notes", heading.TextContent);
         IElement list = cut.Find(".appointment-page ul.appointment-notes");
-        Assert.True(Before(cut.Find(".appointment-page .panel-bar"), heading));
+        IElement bar = cut.Find(".appointment-page .panel-bar");
+        IElement todos = cut.Find(".appointment-page > section.meeting-todos");
+        Assert.True(Before(bar, heading));
         Assert.True(Before(heading, list));
+        Assert.True(Before(bar, todos));
+        Assert.True(Before(todos, heading));
         Assert.False(string.IsNullOrEmpty(heading.Id));
         Assert.Equal(heading.Id, list.GetAttribute("aria-labelledby"));
     }
@@ -492,17 +497,25 @@ public sealed class AppointmentPanelTests : IDisposable
         return cut;
     }
 
-    // True when a and b are children of the same element and a comes first (bUnit wraps found elements, so the
-    // index among the parent's children is found by outer HTML, not CompareDocumentPosition).
+    // True when a and b are children of the same element and a comes first. bUnit wraps found elements and re-finds
+    // them after each render, so both are unwrapped to the DOM nodes of one render; a's parent is read once and b's
+    // parent must be that same node. Each index among the parent's element children (no text nodes) is found by node
+    // identity, never by markup, so two siblings with the same markup can't be mixed up.
     private static bool Before(IElement a, IElement b)
     {
-        IElement parent = a.ParentElement!;
-        List<string> children = parent.Children.Select(c => c.OuterHtml).ToList();
-        Assert.Equal(parent.OuterHtml, b.ParentElement!.OuterHtml);
-        int first = children.IndexOf(a.OuterHtml);
-        int second = children.IndexOf(b.OuterHtml);
-        return first >= 0 && second >= 0 && first < second;
+        IElement first = Raw(a);
+        IElement second = Raw(b);
+        IElement parent = first.ParentElement!;
+        Assert.Same(parent, second.ParentElement);
+        IElement[] children = parent.Children.ToArray();
+        int firstIndex = Array.FindIndex(children, c => ReferenceEquals(c, first));
+        int secondIndex = Array.FindIndex(children, c => ReferenceEquals(c, second));
+        return firstIndex >= 0 && secondIndex >= 0 && firstIndex < secondIndex;
     }
+
+    // The DOM node a bUnit wrapper stands for right now (the element itself when it isn't wrapped).
+    private static IElement Raw(IElement element) =>
+        element is IElementWrapper<IElement> wrapper ? wrapper.WrappedElement : element;
 
     private static IElement Item(IRenderedComponent<Main> cut, int index) =>
         cut.FindAll(".day-appointments .appointment-item")[index];
@@ -530,10 +543,15 @@ public sealed class AppointmentPanelTests : IDisposable
             Assert.Equal(3, cut.FindAll(".day-appointments .appointment-item").Count);
         }, Wait);
 
-    // ".appointment-page shows no Loading…".
+    // ".appointment-page shows no Loading… and contains section.meeting-todos with its h3 Todos": both of the page's own
+    // Task.Run loads (the related notes and MeetingTodosPanel's appointments) have rendered, so no later render can
+    // change the markup an assertion reads.
     private static void WaitForPage(IRenderedComponent<Main> cut) =>
         cut.WaitForAssertion(() =>
-            Assert.DoesNotContain("Loading…", cut.Find(".appointment-page").TextContent, StringComparison.Ordinal), Wait);
+        {
+            Assert.DoesNotContain("Loading…", cut.Find(".appointment-page").TextContent, StringComparison.Ordinal);
+            Assert.Equal("Todos", cut.Find(".appointment-page > section.meeting-todos > h3").TextContent);
+        }, Wait);
 
     // ".note-title is <name>, the editor is mounted and .links-panel shows no Loading…".
     private static async Task OpenFromList(IRenderedComponent<Main> cut, EditorJs js, string name)
