@@ -53,9 +53,9 @@
                 {
                     <FindPanel Key="@find.Key" Value="@find.Value" OnOpen="RequestOpen" OnClose="CloseFind" />
                 }
-                @if (searchShown is { } search)
+                @if (page == Page.Search && searchShown is { } search)
                 {
-                    <SearchPanel Text="@search" Request="@searchRequest" OnOpen="RequestOpen" OnClose="CloseSearch" />
+                    <SearchPanel Text="@search" Request="@searchRequest" Focus="@searchFocus" OnOpen="OpenFromSearch" OnClose="CloseSearch" />
                 }
                 @if (decisionsShown is { } decisionsTag)
                 {
@@ -69,6 +69,10 @@
                 <div class="note-area" hidden="@(page != Page.None)">
                     @if (openName is { } name)
                     {
+                        @if (searchBack is { } back && string.Equals(back.Note, name, StringComparison.Ordinal))
+                        {
+                            <button type="button" class="search-back" @onclick="BackToSearch">Back to search</button>
+                        }
                         @if (name.Contains('/'))
                         {
                             <nav class="breadcrumb" aria-label="Breadcrumb">
@@ -159,7 +163,7 @@
             <aside class="todos-region">
                 <DayAppointmentsPanel OnOpen="OpenAppointment" />
                 <TimesTodayPanel />
-                @if (openName is not null && page == Page.None && searchShown is null)
+                @if (openName is not null && page == Page.None)
                 {
                     <OutlinePanel Headings="outline" OnJump="JumpToOutline" />
                 }
@@ -233,9 +237,18 @@ else
 
     // Bumped each time the search panel is asked for, so asking again for the same text starts it over.
     private int searchRequest;
+
+    // The note whose row Back to search focuses on the shown Search page (null: its input).
+    private string? searchFocus;
+
+    // While set, the open note came from the Search page with this query: Back to search shows it again (job 285).
+    private (string Note, string Text)? searchBack;
+
+    // A search result whose opening waits for the unsaved-changes dialog.
+    private (string Note, string Text)? pendingSearchBack;
     private string? decisionsShown;
     private bool similarShown;
-    private enum Page { None, Triage, People, Tags, Settings, Appointment, Board }
+    private enum Page { None, Triage, People, Tags, Settings, Appointment, Board, Search }
 
     // The board's tag (normalized) while Page.Board is shown (job 242).
     private string? boardShown;
@@ -443,15 +456,56 @@ else
 
     private void CloseFind() => findShown = null;
 
-    private void CloseSearch() => searchShown = null;
-
-    // The search panel with <paramref name="text"/> (the text typed in the top bar's Search popover, possibly empty,
-    // a saved search's query, or the text after /search); its input gets the focus.
-    private void ShowSearch(string text)
+    private void CloseSearch()
     {
+        page = Page.None;
+        searchShown = null;
+        searchFocus = null;
+    }
+
+    // The Search page with <paramref name="text"/> (the text typed in the top bar's Search popover, possibly empty,
+    // a saved search's query, or the text after /search), in place of the note area; its input gets the focus.
+    private void ShowSearch(string text) => ShowSearchPage(text, null);
+
+    // The Search page for text; focus names the note whose row takes the focus (Back to search), null the input.
+    private void ShowSearchPage(string text, string? focus)
+    {
+        OpenPage(Page.Search);
         searchShown = text;
+        searchFocus = focus;
         searchRequest++;
         ShowStatus(string.Empty, string.Empty);
+    }
+
+    // A result on the Search page: opens the note like a click on its name (saving first, or asking to discard);
+    // once it shows, Back to search above it returns to that query's results.
+    private async Task OpenFromSearch((string Note, string Text) hit)
+    {
+        if (string.Equals(hit.Note, openName, StringComparison.Ordinal))
+        {
+            await RequestOpen(hit.Note);
+            searchBack = hit;
+            return;
+        }
+
+        pendingSearchBack = hit;
+        await RequestOpen(hit.Note);
+        if (!discarding)
+        {
+            pendingSearchBack = null;
+        }
+    }
+
+    // Back to search: the Search page again for the query the open note was opened from, read again, with that
+    // note's row focused. The note stays open behind it, unsaved text included.
+    private void BackToSearch()
+    {
+        if (searchBack is not { } back)
+        {
+            return;
+        }
+
+        ShowSearchPage(back.Text, back.Note);
     }
 
     private void CloseDecisions() => decisionsShown = null;
@@ -467,7 +521,8 @@ else
         tagShown = null;
     }
 
-    // Triage, People, Tags and Settings are pages: one at a time, in place of the note area.
+    // Triage, People, Tags, Settings and Search are pages: one at a time, in place of the note area. Any page, or
+    // going back to the note, ends Back to search.
     private void OpenPage(Page next)
     {
         if (page == Page.Tags && next != Page.Tags)
@@ -475,6 +530,13 @@ else
             tagShown = null;
         }
 
+        if (page == Page.Search && next != Page.Search)
+        {
+            searchShown = null;
+            searchFocus = null;
+        }
+
+        searchBack = null;
         page = next;
     }
 
@@ -715,6 +777,12 @@ else
     {
         if (name is not null && string.Equals(name, openName, StringComparison.Ordinal))
         {
+            if (page == Page.Search)
+            {
+                searchShown = null;
+                searchFocus = null;
+            }
+
             page = Page.None;
             reviewShown = false;
             if (heading is not null && editor is not null)
@@ -1000,6 +1068,7 @@ else
         pendingBriefing = false;
         pendingMeeting = null;
         pendingAppointment = null;
+        pendingSearchBack = null;
     }
 
     // Opens the person page Actions gave, or shows why there is none.
@@ -1079,6 +1148,11 @@ else
         reviewShown = false;
         findShown = null;
         searchShown = null;
+        searchFocus = null;
+        searchBack = pendingSearchBack is { } fromSearch && string.Equals(fromSearch.Note, name, StringComparison.Ordinal)
+            ? fromSearch
+            : null;
+        pendingSearchBack = null;
         decisionsShown = null;
         similarShown = false;
         renaming = false;

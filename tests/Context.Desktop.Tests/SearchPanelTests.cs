@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using Bunit;
@@ -34,7 +35,7 @@ public sealed class SearchPanelTests : IDisposable
 
         IRenderedComponent<SearchPanel> cut = data.Bunit.Render<SearchPanel>(p => p
             .Add(c => c.Text, " budget ")
-            .Add(c => c.OnOpen, (string name) => opened.Add(name))
+            .Add(c => c.OnOpen, ((string Note, string Text) hit) => opened.Add(hit.Note))
             .Add(c => c.OnClose, () => closed++));
 
         cut.WaitForAssertion(() => Assert.Equal(["bob", "projects/Plan"], NoteNames(cut)), Wait);
@@ -298,7 +299,7 @@ public sealed class SearchPanelTests : IDisposable
         List<string> opened = [];
         IRenderedComponent<SearchPanel> cut = data.Bunit.Render<SearchPanel>(p => p
             .Add(c => c.Text, " #job1234 AND NOT #Done ")
-            .Add(c => c.OnOpen, (string name) => opened.Add(name)));
+            .Add(c => c.OnOpen, ((string Note, string Text) hit) => opened.Add(hit.Note)));
 
         cut.WaitForAssertion(() => Assert.Equal(["Alpha", "beta"], NoteNames(cut)), Wait);
         Assert.Equal("Search: #job1234 AND NOT #Done", cut.Find("h2").TextContent);
@@ -451,6 +452,219 @@ public sealed class SearchPanelTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Equal(["Review"], NoteNames(cut)), Wait);
     }
+
+    // 285 AC-3: a text hit's row: name button, grey types and date (in the state's zone), and the line with the match
+    // marked in its own case; no type span without types.
+    [Fact]
+    public async Task Render_Hit_TypeDateAndMarkedLine()
+    {
+        data.WriteNote("Plan", "# Plan\ntype:: Project\ntype:: Launch\nthe BuDGet line\n");
+        data.WriteNote("Plain", "a budget here\n");
+        File.SetLastWriteTimeUtc(Path.Combine(data.Root, "Plan.md"), new DateTime(2026, 3, 4, 23, 30, 0, DateTimeKind.Utc));
+        File.SetLastWriteTimeUtc(Path.Combine(data.Root, "Plain.md"), new DateTime(2026, 3, 4, 12, 0, 0, DateTimeKind.Utc));
+        await data.RefreshAsync();
+
+        IRenderedComponent<SearchPanel> cut = Render("budget");
+
+        cut.WaitForAssertion(() => Assert.Equal(["Plain", "Plan"], NoteNames(cut)), Wait);
+        AngleSharp.Dom.IElement plan = cut.FindAll(".search-hits li")[1];
+        Assert.Equal("Plan", plan.QuerySelector(".note-button")!.GetAttribute("title"));
+        AngleSharp.Dom.IElement type = plan.QuerySelector("span.type")!;
+        Assert.Equal("project, launch", type.TextContent);
+        Assert.True(type.ClassList.Contains("grey"));
+        AngleSharp.Dom.IElement date = plan.QuerySelector("span.date")!;
+        Assert.Equal("2026-03-05", date.TextContent);
+        Assert.True(date.ClassList.Contains("grey"));
+        AngleSharp.Dom.IElement line = plan.QuerySelector("span.line")!;
+        Assert.Equal("the BuDGet line", line.TextContent);
+        Assert.Equal("the BuDGet line", line.GetAttribute("title"));
+        Assert.Equal("BuDGet", line.QuerySelector("mark")!.TextContent);
+        Assert.Equal("the <mark>BuDGet</mark> line", line.InnerHtml);
+
+        AngleSharp.Dom.IElement plain = cut.FindAll(".search-hits li")[0];
+        Assert.Null(plain.QuerySelector("span.type"));
+        Assert.Equal("2026-03-04", plain.QuerySelector("span.date")!.TextContent);
+    }
+
+    // 285 AC-3: over 40 characters before the hit, the snippet starts with "…" and the last 40; a surrogate pair at the
+    // cut is never split.
+    [Fact]
+    public async Task Render_LongPrefix_CutWithEllipsis_KeepsSurrogatePair()
+    {
+        string forty = new string('a', 39) + "b";
+        data.WriteNote("Long", "x" + new string('y', 9) + forty + "budget end\n");
+        data.WriteNote("Pair", "\U0001F600" + new string('c', 39) + "budget\n");
+        data.WriteNote("Short", new string('d', 40) + "budget\n");
+        await data.RefreshAsync();
+
+        IRenderedComponent<SearchPanel> cut = Render("budget");
+
+        cut.WaitForAssertion(() => Assert.Equal(["Long", "Pair", "Short"], NoteNames(cut)), Wait);
+        IReadOnlyList<AngleSharp.Dom.IElement> lines = cut.FindAll(".search-hits .line");
+        Assert.Equal("…" + forty + "<mark>budget</mark> end", lines[0].InnerHtml);
+        // The last 40 would start with the pair's low half, so the cut moves past the whole pair.
+        Assert.Equal("…" + new string('c', 39) + "<mark>budget</mark>", lines[1].InnerHtml);
+        Assert.Equal(new string('d', 40) + "<mark>budget</mark>", lines[2].InnerHtml);
+        Assert.Equal("x" + new string('y', 9) + forty + "budget end", lines[0].GetAttribute("title"));
+    }
+
+    // 285 AC-3: the split itself, on the raw line.
+    [Fact]
+    public void SnippetOf_SplitsAroundTheMatch()
+    {
+        SearchPanel.Snippet s = SearchPanel.SnippetOf(new SearchHit("n", 1, "ab\u0007CdE fg", 3, [], null), 3);
+        Assert.Equal("ab\uFFFD", s.Before);
+        Assert.Equal("CdE", s.Match);
+        Assert.Equal(" fg", s.After);
+    }
+
+    // 285 AC-3: tag-filter rows stay name-only.
+    [Fact]
+    public async Task Render_TagFilter_RowsNameOnly()
+    {
+        data.WriteNote("Plan", "type:: project\n#job1234\n");
+        await data.RefreshAsync();
+
+        IRenderedComponent<SearchPanel> cut = Render("#job1234");
+
+        cut.WaitForAssertion(() => Assert.Equal(["Plan"], NoteNames(cut)), Wait);
+        Assert.Empty(cut.FindAll(".search-hits .type, .search-hits .date, .search-hits .line, .search-hits mark"));
+    }
+
+    // 285 AC-4: markup, control and bidi characters in names, types and lines render as text.
+    [Fact]
+    public async Task Render_HostileTypeAndLine_AsText()
+    {
+        data.WriteNote("<i>n<i>\u202E", "type:: <b>t</b>\u202E\u0007\n<img src=x>\u202Ebudget<script>x</script>\n");
+        await data.RefreshAsync();
+
+        IRenderedComponent<SearchPanel> cut = Render("budget");
+
+        cut.WaitForAssertion(() => Assert.Single(NoteNames(cut)), Wait);
+        Assert.Empty(cut.FindAll("i, b, img, script"));
+        Assert.Contains("<b>t</b>", cut.Find(".search-hits .type").TextContent, StringComparison.Ordinal);
+        Assert.StartsWith("<img src=x>", cut.Find(".search-hits .line").TextContent, StringComparison.Ordinal);
+        Assert.Equal("budget", cut.Find(".search-hits mark").TextContent);
+        Assert.EndsWith("<script>x</script>", cut.Find(".search-hits .line").TextContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("\u0007", cut.Markup, StringComparison.Ordinal);
+
+        // The name shows bidi controls as placeholders (NoteName); in the type and the line they stay text inside their
+        // own span, which app.css isolates (unicode-bidi: isolate), so they can't reorder the rest of the row.
+        Assert.Equal("<i>n<i>\uFFFD", cut.Find(".search-hits .note-button").TextContent);
+        Assert.Equal("<b>t</b>\u202E\uFFFD", cut.Find(".search-hits .type").TextContent);
+        Assert.Equal("<img src=x>\u202E", cut.Find(".search-hits .line").ChildNodes[0].TextContent);
+    }
+
+    // 285 AC-5: ArrowDown in the input focuses the first row; the arrows move the one tab stop, stopping at the last;
+    // ArrowUp on the first goes back to the input.
+    [Theory]
+    [InlineData("budget")]
+    [InlineData("#job1234")]
+    public async Task Keyboard_RovingTabIndex(string text)
+    {
+        data.WriteNote("A", "budget #job1234\n");
+        data.WriteNote("B", "budget #job1234\n");
+        data.WriteNote("C", "budget #job1234\n");
+        await data.RefreshAsync();
+        IRenderedComponent<SearchPanel> cut = Render(text);
+        cut.WaitForAssertion(() => Assert.Equal(["A", "B", "C"], NoteNames(cut)), Wait);
+        Assert.Equal(["0", "-1", "-1"], TabIndexes(cut));
+
+        await cut.Find(".search-input").KeyDownAsync(new KeyboardEventArgs { Key = "ArrowDown" });
+        AssertFocusedRow(cut, 0, 1);
+
+        await cut.FindAll(".search-hits .note-button")[0].KeyDownAsync(new KeyboardEventArgs { Key = "ArrowDown" });
+        Assert.Equal(["-1", "0", "-1"], TabIndexes(cut));
+        AssertFocusedRow(cut, 1, 1);
+        await cut.FindAll(".search-hits .note-button")[1].KeyDownAsync(new KeyboardEventArgs { Key = "ArrowDown" });
+        await cut.FindAll(".search-hits .note-button")[2].KeyDownAsync(new KeyboardEventArgs { Key = "ArrowDown" });
+        Assert.Equal(["-1", "-1", "0"], TabIndexes(cut));
+        AssertFocusedRow(cut, 2, 2);
+
+        await cut.FindAll(".search-hits .note-button")[2].KeyDownAsync(new KeyboardEventArgs { Key = "ArrowUp" });
+        await cut.FindAll(".search-hits .note-button")[1].KeyDownAsync(new KeyboardEventArgs { Key = "ArrowUp" });
+        Assert.Equal(["0", "-1", "-1"], TabIndexes(cut));
+        AssertFocusedRow(cut, 0, 2);
+
+        int inputFocus = FocusCount(cut, ".search-input");
+        await cut.FindAll(".search-hits .note-button")[0].KeyDownAsync(new KeyboardEventArgs { Key = "ArrowUp" });
+        cut.WaitForAssertion(() => Assert.Equal(inputFocus + 1, FocusCount(cut, ".search-input")), Wait);
+        Assert.Equal(["0", "-1", "-1"], TabIndexes(cut));
+    }
+
+    // 285 AC-5, AC-7: Enter opens the row once (the click the browser sends after it does nothing) with the shown
+    // query; a later click opens it again; a query typed and run with Return is the one reported.
+    [Fact]
+    public async Task Enter_OpensOnce_WithShownQuery()
+    {
+        data.WriteNote("A", "budget money\n");
+        data.WriteNote("B", "budget\n");
+        await data.RefreshAsync();
+        List<(string Note, string Text)> opened = [];
+        IRenderedComponent<SearchPanel> cut = data.Bunit.Render<SearchPanel>(p => p
+            .Add(c => c.Text, "budget")
+            .Add(c => c.OnOpen, ((string Note, string Text) hit) => opened.Add(hit)));
+        cut.WaitForAssertion(() => Assert.Equal(["A", "B"], NoteNames(cut)), Wait);
+
+        await cut.FindAll(".search-hits .note-button")[1].KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await cut.FindAll(".search-hits .note-button")[1].ClickAsync(new MouseEventArgs());
+        Assert.Equal([("B", "budget")], opened);
+        await cut.FindAll(".search-hits .note-button")[1].KeyUpAsync(new KeyboardEventArgs { Key = "Enter" });
+        await cut.FindAll(".search-hits .note-button")[1].ClickAsync(new MouseEventArgs());
+        Assert.Equal([("B", "budget"), ("B", "budget")], opened);
+
+        await cut.Find(".search-input").InputAsync(new ChangeEventArgs { Value = "money" });
+        await cut.Find(".search-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        cut.WaitForAssertion(() => Assert.Equal(["A"], NoteNames(cut)), Wait);
+        await cut.Find(".search-hits .note-button").ClickAsync(new MouseEventArgs());
+        Assert.Equal(("A", "money"), opened[^1]);
+    }
+
+    // 285 AC-7: Focus makes that note's row the tab stop and focuses it; a note no longer listed gives the first row.
+    [Theory]
+    [InlineData("C", 2)]
+    [InlineData("Gone", 0)]
+    public async Task Focus_FocusesThatRow_OrTheFirst(string focus, int row)
+    {
+        data.WriteNote("A", "budget\n");
+        data.WriteNote("B", "budget\n");
+        data.WriteNote("C", "budget\n");
+        await data.RefreshAsync();
+
+        IRenderedComponent<SearchPanel> cut = data.Bunit.Render<SearchPanel>(p => p
+            .Add(c => c.Text, "budget")
+            .Add(c => c.Focus, focus));
+
+        cut.WaitForAssertion(() => Assert.Equal(["A", "B", "C"], NoteNames(cut)), Wait);
+        string[] expected = ["-1", "-1", "-1"];
+        expected[row] = "0";
+        Assert.Equal(expected, TabIndexes(cut));
+        AssertFocusedRow(cut, row, 1);
+        Assert.Equal(0, FocusCount(cut, ".search-input"));
+    }
+
+    private static string[] TabIndexes(IRenderedComponent<SearchPanel> cut) =>
+        cut.FindAll(".search-hits .note-button").Select(b => b.GetAttribute("tabindex") ?? "").ToArray();
+
+    // Waits until the row's button was given the focus that many times.
+    private void AssertFocusedRow(IRenderedComponent<SearchPanel> cut, int row, int times) =>
+        cut.WaitForAssertion(
+            () => Assert.Equal(times, FocusCount(cut, $".search-hits li:nth-child({row + 1}) .note-button")),
+            Wait);
+
+    // Counts the focus calls on the element the panel holds in that field (a row button or the input).
+    private int FocusCount(IRenderedComponent<SearchPanel> cut, string selector)
+    {
+        ElementReference target = selector == ".search-input"
+            ? (ElementReference)Field(cut, "input")
+            : ((ElementReference[])Field(cut, "rowButtons"))[int.Parse(selector[(selector.IndexOf('(') + 1)..selector.IndexOf(')')], CultureInfo.InvariantCulture) - 1];
+        Assert.False(string.IsNullOrEmpty(target.Id));
+        return data.Bunit.JSInterop.Invocations.Count(i =>
+            i.Identifier == "Blazor._internal.domWrapper.focus" && i.Arguments[0] is ElementReference r && r.Id == target.Id);
+    }
+
+    private static object Field(IRenderedComponent<SearchPanel> cut, string name) =>
+        typeof(SearchPanel).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(cut.Instance)!;
 
     private IRenderedComponent<SearchPanel> Render(string text) =>
         data.Bunit.Render<SearchPanel>(p => p.Add(c => c.Text, text));

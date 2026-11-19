@@ -689,7 +689,6 @@ input[type="password"]:disabled {
 
 .tag-panel,
 .find-panel,
-.search-panel,
 .decisions-panel,
 .similar-panel {
     border-bottom: 1px solid var(--line);
@@ -1772,6 +1771,59 @@ nav.saved-searches ul {
 .saved-search-result,
 .saved-searches-unreadable {
     margin: 0 0 8px;
+}
+
+/* 285: the Search page in place of the note area. Per text hit: the note name, its grey type and date on one line,
+   then the matching line with the match marked; every piece is isolated so its text can't reorder the others. */
+.search-panel .search-hits li {
+    border-bottom: 1px solid var(--line);
+    padding: 8px 0;
+}
+
+.search-panel .hit-head {
+    align-items: baseline;
+    display: flex;
+    gap: 10px;
+    min-width: 0;
+}
+
+.search-panel .hit-head .note-button {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.search-panel .hit-head .type,
+.search-panel .hit-head .date {
+    flex: none;
+    font-size: 0.85em;
+    unicode-bidi: isolate;
+    white-space: nowrap;
+}
+
+.search-panel .search-hits .line {
+    margin-top: 2px;
+    unicode-bidi: isolate;
+}
+
+.search-panel mark {
+    background: none;
+    border-bottom: 2px solid var(--accent-strong);
+    color: var(--text);
+    font-weight: 600;
+}
+
+/* 285: Back to search above a note opened from the Search page, styled like the breadcrumb's links. */
+.search-back {
+    background: none;
+    border: none;
+    color: var(--accent-strong);
+    display: block;
+    margin: 0 0 8px;
+    padding: 0;
+}
+
+.search-back:hover:not(:disabled) {
+    text-decoration: underline;
 }
 
 /* 207: the search panel's input and its save form. */

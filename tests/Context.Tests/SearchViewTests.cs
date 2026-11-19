@@ -297,6 +297,45 @@ public sealed class SearchViewTests : IDisposable
         Assert.Equal((long)TagIndex.ParserVersion, (long)version.ExecuteScalar()!);
     }
 
+    // 285 AC-1: each hit has where the match starts in its line (ignoring case), the note's types and its file's
+    // last-write time in UTC.
+    [Fact]
+    public void Build_Hits_HaveMatchStartTypesAndModified()
+    {
+        string plan = Write("Plan", "# Plan\ntype:: Project\nthe BuDGet line\n");
+        Write("people", "# people\n");
+        string ann = Write("people/Ann", "# Ann\nann budget talk\n");
+        string plain = Write("Plain", "Budget first\n");
+        DateTime planTime = new DateTime(2026, 3, 4, 5, 6, 7, DateTimeKind.Utc);
+        DateTime annTime = new DateTime(2025, 12, 31, 23, 30, 0, DateTimeKind.Utc);
+        DateTime plainTime = new DateTime(2024, 1, 2, 0, 15, 0, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(plan, planTime);
+        File.SetLastWriteTimeUtc(ann, annTime);
+        File.SetLastWriteTimeUtc(plain, plainTime);
+
+        SearchView view = Build("budget");
+
+        Assert.Equal(SearchViewKind.Found, view.Kind);
+        Assert.Equal(["people/Ann", "Plain", "Plan"], view.Hits.Select(h => h.Note).ToArray());
+        SearchHit annHit = view.Hits[0];
+        Assert.Equal("ann budget talk", annHit.Line);
+        Assert.Equal(4, annHit.MatchStart);
+        Assert.Equal(["person"], annHit.Types);
+        Assert.Equal(annTime, annHit.Modified);
+        Assert.Equal(DateTimeKind.Utc, annHit.Modified!.Value.Kind);
+        SearchHit plainHit = view.Hits[1];
+        Assert.Equal(0, plainHit.MatchStart);
+        Assert.Empty(plainHit.Types);
+        Assert.Equal(plainTime, plainHit.Modified);
+        SearchHit planHit = view.Hits[2];
+        Assert.Equal("the BuDGet line", planHit.Line);
+        Assert.Equal(4, planHit.MatchStart);
+        Assert.Equal("BuDGet", planHit.Line.Substring(planHit.MatchStart, "budget".Length));
+        Assert.Equal(["project"], planHit.Types);
+        Assert.Equal(planTime, planHit.Modified);
+        Assert.Equal(DateTimeKind.Utc, planHit.Modified!.Value.Kind);
+    }
+
     private SqliteConnection Open()
     {
         SqliteConnection connection = new SqliteConnection(
