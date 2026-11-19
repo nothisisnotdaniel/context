@@ -1132,13 +1132,12 @@ internal sealed class DesktopActions
     /// Writes the note <paramref name="name"/> as a self-contained HTML page (<see cref="NoteHtml.Render"/>) to the new
     /// file <paramref name="path"/>, with the path, existence and <see cref="NoteStore.WritePlainCopy"/> rules and texts
     /// of <see cref="ExportNote"/>. A plain note's image attachments are embedded; with
-    /// <paramref name="leaveOutPrivate"/> lines tagged <c>#private</c> are left out. A sensitive note is written only
-    /// while it is the open <see cref="SensitiveSession"/> note (else <c>Unlock &lt;name&gt; first.</c>) and only with a
-    /// <paramref name="confirmed"/> warning (else Refused <see cref="ActionReason.NotConfirmed"/>), from the session
-    /// text without images and without a private-key call. Changes nothing in the data folder and never refreshes.
+    /// <paramref name="leaveOutPrivate"/> lines tagged <c>#private</c> are left out. A sensitive note is refused, locked or
+    /// open, with <see cref="ExportSensitiveText"/> and without a private-key call: it is never written as plain text.
+    /// Changes nothing in the data folder and never refreshes.
     /// </summary>
-    public Task<ActionResult> ShareNote(string name, string path, bool leaveOutPrivate, Confirmation? confirmed) =>
-        Run(() => ShareNoteNow(name, path, leaveOutPrivate, confirmed), refresh: false);
+    public Task<ActionResult> ShareNote(string name, string path, bool leaveOutPrivate) =>
+        Run(() => ShareNoteNow(name, path, leaveOutPrivate), refresh: false);
 
     /// <summary>The Refused/<see cref="ActionReason.Exists"/> text of <see cref="SaveSearch"/> (raw name).</summary>
     public static string SearchExistsText(string name) => $"A saved search named {name} already exists.";
@@ -2884,7 +2883,7 @@ internal sealed class DesktopActions
 
     // /share and the Share menu item, with the path from the OS save dialog, checked again here. A sensitive note is
     // the one deliberate plain copy of a sealed note: only its open session text, only after the dialog's warning.
-    private ActionResult ShareNoteNow(string name, string? path, bool leaveOutPrivate, Confirmation? confirmed)
+    private ActionResult ShareNoteNow(string name, string? path, bool leaveOutPrivate)
     {
         if (CopyTarget(path, out string target, out string shown) is { } refused)
         {
@@ -2892,26 +2891,14 @@ internal sealed class DesktopActions
         }
 
         NoteInfo? note;
-        EditableNote? open = null;
         try
         {
             if (!notes.TryFind(name, out note) || note is null)
             {
-                if (!notes.TryFindSensitive(name, out note) || note is null)
-                {
-                    return Refused(ActionReason.Missing, NoteMissingText(name));
-                }
-
-                open = OpenSensitive(note);
-                if (open is null)
-                {
-                    return Refused(ActionReason.Locked, UnlockFirstText(note.Name));
-                }
-
-                if (confirmed is null)
-                {
-                    return Refused(ActionReason.NotConfirmed, NotConfirmedText);
-                }
+                // As ExportNote: a sensitive note is never written out as plain text, and never opened for it.
+                return notes.TryFindSensitive(name, out NoteInfo? locked) && locked is not null
+                    ? Refused(ActionReason.Locked, ExportSensitiveText(locked.Name))
+                    : Refused(ActionReason.Missing, NoteMissingText(name));
             }
 
             if (File.Exists(target) || Directory.Exists(target))
@@ -2928,9 +2915,7 @@ internal sealed class DesktopActions
         try
         {
             NoteInfo found = note;
-            string text = open?.Text ?? ReadPlainCopy(found);
-            Func<string, ResolvedAttachment?> images = open is null ? src => attachments.TryResolve(found.Name, src) : _ => null;
-            html = NoteHtml.Render(found.Title, text, images, leaveOutPrivate);
+            html = NoteHtml.Render(found.Title, ReadPlainCopy(found), src => attachments.TryResolve(found.Name, src), leaveOutPrivate);
         }
         catch (Exception)
         {

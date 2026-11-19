@@ -1,13 +1,7 @@
-@* Share: asks whether to leave out lines tagged #private before the save dialog opens. For a sensitive note it also
-   warns that the copy is not encrypted; Choose file then counts as the confirmation. The Confirmation itself still
-   comes from ConfirmDialog. *@
+@* Share (plain notes only): asks whether to leave out lines tagged #private before the save dialog opens. *@
 
 <ConfirmDialog Question="@($"Share {DesktopText.OneLine(Name)} as an HTML page?")" ConfirmLabel="Choose file…"
                Busy="Busy" OnConfirm="Choose" OnCancel="Cancel">
-    @if (Sensitive)
-    {
-        <p class="share-warning red">This copy is not encrypted. Anyone with the file can read it.</p>
-    }
     <label class="share-option">
         <input type="checkbox" checked="@leaveOutPrivate" disabled="@Busy" @onchange="Toggle" />
         Leave out lines tagged #private
@@ -22,24 +16,21 @@
     [EditorRequired]
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>True for a sensitive note: the warning is shown.</summary>
-    [Parameter]
-    public bool Sensitive { get; set; }
-
     /// <summary>While true the buttons are disabled and Esc does nothing.</summary>
     [Parameter]
     public bool Busy { get; set; }
 
-    /// <summary>Choose file was pressed: the confirmation and whether to leave out #private lines.</summary>
+    /// <summary>Choose file was pressed: true to leave out lines tagged #private.</summary>
     [Parameter]
-    public EventCallback<ShareChoice> OnChoose { get; set; }
+    public EventCallback<bool> OnChoose { get; set; }
 
     [Parameter]
     public EventCallback OnCancel { get; set; }
 
     private void Toggle(ChangeEventArgs e) => leaveOutPrivate = e.Value is true || (e.Value is string text && bool.TryParse(text, out bool on) && on);
 
-    private Task Choose(Confirmation confirmed) => OnChoose.InvokeAsync(new ShareChoice(confirmed, leaveOutPrivate));
+    // ConfirmDialog hands over a Confirmation; Share needs none, so it is not passed on.
+    private Task Choose(Confirmation _) => OnChoose.InvokeAsync(leaveOutPrivate);
 
     private Task Cancel() => OnCancel.InvokeAsync();
 }

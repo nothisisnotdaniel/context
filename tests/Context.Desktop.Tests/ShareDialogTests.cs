@@ -58,7 +58,7 @@ public sealed class ShareDialogTests : IDisposable
         Assert.False(File.Exists(data.Outside("Plan.html")));
     }
 
-    // AC-10, AC-11: a plain note: the dialog has the checked checkbox and the two buttons, no warning; Choose file
+    // AC-10, AC-11: a plain note: the dialog has the checked checkbox and the two buttons; Choose file
     // suggests <name>.html and the status shows the accent Done text.
     [Theory]
     [InlineData(false)]
@@ -82,7 +82,6 @@ public sealed class ShareDialogTests : IDisposable
         Assert.Equal("LABEL", box.ParentElement.TagName);
         Assert.Equal(["Choose file…", "Cancel"], cut.FindAll(".dialog button").Select(b => b.TextContent).ToArray());
         Assert.All(cut.FindAll(".dialog button"), b => Assert.Equal("button", b.GetAttribute("type")));
-        Assert.Empty(cut.FindAll(".share-warning"));
 
         await cut.Find(".dialog button.confirm").ClickAsync(new MouseEventArgs());
 
@@ -188,10 +187,10 @@ public sealed class ShareDialogTests : IDisposable
         Assert.Equal("theirs\n", File.ReadAllText(target));
     }
 
-    // AC-10, AC-11: a sensitive note's dialog warns in red that the copy is not encrypted; Choose file is the
-    // confirmation and the session text is written without asking for the key again.
+    // AC-10: a sensitive note has no Share item, and /share shows Export's sensitive text in red with no dialog; no
+    // file is asked for or written and the key is not asked for again.
     [Fact]
-    public async Task Share_SensitiveNote_WarnsThenWritesPage()
+    public async Task Share_SensitiveNote_NoItem_PaletteRefused()
     {
         data.WriteSensitive("Secret", "# Secret\n\nseen\n");
         string target = data.Outside("Secret.html");
@@ -202,19 +201,18 @@ public sealed class ShareDialogTests : IDisposable
         int agrees = data.Keys.Agrees;
         byte[] sealedBytes = File.ReadAllBytes(Path.Combine(data.Root, "Secret" + NoteStore.SensitiveExtension));
 
-        await MainTests.ChooseAsync(cut, "share");
+        await MainTests.OpenMenuAsync(cut);
+        Assert.Empty(cut.FindAll(".page-menu button.share"));
+        await cut.Find(".page-menu-backdrop").ClickAsync(new MouseEventArgs());
 
-        IElement warning = cut.WaitForElement(".dialog .share-warning", Wait);
-        Assert.Equal("This copy is not encrypted. Anyone with the file can read it.", warning.TextContent);
-        Assert.True(warning.ClassList.Contains("red"));
-        Assert.True(cut.Find(".dialog input[type=checkbox]").HasAttribute("checked"));
+        await RunPalette(cut, "/share");
 
-        await cut.Find(".dialog button.confirm").ClickAsync(new MouseEventArgs());
-
-        cut.WaitForAssertion(() => Assert.Equal($"Shared Secret as HTML: {target}", cut.Find(".main-status").TextContent), Wait);
-        Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
-        Assert.Equal("Secret.html", data.Dialog.ShareSuggestedName);
-        Assert.Contains("<p>seen</p>", File.ReadAllText(target), StringComparison.Ordinal);
+        cut.WaitForAssertion(
+            () => Assert.Equal("Secret is sensitive. Make it plain to export it.", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Empty(cut.FindAll(".dialog"));
+        Assert.Equal(0, data.Dialog.ShareSaves);
+        Assert.False(File.Exists(target));
         Assert.Equal(agrees, data.Keys.Agrees);
         Assert.Equal(sealedBytes, File.ReadAllBytes(Path.Combine(data.Root, "Secret" + NoteStore.SensitiveExtension)));
     }

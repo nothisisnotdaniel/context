@@ -167,8 +167,7 @@ in the command palette) and then `Choose file…`. The note is saved as one web 
 browser: headings, lists, task items, quotes, code and links to web pages and e-mail addresses are kept, tags,
 `[[links]]` and `@[mentions]` become plain text, and the note's attached images are inside the file, so it needs
 nothing else and loads nothing from the internet. Lines tagged `#private` are left out unless you clear the box. A
-sensitive note can be shared while it is open; the dialog warns that the copy is not encrypted, and its images are
-left out. The page is written outside the Context folder only, and an existing file is never overwritten.
+sensitive note can't be shared, just as it can't be exported: it is never written out as plain text. The page is written outside the Context folder only, and an existing file is never overwritten.
 
 ### Todos inside notes
 

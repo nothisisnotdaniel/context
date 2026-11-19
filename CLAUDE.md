@@ -325,7 +325,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Set up sensitive notes` (until recovery is set up) and `Restore from recovery file`, which open `SensitiveSetup`
     (password fields without a value, the loss warning, the OS file dialog through `IFileDialog` /
     `PhotinoFileDialog`; `The passwords don't match.`). The More actions menu of a plain note has `Mark sensitive`, of a
-    sensitive note `Share`, `Make plain` and `Lock` instead of `Open in default editor`; both mark and make-plain ask in a
+    sensitive note `Make plain` and `Lock` instead of `Open in default editor`; both mark and make-plain ask in a
     `ConfirmDialog` and need a saved note.
   - **Rules (tests):** no file in `src/Context.Core/` or `src/Context/` mentions `AesGcm`, `ECDiffieHellman`,
     `IKeyStore` or `SealedNote`; `DllImport`/`LibraryImport`/`extern ` appear only in `MacKeyStore.cs` and `OutlookComSource.cs`; `X509Store`
@@ -1122,16 +1122,15 @@ Every factory agent reads this file before working on Context. Keep it short and
     else just the text; `![alt](src)` is a `data:` image only among `NoteAttachments.ImageSources` (the 20-image cap)
     and when `resolveImage` gives an image, else `[image: alt]`. With `leaveOutPrivate` every line on which
     `TagParser.LineHasTag(line, "private")` (outside fences) is left out. `DesktopActions.ShareNote(name, path,
-    leaveOutPrivate, Confirmation?)` refuses like `ExportNote` (path, inside, missing, exists, `Can't read <name>.`,
-    `Can't write <path>.`; same texts), writes with `WritePlainCopy` and says `Shared <name> as HTML: <path>`; a
-    sensitive note is shared only when it is the open session note (`Unlock <name> first.`) and with a confirmation
-    (`NotConfirmed`), from the session text with no images and without any `Agree`; the `.ctxs` and `context.db` stay
-    as they are. `IFileDialog.SaveShareFile(suggestedName)` adds `.html`. The More actions menu has `Share` for plain
-    and sensitive notes (and `/share`): no note open: red `Open a note first.`; a dirty editor: `Save <name> first.`;
-    else `ShareDialog` (wraps `ConfirmDialog` through its `ChildContent`, so `ConfirmDialog` still makes every
-    `Confirmation`; `OnChoose` carries `ShareChoice(Confirmed, LeaveOutPrivate)`): the checkbox `Leave out lines
-    tagged #private` (checked), for a sensitive note a red warning that the copy is readable by anyone with the
-    file (`p.share-warning`, text in `ShareDialog.razor`), `Choose file…` / `Cancel`, Esc cancels. Choose file calls `SaveShareFile("<leaf>.html")`; a cancelled
+    leaveOutPrivate)` refuses like `ExportNote` (path, inside, missing, exists, `Can't read <name>.`, `Can't write
+    <path>.`; same texts), writes with `WritePlainCopy` and says `Shared <name> as HTML: <path>`. A sensitive note is
+    never shared: locked or open it is Refused/`Locked` with `<name> is sensitive. Make it plain to export it.`
+    (`ExportSensitiveText`) without any `Agree`, and nothing is written. `IFileDialog.SaveShareFile(suggestedName)`
+    adds `.html`. The More actions menu of a plain note has `Share` (a sensitive note has no item; `/share` shows the
+    sensitive text in red without a dialog): no note open: red `Open a note first.`; a dirty editor: `Save <name>
+    first.`; else `ShareDialog` (wraps `ConfirmDialog` through its `ChildContent`; the `Confirmation` it makes is not
+    passed on, `OnChoose` carries only whether to leave out `#private` lines): the checkbox `Leave out lines tagged
+    #private` (checked), `Choose file…` / `Cancel`, Esc cancels. Choose file calls `SaveShareFile("<leaf>.html")`; a cancelled
     save dialog shows nothing, else `ShareNote`'s text in the main status line (accent Done, red otherwise).
     Rules (`DesktopSourceTests`): `WritePlainCopy` and `ReadImport` are named in
     `Context.Desktop` only in `DesktopActions.cs`, and no `.razor` file matches `\b(File|Directory|Path)\.`.
@@ -1180,7 +1179,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `menuitemcheckbox` with `aria-checked`. `Main.PageActionsFor(snapshot)` builds the list: none while a page
     (Triage, People, Tags, Settings, Appointment) is shown and with no note open; `end-day` first on today's daily note (`DailyNote.NameFor(Snapshot.Today)`); for a plain note `rename`,
     `delete`, `history`, `new-subpage`, `move`, `open-external`, `export`, `share`, `mark-sensitive` (when supported); for a
-    sensitive note `rename`, `delete`, `history`, `share`, `make-plain`, `lock`. `Main.RunPageAction(id)` (the bound handler)
+    sensitive note `rename`, `delete`, `history`, `make-plain`, `lock`. `Main.RunPageAction(id)` (the bound handler)
     runs the chosen one. Keys in the menu (default prevented): opening focuses the first item, ArrowDown/ArrowUp
     move and wrap, Return or Space runs the focused item, Esc or Tab closes the menu and focuses the … button.
     **Quick capture:** the capture box is gone (job 198); capture is the palette's `/capture <text>` or the top bar's

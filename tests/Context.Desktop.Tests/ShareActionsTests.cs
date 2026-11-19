@@ -4,7 +4,7 @@ using System.Text;
 namespace Context.Tests;
 
 // 250 AC-8, AC-9: DesktopActions.ShareNote writes the note as an HTML page outside the data folder, refusing like
-// ExportNote; a sensitive note is shared only while open in the session and with a confirmation.
+// ExportNote; a sensitive note is refused as Export refuses it.
 public sealed class ShareActionsTests : IDisposable
 {
     private static readonly byte[] Png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
@@ -30,7 +30,7 @@ public sealed class ShareActionsTests : IDisposable
         SortedDictionary<string, string> before = Files();
         int builds = data.State!.Builds;
 
-        ActionResult result = await data.Actions!.ShareNote("plan", target, leaveOutPrivate: true, null);
+        ActionResult result = await data.Actions!.ShareNote("plan", target, leaveOutPrivate: true);
 
         Assert.Equal(ActionKind.Done, result.Kind);
         Assert.Equal($"Shared Plan as HTML: {target}", result.Text);
@@ -52,7 +52,7 @@ public sealed class ShareActionsTests : IDisposable
         string target = data.Outside("Plan.html");
         await data.RefreshAsync();
 
-        ActionResult result = await data.Actions!.ShareNote("Plan", target, leaveOutPrivate: false, null);
+        ActionResult result = await data.Actions!.ShareNote("Plan", target, leaveOutPrivate: false);
 
         Assert.Equal(ActionKind.Done, result.Kind);
         Assert.Contains("<p>secret #private</p>", File.ReadAllText(target), StringComparison.Ordinal);
@@ -131,80 +131,50 @@ public sealed class ShareActionsTests : IDisposable
         string target = data.Outside(Path.Combine("missing", "Plan.html"));
         await data.RefreshAsync();
 
-        ActionResult result = await data.Actions!.ShareNote("Plan", target, leaveOutPrivate: true, null);
+        ActionResult result = await data.Actions!.ShareNote("Plan", target, leaveOutPrivate: true);
 
         Assert.Equal(ActionKind.Failed, result.Kind);
         Assert.Equal($"Can't write {target}.", result.Text);
         Assert.False(File.Exists(target));
     }
 
-    // AC-9: a locked sensitive note asks to be unlocked first and never asks for the key.
-    [Fact]
-    public async Task ShareNote_LockedSensitive_UnlockFirst()
+    // AC-9: a sensitive note is refused with Export's text, locked or open, without asking for the key; nothing is
+    // written and the .ctxs file and context.db stay unchanged.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ShareNote_Sensitive_RefusedWithoutAgree(bool open)
     {
-        data.WriteSensitive("Secret", "sealed text\n");
+        data.WriteSensitive("Secret", "# Secret\n\nsealed text\n");
         await data.RefreshAsync();
-        int agrees = data.Keys.Agrees;
+        if (open)
+        {
+            Assert.NotNull(await data.State!.ReadSensitive("Secret"));
+        }
 
-        await Refused("secret", data.Outside("Secret.html"), "Unlock Secret first.", confirmed: new Confirmation());
-
-        Assert.Equal(agrees, data.Keys.Agrees);
-    }
-
-    // AC-9: an open sensitive note without a confirmation is not shared.
-    [Fact]
-    public async Task ShareNote_OpenSensitiveWithoutConfirmation_NotConfirmed()
-    {
-        data.WriteSensitive("Secret", "sealed text\n");
-        await data.RefreshAsync();
-        Assert.NotNull(await data.State!.ReadSensitive("Secret"));
-        int agrees = data.Keys.Agrees;
-
-        ActionResult result = await Refused("Secret", data.Outside("Secret.html"), "Not confirmed. Nothing was done.");
-
-        Assert.Equal(ActionReason.NotConfirmed, result.Reason);
-        Assert.Equal(agrees, data.Keys.Agrees);
-    }
-
-    // AC-9: confirmed, the session text is rendered without images; the .ctxs file and context.db stay unchanged and
-    // the key is not asked for again.
-    [Fact]
-    public async Task ShareNote_OpenSensitiveConfirmed_RendersSessionTextWithoutImages()
-    {
-        data.WriteNote("Plan", "x\n");
-        AttachmentAdd added = new NoteAttachments(new NoteStore(data.Root)).Add("Plan", "shot.png", Png);
-        data.WriteSensitive("Secret", $"# Secret\n\nThe plan #private\n\nseen\n\n![shot]({added.Src})\n");
-        await data.RefreshAsync();
-        Assert.NotNull(await data.State!.ReadSensitive("Secret"));
         string sealedPath = Path.Combine(data.Root, "Secret" + NoteStore.SensitiveExtension);
         byte[] sealedBytes = File.ReadAllBytes(sealedPath);
         string? db = DbHash();
         int agrees = data.Keys.Agrees;
         string target = data.Outside("Secret.html");
 
-        ActionResult result = await data.Actions!.ShareNote("Secret", target, leaveOutPrivate: true, new Confirmation());
+        ActionResult result = await Refused("secret", target, "Secret is sensitive. Make it plain to export it.");
 
-        Assert.Equal(ActionKind.Done, result.Kind);
-        Assert.Equal($"Shared Secret as HTML: {target}", result.Text);
-        string html = File.ReadAllText(target);
-        Assert.Contains("<h1>Secret</h1>", html, StringComparison.Ordinal);
-        Assert.Contains("<p>seen</p>", html, StringComparison.Ordinal);
-        Assert.Contains("<p>[image: shot]</p>", html, StringComparison.Ordinal);
-        Assert.DoesNotContain("The plan", html, StringComparison.Ordinal);
-        Assert.DoesNotContain("<img", html, StringComparison.Ordinal);
+        Assert.Equal(ActionReason.Locked, result.Reason);
         Assert.Equal(agrees, data.Keys.Agrees);
+        Assert.False(File.Exists(target));
         Assert.Equal(sealedBytes, File.ReadAllBytes(sealedPath));
         Assert.Equal(db, DbHash());
     }
 
     private async Task<ActionResult> Refused(
-        string name, string path, string text, ActionKind kind = ActionKind.Refused, Confirmation? confirmed = null)
+        string name, string path, string text, ActionKind kind = ActionKind.Refused)
     {
         await data.RefreshAsync();
         SortedDictionary<string, string> before = Files();
         bool existed = Path.IsPathFullyQualified(path) && (File.Exists(path) || Directory.Exists(path));
 
-        ActionResult result = await data.Actions!.ShareNote(name, path, leaveOutPrivate: true, confirmed);
+        ActionResult result = await data.Actions!.ShareNote(name, path, leaveOutPrivate: true);
 
         Assert.Equal(kind, result.Kind);
         Assert.Equal(text, result.Text);

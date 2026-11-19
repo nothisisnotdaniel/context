@@ -1797,7 +1797,7 @@ public sealed class MainTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Contains(cut.FindAll(".links-panel p"), p => p.TextContent == "Sensitive notes have no links."), Wait);
         Assert.Empty(cut.FindAll(".note-toolbar"));
-        Assert.Equal(["rename", "delete", "history", "share", "make-plain", "lock"], await MenuIdsAsync(cut));
+        Assert.Equal(["rename", "delete", "history", "make-plain", "lock"], await MenuIdsAsync(cut));
     }
 
     // 152 AC-14 / AC-16: Export of a subpage suggests its title as the file name.
@@ -3850,7 +3850,7 @@ public sealed class MainTests : IDisposable
         await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal("Can't unlock 2026-10-29.", cut.Find(".unreadable").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Contains(cut.FindAll(".links-panel p"), p => p.TextContent == "Sensitive notes have no links."), Wait);
-        Assert.Equal(["end-day", "rename", "delete", "history", "share", "make-plain", "lock"], await MenuIdsAsync(cut));
+        Assert.Equal(["end-day", "rename", "delete", "history", "make-plain", "lock"], await MenuIdsAsync(cut));
         int agrees = data.Keys.Agrees;
         byte[] bytes = File.ReadAllBytes(Path.Combine(data.Root, "2026-10-29.ctxs"));
 
@@ -4072,7 +4072,7 @@ public sealed class MainTests : IDisposable
         await PickDate(cut, "2026-11-21");
         cut.WaitForAssertion(() => Assert.Equal("2026-11-21", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Contains(cut.FindAll(".links-panel p"), p => p.TextContent == "Sensitive notes have no links."), Wait);
-        Assert.Equal(["rename", "delete", "history", "share", "make-plain", "lock"], await MenuIdsAsync(cut));
+        Assert.Equal(["rename", "delete", "history", "make-plain", "lock"], await MenuIdsAsync(cut));
     }
 
     // 199 AC-1, 241: Today is the first icon button, then Search (218), Capture and Pick a day; no popover at first. (216: with no note

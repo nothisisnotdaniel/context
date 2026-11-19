@@ -334,15 +334,11 @@ input[type="checkbox"]:disabled {
     overflow-wrap: anywhere;
 }
 
-/* Share: the #private choice and, for a sensitive note, the warning that the copy is not encrypted. */
+/* Share: the #private choice. */
 .share-option {
     align-items: center;
     display: flex;
     gap: 8px;
-    margin: 0 0 16px;
-}
-
-.share-warning {
     margin: 0 0 16px;
 }
 

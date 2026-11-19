@@ -66,7 +66,7 @@ public sealed class SensitiveFlowTests : IDisposable
 
         await Open(cut, js, "Plan");
 
-        Assert.Equal(["Rename", "Delete", "History", "Share", "Make plain", "Lock"], await MenuLabelsAsync(cut));
+        Assert.Equal(["Rename", "Delete", "History", "Make plain", "Lock"], await MenuLabelsAsync(cut));
         Assert.Empty(cut.FindAll("button.open-external"));
         Assert.Empty(cut.FindAll(".note-toolbar"));
 
@@ -480,7 +480,7 @@ public sealed class SensitiveFlowTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Equal("Project", cut.Find(".note-title").TextContent), Wait);
         Assert.Equal(["Project.ctxs"], RootFiles());
-        Assert.Equal(["Rename", "Delete", "History", "Share", "Make plain", "Lock"], await MenuLabelsAsync(cut));
+        Assert.Equal(["Rename", "Delete", "History", "Make plain", "Lock"], await MenuLabelsAsync(cut));
         cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.mount").Count), Wait);
         Assert.Equal("Secret\n", js.MountedText());
         Assert.Equal(1, data.Keys.Agrees);
