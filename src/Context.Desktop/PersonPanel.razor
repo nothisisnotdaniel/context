@@ -30,6 +30,7 @@
             {
                 <p class="grey" role="status">No notes, appointments or todos mention @DesktopText.OneLine(Person).</p>
             }
+            @TopicResult()
         }
         else
         {
@@ -71,6 +72,7 @@
                 </ul>
             }
             @TopicsSection(view)
+            @TopicResult()
             @if (view.Waiting.Count > 0)
             {
                 <h2>Waiting for</h2>
@@ -119,10 +121,6 @@
             <p class="red" role="status">Can't read the todos.</p>
         }
     }
-    @if (topicResult is { Kind: not ActionKind.Done } failed)
-    {
-        <p class="red topic-result" role="status">@DesktopText.OneLine(failed.Text)</p>
-    }
     @if (askingTopic is { } topicAsked)
     {
         <ConfirmDialog Question="@($"Mark this topic done? {topicAsked.Text}")" ConfirmLabel="Mark done"
@@ -146,6 +144,15 @@
     /// <summary>Called with a mentioning note's name when it is clicked.</summary>
     [Parameter]
     public EventCallback<string> OnOpen { get; set; }
+
+    // The red line of a failed tick, right under the Topics list.
+    private RenderFragment TopicResult() => __builder =>
+    {
+        @if (topicResult is { Kind: not ActionKind.Done } failed)
+        {
+            <p class="red topic-result" role="status">@DesktopText.OneLine(failed.Text)</p>
+        }
+    };
 
     // The open topics (job 253): a checkbox asks first, the text, and the note's name opening the note.
     private RenderFragment TopicsSection(PersonView shown) => __builder =>

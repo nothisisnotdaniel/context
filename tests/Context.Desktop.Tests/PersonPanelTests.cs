@@ -401,7 +401,7 @@ public sealed class PersonPanelTests : IDisposable
         Assert.Empty(cut.FindAll(".topics-list"));
     }
 
-    // 253 AC-7: a topic whose line changed since the render shows the red line and writes nothing.
+    // 253 AC-7: a topic whose line changed since the render shows the red line right under the list and writes nothing.
     [Fact]
     public async Task Tick_TopicChanged_RedLine()
     {
@@ -415,6 +415,7 @@ public sealed class PersonPanelTests : IDisposable
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.True(cut.Find("p.topic-result").ClassList.Contains("red")), Wait);
+        Assert.True(cut.Find("p.topic-result").PreviousElementSibling!.ClassList.Contains("topics-list"));
         Assert.Equal("next: @[Ann Lee] budget later\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
     }
 

@@ -100,7 +100,8 @@ internal static class TopicParser
         }
 
         System.Text.StringBuilder builder = new();
-        TagParser.Collapse(line.AsSpan(close + 1), builder, int.MaxValue, null);
+        // Stops once past MaxTextLength: the kept prefix is the same as collapsing the whole rest.
+        TagParser.Collapse(line.AsSpan(close + 1), builder, MaxTextLength, null);
         if (builder.Length > MaxTextLength)
         {
             builder.Length = char.IsHighSurrogate(builder[MaxTextLength - 1]) ? MaxTextLength - 1 : MaxTextLength;
