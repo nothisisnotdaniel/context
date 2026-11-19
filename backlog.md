@@ -131,6 +131,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#84](backlog/084-screenshot-to-inbox.md) Screenshot to inbox → 260-screenshot-to-inbox
 - [x] [#86](backlog/086-mermaid-diagrams.md) Mermaid diagrams → 263-mermaid-diagrams
 - [x] [#87](backlog/087-standup-notes.md) Standup notes → 265-standup-notes
+- [ ] [#352](backlog/352-fix-flaky-snapshot-tests-that-catch.md) Fix flaky snapshot tests that catch the recent.json temp file
 - [ ] [#85](backlog/085-similar-notes.md) Similar notes
 - [ ] [#90](backlog/090-keep-mixed-line-endings.md) Keep mixed line endings
 - [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4; #108)
