@@ -328,6 +328,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#369](backlog/369-work-item-read-the-linked-repos.md) Work item: read the linked repos in parallel
 - [?] [#370](backlog/370-command-bar-show-a-running-line.md) Command bar: show a running line while a command runs
 - [?] [#371](backlog/371-command-bar-fit-the-window-to.md) Command bar: fit the window to its content and check the rounded corners
+- [?] [#375](backlog/375-code-block-copy-announce-the-result.md) Code block Copy: announce the result to screen readers
+- [?] [#376](backlog/376-code-blocks-track-changed-blocks-by.md) Code blocks: track changed blocks by identity, not index
 
 ## Dropped with the terminal UI
 
