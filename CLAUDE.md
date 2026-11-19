@@ -1350,6 +1350,28 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Outlook on.`/`Outlook off.`, Refused when turning on without `Available`, Failed `Can't read settings.json. Nothing
     was saved.` for a broken file). Nothing from Outlook is stored on disk; the CLI, `review` and the briefing don't
     read it.
+    **Smart paste** (job 244): `editor/src/paste.js` (DOM-free): `tableText` (CRLF/CR to `\n`, one trailing `\n`
+    dropped, 2-500 lines, equal tabs 1-49, no `|` in a cell; trimmed cells, header, `---` row), `loneLink` (trimmed,
+    one `http(s)` URL with a host, no whitespace, at most 2048), `smartPaste(state, text, plain)` (null for plain, a
+    non-paragraph or code; a table replaces the selection as its own paragraph; a link goes in as unmarked text with
+    meta `linkMeta`), `linkTitleTransaction` (only while the mapped range still holds exactly the unmarked URL and the
+    block saves and parses back with the same link runs; `closeHistory`, one undo step), test hooks `pastedMarkdown`
+    and `titledMarkdown` (`SmartPasteBundleTests`). `view.js` `handlePaste` treats a paste as plain while Shift is held
+    (own keydown/keyup tracking, ProseMirror's rule incl. key 45), records each pasted link (`maxPendingLinks` 20,
+    mapped on every transaction) and calls `OnPasteLink(url)`; `setLinkTitle(element, url, title)` applies a title.
+    `markdown.js` no longer escapes `|` (`RoundTrip/lossless/table.md`, `lossy/escaped-pipe.md`). Core `PageTitle.cs`:
+    `IPageTitleSource`, `PageTitleFetcher(handler, timeout)` (one GET, `Accept` HTML, 2xx, final URI http(s), media type
+    absent/`text/html`/`application/xhtml+xml`, first `MaxBodyBytes` 256 KiB, declared charset else UTF-8, first
+    `<title>` HTML-decoded, bidi controls removed, control/whitespace runs one space, cut to 200; user info or a padded URL refused; never
+    throws, never logs). `SettingsStore.ReadFetchTitles` (exactly `"paste":{"fetchTitles":true}`, a broken file
+    throws) / `SaveFetchTitles` (other keys kept). `DesktopState.FetchTitlesSetting()` (false on error) and
+    `PageTitle(url, token)` (null when off, cancelled or no source); `Program.cs` passes its own `SocketsHttpHandler`
+    (`UseCookies = false`, no credentials, 5 redirects) with a 3 s timeout. `NoteEditor` handles `LinkPasted` only for a
+    plain mounted note (`LastTitleFetch` for tests) and cancels pending fetches on reload, `ShowSavedAsync` and dispose.
+    Settings `h3` `Pasting` (after Outlook): `input.fetch-titles` `Fetch page titles for pasted links`, grey hint;
+    `DesktopActions.SetFetchTitles(on)`: accent `Page titles on.`/`Page titles off.`, else red `Can't save
+    settings.json.` with the box back. Tests use `FakePageTitles` and `FakeHttpHandler` (`RedirectTo`). Manual check:
+    Cmd+Shift+V in WKWebView (README).
     **Crash log** (job 237, `CrashLog.cs`, desktop only): `CrashLog(root, utcNow, version, os, home)` writes into
     `<root>/.logs/` (a dot folder, so `List()` and `DataWatcher` ignore it). `Write(source, e)` writes
     `crash-yyyyMMdd-HHmmss-fff.log` (UTC; `-2`..`-99` on a clash, `FileMode.CreateNew`) holding only the UTC time, the

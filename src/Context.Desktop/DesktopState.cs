@@ -29,6 +29,7 @@ internal sealed class DesktopState
     private readonly Func<DateOnly> today;
     private readonly Func<DateTime> utcNow;
     private readonly IOutlookSource outlook;
+    private readonly IPageTitleSource? pageTitles;
 
     // Guards the Outlook cache: one call per day (appointments), each with its start time.
     private readonly object outlookGate = new();
@@ -64,8 +65,10 @@ internal sealed class DesktopState
         SensitiveSession? session = null,
         CalendarLink? calendarLink = null,
         IOutlookSource? outlook = null,
-        TimeSpan? outlookTimeout = null)
+        TimeSpan? outlookTimeout = null,
+        IPageTitleSource? pageTitles = null)
     {
+        this.pageTitles = pageTitles;
         this.outlook = outlook ?? new UnsupportedOutlookSource();
         OutlookTimeout = outlookTimeout ?? DefaultOutlookTimeout;
         this.calendarLink = calendarLink;
@@ -619,6 +622,46 @@ internal sealed class DesktopState
             return new OutlookSettingView(availability, false, true);
         }
     });
+
+    /// <summary>
+    /// Whether a pasted link's page may be downloaded for its title (<c>"paste":{"fetchTitles":true}</c>), off the
+    /// calling thread. Never throws: a missing or unreadable <c>settings.json</c> reads as off.
+    /// </summary>
+    public Task<bool> FetchTitlesSetting() => Task.Run(FetchTitlesOn);
+
+    /// <summary>
+    /// The page title for a link pasted into a plain note, or <c>null</c>. Asks the page-title source (once) only when
+    /// the setting is on; with it off (or unreadable), without a source or once <paramref name="token"/> is cancelled,
+    /// nothing is requested. Never throws.
+    /// </summary>
+    public async Task<string?> PageTitle(string url, CancellationToken token)
+    {
+        try
+        {
+            if (pageTitles is null || !await FetchTitlesSetting().ConfigureAwait(false) || token.IsCancellationRequested)
+            {
+                return null;
+            }
+
+            return await pageTitles.FetchAsync(url, token).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private bool FetchTitlesOn()
+    {
+        try
+        {
+            return new SettingsStore(notes.Root).ReadFetchTitles();
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
 
     /// <summary>Whether Outlook can be read here; reads no calendar data and never throws.</summary>
     public OutlookAvailability ReadOutlookAvailability()

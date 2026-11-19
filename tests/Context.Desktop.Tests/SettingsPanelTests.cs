@@ -47,7 +47,7 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.Equal("Close", close.GetAttribute("aria-label"));
         Assert.Equal("Close", close.GetAttribute("title"));
         Assert.NotNull(close.QuerySelector("svg"));
-        Assert.Equal(["Exchange calendar", "Outlook", "Sensitive notes"], cut.FindAll("h3").Select(h => h.TextContent).ToArray());
+        Assert.Equal(["Exchange calendar", "Outlook", "Pasting", "Sensitive notes"], cut.FindAll("h3").Select(h => h.TextContent).ToArray());
         IElement line = cut.Find(".calendar-link-state");
         Assert.Equal("No calendar link set.", line.TextContent);
         Assert.True(line.ClassList.Contains("grey"));
@@ -64,11 +64,13 @@ public sealed class SettingsPanelTests : IDisposable
     [Fact]
     public async Task Field_IsAMaskedInputWithoutAValue_SaveDisabledWhileEmpty()
     {
-        // 217: without Outlook here the Outlook section has no checkbox, so the link field is the only input.
+        // 217: without Outlook here the Outlook section has no checkbox, so (244: besides the Pasting checkbox) the link
+        // field is the only input.
         data.Outlook.Available = OutlookAvailability.Unsupported;
         IRenderedComponent<SettingsPanel> cut = await Show();
 
-        IElement field = Assert.Single(cut.FindAll("input"));
+        Assert.Single(cut.FindAll("input[type=checkbox]"), i => i.ClassList.Contains("fetch-titles"));
+        IElement field = Assert.Single(cut.FindAll("input"), i => i.GetAttribute("type") != "checkbox");
         Assert.Equal("password", field.GetAttribute("type"));
         Assert.Equal("Calendar link", field.GetAttribute("aria-label"));
         Assert.Equal("off", field.GetAttribute("autocomplete"));
@@ -628,6 +630,141 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.Contains("red", cut.Find(".outlook-result").ClassList);
         Assert.False(cut.Find("input.outlook-enabled").HasAttribute("checked"));
         Assert.Equal(before, File.ReadAllBytes(path));
+    }
+
+    // 244 AC-9: the Pasting section: the checkbox shows the stored value (unchecked by default and for an unreadable
+    // file), with its label and the grey hint; showing it asks for no page title.
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("{\"paste\":{\"fetchTitles\":false}}", false)]
+    [InlineData("{\"paste\":{\"fetchTitles\":true}}", true)]
+    [InlineData("not json", false)]
+    public async Task Pasting_CheckboxShowsTheStoredValue(string? settings, bool expected)
+    {
+        if (settings is not null)
+        {
+            data.WriteFile(SettingsStore.FileName, settings);
+        }
+
+        IRenderedComponent<SettingsPanel> cut = await Show();
+
+        IElement box = cut.Find("label.fetch-titles-line input.fetch-titles");
+        Assert.Equal("checkbox", box.GetAttribute("type"));
+        Assert.Equal(expected, box.HasAttribute("checked"));
+        Assert.Equal("Fetch page titles for pasted links", cut.Find("label.fetch-titles-line").TextContent.Trim());
+        IElement hint = cut.Find(".fetch-titles-hint");
+        Assert.Equal("When on, Context downloads a pasted link's page to read its title.", hint.TextContent);
+        Assert.Contains("grey", hint.ClassList);
+        Assert.Equal(string.Empty, cut.Find(".fetch-titles-result").TextContent);
+        Assert.Equal("status", cut.Find(".fetch-titles-result").GetAttribute("role"));
+        Assert.Equal(0, data.PageTitles.Calls);
+    }
+
+    // 244 AC-9: toggling saves through SetFetchTitles (other properties kept); Done shows Page titles on./off. in the
+    // accent colour and the box follows.
+    [Fact]
+    public async Task Pasting_Toggle_OnThenOff_KeepsOthers()
+    {
+        data.WriteFile(SettingsStore.FileName, "{\"theme\":\"dark\",\"outlook\":{\"enabled\":true},\"savedSearches\":[{\"name\":\"Work\",\"query\":\"#work\"}]}");
+        IRenderedComponent<SettingsPanel> cut = await Show();
+
+        await cut.Find("input.fetch-titles").ChangeAsync(new ChangeEventArgs { Value = true });
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("Page titles on.", cut.Find(".fetch-titles-result").TextContent);
+            Assert.True(cut.Find("input.fetch-titles").HasAttribute("checked"));
+        }, Wait);
+        Assert.Contains("accent", cut.Find(".fetch-titles-result").ClassList);
+        SettingsStore store = new SettingsStore(data.Root);
+        Assert.True(store.ReadFetchTitles());
+        Assert.True(store.ReadOutlook());
+        Assert.Single(store.ReadSavedSearches());
+        Assert.Contains("\"theme\": \"dark\"", File.ReadAllText(Path.Combine(data.Root, SettingsStore.FileName)), StringComparison.Ordinal);
+
+        await cut.Find("input.fetch-titles").ChangeAsync(new ChangeEventArgs { Value = false });
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("Page titles off.", cut.Find(".fetch-titles-result").TextContent);
+            Assert.False(cut.Find("input.fetch-titles").HasAttribute("checked"));
+        }, Wait);
+        Assert.False(store.ReadFetchTitles());
+        Assert.True(store.ReadOutlook());
+        Assert.Equal(0, data.PageTitles.Calls);
+    }
+
+    // 244 AC-9: a broken settings.json shows the red text, the box stays unchecked, and the file is not changed.
+    [Fact]
+    public async Task Pasting_Toggle_BrokenSettings_RedText_BoxBack()
+    {
+        data.WriteFile(SettingsStore.FileName, "{\"dayEnd\":{\"moved\":5}}");
+        string path = Path.Combine(data.Root, SettingsStore.FileName);
+        byte[] before = File.ReadAllBytes(path);
+        IRenderedComponent<SettingsPanel> cut = await Show();
+
+        await cut.Find("input.fetch-titles").ChangeAsync(new ChangeEventArgs { Value = true });
+
+        cut.WaitForAssertion(
+            () => Assert.Equal("Can't save settings.json.", cut.Find(".fetch-titles-result").TextContent), Wait);
+        Assert.Contains("red", cut.Find(".fetch-titles-result").ClassList);
+        Assert.False(cut.Find("input.fetch-titles").HasAttribute("checked"));
+        Assert.Equal(before, File.ReadAllBytes(path));
+    }
+
+    // 244 AC-9: a folder that can't be written: the red text, and the box goes back to the stored (checked) value.
+    [Fact]
+    public async Task Pasting_Toggle_ReadOnlyFolder_RedText_BoxBack()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        data.WriteFile(SettingsStore.FileName, "{\"paste\":{\"fetchTitles\":true}}");
+        string path = Path.Combine(data.Root, SettingsStore.FileName);
+        byte[] before = File.ReadAllBytes(path);
+        IRenderedComponent<SettingsPanel> cut = await Show();
+        File.SetUnixFileMode(data.Root, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            if (CanWriteIn(data.Root))
+            {
+                // Running as root: the folder stays writable, nothing to check.
+                return;
+            }
+
+            await cut.Find("input.fetch-titles").ChangeAsync(new ChangeEventArgs { Value = false });
+
+            cut.WaitForAssertion(
+                () => Assert.Equal("Can't save settings.json.", cut.Find(".fetch-titles-result").TextContent), Wait);
+            Assert.Contains("red", cut.Find(".fetch-titles-result").ClassList);
+            Assert.True(cut.Find("input.fetch-titles").HasAttribute("checked"));
+            Assert.Equal(before, File.ReadAllBytes(path));
+        }
+        finally
+        {
+            File.SetUnixFileMode(data.Root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    private static bool CanWriteIn(string folder)
+    {
+        string probe = Path.Combine(folder, "probe-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            File.WriteAllText(probe, "x");
+            File.Delete(probe);
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
     }
 
     private async Task<IRenderedComponent<SettingsPanel>> Show()

@@ -78,9 +78,21 @@ internal static class Program
             MaxAutomaticRedirections = 5,
         };
         CalendarFeed feed = new CalendarFeed(folder, calendarLink, http, () => DateTime.UtcNow);
+
+        // Page titles for pasted links (job 244, only when the setting is on): a handler of its own, without cookies or
+        // credentials, so nothing of the calendar feed's is shared; each fetch is cut off after 3 s.
+        using SocketsHttpHandler titleHttp = new SocketsHttpHandler
+        {
+            UseCookies = false,
+            Credentials = null,
+            AllowAutoRedirect = true,
+            MaxAutomaticRedirections = 5,
+        };
+        PageTitleFetcher pageTitles = new PageTitleFetcher(titleHttp, TimeSpan.FromSeconds(3));
         SensitiveSession session = new SensitiveSession(() => DateTime.UtcNow);
         DesktopState state = new DesktopState(
-            notes, todos, index, calendar, feed, Today, () => DateTime.UtcNow, KeyStore(), session, calendarLink, Outlook());
+            notes, todos, index, calendar, feed, Today, () => DateTime.UtcNow, KeyStore(), session, calendarLink, Outlook(),
+            pageTitles: pageTitles);
         DesktopActions actions = new DesktopActions(
             notes, todos, state, new ShellNoteLauncher(), calendarLink, feed, () => DateTime.Now, calendar,
             TimesFolder.Resolve(Environment.GetEnvironmentVariable(TimesFolder.VariableName)), new SystemNotifier());

@@ -1,7 +1,8 @@
 // The bundle's entry: everything the page and the tests use hangs off globalThis.ContextEditor.
 import { roundTrip, isLossless, inlineNodes, docJson, splitTitle, outline, attributeRows, editAttributes, attributeSplit } from "./markdown.js";
 import { chipDom, headingDom } from "./schema.js";
-import { opensChip, typedBlock, typedMarkdown, mount, getMarkdown, isDirty, markClean, markCleanIf, destroy, focus, insertAttachment, headings, scrollToHeading, attributes, setAttributes } from "./view.js";
+import { opensChip, typedBlock, typedMarkdown, mount, getMarkdown, isDirty, markClean, markCleanIf, destroy, focus, insertAttachment, headings, scrollToHeading, attributes, setAttributes, setLinkTitle } from "./view.js";
+import { pastedMarkdown, titledMarkdown } from "./paste.js";
 
 // A file dropped anywhere in the window must never navigate the web view: the editor handles its own drops.
 if (typeof globalThis.addEventListener === "function") {
@@ -38,6 +39,8 @@ globalThis.ContextEditor = Object.freeze({
   chipDom,
   headingDom,
   opensChip,
+  pastedMarkdown,
+  titledMarkdown,
   // Need a page.
   mount,
   getMarkdown,
@@ -51,4 +54,5 @@ globalThis.ContextEditor = Object.freeze({
   scrollToHeading,
   attributes,
   setAttributes,
+  setLinkTitle,
 });

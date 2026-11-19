@@ -190,7 +190,7 @@ internal sealed record BoardSetting
 
 /// <summary>
 /// <c>&lt;root&gt;/settings.json</c>: <c>{"dayEnd":{"worked":"yyyy-MM-ddTHH:mm","moved":"yyyy-MM-dd"}}</c>, both values
-/// optional, <c>"savedSearches":[{"name":"…","query":"…"}]</c>, <c>"outlook":{"enabled":true|false}</c> and
+/// optional, <c>"savedSearches":[{"name":"…","query":"…"}]</c>, <c>"outlook":{"enabled":true|false}</c>, <c>"paste":{"fetchTitles":true|false}</c> and
 /// <c>"boards":[{"tag":"…","columns":["…"]}]</c> (read only, see <see cref="ReadBoards"/>). Read through <see cref="BoundedFile"/>; written as UTF-8 without BOM through a temp file and a move,
 /// keeping every other property. The automatic day's end (<see cref="DayEnd.AutoClose"/>) and the saved searches use it.
 /// </summary>
@@ -212,6 +212,8 @@ internal sealed class SettingsStore
     private const string QueryKey = "query";
     private const string OutlookKey = "outlook";
     private const string EnabledKey = "enabled";
+    private const string PasteKey = "paste";
+    private const string FetchTitlesKey = "fetchTitles";
     private const string BoardsKey = "boards";
     private const string TagKey = "tag";
     private const string ColumnsKey = "columns";
@@ -326,6 +328,26 @@ internal sealed class SettingsStore
         DayEndOf(document);
         SavedSearchesOf(document);
         document[OutlookKey] = new JsonObject { [EnabledKey] = enabled };
+        Write(document);
+    }
+
+    /// <summary>
+    /// True when <c>paste</c> is exactly <c>{"fetchTitles":true}</c>: a pasted link's page may be downloaded for its
+    /// title. A missing file or section, or any other value, counts as off. Throws <see cref="SettingsStoreException"/>
+    /// only when the file itself can't be read or isn't a JSON object.
+    /// </summary>
+    public bool ReadFetchTitles() => FlagOf(ReadRoot(), PasteKey, FetchTitlesKey) ?? false;
+
+    /// <summary>
+    /// Writes <c>"paste":{"fetchTitles":<paramref name="enabled"/>}</c>, replacing whatever <c>paste</c> held and
+    /// keeping every other property, creating the root folder if needed. Throws like <see cref="SaveOutlook"/>.
+    /// </summary>
+    public void SaveFetchTitles(bool enabled)
+    {
+        JsonObject document = ReadRoot();
+        DayEndOf(document);
+        SavedSearchesOf(document);
+        document[PasteKey] = new JsonObject { [FetchTitlesKey] = enabled };
         Write(document);
     }
 
@@ -563,12 +585,15 @@ internal sealed class SettingsStore
     }
 
     // The stored value of "outlook", or null when it is missing or anything other than exactly {"enabled":<bool>}.
-    private static bool? OutlookOf(JsonObject document)
+    private static bool? OutlookOf(JsonObject document) => FlagOf(document, OutlookKey, EnabledKey);
+
+    // The stored value of a section that is exactly {"<flag>":<bool>}, or null when it is missing or anything else.
+    private static bool? FlagOf(JsonObject document, string key, string flag)
     {
-        if (!document.TryGetPropertyValue(OutlookKey, out JsonNode? node)
+        if (!document.TryGetPropertyValue(key, out JsonNode? node)
             || node is not JsonObject section
             || section.Count != 1
-            || !section.TryGetPropertyValue(EnabledKey, out JsonNode? enabledNode)
+            || !section.TryGetPropertyValue(flag, out JsonNode? enabledNode)
             || enabledNode is not JsonValue value)
         {
             return null;

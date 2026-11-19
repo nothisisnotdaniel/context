@@ -71,6 +71,9 @@ internal sealed class DesktopFixture : IDisposable
     /// <summary>The Outlook source the state reads; in memory, Available, answering nothing. Released in <see cref="Dispose"/>.</summary>
     public FakeOutlookSource Outlook { get; } = new();
 
+    /// <summary>The page-title source the state asks for pasted links (job 244); in memory, never the network.</summary>
+    public FakePageTitles PageTitles { get; } = new();
+
     /// <summary>The state's Outlook timeout; <c>null</c> keeps the default. Set it before <see cref="CreateState"/>.</summary>
     public TimeSpan? OutlookTimeout { get; set; }
 
@@ -200,7 +203,8 @@ internal sealed class DesktopFixture : IDisposable
             Session,
             link,
             Outlook,
-            OutlookTimeout);
+            OutlookTimeout,
+            PageTitles);
         Actions = new DesktopActions(
             Notes, Todos, State, Launcher, link, feed, () => LocalNow, new CalendarStore(Root, Zone), TimesFolder, Notifier);
         Bunit.Services.AddSingleton(State);

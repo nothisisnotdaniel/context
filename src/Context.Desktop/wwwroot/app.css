@@ -1980,8 +1980,9 @@ nav.saved-searches ul {
     text-decoration: underline;
 }
 
-/* The settings page's Outlook checkbox line. */
-.settings-panel .outlook-line {
+/* The settings page's Outlook and Pasting checkbox lines. */
+.settings-panel .outlook-line,
+.settings-panel .fetch-titles-line {
     align-items: center;
     display: flex;
     gap: 6px;

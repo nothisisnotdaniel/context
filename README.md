@@ -203,6 +203,30 @@ appointments panel shows `Can't read Outlook (access denied).`. With Outlook clo
 Start it to see its appointments.`. The new Outlook and other systems can't be read; the section says so, and a
 calendar link works instead. The command-line tool doesn't read Outlook.
 
+### Smart paste
+
+When you paste plain text into a note in the desktop app, Context tidies it up:
+
+- Cells copied from Excel or Teams (tab-separated, 2 to 500 rows, the same number of columns on every row, no `|` in
+  a cell) become a Markdown table in its own paragraph, the first row as the header:
+  `| a | b |`, `| --- | --- |`, `| 1 | 2 |`. Context shows the table as text; it is not drawn as a grid.
+- A lone web link (`http://` or `https://`) goes in as you pasted it. If you turn on *Fetch page titles for pasted
+  links* in Settings, under *Pasting*, Context then downloads that page (one request, no cookies, no saved
+  passwords, at most 256 KiB, 3 seconds) and replaces the link with `[page title](link)`, but only if you haven't
+  changed the link in the meantime. One undo brings the plain link back. The setting is off by default and stored as
+  `"paste":{"fetchTitles":true}` in `settings.json`; while it is off, and always in sensitive notes, nothing is
+  downloaded. A title that would not save as the same link (for example one holding `#tag` or `[[...]]`) is not
+  used.
+- Headings and code are left alone: pasting there works as before.
+
+Ctrl+Shift+V (Cmd+Shift+V on macOS) pastes the text exactly as it is, with no table and no title. On macOS the app
+runs in WKWebView: when it delivers the paste to the page with Shift held, Context sees that and pastes the plain
+text; if WKWebView pastes natively without telling the page, you also get the plain text and no smart handling.
+This has not yet been checked by hand on macOS.
+
+A `|` you type is now saved as `|` (it used to be saved as `\|`), so tables already in your notes survive editing.
+A `\|` written in a file outside Context is saved as `|` once you edit the note in the app.
+
 ### Note templates
 
 Keep notes you write again and again (meetings, reviews) as plain Markdown files in the `templates` folder of the

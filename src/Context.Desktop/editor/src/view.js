@@ -1,6 +1,7 @@
 // The editor in the page: one ProseMirror view per host element. DOM is built only through ProseMirror's
 // renderer and document.createElement; tag, link, mention and attachment PDF clicks (and Enter on a focused chip) and
-// dropped files are reported to .NET, which decides what to open or store.
+// dropped files are reported to .NET, which decides what to open or store. A pasted lone link is reported too (job 244):
+// .NET may answer with its page title through setLinkTitle.
 import { EditorState, Selection, TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { keymap } from "prosemirror-keymap";
@@ -9,6 +10,7 @@ import { baseKeymap, toggleMark, setBlockType, chainCommands } from "prosemirror
 import { splitListItem, liftListItem, sinkListItem } from "prosemirror-schema-list";
 import { inputRules, wrappingInputRule, textblockTypeInputRule, InputRule } from "prosemirror-inputrules";
 import { schema } from "./schema.js";
+import { smartPaste, linkMeta, linkTitleTransaction } from "./paste.js";
 import { parse, serialize, splitTitle, joinTitle, headingList, attributeSplit, attributeBlockRowsJson, editAttributes, normalizePerson, isNetWhite } from "./markdown.js";
 
 const editors = new WeakMap();
@@ -16,6 +18,9 @@ const editors = new WeakMap();
 // The limits .NET checks again: NoteAttachments.MaxBytes and MaxFilesPerDrop.
 const maxAttachmentBytes = 10 * 1024 * 1024;
 const maxFilesPerDrop = 10;
+
+// The pasted links an editor still waits on a title for; the oldest is dropped past this.
+const maxPendingLinks = 20;
 
 // An attachment PDF link: the only href a click opens (through .NET, in the system viewer).
 const attachmentPdf = /^\.attachments\/[^/\\]+\.pdf$/;
@@ -331,7 +336,7 @@ export function mount(element, markdown, dotnet, images, name) {
   const { head, body: afterHead } = JSON.parse(splitTitle(markdown, name));
   const { attrs, body } = attributeSplit(afterHead);
   const doc = parse(body);
-  const editor = { view: null, head, attrs, cleanAttrs: attrs, clean: doc, dirty: false, dotnet, images: new Map(), dropPos: null };
+  const editor = { view: null, head, attrs, cleanAttrs: attrs, clean: doc, dirty: false, dotnet, images: new Map(), dropPos: null, links: [], shift: false, lastKey: 0 };
   for (const image of images || []) {
     if (image && typeof image.src === "string" && !editor.images.has(image.src)) {
       editor.images.set(image.src, blobUrl(image.mime, image.base64));
@@ -376,6 +381,10 @@ export function mount(element, markdown, dotnet, images, name) {
         if (editor.dropPos !== null) {
           editor.dropPos = tr.mapping.map(editor.dropPos);
         }
+        for (const link of editor.links) {
+          link.from = tr.mapping.map(link.from, 1);
+          link.to = tr.mapping.map(link.to, -1);
+        }
         reportDirty(editor);
         // Every text change restarts .NET's auto-save pause; .NET reads nothing until the pause elapses.
         dotnet.invokeMethodAsync("OnChanged").catch(() => {});
@@ -392,10 +401,36 @@ export function mount(element, markdown, dotnet, images, name) {
       dotnet.invokeMethodAsync("OnAttachment", href).catch(() => {});
       return true;
     },
+    // Smart paste (paste.js): a table or a lone link gets its own transaction; anything else, and every
+    // Ctrl/Cmd+Shift+V (plain, told the way ProseMirror tells it: Shift held, the key not Insert), takes the default.
+    handlePaste(view, event) {
+      const data = event && event.clipboardData;
+      if (!data) {
+        return false;
+      }
+      const tr = smartPaste(view.state, data.getData("text/plain"), editor.shift && editor.lastKey !== 45);
+      if (tr === null) {
+        return false;
+      }
+      view.dispatch(tr.setMeta("paste", true).setMeta("uiEvent", "paste"));
+      const url = tr.getMeta(linkMeta);
+      if (typeof url === "string") {
+        const to = view.state.selection.from;
+        editor.links.push({ url, from: to - url.length, to });
+        if (editor.links.length > maxPendingLinks) {
+          editor.links.shift();
+        }
+        dotnet.invokeMethodAsync("OnPasteLink", url).catch(() => {});
+      }
+      return true;
+    },
     handleDOMEvents: {
-      // A keydown on a focused chip never reaches the keymaps: Enter opens the chip like a click, every other key
-      // keeps its browser default (Tab moves on) and changes no text.
+      // Every keydown notes whether Shift is held (a paste then is a plain one, as ProseMirror tells it). A keydown on
+      // a focused chip never reaches the keymaps: Enter opens the chip like a click, every other key keeps its browser
+      // default (Tab moves on) and changes no text.
       keydown(view, event) {
+        editor.shift = event.keyCode === 16 || event.shiftKey;
+        editor.lastKey = event.keyCode;
         const node = chipNode(view, event.target);
         if (!node) {
           return false;
@@ -405,6 +440,13 @@ export function mount(element, markdown, dotnet, images, name) {
           openChip(node, dotnet);
         }
         return true;
+      },
+      // Shift let go: the next paste is not a plain one (ProseMirror's own rule).
+      keyup(view, event) {
+        if (event.keyCode === 16) {
+          editor.shift = false;
+        }
+        return false;
       },
       // Dropped files: remember where they landed (the cursor when that can't be told) and hand them to .NET.
       drop(view, event) {
@@ -449,6 +491,29 @@ export function insertAttachment(element, src, name, isImage, mime, base64) {
   editor.dropPos = null;
   editor.view.dispatch(tr);
   editor.dropPos = pos + node.nodeSize;
+}
+
+/**
+ * Gives the link pasted as url (the oldest such paste on this mount) its page title: in one transaction, its own undo
+ * step, the URL text becomes title with a link mark to url, but only while the mapped range still holds exactly that URL
+ * text without marks. Returns whether it did; the pending link is forgotten either way.
+ */
+export function setLinkTitle(element, url, title) {
+  const editor = editors.get(element);
+  if (!editor) {
+    return false;
+  }
+  const index = editor.links.findIndex(link => link.url === url);
+  if (index < 0) {
+    return false;
+  }
+  const [link] = editor.links.splice(index, 1);
+  const tr = linkTitleTransaction(editor.view.state, link.from, link.to, url, title);
+  if (tr === null) {
+    return false;
+  }
+  editor.view.dispatch(tr);
+  return true;
 }
 
 /** The editor's text as Markdown: the hidden title line first, unchanged. */

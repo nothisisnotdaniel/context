@@ -89,6 +89,13 @@
     private CancellationTokenSource? pause;
     private bool disposed;
 
+    // The page-title lookups of links pasted into this mount (job 244): all cancelled by a remount or when the editor
+    // goes away, so a late title never reaches another text.
+    private CancellationTokenSource titleFetches = new();
+
+    /// <summary>The latest pasted link's title lookup (finished when there was none); for tests to wait on.</summary>
+    internal Task LastTitleFetch { get; private set; } = Task.CompletedTask;
+
     // The open document's headings, read from the mounted editor only (a sensitive note's never leave its memory but
     // as this list, reported through OnOutline); empty until mounted, and reported empty when this editor goes away or
     // locks.
@@ -353,6 +360,7 @@
         }
 
         CancelPause();
+        CancelTitleFetches();
 
         EditableNote? note = await State.ReadForEdit(Name);
         if (note is null)
@@ -388,6 +396,7 @@
         }
 
         CancelPause();
+        CancelTitleFetches();
         try
         {
             await Interop.MountAsync(host, saved.Text, Sensitive ? [] : await State.InlineImages(Name, saved.Text), Name);
@@ -409,6 +418,7 @@
     {
         disposed = true;
         CancelPause();
+        CancelTitleFetches();
         await ClearOutlineAsync();
         Dispose();
         if (Sensitive)
@@ -425,6 +435,7 @@
         Interop.DirtyChanged -= DirtyChanged;
         Interop.FilesDropped -= FilesDropped;
         Interop.AttachmentClicked -= AttachmentClicked;
+        Interop.LinkPasted -= LinkPasted;
         Interop.Changed -= EditorChanged;
         await Interop.DestroyAsync();
     }
@@ -458,6 +469,7 @@
             Interop.DirtyChanged += DirtyChanged;
             Interop.FilesDropped += FilesDropped;
             Interop.AttachmentClicked += AttachmentClicked;
+            Interop.LinkPasted += LinkPasted;
             Interop.Changed += EditorChanged;
 
             // A sensitive note shows no images: nothing next to it is read.
@@ -869,6 +881,52 @@
     private Task FilesDropped(DroppedFiles dropped) => InvokeAsync(() => OnAttach.InvokeAsync(dropped));
 
     private Task AttachmentClicked(string href) => InvokeAsync(() => OnOpenAttachment.InvokeAsync(href));
+
+    // A lone link was pasted: in a plain note, its page title is looked up in the background (DesktopState.PageTitle
+    // asks nothing while the setting is off). A sensitive note's links never leave it.
+    private Task LinkPasted(string url) => InvokeAsync(() =>
+    {
+        if (Sensitive || disposed || !mounted)
+        {
+            return;
+        }
+
+        LastTitleFetch = FetchTitleAsync(url, titleFetches.Token);
+    });
+
+    // Hands a found title to the editor, which applies it only while the pasted URL text is still untouched.
+    private async Task FetchTitleAsync(string url, CancellationToken cancel)
+    {
+        string? title = await State.PageTitle(url, cancel);
+        if (title is null || cancel.IsCancellationRequested)
+        {
+            return;
+        }
+
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                if (cancel.IsCancellationRequested || disposed || !mounted)
+                {
+                    return;
+                }
+
+                await Interop.SetLinkTitleAsync(host, url, title);
+            });
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException or ObjectDisposedException)
+        {
+            // The page or the editor is gone; the URL stays as pasted.
+        }
+    }
+
+    private void CancelTitleFetches()
+    {
+        titleFetches.Cancel();
+        titleFetches.Dispose();
+        titleFetches = new CancellationTokenSource();
+    }
 
     private void ShowStatus(string text, string cssClass)
     {
