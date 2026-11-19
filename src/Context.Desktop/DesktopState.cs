@@ -616,6 +616,26 @@ internal sealed class DesktopState
     });
 
     /// <summary>
+    /// The <c>affiliation::</c> and <c>role::</c> values of the person pages (<see cref="Context.PeopleAttributes.Build"/>)
+    /// after syncing the index, off the calling thread. Never throws: any failure gives the
+    /// <see cref="PeopleAttributesKind.IndexUnreadable"/> view.
+    /// </summary>
+    public Task<PeopleAttributes> PeopleAttributes() => Task.Run(() =>
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                return Context.PeopleAttributes.Build(index, notes);
+            }
+        }
+        catch (Exception)
+        {
+            return Context.PeopleAttributes.Unreadable;
+        }
+    });
+
+    /// <summary>
     /// The notes linked to the note called <paramref name="name"/> by shared tags or <c>[[note links]]</c>
     /// (<see cref="LinksView.Build"/>) after syncing the index, off the calling thread. Never throws: any failure
     /// gives the <see cref="LinksViewKind.IndexUnreadable"/> view.
