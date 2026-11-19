@@ -60,6 +60,11 @@
             Read calendar from Outlook
         </label>
         <p class="outlook-hint grey">@OutlookHintText</p>
+        <label class="mail-digest-line">
+            <input type="checkbox" class="mail-digest-enabled" checked="@outlook.MailDigestEnabled" disabled="@busy"
+                   @onchange="ToggleMailDigest" />
+            Suggest todos from Outlook mail
+        </label>
     }
     <p class="outlook-result @outlookResultClass" role="status">@outlookResultText</p>
     <h3>Pasting</h3>
@@ -394,6 +399,30 @@
     }
 
     // The checkbox: stores the new value, then shows what is stored.
+    private async Task ToggleMailDigest(ChangeEventArgs e)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        bool on = e.Value is bool value ? value : string.Equals(e.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.SetMailDigestEnabled(on);
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        outlookResultText = DesktopText.OneLine(result.Text);
+        outlookResultClass = result.Kind == ActionKind.Done ? "accent" : "red";
+        await Load();
+    }
+
     private async Task ToggleOutlook(ChangeEventArgs e)
     {
         if (busy)

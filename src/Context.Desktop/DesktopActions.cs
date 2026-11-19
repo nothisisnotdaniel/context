@@ -229,6 +229,8 @@ internal sealed class DesktopActions
     public const string OutlookOnText = "Outlook on.";
     public const string OutlookOffText = "Outlook off.";
     public const string OutlookUnavailableText = "Outlook can't be read on this computer.";
+    public const string MailDigestOnText = "Mail suggestions on.";
+    public const string MailDigestOffText = "Mail suggestions off.";
     public const string FetchTitlesOnText = "Page titles on.";
     public const string FetchTitlesOffText = "Page titles off.";
     public const string SettingsNotSavedText = "Can't save settings.json.";
@@ -1512,6 +1514,104 @@ internal sealed class DesktopActions
     /// (<see cref="SearchGoneText"/>); a broken file is Failed with <see cref="SearchesNotRemovedText"/>.
     /// </summary>
     public Task<ActionResult> RemoveSavedSearch(string name) => Run(() => RemoveSavedSearchNow(name));
+
+    /// <summary>
+    /// Stores whether the Mail digest may read Outlook mail (<c>"mailDigest":{"enabled":…}</c> in
+    /// <c>settings.json</c>, every other property kept; job 286). Done with <see cref="MailDigestOnText"/> or
+    /// <see cref="MailDigestOffText"/>. Turning it on is Refused/<see cref="ActionReason.Invalid"/>
+    /// (<see cref="OutlookUnavailableText"/>, writing nothing) when the source is not
+    /// <see cref="OutlookAvailability.Available"/>. A broken <c>settings.json</c> is Failed with
+    /// <see cref="SearchesUnreadableText"/> and left as it is.
+    /// </summary>
+    public Task<ActionResult> SetMailDigestEnabled(bool on) => Run(() => SetMailDigestEnabledNow(on));
+
+    /// <summary>
+    /// Accepts one Mail digest suggestion (job 286): a <see cref="MailSuggestionKind.Todo"/> is added due today, a
+    /// <see cref="MailSuggestionKind.FollowUp"/> due on its date, both like <see cref="AddTodo"/>;
+    /// a <see cref="MailSuggestionKind.MeetingNote"/> creates the top-level note <see cref="MailSuggestion.Title"/>
+    /// with <c># &lt;Title&gt;</c> and a line naming the sender and the mail's date. An invalid title is
+    /// Refused/<see cref="ActionReason.Invalid"/> with the <see cref="NoteStore.ValidateTitle"/> text, a taken name
+    /// Refused/<see cref="ActionReason.Exists"/> with <see cref="ExistsText"/>. A Done suggestion is left out of the
+    /// session's later digests.
+    /// </summary>
+    public Task<ActionResult> AcceptSuggestion(MailSuggestion suggestion) => Run(() => AcceptSuggestionNow(suggestion));
+
+    private ActionResult AcceptSuggestionNow(MailSuggestion suggestion)
+    {
+        ActionResult result = suggestion.Kind switch
+        {
+            MailSuggestionKind.Todo => AddTodoNow(suggestion.Text, DateOnly.FromDateTime(localNow()), null, null),
+            MailSuggestionKind.FollowUp => AddTodoNow(
+                suggestion.Text, suggestion.Due ?? DateOnly.FromDateTime(localNow()), null, null),
+            _ => CreateMailNoteNow(suggestion),
+        };
+        if (result.Kind == ActionKind.Done)
+        {
+            state.HideMailSuggestion(suggestion);
+        }
+
+        return result;
+    }
+
+    private ActionResult CreateMailNoteNow(MailSuggestion suggestion)
+    {
+        string title = suggestion.Title ?? suggestion.Text;
+        string? invalid = NoteStore.ValidateTitle(NoteStore.NormalizeTitle(title));
+        if (invalid is not null)
+        {
+            return Refused(ActionReason.Invalid, invalid);
+        }
+
+        DateTime received = TimeZoneInfo.ConvertTimeFromUtc(
+            DateTime.SpecifyKind(suggestion.Source.Received, DateTimeKind.Utc), state.Zone);
+        string sender = DesktopText.OneLine(suggestion.Source.Sender);
+        string text = "# " + title + "\n\nFrom mail by " + sender + ", "
+            + received.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ".\n";
+        try
+        {
+            NoteInfo created = notes.CreateWithText(title, text);
+            return new ActionResult(ActionKind.Done, ActionReason.None, created.Name);
+        }
+        catch (NoteExistsException)
+        {
+            return Refused(ActionReason.Exists, ExistsText(title));
+        }
+        catch (ArgumentException)
+        {
+            return Refused(ActionReason.Invalid, NoteStore.ValidateTitle(NoteStore.NormalizeTitle(title)) ?? CreateFailedText);
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, CreateFailedText);
+        }
+    }
+
+    private ActionResult SetMailDigestEnabledNow(bool on)
+    {
+        if (on && state.ReadOutlookAvailability() != OutlookAvailability.Available)
+        {
+            return Refused(ActionReason.Invalid, OutlookUnavailableText);
+        }
+
+        try
+        {
+            settings.SaveMailDigest(on);
+        }
+        catch (SettingsTooLargeException)
+        {
+            return Refused(ActionReason.Invalid, SearchesTooLargeText);
+        }
+        catch (SettingsStoreException)
+        {
+            return Failed(ActionReason.Unreadable, SearchesUnreadableText);
+        }
+        catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+        {
+            return Failed(ActionReason.WriteFailed, SearchesWriteFailedText);
+        }
+
+        return new ActionResult(ActionKind.Done, ActionReason.None, on ? MailDigestOnText : MailDigestOffText);
+    }
 
     /// <summary>
     /// Stores whether Context reads Outlook (<c>"outlook":{"enabled":…}</c> in <c>settings.json</c>, every other

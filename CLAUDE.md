@@ -875,7 +875,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `[[note link]]` parsing in `NoteLinkParser.cs`, link rewriting on rename in `NoteLinkRewriter.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the desktop's recently opened notes (`recent.json`) in `RecentNotes.cs`, its pinned notes (`pinned.json`) in `PinnedNotes.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; over the cap it throws `FileTooLargeException : IOException` (`Too large.`); job 275: every full read of `.ics` files and the feed cache (`CalendarStore.ReadText`, `MaxFileBytes`), `todos.json` (`TodoStore.MaxFileBytes`, 5 MB; a directory named `todos.json` can't be read), `calendar-link.txt` (`CalendarLink.MaxFileBytes`, 4096) and notes (`NoteStore.Read`) goes through it; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
-    `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs` (the agenda carry-over in `MeetingCarryOver.cs`), note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs` (its triage queue, remove and snooze in `InboxTriage.cs`), the day's end in `DayEnd.cs` (Times' day file in `TimesDay.cs`, today's Times bookings in `TimesNow.cs`, `settings.json` in `SettingsStore.cs`), the morning briefing in `Briefing.cs` (Times' flexitime balance in `TimesBalance.cs`), the todo input rules (`TryParseDate`,
+    `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs` (the agenda carry-over in `MeetingCarryOver.cs`), the Mail digest's rules in `MailDigest.cs`, note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs` (its triage queue, remove and snooze in `InboxTriage.cs`), the day's end in `DayEnd.cs` (Times' day file in `TimesDay.cs`, today's Times bookings in `TimesNow.cs`, `settings.json` in `SettingsStore.cs`), the morning briefing in `Briefing.cs` (Times' flexitime balance in `TimesBalance.cs`), the todo input rules (`TryParseDate`,
     `MaxTextLength`, `TryParseRepeat`, `NextDue`) in `TodoInput.cs`, the todo repeat in `TodoRepeat.cs`, waiting-for todos in `WaitingFor.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`), `SearchView.cs` (`search`), `TagFilter.cs` (tag filters), `DecisionsView.cs` (`decisions`, with `DecisionParser.cs`), `SimilarNotes.cs` (similar notes), `BoardView.cs` (tag boards), `ReviewView.cs` (the weekly review) and `CalendarLinkView.cs`
     (the calendar link), and the command ranking for the desktop palette in `CommandMatcher.cs`; the notes list is `NoteStore.List()` itself.
   - **Data step in Core, drawing in the front end:** a view's Core data step returns plain types (a kind plus raw
@@ -900,7 +900,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `DataWatcher` (one `FileSystemWatcher` with subfolders, `IsRelevant` filter: the top-level files as before, plus
     a `.md` at any depth except under a folder starting with `.` or under the top-level `calendar/`, and the top-level
     `settings.json` (job 207: saved searches edited outside the app; any case, not in a subfolder); 300 ms
-    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `PeoplePanel`, `LinksPanel`, `OutlinePanel`, `DayAppointmentsPanel`, `TimesTodayPanel`, `AppointmentPanel`, `PersonPanel`, `ItemPanel`, `ReviewPanel`, `TriagePanel`, `ToReviewPanel`, `SimilarPanel`)
+    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `PeoplePanel`, `LinksPanel`, `OutlinePanel`, `DayAppointmentsPanel`, `TimesTodayPanel`, `AppointmentPanel`, `PersonPanel`, `ItemPanel`, `ReviewPanel`, `TriagePanel`, `MailDigestPanel`, `ToReviewPanel`, `SimilarPanel`)
     inherit `StateComponent`, which injects the state and `DesktopActions` (internal types can't be
     public parameters). `DesktopActions` (with `ActionResult`: `ActionKind` `Done`/`Refused`/`Failed`, `ActionReason`,
     raw text) is the only write path: it never throws, runs one action at a time (`Busy`), refreshes the state after a change and has the test
@@ -1596,8 +1596,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     note or failing `headings` shows none, and a locked sensitive note's outline goes with its editor (its headings are only ever read from the unlocked editor, never indexed).
     **Outlook** (job 217, Windows with classic Outlook only): `IOutlookSource` (`Availability()` `Unsupported`/
     `NotInstalled`/`Available`; `Appointments(day, zone)` gives `OutlookRead<T>` with a
-    kind `Ok`/`NotRunning`/`Denied`/`Failed` and the items, never an exception text; job 223 removed the mail read, so
-    Context never reads the Inbox). `Program.cs` is the only file naming `OutlookComSource` (Windows; elsewhere `UnsupportedOutlookSource`),
+    kind `Ok`/`NotRunning`/`Denied`/`Failed` and the items, never an exception text; `RecentMail(sinceUtc, max)` for
+    the Mail digest, below. Job 223 removed the old mail panel. The Mail digest's read is the only Inbox read: opt-in,
+    only on a click of Read mail, private items skipped, `Body` capped). `Program.cs` is the only file naming `OutlookComSource` (Windows; elsewhere `UnsupportedOutlookSource`),
     and no test does (tests use `FakeOutlookSource`: availability, kind and items per call, call counts, `Throws`, a
     `ManualResetEventSlim` gate released on dispose). `OutlookComSource` is late-bound (`dynamic`, no interop package),
     attaches only through `ole32!CLSIDFromProgID` + `oleaut32!GetActiveObject` (never `Activator.CreateInstance`, never
@@ -1605,8 +1606,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     default Calendar (9; `Sort("[Start]")`, `IncludeRecurrences`, `Restrict` built only from the day in current-culture
     `g`), walks `GetFirst`/`GetNext` (never `Count`; 500 items), converts machine time to the
     calendar zone and `FinalReleaseComObject`s every COM object; it writes nothing (no `.Save(`/`.Send(`/`.Delete(`/
-    `.Move(`/`.Display(`) and reads no `Body`/`HTMLBody`/`Recipients`/`RequiredAttendees`/`SenderEmailAddress`, and has
-    no exemption from any other source scan. Private items (job 227, always on, no setting): `ReadAppointment` reads
+    `.Move(`/`.Display(`) and reads no `HTMLBody`/`Recipients`/`RequiredAttendees`/`SenderEmailAddress` (and `Body` only
+    in the Mail digest's capped read), and has no exemption from any other source scan. Private items (job 227, always on, no setting): `ReadAppointment` reads
     `Sensitivity` first and skips the item, before reading anything else of it, unless `OutlookSensitivity.IsPrivate`
     sees a number equal to 0 (Normal) or 1 (Personal); Private (2), Confidential (3), any other or unreadable value is
     hidden (fails closed; `OutlookSensitivity.cs`, `OutlookSensitivityTests`). On = `SettingsStore.ReadOutlook()` (exactly `"outlook":{"enabled":true}`;
@@ -1625,6 +1626,33 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Outlook on.`/`Outlook off.`, Refused when turning on without `Available`, Failed `Can't read settings.json. Nothing
     was saved.` for a broken file). Nothing from Outlook is stored on disk; the CLI, `review` and the briefing don't
     read it.
+    **Mail digest** (job 286, opt-in, no model): `MailDigest.cs` (Core, pure): `MailMessage(Subject, Sender, Received
+    UTC, MessageClass, Body)`, `MailSuggestion(Kind, Text, Due?, Title?, Source)` with `MailSuggestionKind`
+    `Todo`/`FollowUp`/`MeetingNote`, and `MailDigest.Suggest(messages, today, hidden)`: newest mail first; a
+    `MessageClass` starting with `IPM.Schedule.Meeting.Request` (ordinal, any case) gives only a MeetingNote whose
+    `TitleFor(subject)` turns path characters and controls into spaces, collapses and trims, cuts to 100 (never inside
+    a surrogate pair), strips leading/trailing dots and spaces and a trailing `.md`, else `Mail note`; any other mail
+    gives up to 3 Todos for sentences (split after `.`/`!`/`?` before whitespace or the line end) starting with
+    please/can you/could you/bitte/kannst du/könntest du (then a non-letter), controls removed, cut to 200, plus one
+    FollowUp `Reply to <Sender>: <Subject>` (same cleaning, due today + 2) when a body line ends in `?`; deduped by
+    kind and text, at most 50 (`MailDigestTests`). `OutlookComSource.RecentMail` reads the Inbox (6) only: `Restrict`
+    on `[ReceivedTime]` from the date alone, `Sort("[ReceivedTime]", true)`, `GetFirst`/`GetNext` up to 200; `ReadMail`
+    reads `Sensitivity` first and skips private items, then only `Subject`, `SenderName`, `ReceivedTime`,
+    `MessageClass` and `Body` cut to `MailDigest.MaxBodyLength` (4000). On = `SettingsStore.ReadMailDigest()`
+    (`"mailDigest":{"enabled":true}`), the Outlook setting and `Available` (`DesktopState.MailDigestOn()`); Settings
+    has the checkbox `input.mail-digest-enabled` `Suggest todos from Outlook mail` under the Outlook checkbox
+    (`DesktopActions.SetMailDigestEnabled`, Done `Mail suggestions on.`/`off.`, Refused without `Available`).
+    `MailDigestPanel` (`Page.MailDigest`, palette `/digest`): grey `Turn on mail suggestions in Settings.` when off;
+    else `button.read-mail` `Read mail` is the only thing that reads (`DesktopState.MailDigest()`: 7 days, 200 mails,
+    `OutlookTimeout`, never cached, never on open or on a state change), `Reading mail…` meanwhile, then
+    `OutlookStatusLine.MailText` (NotRunning `Outlook isn't running. Start it to see its mail.`) or rows
+    `li.digest-row` (kind, text as one line, grey `Sender · yyyy-MM-dd HH:mm`, `button.digest-accept`/`.digest-dismiss`;
+    focus moves to the next row's Accept). `DesktopActions.AcceptSuggestion`: Todo `AddTodo(text, today)`, FollowUp
+    `AddTodo(text, due)`, MeetingNote `CreateWithText(Title, "# Title\n\nFrom mail by <Sender>, <yyyy-MM-dd>.\n")`
+    (Refused/Invalid with the `ValidateTitle` text, Refused/Exists with `ExistsText(Title)`); Done hides the row,
+    Refused/Failed keep it with `p.digest-result`. Accepted and dismissed suggestions are hidden for the session in
+    memory only (`DesktopState.HideMailSuggestion`); no mail text is written, logged or cached in files, and the CLI,
+    `review` and the briefing never see it (`MailDigestPanelTests`, `MailDigestActionsTests`).
     **Smart paste** (job 244): `editor/src/paste.js` (DOM-free): `tableText` (CRLF/CR to `\n`, one trailing `\n`
     dropped, 2-500 lines, equal tabs 1-49, no `|` in a cell; trimmed cells, header, `---` row), `loneLink` (trimmed,
     one `http(s)` URL with a host, no whitespace, at most 2048), `smartPaste(state, text, plain)` (null for plain, a
@@ -1800,7 +1828,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `LinkCreateActionsTests` (`CreateLinkedNote`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `ShareActionsTests` (`ShareNote`) and `ShareDialogTests` (Share through `Main`), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `PeoplePanelTests`, `ReviewPanelTests`, `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StandupActionsTests` (`WriteStandup`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `LinkCreateActionsTests` (`CreateLinkedNote`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `MailDigestPanelTests` (the Mail digest page and `/digest` through `Main`, with `FakeOutlookSource`) and `MailDigestActionsTests` (`AcceptSuggestion`, `SetMailDigestEnabled`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `ShareActionsTests` (`ShareNote`) and `ShareDialogTests` (Share through `Main`), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `PeoplePanelTests`, `ReviewPanelTests`, `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StandupActionsTests` (`WriteStandup`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
     CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules, the transfer calls and no file system class in `.razor`), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),

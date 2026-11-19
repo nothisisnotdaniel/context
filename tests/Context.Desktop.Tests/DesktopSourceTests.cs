@@ -23,10 +23,11 @@ public sealed class DesktopSourceTests
     // 177: NoteAttachments.Add (caught by Add), MoveWithNote and RemoveUnlinked. 178: TodoStore.MarkNotified.
     // 179: InboxTriage.Snooze; InboxTriage.Remove is checked on its own (Sources_CallInboxTriageWritesOnlyInDesktopActions),
     // since components remove from their own lists. 201: NoteTodos.Complete (matched by Complete). 217: SettingsStore.SaveOutlook.
+    // 286: SettingsStore.SaveMailDigest.
     private static readonly Regex Writes = new(
         @"(?:(?<!\bActions)|(?!\.\s*RestoreVersion\s*\())\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
         + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture|CreateChild|Move|Ensure|CreateWithText"
-        + @"|CloseDay|RefreshWorked|RefreshStandup|MoveTodos|AutoClose|MoveDue|SaveDayEnd|SaveSavedSearches|Keep|RemoveHistory|RestoreVersion|MoveWithNote|RemoveUnlinked|MarkNotified|Snooze|SaveOutlook|SaveScreenshotFolder|RemoveScreenshotFolder)\s*\(",
+        + @"|CloseDay|RefreshWorked|RefreshStandup|MoveTodos|AutoClose|MoveDue|SaveDayEnd|SaveSavedSearches|Keep|RemoveHistory|RestoreVersion|MoveWithNote|RemoveUnlinked|MarkNotified|Snooze|SaveOutlook|SaveMailDigest|SaveScreenshotFolder|RemoveScreenshotFolder)\s*\(",
         RegexOptions.CultureInvariant);
 
     // 136: the real key stores and the real file dialog, spelled in pieces: no test file may hold their names (see
@@ -1428,6 +1429,7 @@ public sealed class DesktopSourceTests
     [InlineData("settings.SaveDayEnd(values)")]
     [InlineData("settings.SaveSavedSearches(searches)")]
     [InlineData("settings.SaveOutlook(on)")]
+    [InlineData("settings.SaveMailDigest(on)")]
     [InlineData("history.Keep(note.Path, bytes)")]
     [InlineData("state.HistoryStore.Keep(found.Path, current, found.Name)")]
     [InlineData("state.HistoryStore.RemoveHistory(path, \".md\")")]
@@ -2041,9 +2043,9 @@ public sealed class DesktopSourceTests
         Assert.Contains("[SupportedOSPlatform(\"windows\")]", source, StringComparison.Ordinal);
     }
 
-    // 217 AC-8: the Outlook source reads no mail body and no recipients, and never asks a folder for its Count.
+    // 217 AC-8: the Outlook source reads no HTML body and no recipients, and never asks a folder for its Count.
+    // 286 AC-11: the plain Body is allowed only as the Mail digest's capped read (OutlookSource_ReadsBodyOnlyCapped).
     [Theory]
-    [InlineData("Body")]
     [InlineData("HTMLBody")]
     [InlineData("Recipients")]
     [InlineData("RequiredAttendees")]
@@ -2058,17 +2060,92 @@ public sealed class DesktopSourceTests
         Assert.DoesNotContain(forbidden, source, StringComparison.Ordinal);
     }
 
-    // 223 AC-3: the Outlook source reads no mail: no sender, no received time, no Inbox folder.
+    // 223 AC-3, 286 AC-11: the Outlook source reads no sender, no received time and no Inbox folder outside the
+    // Mail digest's two mail methods (comments aside), and those read only the listed fields.
     [Theory]
     [InlineData("SenderName")]
     [InlineData("ReceivedTime")]
     [InlineData("InboxFolder")]
     [InlineData("Inbox")]
-    public void OutlookSource_ReadsNoMail(string forbidden)
+    public void OutlookSource_ReadsMailOnlyInTheMailMethods(string name)
+    {
+        string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), RealOutlookFile)).ReplaceLineEndings("\n");
+        string recent = Between(source, "public OutlookRead<MailMessage> RecentMail(", "// The running Outlook");
+        string read = Between(source, "private static MailMessage? ReadMail(", "// A wall-clock time");
+        string rest = source.Replace(recent, string.Empty, StringComparison.Ordinal).Replace(read, string.Empty, StringComparison.Ordinal);
+        string code = string.Join('\n', rest.Split('\n').Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+
+        Assert.DoesNotContain(name, code, StringComparison.Ordinal);
+        Assert.Contains(name, recent + read, StringComparison.Ordinal);
+    }
+
+    // 286 AC-11: the mail read asks each item for exactly these properties, and nothing else.
+    [Fact]
+    public void OutlookSource_ReadMail_ReadsOnlyTheListedFields()
+    {
+        string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), RealOutlookFile)).ReplaceLineEndings("\n");
+        string read = Between(source, "private static MailMessage? ReadMail(", "// A wall-clock time");
+
+        string[] names = [.. Regex.Matches(read, @"\bitem\.(\w+)").Select(m => m.Groups[1].Value).Distinct()];
+
+        Assert.Equal(["Sensitivity", "Subject", "SenderName", "ReceivedTime", "MessageClass", "Body"], names);
+    }
+
+    // 286 AC-11: the plain Body is read once, in the mail read, and cut to MailDigest.MaxBodyLength right after.
+    [Fact]
+    public void OutlookSource_ReadsBodyOnlyCapped()
+    {
+        string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), RealOutlookFile)).ReplaceLineEndings("\n");
+        string read = Between(source, "private static MailMessage? ReadMail(", "// A wall-clock time");
+
+        Assert.Single(Regex.Matches(source, @"\bBody\b"));
+        Assert.Single(Regex.Matches(read, @"\bBody\b"));
+        int body = read.IndexOf("item.Body", StringComparison.Ordinal);
+        int cap = read.IndexOf("body.Length > MailDigest.MaxBodyLength", StringComparison.Ordinal);
+        int cut = read.IndexOf("body[..MailDigest.MaxBodyLength]", StringComparison.Ordinal);
+        Assert.True(body >= 0 && cap > body && cut > cap);
+        Assert.Equal(4000, MailDigest.MaxBodyLength);
+    }
+
+    // 286 AC-11: the mail read never writes, sends, deletes, moves or shows an item.
+    [Theory]
+    [InlineData(".Save(")]
+    [InlineData(".Send(")]
+    [InlineData(".Delete(")]
+    [InlineData(".Move(")]
+    [InlineData(".Display(")]
+    [InlineData("HTMLBody")]
+    [InlineData("Recipients")]
+    [InlineData("SenderEmailAddress")]
+    public void OutlookSource_MailRead_StillRefuses(string forbidden)
     {
         string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), RealOutlookFile));
 
         Assert.DoesNotContain(forbidden, source, StringComparison.Ordinal);
+    }
+
+    // 286 AC-11: the mail read, too, reads each item's Sensitivity and skips private ones before anything else.
+    [Fact]
+    public void OutlookSource_ReadMail_ReadsSensitivityFirst()
+    {
+        string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), RealOutlookFile)).ReplaceLineEndings("\n");
+        string read = Between(source, "private static MailMessage? ReadMail(", "// A wall-clock time");
+
+        int sensitivity = read.IndexOf("item.Sensitivity", StringComparison.Ordinal);
+        int check = read.IndexOf("OutlookSensitivity.IsPrivate(", StringComparison.Ordinal);
+        int subject = read.IndexOf("item.Subject", StringComparison.Ordinal);
+        Assert.True(sensitivity >= 0 && check > sensitivity && subject > check);
+        Assert.Equal(sensitivity, read.IndexOf("item.", StringComparison.Ordinal));
+    }
+
+    // The text from start up to (not including) end; both must be found.
+    private static string Between(string text, string start, string end)
+    {
+        int from = text.IndexOf(start, StringComparison.Ordinal);
+        Assert.True(from >= 0, start);
+        int to = text.IndexOf(end, from, StringComparison.Ordinal);
+        Assert.True(to > from, end);
+        return text[from..to];
     }
 
     // 227 AC-6: the Outlook source reads each item's Sensitivity and skips private ones before reading its Subject.
@@ -2089,7 +2166,7 @@ public sealed class DesktopSourceTests
         Assert.True(body.IndexOf("item.", StringComparison.Ordinal) == sensitivity);
     }
 
-    // 223 AC-2: the Mail panel is gone, and no source names the mail read or its view.
+    // 223 AC-2: the Mail panel is gone, and no source names its summary or view (286 brings back only RecentMail).
     [Fact]
     public void Sources_HaveNoMailPanel()
     {
@@ -2098,7 +2175,7 @@ public sealed class DesktopSourceTests
             .Where(f =>
             {
                 string text = File.ReadAllText(Path.Combine(root, f));
-                return new[] { "RecentMail", "MailSummary", "RecentMailView" }
+                return new[] { "MailSummary", "RecentMailView", "RecentMailPanel" }
                     .Any(n => text.Contains(n, StringComparison.Ordinal));
             })
             .ToList();
@@ -2118,14 +2195,20 @@ public sealed class DesktopSourceTests
         Assert.DoesNotContain(forbidden, css, StringComparison.Ordinal);
     }
 
-    // 223 AC-5: the settings page promises no mail.
+    // 223 AC-5, 286: the settings page mentions mail only for the Mail digest's checkbox.
     [Fact]
-    public void SettingsPanel_MentionsNoMail()
+    public void SettingsPanel_MentionsMailOnlyForTheDigest()
     {
         string text = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "SettingsPanel.razor"));
+        string rest = Regex.Replace(
+            text.Replace("Suggest todos from Outlook mail", string.Empty, StringComparison.Ordinal),
+            "mail-?digest",
+            string.Empty,
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-        Assert.DoesNotContain("mail", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("mail", rest, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Read calendar from Outlook", text, StringComparison.Ordinal);
+        Assert.Contains("Suggest todos from Outlook mail", text, StringComparison.Ordinal);
     }
 
     // 223 AC-8: README's Outlook section mentions no mail or Inbox.
@@ -2143,17 +2226,25 @@ public sealed class DesktopSourceTests
         Assert.DoesNotContain("inbox", section, StringComparison.OrdinalIgnoreCase);
     }
 
-    // 223 AC-8: CLAUDE.md names no mail panel, mail read or sender.
+    // 223 AC-8: CLAUDE.md names no removed mail panel or summary.
     [Theory]
     [InlineData("RecentMailPanel")]
-    [InlineData("RecentMail")]
     [InlineData("MailSummary")]
-    [InlineData("SenderName")]
-    public void ClaudeMd_NamesNoMailRead(string forbidden)
+    public void ClaudeMd_NamesNoMailPanel(string forbidden)
     {
         string text = File.ReadAllText(Path.Combine(RepoFiles.Root(), "CLAUDE.md"));
 
         Assert.DoesNotContain(forbidden, text, StringComparison.Ordinal);
+    }
+
+    // 286 AC-12: CLAUDE.md no longer says Context never reads the Inbox; it names the Mail digest's read as the only one.
+    [Fact]
+    public void ClaudeMd_NamesTheMailDigestInboxRead()
+    {
+        string text = File.ReadAllText(Path.Combine(RepoFiles.Root(), "CLAUDE.md"));
+
+        Assert.DoesNotContain("never reads the Inbox", text, StringComparison.Ordinal);
+        Assert.Contains("The Mail digest's read is the only Inbox read", text, StringComparison.Ordinal);
     }
 
     // 136 AC-10: the certificate store and CNG are used only in the Windows key store.

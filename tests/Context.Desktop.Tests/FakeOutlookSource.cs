@@ -10,6 +10,7 @@ internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
     private readonly object gate = new();
     private readonly ManualResetEventSlim open = new(initialState: true);
     private readonly List<(DateOnly Day, TimeZoneInfo Zone)> appointmentCalls = [];
+    private readonly List<(DateTime SinceUtc, int Max)> mailCalls = [];
     private int availabilityCalls;
 
     public OutlookAvailability Available { get; set; } = OutlookAvailability.Available;
@@ -20,7 +21,13 @@ internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
     /// <summary>The items an <see cref="OutlookReadKind.Ok"/> <see cref="Appointments"/> call answers, by day.</summary>
     public Dictionary<DateOnly, IReadOnlyList<Appointment>> Days { get; } = [];
 
-    /// <summary>When set, <see cref="Appointments"/> throws this after counting the call.</summary>
+    /// <summary>The kind every <see cref="RecentMail"/> call answers.</summary>
+    public OutlookReadKind MailKind { get; set; } = OutlookReadKind.Ok;
+
+    /// <summary>The mails an <see cref="OutlookReadKind.Ok"/> <see cref="RecentMail"/> call answers.</summary>
+    public List<MailMessage> Mails { get; } = [];
+
+    /// <summary>When set, <see cref="Appointments"/> and <see cref="RecentMail"/> throw this after counting the call.</summary>
     public Exception? Throws { get; set; }
 
     public int AppointmentCalls
@@ -30,6 +37,29 @@ internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
             lock (gate)
             {
                 return appointmentCalls.Count;
+            }
+        }
+    }
+
+    public int MailCalls
+    {
+        get
+        {
+            lock (gate)
+            {
+                return mailCalls.Count;
+            }
+        }
+    }
+
+    /// <summary>The arguments of every <see cref="RecentMail"/> call, in order.</summary>
+    public IReadOnlyList<(DateTime SinceUtc, int Max)> MailArguments
+    {
+        get
+        {
+            lock (gate)
+            {
+                return [.. mailCalls];
             }
         }
     }
@@ -79,6 +109,30 @@ internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
         }
 
         return new OutlookRead<Appointment>(OutlookReadKind.Ok, Days.TryGetValue(day, out IReadOnlyList<Appointment>? items) ? items : []);
+    }
+
+    public OutlookRead<MailMessage> RecentMail(DateTime sinceUtc, int max)
+    {
+        lock (gate)
+        {
+            mailCalls.Add((sinceUtc, max));
+        }
+
+        open.Wait();
+        if (Throws is not null)
+        {
+            throw Throws;
+        }
+
+        if (MailKind != OutlookReadKind.Ok)
+        {
+            return new OutlookRead<MailMessage>(MailKind);
+        }
+
+        lock (gate)
+        {
+            return new OutlookRead<MailMessage>(OutlookReadKind.Ok, [.. Mails]);
+        }
     }
 
     /// <summary>Releases the gate, so no read stays blocked after the test; the gate itself is kept for late reads.</summary>

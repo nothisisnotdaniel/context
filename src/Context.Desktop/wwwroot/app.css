@@ -2007,6 +2007,67 @@ nav.saved-searches ul {
     display: none;
 }
 
+/* Mail digest (job 286): the Read mail button, its status line and one row per suggestion with Accept and Dismiss. */
+.mail-digest-panel {
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+}
+
+.mail-digest-panel:focus {
+    outline: none;
+}
+
+.mail-digest-bar {
+    margin: 8px 0;
+}
+
+.digest-rows {
+    list-style: none;
+    margin: 0 0 8px;
+    padding: 0;
+}
+
+.digest-row {
+    align-items: baseline;
+    border-top: 1px solid var(--line);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    padding: 6px 0;
+}
+
+.digest-kind {
+    flex: none;
+    font-weight: 600;
+}
+
+.digest-text {
+    flex: 1 1 12em;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.digest-source {
+    flex: 1 1 100%;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.digest-buttons {
+    display: flex;
+    gap: 6px;
+}
+
+.digest-result {
+    flex: 1 1 100%;
+    margin: 0;
+}
+
+.mail-digest-result:empty {
+    display: none;
+}
+
 /* The weekly review: changed notes, done and overdue todos, and next week's appointments grouped by day. */
 .review-panel {
     border-bottom: 1px solid var(--line);
@@ -2309,6 +2370,7 @@ nav.saved-searches ul {
 
 /* The settings page's Outlook and Pasting checkbox lines. */
 .settings-panel .outlook-line,
+.settings-panel .mail-digest-line,
 .settings-panel .fetch-titles-line {
     align-items: center;
     display: flex;

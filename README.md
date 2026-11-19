@@ -254,11 +254,29 @@ On Windows with classic Outlook, the desktop app can show the day's Outlook appo
 `calendar/*.ics` and the Exchange calendar. Turn it on in Settings, under *Outlook*: `Read calendar from Outlook`. It
 is off by default and stored as `"outlook":{"enabled":true}` in `settings.json`. Context reads the Outlook that is
 already running, with the profile you are signed in with: no app registration, no token, and it never starts Outlook,
-never changes anything in it and stores nothing from it on disk. It reads only the default Calendar (title, location,
-start, end, all day), at most every five minutes. Outlook may ask whether Context may access it; if you deny it, the
+never changes anything in it and stores nothing from it on disk. For appointments it reads only the default Calendar
+(title, location, start, end, all day), at most every five minutes. Outlook may ask whether Context may access it; if you deny it, the
 appointments panel shows `Can't read Outlook (access denied).`. With Outlook closed it shows `Outlook isn't running.
 Start it to see its appointments.`. The new Outlook and other systems can't be read; the section says so, and a
 calendar link works instead. The command-line tool doesn't read Outlook.
+
+### Mail digest
+
+On Windows with classic Outlook, the desktop app can suggest todos and notes from your recent mail. It is off by
+default: turn on `Read calendar from Outlook` and then `Suggest todos from Outlook mail` in Settings, under *Outlook*
+(stored as `"mailDigest":{"enabled":true}` in `settings.json`). Open the page with `/digest` in the command palette.
+Context reads your mail only when you click `Read mail`: the Inbox of the last seven days, at most 200 mails, and of
+each only the subject, the sender's name, when it arrived, its kind and the first 4000 characters of its text. Private
+and confidential mails are skipped. Fixed rules on this computer (no AI model) make the suggestions:
+
+- a sentence that starts with *please*, *can you*, *could you*, *bitte*, *kannst du* or *könntest du* becomes a todo
+  due today (at most three per mail);
+- a mail with a line ending in `?` becomes the follow-up `Reply to <sender>: <subject>`, due in two days;
+- a meeting request becomes a new note named after its subject, with the sender and the date.
+
+Each suggestion has `Accept` and `Dismiss`. Nothing is added to your todos or notes until you accept it; a dismissed
+suggestion stays hidden until Context restarts. Context never changes, sends or moves a mail, stores no mail on disk,
+and the command-line tool, `review` and the briefing never see it.
 
 ### Smart paste
 

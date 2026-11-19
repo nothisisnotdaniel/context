@@ -39,6 +39,10 @@ internal sealed class DesktopState
     private readonly object outlookGate = new();
     private Dictionary<DateOnly, OutlookCall<Appointment>> outlookDays = new();
 
+    // The mail suggestions accepted or dismissed in this session (job 286); never written to disk.
+    private readonly object mailGate = new();
+    private readonly Dictionary<MailSuggestionKey, bool> hiddenMail = [];
+
     private Task<DesktopSnapshot>? running;
     private bool pending;
     private DateOnly? lastDay;
@@ -847,7 +851,11 @@ internal sealed class DesktopState
         try
         {
             availability = outlook.Availability();
-            return new OutlookSettingView(availability, new SettingsStore(notes.Root).ReadOutlook(), false);
+            SettingsStore settings = new SettingsStore(notes.Root);
+            return new OutlookSettingView(availability, settings.ReadOutlook(), false)
+            {
+                MailDigestEnabled = settings.ReadMailDigest(),
+            };
         }
         catch (Exception)
         {
@@ -925,6 +933,78 @@ internal sealed class DesktopState
         catch (Exception)
         {
             return OutlookAvailability.Unsupported;
+        }
+    }
+
+    /// <summary>The days of Inbox mail the Mail digest reads.</summary>
+    public const int MailDigestDays = 7;
+
+    /// <summary>The most Inbox mails the Mail digest reads.</summary>
+    public const int MailDigestMax = 200;
+
+    /// <summary>
+    /// Whether the Mail digest may read Outlook (job 286): its own setting and the Outlook setting are on and Outlook
+    /// can be read here. Off the calling thread; never throws (an unreadable <c>settings.json</c> is off).
+    /// </summary>
+    public Task<bool> MailDigestOn() => Task.Run(MailOn);
+
+    /// <summary>
+    /// Reads the Inbox mail of the last <see cref="MailDigestDays"/> days (at most <see cref="MailDigestMax"/>),
+    /// bounded by <see cref="OutlookTimeout"/>, and returns its suggestions without those accepted or dismissed in
+    /// this session. With the digest off, nothing is asked. Off the calling thread, never cached, never throws.
+    /// </summary>
+    public Task<MailDigestView> MailDigest() => Task.Run(() =>
+    {
+        try
+        {
+            if (!MailOn())
+            {
+                return new MailDigestView(OutlookStatus.Off, []);
+            }
+
+            DateTime nowUtc = DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc);
+            DateTime sinceUtc = nowUtc.AddDays(-MailDigestDays);
+            (OutlookStatus status, IReadOnlyList<MailMessage> mails) =
+                Finish(Start(nowUtc, () => outlook.RecentMail(sinceUtc, MailDigestMax)));
+            if (status != OutlookStatus.Ok)
+            {
+                return new MailDigestView(status, []);
+            }
+
+            return new MailDigestView(OutlookStatus.Ok, Context.MailDigest.Suggest(mails, today(), IsMailHidden));
+        }
+        catch (Exception)
+        {
+            return new MailDigestView(OutlookStatus.Failed, []);
+        }
+    });
+
+    /// <summary>Leaves <paramref name="suggestion"/> out of every later <see cref="MailDigest"/> in this session.</summary>
+    public void HideMailSuggestion(MailSuggestion suggestion)
+    {
+        lock (mailGate)
+        {
+            hiddenMail[MailSuggestionKey.Of(suggestion)] = true;
+        }
+    }
+
+    private bool IsMailHidden(MailSuggestion suggestion)
+    {
+        lock (mailGate)
+        {
+            return hiddenMail.ContainsKey(MailSuggestionKey.Of(suggestion));
+        }
+    }
+
+    private bool MailOn()
+    {
+        try
+        {
+            return new SettingsStore(notes.Root).ReadMailDigest() && OutlookOn();
+        }
+        catch (Exception)
+        {
+            return false;
         }
     }
 
@@ -1008,6 +1088,14 @@ internal sealed class DesktopState
             OutlookReadKind.Denied => (OutlookStatus.Denied, []),
             _ => (OutlookStatus.Failed, []),
         };
+    }
+
+    // One suggestion as the session remembers it: its kind and text and the mail it came from.
+    private sealed record MailSuggestionKey(
+        MailSuggestionKind Kind, string Text, string Sender, string Subject, DateTime Received)
+    {
+        public static MailSuggestionKey Of(MailSuggestion s) =>
+            new(s.Kind, s.Text, s.Source.Sender, s.Source.Subject, s.Source.Received);
     }
 
     // One Outlook source call and when it started. A call still running is shared; a finished one is kept for
