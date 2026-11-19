@@ -347,6 +347,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#391](backlog/391-editor-type-an-inline-code-span.md) Editor: type an inline code span that holds a backtick
 - [?] [#392](backlog/392-notes-clean-up-escapes-saved-by.md) Notes: clean up escapes saved by the old editor
 - [?] [#393](backlog/393-tests-find-the-rare-unnamed-debug.md) Tests: find the rare unnamed Debug failure in Context.Desktop.Tests
+- [?] [#394](backlog/394-search-index-skip-the-full-note.md) Search index: skip the full note_text repair pass when nothing needs it
 
 ## Dropped with the terminal UI
 
