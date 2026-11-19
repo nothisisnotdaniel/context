@@ -149,35 +149,4 @@ public sealed class DoneLogTests : IDisposable
     {
         Assert.Empty(DoneLog.Read(store));
     }
-
-    // AC-8: weeks run Monday to Sunday, newest first; inside a week by date, then line, descending.
-    [Fact]
-    public void View_GroupsByWeekNewestFirst()
-    {
-        File.WriteAllText(DonePath, "# done\n- 2026-11-16 mon\n- 2026-11-22 sun a\n- 2026-11-23 next mon\n- 2026-11-22 sun b\n");
-
-        DoneLogView view = DoneLogView.Build(store);
-
-        Assert.False(view.Unreadable);
-        Assert.Equal([new DateOnly(2026, 11, 23), new DateOnly(2026, 11, 16)], view.Weeks.Select(w => w.Monday));
-        Assert.Equal(["next mon"], view.Weeks[0].Entries.Select(e => e.Text));
-        Assert.Equal(["sun b", "sun a", "mon"], view.Weeks[1].Entries.Select(e => e.Text));
-        Assert.Equal(new DateOnly(2026, 11, 16), DoneLogView.Monday(new DateOnly(2026, 11, 22)));
-    }
-
-    // AC-8: an unreadable note sets Unreadable with no weeks; a missing one is just empty.
-    [Fact]
-    public void View_Unreadable_SetsFlag()
-    {
-        Assert.Equal((0, false), (DoneLogView.Build(store).Weeks.Count, DoneLogView.Build(store).Unreadable));
-        using (FileStream big = File.Create(DonePath))
-        {
-            big.SetLength(NoteStore.MaxNoteBytes + 1);
-        }
-
-        DoneLogView view = DoneLogView.Build(store);
-
-        Assert.True(view.Unreadable);
-        Assert.Empty(view.Weeks);
-    }
 }
