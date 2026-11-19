@@ -315,6 +315,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#359](backlog/359-refuse-lookalike-spellings-of-the-removed.md) Refuse lookalike spellings of the removed secret options
 - [?] [#360](backlog/360-test-the-full-removed-option-sentence.md) Test the full removed-option sentence in CLAUDE.md
 - [?] [#361](backlog/361-tag-index-explicit-handling-of-a.md) Tag index: explicit handling of a symlinked context.db
+- [?] [#362](backlog/362-notes-refuse-a-note-swapped-for.md) Notes: refuse a note swapped for a symlink between listing and reading
+- [?] [#363](backlog/363-calendar-skip-symlinked-ics-files.md) Calendar: skip symlinked .ics files
 
 ## Dropped with the terminal UI
 
