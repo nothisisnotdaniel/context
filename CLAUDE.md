@@ -1327,9 +1327,10 @@ Every factory agent reads this file before working on Context. Keep it short and
     state is built. A test that snapshots the data folder after an open first calls `DesktopFixture.WaitForRecentWrites()`,
     a bounded poll until the internal `DesktopActions.PendingRecentWrites` (writes `RecordOpened` started, counted with
     `Interlocked`, uncounted in the task's `finally`) is 0; `DesktopFixture.HoldRecentWrites()` holds the write gate on a
-    thread of its own (job 246). `FileSnapshot.Take` also leaves out the temp files of every ignored file (`.<name>.<anything>.tmp` in
-    that file's own folder, checked on the path before any read), so a snapshot that ignores `recent.json` never sees
-    or reads a write in flight; a test that proves no temp file is left lists the folder itself (job 267). A whole-folder snapshot that includes `context.db` while panels may still load goes
+    thread of its own (job 246). `FileSnapshot.Take` also leaves out the temp files of every ignored file
+    (`.<name>.<anything>.tmp` in that file's own folder, checked on the path before any read), so a snapshot that
+    ignores `recent.json` never sees or reads a write in flight; a test that proves no temp file is left lists the
+    folder itself (job 267). A whole-folder snapshot that includes `context.db` while panels may still load goes
     through `DesktopFixture.SnapshotUnderIndexGate(syncFirst)` (under `IndexGate`; `syncFirst: true` for "before"), since
     reading the file during a panel's index sync fails on macOS. An open subpage shows `<nav class="breadcrumb" aria-label="Breadcrumb">`
     as the first child of `.note-area`: each ancestor a `button.crumb` opening it through `RequestOpen`, the last item a span with
