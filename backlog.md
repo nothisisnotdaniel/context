@@ -184,7 +184,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [h] [#155](backlog/155-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view
 - [ ] [#156](backlog/156-hide-the-empty-editor-box-when.md) Hide the empty editor box when the editor fails to start
 - [ ] [#226](backlog/226-cli-and-console-todo-hints.md) CLI and console todo hints
-- [?] [#160](backlog/160-replace-the-console-text-parity-rule.md) Replace the console text-parity rule in CLAUDE.md
+- [ ] [#160](backlog/160-replace-the-console-text-parity-rule.md) Replace the console text-parity rule in CLAUDE.md
 - [ ] [#235](backlog/235-signing-hardening-and-windows-signing.md) Signing hardening and Windows signing
 - [h] [#164](backlog/164-set-up-apple-signing-and-check.md) Set up Apple signing and check the first signed build
 - [h] [#167](backlog/167-check-the-first-todos-json-id.md) Check the first todos.json id migration
