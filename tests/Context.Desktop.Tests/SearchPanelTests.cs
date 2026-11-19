@@ -48,7 +48,8 @@ public sealed class SearchPanelTests : IDisposable
         Assert.True(line.ClassList.Contains("grey"));
         Assert.True(line.ClassList.Contains("cut"));
         Assert.All(cut.FindAll("button"), b => Assert.Equal("button", b.GetAttribute("type")));
-        Assert.Empty(cut.FindAll("p[role=status]"));
+        // 295: the only status line is the count above the list.
+        Assert.Equal("2 notes found", Assert.Single(cut.FindAll("p[role=status]")).TextContent);
 
         await cut.FindAll(".search-hits button")[1].ClickAsync(new MouseEventArgs());
         await cut.Find("button.close").ClickAsync(new MouseEventArgs());
@@ -666,6 +667,92 @@ public sealed class SearchPanelTests : IDisposable
 
     private static object Field(IRenderedComponent<SearchPanel> cut, string name) =>
         typeof(SearchPanel).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(cut.Instance)!;
+
+    // 295 AC-9: with hits, a grey role=status count line comes before the labelled list: the full count, not capped.
+    [Theory]
+    [InlineData(1, "1 note found")]
+    [InlineData(3, "3 notes found")]
+    [InlineData(103, "103 notes found")]
+    public async Task Render_Hits_CountLineBeforeLabelledList(int count, string expected)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            data.WriteNote($"n{i:D3}", "shared word\n");
+        }
+
+        await data.RefreshAsync();
+
+        IRenderedComponent<SearchPanel> cut = Render("shared");
+
+        cut.WaitForAssertion(() => Assert.Equal(Math.Min(count, SearchPanel.MaxRows), NoteNames(cut).Length), Wait);
+        AngleSharp.Dom.IElement line = cut.Find("p.search-count");
+        Assert.Equal(expected, line.TextContent);
+        Assert.Equal("status", line.GetAttribute("role"));
+        Assert.True(line.ClassList.Contains("grey"));
+        AngleSharp.Dom.IElement list = cut.Find("ul.search-hits");
+        Assert.Equal("Search results", list.GetAttribute("aria-label"));
+        Assert.True(line.NextElementSibling!.ClassList.Contains("search-hits"));
+    }
+
+    // 295 AC-9: a tag filter's results have the count line and the labelled list too.
+    [Fact]
+    public async Task Render_TagFilter_CountLine()
+    {
+        data.WriteNote("Alpha", "#shared\n");
+        data.WriteNote("beta", "#shared\n");
+        data.WriteNote("Other", "#other\n");
+        await data.RefreshAsync();
+
+        IRenderedComponent<SearchPanel> cut = Render("#shared");
+
+        cut.WaitForAssertion(() => Assert.Equal(["Alpha", "beta"], NoteNames(cut)), Wait);
+        AngleSharp.Dom.IElement line = cut.Find("p.search-count");
+        Assert.Equal("2 notes found", line.TextContent);
+        Assert.Equal("status", line.GetAttribute("role"));
+        Assert.Equal("Search results", cut.Find("ul.search-hits").GetAttribute("aria-label"));
+    }
+
+    // 295 AC-9: blank, no matches and an unreadable index have their own status line and no count line.
+    [Theory]
+    [InlineData("", "Type text or a tag filter like #project and not #done.", false)]
+    [InlineData("nothing here", "No notes contain nothing here.", false)]
+    [InlineData("budget", "Can't read the search index.", true)]
+    public async Task Render_NoHits_NoCountLine(string text, string status, bool badIndex)
+    {
+        data.WriteNote("Plan", "budget\n");
+        if (badIndex)
+        {
+            data.WriteFile(TagIndex.FileName, NotADatabase);
+        }
+
+        await data.RefreshAsync();
+
+        IRenderedComponent<SearchPanel> cut = Render(text);
+
+        cut.WaitForAssertion(() => Assert.Equal(status, cut.Find("p[role=status]").TextContent), Wait);
+        Assert.Empty(cut.FindAll("p.search-count"));
+        Assert.Single(cut.FindAll("p[role=status]"));
+    }
+
+    // 295 AC-6: 250 hits show 100 rows, then "… 150 more"; the count line gives all 250.
+    [Fact]
+    public async Task Render_250Hits_HundredRowsAndMoreLine()
+    {
+        for (int i = 0; i < 250; i++)
+        {
+            data.WriteNote($"n{i:D3}", "shared word\n");
+        }
+
+        await data.RefreshAsync();
+
+        IRenderedComponent<SearchPanel> cut = Render("shared");
+
+        cut.WaitForAssertion(() => Assert.Equal(100, NoteNames(cut).Length), Wait);
+        Assert.Equal("n000", NoteNames(cut)[0]);
+        Assert.Equal("n099", NoteNames(cut)[^1]);
+        Assert.Equal("… 150 more", cut.Find("p.more").TextContent);
+        Assert.Equal("250 notes found", cut.Find("p.search-count").TextContent);
+    }
 
     private IRenderedComponent<SearchPanel> Render(string text) =>
         data.Bunit.Render<SearchPanel>(p => p.Add(c => c.Text, text));

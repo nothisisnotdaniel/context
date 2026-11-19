@@ -23,11 +23,18 @@ internal enum TagsViewKind
 internal sealed record TagsView
 {
     public TagsView(TagsViewKind kind, string tag, IReadOnlyList<TagCount> tags, IReadOnlyList<string> notes)
+        : this(kind, tag, tags, notes, [])
+    {
+    }
+
+    public TagsView(
+        TagsViewKind kind, string tag, IReadOnlyList<TagCount> tags, IReadOnlyList<string> notes, IReadOnlyList<string> skipped)
     {
         Kind = kind;
         Tag = tag;
         Tags = tags;
         Notes = notes;
+        Skipped = skipped;
     }
 
     /// <summary>
@@ -63,7 +70,17 @@ internal sealed record TagsView
     /// </summary>
     public IReadOnlyList<string> Notes { get; }
 
-    /// <summary>Syncs the index, then lists every tag (blank <paramref name="argument"/>) or a tag's notes.</summary>
+    /// <summary>
+    /// The notes over <see cref="NoteStore.MaxNoteBytes"/> that the index left out (<see cref="TagIndex.Skipped"/>,
+    /// sorted ignoring case, then ordinal), for <c>AllTags</c>. Every other kind gives empty (<c>[]</c>), never null.
+    /// The names are raw text: clean and escape them before showing them.
+    /// </summary>
+    public IReadOnlyList<string> Skipped { get; }
+
+    /// <summary>
+    /// Syncs the index, then lists every tag (blank <paramref name="argument"/>, with the notes too big to index) or a
+    /// tag's notes.
+    /// </summary>
     public static TagsView Build(TagIndex index, NoteStore store, string argument)
     {
         try
@@ -71,7 +88,7 @@ internal sealed record TagsView
             index.Sync(store);
             if (string.IsNullOrWhiteSpace(argument))
             {
-                return new TagsView(TagsViewKind.AllTags, string.Empty, index.Tags(), []);
+                return new TagsView(TagsViewKind.AllTags, string.Empty, index.Tags(), [], index.Skipped());
             }
 
             string tag = TagIndex.NormalizeTag(argument);

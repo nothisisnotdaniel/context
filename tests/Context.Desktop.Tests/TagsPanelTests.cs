@@ -206,4 +206,60 @@ public sealed class TagsPanelTests : IDisposable
         cut.FindAll(".tag-row")
             .Select(r => r.QuerySelector("button")!.TextContent + " " + r.QuerySelector(".count")!.TextContent)
             .ToArray();
+
+    // 295: a note over the cap, written sparse after its first line.
+    private void WriteTooBig(string name)
+    {
+        data.WriteNote(name, "#big\n");
+        using FileStream stream = new FileStream(Path.Combine(data.Root, name + ".md"), FileMode.Open);
+        stream.SetLength(NoteStore.MaxNoteBytes + 1);
+    }
+
+    // 295 AC-3: no skipped note, no skipped line.
+    [Fact]
+    public async Task Render_NoSkipped_NoLine()
+    {
+        data.WriteNote("Plan", "#work\n");
+        await data.RefreshAsync();
+
+        IRenderedComponent<TagsPanel> cut = data.Bunit.Render<TagsPanel>();
+
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-list button")), Wait);
+        Assert.Empty(cut.FindAll("p.tags-skipped"));
+    }
+
+    // 295 AC-3: one skipped note is named on a grey line, also in the empty-tags state; names go through OneLine.
+    [Fact]
+    public async Task Render_OneSkipped_GreyLine_InEmptyState()
+    {
+        WriteTooBig("Big\u202Enote");
+        await data.RefreshAsync();
+
+        IRenderedComponent<TagsPanel> cut = data.Bunit.Render<TagsPanel>();
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            "No tags yet. Add #tag to a note to link it.", cut.Find("p[role=status]").TextContent), Wait);
+        IElement line = cut.Find("p.tags-skipped");
+        Assert.Equal($"Not indexed (over 5 MB): {DesktopText.OneLine("Big\u202Enote")}.", line.TextContent);
+        Assert.True(line.ClassList.Contains("grey"));
+    }
+
+    // 295 AC-3: twelve skipped notes name the first ten (sorted), then ", … 2 more".
+    [Fact]
+    public async Task Render_TwelveSkipped_TenNamesThenMore()
+    {
+        data.WriteNote("Plan", "#work\n");
+        for (int i = 0; i < 12; i++)
+        {
+            WriteTooBig($"big{i:D2}");
+        }
+
+        await data.RefreshAsync();
+
+        IRenderedComponent<TagsPanel> cut = data.Bunit.Render<TagsPanel>();
+
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".tag-list button")), Wait);
+        string names = string.Join(", ", Enumerable.Range(0, 10).Select(i => $"big{i:D2}"));
+        Assert.Equal($"Not indexed (over 5 MB): {names}, … 2 more.", cut.Find("p.tags-skipped").TextContent);
+    }
 }

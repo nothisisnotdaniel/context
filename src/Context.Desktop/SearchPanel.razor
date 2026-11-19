@@ -41,7 +41,8 @@
         }
         else
         {
-            <ul class="search-hits">
+            <p class="grey search-count" role="status">@CountText(tagView.Notes.Count)</p>
+            <ul class="search-hits" aria-label="Search results">
                 @foreach ((string note, int i) in tagView.Notes.Take(MaxRows).Select((n, i) => (n, i)))
                 {
                     string name = note;
@@ -80,7 +81,8 @@
         }
         else
         {
-            <ul class="search-hits">
+            <p class="grey search-count" role="status">@CountText(textView.Hits.Count)</p>
+            <ul class="search-hits" aria-label="Search results">
                 @foreach ((SearchHit hit, int i) in textView.Hits.Take(MaxRows).Select((h, i) => (h, i)))
                 {
                     string name = hit.Note;
@@ -197,6 +199,10 @@
 
     [Parameter]
     public EventCallback OnClose { get; set; }
+
+    // The count line above the results: the full number of notes found, not capped at MaxRows.
+    internal static string CountText(int count) =>
+        count == 1 ? "1 note found" : $"{count.ToString(CultureInfo.InvariantCulture)} notes found";
 
     private static string More(int count) =>
         $"{CurrentView.Outside} {(count - MaxRows).ToString(CultureInfo.InvariantCulture)} more";

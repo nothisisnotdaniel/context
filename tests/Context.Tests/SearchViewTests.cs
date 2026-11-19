@@ -199,7 +199,7 @@ public sealed class SearchViewTests : IDisposable
 
         Assert.Equal(SearchViewKind.NoMatches, view.Kind);
         Assert.Equal(SearchViewKind.NoMatches, Build("sealed").Kind);
-        Assert.Empty(index.Search(marker));
+        Assert.Empty(index.Search(marker, (note, _) => note));
         Assert.DoesNotContain(marker, DbBytes(), StringComparison.Ordinal);
         Assert.DoesNotContain(marker.ToLowerInvariant(), DbBytes(), StringComparison.Ordinal);
     }
@@ -342,5 +342,31 @@ public sealed class SearchViewTests : IDisposable
             new SqliteConnectionStringBuilder { DataSource = DbPath, Pooling = false }.ToString());
         connection.Open();
         return connection;
+    }
+
+    // 295 AC-5, AC-6: 250 matching notes give 250 hits, one per note, sorted ignoring case, then ordinal, each with its
+    // line; a row the trigram index matches but whose lines don't contain the query (the Kelvin sign folds to k in
+    // FTS5, not in an ordinal comparison) is dropped by the selector.
+    [Fact]
+    public void Build_250Matches_AllHitsInOrder_TrigramOnlyDropped()
+    {
+        for (int i = 0; i < 250; i++)
+        {
+            Write((i % 2 == 0 ? "N" : "n") + i.ToString("D3", System.Globalization.CultureInfo.InvariantCulture), $"# t\nthe shared key {i}\nshared key again");
+        }
+
+        Write("Kelvin", "the shared Key");
+
+        SearchView view = Build("shared key");
+
+        Assert.Equal(SearchViewKind.Found, view.Kind);
+        Assert.Equal(250, view.Hits.Count);
+        Assert.Equal(
+            Enumerable.Range(0, 250).Select(i => (i % 2 == 0 ? "N" : "n") + i.ToString("D3", System.Globalization.CultureInfo.InvariantCulture)),
+            view.Hits.Select(h => h.Note));
+        Assert.All(view.Hits, h => Assert.Equal(2, h.LineNumber));
+        Assert.All(view.Hits, h => Assert.Equal(4, h.MatchStart));
+        Assert.All(view.Hits, h => Assert.NotNull(h.Modified));
+        Assert.Equal(["Kelvin"], index.Search("shared key", (note, _) => note).Where(n => n == "Kelvin"));
     }
 }
