@@ -1846,6 +1846,24 @@ public sealed class CliTests : IDisposable
         Assert.Equal(before, Snapshot());
     }
 
+    // 245 AC-11: meeting <n> copies yesterday's open todo of the same meeting under "## From last time".
+    [Fact]
+    public void Meeting_PreviousOccurrence_CarriesOverOpenTodo()
+    {
+        WriteIcs("weekly.ics", "BEGIN:VCALENDAR\r\n" + Event("Weekly", "20261029T090000", "20261029T093000") + "END:VCALENDAR\r\n");
+        WriteNested("Meetings", "# Meetings\n");
+        WriteNested("Meetings/Weekly", "# Weekly\n");
+        WriteNested("Meetings/Weekly/2026-10-28", "# 2026-10-28\n\n- [ ] Send budget\n- [x] Done thing\n");
+
+        Result result = Run("meeting", "1");
+
+        Assert.Equal((0, string.Empty), (result.Code, result.Err));
+        Assert.EndsWith(
+            "\n## From last time\n\nFrom [[Meetings/Weekly/2026-10-28]]:\n\n- [ ] Send budget\n", result.Out, StringComparison.Ordinal);
+        Assert.StartsWith("# 2026-10-29\n\n#meeting\n\n- Title: Weekly\n", result.Out, StringComparison.Ordinal);
+        Assert.Equal(result.Out, Read(Path.Combine("Meetings", "Weekly", "2026-10-29.md")));
+    }
+
     // 167 AC-5, 220 AC-6: an existing legacy note (another case, other bytes) is printed as it is and never changed.
     [Fact]
     public void Meeting_ExistingNote_PrintedUnchanged()

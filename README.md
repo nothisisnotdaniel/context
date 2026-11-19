@@ -90,7 +90,9 @@ is and never changed. In the desktop app, `/today` in the command palette opens 
 `context current` numbers today's appointments (`1`, `2`, ...). `context meeting 2` prints the note for appointment 2,
 named after its date and title (for example `2026-10-29 Review Q4 plan`). When it doesn't exist yet it is created first,
 tagged `#meeting`, with the appointment's title, time, location and attendees; an existing note is printed as it is and
-never changed. In the desktop app, `/meeting 2` in the command palette opens the same note (numbered as
+never changed. A new note also gets the still-open points of the same meeting's previous note (its open
+`- [ ]` todos and the lines under an `Open points` heading) under `## From last time`, with a link to that note; the
+previous note is only read, never changed. In the desktop app, `/meeting 2` in the command palette opens the same note (numbered as
 `context current` numbers them).
 
 ### Day's end

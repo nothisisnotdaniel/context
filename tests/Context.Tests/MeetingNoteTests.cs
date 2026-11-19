@@ -522,6 +522,131 @@ public sealed class MeetingNoteTests : IDisposable
         Assert.Equal(["meetings.ctxs"], TopFiles());
     }
 
+    // 245 ------------------------------------------------------------------------------------------
+
+    private static Appointment Weekly() => new("Weekly", null, new DateTime(2026, 11, 19, 9, 0, 0), new DateTime(2026, 11, 19, 9, 30, 0), false, null);
+
+    private string NotePath(string name) => Path.Combine([root, .. name.Split('/')]) + ".md";
+
+    private void WriteWeekly(string date, string text)
+    {
+        WriteFile("Meetings.md", "# Meetings\n");
+        WriteFile(Path.Combine("Meetings", "Weekly.md"), "# Weekly\n");
+        WriteFile(Path.Combine("Meetings", "Weekly", date + ".md"), text);
+    }
+
+    private string Created() => File.ReadAllText(NotePath("Meetings/Weekly/2026-11-19"));
+
+    // 245 AC-1/AC-6: the open todo of the previous note is carried over with a link; the old note is unchanged.
+    [Fact]
+    public void Ensure_PreviousNote_CarriesOverOpenPoints()
+    {
+        WriteWeekly("2026-11-12", "# 2026-11-12\n\n- [ ] Send budget\n- [x] Done thing\n");
+        string previous = NotePath("Meetings/Weekly/2026-11-12");
+        DateTime written = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(previous, written);
+        byte[] bytes = File.ReadAllBytes(previous);
+
+        MeetingNoteResult result = MeetingNote.Ensure(new NoteStore(root), Weekly());
+
+        Assert.Equal(new MeetingNoteResult(MeetingNoteKind.Created, "Meetings/Weekly/2026-11-19"), result);
+        Assert.Equal(
+            MeetingNote.Format(Weekly()) + "\n## From last time\n\nFrom [[Meetings/Weekly/2026-11-12]]:\n\n- [ ] Send budget\n",
+            Created());
+        Assert.Equal(bytes, File.ReadAllBytes(previous));
+        Assert.Equal(written, File.GetLastWriteTimeUtc(previous));
+    }
+
+    // 245 AC-2: only the latest earlier occurrence is copied.
+    [Fact]
+    public void Ensure_SeveralOccurrences_LatestEarlierCopied()
+    {
+        WriteWeekly("2026-11-05", "- [ ] old\n");
+        WriteWeekly("2026-11-12", "- [ ] recent\n");
+        WriteWeekly("2026-11-26", "- [ ] later\n");
+        WriteFile(Path.Combine("Meetings", "Weekly", "Agenda.md"), "- [ ] agenda\n");
+
+        MeetingNote.Ensure(new NoteStore(root), Weekly());
+
+        Assert.EndsWith("From [[Meetings/Weekly/2026-11-12]]:\n\n- [ ] recent\n", Created(), StringComparison.Ordinal);
+    }
+
+    // 245 AC-5: no previous note, or one with nothing open: exactly Format's text.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("# 2026-11-12\n\n- [x] Done thing\nnotes\n")]
+    public void Ensure_NothingToCarry_FormatOnly(string? previous)
+    {
+        if (previous is not null)
+        {
+            WriteWeekly("2026-11-12", previous);
+        }
+
+        MeetingNoteResult result = MeetingNote.Ensure(new NoteStore(root), Weekly());
+
+        Assert.Equal(MeetingNoteKind.Created, result.Kind);
+        Assert.Equal(new UTF8Encoding(false).GetBytes(MeetingNote.Format(Weekly())), File.ReadAllBytes(NotePath("Meetings/Weekly/2026-11-19")));
+    }
+
+    // 245 AC-7: an existing note (new-style, legacy plain or sealed) is returned without reading the previous note.
+    [Theory]
+    [InlineData("Meetings/Weekly/2026-11-19.md")]
+    [InlineData("2026-11-19 Weekly.md")]
+    [InlineData("2026-11-19 Weekly.ctxs")]
+    public void Ensure_ExistingNote_PreviousNotRead(string file)
+    {
+        MeetingNoteKind kind = file.EndsWith(".ctxs", StringComparison.Ordinal) ? MeetingNoteKind.Sensitive : MeetingNoteKind.Existing;
+        WriteWeekly("2026-11-12", "- [ ] Send budget\n");
+        WriteFile(file, "kept");
+        SortedDictionary<string, string> before = FileSnapshot.Take(root);
+        int reads = 0;
+
+        MeetingNoteResult result = MeetingNote.Ensure(new NoteStore(root), Weekly(), null, _ => reads++);
+
+        Assert.Equal(kind, result.Kind);
+        Assert.Equal(0, reads);
+        Assert.Equal(before, FileSnapshot.Take(root));
+    }
+
+    // 245 AC-8: a previous note over 1 MiB gives a note without the section.
+    [Fact]
+    public void Ensure_PreviousTooLarge_NoSection()
+    {
+        WriteWeekly("2026-11-12", "- [ ] Send budget\n" + new string('x', (int)MeetingCarryOver.MaxPreviousBytes));
+
+        MeetingNoteResult result = MeetingNote.Ensure(new NoteStore(root), Weekly());
+
+        Assert.Equal(MeetingNoteKind.Created, result.Kind);
+        Assert.Equal(MeetingNote.Format(Weekly()), Created());
+    }
+
+    // 245 AC-8: a previous note whose read throws (gone, or access denied) gives a note without the section.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Ensure_PreviousUnreadable_NoSection(bool removed)
+    {
+        WriteWeekly("2026-11-12", "- [ ] Send budget\n");
+
+        MeetingNoteResult result = MeetingNote.Ensure(
+            new NoteStore(root),
+            Weekly(),
+            null,
+            note =>
+            {
+                if (removed)
+                {
+                    File.Delete(note.Path);
+                    return;
+                }
+
+                throw new UnauthorizedAccessException();
+            });
+
+        Assert.Equal(MeetingNoteKind.Created, result.Kind);
+        Assert.Equal(MeetingNote.Format(Weekly()), Created());
+    }
+
     // A new-style name: Meetings, a valid title part and the date, each a valid segment.
     private static void AssertValidName(string name)
     {
