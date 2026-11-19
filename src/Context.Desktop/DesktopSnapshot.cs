@@ -23,7 +23,8 @@ internal sealed record DesktopSnapshot
         IReadOnlyList<SavedSearch>? savedSearches = null,
         bool savedSearchesUnreadable = false,
         IReadOnlyList<NoteReview>? reviews = null,
-        bool reviewsUnreadable = false)
+        bool reviewsUnreadable = false,
+        IReadOnlySet<Guid>? meetingHints = null)
     {
         Failed = failed;
         Today = today;
@@ -42,6 +43,7 @@ internal sealed record DesktopSnapshot
         SavedSearchesUnreadable = savedSearchesUnreadable;
         Reviews = reviews ?? [];
         ReviewsUnreadable = reviewsUnreadable;
+        MeetingHints = meetingHints ?? new HashSet<Guid>();
     }
 
     /// <summary>Returns only the type name, so formatting a snapshot never prints its raw text.</summary>
@@ -100,6 +102,13 @@ internal sealed record DesktopSnapshot
 
     /// <summary>True when <c>context.db</c> can't be read for the review dates; then <see cref="Reviews"/> is empty.</summary>
     public bool ReviewsUnreadable { get; }
+
+    /// <summary>
+    /// The ids of the open tied todos (job 287) whose day is today through <see cref="MeetingLink.MaxSearchDays"/> days
+    /// on and whose occurrence is <see cref="MeetingLink.Missing"/> from a source that was read: the todo list shows
+    /// "Meeting cancelled or moved" for them.
+    /// </summary>
+    public IReadOnlySet<Guid> MeetingHints { get; }
 
     /// <summary>The snapshot shown when building one threw.</summary>
     public static DesktopSnapshot ForFailure(string folder, DateOnly today) =>

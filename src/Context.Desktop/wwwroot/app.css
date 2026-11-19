@@ -2516,3 +2516,72 @@ nav.saved-searches ul {
     visibility: hidden;
     width: 1024px;
 }
+
+/* 287: the todos tied to a meeting, on the appointment page and above a meeting note: the text field, Add and the tie
+   select in one row, then each tied todo with its checkbox and Push; the picker lists other appointments as buttons. */
+.meeting-todos {
+    margin: 0 0 12px;
+}
+
+.meeting-todo-entry {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 8px;
+}
+
+.meeting-todo-entry .meeting-todo-text {
+    flex: 1 1 16em;
+    min-width: 0;
+}
+
+.meeting-todo-entry .tie-todo {
+    flex: 0 1 16em;
+    min-width: 0;
+}
+
+.meeting-todo-list,
+.meeting-picker {
+    list-style: none;
+    margin: 0 0 8px;
+    padding: 0;
+}
+
+.meeting-todo {
+    align-items: center;
+    display: flex;
+    gap: 10px;
+    min-width: 0;
+    padding: 3px 0;
+}
+
+.meeting-todo .push-todo {
+    flex: none;
+}
+
+.meeting-picker .pick-meeting {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    max-width: 100%;
+    padding: 2px 0;
+    text-align: left;
+    text-decoration: underline;
+}
+
+/* A tied todo's meeting title (cut, full title in its title) and the hint when that occurrence is gone, in grey. */
+.todo .todo-meeting {
+    flex: 0 1 auto;
+    font-size: 12px;
+    max-width: 14em;
+    min-width: 0;
+}
+
+.todo .meeting-hint {
+    flex: none;
+    font-size: 12px;
+    white-space: nowrap;
+}

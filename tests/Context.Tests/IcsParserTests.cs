@@ -274,4 +274,34 @@ public sealed class IcsParserTests
         Assert.Empty(IcsParser.Parse(text, Zone));
         Assert.Empty(IcsParser.Parse(text, Zone, new DateOnly(2026, 10, 29)));
     }
+
+    // 287 AC-1: every occurrence and the override of a series get the event's UID; parsed appointments still equal
+    // ones built without a Uid.
+    [Fact]
+    public void Parse_Uid_OnEveryOccurrenceAndOverride_NotPartOfEquals()
+    {
+        string text = Calendar(
+            "BEGIN:VEVENT", "UID:abc", "SUMMARY:Weekly", "DTSTART:20261006T100000", "DTEND:20261006T110000",
+            "RRULE:FREQ=WEEKLY", "END:VEVENT",
+            "BEGIN:VEVENT", "UID:abc", "RECURRENCE-ID:20261013T100000", "SUMMARY:Moved", "DTSTART:20261013T140000",
+            "DTEND:20261013T150000", "END:VEVENT",
+            "BEGIN:VEVENT", "SUMMARY:One-off", "DTSTART:20261020T090000", "END:VEVENT");
+
+        Appointment first = Assert.Single(IcsParser.Parse(text, Zone, new DateOnly(2026, 10, 6)));
+        Appointment moved = Assert.Single(IcsParser.Parse(text, Zone, new DateOnly(2026, 10, 13)));
+        IReadOnlyList<Appointment> third = IcsParser.Parse(text, Zone, new DateOnly(2026, 10, 20));
+
+        Assert.Equal("abc", first.Uid);
+        Assert.Equal("abc", moved.Uid);
+        Assert.Equal("Moved", moved.Title);
+        Assert.Equal(["abc", null], third.Select(a => a.Uid));
+        Assert.Null(third.Single(a => a.Title == "One-off").Uid);
+        Assert.Equal(["abc", "abc", null], IcsParser.Parse(text, Zone).Select(a => a.Uid));
+        Assert.Equal(
+            new Appointment("Weekly", null, new DateTime(2026, 10, 6, 10, 0, 0), new DateTime(2026, 10, 6, 11, 0, 0), false),
+            first);
+        Assert.Equal(
+            new Appointment("Weekly", null, new DateTime(2026, 10, 6, 10, 0, 0), new DateTime(2026, 10, 6, 11, 0, 0), false).GetHashCode(),
+            first.GetHashCode());
+    }
 }

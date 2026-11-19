@@ -4687,4 +4687,54 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
+
+    // 287 AC-12: an open meeting note Meetings/<part>/yyyy-MM-dd shows the meeting todos panel above the editor, with
+    // the todos tied to that day's appointment whose note it is; a note that isn't a meeting note shows no panel.
+    [Fact]
+    public async Task MeetingNote_ShowsMeetingTodosAboveEditor_OtherNoteNone()
+    {
+        EditorJs js = new EditorJs(data.Bunit);
+        MeetingCalendar.WriteAll(data);
+        data.WriteNote("Meetings", "# Meetings\n");
+        data.WriteFile(Path.Combine("Meetings", "Sync.md"), "# Sync\n");
+        data.WriteFile(Path.Combine("Meetings", "Sync", "2026-10-29.md"), "# 2026-10-29\n\n#meeting\n");
+        data.WriteNote("Plan", "# Plan\n");
+        TodoStore store = MeetingCalendar.Store(data);
+        store.Add("Bring budget", DesktopFixture.Today, null, null, MeetingCalendar.SyncLink());
+        store.Add("Elsewhere", DesktopFixture.Today, null, null, MeetingCalendar.OnceLink());
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await NoteOpener.OpenAsync(cut, "Meetings/Sync/2026-10-29");
+
+        cut.WaitForAssertion(() => Assert.Equal("Meetings/Sync/2026-10-29", cut.Find(".note-title").GetAttribute("title")), Wait);
+        cut.WaitForAssertion(() => Assert.Single(js.Calls("ContextEditor.mount")), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Todos", cut.Find("section.meeting-todos h3").TextContent), Wait);
+        Assert.Equal(
+            ["Bring budget"], cut.FindAll(".meeting-todos .meeting-todo-list .text").Select(e => e.TextContent).ToArray());
+        Assert.Single(cut.FindAll("section.meeting-todos ~ .note-editor"));
+
+        await NoteOpener.OpenAsync(cut, "Plan");
+
+        cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-title").GetAttribute("title")), Wait);
+        Assert.Empty(cut.FindAll(".meeting-todos"));
+    }
+
+    // 287 AC-12: the panel's appointments are the day's appointments whose meeting note is the open note; a note named
+    // like a meeting note of no appointment has none (so no panel), and a plain note's name has no meeting day.
+    [Fact]
+    public async Task MeetingNote_Appointments_OnlyThoseWhoseNoteItIs()
+    {
+        MeetingCalendar.WriteAll(data);
+        await data.RefreshAsync();
+
+        IReadOnlyList<Appointment> sync = await data.State!.MeetingAppointments(DesktopFixture.Today, null, "Meetings/Sync/2026-10-29");
+        IReadOnlyList<Appointment> other = await data.State.MeetingAppointments(DesktopFixture.Today, null, "Meetings/Other/2026-10-29");
+
+        Assert.Equal(["Sync"], sync.Select(a => a.Title).ToArray());
+        Assert.Empty(other);
+        Assert.Equal(DesktopFixture.Today, DesktopState.MeetingNoteDay("Meetings/Sync/2026-10-29"));
+        Assert.Null(DesktopState.MeetingNoteDay("Plan"));
+        Assert.Null(DesktopState.MeetingNoteDay("Meetings/Sync/notadate"));
+        Assert.Null(DesktopState.MeetingNoteDay("Meetings/2026-10-29"));
+    }
 }

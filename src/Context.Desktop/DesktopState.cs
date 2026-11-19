@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Context;
 
 /// <summary>
@@ -12,6 +14,9 @@ internal sealed class DesktopState
 
     /// <summary>How long an Outlook read (the appointments of one day) is kept, by the state's UTC clock.</summary>
     public static readonly TimeSpan OutlookCacheAge = TimeSpan.FromMinutes(5);
+
+    /// <summary>How many days, from today, <see cref="UpcomingAppointments"/> covers (job 287).</summary>
+    public const int UpcomingDays = 14;
 
     /// <summary>The default <see cref="OutlookTimeout"/>.</summary>
     public static readonly TimeSpan DefaultOutlookTimeout = TimeSpan.FromSeconds(10);
@@ -769,6 +774,105 @@ internal sealed class DesktopState
     });
 
     /// <summary>
+    /// The appointments a <c>MeetingTodosPanel</c> works on (job 287), off the calling thread: those of
+    /// <paramref name="day"/> (files, the feed's cached copy and Outlook when on, as <see cref="AppointmentPage"/>) whose
+    /// title is ordinally <paramref name="title"/>, or, with <paramref name="title"/> <c>null</c>, those whose meeting
+    /// note is <paramref name="noteName"/> (<see cref="MeetingNote.IsNoteOf"/>). In the day's order, so the first is the
+    /// page's <see cref="AppointmentPageView.First"/>. Reads only, never downloads and never throws: none on a failure.
+    /// </summary>
+    public Task<IReadOnlyList<Appointment>> MeetingAppointments(DateOnly day, string? title, string? noteName) =>
+        Task.Run<IReadOnlyList<Appointment>>(() =>
+        {
+            try
+            {
+                return ReadDay(day, OutlookDay(day).Items).Appointments
+                    .Where(a => title is not null
+                        ? string.Equals(a.Title, title, StringComparison.Ordinal)
+                        : noteName is not null && MeetingNote.IsNoteOf(a, noteName))
+                    .ToList();
+            }
+            catch (Exception)
+            {
+                return [];
+            }
+        });
+
+    /// <summary>
+    /// The day of the meeting note <paramref name="name"/> (<c>Meetings/&lt;part&gt;/yyyy-MM-dd</c>, invariant), or
+    /// <c>null</c> when it isn't named like one.
+    /// </summary>
+    internal static DateOnly? MeetingNoteDay(string? name)
+    {
+        if (name is null || !name.StartsWith(MeetingNote.FolderName + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        string[] parts = name.Split('/');
+        return parts.Length == 3
+            && DateOnly.TryParseExact(parts[2], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly day)
+            ? day
+            : null;
+    }
+
+    /// <summary>
+    /// The open todos of <see cref="Snapshot"/> tied to one of <paramref name="appointments"/>
+    /// (<see cref="MeetingLink.Matches"/>), in <see cref="TodoStore.List"/> order (job 287).
+    /// </summary>
+    internal IReadOnlyList<TodoItem> MeetingTodos(IReadOnlyList<Appointment> appointments) =>
+        (snapshot?.Todos ?? [])
+            .Where(t => t.Done is null && t.Meeting is { } link && appointments.Any(link.Matches))
+            .ToList();
+
+    /// <summary>
+    /// The next occurrence of the meeting <paramref name="todo"/> is tied to (<see cref="MeetingLink.NextOccurrence"/>
+    /// over the calendar files, the feed's cached copy and Outlook when on, with the state's clock in the calendar's
+    /// zone), off the calling thread. Never downloads and never throws: <c>null</c> when there is none, the todo is
+    /// untied, or reading fails.
+    /// </summary>
+    public Task<Appointment?> NextMeeting(TodoItem todo) => Task.Run(() =>
+    {
+        try
+        {
+            if (todo.Meeting is not { } link)
+            {
+                return null;
+            }
+
+            DateTime localNow = LocalNow();
+            return MeetingLink.NextOccurrence(link, d => ReadDay(d, OutlookDay(d).Items).Appointments, localNow);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    });
+
+    /// <summary>
+    /// The appointments with a Uid of <paramref name="today"/> through 13 days on (the same sources as
+    /// <see cref="NextMeeting"/>), in day order, off the calling thread (job 287). Never throws: none on a failure.
+    /// </summary>
+    public Task<IReadOnlyList<Appointment>> UpcomingAppointments(DateOnly today) => Task.Run<IReadOnlyList<Appointment>>(() =>
+    {
+        try
+        {
+            List<Appointment> found = [];
+            for (int offset = 0; offset < UpcomingDays; offset++)
+            {
+                DateOnly day = today.AddDays(offset);
+                found.AddRange(ReadDay(day, OutlookDay(day).Items).Appointments
+                    .Where(a => MeetingLink.For(a) is not null && DateOnly.FromDateTime(a.Start) == day));
+            }
+
+            return found;
+        }
+        catch (Exception)
+        {
+            return [];
+        }
+    });
+
+    /// <summary>
     /// The open topics for the next 1:1 with <paramref name="names"/> (<see cref="MeetingTopics.For"/>) after syncing
     /// the index under its lock, on the calling thread. Reads only and never throws: none when the index can't be read.
     /// </summary>
@@ -819,10 +923,17 @@ internal sealed class DesktopState
         }
     }
 
+    // The state's clock as the calendar zone's wall clock.
+    private DateTime LocalNow() =>
+        TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc), calendar.Zone);
+
     // The day's appointments from the calendar files, the feed's cached copy and Outlook's; never downloads.
-    private CalendarDay ReadDay(DateOnly day, IReadOnlyList<Appointment> fromOutlook)
+    private CalendarDay ReadDay(DateOnly day, IReadOnlyList<Appointment> fromOutlook) =>
+        ReadDay(day, fromOutlook, feed?.ReadCache());
+
+    // ReadDay with the feed's cached text already read (null: no cache).
+    private CalendarDay ReadDay(DateOnly day, IReadOnlyList<Appointment> fromOutlook, string? cached)
     {
-        string? cached = feed?.ReadCache();
         IReadOnlyList<Appointment> fromFeed = cached is null
             ? []
             : CurrentView.FeedEvents(new CalendarFeedResult(CalendarFeedStatus.Stale, cached), calendar.Zone, day);
@@ -1466,6 +1577,66 @@ internal sealed class DesktopState
         }
     }
 
+    // The open tied todos whose day is today through MaxSearchDays on and whose occurrence is Missing from a source that
+    // was read (job 287): an outlook: Uid from an Ok Outlook read of the day; any other from the calendar files plus the
+    // feed's cached copy, when no file is unreadable and, without a cache, only for a Uid the files have. Never
+    // downloads and never throws: none on a failure.
+    private HashSet<Guid> MeetingHints(IReadOnlyList<TodoItem> todoList, DateOnly today)
+    {
+        try
+        {
+            string? cached = null;
+            bool cacheRead = false;
+            HashSet<string>? fileUids = null;
+            Dictionary<DateOnly, CalendarDay> days = [];
+
+            bool Hinted(MeetingLink link)
+            {
+                if (link.Uid.StartsWith(MeetingLink.OutlookUidPrefix, StringComparison.Ordinal))
+                {
+                    (OutlookStatus status, IReadOnlyList<Appointment> items) = OutlookDay(link.Day);
+                    return status == OutlookStatus.Ok && MeetingLink.Missing(link, items);
+                }
+
+                if (!cacheRead)
+                {
+                    cached = feed?.ReadCache();
+                    cacheRead = true;
+                }
+
+                if (!days.TryGetValue(link.Day, out CalendarDay? read))
+                {
+                    read = ReadDay(link.Day, [], cached);
+                    days[link.Day] = read;
+                }
+
+                if (read.Unreadable.Count > 0 || !MeetingLink.Missing(link, read.Appointments))
+                {
+                    return false;
+                }
+
+                // Without a cached feed, a Uid the files don't have may be the feed's: it can't be checked.
+                fileUids ??= cached is null
+                    ? calendar.All([]).Appointments.Select(a => a.Uid).OfType<string>().ToHashSet(StringComparer.Ordinal)
+                    : null;
+                return cached is not null || fileUids!.Contains(link.Uid);
+            }
+
+            return todoList
+                .Where(t => t.Done is null
+                    && t.Meeting is { } link
+                    && link.Day >= today
+                    && link.Day.DayNumber <= (long)today.DayNumber + MeetingLink.MaxSearchDays
+                    && Hinted(link))
+                .Select(t => t.Id)
+                .ToHashSet();
+        }
+        catch (Exception)
+        {
+            return [];
+        }
+    }
+
     // Never throws: any failure becomes the fixed failure snapshot, so no exception text reaches the page.
     private DesktopSnapshot Build()
     {
@@ -1573,7 +1744,7 @@ internal sealed class DesktopState
             return new DesktopSnapshot(
                 false, day, current, todoList, todosUnreadable, noteList, notesUnreadable, folder, sensitive,
                 KeyStore.Supported, RecoveryReady(), noteTodos, noteTodosUnreadable, savedSearches,
-                savedSearchesUnreadable, reviews, reviewsUnreadable);
+                savedSearchesUnreadable, reviews, reviewsUnreadable, MeetingHints(todoList, day));
         }
         catch (Exception)
         {

@@ -91,7 +91,7 @@ public sealed class AppointmentPanelTests : IDisposable
         await ClickItem(cut, 0);
         WaitForPage(cut);
 
-        IElement heading = Assert.Single(cut.FindAll(".appointment-page h3"));
+        IElement heading = Assert.Single(cut.FindAll(".appointment-page > h3"));
         Assert.Equal("Notes", heading.TextContent);
         IElement list = cut.Find(".appointment-page ul.appointment-notes");
         Assert.True(Before(cut.Find(".appointment-page .panel-bar"), heading));
@@ -110,7 +110,7 @@ public sealed class AppointmentPanelTests : IDisposable
         await ClickItem(cut, 0);
         WaitForPage(cut);
 
-        IElement heading = Assert.Single(cut.FindAll(".appointment-page h3"));
+        IElement heading = Assert.Single(cut.FindAll(".appointment-page > h3"));
         Assert.Equal("Notes", heading.TextContent);
         Assert.True(Before(heading, cut.Find(".appointment-page button.create-note-link")));
     }
@@ -131,7 +131,7 @@ public sealed class AppointmentPanelTests : IDisposable
 
         IElement line = cut.Find(".appointment-page p.grey");
         Assert.Equal("No related notes.", line.TextContent);
-        IElement heading = Assert.Single(cut.FindAll(".appointment-page h3"));
+        IElement heading = Assert.Single(cut.FindAll(".appointment-page > h3"));
         Assert.Equal("Notes", heading.TextContent);
         Assert.True(Before(heading, line));
     }
@@ -149,7 +149,7 @@ public sealed class AppointmentPanelTests : IDisposable
 
         IElement line = cut.Find(".appointment-page p.red");
         Assert.Equal("Can't read the related notes.", line.TextContent);
-        IElement heading = Assert.Single(cut.FindAll(".appointment-page h3"));
+        IElement heading = Assert.Single(cut.FindAll(".appointment-page > h3"));
         Assert.Equal("Notes", heading.TextContent);
         Assert.True(Before(heading, line));
     }
@@ -544,5 +544,232 @@ public sealed class AppointmentPanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);
         cut.WaitForAssertion(() => Assert.Equal(name, cut.Find(".note-title").GetAttribute("title")), Wait);
+    }
+
+    // 287 AC-6: h3 Todos lists the open todos tied to today's Sync, in List() order; a done one and one tied to next
+    // week's occurrence are left out. A typed todo and Add store a todo due today tied to the first Sync, and it shows.
+    [Fact]
+    public async Task MeetingTodos_ListsTiedTodos_AddTiesToFirst()
+    {
+        MeetingCalendar.WriteAll(data);
+        TodoStore store = MeetingCalendar.Store(data);
+        store.Add("Bring budget", DesktopFixture.Today, null, null, MeetingCalendar.SyncLink());
+        store.Add("Untied", DesktopFixture.Today.AddDays(1));
+        store.Add("Next week", DesktopFixture.Today.AddDays(7), null, null, MeetingCalendar.SyncLink(1));
+        store.Complete(store.Add("Done one", DesktopFixture.Today, null, null, MeetingCalendar.SyncLink()).Id);
+        store.Add("Ask about Q4", DesktopFixture.Today, null, null, MeetingCalendar.SyncLink());
+        IRenderedComponent<AppointmentPanel> cut = await RenderMeeting("Sync");
+
+        Assert.Equal(["Bring budget", "Ask about Q4"], TiedRows(cut));
+        IElement field = cut.Find(".meeting-todos input.meeting-todo-text");
+        Assert.Equal("Todo for this meeting", field.GetAttribute("placeholder"));
+        Assert.Equal("Todo for this meeting", field.GetAttribute("aria-label"));
+        Assert.Equal("200", field.GetAttribute("maxlength"));
+
+        await Act(cut, () => cut.Find("input.meeting-todo-text").InputAsync(new ChangeEventArgs { Value = "Numbers" }));
+        await Act(cut, () => cut.Find("button.add-meeting-todo").ClickAsync(new MouseEventArgs()));
+
+        cut.WaitForAssertion(() => Assert.Equal(["Bring budget", "Ask about Q4", "Numbers"], TiedRows(cut)), Wait);
+        TodoItem added = store.List().Single(t => t.Text == "Numbers");
+        Assert.Equal(DesktopFixture.Today, added.Due);
+        Assert.True(added.Meeting!.Matches(MeetingCalendar.At("Sync", MeetingCalendar.SyncToday, MeetingCalendar.SyncUid)));
+        Assert.Equal("Sync", added.Meeting.Title);
+        Assert.Equal(string.Empty, cut.Find("input.meeting-todo-text").GetAttribute("value") ?? string.Empty);
+    }
+
+    // 287 keyboard order: the text field, Add, the tie select, then each row's checkbox and Push; every control is
+    // labelled.
+    [Fact]
+    public async Task MeetingTodos_KeyboardOrder_InputAddSelectThenRows()
+    {
+        MeetingCalendar.WriteAll(data);
+        TodoStore store = MeetingCalendar.Store(data);
+        store.Add("One", DesktopFixture.Today, null, null, MeetingCalendar.SyncLink());
+        store.Add("Two", DesktopFixture.Today, null, null, MeetingCalendar.SyncLink());
+        IRenderedComponent<AppointmentPanel> cut = await RenderMeeting("Sync");
+
+        IReadOnlyList<IElement> controls = cut.FindAll(".meeting-todos input, .meeting-todos button, .meeting-todos select");
+
+        Assert.Equal(
+            ["meeting-todo-text", "add-meeting-todo", "tie-todo", "done", "push-todo", "done", "push-todo"],
+            controls.Select(c => c.ClassList[0]).ToArray());
+        Assert.Equal("Add", controls[1].TextContent);
+        Assert.Equal("Tie an open todo", controls[2].GetAttribute("aria-label"));
+        Assert.All(cut.FindAll("button.push-todo"), b => Assert.Equal("Push to next meeting", b.TextContent));
+        Assert.All(cut.FindAll(".meeting-todo-list input.done"), c => Assert.NotNull(c.Closest("label")));
+    }
+
+    // 287 AC-7: the select starts with "Tie an open todo…" and lists only the untied open todos; choosing one ties it to
+    // today's Sync and makes it due today.
+    [Fact]
+    public async Task MeetingTodos_TieSelect_TiesUntiedTodoToFirst()
+    {
+        MeetingCalendar.WriteAll(data);
+        TodoStore store = MeetingCalendar.Store(data);
+        store.Add("Tied", DesktopFixture.Today, null, null, MeetingCalendar.SyncLink());
+        TodoItem later = store.Add("Later", DesktopFixture.Today.AddDays(3), null, new TimeOnly(9, 30));
+        store.Add("Elsewhere", DesktopFixture.Today, null, null, MeetingCalendar.OnceLink());
+        IRenderedComponent<AppointmentPanel> cut = await RenderMeeting("Sync");
+
+        IReadOnlyList<IElement> options = cut.FindAll("select.tie-todo option");
+        Assert.Equal(["Tie an open todo…", "Later"], options.Select(o => o.TextContent).ToArray());
+        Assert.Equal(string.Empty, options[0].GetAttribute("value"));
+
+        await Act(cut, () => cut.Find("select.tie-todo").ChangeAsync(new ChangeEventArgs { Value = options[1].GetAttribute("value") }));
+
+        cut.WaitForAssertion(() => Assert.Equal(["Tied", "Later"], TiedRows(cut)), Wait);
+        TodoItem tied = store.List().Single(t => t.Id == later.Id);
+        Assert.Equal(DesktopFixture.Today, tied.Due);
+        Assert.Equal(new TimeOnly(9, 30), tied.Time);
+        Assert.Equal(MeetingCalendar.SyncLink(), tied.Meeting);
+        Assert.Equal(["Tie an open todo…"], cut.FindAll("select.tie-todo option").Select(o => o.TextContent).ToArray());
+    }
+
+    // 287 AC-8 and AC-4: an appointment without a UID shows the grey line, with no field, no select and no Push.
+    [Fact]
+    public async Task MeetingTodos_NoUid_GreyLineOnly()
+    {
+        MeetingCalendar.WriteAll(data);
+        MeetingCalendar.Store(data).Add("Untied", DesktopFixture.Today);
+        IRenderedComponent<AppointmentPanel> cut = await RenderMeeting("Plain");
+
+        IElement line = cut.Find(".meeting-todos p");
+        Assert.Equal("This appointment can't hold todos.", line.TextContent);
+        Assert.Contains("grey", line.ClassList);
+        Assert.Empty(cut.FindAll("input.meeting-todo-text"));
+        Assert.Empty(cut.FindAll("select.tie-todo"));
+        Assert.Empty(cut.FindAll("button.push-todo"));
+    }
+
+    // 287 AC-9: Push on a weekly meeting's todo re-ties it to next week's occurrence; it leaves the list and the accent
+    // line shows the new date.
+    [Fact]
+    public async Task MeetingTodos_Push_MovesToNextOccurrence()
+    {
+        MeetingCalendar.WriteAll(data);
+        TodoStore store = MeetingCalendar.Store(data);
+        TodoItem todo = store.Add("Bring budget", DesktopFixture.Today, null, null, MeetingCalendar.SyncLink());
+        IRenderedComponent<AppointmentPanel> cut = await RenderMeeting("Sync");
+
+        await Act(cut, () => cut.Find("button.push-todo").ClickAsync(new MouseEventArgs()));
+
+        cut.WaitForAssertion(() => Assert.Equal("Moved to 2026-11-05.", cut.Find(".meeting-todos p.accent").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Empty(TiedRows(cut)), Wait);
+        TodoItem moved = store.List().Single(t => t.Id == todo.Id);
+        Assert.Equal(new DateOnly(2026, 11, 5), moved.Due);
+        Assert.Equal(MeetingCalendar.SyncLink(1), moved.Meeting);
+    }
+
+    // 287 AC-10: with no next occurrence, Push lists the next 14 days' appointments with a UID (date, time, title), not
+    // the current one; a click ties the todo to the chosen one.
+    [Fact]
+    public async Task MeetingTodos_PushWithoutNext_PicksAnotherAppointment()
+    {
+        MeetingCalendar.WriteAll(data);
+        TodoStore store = MeetingCalendar.Store(data);
+        TodoItem todo = store.Add("Follow up", DesktopFixture.Today, null, null, MeetingCalendar.OnceLink());
+        IRenderedComponent<AppointmentPanel> cut = await RenderMeeting("Once");
+
+        await Act(cut, () => cut.Find("button.push-todo").ClickAsync(new MouseEventArgs()));
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            "No next meeting found. Pick another appointment:", cut.Find(".meeting-picker-heading").TextContent), Wait);
+        Assert.Equal(
+            ["2026-10-29 11:00 Sync", "2026-11-05 11:00 Sync"],
+            cut.FindAll(".meeting-picker button.pick-meeting").Select(b => b.TextContent).ToArray());
+
+        await Act(cut, () => cut.FindAll(".meeting-picker button.pick-meeting")[1].ClickAsync(new MouseEventArgs()));
+
+        cut.WaitForAssertion(() => Assert.Equal("Moved to 2026-11-05.", cut.Find(".meeting-todos p.accent").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Empty(TiedRows(cut)), Wait);
+        Assert.Empty(cut.FindAll(".meeting-picker"));
+        TodoItem moved = store.List().Single(t => t.Id == todo.Id);
+        Assert.Equal(new DateOnly(2026, 11, 5), moved.Due);
+        Assert.Equal(MeetingCalendar.SyncLink(1), moved.Meeting);
+    }
+
+    // 287 AC-10: with no other appointment in the next 14 days, Push shows the grey line and writes nothing.
+    [Fact]
+    public async Task MeetingTodos_PushWithoutNextOrOthers_GreyLine()
+    {
+        data.WriteCalendar("meetings.ics", DesktopFixture.Calendar(MeetingCalendar.Once(), MeetingCalendar.Plain()));
+        MeetingCalendar.Store(data).Add("Follow up", DesktopFixture.Today, null, null, MeetingCalendar.OnceLink());
+        IRenderedComponent<AppointmentPanel> cut = await RenderMeeting("Once");
+        byte[] before = File.ReadAllBytes(TodosPath);
+
+        await Act(cut, () => cut.Find("button.push-todo").ClickAsync(new MouseEventArgs()));
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            "No other appointments in the next 14 days.", cut.Find(".meeting-todos p.meeting-picker-none").TextContent), Wait);
+        Assert.Contains("grey", cut.Find("p.meeting-picker-none").ClassList);
+        Assert.Empty(cut.FindAll(".meeting-picker"));
+        Assert.Equal(before, File.ReadAllBytes(TodosPath));
+    }
+
+    // 287 AC-11: a todo done elsewhere after the page showed it: Push shows the red line and writes nothing.
+    [Fact]
+    public async Task MeetingTodos_PushAfterDoneElsewhere_RedLineNothingWritten()
+    {
+        MeetingCalendar.WriteAll(data);
+        TodoStore store = MeetingCalendar.Store(data);
+        TodoItem todo = store.Add("Bring budget", DesktopFixture.Today, null, null, MeetingCalendar.SyncLink());
+        IRenderedComponent<AppointmentPanel> cut = await RenderMeeting("Sync");
+        store.Complete(todo.Id);
+        byte[] before = File.ReadAllBytes(TodosPath);
+
+        await Act(cut, () => cut.Find("button.push-todo").ClickAsync(new MouseEventArgs()));
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            "The todo list changed. Nothing was moved.", cut.Find(".meeting-todos p.red").TextContent), Wait);
+        Assert.Equal(before, File.ReadAllBytes(TodosPath));
+    }
+
+    // 287 AC-11: a todo removed elsewhere after the select listed it: tying it shows the red line and writes nothing.
+    [Fact]
+    public async Task MeetingTodos_TieAfterRemovedElsewhere_RedLineNothingWritten()
+    {
+        MeetingCalendar.WriteAll(data);
+        TodoStore store = MeetingCalendar.Store(data);
+        TodoItem todo = store.Add("Later", DesktopFixture.Today.AddDays(2));
+        IRenderedComponent<AppointmentPanel> cut = await RenderMeeting("Sync");
+        store.Complete(todo.Id);
+        byte[] before = File.ReadAllBytes(TodosPath);
+
+        await Act(cut, () => cut.Find("select.tie-todo").ChangeAsync(new ChangeEventArgs { Value = todo.Id.ToString("D") }));
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            "The todo list changed. Nothing was moved.", cut.Find(".meeting-todos p.red").TextContent), Wait);
+        Assert.Equal(before, File.ReadAllBytes(TodosPath));
+    }
+
+    private string TodosPath => Path.Combine(data.Root, "todos.json");
+
+    // Refreshes, renders the page for today's appointments named title and waits for its notes and its todo panel.
+    private async Task<IRenderedComponent<AppointmentPanel>> RenderMeeting(string title)
+    {
+        await data.RefreshAsync();
+        IRenderedComponent<AppointmentPanel> cut = data.Bunit.Render<AppointmentPanel>(p => p
+            .Add(c => c.Title, title)
+            .Add(c => c.Day, DesktopFixture.Today));
+        WaitForMeetingTodos(cut);
+        return cut;
+    }
+
+    // ".appointment-page shows no Loading… and its .meeting-todos has h3 Todos".
+    private static void WaitForMeetingTodos(IRenderedComponent<AppointmentPanel> cut) =>
+        cut.WaitForAssertion(() =>
+        {
+            Assert.DoesNotContain("Loading…", cut.Find(".appointment-page").TextContent, StringComparison.Ordinal);
+            Assert.Equal("Todos", cut.Find(".meeting-todos h3").TextContent);
+        }, Wait);
+
+    private static string[] TiedRows(IRenderedComponent<AppointmentPanel> cut) =>
+        cut.FindAll(".meeting-todo-list .text").Select(e => e.TextContent).ToArray();
+
+    // "the reload count is 0", then the event runs in one dispatcher call.
+    private async Task Act(IRenderedComponent<AppointmentPanel> cut, Func<Task> act)
+    {
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        await cut.InvokeAsync(act);
     }
 }

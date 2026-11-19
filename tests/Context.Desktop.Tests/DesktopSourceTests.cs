@@ -23,11 +23,11 @@ public sealed class DesktopSourceTests
     // 177: NoteAttachments.Add (caught by Add), MoveWithNote and RemoveUnlinked. 178: TodoStore.MarkNotified.
     // 179: InboxTriage.Snooze; InboxTriage.Remove is checked on its own (Sources_CallInboxTriageWritesOnlyInDesktopActions),
     // since components remove from their own lists. 201: NoteTodos.Complete (matched by Complete). 217: SettingsStore.SaveOutlook.
-    // 286: SettingsStore.SaveMailDigest.
+    // 286: SettingsStore.SaveMailDigest. 287: TodoStore.Tie.
     private static readonly Regex Writes = new(
         @"(?:(?<!\bActions)|(?!\.\s*RestoreVersion\s*\())\.\s*(Create|Save|SaveIfUnchanged|Add|Complete|Set|Clear|Delete|Rename|ClearCache"
         + @"|Seal|AddRecipient|DeleteSensitive|CreateMachineKey|StoreRecoveryPublicKey|Capture|CreateChild|Move|Ensure|CreateWithText"
-        + @"|CloseDay|RefreshWorked|RefreshStandup|MoveTodos|AutoClose|MoveDue|SaveDayEnd|SaveSavedSearches|Keep|RemoveHistory|RestoreVersion|MoveWithNote|RemoveUnlinked|MarkNotified|Snooze|SaveOutlook|SaveMailDigest|SaveScreenshotFolder|RemoveScreenshotFolder)\s*\(",
+        + @"|CloseDay|RefreshWorked|RefreshStandup|MoveTodos|AutoClose|MoveDue|SaveDayEnd|SaveSavedSearches|Keep|RemoveHistory|RestoreVersion|MoveWithNote|RemoveUnlinked|MarkNotified|Tie|Snooze|SaveOutlook|SaveMailDigest|SaveScreenshotFolder|RemoveScreenshotFolder)\s*\(",
         RegexOptions.CultureInvariant);
 
     // 136: the real key stores and the real file dialog, spelled in pieces: no test file may hold their names (see
@@ -1430,6 +1430,7 @@ public sealed class DesktopSourceTests
     [InlineData("settings.SaveSavedSearches(searches)")]
     [InlineData("settings.SaveOutlook(on)")]
     [InlineData("settings.SaveMailDigest(on)")]
+    [InlineData("todos.Tie(id, link)")]
     [InlineData("history.Keep(note.Path, bytes)")]
     [InlineData("state.HistoryStore.Keep(found.Path, current, found.Name)")]
     [InlineData("state.HistoryStore.RemoveHistory(path, \".md\")")]
@@ -1445,6 +1446,8 @@ public sealed class DesktopSourceTests
     [InlineData("Actions.RestoreVersion(name, version.Id, request.Note, confirmed)")]
     [InlineData("Actions.MarkSensitive(name, confirmed)")]
     [InlineData("Actions.TriageSnooze(item, until)")]
+    [InlineData("Actions.TieTodo(todo.Id, next)")]
+    [InlineData("Actions.AddMeetingTodo(shown[0], newText)")]
     public void Writes_Pattern_LeavesCallsOnActions(string call)
     {
         Assert.DoesNotMatch(Writes, call);
@@ -1718,6 +1721,24 @@ public sealed class DesktopSourceTests
             .ToList();
 
         Assert.Equal(["src/Context.Core/TodoStore.cs", ActionsFile], found);
+    }
+
+    // 287 AC-14: the store write .Tie( is called only in DesktopActions.cs (in the Core and the desktop sources), and
+    // the meeting todos panel reaches the new writes only through Actions.TieTodo( and Actions.AddMeetingTodo(.
+    [Fact]
+    public void Sources_CallTieOnlyInDesktopActions()
+    {
+        string root = RepoFiles.Root();
+        Regex tie = new(@"\.\s*Tie\s*\(", RegexOptions.CultureInvariant);
+        List<string> found = RepoFiles.Sources(root, "src", ".cs", ".razor")
+            .Where(f => tie.IsMatch(File.ReadAllText(Path.Combine(root, f))))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Equal([ActionsFile], found);
+        string panel = File.ReadAllText(Path.Combine(root, "src/Context.Desktop/MeetingTodosPanel.razor"));
+        Assert.Contains("Actions.TieTodo(", panel, StringComparison.Ordinal);
+        Assert.Contains("Actions.AddMeetingTodo(", panel, StringComparison.Ordinal);
     }
 
     // 237 AC-12: the crash log names no data store, no actions and no console; its session file is written in place

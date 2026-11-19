@@ -12,13 +12,15 @@ internal sealed record Appointment
     /// <param name="end">End in the local zone (all-day events: midnight after the last day, exclusive).</param>
     /// <param name="allDay">True for a <c>VALUE=DATE</c> start.</param>
     /// <param name="attendees">The <c>CN</c> names of the <c>ATTENDEE</c>s; none when left out.</param>
+    /// <param name="uid">The event's <c>UID</c> (or Outlook's <c>outlook:</c> id); <c>null</c> without one.</param>
     public Appointment(
         string title,
         string? location,
         DateTime start,
         DateTime end,
         bool allDay,
-        IReadOnlyList<string>? attendees = null)
+        IReadOnlyList<string>? attendees = null,
+        string? uid = null)
     {
         Title = title;
         Location = location;
@@ -26,6 +28,7 @@ internal sealed record Appointment
         End = end;
         AllDay = allDay;
         Attendees = attendees ?? [];
+        Uid = uid;
     }
 
     /// <summary><c>SUMMARY</c>, or an empty string when it is missing.</summary>
@@ -50,7 +53,14 @@ internal sealed record Appointment
     /// </summary>
     public IReadOnlyList<string> Attendees { get; }
 
-    /// <summary>Equal when every field is, with <see cref="Attendees"/> compared name by name (ordinal).</summary>
+    /// <summary>
+    /// The event's trimmed <c>UID</c> (the same on every occurrence and override of a series), or for Outlook
+    /// <c>outlook:</c> + its global id; <c>null</c> without one. Untrusted outside text, never shown. Not part of
+    /// <see cref="Equals(Appointment?)"/> or <see cref="GetHashCode"/>.
+    /// </summary>
+    public string? Uid { get; }
+
+    /// <summary>Equal when every field but <see cref="Uid"/> is, with <see cref="Attendees"/> compared name by name (ordinal).</summary>
     public bool Equals(Appointment? other) =>
         other is not null
         && string.Equals(Title, other.Title, StringComparison.Ordinal)
@@ -287,7 +297,7 @@ internal static class IcsParser
                 continue;
             }
 
-            result.Add(new Appointment(first.Title, first.Location, start, start + duration, first.AllDay, first.Attendees));
+            result.Add(new Appointment(first.Title, first.Location, start, start + duration, first.AllDay, first.Attendees, first.Uid));
         }
 
         return result;
@@ -859,7 +869,7 @@ internal static class IcsParser
                 return null;
             }
 
-            return new Appointment(summary ?? string.Empty, location, startTime, endTime, allDay, attendees);
+            return new Appointment(summary ?? string.Empty, location, startTime, endTime, allDay, attendees, Uid);
         }
     }
 
