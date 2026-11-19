@@ -32,6 +32,7 @@ internal sealed class DesktopState
     private readonly IPageTitleSource? pageTitles;
     private readonly string? timesFolder;
     private readonly ICommitLog commitLog;
+    private readonly Func<string?>? timesCommand;
     private string? offeredItemPage;
 
     // Guards the Outlook cache: one call per day (appointments), each with its start time.
@@ -76,9 +77,11 @@ internal sealed class DesktopState
         IPageTitleSource? pageTitles = null,
         bool? isMac = null,
         string? timesFolder = null,
-        ICommitLog? commitLog = null)
+        ICommitLog? commitLog = null,
+        Func<string?>? timesCommand = null)
     {
         IsMac = isMac ?? OperatingSystem.IsMacOS();
+        this.timesCommand = timesCommand;
         this.timesFolder = timesFolder;
         this.commitLog = commitLog ?? new GitCommitLog();
         this.pageTitles = pageTitles;
@@ -151,6 +154,25 @@ internal sealed class DesktopState
 
     /// <summary>Whether the app runs on macOS, where the screenshot hotkey works (job 260); tests inject it.</summary>
     public bool IsMac { get; }
+
+    /// <summary>
+    /// True when the Times command (<c>tm</c>, job 282) was found for the command bar; checked on each call, never
+    /// throws. Without a finder (tests that pass none) it is false.
+    /// </summary>
+    public bool TimesCommandFound
+    {
+        get
+        {
+            try
+            {
+                return !string.IsNullOrEmpty(timesCommand?.Invoke());
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+    }
 
     /// <summary>How long one Outlook source call may take before it counts as timed out.</summary>
     public TimeSpan OutlookTimeout { get; }

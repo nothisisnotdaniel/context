@@ -111,6 +111,12 @@
         }
     </div>
     <p class="screenshot-result @screenshotResultClass" role="status">@screenshotResultText</p>
+    <h3>Command bar</h3>
+    <p class="command-bar-hotkey grey">@(State.IsMac ? CommandBarHotkeyText : CommandBarOtherText)</p>
+    @if (!State.TimesCommandFound)
+    {
+        <p class="command-bar-times grey">@CommandBarNoTimesText</p>
+    }
     <h3>Repository folders</h3>
     @if (repositories is null)
     {
@@ -206,6 +212,9 @@
     public const string ScreenshotHotkeyText = "Press Control+Option+Shift+S to add a screen area to the inbox.";
     public const string ScreenshotWindowsText =
         "The screenshot hotkey works on macOS. On Windows, set the folder to the Snipping Tool's screenshots folder.";
+    public const string CommandBarHotkeyText = "Press Control+Option+Space anywhere to open the command bar.";
+    public const string CommandBarOtherText = "The command bar is only on macOS.";
+    public const string CommandBarNoTimesText = "Times commands need the tm command, which wasn't found.";
     public const string RepositoriesNotSetText =
         "No repository folders set. Add a git repository's folder to see its commits on work item pages.";
     public const string ScreenshotUnreadableText = "Can't read the screenshot folder setting.";

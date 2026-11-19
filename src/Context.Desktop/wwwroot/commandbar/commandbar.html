@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'" />
+    <title>Context command bar</title>
+    <link href="commandbar.css" rel="stylesheet" />
+</head>
+<body>
+    <main class="bar">
+        <input id="line" type="text" autocomplete="off" spellcheck="false" maxlength="300"
+               aria-label="Command" placeholder="cp 1234 review, a, l, todo tomorrow …, note …, capture …"
+               role="combobox" aria-autocomplete="list" aria-controls="suggestions" aria-expanded="false" />
+        <ul id="suggestions" role="listbox" aria-label="Suggestions"></ul>
+        <p id="result" role="status"></p>
+    </main>
+    <script src="commandbar.js"></script>
+</body>
+</html>

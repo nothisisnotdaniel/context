@@ -4,10 +4,12 @@ using System.Runtime.Versioning;
 namespace Context;
 
 /// <summary>
-/// The real <see cref="IGlobalHotkey"/> on macOS (job 260): Control+Option+Shift+S through Carbon's
-/// <c>RegisterEventHotKey</c> on the application event target, with one event handler for
-/// <c>kEventHotKeyPressed</c>. The handler delegate is kept in a field so it is not collected while registered.
-/// Register it on the main thread, before the window's run loop starts.
+/// The real <see cref="IGlobalHotkey"/> on macOS (job 260): one key and modifiers (see <see cref="GlobalHotkeys"/>)
+/// through Carbon's <c>RegisterEventHotKey</c> on the application event target, with one event handler for
+/// <c>kEventHotKeyPressed</c>. Job 282: every registered hotkey's handler sees every press, so the handler reads the
+/// pressed hotkey's id (<c>GetEventParameter</c>) and raises <see cref="Pressed"/> only for its own id; another id is
+/// passed on (<c>eventNotHandledErr</c>) to the next handler. The handler delegate is kept in a field so it is not
+/// collected while registered. Register it on the main thread, before the window's run loop starts.
 /// </summary>
 [SupportedOSPlatform("macos")]
 internal sealed class MacGlobalHotkey : IGlobalHotkey
@@ -18,19 +20,28 @@ internal sealed class MacGlobalHotkey : IGlobalHotkey
     private const uint EventClassKeyboard = 0x6B657962;
     private const uint EventHotKeyPressed = 5;
 
-    // kVK_ANSI_S and the Carbon modifier bits controlKey, optionKey, shiftKey.
-    private const uint KeyS = 0x01;
-    private const uint Modifiers = 0x1000 | 0x0800 | 0x0200;
+    // kEventParamDirectObject ('----') and typeEventHotKeyID ('hkid').
+    private const uint ParamDirectObject = 0x2D2D2D2D;
+    private const uint TypeEventHotKeyId = 0x686B6964;
 
-    // 'Ctxt', the hotkey's signature.
+    // eventNotHandledErr: the press is another hotkey's.
+    private const int EventNotHandled = -9874;
+
+    // 'Ctxt', the hotkeys' signature.
     private const uint Signature = 0x43747874;
 
     private readonly EventHandlerProc handler;
+    private readonly uint keyCode;
+    private readonly uint modifiers;
+    private readonly uint id;
     private IntPtr hotKeyRef;
     private IntPtr handlerRef;
 
-    public MacGlobalHotkey()
+    public MacGlobalHotkey(uint keyCode, uint modifiers, uint id)
     {
+        this.keyCode = keyCode;
+        this.modifiers = modifiers;
+        this.id = id;
         handler = OnEvent;
     }
 
@@ -56,8 +67,8 @@ internal sealed class MacGlobalHotkey : IGlobalHotkey
                 return false;
             }
 
-            EventHotKeyId id = new EventHotKeyId { Signature = Signature, Id = 1 };
-            if (RegisterEventHotKey(KeyS, Modifiers, id, target, 0, out hotKeyRef) != 0)
+            EventHotKeyId hotKeyId = new EventHotKeyId { Signature = Signature, Id = id };
+            if (RegisterEventHotKey(keyCode, modifiers, hotKeyId, target, 0, out hotKeyRef) != 0)
             {
                 hotKeyRef = IntPtr.Zero;
                 RemoveEventHandler(handlerRef);
@@ -92,6 +103,15 @@ internal sealed class MacGlobalHotkey : IGlobalHotkey
     {
         try
         {
+            if (GetEventParameter(
+                    eventRef, ParamDirectObject, TypeEventHotKeyId, IntPtr.Zero,
+                    (nuint)Marshal.SizeOf<EventHotKeyId>(), IntPtr.Zero, out EventHotKeyId pressed) != 0
+                || pressed.Signature != Signature
+                || pressed.Id != id)
+            {
+                return EventNotHandled;
+            }
+
             Pressed?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception)
@@ -132,4 +152,9 @@ internal sealed class MacGlobalHotkey : IGlobalHotkey
 
     [DllImport(Carbon)]
     private static extern int UnregisterEventHotKey(IntPtr hotKeyRef);
+
+    [DllImport(Carbon)]
+    private static extern int GetEventParameter(
+        IntPtr eventRef, uint name, uint desiredType, IntPtr actualType, nuint bufferSize, IntPtr actualSize,
+        out EventHotKeyId data);
 }

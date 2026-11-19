@@ -231,6 +231,12 @@ internal sealed class DesktopFixture : IDisposable
     /// <summary>The commit log the state reads work item commits through (job 280); it never runs git.</summary>
     public FakeCommitLog CommitLog { get; } = new FakeCommitLog();
 
+    /// <summary>The located tm path the state reports (job 282); null means not found. Set it before <see cref="CreateState"/>.</summary>
+    public string? TimesCommand { get; set; } = "/fake/tm";
+
+    /// <summary>The command bar's hook to Main (job 282), registered with <see cref="Bunit"/>.</summary>
+    public CommandBarContext CommandBar { get; } = new CommandBarContext();
+
     /// <summary>Builds the state and the actions (once) and registers both with <see cref="Bunit"/>.</summary>
     public DesktopState CreateState()
     {
@@ -260,7 +266,8 @@ internal sealed class DesktopFixture : IDisposable
             PageTitles,
             IsMac,
             TimesFolder,
-            CommitLog);
+            CommitLog,
+            () => TimesCommand);
         Actions = new DesktopActions(
             Notes, Todos, State, Launcher, link, feed, () => LocalNow, new CalendarStore(Root, Zone), TimesFolder, Notifier,
             ScreenCapture);
@@ -270,6 +277,7 @@ internal sealed class DesktopFixture : IDisposable
         Bunit.Services.AddSingleton<IFileDialog>(Dialog);
         Bunit.Services.AddSingleton<IAutoSavePause>(AutoSave);
         Bunit.Services.AddSingleton(Guard);
+        Bunit.Services.AddSingleton(CommandBar);
         return State;
     }
 
