@@ -282,4 +282,42 @@ public sealed class CalendarStoreTests : IDisposable
 
         Assert.Equal(["File open", "Feed open"], Titles(day));
     }
+
+    // 275 AC-1: a FIFO .ics with no writer next to a valid file doesn't hang the day; the valid file's events show.
+    [Fact(Timeout = 30_000)]
+    public async Task Day_FifoNextToValidFile_DoesNotHang()
+    {
+        Write("a.ics", Event("Standup", ":20261029T090000", ":20261029T093000"));
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using (System.Diagnostics.Process mkfifo = System.Diagnostics.Process.Start("mkfifo", Path.Combine(folder, "x.ics")))
+        {
+            mkfifo.WaitForExit();
+        }
+
+        CalendarDay day = await Task.Run(Day);
+
+        Assert.Equal(["Standup"], Titles(day));
+    }
+
+    // 275 AC-1: ReadText reads a file of exactly MaxFileBytes and refuses one a byte bigger.
+    [Fact]
+    public void ReadText_AtAndOverMaxFileBytes()
+    {
+        Directory.CreateDirectory(folder);
+        string exact = Path.Combine(folder, "exact.ics");
+        File.WriteAllText(exact, "BEGIN:VCALENDAR" + new string(' ', (int)CalendarStore.MaxFileBytes - 15));
+        string over = Path.Combine(folder, "over.ics");
+        File.WriteAllText(over, "BEGIN:VCALENDAR" + new string(' ', (int)CalendarStore.MaxFileBytes - 14));
+
+        string? text = CalendarStore.ReadText(exact);
+
+        Assert.NotNull(text);
+        Assert.Equal(CalendarStore.MaxFileBytes, text.Length);
+        Assert.StartsWith("BEGIN:VCALENDAR", text);
+        Assert.Null(CalendarStore.ReadText(over));
+    }
 }

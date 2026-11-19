@@ -161,4 +161,45 @@ public sealed class CalendarLinkTests : IDisposable
 
         Assert.DoesNotContain(FakeHttpHandler.PathToken, e.ToString(), StringComparison.Ordinal);
     }
+
+    // 275 AC-3: a file over MaxFileBytes (4096) can't be read, even when it holds a valid link; the message has no content.
+    [Fact]
+    public void Get_OverMaxFileBytes_Throws_WithoutTheContent_AtLimitReads()
+    {
+        Directory.CreateDirectory(root);
+        CalendarLink link = new CalendarLink(root);
+        string valid = "https://example.com/" + FakeHttpHandler.PathToken;
+        File.WriteAllText(link.FilePath, valid + new string(' ', (int)CalendarLink.MaxFileBytes + 1 - valid.Length));
+
+        CalendarLinkException e = Assert.Throws<CalendarLinkException>(() => link.Get());
+
+        Assert.Equal("Can't read calendar-link.txt.", e.Message);
+        Assert.DoesNotContain(FakeHttpHandler.PathToken, e.ToString(), StringComparison.Ordinal);
+
+        File.WriteAllText(link.FilePath, valid + new string(' ', (int)CalendarLink.MaxFileBytes - valid.Length));
+        Assert.Equal(4096, new FileInfo(link.FilePath).Length);
+
+        Assert.Equal(new Uri(valid), link.Get());
+    }
+
+    // 275 AC-3: a FIFO calendar-link.txt with no writer can't be read and doesn't block.
+    [Fact(Timeout = 30_000)]
+    public async Task Get_Fifo_Throws_WithoutBlocking()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(root);
+        CalendarLink link = new CalendarLink(root);
+        using (System.Diagnostics.Process mkfifo = System.Diagnostics.Process.Start("mkfifo", link.FilePath))
+        {
+            mkfifo.WaitForExit();
+        }
+
+        CalendarLinkException e = await Assert.ThrowsAsync<CalendarLinkException>(() => Task.Run(link.Get));
+
+        Assert.Equal("Can't read calendar-link.txt.", e.Message);
+    }
 }

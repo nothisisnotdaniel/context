@@ -1326,4 +1326,98 @@ public sealed class NoteStoreTests : IDisposable
         Assert.Equal("A note title can't start with a dot.", Assert.Throws<ArgumentException>(() => store.CreateChild("Plan", title)).Message.Split(" (")[0]);
         Assert.Equal(["Plan"], store.List().Select(n => n.Name));
     }
+
+    // 275 ----------------------------------------------------------------------------------------
+
+    private const int HangTimeoutMs = 30_000;
+
+    private NoteInfo BigNote(string name, long length)
+    {
+        Directory.CreateDirectory(root);
+        string path = Path.Combine(root, name + ".md");
+        using (FileStream stream = new FileStream(path, FileMode.Create))
+        {
+            stream.Write("#work\n"u8);
+            stream.SetLength(length);
+        }
+
+        return new NoteStore(root).List().Single(n => n.Name == name);
+    }
+
+    // 275 AC-4: a note of exactly MaxNoteBytes reads; one byte more throws FileTooLargeException.
+    [Fact]
+    public void Read_AtAndOverMaxNoteBytes()
+    {
+        NoteStore store = new NoteStore(root);
+        string text = store.Read(BigNote("Exact", NoteStore.MaxNoteBytes));
+        Assert.Equal(NoteStore.MaxNoteBytes, text.Length);
+        Assert.StartsWith("#work\n", text);
+
+        FileTooLargeException ex = Assert.Throws<FileTooLargeException>(() => store.Read(BigNote("Over", NoteStore.MaxNoteBytes + 1)));
+        Assert.Equal("Too large.", ex.Message);
+        Assert.IsAssignableFrom<IOException>(ex);
+    }
+
+    // 275 AC-4: a FIFO x.md reads as "" without blocking.
+    [Fact(Timeout = HangTimeoutMs)]
+    public async Task Read_Fifo_ReturnsEmptyWithoutBlocking()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(root);
+        string fifo = Path.Combine(root, "x.md");
+        using (System.Diagnostics.Process mkfifo = System.Diagnostics.Process.Start("mkfifo", fifo))
+        {
+            mkfifo.WaitForExit();
+        }
+
+        NoteStore store = new NoteStore(root);
+        string text = await Task.Run(() => store.Read(new NoteInfo("x", DateTime.MinValue, fifo)));
+
+        Assert.Equal("", text);
+    }
+
+    // 275 AC-8: note symlinks at the top level and in a child folder are not listed or found; regular siblings are.
+    [Fact]
+    public void List_FileSymlinks_AreLeftOut()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string outside = Path.Combine(parent, "secret.txt");
+        File.WriteAllText(outside, "secret");
+        WriteAt("Plain", "p");
+        WriteAt("Meetings", "m");
+        WriteAt("Meetings/y", "y");
+        File.CreateSymbolicLink(Path.Combine(root, "Link.md"), outside);
+        File.CreateSymbolicLink(Path.Combine(root, "Meetings", "x.md"), outside);
+        NoteStore store = new NoteStore(root);
+
+        Assert.Equal(["Meetings", "Meetings/y", "Plain"], store.List().Select(n => n.Name).ToArray());
+        Assert.False(store.TryFind("Link", out NoteInfo? link));
+        Assert.Null(link);
+        Assert.False(store.TryFind("Meetings/x", out NoteInfo? child));
+        Assert.Null(child);
+    }
+
+    // 275 AC-9: .md and .ctxs files are listed whatever the case of their extension, on every OS.
+    [Fact]
+    public void List_ExtensionInAnyCase_IsListed()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "Upper.MD"), "u");
+        File.WriteAllText(Path.Combine(root, "Parent.md"), "p");
+        Directory.CreateDirectory(Path.Combine(root, "Parent"));
+        File.WriteAllText(Path.Combine(root, "Parent", "Child.Md"), "c");
+        File.WriteAllText(Path.Combine(root, "Secret.CTXS"), "s");
+        NoteStore store = new NoteStore(root);
+
+        Assert.Equal(["Parent", "Parent/Child", "Upper"], store.List().Select(n => n.Name).ToArray());
+        Assert.Equal(["Secret"], store.ListSensitive().Select(n => n.Name).ToArray());
+    }
 }

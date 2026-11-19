@@ -143,4 +143,20 @@ public sealed class PageTypesTests : IDisposable
             return false;
         }
     }
+
+    // 275 AC-6: a type page over NoteStore.MaxNoteBytes is ignored; one just under it loads.
+    [Fact]
+    public void Load_TypePageOverLimit_Ignored_JustUnderLoads()
+    {
+        Write("Types", "# Types");
+        string start = "attribute:: owner\n";
+        Write("Types/X", start + new string(' ', (int)NoteStore.MaxNoteBytes + 1 - start.Length));
+        Assert.Equal(NoteStore.MaxNoteBytes + 1, new FileInfo(Path.Combine(root, "Types", "X.md")).Length);
+
+        Assert.Equal("organization: | person:aliases,affiliation,role", Describe(PageTypes.Load(store)));
+
+        Write("Types/X", start + new string(' ', (int)NoteStore.MaxNoteBytes - 1 - start.Length));
+
+        Assert.Equal("organization: | person:aliases,affiliation,role | x:owner", Describe(PageTypes.Load(store)));
+    }
 }

@@ -1218,6 +1218,17 @@ public sealed class TagIndexTests : IDisposable
         return rows;
     }
 
+    // The stored last-write ticks of a note, or null when there is none (a note that couldn't be read).
+    private long? StoredModified(string note)
+    {
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT modified FROM notes WHERE name = $note";
+        command.Parameters.AddWithValue("$note", note);
+        object? value = command.ExecuteScalar();
+        return value is long ticks ? ticks : null;
+    }
+
     // 170 AC-1: Sync writes one note_text row per note with its whole text; Search finds rows ignoring case.
     [Fact]
     public void Sync_WritesNoteText_SearchMatchesIgnoringCase()
@@ -1292,7 +1303,7 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal([("A", "uno"), ("C", "two")], TextRows());
     }
 
-    // 170: a note that can't be read, or is over MaxEditBytes, has no note_text row (a big note keeps its tags).
+    // 170, 275: a note that can't be read, or is over MaxNoteBytes, has no note_text row and no tags.
     [Fact]
     public void Sync_UnreadableOrTooBigNote_HasNoTextRow()
     {
@@ -1300,15 +1311,17 @@ public sealed class TagIndexTests : IDisposable
         string big = Path.Combine(root, "Big.md");
         using (FileStream stream = new FileStream(big, FileMode.Create))
         {
-            byte[] start = Encoding.UTF8.GetBytes("#work\n");
+            byte[] start = Encoding.UTF8.GetBytes("#work\n[[Small]]\n");
             stream.Write(start);
-            stream.SetLength(NoteStore.MaxEditBytes + 1);
+            stream.SetLength(NoteStore.MaxNoteBytes + 1);
         }
 
         index.Sync(store);
 
         Assert.Equal([("Small", "small")], TextRows());
-        Assert.Equal(["Big"], index.NotesWithTag("work"));
+        Assert.Empty(index.NotesWithTag("work"));
+        Assert.Empty(index.Links("Small"));
+        Assert.Null(StoredModified("Big"));
         if (OperatingSystem.IsWindows())
         {
             return;
@@ -1326,6 +1339,20 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Empty(TextRows());
+    }
+
+    // 275: a note just under MaxNoteBytes is fully indexed: its tags and its text row.
+    [Fact]
+    public void Sync_NoteJustUnderLimit_IsFullyIndexed()
+    {
+        string start = "#work\n";
+        WriteNote("Big", start + new string(' ', (int)NoteStore.MaxNoteBytes - 1 - start.Length));
+
+        index.Sync(store);
+
+        Assert.Equal(["Big"], index.NotesWithTag("work"));
+        Assert.Equal(["Big"], TextRows().Select(r => r.Note));
+        Assert.NotNull(StoredModified("Big"));
     }
 
     // 170: FTS5 secure-delete is on for note_text, and a sync with nothing to do leaves the file's bytes alone.

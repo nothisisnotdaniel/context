@@ -481,7 +481,7 @@ internal sealed class NoteStore
             return [];
         }
 
-        return Directory.EnumerateFiles(root, "*" + SensitiveExtension, SearchOption.TopDirectoryOnly)
+        return Files(root, SensitiveExtension)
             .Where(p => string.Equals(Path.GetExtension(p), SensitiveExtension, StringComparison.OrdinalIgnoreCase))
             .Select(p => new NoteInfo(Path.GetFileNameWithoutExtension(p), File.GetLastWriteTime(p), p))
             .Where(n => n.Name.Length > 0)
@@ -554,10 +554,12 @@ internal sealed class NoteStore
     }
 
     /// <summary>
-    /// The text of <paramref name="note"/> (decoded like <see cref="File.ReadAllText(string)"/>). Throws
-    /// <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> when it can't be read.
+    /// The text of <paramref name="note"/> (decoded like <see cref="File.ReadAllText(string)"/>), read through
+    /// <see cref="BoundedFile"/>. Throws <see cref="FileTooLargeException"/> when it is larger than
+    /// <see cref="MaxNoteBytes"/>, and <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> when it
+    /// can't be read. A FIFO or empty file reads as <c>""</c>.
     /// </summary>
-    public string Read(NoteInfo note) => File.ReadAllText(note.Path);
+    public string Read(NoteInfo note) => DecodeText(BoundedFile.Read(note.Path, MaxNoteBytes));
 
     /// <summary>
     /// Reads <paramref name="note"/> for editing: the text with <c>\r\n</c>
@@ -781,6 +783,9 @@ internal sealed class NoteStore
     /// </summary>
     public const long MaxEditBytes = MaxImportBytes;
 
+    /// <summary>The one limit for reading a note in full (<see cref="Read"/>, the index, the CLI): 5 MB.</summary>
+    public const long MaxNoteBytes = MaxEditBytes;
+
     // Decodes text the way File.ReadAllText does: UTF-8 unless a byte order mark says otherwise; the mark is dropped.
     internal static string DecodeText(byte[] bytes)
     {
@@ -912,13 +917,13 @@ internal sealed class NoteStore
         List<string> files;
         if (parent is null)
         {
-            files = Directory.EnumerateFiles(folder, "*" + Extension, SearchOption.TopDirectoryOnly).ToList();
+            files = Files(folder, Extension);
         }
         else
         {
             try
             {
-                files = Directory.EnumerateFiles(folder, "*" + Extension, SearchOption.TopDirectoryOnly).ToList();
+                files = Files(folder, Extension);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -978,6 +983,23 @@ internal sealed class NoteStore
             }
         }
     }
+
+    private static readonly EnumerationOptions NoteFileOptions = new EnumerationOptions
+    {
+        MatchCasing = MatchCasing.CaseInsensitive,
+        RecurseSubdirectories = false,
+        AttributesToSkip = 0,
+        IgnoreInaccessible = false,
+    };
+
+    // The paths of the files in a folder whose name ends in the extension in any case, on every OS. Links (symbolic
+    // links, junctions, other reparse points), folders and devices are left out, so a note never reads a file from
+    // outside the root through a link. Throws when the folder can't be read.
+    private static List<string> Files(string folder, string extension) =>
+        new DirectoryInfo(folder).EnumerateFiles("*" + extension, NoteFileOptions)
+            .Where(f => !IsLink(f) && (f.Attributes & (FileAttributes.Directory | FileAttributes.Device)) == 0)
+            .Select(f => f.FullName)
+            .ToList();
 
     // The folders in a folder that can hold subpages: no link or reparse point, no name starting with '.', and at the
     // top level not the calendar folder. Sorted exactly by name so the case-insensitive match is the same every time.

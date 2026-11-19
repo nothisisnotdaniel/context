@@ -9,8 +9,8 @@ internal static class BoundedFile
 {
     /// <summary>
     /// The bytes of <paramref name="path"/>. Throws <see cref="FileNotFoundException"/> when it is missing,
-    /// <see cref="UnauthorizedAccessException"/> when access is denied, and <see cref="IOException"/> when it is not
-    /// seekable, is larger than <paramref name="maxBytes"/> or can't be read. Exception messages are fixed texts.
+    /// <see cref="UnauthorizedAccessException"/> when access is denied, and <see cref="FileTooLargeException"/> when it
+    /// is larger than <paramref name="maxBytes"/>, and <see cref="IOException"/> when it is not seekable or can't be read. Exception messages are fixed texts.
     /// </summary>
     public static byte[] Read(string path, long maxBytes)
     {
@@ -27,7 +27,7 @@ internal static class BoundedFile
 
         if (info.Length > maxBytes)
         {
-            throw new IOException("Too large.");
+            throw new FileTooLargeException();
         }
 
         using FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -38,7 +38,7 @@ internal static class BoundedFile
 
         if (stream.Length > maxBytes)
         {
-            throw new IOException("Too large.");
+            throw new FileTooLargeException();
         }
 
         using MemoryStream copy = new MemoryStream();
@@ -53,12 +53,21 @@ internal static class BoundedFile
 
             if (copy.Length + read > maxBytes)
             {
-                throw new IOException("Too large.");
+                throw new FileTooLargeException();
             }
 
             copy.Write(buffer, 0, read);
         }
 
         return copy.ToArray();
+    }
+}
+
+/// <summary>A file is larger than the cap given to <see cref="BoundedFile.Read"/>. The message is always <c>Too large.</c></summary>
+internal sealed class FileTooLargeException : IOException
+{
+    public FileTooLargeException()
+        : base("Too large.")
+    {
     }
 }

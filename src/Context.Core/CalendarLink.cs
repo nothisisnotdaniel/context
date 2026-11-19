@@ -23,6 +23,9 @@ internal sealed class CalendarLink
     /// <summary>The file name of the link inside the root.</summary>
     public const string FileName = "calendar-link.txt";
 
+    /// <summary>The largest <c>calendar-link.txt</c> that is read (4096 bytes); a bigger one can't be read.</summary>
+    public const long MaxFileBytes = 4096;
+
     private const string Https = "https";
     private const string Webcal = "webcal";
 
@@ -54,7 +57,10 @@ internal sealed class CalendarLink
         string text;
         try
         {
-            text = File.ReadAllText(path);
+            // Decoded like File.ReadAllText: UTF-8, or the encoding of a byte order mark.
+            using StreamReader reader = new StreamReader(
+                new MemoryStream(BoundedFile.Read(path, MaxFileBytes)), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            text = reader.ReadToEnd();
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {

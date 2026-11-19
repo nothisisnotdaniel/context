@@ -806,6 +806,9 @@ internal sealed class Cli
     /// <summary>The error line for a command that would need the text of a sensitive note.</summary>
     internal static string SensitiveText(string name) => $"{name} is sensitive. Open it in the desktop app.";
 
+    // The error for a note over NoteStore.MaxNoteBytes; name is already passed through OneLine.
+    private static string TooLargeText(string name) => $"Can't read {name}: it is over 5 MB.";
+
     // The error for a sensitive note called name, or null when there is none.
     private string? Sensitive(Session session, string name) =>
         session.Notes.TryFindSensitive(name, out NoteInfo? locked) && locked is not null
@@ -821,6 +824,10 @@ internal sealed class Cli
             {
                 return Error(Sensitive(session, name) ?? $"No note named {OneLine(name.Trim())}.");
             }
+        }
+        catch (FileTooLargeException)
+        {
+            return Error(TooLargeText(OneLine(name.Trim())));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -1520,6 +1527,10 @@ internal sealed class Cli
         try
         {
             text = store.Read(match);
+        }
+        catch (FileTooLargeException)
+        {
+            return Error(TooLargeText(shownName));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

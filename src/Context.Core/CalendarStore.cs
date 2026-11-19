@@ -172,39 +172,10 @@ internal sealed class CalendarStore
     /// </summary>
     internal static string? ReadText(string path)
     {
-        const long Limit = MaxFileBytes;
         try
         {
-            using FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            if (stream.Length > Limit)
-            {
-                return null;
-            }
-
-            // Read at most one byte past the cap, in case the file grows while it is read.
-            byte[] buffer = new byte[(int)stream.Length + 1];
-            int total = 0;
-            while (total < buffer.Length)
-            {
-                int read = stream.Read(buffer, total, buffer.Length - total);
-                if (read == 0)
-                {
-                    break;
-                }
-
-                total += read;
-                if (total == buffer.Length && buffer.Length <= Limit)
-                {
-                    Array.Resize(ref buffer, (int)Math.Min(buffer.Length * 2L, Limit + 1));
-                }
-            }
-
-            if (total > Limit)
-            {
-                return null;
-            }
-
-            string text = Utf8.GetString(buffer, 0, total);
+            byte[] bytes = BoundedFile.Read(path, MaxFileBytes);
+            string text = Utf8.GetString(bytes);
             return text.Length > 0 && text[0] == '﻿' ? text[1..] : text;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
