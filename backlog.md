@@ -146,7 +146,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#52](backlog/052-recent-and-pinned-notes.md) Recent and pinned notes → 278-recent-pinned-notes
 - [x] [#63](backlog/063-project-page-per-work-item.md) Project page per work item → 280-project-page-work-item
 - [x] [#72](backlog/072-command-bar.md) Command bar (after: Times#4) → 282-command-bar
-- [ ] [#73](backlog/073-mail-digest.md) Mail digest
+- [x] [#73](backlog/073-mail-digest.md) Mail digest → 286-mail-digest
 - [ ] [#75](backlog/075-todos-tied-to-meetings.md) Todos tied to meetings
 - [ ] [#76](backlog/076-done-log.md) Done log
 - [ ] [#23](backlog/023-voice-capture-spike.md) Voice capture spike
