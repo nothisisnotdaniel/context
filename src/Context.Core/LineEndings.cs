@@ -16,29 +16,47 @@ internal static class LineEndings
     /// </summary>
     public static (string Text, bool HadCrlf, IReadOnlyList<bool>? LineCrlf) Read(string decoded)
     {
-        List<bool> flags = new List<bool>();
+        string text = decoded.Replace("\r\n", "\n", StringComparison.Ordinal);
         int crlf = 0;
+        int lf = 0;
+        bool first = false;
         for (int i = 0; i < decoded.Length; i++)
         {
             if (decoded[i] == '\n')
             {
                 bool isCrlf = i > 0 && decoded[i - 1] == '\r';
-                flags.Add(isCrlf);
+                if (crlf + lf == 0)
+                {
+                    first = isCrlf;
+                }
+
                 if (isCrlf)
                 {
                     crlf++;
                 }
+                else
+                {
+                    lf++;
+                }
             }
         }
 
-        string text = decoded.Replace("\r\n", "\n", StringComparison.Ordinal);
-        int lf = flags.Count - crlf;
         if (crlf == 0 || lf == 0)
         {
             return (text, crlf > 0, null);
         }
 
-        bool majority = crlf == lf ? flags[0] : crlf > lf;
+        // Mixed: only now is the per-break list built.
+        List<bool> flags = new List<bool>(crlf + lf);
+        for (int i = 0; i < decoded.Length; i++)
+        {
+            if (decoded[i] == '\n')
+            {
+                flags.Add(i > 0 && decoded[i - 1] == '\r');
+            }
+        }
+
+        bool majority = crlf == lf ? first : crlf > lf;
         return (text, majority, flags);
     }
 
