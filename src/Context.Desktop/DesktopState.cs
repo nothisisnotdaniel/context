@@ -882,6 +882,50 @@ internal sealed class DesktopState
     });
 
     /// <summary>
+    /// The board of <paramref name="tag"/> (job 242): its setting from <c>settings.json</c>
+    /// (<see cref="SettingsStore.ReadBoards"/>), then <see cref="BoardView.Build"/> after syncing the index, off the
+    /// calling thread. Reads only and never throws: a bad tag is <see cref="BoardPageKind.InvalidTag"/> without reading,
+    /// a broken <c>settings.json</c> <see cref="BoardPageKind.SettingsUnreadable"/>, any other failure
+    /// <see cref="BoardPageKind.Unreadable"/>.
+    /// </summary>
+    public Task<BoardPage> Board(string tag) => Task.Run(() =>
+    {
+        if (!BoardView.TryNormalizeTag(tag, out string normalized))
+        {
+            return new BoardPage(BoardPageKind.InvalidTag, string.Empty, null);
+        }
+
+        try
+        {
+            IReadOnlyList<BoardSetting> boards;
+            try
+            {
+                boards = new SettingsStore(notes.Root).ReadBoards();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return new BoardPage(BoardPageKind.SettingsUnreadable, normalized, null);
+            }
+
+            BoardSetting? setting = boards.FirstOrDefault(b => string.Equals(b.Tag, normalized, StringComparison.Ordinal));
+            if (setting is null)
+            {
+                return new BoardPage(BoardPageKind.NoBoard, normalized, null);
+            }
+
+            lock (indexGate)
+            {
+                BoardView view = BoardView.Build(notes, index, setting);
+                return new BoardPage(view.Unreadable ? BoardPageKind.Unreadable : BoardPageKind.Shown, normalized, view);
+            }
+        }
+        catch (Exception)
+        {
+            return new BoardPage(BoardPageKind.Unreadable, normalized, null);
+        }
+    });
+
+    /// <summary>
     /// The calendar link as the settings page shows it (<see cref="CalendarLinkView.Show"/>): the masked link and
     /// the time of the cached copy, <c>NotSet</c> or <c>Unreadable</c>, off the calling thread. The link itself never
     /// leaves Core. Reads only (no download) and never throws: any failure gives the <c>Unreadable</c> view.

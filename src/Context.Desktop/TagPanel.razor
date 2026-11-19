@@ -4,6 +4,7 @@
 <section class="tag-panel" aria-label="Notes with this tag">
     <div class="panel-bar">
         <h2>Notes with <span class="accent">@DesktopText.OneLine(TagParser.Format(Tag))</span></h2>
+        <button type="button" class="board-open" @onclick="() => OnBoard.InvokeAsync(Tag)">Board</button>
         <button type="button" class="close" @onclick="() => OnClose.InvokeAsync()">Close</button>
     </div>
     @if (loading)
@@ -45,6 +46,10 @@
     /// <summary>Called with a note's name when it is clicked.</summary>
     [Parameter]
     public EventCallback<string> OnOpen { get; set; }
+
+    /// <summary>Called with the tag when <c>Board</c> is clicked (job 242).</summary>
+    [Parameter]
+    public EventCallback<string> OnBoard { get; set; }
 
     [Parameter]
     public EventCallback OnClose { get; set; }

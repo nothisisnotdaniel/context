@@ -31,6 +31,7 @@
     /// <summary>The commands the palette offers.</summary>
     internal static readonly IReadOnlyList<PaletteCommand> Commands =
     [
+        new PaletteCommand("/board", "/board <tag>", "Show the board of a tag"),
         new PaletteCommand("/briefing", "/briefing", "Open today's briefing"),
         new PaletteCommand("/capture", "/capture <text>", "Append a dated line to the inbox"),
         new PaletteCommand("/decisions", "/decisions [tag]", "List the Decision: lines in notes, newest first"),

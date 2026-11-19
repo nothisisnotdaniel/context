@@ -33,6 +33,10 @@
                 {
                     <ReviewPanel OnOpen="RequestOpen" OnClose="CloseReview" />
                 }
+                @if (page == Page.Board && boardShown is { } boardTag)
+                {
+                    <BoardPanel Tag="@boardTag" OnOpen="RequestOpen" OnClose="CloseBoard" />
+                }
                 @if (page == Page.People)
                 {
                     <PeoplePanel OnOpen="RequestOpen" OnClose="ClosePeople" />
@@ -43,7 +47,7 @@
                 }
                 @if (tagShown is { } tag)
                 {
-                    <TagPanel Tag="@tag" OnOpen="RequestOpen" OnClose="CloseTag" />
+                    <TagPanel Tag="@tag" OnOpen="RequestOpen" OnBoard="ShowBoard" OnClose="CloseTag" />
                 }
                 @if (findShown is { } find)
                 {
@@ -216,7 +220,10 @@ else
     // Bumped each time the search panel is asked for, so asking again for the same text starts it over.
     private int searchRequest;
     private string? decisionsShown;
-    private enum Page { None, Triage, People, Tags, Settings, Appointment }
+    private enum Page { None, Triage, People, Tags, Settings, Appointment, Board }
+
+    // The board's tag (normalized) while Page.Board is shown (job 242).
+    private string? boardShown;
 
     // The appointment page's title (raw) and day while Page.Appointment is shown.
     private (string Title, DateOnly Day)? appointmentShown;
@@ -435,6 +442,27 @@ else
     private void ShowSettings() => OpenPage(Page.Settings);
 
     private void CloseSettings() => page = Page.None;
+
+    // A tag's board (job 242): a page in place of the note area; a text that is no tag shows the usage line instead.
+    private void ShowBoard(string tag)
+    {
+        if (!BoardView.TryNormalizeTag(tag, out string normalized))
+        {
+            ShowStatus("Type /board <tag>.", "red");
+            return;
+        }
+
+        boardShown = normalized;
+        OpenPage(Page.Board);
+        tagShown = null;
+        ShowStatus(string.Empty, string.Empty);
+    }
+
+    private void CloseBoard()
+    {
+        page = Page.None;
+        boardShown = null;
+    }
 
     // A sidebar appointment: its page in the main region (job 214), saving the open note first or asking to discard it
     // like RequestOpen. Another appointment with the same title and day keeps the shown page as it is.
@@ -1070,6 +1098,10 @@ else
                 // The text to look for in every plain note: /search budget 2027. Read only; SearchPanel shows the
                 // hint for a blank text and the usage line for a bad one.
                 ShowSearch(rest);
+                break;
+            case "/board":
+                // A tag's board: /board launch. Read only until a card is moved.
+                ShowBoard(rest);
                 break;
             case "/decisions":
                 // Every note's Decision: lines, or those of the notes with a tag: /decisions #work. Read only;

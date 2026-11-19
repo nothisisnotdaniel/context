@@ -434,4 +434,130 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Throws<SettingsTooLargeException>(() => new SettingsStore(root).SaveOutlook(true));
         Assert.Equal(before, File.ReadAllBytes(FilePath));
     }
+
+    // 242 AC-1: no file or no boards property gives no boards, and nothing is created.
+    [Fact]
+    public void ReadBoards_MissingFileOrProperty_GivesEmpty()
+    {
+        Assert.Empty(new SettingsStore(root).ReadBoards());
+        Assert.False(Directory.Exists(root));
+
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, "{\"dayEnd\":{\"moved\":\"2026-11-01\"}}");
+
+        Assert.Empty(new SettingsStore(root).ReadBoards());
+    }
+
+    // 242 AC-1: tags are normalized, columns lower-cased, order kept.
+    [Fact]
+    public void ReadBoards_NormalizesTagsAndColumns_InSavedOrder()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath,
+            "{\"boards\":[{\"tag\":\"#Launch\",\"columns\":[\"Todo\",\"doing\",\"DONE\"]},"
+            + "{\"columns\":[\"a-1_b\"],\"tag\":\"#[Big  Plan]\"}]}");
+
+        IReadOnlyList<BoardSetting> boards = new SettingsStore(root).ReadBoards();
+
+        Assert.Equal(2, boards.Count);
+        Assert.Equal("launch", boards[0].Tag);
+        Assert.Equal(["todo", "doing", "done"], boards[0].Columns);
+        Assert.Equal("big plan", boards[1].Tag);
+        Assert.Equal(["a-1_b"], boards[1].Columns);
+        Assert.Equal(nameof(BoardSetting), boards[0].ToString());
+    }
+
+    // 242 AC-1: the limits themselves are accepted: 12 columns, 40-character columns, 50 boards.
+    [Fact]
+    public void ReadBoards_AcceptsTheLimits()
+    {
+        Directory.CreateDirectory(root);
+        string twelve = string.Join(",", Enumerable.Range(1, SettingsStore.MaxColumns).Select(n => "\"c" + n + "\""));
+        string long40 = "\"a" + new string('b', BoardView.MaxColumnLength - 1) + "\"";
+        string boards = string.Join(",", Enumerable.Range(1, SettingsStore.MaxBoards)
+            .Select(n => "{\"tag\":\"t" + n + "\",\"columns\":[" + (n == 1 ? twelve : long40) + "]}"));
+        File.WriteAllText(FilePath, "{\"boards\":[" + boards + "]}");
+
+        IReadOnlyList<BoardSetting> read = new SettingsStore(root).ReadBoards();
+
+        Assert.Equal(SettingsStore.MaxBoards, read.Count);
+        Assert.Equal(SettingsStore.MaxColumns, read[0].Columns.Count);
+        Assert.Equal(BoardView.MaxColumnLength, read[1].Columns[0].Length);
+    }
+
+    // 242 AC-1: anything else throws.
+    [Theory]
+    [InlineData("{\"boards\":5}")]
+    [InlineData("{\"boards\":{}}")]
+    [InlineData("{\"boards\":[5]}")]
+    [InlineData("{\"boards\":[null]}")]
+    [InlineData("{\"boards\":[{\"tag\":\"a\"}]}")]
+    [InlineData("{\"boards\":[{\"columns\":[\"a\"]}]}")]
+    [InlineData("{\"boards\":[{\"tag\":\"a\",\"columns\":[\"a\"],\"x\":1}]}")]
+    [InlineData("{\"boards\":[{\"tag\":5,\"columns\":[\"a\"]}]}")]
+    [InlineData("{\"boards\":[{\"tag\":\"\",\"columns\":[\"a\"]}]}")]
+    [InlineData("{\"boards\":[{\"tag\":\"1abc\",\"columns\":[\"a\"]}]}")]
+    [InlineData("{\"boards\":[{\"tag\":\"#a!b\",\"columns\":[\"a\"]}]}")]
+    [InlineData("{\"boards\":[{\"tag\":\"a\",\"columns\":[]}]}")]
+    [InlineData("{\"boards\":[{\"tag\":\"a\",\"columns\":\"a\"}]}")]
+    [InlineData("{\"boards\":[{\"tag\":\"a\",\"columns\":[\"\"]}]}")]
+    [InlineData("{\"boards\":[{\"tag\":\"a\",\"columns\":[\"1a\"]}]}")]
+    [InlineData("{\"boards\":[{\"tag\":\"a\",\"columns\":[\"a b\"]}]}")]
+    [InlineData("{\"boards\":[{\"tag\":\"a\",\"columns\":[\"a/b\"]}]}")]
+    [InlineData("{\"boards\":[{\"tag\":\"a\",\"columns\":[\"ä\"]}]}")]
+    [InlineData("{\"boards\":[{\"tag\":\"a\",\"columns\":[5]}]}")]
+    [InlineData("{\"boards\":[{\"tag\":\"a\",\"columns\":[\"Todo\",\"todo\"]}]}")]
+    [InlineData("{\"boards\":[{\"tag\":\"a\",\"columns\":[\"x\"]},{\"tag\":\"#A\",\"columns\":[\"y\"]}]}")]
+    public void ReadBoards_Broken_Throws(string text)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, text);
+
+        Assert.Throws<SettingsStoreException>(() => new SettingsStore(root).ReadBoards());
+    }
+
+    // 242 AC-1: over the limits throws: 13 columns, a 41-character column, 51 boards.
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void ReadBoards_OverTheLimits_Throws(int which)
+    {
+        Directory.CreateDirectory(root);
+        string text = which switch
+        {
+            0 => "{\"boards\":[{\"tag\":\"a\",\"columns\":["
+                + string.Join(",", Enumerable.Range(1, SettingsStore.MaxColumns + 1).Select(n => "\"c" + n + "\"")) + "]}]}",
+            1 => "{\"boards\":[{\"tag\":\"a\",\"columns\":[\"a" + new string('b', BoardView.MaxColumnLength) + "\"]}]}",
+            _ => "{\"boards\":[" + string.Join(",", Enumerable.Range(1, SettingsStore.MaxBoards + 1)
+                .Select(n => "{\"tag\":\"t" + n + "\",\"columns\":[\"a\"]}")) + "]}",
+        };
+        File.WriteAllText(FilePath, text);
+
+        Assert.Throws<SettingsStoreException>(() => new SettingsStore(root).ReadBoards());
+    }
+
+    // 242 AC-1: every write keeps boards as it was (compared as parsed JSON).
+    [Fact]
+    public void Writes_KeepBoards()
+    {
+        Directory.CreateDirectory(root);
+        const string Boards = "[{\"tag\":\"Launch\",\"columns\":[\"Todo\",\"doing\"]}]";
+        File.WriteAllText(FilePath, "{\"boards\":" + Boards + "}");
+        SettingsStore store = new SettingsStore(root);
+        System.Text.Json.Nodes.JsonNode expected = System.Text.Json.Nodes.JsonNode.Parse(Boards)!;
+
+        store.SaveSavedSearches([new SavedSearch("Plan", "#plan")]);
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(expected,
+            System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(FilePath))!["boards"]));
+
+        store.SaveDayEnd(new DayEndSettings("2026-11-14T17:30", new DateOnly(2026, 11, 14)));
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(expected,
+            System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(FilePath))!["boards"]));
+
+        store.SaveOutlook(true);
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(expected,
+            System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(FilePath))!["boards"]));
+        Assert.Equal(["todo", "doing"], store.ReadBoards()[0].Columns);
+    }
 }

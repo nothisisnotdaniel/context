@@ -141,6 +141,21 @@ Every factory agent reads this file before working on Context. Keep it short and
     the line's `PersonParser.Parse` mentions shown as `TagIndex.Aliases()` resolves them (else as written), distinct
     by `PersonParser.Key`, in line order. Sorted by date descending, then note ignoring case, then ordinal, then line;
     kinds `Found`, `NoDecisions`, `InvalidTag`, `IndexUnreadable` (`TagIndexException`). Sensitive notes never appear.
+  - **Tag board** (job 242, `BoardView.cs`): boards are set by hand in `settings.json` as
+    `"boards":[{"tag":"launch","columns":["todo","doing","done"]}]` (`SettingsStore.ReadBoards`, `BoardSetting`; at most
+    `MaxBoards` 50 boards and `MaxColumns` 12 columns; a column is ASCII letters, digits, `-` and `_`, a letter first, at
+    most 40 characters, lower-cased, distinct; anything else throws `SettingsStoreException`; every write keeps
+    `boards`). A card's column is its first `#status/<column>` token (`#status/` ASCII-case-insensitive, at line start
+    or after whitespace, outside fences and code spans, the longest run of column characters, one of the board's
+    columns; else plain text); `TagParser` is unchanged, so `#status/doing` is also the tag `status/doing`.
+    `BoardView.Build(store, index, board)`: `Sync`, a note card per note with the tag (its token outside open todo
+    lines) and a todo card per open note todo whose own text has the tag (its own token); sensitive and unreadable
+    notes never appear; a `TagIndexException` is `Unreadable`. Columns in board order, led by No status (`Name` null)
+    only when it has cards; cards by note ignoring case, then ordinal, the note card first, then by line.
+    `BoardView.Move(store, card, column, history)` rewrites only the token's column (none: a final `#status/<col>`
+    line, or ` #status/<col>` at the todo line's end) through `ReadForEdit`/`SaveIfUnchanged` (CRLF and BOM kept,
+    a version kept): `Done`, `Unchanged` (own column, nothing written), `Changed` (the token's line is not as built,
+    or the file changed), `Missing`, `Failed`.
 - **Views:**
   - **Review view (job 169):** `ReviewView.Build(notes, todos, calendar, feed, today)` in Core (`ReviewView.cs`) holds
     `From` (today-6) and `To` (today), the calendar's `Zone`, `ChangedNotes` (`ChangedNote`: name and last-write time
@@ -744,7 +759,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
     `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs`, note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs` (its triage queue, remove and snooze in `InboxTriage.cs`), the day's end in `DayEnd.cs` (Times' day file in `TimesDay.cs`, `settings.json` in `SettingsStore.cs`), the morning briefing in `Briefing.cs` (Times' flexitime balance in `TimesBalance.cs`), the todo input rules (`TryParseDate`,
-    `MaxTextLength`, `TryParseRepeat`, `NextDue`) in `TodoInput.cs`, the todo repeat in `TodoRepeat.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`), `SearchView.cs` (`search`), `TagFilter.cs` (tag filters), `DecisionsView.cs` (`decisions`, with `DecisionParser.cs`), `ReviewView.cs` (the weekly review) and `CalendarLinkView.cs`
+    `MaxTextLength`, `TryParseRepeat`, `NextDue`) in `TodoInput.cs`, the todo repeat in `TodoRepeat.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`), `SearchView.cs` (`search`), `TagFilter.cs` (tag filters), `DecisionsView.cs` (`decisions`, with `DecisionParser.cs`), `BoardView.cs` (tag boards), `ReviewView.cs` (the weekly review) and `CalendarLinkView.cs`
     (the calendar link), and the command ranking for the desktop palette in `CommandMatcher.cs`; the notes list is `NoteStore.List()` itself.
   - **Data step in Core, drawing in the front end:** a view's Core data step returns plain types (a kind plus raw
     text, never markup, never cleaned or escaped, no exception messages). The front ends (`Cli`, and the desktop
@@ -861,7 +876,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     file bytes, read through `BoundedFile`): a bigger or non-seekable note can't be opened (`Can't read <name>.`), a save
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
-    `/briefing`, `/capture`, `/decisions`, `/done`, `/export`, `/find`, `/import`, `/meeting`, `/new`, `/open`, `/review`, `/save`, `/search`, `/settings`, `/tags`, `/today`, `/todo`, `/triage` (no `/current` since job 216) with `CommandMatcher` (in Core; ties
+    `/board`, `/briefing`, `/capture`, `/decisions`, `/done`, `/export`, `/find`, `/import`, `/meeting`, `/new`, `/open`, `/review`, `/save`, `/search`, `/settings`, `/tags`, `/today`, `/todo`, `/triage` (no `/current` since job 216) with `CommandMatcher` (in Core; ties
     in Levenshtein score are ordered by `SwapDistance`, which counts an adjacent swap as one edit, so `/opne` runs `/open`).
     `/todo every <weekday|day|month> <text>` (job 168) adds a recurring todo (`TryParseRepeat`, then `AddTodo`), accent
     `Added: <text>`; a missing or bad unit or missing text is red `Type /todo every <weekday|day|month> <text>.`; a bad
@@ -1001,6 +1016,17 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Nothing overdue.`, `No appointments next week.`), red `Can't read todos.json.` in both todo sections and the
     calendar texts (as `DayAppointmentsPanel`'s feed line). It reloads on `State.Changed` keeping the shown rows;
     `Close`, opening a note or `Today` hides it.
+    **Board (job 242):** `BoardPanel` (`section.page.board-panel`, `/board <tag>` or `TagPanel`'s `button.board-open`;
+    `Main`'s `page`, `Page.Board`, `boardShown`; a bad argument is red `Type /board <tag>.` in the status line) has the
+    heading `Board #tag` and the icon-only ×, and shows `DesktopState.Board(tag)` (`BoardPage`: settings read, then
+    `BoardView.Build` under the index lock): one `section.board-column` per column (`aria-label` and `h3` its name, `No
+    status` for cards without a token) with a `ul` of `li.board-card[draggable=true]`: the note's name as a
+    `button.note-button` (`RequestOpen`), a todo card's text in `span.board-todo`, and `button.board-move` ← / →
+    (`Move to <col>`, the columns on either side; a No status card only to the first). A drop on another column or a
+    move button calls `DesktopActions.MoveBoardCard` (`BoardView.Move`): Done reloads; Changed, Missing, Failed and
+    Busy show their red line in `p.board-result`. Grey `No board for #tag. Add it under "boards" in settings.json.`,
+    red `Can't read settings.json.`, red `Can't read the board.`, grey `No notes or todos have #tag.`. It reloads on
+    `State.Changed`, keeping the shown cards.
     **People (job 239):** `PeoplePanel` (`section.page.people-panel`, the person icon `button.people-open` in `NotesPanel`'s
     bar between Triage and Tags, `OnPeople`; `Main`'s `page`, `Page.People`) lists the person pages (`People.PersonOf`)
     of `Snapshot.Notes` only (no index, no file read), sorted by `Title` ignoring case, then ordinal, in
