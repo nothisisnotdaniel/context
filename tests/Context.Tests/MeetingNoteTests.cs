@@ -671,4 +671,85 @@ public sealed class MeetingNoteTests : IDisposable
         Assert.DoesNotContain(name, c => "/\\:*?\"<>|".Contains(c, StringComparison.Ordinal) || char.IsControl(c));
         Assert.Matches(@"^\d{4}-\d{2}-\d{2} ", name);
     }
+
+    private static NoteTopic Topic(string note, int line, string person, string text) =>
+        new(note, line, person, text, "next: @[" + person + "] " + text);
+
+    // 253 AC-6: the topics section sits before "## From last time", in the stated format.
+    [Fact]
+    public void Ensure_Topics_SectionBeforeCarryOver()
+    {
+        WriteWeekly("2026-11-12", "- [ ] Send budget\n");
+        NoteTopic[] topics =
+        [
+            Topic("Plan", 3, "Ann Lee", "budget  \u0007 review"),
+            Topic("people/Bob", 1, "Bob", "travel"),
+            Topic("A [x] #b", 2, "Bob", "odd"),
+            Topic("Tick`s", 2, "Bob", "tick"),
+        ];
+
+        MeetingNoteResult result = MeetingNote.Ensure(new NoteStore(root), Weekly(), topics: topics);
+
+        Assert.Equal(MeetingNoteKind.Created, result.Kind);
+        Assert.Equal(
+            MeetingNote.Format(Weekly())
+                + "\n## Topics\n\n"
+                + "- @[Ann Lee]: " + SafeText.Clean("budget  \u0007 review").Replace('\n', ' ') + " (from [[Plan]])\n"
+                + "- @[Bob]: travel (from [[people/Bob]])\n"
+                + "- @[Bob]: odd (from A [x] #b)\n"
+                + "- @[Bob]: tick (from Tick`s)\n"
+                + "\n## From last time\n\nFrom [[Meetings/Weekly/2026-11-12]]:\n\n- [ ] Send budget\n",
+            Created());
+    }
+
+    // 253 AC-6: at most 200 topic lines, then one line with the rest's count.
+    [Fact]
+    public void Ensure_ManyTopics_Cut()
+    {
+        NoteTopic[] topics = Enumerable.Range(1, 203).Select(i => Topic("Plan", i, "Ann", "t" + i)).ToArray();
+
+        MeetingNote.Ensure(new NoteStore(root), Weekly(), topics: topics);
+
+        string[] lines = Created().Split('\n');
+        Assert.Equal(200, lines.Count(l => l.StartsWith("- @[Ann]: ", StringComparison.Ordinal)));
+        Assert.Contains("- @[Ann]: t200 (from [[Plan]])", lines);
+        Assert.EndsWith("- … and 3 more.\n", Created(), StringComparison.Ordinal);
+    }
+
+    // 253 AC-6: an existing note is never written, topics or not.
+    [Fact]
+    public void Ensure_Topics_ExistingNoteWritesNothing()
+    {
+        WriteWeekly("2026-11-19", "kept\r\n");
+        SortedDictionary<string, string> before = FileSnapshot.Take(root);
+
+        MeetingNoteResult result = MeetingNote.Ensure(new NoteStore(root), Weekly(), topics: [Topic("Plan", 1, "Ann", "x")]);
+
+        Assert.Equal(MeetingNoteKind.Existing, result.Kind);
+        Assert.Equal(before, FileSnapshot.Take(root));
+    }
+
+    // 253 AC-6: with null or no topics the bytes are exactly today's output.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Ensure_NoTopics_SameBytes(bool empty)
+    {
+        WriteWeekly("2026-11-12", "- [ ] Send budget\n");
+        string other = Path.Combine(parent, "Other");
+        Directory.CreateDirectory(other);
+        foreach (string file in Directory.GetFiles(root, "*", SearchOption.AllDirectories))
+        {
+            string target = Path.Combine(other, Path.GetRelativePath(root, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(file, target);
+        }
+
+        MeetingNote.Ensure(new NoteStore(other), Weekly());
+        MeetingNote.Ensure(new NoteStore(root), Weekly(), topics: empty ? [] : null);
+
+        Assert.Equal(
+            File.ReadAllBytes(Path.Combine(other, "Meetings", "Weekly", "2026-11-19.md")),
+            File.ReadAllBytes(NotePath("Meetings/Weekly/2026-11-19")));
+    }
 }

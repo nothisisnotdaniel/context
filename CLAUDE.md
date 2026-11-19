@@ -21,9 +21,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     `#[Work]` are one tag. `TagParser.Format` shows a tag as `#tag`, or `#[tag]` when it has a space; all tag
     output uses it. `TagIndex.NormalizeTag` (for a typed tag, as in `context tags <tag>`) accepts `work`, `#work`, `[a b]`, `#[a b]`. `TagIndex` keeps the index in SQLite at `<root>/context.db` (`Microsoft.Data.Sqlite`,
     `Pooling=False`, parameterized SQL only): `notes(name, modified)` (last-write UTC ticks, NULL for a
-    note that couldn't be read so it is retried), `note_tags(note, tag)`, `note_links(note, target, heading)` (job 205: `heading` is the text after the first `#` or NULL; primary key stays `(note, target)`; a database without the column gets it through `ALTER TABLE` on every open, before any query), `note_people(note, person, spelling)`, `note_decisions(note, line, text)` (job 180, primary key `(note, line)`; one row per `DecisionParser` line, written and pruned with the note's other rows), `note_todos(note, line, due, text, raw)` (job 201, primary key `(note, line)`; one row per open `NoteTodoParser` line, `due` `yyyy-MM-dd` or NULL, written and pruned like `note_decisions`) and `note_attributes(note, key, value_key, value)` (job 157, primary key `(note, key, value_key)`, index on `(key, value_key)`) and `note_text` (job 170: FTS5 `fts5(note UNINDEXED, body, tokenize='trigram')` with FTS5 `secure-delete` on, set once in `Sync` after checking `note_text_config`; one row per plain note with its whole text, none for a note that can't be read or is over `NoteStore.MaxEditBytes`; sensitive notes are never listed, so never indexed; every connection sets `PRAGMA secure_delete = ON`, so a deleted note's text doesn't linger in free pages of `context.db`; the rollback journal `context.db-journal` briefly holds the old pages and is unlinked, not zeroed, after each commit, which is outside this guarantee). `Sync(NoteStore)` updates it
+    note that couldn't be read so it is retried), `note_tags(note, tag)`, `note_links(note, target, heading)` (job 205: `heading` is the text after the first `#` or NULL; primary key stays `(note, target)`; a database without the column gets it through `ALTER TABLE` on every open, before any query), `note_people(note, person, spelling)`, `note_decisions(note, line, text)` (job 180, primary key `(note, line)`; one row per `DecisionParser` line, written and pruned with the note's other rows), `note_todos(note, line, due, text, raw)` (job 201, primary key `(note, line)`; one row per open `NoteTodoParser` line, `due` `yyyy-MM-dd` or NULL, written and pruned like `note_decisions`), `note_topics(note, line, person, text, raw)` (job 253, primary key `(note, line)`; one row per `TopicParser` line, written and pruned like `note_decisions`; read by `Topics()`, plain notes only) and `note_attributes(note, key, value_key, value)` (job 157, primary key `(note, key, value_key)`, index on `(key, value_key)`) and `note_text` (job 170: FTS5 `fts5(note UNINDEXED, body, tokenize='trigram')` with FTS5 `secure-delete` on, set once in `Sync` after checking `note_text_config`; one row per plain note with its whole text, none for a note that can't be read or is over `NoteStore.MaxEditBytes`; sensitive notes are never listed, so never indexed; every connection sets `PRAGMA secure_delete = ON`, so a deleted note's text doesn't linger in free pages of `context.db`; the rollback journal `context.db-journal` briefly holds the old pages and is unlinked, not zeroed, after each commit, which is outside this guarantee). `Sync(NoteStore)` updates it
     in one transaction and only re-parses files whose time changed. `PRAGMA user_version` holds the parser
-    version (`TagIndex.ParserVersion`, now 10: the heading of a `[[Note#Heading]]` link in `note_links.heading`; 9 was open `- [ ]` lines in `note_todos`; 8 was `Decision:` lines in `note_decisions`; 7 was note text in `note_text`; 6 was a link target that runs into a code span is no link); when it is lower, `Sync` clears every stored time and empties `note_text` in the same
+    version (`TagIndex.ParserVersion`, now 11: `next: @[Name] topic` lines in `note_topics`, no longer note todos; 10 was the heading of a `[[Note#Heading]]` link in `note_links.heading`; 9 was open `- [ ]` lines in `note_todos`; 8 was `Decision:` lines in `note_decisions`; 7 was note text in `note_text`; 6 was a link target that runs into a code span is no link); when it is lower, `Sync` clears every stored time and empties `note_text` in the same
     transaction (so all notes are re-parsed and their text written once) and then sets it. Bump it whenever parsing changes. Queries: `Tags()`, `NotesWithTag`,
     `NoteTags()`, `FindNote`, `Links`, `People()`, `NotesMentioning`, `NotesWithAttribute(key, value)` (by `AttributeParser.ValueKey`), `NotesWithoutAttribute(key)`, `Search(text)` (`(Note, Body)` rows for `note_text MATCH $q`, `$q` the text as one FTS5 phrase: `"` + text with `"` doubled + `"`, always a parameter, so FTS syntax is literal), `Decisions(tag?)` (`(Note, Line, Text, Modified)` rows of `note_decisions` joined to `notes` with a stored time, `Modified` UTC; a tag keeps the notes with that `note_tags` row), `NoteTodos()` (`NoteTodo` rows of `note_todos` joined to `notes` with a stored time). A database that can't be opened or isn't valid throws `TagIndexException` (an
     `IOException`) and is never deleted or overwritten. The file database waits up to `TagIndex.BusyTimeout` (5 s; an
@@ -499,7 +499,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     `ParsedNoteTodo(Line, Text, Due?, Raw)` for each line outside fences (`TagParser.NumberedLinesOutsideFences`) that is
     optional spaces/tabs, `-`/`*`/`+`, one space, `[ ]`, one space, then text; the first whitespace-delimited token
     `due:yyyy-MM-dd` (ASCII digits, a real date, not in a code span) sets `Due` and leaves the text, which is collapsed
-    (`TagParser.Collapse`) and cut to `MaxTextLength` (1000, never inside a surrogate pair); an empty text is no todo.
+    (`TagParser.Collapse`) and cut to `MaxTextLength` (1000, never inside a surrogate pair); an empty text is no todo;
+    a topic line (`TopicParser.ParseLine` gives one, job 253) is no todo either.
     `TagIndex` stores them per plain note (`note_todos`); the note stays the only source. `NoteTodos.Load(store, index)`
     syncs and returns them; `NoteTodos.Merge(stored, notes)` gives the `TodoEntry` list both front ends show: by due date,
     on one date the `todos.json` todos first (`List()` order), then note todos by note name ignoring case, then ordinal,
@@ -754,7 +755,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Context.Desktop` and `Context.Desktop.Tests`, each by name and `PublicKey` (`Key="$(ContextPublicKey)"`; every
     assembly is public-signed with the committed `Context.snk`, see **Strong name**). `Context` grants only
     `Context.Tests` and `Context.Desktop` only `Context.Desktop.Tests`, the same way; no `InternalsVisibleTo` is name-only.
-    It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, picking a todo by its text in `TodoPicker.cs`, todos inside notes in `NoteTodoParser.cs` and `NoteTodo.cs`, tag parsing in `TagParser.cs`, the shared HTML page of a note in `NoteHtml.cs`,
+    It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, picking a todo by its text in `TodoPicker.cs`, todos inside notes in `NoteTodoParser.cs` and `NoteTodo.cs`, topics for the next 1:1 in `TopicParser.cs` and `MeetingTopics.cs`, tag parsing in `TagParser.cs`, the shared HTML page of a note in `NoteHtml.cs`,
     `[[note link]]` parsing in `NoteLinkParser.cs`, link rewriting on rename in `NoteLinkRewriter.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the desktop's recently opened notes (`recent.json`) in `RecentNotes.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
@@ -925,7 +926,10 @@ Every factory agent reads this file before working on Context. Keep it short and
     for a name with `[`, `]`, `#` or a backtick) and at most `MaxLines` (200) lines, then `- … and <k> more in the
     previous note.`. The previous note is read through `BoundedFile` at `MaxPreviousBytes` (1 MiB), never written; too
     large, unreadable (`IOException`, `UnauthorizedAccessException`) or nothing open: no section. `Ensure`'s
-    `beforeReadPrevious` is the test hook. `Today(calendar, feed, day)` gives the numbered list (`CurrentView` order: files plus feed).
+    `beforeReadPrevious` is the test hook. **Topics** (job 253): `Ensure(..., topics)` writes, only when it creates the
+    note and the list is non-empty, `TopicsSection(topics)` before the carry-over: `\n## Topics\n\n`, then
+    `- @[<Person>]: <OneLine text> (from [[<note>]])` per topic (plain `(from <note>)` for a name with `[`, `]`, `#` or
+    a backtick), at most `MeetingCarryOver.MaxLines` (200), then `- … and <k> more.`; null or empty: today's bytes. `Today(calendar, feed, day)` gives the numbered list (`CurrentView` order: files plus feed).
     **Daily note:** `DailyNote` (Core) names the note `yyyy-MM-dd` (invariant) for the local day. `Ensure(notes, day,
     compose)` returns `Existing` or `Sensitive` for a note of that name without calling `compose` or writing, else
     creates the top-level note through `CreateWithText` (a `NoteExistsException` race counts as existing).
@@ -1231,6 +1235,22 @@ Every factory agent reads this file before working on Context. Keep it short and
     of `ul.todo-list` and shows them, same rows and order, in `section.waiting-for` (`h3` `Waiting for`,
     `ul.waiting-list`) below it, only with rows. `PersonView.Waiting` holds the open stored ones waiting on the person
     (`aliases.PersonKey`), left out of `OpenTodos`; `PersonPanel` shows them as `Waiting for` before `Open todos`.
+    **Topics for the next 1:1 (job 253, Core `TopicParser.cs`, `MeetingTopics.cs`):** a line outside fences that is
+    optional spaces/tabs, optionally `-`/`*`/`+` and one space, optionally `[ ]` and one space, then `next:` (ASCII,
+    ignoring case), optional spaces/tabs and an `@[Name]` mention right there (the `WaitingFor` rules) is a topic
+    (`ParsedTopic(Line, Person, Text, Raw)`; text after the mention collapsed, trimmed, cut to 1000; empty or `[x]`:
+    none). `TagIndex.Topics()` gives `NoteTopic(Note, Line, Person, Text, Raw)` rows; `MeetingTopics.For(topics,
+    aliases, names)` keeps those whose person resolves (`PersonKey`) to one of `names`, ordered by that name's first
+    position, then note ignoring case, then ordinal, then line. `MeetingTopics.Complete(store, topic, history?)`
+    works like `NoteTodos.Complete` (same `NoteTodoResult` and texts) and rewrites the line to `TopicParser.DoneForm`:
+    `[ ]` → `[x]`, `- next:` → `- [x] next:`, bare `next:` → `- [x] next:` (indent kept). `PersonView.Topics` (never
+    counted for `Kind`) shows in `PersonPanel` as `Topics` (`ul.person-todos.topics-list`, `li.topic`) before `Waiting
+    for` (alone when there are no mentions); `AppointmentPageView.Topics` (`DesktopState.AppointmentPage`, the
+    attendees, under the index lock) shows in `AppointmentPanel` as `section.topics` (`h3 Topics`, rows `Person: text`)
+    above `h3 Notes`, only with rows and a readable index. Each row: `input.done` asks through `ConfirmDialog`
+    (`Mark this topic done?`), then `DesktopActions.CompleteTopic(topic, confirmation)`; a non-Done result is the red
+    `p.topic-result`; `button.topic-note` opens the note. `OpenMeetingNote` passes `DesktopState.TopicsFor(attendees)`
+    to `MeetingNote.Ensure` when the note doesn't exist yet. The CLI is unchanged.
     `Briefing.Compose` writes `## Follow-ups` after `## Todos`: `- <Person>: <Rest>` per open stored one with
     `Due <= today` (` (due yyyy-MM-dd)` when overdue), else `- No follow-ups due.` or `- Can't read todos.json.`.
     Triage's `Delegate (W)` (after Todo; key w) form has Person (focused), Todo text (prefilled) and Follow-up date

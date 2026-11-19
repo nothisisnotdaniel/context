@@ -220,6 +220,13 @@ internal sealed class TagIndex
             text TEXT NOT NULL,
             raw TEXT NOT NULL,
             PRIMARY KEY(note, line));
+        CREATE TABLE IF NOT EXISTS note_topics(
+            note TEXT NOT NULL,
+            line INTEGER NOT NULL,
+            person TEXT NOT NULL,
+            text TEXT NOT NULL,
+            raw TEXT NOT NULL,
+            PRIMARY KEY(note, line));
         CREATE VIRTUAL TABLE IF NOT EXISTS note_text USING fts5(note UNINDEXED, body, tokenize='trigram');
         """;
 
@@ -230,9 +237,10 @@ internal sealed class TagIndex
     /// 4: <c>@[person]</c> mentions (and <c>@[[x]]</c> is no link). 5: <c>key:: value</c> attributes. 6: a link target
     /// that runs into a code span is no link. 7: note text (the full-text table <c>note_text</c>). 8: <c>Decision:</c> lines
     /// (<c>note_decisions</c>). 9: open <c>- [ ]</c> todos (<c>note_todos</c>). 10: the heading of a
-    /// <c>[[Note#Heading]]</c> link (<c>note_links.heading</c>).
+    /// <c>[[Note#Heading]]</c> link (<c>note_links.heading</c>). 11: <c>next: @[Name]</c> topics (<c>note_topics</c>),
+    /// which are no longer note todos.
     /// </summary>
-    public const int ParserVersion = 10;
+    public const int ParserVersion = 11;
 
     /// <summary>
     /// How long opening <c>context.db</c> and starting <see cref="Sync"/>'s write transaction wait while another
@@ -325,6 +333,7 @@ internal sealed class TagIndex
                 IReadOnlyList<PageAttribute> attributes;
                 IReadOnlyList<ParsedDecision> decisions;
                 IReadOnlyList<ParsedNoteTodo> noteTodos;
+                IReadOnlyList<ParsedTopic> topics;
                 string? body;
                 long? newModified = modified;
                 try
@@ -338,6 +347,7 @@ internal sealed class TagIndex
                     attributes = AttributeParser.Parse(text);
                     decisions = DecisionParser.Parse(text);
                     noteTodos = NoteTodoParser.Parse(text);
+                    topics = TopicParser.Parse(text);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
@@ -347,6 +357,7 @@ internal sealed class TagIndex
                     attributes = [];
                     decisions = [];
                     noteTodos = [];
+                    topics = [];
                     body = null;
                     newModified = null;
                 }
@@ -425,6 +436,20 @@ internal sealed class TagIndex
                         ("$raw", todo.Raw));
                 }
 
+                Execute(connection, transaction, "DELETE FROM note_topics WHERE note = $note", ("$note", note.Name));
+                foreach (ParsedTopic topic in topics)
+                {
+                    Execute(
+                        connection,
+                        transaction,
+                        "INSERT INTO note_topics(note, line, person, text, raw) VALUES($note, $line, $person, $text, $raw)",
+                        ("$note", note.Name),
+                        ("$line", topic.Line),
+                        ("$person", topic.Person),
+                        ("$text", topic.Text),
+                        ("$raw", topic.Raw));
+                }
+
                 if (!upgrade)
                 {
                     Execute(connection, transaction, "DELETE FROM note_text WHERE note = $note", ("$note", note.Name));
@@ -457,6 +482,7 @@ internal sealed class TagIndex
                 Execute(connection, transaction, "DELETE FROM note_attributes WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_decisions WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_todos WHERE note = $note", ("$note", gone));
+                Execute(connection, transaction, "DELETE FROM note_topics WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_text WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM notes WHERE name = $note", ("$note", gone));
             }
@@ -468,6 +494,7 @@ internal sealed class TagIndex
             Execute(connection, transaction, "DELETE FROM note_attributes WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_decisions WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_todos WHERE note NOT IN (SELECT name FROM notes)");
+            Execute(connection, transaction, "DELETE FROM note_topics WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_text WHERE note NOT IN (SELECT name FROM notes)");
             if (upgrade)
             {
@@ -587,6 +614,34 @@ internal sealed class TagIndex
         }
 
         return (IReadOnlyList<NoteTodo>)rows;
+    });
+
+    /// <summary>
+    /// Every row of <c>note_topics</c> of a note with a stored time, unsorted (<see cref="MeetingTopics.For"/> picks and
+    /// orders them). A row edited by hand with a line out of range is skipped.
+    /// </summary>
+    public IReadOnlyList<NoteTopic> Topics() => Run(connection =>
+    {
+        List<NoteTopic> rows = [];
+        using SqliteCommand command = Command(
+            connection,
+            null,
+            "SELECT t.note, t.line, t.person, t.text, t.raw FROM note_topics t "
+                + "JOIN notes n ON n.name = t.note WHERE n.modified IS NOT NULL");
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            long line = reader.GetInt64(1);
+            if (line < 1 || line > int.MaxValue)
+            {
+                continue;
+            }
+
+            rows.Add(new NoteTopic(
+                reader.GetString(0), (int)line, reader.GetString(2), reader.GetString(3), reader.GetString(4)));
+        }
+
+        return (IReadOnlyList<NoteTopic>)rows;
     });
 
     /// <summary>Every tag with the number of notes that have it, sorted by tag (ordinal).</summary>

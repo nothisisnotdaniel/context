@@ -389,7 +389,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(10, TagIndex.ParserVersion);
+        Assert.Equal(11, TagIndex.ParserVersion);
     }
 
     // 024 AC-6
@@ -438,13 +438,13 @@ public sealed class TagIndexTests : IDisposable
         using (SqliteConnection connection = Open())
         {
             using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 11";
+            command.CommandText = "PRAGMA user_version = 12";
             command.ExecuteNonQuery();
         }
 
         index.Sync(store);
 
-        Assert.Equal(11, UserVersion());
+        Assert.Equal(12, UserVersion());
     }
 
     // 048 AC-4: the old constructor means a tag link only.
@@ -847,7 +847,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(10, TagIndex.ParserVersion);
+        Assert.Equal(11, TagIndex.ParserVersion);
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
         Assert.Equal(["A", "Beta"], NoteRows());
         Assert.Equal([("A", "work"), ("Beta", "home")], Rows());
@@ -1198,7 +1198,7 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal(["Anna|1", "AS|1"], index.People().Select(Describe));
         Assert.Empty(index.NotesMentioning("Anna Schmidt"));
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(10, TagIndex.ParserVersion);
+        Assert.Equal(11, TagIndex.ParserVersion);
     }
 
     // 170 ----------------------------------------------------------------------------------------
@@ -1520,6 +1520,85 @@ public sealed class TagIndexTests : IDisposable
         Assert.Throws<TagIndexException>(() => index.NoteTodos());
     }
 
+    private static string Describe(NoteTopic topic) => $"{topic.Note}|{topic.Line}|{topic.Person}|{topic.Text}|{topic.Raw}";
+
+    private static IEnumerable<string> TopicRows(TagIndex index) =>
+        index.Topics().Select(Describe).Order(StringComparer.Ordinal);
+
+    // 253 AC-3: Sync stores one row per topic line of each plain note; no topic line is a note todo.
+    [Fact]
+    public void Sync_StoresTopics()
+    {
+        WriteNote("Plan", "# Plan\r\nnext: @[Ann Lee] budget\r\n- [ ] NEXT: @[Ann  Lee] hiring\r\n- [x] next: @[Ann Lee] old\r\n");
+        WriteNote("Other", "- next:@[Bob] travel\n");
+
+        index.Sync(store);
+
+        Assert.Equal(
+            [
+                "Other|1|Bob|travel|- next:@[Bob] travel",
+                "Plan|2|Ann Lee|budget|next: @[Ann Lee] budget",
+                "Plan|3|Ann Lee|hiring|- [ ] NEXT: @[Ann  Lee] hiring",
+            ],
+            TopicRows(index));
+        Assert.Empty(index.NoteTodos());
+    }
+
+    // 253 AC-3: editing or deleting the note updates or removes its rows on the next Sync.
+    [Fact]
+    public void Sync_Topics_FollowEditAndDelete()
+    {
+        WriteNote("Plan", "next: @[Ann Lee] budget\nnext: @[Ann Lee] hiring\n");
+        WriteNote("Gone", "next: @[Bob] travel\n");
+        index.Sync(store);
+        Assert.Equal(3, index.Topics().Count);
+
+        EditNote("Plan", "- [x] next: @[Ann Lee] budget\nnext: @[Ann Lee] hiring now\n");
+        File.Delete(Path.Combine(root, "Gone.md"));
+        index.Sync(store);
+
+        Assert.Equal(["Plan|2|Ann Lee|hiring now|next: @[Ann Lee] hiring now"], TopicRows(index));
+    }
+
+    // 253 AC-3: a database at user_version 10 is re-parsed fully (topics appear for unchanged notes) and ends at 11.
+    [Fact]
+    public void Sync_Version10Database_ReparsedForTopics()
+    {
+        WriteNote("Plan", "- [ ] next: @[Ann Lee] budget");
+        File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc));
+        index.Sync(store);
+        using (SqliteConnection connection = Open())
+        {
+            // As the version 10 parser left it: the line was a note todo and there was no topics table.
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "PRAGMA user_version = 10; DROP TABLE note_topics; "
+                + "INSERT INTO note_todos(note, line, due, text, raw) VALUES('Plan', 1, NULL, 'next: @[Ann Lee] budget', '- [ ] next: @[Ann Lee] budget');";
+            command.ExecuteNonQuery();
+        }
+
+        index.Sync(store);
+
+        Assert.Equal(["Plan|1|Ann Lee|budget|- [ ] next: @[Ann Lee] budget"], TopicRows(index));
+        Assert.Empty(index.NoteTodos());
+        Assert.Equal(11, UserVersion());
+    }
+
+    // 253 AC-3: a sensitive .ctxs note never has topic rows.
+    [Fact]
+    public void Sync_SensitiveNote_HasNoTopics()
+    {
+        WriteNote("Other", "next: @[Ann Lee] kept");
+        File.WriteAllText(Path.Combine(root, "Plan.ctxs"), "next: @[Ann Lee] secret");
+
+        index.Sync(store);
+
+        Assert.Equal(["Other|1|Ann Lee|kept|next: @[Ann Lee] kept"], TopicRows(index));
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM note_topics WHERE note = 'Plan'";
+        Assert.Equal(0L, (long)command.ExecuteScalar()!);
+    }
+
     /// <summary>Every (note, target, heading) row of <c>note_links</c>, read directly.</summary>
     private List<(string Note, string Target, string? Heading)> HeadingRows()
     {
@@ -1578,7 +1657,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal([("A", "Plan#Goals", "Goals")], HeadingRows());
-        Assert.Equal(10, UserVersion());
+        Assert.Equal(TagIndex.ParserVersion, UserVersion());
         Assert.Equal(["Plan|To|False|"], index.Links("A").Select(Describe));
     }
 

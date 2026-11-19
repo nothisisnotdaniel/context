@@ -679,6 +679,17 @@ internal sealed class DesktopActions
         Run(() => CompleteNoteTodoNow(todo, confirmed));
 
     /// <summary>
+    /// Ticks off a topic for the next 1:1 (job 253), only when the user <paramref name="confirmed"/> it, through
+    /// <see cref="MeetingTopics.Complete(NoteStore, NoteTopic, NoteHistory?)"/>, by the rules of
+    /// <see cref="CompleteNoteTodo"/>: only when the note's line is still the topic's line as indexed it becomes its
+    /// done form (every other byte kept, the previous bytes kept as a version), then the state is refreshed. A changed
+    /// line is refused as <see cref="ActionReason.Changed"/>, a gone note as <see cref="ActionReason.Missing"/>; nothing
+    /// is written then. The result's text is the topic's text when done.
+    /// </summary>
+    public Task<ActionResult> CompleteTopic(NoteTopic topic, Confirmation? confirmed) =>
+        Run(() => CompleteTopicNow(topic, confirmed));
+
+    /// <summary>
     /// Moves a board card (job 242) to <paramref name="column"/> through
     /// <see cref="BoardView.Move(NoteStore, BoardCard, string, NoteHistory?)"/>: only the card's
     /// <c>#status/&lt;column&gt;</c> token changes (or one is appended), every other byte is kept and the previous bytes
@@ -1494,6 +1505,23 @@ internal sealed class DesktopActions
         };
     }
 
+    private ActionResult CompleteTopicNow(NoteTopic topic, Confirmation? confirmed)
+    {
+        if (confirmed is null)
+        {
+            return Refused(ActionReason.NotConfirmed, NotConfirmedText);
+        }
+
+        string note = DesktopText.OneLine(topic.Note);
+        return MeetingTopics.Complete(notes, topic, state.HistoryStore) switch
+        {
+            NoteTodoResult.Done => new ActionResult(ActionKind.Done, ActionReason.None, topic.Text),
+            NoteTodoResult.Missing => Refused(ActionReason.Missing, NoteTodos.MissingText(note)),
+            NoteTodoResult.Failed => Failed(ActionReason.WriteFailed, NoteTodos.FailedText(note)),
+            _ => Refused(ActionReason.Changed, NoteTodos.ChangedText(note)),
+        };
+    }
+
     private ActionResult MoveBoardCardNow(BoardCard card, string column)
     {
         if (!card.Columns.Contains(column, StringComparer.Ordinal))
@@ -2031,7 +2059,9 @@ internal sealed class DesktopActions
         string name = MeetingNote.NameFor(appointment);
         try
         {
-            MeetingNoteResult result = MeetingNote.Ensure(notes, appointment);
+            // Only a created note takes the attendees' topics; an index that can't be read gives none.
+            IReadOnlyList<NoteTopic> topics = notes.TryFind(name, out _) ? [] : state.TopicsFor(appointment.Attendees);
+            MeetingNoteResult result = MeetingNote.Ensure(notes, appointment, topics: topics);
             return new ActionResult(
                 ActionKind.Done,
                 result.Kind == MeetingNoteKind.Created ? ActionReason.None : ActionReason.Unchanged,

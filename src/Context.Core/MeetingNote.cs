@@ -48,6 +48,9 @@ internal static class MeetingNote
     /// <summary>The tag every new meeting note carries.</summary>
     public const string Tag = "meeting";
 
+    /// <summary>The heading of a new meeting note's topics section (job 253).</summary>
+    public const string TopicsHeading = "Topics";
+
     /// <summary>The title used when nothing of the appointment's title is left.</summary>
     public const string FallbackTitle = "Meeting";
 
@@ -215,10 +218,16 @@ internal static class MeetingNote
     /// the folder can't be read or written. <paramref name="beforeCreate"/> (tests only) runs after the checks, just
     /// before the first create. A created note also gets <see cref="MeetingCarryOver"/>'s <c>## From last time</c>
     /// section with the open points of the previous occurrence's note (see <see cref="CarryOver"/>);
-    /// <paramref name="beforeReadPrevious"/> (tests only) runs just before that note is read.
+    /// <paramref name="beforeReadPrevious"/> (tests only) runs just before that note is read. With
+    /// <paramref name="topics"/> (job 253) a created note also gets a <c>## Topics</c> section (<see cref="TopicsSection"/>)
+    /// before that one; an existing note is never written.
     /// </summary>
     public static MeetingNoteResult Ensure(
-        NoteStore notes, Appointment appointment, Action? beforeCreate = null, Action<NoteInfo>? beforeReadPrevious = null)
+        NoteStore notes,
+        Appointment appointment,
+        Action? beforeCreate = null,
+        Action<NoteInfo>? beforeReadPrevious = null,
+        IReadOnlyList<NoteTopic>? topics = null)
     {
         string part = TitlePartFor(appointment);
         string date = Date(appointment.Start);
@@ -246,6 +255,7 @@ internal static class MeetingNote
             NoteInfo meeting = Parent(notes, folder.Name, part);
             try
             {
+                body += TopicsSection(topics);
                 body += CarryOver(notes, meeting.Name, DateOnly.FromDateTime(appointment.Start), beforeReadPrevious);
                 NoteInfo created = notes.CreateChild(meeting.Name, date, body);
                 return new MeetingNoteResult(MeetingNoteKind.Created, created.Name);
@@ -263,6 +273,41 @@ internal static class MeetingNote
             // A parent that went away in between or can't hold subpages: the note can't be written.
             throw new IOException("The meeting note can't be created.", ex);
         }
+    }
+
+    /// <summary>
+    /// The topics section of a new meeting note: <c>\n## Topics\n\n</c>, then one
+    /// <c>- @[&lt;Person&gt;]: &lt;Text&gt; (from [[&lt;note&gt;]])</c> line per topic (plain <c>from &lt;note&gt;</c> for a
+    /// name with <c>[</c>, <c>]</c>, <c>#</c> or a backtick), at most <see cref="MeetingCarryOver.MaxLines"/> lines, then
+    /// <c>- … and &lt;k&gt; more.</c>. The empty text for no topics.
+    /// </summary>
+    internal static string TopicsSection(IReadOnlyList<NoteTopic>? topics)
+    {
+        if (topics is null || topics.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        StringBuilder text = new StringBuilder();
+        text.Append("\n## ").Append(TopicsHeading).Append("\n\n");
+        int count = Math.Min(topics.Count, MeetingCarryOver.MaxLines);
+        for (int i = 0; i < count; i++)
+        {
+            NoteTopic topic = topics[i];
+            bool plain = topic.Note.IndexOfAny(['[', ']', '#', '`']) >= 0;
+            text.Append("- @[").Append(topic.Person).Append("]: ").Append(OneLine(topic.Text))
+                .Append(plain ? $" (from {OneLine(topic.Note)})" : $" (from [[{topic.Note}]])")
+                .Append('\n');
+        }
+
+        if (topics.Count > MeetingCarryOver.MaxLines)
+        {
+            text.Append("- … and ")
+                .Append((topics.Count - MeetingCarryOver.MaxLines).ToString(CultureInfo.InvariantCulture))
+                .Append(" more.\n");
+        }
+
+        return text.ToString();
     }
 
     /// <summary>

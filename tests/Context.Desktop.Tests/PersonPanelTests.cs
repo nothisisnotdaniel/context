@@ -345,6 +345,80 @@ public sealed class PersonPanelTests : IDisposable
         Assert.Equal(["2026-10-28|Thank @[Anna]"], TodoRows(cut, "done-todos"));
     }
 
+    private static string[] TopicRows(IRenderedComponent<PersonPanel> cut) =>
+        cut.FindAll("ul.topics-list li.topic")
+            .Select(li => li.QuerySelector(".text")!.TextContent + "|" + li.QuerySelector(".topic-note")!.TextContent)
+            .ToArray();
+
+    // 253 AC-7: Topics (before Waiting for, alias resolved) on Ann Lee's page; ticking one asks, marks it done in its
+    // note and it is gone after the reload.
+    [Fact]
+    public async Task Render_Topics_BeforeWaiting_TickMarksDone()
+    {
+        data.WriteNote("people", "# people\n");
+        data.WriteFile(Path.Combine("people", "Ann Lee.md"), "# Ann Lee\naliases:: Ann\n");
+        data.WriteNote("Plan", "# Plan\r\n- [ ] next: @[Ann Lee] budget\r\nnext: @[Ann] hiring\r\n");
+        data.WriteNote("Other", "next: @[Bob] travel\n");
+        data.AddTodo("waiting: @[Ann Lee] contract", DesktopFixture.Today);
+        await data.RefreshAsync();
+        List<string> opened = [];
+
+        IRenderedComponent<PersonPanel> cut = data.Bunit.Render<PersonPanel>(p => p
+            .Add(c => c.Person, "Ann Lee")
+            .Add(c => c.OnOpen, (string name) => opened.Add(name)));
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            ["Mentioned in", "Topics", "Waiting for"],
+            cut.FindAll("h2").Select(h => h.TextContent).ToArray()), Wait);
+        Assert.Equal(["budget|Plan", "hiring|Plan"], TopicRows(cut));
+
+        await cut.Find("li.topic .topic-note").ClickAsync(new MouseEventArgs());
+        Assert.Equal(["Plan"], opened);
+
+        cut.FindAll("li.topic input.done")[0].Change(true);
+        Assert.Contains("budget", cut.Find("[role=dialog]").TextContent, StringComparison.Ordinal);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal(["hiring|Plan"], TopicRows(cut)), Wait);
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        Assert.Empty(cut.FindAll("p.topic-result"));
+        Assert.Equal(
+            "# Plan\r\n- [x] next: @[Ann Lee] budget\r\nnext: @[Ann] hiring\r\n",
+            File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+    }
+
+    // 253 AC-7: a person without topics has no Topics section.
+    [Fact]
+    public async Task Render_NoTopics_NoSection()
+    {
+        data.WriteNote("Plan", "@[Ann Lee] and next: @[Bob] travel\n- [x] next: @[Ann Lee] done\n");
+        await data.RefreshAsync();
+
+        IRenderedComponent<PersonPanel> cut = Render("Ann Lee");
+
+        cut.WaitForAssertion(() => Assert.Equal(["Plan"], NoteNames(cut)), Wait);
+        Assert.Equal(["Mentioned in"], cut.FindAll("h2").Select(h => h.TextContent).ToArray());
+        Assert.Empty(cut.FindAll(".topics-list"));
+    }
+
+    // 253 AC-7: a topic whose line changed since the render shows the red line right under the list and writes nothing.
+    [Fact]
+    public async Task Tick_TopicChanged_RedLine()
+    {
+        data.WriteNote("Plan", "next: @[Ann Lee] budget\n");
+        await data.RefreshAsync();
+        IRenderedComponent<PersonPanel> cut = Render("Ann Lee");
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll("li.topic")), Wait);
+        data.WriteNote("Plan", "next: @[Ann Lee] budget later\n");
+
+        cut.Find("li.topic input.done").Change(true);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.True(cut.Find("p.topic-result").ClassList.Contains("red")), Wait);
+        Assert.True(cut.Find("p.topic-result").PreviousElementSibling!.ClassList.Contains("topics-list"));
+        Assert.Equal("next: @[Ann Lee] budget later\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+    }
+
     private IRenderedComponent<PersonPanel> Render(string person) =>
         data.Bunit.Render<PersonPanel>(p => p.Add(c => c.Person, person));
 
