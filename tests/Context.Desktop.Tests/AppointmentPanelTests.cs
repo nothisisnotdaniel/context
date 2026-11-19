@@ -1,5 +1,6 @@
 using AngleSharp.Dom;
 using Bunit;
+using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 
 namespace Context.Tests;
@@ -346,9 +347,51 @@ public sealed class AppointmentPanelTests : IDisposable
         Assert.Equal(["Anna: budget", "anna: hiring", "Bob: travel"], TopicRows(cut));
         Assert.True(Before(section, cut.Find("#appointment-notes-heading")));
 
-        cut.FindAll(".appointment-page li.topic input.done")[0].Change(true);
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await TickFirstTopic(cut);
+        await ConfirmBudget(cut);
+        AssertBudgetDone(cut);
+    }
 
+    // 276 AC-4: a state reload after the page has loaded re-renders the topic rows; the tick still opens the dialog.
+    [Fact]
+    public async Task Topics_ReloadBeforeTick_DialogStillOpens()
+    {
+        WriteDay();
+        data.WriteNote("Plan", "next: @[Anna] budget\n- next: @[anna] hiring\nnext: @[Bob] travel\n");
+        IRenderedComponent<Main> cut = await RenderMain();
+
+        await Item(cut, 0).ClickAsync(new MouseEventArgs());
+        WaitForPage(cut);
+        Assert.Equal(["Anna: budget", "anna: hiring", "Bob: travel"], TopicRows(cut));
+
+        // "Refresh() completed", then "the reload count is 0".
+        await data.State!.Refresh().WaitAsync(Wait);
+        await data.State.ReloadsSettled().WaitAsync(Wait);
+
+        await TickFirstTopic(cut);
+        await ConfirmBudget(cut);
+        AssertBudgetDone(cut);
+    }
+
+    // 276: no reload may hold the renderer ("the reload count is 0", then a flush), and the checkbox is found again,
+    // so the awaited change goes to the current element.
+    private async Task TickFirstTopic(IRenderedComponent<Main> cut)
+    {
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        await cut.InvokeAsync(() => { });
+        await cut.FindAll(".appointment-page li.topic input.done")[0].ChangeAsync(new ChangeEventArgs { Value = true });
+    }
+
+    // "the dialog question is Mark this topic done? budget", then the confirm click.
+    private static async Task ConfirmBudget(IRenderedComponent<Main> cut)
+    {
+        cut.WaitForAssertion(
+            () => Assert.Equal("Mark this topic done? budget", cut.Find("[role=dialog] .question").TextContent), Wait);
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+    }
+
+    private void AssertBudgetDone(IRenderedComponent<Main> cut)
+    {
         // "section.topics has no row with budget".
         cut.WaitForAssertion(() => Assert.Equal(["anna: hiring", "Bob: travel"], TopicRows(cut)), Wait);
         Assert.Equal(
