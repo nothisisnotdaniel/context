@@ -141,7 +141,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#384](backlog/384-type-backticks-for-inline-code-and.md) Type backticks for inline code and code blocks, never auto-escape input → 290-backtick-code-input
 - [x] [#385](backlog/385-filter-the-people-panel-by-affiliation.md) Filter the People panel by affiliation and role → 291-people-affiliation-filter
 - [x] [#395](backlog/395-fix-flaky-recent-json-test-that.md) Fix flaky recent.json test that failed CI after job 295 → 297-flaky-recent-test
-- [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4; #108)
+- [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4)
 - [x] [#234](backlog/234-release-and-ci-workflow-hardening.md) Release and CI workflow hardening → 272-release-ci-hardening
 - [x] [#113](backlog/113-refuse-removed-secret-options-after-a.md) Refuse removed secret options after a command → 273-refuse-removed-secret-options
 - [x] [#114](backlog/114-owner-only-file-mode-for-all.md) Owner-only file mode for all data files → 274-owner-only-file-mode
@@ -213,7 +213,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#38](backlog/038-core-dependency-test-tidy-ups.md) Core dependency test tidy-ups
 - [ ] [#61](backlog/061-resurfacing.md) Resurfacing
 - [ ] [#77](backlog/077-quick-switcher.md) Quick switcher
-- [ ] [#106](backlog/106-claude-code-mcp-server.md) Claude Code MCP server (after: #101; #17; Times#37; #108)
+- [ ] [#106](backlog/106-claude-code-mcp-server.md) Claude Code MCP server (after: #101; #17; Times#37)
 - [ ] [#107](backlog/107-own-cloud-sync-spike.md) Own-cloud sync spike
 - [ ] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39)
 - [ ] [#109](backlog/109-install-guide-for-the-unsigned-desktop.md) Install guide for the unsigned desktop app

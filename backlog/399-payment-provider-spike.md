@@ -13,3 +13,4 @@ Without a merchant of record the app cannot be sold across countries without reg
 ## Notes
 
 Added on 2026-11-19 after the user asked what to use instead of Lemon Squeezy.
+Times#39 now issues signed offline keys by hand; the recommendation should say how the provider fits next to them (its own keys as a second kind, or a webhook that issues ours) and what that needs.
