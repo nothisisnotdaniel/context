@@ -314,6 +314,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#358](backlog/358-release-check-target-is-a-commit.md) Release: check TARGET is a commit sha in the version checks
 - [?] [#359](backlog/359-refuse-lookalike-spellings-of-the-removed.md) Refuse lookalike spellings of the removed secret options
 - [?] [#360](backlog/360-test-the-full-removed-option-sentence.md) Test the full removed-option sentence in CLAUDE.md
+- [?] [#361](backlog/361-tag-index-explicit-handling-of-a.md) Tag index: explicit handling of a symlinked context.db
 
 ## Dropped with the terminal UI
 
