@@ -123,7 +123,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#69](backlog/069-board-view-for-a-tag.md) Board view for a tag → 242-tag-board-view
 - [x] [#74](backlog/074-waiting-for-list.md) Waiting-for list → 243-waiting-for-list
 - [x] [#78](backlog/078-smart-paste.md) Smart paste → 244-smart-paste
-- [ ] [#80](backlog/080-agenda-carry-over.md) Agenda carry-over
+- [x] [#80](backlog/080-agenda-carry-over.md) Agenda carry-over → 245-agenda-carry-over
 - [ ] [#79](backlog/079-share-a-note.md) Share a note
 - [ ] [#81](backlog/081-topics-for-the-next-1-1.md) Topics for the next 1:1
 - [ ] [#82](backlog/082-review-dates.md) Review dates
