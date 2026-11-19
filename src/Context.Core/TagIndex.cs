@@ -892,6 +892,29 @@ internal sealed class TagIndex
     });
 
     /// <summary>
+    /// Every stored attribute with the key <paramref name="key"/> (already normalized with
+    /// <see cref="AttributeParser.NormalizeKey"/>) as <c>(Note, Value)</c> rows, the value spelled as stored (raw),
+    /// ordered by note (ordinal), then line order (<c>rowid</c>). A key nobody uses gives an empty list.
+    /// </summary>
+    public IReadOnlyList<(string Note, string Value)> AttributeValues(string key) => Run(connection =>
+    {
+        List<(string Note, string Value)> rows = [];
+        using SqliteCommand command = Command(
+            connection,
+            null,
+            "SELECT note, value FROM note_attributes WHERE key = $key ORDER BY rowid");
+        command.Parameters.AddWithValue("$key", key);
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            rows.Add((reader.GetString(0), reader.GetString(1)));
+        }
+
+        // A stable sort by note (ordinal, the same on every OS) keeps each note's rows in line order.
+        return (IReadOnlyList<(string Note, string Value)>)rows.OrderBy(r => r.Note, StringComparer.Ordinal).ToList();
+    });
+
+    /// <summary>
     /// The indexed note called <paramref name="name"/> (trimmed): an exact match first, then one ignoring
     /// case. <c>null</c> if there is none.
     /// </summary>

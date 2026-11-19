@@ -1443,6 +1443,35 @@ input[type="password"]:disabled {
     min-width: 0;
 }
 
+/* The People filters (job 291): native selects with a visible label; a long value is cut by the select's width. */
+.people-filters {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    margin-top: 10px;
+}
+
+.people-filter {
+    align-items: center;
+    display: flex;
+    gap: 6px;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.people-filter select {
+    max-width: 16em;
+    min-width: 0;
+}
+
+/* A row's roles and affiliations, grey and on one cut line under the name. */
+.person-open .person-details {
+    display: block;
+    font-size: 0.85em;
+    text-align: left;
+}
+
 /* A tag's board (job 242): its columns side by side, each a list of cards; a card shows the note name (link-like), a
    todo card its text, and the move buttons to the columns on either side. Long text is cut, the full text in title. */
 .board-panel {

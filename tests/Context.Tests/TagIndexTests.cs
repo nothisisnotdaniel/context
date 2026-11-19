@@ -985,6 +985,24 @@ public sealed class TagIndexTests : IDisposable
         return rows;
     }
 
+    // 291 AC-1: AttributeValues gives exactly the key's rows as stored, by note (ordinal), then line order; an unused key
+    // gives nothing. The key is a parameter, so a quote in it is plain text.
+    [Fact]
+    public void AttributeValues_KeyRows_ByNoteThenLine()
+    {
+        WriteNote("bob", "role:: Zed\nrole:: [[Lead]]\naffiliation:: ACME\nrole:: alpha\n");
+        WriteNote("Zoe", "role:: Chef\n");
+        WriteNote("anna", "Role::   Team  lead \nrole:: team lead\n");
+        index.Sync(store);
+
+        Assert.Equal(
+            [("Zoe", "Chef"), ("anna", "Team lead"), ("bob", "Zed"), ("bob", "[[Lead]]"), ("bob", "alpha")],
+            index.AttributeValues("role"));
+        Assert.Equal([("bob", "ACME")], index.AttributeValues("affiliation"));
+        Assert.Empty(index.AttributeValues("aliases"));
+        Assert.Empty(index.AttributeValues("role' OR 1=1 --"));
+    }
+
     // 157 AC-3: Sync stores each note's attributes with the value key, keeps them up to date and drops them with the note.
     [Fact]
     public void Sync_StoresAttributes_AndDropsThemWithTheNote()

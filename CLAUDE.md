@@ -25,7 +25,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     in one transaction and only re-parses files whose time changed. `PRAGMA user_version` holds the parser
     version (`TagIndex.ParserVersion`, now 13: `#<n>` work item references in `note_items`; 12 was `review:yyyy-MM-dd` lines in `note_reviews`; 11 was `next: @[Name] topic` lines in `note_topics`, no longer note todos; 10 was the heading of a `[[Note#Heading]]` link in `note_links.heading`; 9 was open `- [ ]` lines in `note_todos`; 8 was `Decision:` lines in `note_decisions`; 7 was note text in `note_text`; 6 was a link target that runs into a code span is no link); when it is lower, `Sync` clears every stored time and empties `note_text` in the same
     transaction (so all notes are re-parsed and their text written once) and then sets it. Bump it whenever parsing changes. Queries: `Tags()`, `Reviews()`, `NotesWithTag`,
-    `NoteTags()`, `FindNote`, `Links`, `People()`, `NotesMentioning`, `NotesWithAttribute(key, value)` (by `AttributeParser.ValueKey`), `NotesWithoutAttribute(key)`, `Search(text)` (`(Note, Body)` rows for `note_text MATCH $q`, `$q` the text as one FTS5 phrase: `"` + text with `"` doubled + `"`, always a parameter, so FTS syntax is literal), `Decisions(tag?)` (`(Note, Line, Text, Modified)` rows of `note_decisions` joined to `notes` with a stored time, `Modified` UTC; a tag keeps the notes with that `note_tags` row), `NoteTodos()` (`NoteTodo` rows of `note_todos` joined to `notes` with a stored time). A database that can't be opened or isn't valid throws `TagIndexException` (an
+    `NoteTags()`, `FindNote`, `Links`, `People()`, `NotesMentioning`, `NotesWithAttribute(key, value)` (by `AttributeParser.ValueKey`), `NotesWithoutAttribute(key)`, `AttributeValues(key)` (job 291: the `(Note, Value)` rows of `note_attributes` for the key, value as stored, by note (ordinal), then `rowid`), `Search(text)` (`(Note, Body)` rows for `note_text MATCH $q`, `$q` the text as one FTS5 phrase: `"` + text with `"` doubled + `"`, always a parameter, so FTS syntax is literal), `Decisions(tag?)` (`(Note, Line, Text, Modified)` rows of `note_decisions` joined to `notes` with a stored time, `Modified` UTC; a tag keeps the notes with that `note_tags` row), `NoteTodos()` (`NoteTodo` rows of `note_todos` joined to `notes` with a stored time). A database that can't be opened or isn't valid throws `TagIndexException` (an
     `IOException`) and is never deleted or overwritten. The file database waits up to `TagIndex.BusyTimeout` (5 s; an
     internal constructor argument shortens it for tests) for another process's lock, and `Sync` starts with
     `BEGIN IMMEDIATE`, so the desktop app and a command-line run can share it. `TagsView.Build`, `LinksView.Build`
@@ -1200,6 +1200,18 @@ Every factory agent reads this file before working on Context. Keep it short and
     `ul.people-list` (`aria-label="People"`): one `button.person-open.cut` per page, text `DesktopText.NoteName(Title)`,
     `title` through `OneLine`, opening it through `RequestOpen`; none: grey `p[role=status]` `No people yet. Mention
     someone as @[Name] and open the mention to add their page.`. Sensitive notes are not listed. Its × closes it.
+    **Filters** (job 291, Core `PeopleAttributes.cs`): `PeopleAttributes.Build(index, store)` (`Found`,
+    `IndexUnreadable`) syncs and reads `AttributeValues("affiliation"/"role")` of the direct person pages only: `People`
+    (note name -> `PersonAttributes`: shown `Affiliations`/`Roles` distinct by `ValueKey`, stored order, `HasAffiliation`/
+    `HasRole(key)`) and the options `Affiliations`/`Roles` (`AttributeOption(Key, Label)`, distinct by `ValueKey`, label
+    from the first page in ordinal name order, sorted by label ignoring case, then ordinal); `Shown(value)` turns exactly
+    one `[[X]]` into the trimmed `X`. `DesktopState.PeopleAttributes()` runs it under `indexGate`, never throws. The panel
+    renders by name from the snapshot until it loads; then `select.people-affiliation`/`select.people-role`
+    (`aria-label`, first option `All` = `""`, values = keys, text through `OneLine`; a filter with no values is not
+    rendered) above the list, `button.people-clear` `Clear filters` while one is set, grey `No people match these
+    filters.` in place of the list, and per row a grey `span.person-details` in the button (roles `, ` joined, ` · `,
+    affiliations, through `OneLine`). A bad index: everyone, no filters, red `Can't read the attributes.`. Reloads on
+    `State.Changed` keeping the rows; a selection that is gone resets to `All`; older results are dropped.
     **Tags and links:** `TagsPanel` (the `Tags` button in `NotesPanel`, or `/tags` without an argument; `Main`'s
     `page`) lists `DesktopState.Tags()` (`TagsView.Build`): one button per tag with its grey note count; a click
     shows `TagPanel` for it below the list (`aria-pressed` on that button); its × hides both, `TagPanel`'s only
