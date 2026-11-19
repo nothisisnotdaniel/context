@@ -5,6 +5,7 @@
     <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-question" tabindex="-1"
          @onkeydown="Key">
         <p id="confirm-question" class="question">@DesktopText.OneLine(Question)</p>
+        @ChildContent
         <div class="dialog-buttons">
             <button type="button" class="confirm" disabled="@Busy" @onclick="Confirm">@ConfirmLabel</button>
             <button type="button" class="cancel" disabled="@Busy" @onclick="Cancel" @ref="cancelButton">Cancel</button>
@@ -28,6 +29,10 @@
     /// <summary>While true both buttons are disabled and Esc does nothing.</summary>
     [Parameter]
     public bool Busy { get; set; }
+
+    /// <summary>Optional content shown between the question and the buttons, such as a choice or a warning.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
 
     [Parameter]
     public EventCallback<Confirmation> OnConfirm { get; set; }

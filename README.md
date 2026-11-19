@@ -110,7 +110,7 @@ The desktop app saves the open note by itself one second after you stop typing; 
 `Saving…` and then `Saved.` in grey. Ctrl+S (Cmd+S on macOS) and `/save` save at once. Opening
 another note, the person behind a mention, `/today`, `/briefing` or `/meeting`, and closing the window save first, so
 `Discard changes to <name>?` only appears when that save failed; its red reason stays under the note, and your text
-stays in the editor. Rename, New subpage, Move, Mark sensitive, Make plain, Restore this version, Export, a capture
+stays in the editor. Rename, New subpage, Move, Mark sensitive, Make plain, Restore this version, Export, Share, a capture
 into the open inbox and triage into the open note also save first, and say `Save <name> first.` only when that save
 failed. A note that changed on disk since you opened it is never overwritten: the save is refused in red.
 
@@ -159,6 +159,15 @@ removes the attachments that only it links in its level; ones another note links
   of <name>. Nothing was moved.`), and deleting it removes none of its attachments.
 - An older kept version of a moved note still holds the old attachment names, so restoring it can link a missing or
   different file.
+
+### Sharing a note
+
+To send a note to someone who doesn't use Context, choose `Share` in the desktop app's More actions menu (or `/share`
+in the command palette) and then `Choose file…`. The note is saved as one web page (`<name>.html`) that opens in any
+browser: headings, lists, task items, quotes, code and links to web pages and e-mail addresses are kept, tags,
+`[[links]]` and `@[mentions]` become plain text, and the note's attached images are inside the file, so it needs
+nothing else and loads nothing from the internet. Lines tagged `#private` are left out unless you clear the box. A
+sensitive note can't be shared, just as it can't be exported: it is never written out as plain text. The page is written outside the Context folder only, and an existing file is never overwritten.
 
 ### Todos inside notes
 

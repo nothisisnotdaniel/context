@@ -754,7 +754,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Context.Desktop` and `Context.Desktop.Tests`, each by name and `PublicKey` (`Key="$(ContextPublicKey)"`; every
     assembly is public-signed with the committed `Context.snk`, see **Strong name**). `Context` grants only
     `Context.Tests` and `Context.Desktop` only `Context.Desktop.Tests`, the same way; no `InternalsVisibleTo` is name-only.
-    It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, picking a todo by its text in `TodoPicker.cs`, todos inside notes in `NoteTodoParser.cs` and `NoteTodo.cs`, tag parsing in `TagParser.cs`,
+    It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, picking a todo by its text in `TodoPicker.cs`, todos inside notes in `NoteTodoParser.cs` and `NoteTodo.cs`, tag parsing in `TagParser.cs`, the shared HTML page of a note in `NoteHtml.cs`,
     `[[note link]]` parsing in `NoteLinkParser.cs`, link rewriting on rename in `NoteLinkRewriter.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the desktop's recently opened notes (`recent.json`) in `RecentNotes.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
@@ -876,7 +876,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     file bytes, read through `BoundedFile`): a bigger or non-seekable note can't be opened (`Can't read <name>.`), a save
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
-    `/board`, `/briefing`, `/capture`, `/decisions`, `/done`, `/export`, `/find`, `/import`, `/meeting`, `/new`, `/open`, `/review`, `/save`, `/search`, `/settings`, `/tags`, `/today`, `/todo`, `/triage` (no `/current` since job 216) with `CommandMatcher` (in Core; ties
+    `/board`, `/briefing`, `/capture`, `/decisions`, `/done`, `/export`, `/find`, `/import`, `/meeting`, `/new`, `/open`, `/review`, `/save`, `/search`, `/settings`, `/share`, `/tags`, `/today`, `/todo`, `/triage` (no `/current` since job 216) with `CommandMatcher` (in Core; ties
     in Levenshtein score are ordered by `SwapDistance`, which counts an adjacent swap as one edit, so `/opne` runs `/open`).
     `/todo every <weekday|day|month> <text>` (job 168) adds a recurring todo (`TryParseRepeat`, then `AddTodo`), accent
     `Added: <text>`; a missing or bad unit or missing text is red `Type /todo every <weekday|day|month> <text>.`; a bad
@@ -1111,7 +1111,28 @@ Every factory agent reads this file before working on Context. Keep it short and
     replaced: <name>`. The More actions menu of a plain note has `Export` (or `/export`; argument ignored; no note open: red
     `Open a note first.`; a sensitive note has no item and `/export` shows the sensitive text without a dialog):
     a dirty editor is refused with `Save <name> first.`, else `SaveExportFile("<name>.md")` and `ExportNote`'s text
-    in the main status line. Rules (`DesktopSourceTests`): `WritePlainCopy` and `ReadImport` are named in
+    in the main status line.
+    **Share (job 250):** `NoteHtml.Render(title, text, resolveImage, leaveOutPrivate)` (Core, pure, reads no file)
+    makes one self-contained page: `<!DOCTYPE html>`, `<meta charset="utf-8">`, the CSP meta `default-src 'none';
+    img-src data:; style-src 'unsafe-inline'`, the encoded `<title>`, one inline `<style>`, no script. It renders
+    headings h1-h6, paragraphs, `-`/`*`/`1.` lists nested by indentation (tasks as ☐/☑), `>` quotes, fenced code as
+    `<pre><code>`, code spans, `**strong**`, `*em*`/`_em_`; everything else (tables too) is a paragraph, and all text is
+    encoded. Tags show as `TagParser.Format`, `[[Note]]`/`[[Note#Heading]]` as the target and `@[Name]` as the name,
+    never as links (inside code as written); `[text](url)` is an `<a href>` only for http/https/mailto (any case),
+    else just the text; `![alt](src)` is a `data:` image only among `NoteAttachments.ImageSources` (the 20-image cap)
+    and when `resolveImage` gives an image, else `[image: alt]`. With `leaveOutPrivate` every line on which
+    `TagParser.LineHasTag(line, "private")` (outside fences) is left out. `DesktopActions.ShareNote(name, path,
+    leaveOutPrivate)` refuses like `ExportNote` (path, inside, missing, exists, `Can't read <name>.`, `Can't write
+    <path>.`; same texts), writes with `WritePlainCopy` and says `Shared <name> as HTML: <path>`. A sensitive note is
+    never shared: locked or open it is Refused/`Locked` with `<name> is sensitive. Make it plain to export it.`
+    (`ExportSensitiveText`) without any `Agree`, and nothing is written. `IFileDialog.SaveShareFile(suggestedName)`
+    adds `.html`. The More actions menu of a plain note has `Share` (a sensitive note has no item; `/share` shows the
+    sensitive text in red without a dialog): no note open: red `Open a note first.`; a dirty editor: `Save <name>
+    first.`; else `ShareDialog` (wraps `ConfirmDialog` through its `ChildContent`; the `Confirmation` it makes is not
+    passed on, `OnChoose` carries only whether to leave out `#private` lines): the checkbox `Leave out lines tagged
+    #private` (checked), `Choose file…` / `Cancel`, Esc cancels. Choose file calls `SaveShareFile("<leaf>.html")`; a cancelled
+    save dialog shows nothing, else `ShareNote`'s text in the main status line (accent Done, red otherwise).
+    Rules (`DesktopSourceTests`): `WritePlainCopy` and `ReadImport` are named in
     `Context.Desktop` only in `DesktopActions.cs`, and no `.razor` file matches `\b(File|Directory|Path)\.`.
     **Sidebar bar (job 197):** `NotesPanel`'s bar holds only the icon buttons (`.notes-bar-buttons`: triage, people, tags, settings; Search moved to the top bar in job 218, `NotesPanel.OnSearch` stays for saved searches), right-aligned (`justify-content: flex-end`); no logo and no visible "Notes" heading, the list `ul.note-list.recent-notes` carries `aria-label="Recent notes"` (job 240). Between the bar and the list, `nav.saved-searches` (job 207, `aria-label="Saved searches"`, only with entries; `DesktopSnapshot.SavedSearches`) has per entry `button.saved-search` (name through `OneLine`, cut, `title` the query; `OnSearch(query)`) and `button.saved-search-remove` (`×`, `aria-label`/`title` `Remove <name>`; `Actions.RemoveSavedSearch`, result in grey/red `p.saved-search-result`); `SavedSearchesUnreadable` shows red `Can't read saved searches.` instead. **Placeholders:** a box's placeholder says only what it is for (`New todo`, `Capture to inbox`), never a `Return to …` hint; Return still submits and there are no submit buttons.
     **Tidy layout (job 192):** the Triage, People (job 239), Tags and Settings buttons in `NotesPanel`'s bar are icon-only (inline `svg`, `aria-hidden`, `currentColor`; `aria-label` and `title` carry the name), note rows show no modified date, and `.top-bar` is a band (`--panel` background, `--line` bottom border).
@@ -1157,7 +1178,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     public record (a parameter type must be public); its id is the item's class, `checked` non-null makes a
     `menuitemcheckbox` with `aria-checked`. `Main.PageActionsFor(snapshot)` builds the list: none while a page
     (Triage, People, Tags, Settings, Appointment) is shown and with no note open; `end-day` first on today's daily note (`DailyNote.NameFor(Snapshot.Today)`); for a plain note `rename`,
-    `delete`, `history`, `new-subpage`, `move`, `open-external`, `export`, `mark-sensitive` (when supported); for a
+    `delete`, `history`, `new-subpage`, `move`, `open-external`, `export`, `share`, `mark-sensitive` (when supported); for a
     sensitive note `rename`, `delete`, `history`, `make-plain`, `lock`. `Main.RunPageAction(id)` (the bound handler)
     runs the chosen one. Keys in the menu (default prevented): opening focuses the first item, ArrowDown/ArrowUp
     move and wrap, Return or Space runs the focused item, Esc or Tab closes the menu and focuses the … button.
@@ -1490,7 +1511,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `LinkCreateActionsTests` (`CreateLinkedNote`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `PeoplePanelTests`, `ReviewPanelTests`, `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `LinkCreateActionsTests` (`CreateLinkedNote`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `ShareActionsTests` (`ShareNote`) and `ShareDialogTests` (Share through `Main`), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `PeoplePanelTests`, `ReviewPanelTests`, `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
     CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules, the transfer calls and no file system class in `.razor`), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),

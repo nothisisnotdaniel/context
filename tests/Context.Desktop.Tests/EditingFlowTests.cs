@@ -186,7 +186,7 @@ public sealed class EditingFlowTests : IDisposable
             cut.Find(".palette-input").GetAttribute("blazor:elementReference"),
             ((Microsoft.AspNetCore.Components.ElementReference)focus.Arguments[0]!).Id);
         Assert.Equal(
-            ["/board <tag>", "/briefing", "/capture <text>", "/decisions [tag]", "/done <text>", "/export", "/find <attribute> <value>", "/import", "/meeting <number>", "/new <title> [--template <name>]", "/open <note>", "/review", "/save", "/search <text>", "/settings", "/tags [tag]", "/today", "/todo <<yyyy-MM-dd|today|tomorrow> [HH:mm]|every <weekday|day|month>> <text>", "/triage"],
+            ["/board <tag>", "/briefing", "/capture <text>", "/decisions [tag]", "/done <text>", "/export", "/find <attribute> <value>", "/import", "/meeting <number>", "/new <title> [--template <name>]", "/open <note>", "/review", "/save", "/search <text>", "/settings", "/share", "/tags [tag]", "/today", "/todo <<yyyy-MM-dd|today|tomorrow> [HH:mm]|every <weekday|day|month>> <text>", "/triage"],
             cut.FindAll(".palette-row .usage").Select(u => u.TextContent).ToArray());
 
         await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });

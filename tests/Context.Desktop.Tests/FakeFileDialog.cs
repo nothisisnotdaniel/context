@@ -50,4 +50,19 @@ internal sealed class FakeFileDialog : IFileDialog
         SuggestedName = suggestedName;
         return ExportPath;
     }
+
+    /// <summary>What <see cref="SaveShareFile"/> returns; <c>null</c> means cancelled.</summary>
+    public string? SharePath { get; set; }
+
+    public int ShareSaves { get; private set; }
+
+    /// <summary>The name the last <see cref="SaveShareFile"/> call suggested.</summary>
+    public string? ShareSuggestedName { get; private set; }
+
+    public string? SaveShareFile(string suggestedName)
+    {
+        ShareSaves++;
+        ShareSuggestedName = suggestedName;
+        return SharePath;
+    }
 }

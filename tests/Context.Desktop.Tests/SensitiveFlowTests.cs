@@ -71,7 +71,7 @@ public sealed class SensitiveFlowTests : IDisposable
         Assert.Empty(cut.FindAll(".note-toolbar"));
 
         await Open(cut, js, "Other");
-        Assert.Equal(["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export", "Mark sensitive"], await MenuLabelsAsync(cut));
+        Assert.Equal(["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export", "Share", "Mark sensitive"], await MenuLabelsAsync(cut));
     }
 
     // AC-5: a refused OS prompt, a lost key or a changed file shows one red line and no editor.
@@ -461,7 +461,7 @@ public sealed class SensitiveFlowTests : IDisposable
         Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         Assert.Empty(cut.FindAll("li.note .locked"));
         cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
-        Assert.Equal(["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export", "Mark sensitive"], await MenuLabelsAsync(cut));
+        Assert.Equal(["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export", "Share", "Mark sensitive"], await MenuLabelsAsync(cut));
         Assert.Equal(1, data.Keys.Agrees);
     }
 
@@ -518,7 +518,7 @@ public sealed class SensitiveFlowTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
 
-        Assert.Equal(["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export"], await MenuLabelsAsync(cut));
+        Assert.Equal(["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export", "Share"], await MenuLabelsAsync(cut));
         Assert.Empty(cut.FindAll(".sensitive-entry"));
         Assert.Empty(cut.FindAll("button.sensitive-setup-open"));
         Assert.Empty(cut.FindAll("button.sensitive-restore-open"));

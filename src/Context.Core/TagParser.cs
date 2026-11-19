@@ -75,7 +75,26 @@ internal static class TagParser
         }
     }
 
-    private static void ParseLine(string line, List<string> tags, HashSet<string> seen)
+    private static void ParseLine(string line, List<string> tags, HashSet<string> seen) =>
+        ScanLine(line, (_, _, tag) => Add(tag, tags, seen));
+
+    /// <summary>
+    /// True when <see cref="Parse"/> finds the tag <paramref name="tag"/> (lower-case) on the one line
+    /// <paramref name="line"/>, outside its code spans. Used by <see cref="NoteHtml"/> to leave out <c>#private</c> lines.
+    /// </summary>
+    internal static bool LineHasTag(string line, string tag)
+    {
+        bool found = false;
+        ScanLine(line, (_, _, t) => found |= string.Equals(t, tag, StringComparison.Ordinal));
+        return found;
+    }
+
+    /// <summary>
+    /// Calls <paramref name="found"/> with the start, the end (exclusive) and the lower-cased tag of every tag on the one
+    /// line <paramref name="line"/>, in order, by the rules of <see cref="Parse"/> (repeats too): <c>line[start..end]</c>
+    /// is <c>#tag</c> or <c>#[..]</c>.
+    /// </summary>
+    internal static void ScanLine(string line, Action<int, int, string> found)
     {
         CodeSpans? spans = CodeSpans.For(line);
         int i = 0;
@@ -107,7 +126,7 @@ internal static class TagParser
                     string? bracketTag = NormalizeBracket(line.AsSpan(i + 2, nextClose - i - 2));
                     if (bracketTag is not null)
                     {
-                        Add(bracketTag, tags, seen);
+                        found(i, nextClose + 1, bracketTag);
                         i = nextClose + 1;
                         continue;
                     }
@@ -129,7 +148,7 @@ internal static class TagParser
                 int length = end - i - 1;
                 if (length <= MaxTagLength)
                 {
-                    Add(line.Substring(i + 1, length).ToLowerInvariant(), tags, seen);
+                    found(i, end, line.Substring(i + 1, length).ToLowerInvariant());
                 }
 
                 i = end;

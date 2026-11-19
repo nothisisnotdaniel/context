@@ -334,6 +334,14 @@ input[type="checkbox"]:disabled {
     overflow-wrap: anywhere;
 }
 
+/* Share: the #private choice. */
+.share-option {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+    margin: 0 0 16px;
+}
+
 .dialog-buttons {
     display: flex;
     gap: 8px;

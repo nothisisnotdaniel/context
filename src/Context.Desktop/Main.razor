@@ -182,6 +182,10 @@
             <ConfirmDialog Question="@($"Make {DesktopText.OneLine(plain)} plain? It will be stored as readable text again. Its history will be removed.")"
                            ConfirmLabel="Make plain" Busy="running" OnConfirm="MakePlainConfirmed" OnCancel="CancelSensitive" />
         }
+        @if (sharing && openName is { } shared)
+        {
+            <ShareDialog Name="@shared" Busy="running" OnChoose="ShareChosen" OnCancel="CancelShare" />
+        }
         @if (restoring is { } version && openName is { } restored)
         {
             <ConfirmDialog Question="@($"Restore {DesktopText.OneLine(restored)} to the version from {HistoryPanel.TimeText(version.SavedUtc, State.Zone)}? The current text is kept as a version.")"
@@ -257,6 +261,7 @@ else
     private bool openSensitive;
     private bool marking;
     private bool unsealing;
+    private bool sharing;
     private bool historyShown;
     private (string Id, DateTime SavedUtc)? restoring;
     private NotesPanel? notesPanel;
@@ -315,7 +320,7 @@ else
         bool shown = openName is not null || page != Page.None || reviewShown || tagShown is not null
             || findShown is not null || searchShown is not null || decisionsShown is not null || paletteOpen
             || discarding || renaming || subpaging || moving || deleting || renameAsk is not null || marking
-            || unsealing || restoring is not null || running;
+            || unsealing || sharing || restoring is not null || running;
         if (shown)
         {
             return false;
@@ -341,7 +346,7 @@ else
             return;
         }
 
-        bool busy = discarding || renaming || subpaging || moving || deleting || marking || unsealing || running
+        bool busy = discarding || renaming || subpaging || moving || deleting || marking || unsealing || sharing || running
             || (editor is not null && openName is not null && await editor.IsDirtyAsync());
         if (busy)
         {
@@ -373,7 +378,7 @@ else
     private void OpenPalette(KeyboardEventArgs e)
     {
         if ((e.CtrlKey || e.MetaKey) && string.Equals(e.Key, "k", StringComparison.OrdinalIgnoreCase) && !discarding && !deleting
-            && !marking && !unsealing)
+            && !marking && !unsealing && !sharing)
         {
             paletteOpen = true;
         }
@@ -1031,6 +1036,7 @@ else
         renameAsk = null;
         marking = false;
         unsealing = false;
+        sharing = false;
         historyShown = false;
         restoring = null;
         if (name is null)
@@ -1108,6 +1114,10 @@ else
                 // DecisionsPanel shows the usage line for an invalid tag.
                 decisionsShown = rest;
                 ShowStatus(string.Empty, string.Empty);
+                break;
+            case "/share":
+                // As /export: the target comes from the OS save dialog only, after the share dialog.
+                await AskShare();
                 break;
             case "/import":
                 // What was typed after the command is ignored: the files come from the OS dialog only.
@@ -2208,6 +2218,7 @@ else
             new PageAction("move", "Move"),
             new PageAction("open-external", "Open in default editor"),
             new PageAction("export", "Export"),
+            new PageAction("share", "Share"),
         ];
         return snapshot.SensitiveSupported ? [.. plain, new PageAction("mark-sensitive", "Mark sensitive")] : plain;
     }
@@ -2241,6 +2252,9 @@ else
                 break;
             case "lock":
                 await LockOpen();
+                break;
+            case "share":
+                await AskShare();
                 break;
             case "open-external":
             {
@@ -2363,6 +2377,73 @@ else
 
         string? target = Dialog.SaveExportFile(name[(name.LastIndexOf('/') + 1)..] + ".md");
         return target is null ? null : (name, target);
+    }
+
+    // Share: refused with no note open, for a sensitive note (as Export) or with unsaved changes, otherwise asked in
+    // ShareDialog.
+    private async Task AskShare()
+    {
+        if (openName is not { } name)
+        {
+            ShowStatus("Open a note first.", "red");
+            return;
+        }
+
+        if (running)
+        {
+            return;
+        }
+
+        if (openSensitive)
+        {
+            ShowStatus(DesktopActions.ExportSensitiveText(DesktopText.OneLine(name)), "red");
+            return;
+        }
+
+        if (await KeptUnsaved())
+        {
+            ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
+            return;
+        }
+
+        renaming = false;
+        ShowStatus(string.Empty, string.Empty);
+        sharing = true;
+    }
+
+    private void CancelShare()
+    {
+        if (!running)
+        {
+            sharing = false;
+        }
+    }
+
+    // Choose file in ShareDialog: asks where to write the page, then writes it. Cancelling the save dialog writes
+    // nothing and shows no status.
+    private async Task ShareChosen(bool leaveOutPrivate)
+    {
+        if (openName is not { } name || running || openSensitive)
+        {
+            return;
+        }
+
+        string? target = Dialog.SaveShareFile(name[(name.LastIndexOf('/') + 1)..] + ".html");
+        sharing = false;
+        if (target is null)
+        {
+            return;
+        }
+
+        running = true;
+        try
+        {
+            ShowExported(await Actions.ShareNote(name, target, leaveOutPrivate));
+        }
+        finally
+        {
+            running = false;
+        }
     }
 
     private void ShowExported(ActionResult exported) =>

@@ -73,12 +73,12 @@ internal static class NoteLinkParser
     {
         List<string> targets = [];
         HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
-        List<(int Start, int Length)> found = [];
+        List<(int Start, int Length, int From, int To)> found = [];
         foreach (string line in TagParser.LinesOutsideFences(markdown))
         {
             found.Clear();
             ParseLine(line, found);
-            foreach ((int start, int length) in found)
+            foreach ((int start, int length, _, _) in found)
             {
                 string text = line.Substring(start, length);
                 if (seen.Add(text))
@@ -100,12 +100,12 @@ internal static class NoteLinkParser
     public static IReadOnlyList<NoteLinkSpan> FindSpans(string markdown)
     {
         List<NoteLinkSpan> spans = [];
-        List<(int Start, int Length)> found = [];
+        List<(int Start, int Length, int From, int To)> found = [];
         foreach ((int number, int lineStart, string line) in TagParser.IndexedLinesOutsideFences(markdown))
         {
             found.Clear();
             ParseLine(line, found);
-            foreach ((int start, int length) in found)
+            foreach ((int start, int length, _, _) in found)
             {
                 spans.Add(new NoteLinkSpan(number, lineStart + start, line.Substring(start, length)));
             }
@@ -131,8 +131,20 @@ internal static class NoteLinkParser
         return new NoteLinkTarget(target[..hash].Trim(), heading.Length == 0 ? null : heading);
     }
 
-    // Adds the start and length (in the line) of each link's trimmed target, in order.
-    private static void ParseLine(string line, List<(int Start, int Length)> found)
+    /// <summary>
+    /// Every link on the one line <paramref name="line"/>, in order, by the rules of <see cref="Parse"/> (repeats too):
+    /// <c>line[From..To]</c> is the whole <c>[[..]]</c> and <c>Target</c> the trimmed raw target. Used by <see cref="NoteHtml"/>.
+    /// </summary>
+    internal static IReadOnlyList<(int From, int To, string Target)> LineLinks(string line)
+    {
+        List<(int Start, int Length, int From, int To)> found = [];
+        ParseLine(line, found);
+        return found.Select(f => (f.From, f.To, line.Substring(f.Start, f.Length))).ToList();
+    }
+
+    // Adds the start and length (in the line) of each link's trimmed target, and where its "[[" starts and its "]]"
+    // ends, in order.
+    private static void ParseLine(string line, List<(int Start, int Length, int From, int To)> found)
     {
         // The first ']' and the first '[' at or after the current text start; remembered so a line full of
         // "[[" is still scanned once (each search only moves forward).
@@ -194,7 +206,7 @@ internal static class NoteLinkParser
                 ReadOnlySpan<char> target = raw.Trim();
                 if (target.Length > 0 && target.Length <= MaxTargetLength)
                 {
-                    found.Add((textStart + (raw.Length - raw.TrimStart().Length), target.Length));
+                    found.Add((textStart + (raw.Length - raw.TrimStart().Length), target.Length, i, nextClose + 2));
                 }
 
                 i = nextClose + 2;

@@ -261,10 +261,10 @@ public sealed class MainTests : IDisposable
         await OpenMenuAsync(cut);
         IReadOnlyList<IElement> items = cut.FindAll(".page-menu button");
         Assert.Equal(
-            ["rename", "delete", "history", "new-subpage", "move", "open-external", "export", "mark-sensitive"],
+            ["rename", "delete", "history", "new-subpage", "move", "open-external", "export", "share", "mark-sensitive"],
             items.Select(b => b.ClassName ?? string.Empty).ToArray());
         Assert.Equal(
-            ["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export", "Mark sensitive"], items.Select(b => b.TextContent).ToArray());
+            ["Rename", "Delete", "History", "New subpage", "Move", "Open in default editor", "Export", "Share", "Mark sensitive"], items.Select(b => b.TextContent).ToArray());
         Assert.All(items, b => Assert.Equal("button", b.GetAttribute("type")));
         Assert.Equal("menuitemcheckbox", cut.Find(".page-menu button.history").GetAttribute("role"));
         Assert.All(items.Where(b => b.ClassName != "history"), b => Assert.Equal("menuitem", b.GetAttribute("role")));
@@ -283,7 +283,7 @@ public sealed class MainTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Equal("Can't read Big.", cut.Find(".unreadable").TextContent), Wait);
         await OpenMenuAsync(cut);
-        Assert.Equal(8, cut.FindAll(".page-menu button").Count);
+        Assert.Equal(9, cut.FindAll(".page-menu button").Count);
     }
 
     // 134 AC-8: Rename swaps in a prefilled field; Enter or Save name renames and the editor shows the new name.
@@ -1814,6 +1814,24 @@ public sealed class MainTests : IDisposable
 
         Assert.Equal("Meeting 1.md", data.Dialog.SuggestedName);
         Assert.Equal("# Meeting 1\n", File.ReadAllText(data.Outside("m1.md")));
+    }
+
+    // 250 AC-11: Share of a subpage suggests its title with .html.
+    [Fact]
+    public async Task Share_Subpage_SuggestsTitle()
+    {
+        WriteMeetings();
+        data.Dialog.SharePath = data.Outside("m1.html");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await OpenFull(cut, js, "Meetings/Meeting 1");
+
+        await ChooseAsync(cut, "share");
+        await cut.WaitForElement(".dialog button.confirm", Wait).ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Shared Meetings/Meeting 1 as HTML: " + data.Outside("m1.html"), cut.Find(".main-status").TextContent), Wait);
+        Assert.Equal("Meeting 1.html", data.Dialog.ShareSuggestedName);
+        Assert.Contains("<h1>Meeting 1</h1>", File.ReadAllText(data.Outside("m1.html")), StringComparison.Ordinal);
     }
 
     // 174 AC-12: History shows the panel under the editor and hides it again; another note starts without it.
@@ -4048,7 +4066,7 @@ public sealed class MainTests : IDisposable
 
         await PickAndOpen(cut, js, "2026-11-20", "2026-11-20");
         Assert.Equal(
-            ["rename", "delete", "history", "new-subpage", "move", "open-external", "export", "mark-sensitive"],
+            ["rename", "delete", "history", "new-subpage", "move", "open-external", "export", "share", "mark-sensitive"],
             await MenuIdsAsync(cut));
 
         await PickDate(cut, "2026-11-21");
