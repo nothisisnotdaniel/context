@@ -141,6 +141,17 @@ Every factory agent reads this file before working on Context. Keep it short and
     the line's `PersonParser.Parse` mentions shown as `TagIndex.Aliases()` resolves them (else as written), distinct
     by `PersonParser.Key`, in line order. Sorted by date descending, then note ignoring case, then ordinal, then line;
     kinds `Found`, `NoDecisions`, `InvalidTag`, `IndexUnreadable` (`TagIndexException`). Sensitive notes never appear.
+  - **Similar notes** (job 268, `SimilarNotes.cs`): `SimilarNotes.TitleKey(name)` is the last segment's
+    letter-or-digit runs, lower-cased invariant, joined by one space. `TitleMatch(a, b)`: no letter in either key is
+    `None`; equal keys `Same`; keys equal once digits are removed (and different) `None`; a key under 5 characters
+    `None`; else `Similar` when the banded `Distance` is at most 1 (shorter key under 10) or 2. `Shingles(text)` are the
+    distinct runs of 3 tokens (`Tokens`: letter-or-digit runs, lower-cased); `ContentScore` is the Jaccard index, null
+    under `MinShingles` (10) or below `ContentThreshold` (0.5, inclusive). `Pairs` buckets titles by key length and
+    finds content candidates through an inverted shingle index, skipping a shingle shared by more than
+    `MaxShingleNotes` (50) notes. `TagIndex.NoteTexts()` (no parameters) reads every `note_text` row, so only plain,
+    readable notes up to `MaxEditBytes` take part. `SimilarNotesView.Build(index, store)` (`Found`, `NoSimilar`,
+    `IndexUnreadable`): `Sync`, one `NoteTexts()`, only `store.List()` names; each pair once with `First` before `Second`
+    ignoring case, then ordinal; pairs with both reasons first, then score descending, then names. Desktop only.
   - **Tag board** (job 242, `BoardView.cs`): boards are set by hand in `settings.json` as
     `"boards":[{"tag":"launch","columns":["todo","doing","done"]}]` (`SettingsStore.ReadBoards`, `BoardSetting`; at most
     `MaxBoards` 50 boards and `MaxColumns` 12 columns; a column is ASCII letters, digits, `-` and `_`, a letter first, at
@@ -767,7 +778,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
     `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs` (the agenda carry-over in `MeetingCarryOver.cs`), note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs` (its triage queue, remove and snooze in `InboxTriage.cs`), the day's end in `DayEnd.cs` (Times' day file in `TimesDay.cs`, `settings.json` in `SettingsStore.cs`), the morning briefing in `Briefing.cs` (Times' flexitime balance in `TimesBalance.cs`), the todo input rules (`TryParseDate`,
-    `MaxTextLength`, `TryParseRepeat`, `NextDue`) in `TodoInput.cs`, the todo repeat in `TodoRepeat.cs`, waiting-for todos in `WaitingFor.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`), `SearchView.cs` (`search`), `TagFilter.cs` (tag filters), `DecisionsView.cs` (`decisions`, with `DecisionParser.cs`), `BoardView.cs` (tag boards), `ReviewView.cs` (the weekly review) and `CalendarLinkView.cs`
+    `MaxTextLength`, `TryParseRepeat`, `NextDue`) in `TodoInput.cs`, the todo repeat in `TodoRepeat.cs`, waiting-for todos in `WaitingFor.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`), `SearchView.cs` (`search`), `TagFilter.cs` (tag filters), `DecisionsView.cs` (`decisions`, with `DecisionParser.cs`), `SimilarNotes.cs` (similar notes), `BoardView.cs` (tag boards), `ReviewView.cs` (the weekly review) and `CalendarLinkView.cs`
     (the calendar link), and the command ranking for the desktop palette in `CommandMatcher.cs`; the notes list is `NoteStore.List()` itself.
   - **Data step in Core, drawing in the front end:** a view's Core data step returns plain types (a kind plus raw
     text, never markup, never cleaned or escaped, no exception messages). The front ends (`Cli`, and the desktop
@@ -791,7 +802,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `DataWatcher` (one `FileSystemWatcher` with subfolders, `IsRelevant` filter: the top-level files as before, plus
     a `.md` at any depth except under a folder starting with `.` or under the top-level `calendar/`, and the top-level
     `settings.json` (job 207: saved searches edited outside the app; any case, not in a subfolder); 300 ms
-    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `PeoplePanel`, `LinksPanel`, `OutlinePanel`, `DayAppointmentsPanel`, `AppointmentPanel`, `PersonPanel`, `ReviewPanel`, `TriagePanel`, `ToReviewPanel`)
+    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `PeoplePanel`, `LinksPanel`, `OutlinePanel`, `DayAppointmentsPanel`, `AppointmentPanel`, `PersonPanel`, `ReviewPanel`, `TriagePanel`, `ToReviewPanel`, `SimilarPanel`)
     inherit `StateComponent`, which injects the state and `DesktopActions` (internal types can't be
     public parameters). `DesktopActions` (with `ActionResult`: `ActionKind` `Done`/`Refused`/`Failed`, `ActionReason`,
     raw text) is the only write path: it never throws, runs one action at a time (`Busy`), refreshes the state after a change and has the test
@@ -884,7 +895,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     file bytes, read through `BoundedFile`): a bigger or non-seekable note can't be opened (`Can't read <name>.`), a save
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
-    `/board`, `/briefing`, `/capture`, `/decisions`, `/done`, `/export`, `/find`, `/import`, `/meeting`, `/new`, `/open`, `/review`, `/save`, `/search`, `/settings`, `/share`, `/standup`, `/tags`, `/today`, `/todo`, `/triage` (no `/current` since job 216) with `CommandMatcher` (in Core; ties
+    `/board`, `/briefing`, `/capture`, `/decisions`, `/done`, `/export`, `/find`, `/import`, `/meeting`, `/new`, `/open`, `/review`, `/save`, `/search`, `/settings`, `/share`, `/similar`, `/standup`, `/tags`, `/today`, `/todo`, `/triage` (no `/current` since job 216) with `CommandMatcher` (in Core; ties
     in Levenshtein score are ordered by `SwapDistance`, which counts an adjacent swap as one edit, so `/opne` runs `/open`).
     `/todo every <weekday|day|month> <text>` (job 168) adds a recurring todo (`TryParseRepeat`, then `AddTodo`), accent
     `Added: <text>`; a missing or bad unit or missing text is red `Type /todo every <weekday|day|month> <text>.`; a bad
@@ -1113,6 +1124,22 @@ Every factory agent reads this file before working on Context. Keep it short and
     most `MaxRows` (100), then grey `… <n> more`. Grey `Loading…`, grey `No decisions yet.` / `No decisions in notes
     tagged #<tag>.`, red `Can't read the decisions.`, red `Type /decisions [tag].` for an invalid tag (nothing read);
     same read-only (no `Actions.`), reload and stale-result rules. Opening a note or `Today` closes it.
+    `SimilarPanel` (job 268, `/similar`; `Main`'s `similarShown`, after `DecisionsPanel`) has the heading `Similar notes`
+    and `Close`, and lists `DesktopState.Similar()` (under `indexGate`, never throws): per pair two `note-button`s
+    (`OnOpen`), the grey `span.reason` (`same title`, `similar title`, `<n>% same text` rounded down, joined by `, `) and
+    `button.keep-first`/`keep-second` `Keep <name>`; at most `MaxRows` (100), then grey `… <n> more`; grey `Loading…`,
+    grey `No similar notes.`, red `Can't read the notes index.`. A Keep button asks `Main.MergeHeld` (either note open
+    and dirty: red `Save <name> first.`), then `DesktopState.MergeLinkCount` (`LinkRenamePlan.ForMerge`, read-only) and
+    the `ConfirmDialog` `Merge <source> into <target>? Its text is added to <target>, links in <n> notes are updated and
+    <source> stays in its history.` (`Merge`); confirm calls `DesktopActions.MergeNotes(target, source, confirmation)`:
+    refusals (no confirmation, `Missing`, same note, sensitive `Locked` with no key call, subpages, attachments in another
+    folder, over `MaxEditBytes`, a failed link round trip) write nothing; else the source's bytes are kept through
+    `HistoryStore.Keep`, the target is saved as its text without trailing line breaks + `\n\n` + the source's text (BOM
+    dropped, its own links rewritten) through `SaveIfUnchanged(..., HistoryStore)`, the source removed with `Delete(...,
+    removeHistory: false, removeAttachments: false)` and other notes' links rewritten as on rename (`LinksLeft` text
+    `Merged <s> into <t>, but links in <k> notes couldn't be updated: ...`). The result is `p.similar-result` (accent on
+    Done); `Main.Merged` opens the target when the source was open and reloads an open clean target. A merged note is
+    recovered by creating a note with its name and opening History.
     **Import and export:** the only paths the desktop reads or writes outside the data folder come from the OS
     dialog (`IFileDialog.OpenMarkdownFiles()`: several `*.md`, empty when cancelled or failed;
     `SaveExportFile(suggestedName)`: `null` when cancelled, adds `.md` to a name without extension; Photino's save

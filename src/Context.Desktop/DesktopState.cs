@@ -289,6 +289,22 @@ internal sealed class DesktopState
     });
 
     /// <summary>
+    /// How many other plain notes merging <paramref name="source"/> into <paramref name="target"/> would update links in
+    /// (<see cref="LinkRenamePlan.ForMerge"/>), off the calling thread. Reads only; 0 on any error.
+    /// </summary>
+    public Task<int> MergeLinkCount(string target, string source) => Task.Run(() =>
+    {
+        try
+        {
+            return LinkRenamePlan.ForMerge(notes, target, source).Notes.Count;
+        }
+        catch (Exception)
+        {
+            return 0;
+        }
+    });
+
+    /// <summary>
     /// The images the plain note <paramref name="name"/> shows inline, off the calling thread: each source of
     /// <see cref="NoteAttachments.ImageSources"/> in <paramref name="text"/> that <see cref="NoteAttachments.TryResolve"/>
     /// accepts as an image, with its MIME type and base64 bytes. Empty on any error. Reads only.
@@ -1000,6 +1016,26 @@ internal sealed class DesktopState
         catch (Exception)
         {
             return new DecisionsView(DecisionsViewKind.IndexUnreadable, string.Empty, []);
+        }
+    });
+
+    /// <summary>
+    /// The similar plain notes (job 268, <see cref="SimilarNotesView.Build"/> after syncing the index), off the calling
+    /// thread under the index lock. Reads only and never throws: any failure is
+    /// <see cref="SimilarNotesKind.IndexUnreadable"/>.
+    /// </summary>
+    public Task<SimilarNotesView> Similar() => Task.Run(() =>
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                return SimilarNotesView.Build(index, notes);
+            }
+        }
+        catch (Exception)
+        {
+            return new SimilarNotesView(SimilarNotesKind.IndexUnreadable, []);
         }
     });
 

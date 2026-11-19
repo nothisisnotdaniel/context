@@ -61,6 +61,10 @@
                 {
                     <DecisionsPanel Tag="@decisionsTag" OnOpen="RequestOpen" OnClose="CloseDecisions" />
                 }
+                @if (similarShown)
+                {
+                    <SimilarPanel OnOpen="RequestOpen" OnClose="CloseSimilar" Guard="MergeHeld" OnMerged="Merged" />
+                }
                 <p class="main-status cut @statusClass" role="status" title="@statusText">@statusText</p>
                 <div class="note-area" hidden="@(page != Page.None)">
                     @if (openName is { } name)
@@ -225,6 +229,7 @@ else
     // Bumped each time the search panel is asked for, so asking again for the same text starts it over.
     private int searchRequest;
     private string? decisionsShown;
+    private bool similarShown;
     private enum Page { None, Triage, People, Tags, Settings, Appointment, Board }
 
     // The board's tag (normalized) while Page.Board is shown (job 242).
@@ -319,7 +324,7 @@ else
         }
 
         bool shown = openName is not null || page != Page.None || reviewShown || tagShown is not null
-            || findShown is not null || searchShown is not null || decisionsShown is not null || paletteOpen
+            || findShown is not null || searchShown is not null || decisionsShown is not null || similarShown || paletteOpen
             || discarding || renaming || subpaging || moving || deleting || renameAsk is not null || marking
             || unsealing || sharing || restoring is not null || running;
         if (shown)
@@ -408,6 +413,8 @@ else
     }
 
     private void CloseDecisions() => decisionsShown = null;
+
+    private void CloseSimilar() => similarShown = false;
 
     // The tags view: every tag with its note count; a click on one shows the tag panel below it.
     private void ShowTags() => OpenPage(Page.Tags);
@@ -504,6 +511,7 @@ else
         findShown = null;
         searchShown = null;
         decisionsShown = null;
+        similarShown = false;
         OpenPage(Page.Appointment);
         appointmentShown = appointment;
         ShowStatus(string.Empty, string.Empty);
@@ -1030,6 +1038,7 @@ else
         findShown = null;
         searchShown = null;
         decisionsShown = null;
+        similarShown = false;
         renaming = false;
         subpaging = false;
         moving = false;
@@ -1114,6 +1123,11 @@ else
                 // Every note's Decision: lines, or those of the notes with a tag: /decisions #work. Read only;
                 // DecisionsPanel shows the usage line for an invalid tag.
                 decisionsShown = rest;
+                ShowStatus(string.Empty, string.Empty);
+                break;
+            case "/similar":
+                // Pairs of notes that look like duplicates (job 268). Read only until a Keep button is confirmed.
+                similarShown = true;
                 ShowStatus(string.Empty, string.Empty);
                 break;
             case "/share":
@@ -1552,6 +1566,39 @@ else
         }
 
         return null;
+    }
+
+    // Before a merge: either note open with unsaved changes holds it back.
+    private async Task<string?> MergeHeld(string target, string source)
+    {
+        if (openName is { } name && editor is not null
+            && (string.Equals(name, target, StringComparison.Ordinal) || string.Equals(name, source, StringComparison.Ordinal))
+            && await editor.IsDirtyAsync())
+        {
+            return $"Save {name} first.";
+        }
+
+        return null;
+    }
+
+    // After a merge: an open, clean target shows the merged text; an open source (now gone) gives way to the target,
+    // with the similar notes still shown.
+    private async Task Merged((string Target, string Source) merge)
+    {
+        if (openName is not { } name || editor is null || openSensitive)
+        {
+            return;
+        }
+
+        if (string.Equals(name, merge.Source, StringComparison.Ordinal))
+        {
+            ShowNote(merge.Target);
+            similarShown = true;
+        }
+        else if (string.Equals(name, merge.Target, StringComparison.Ordinal) && !await editor.IsDirtyAsync())
+        {
+            await editor.ReloadAsync();
+        }
     }
 
     // After a review date was moved or removed: the open, clean note shows what was written, as after a triage action.

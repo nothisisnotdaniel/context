@@ -447,7 +447,8 @@ input[type="password"]:disabled {
 .tag-notes .note-button,
 .find-notes .note-button,
 .search-hits .note-button,
-.decision-rows .note-button {
+.decision-rows .note-button,
+.similar-rows .note-button {
     background: none;
     border: none;
     border-radius: 3px;
@@ -473,7 +474,8 @@ input[type="password"]:disabled {
 .tag-notes .note-button:hover:not(:disabled),
 .find-notes .note-button:hover:not(:disabled),
 .search-hits .note-button:hover:not(:disabled),
-.decision-rows .note-button:hover:not(:disabled) {
+.decision-rows .note-button:hover:not(:disabled),
+.similar-rows .note-button:hover:not(:disabled) {
     text-decoration: underline;
 }
 
@@ -508,6 +510,39 @@ input[type="password"]:disabled {
 .decision-rows .text {
     flex: 1;
     min-width: 0;
+}
+
+/* The similar notes panel (job 268): both note names, the grey reason and the two Keep buttons on one line. */
+.similar-rows li {
+    align-items: baseline;
+    display: flex;
+    gap: 8px;
+    padding: 3px 0;
+}
+
+.similar-rows .note-button {
+    flex: none;
+    max-width: 25%;
+}
+
+.similar-rows .reason {
+    flex: 1;
+    min-width: 0;
+}
+
+.similar-rows .similar-buttons {
+    display: flex;
+    flex: none;
+    gap: 6px;
+}
+
+.similar-rows .keep-first,
+.similar-rows .keep-second {
+    max-width: 12em;
+}
+
+.similar-result {
+    margin: 8px 0 0;
 }
 
 /* The main region's status line and the bars above the editor and the tag panel. */
@@ -616,7 +651,8 @@ input[type="password"]:disabled {
 .tag-panel,
 .find-panel,
 .search-panel,
-.decisions-panel {
+.decisions-panel,
+.similar-panel {
     border-bottom: 1px solid var(--line);
     margin-bottom: 16px;
     padding-bottom: 12px;

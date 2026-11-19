@@ -1236,6 +1236,24 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal("# Plan\nBudget 2027", Assert.Single(index.Search("et 20")).Body);
     }
 
+    // 268 AC-3: NoteTexts gives every note_text row (plain notes only), sorted by note, and reads through one query.
+    [Fact]
+    public void NoteTexts_AllPlainRows_SortedByNote()
+    {
+        WriteNote("b", "second");
+        WriteNote("A", "first");
+        Directory.CreateDirectory(Path.Combine(root, "A"));
+        File.WriteAllText(Path.Combine(root, "A", "Child.md"), "child");
+        File.WriteAllText(Path.Combine(root, "Secret.ctxs"), "sealed");
+        index.Sync(store);
+        int before = index.Reads;
+
+        IReadOnlyList<(string Note, string Body)> rows = index.NoteTexts();
+
+        Assert.Equal([("A", "first"), ("A/Child", "child"), ("b", "second")], rows);
+        Assert.Equal(before + 1, index.Reads);
+    }
+
     // 170 AC-2: the query is one quoted phrase passed as a parameter: quotes and FTS operators are text.
     [Theory]
     [InlineData("a\" OR \"b")]
