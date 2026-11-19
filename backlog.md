@@ -323,6 +323,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#367](backlog/367-commit-log-turn-off-signature-checks.md) Commit log: turn off signature checks in git log
 - [?] [#368](backlog/368-desktop-request-folder-tighten-an-existing.md) Desktop request folder: tighten an existing .desktop folder and refuse a symlinked lock
 - [?] [#369](backlog/369-work-item-read-the-linked-repos.md) Work item: read the linked repos in parallel
+- [?] [#370](backlog/370-command-bar-show-a-running-line.md) Command bar: show a running line while a command runs
+- [?] [#371](backlog/371-command-bar-fit-the-window-to.md) Command bar: fit the window to its content and check the rounded corners
 
 ## Dropped with the terminal UI
 
