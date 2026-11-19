@@ -1245,7 +1245,8 @@ internal sealed class TagIndex
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Left as it is; the database still opens.
+            // Left as it is; the database still opens. Its journal then takes the same loose mode, which exposes
+            // nothing the readable database doesn't already.
         }
     }
 

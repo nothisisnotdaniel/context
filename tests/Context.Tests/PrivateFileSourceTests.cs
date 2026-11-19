@@ -18,7 +18,7 @@ public sealed partial class PrivateFileSourceTests
             "export and share write to a path the user picks outside the data folder; the umask applies there",
     };
 
-    [GeneratedRegex(@"(?<![A-Za-z0-9_])(Directory\.CreateDirectory\(|File\.WriteAll|File\.AppendAll|File\.Create\(|File\.OpenWrite\(|new FileStream\()")]
+    [GeneratedRegex(@"(?<![A-Za-z0-9_])(Directory\.CreateDirectory\(|File\.WriteAll|File\.AppendAll|File\.Create\(|File\.OpenWrite\(|File\.Open\(|File\.Copy\(|new StreamWriter\(|new FileStream\()")]
     private static partial Regex WriteCall();
 
     [GeneratedRegex(@"^\s*(?:(?:public|internal|private|protected|static|async|override|sealed|unsafe)\s+)+[\w<>\[\],.?() ]+?\s+(\w+)\s*\(")]
@@ -106,7 +106,8 @@ public sealed partial class PrivateFileSourceTests
 
                 foreach (Match match in WriteCall().Matches(lines[i]))
                 {
-                    if (match.Value == "new FileStream(" && IsReadOnlyStream(Statement(lines, i, match.Index)))
+                    if ((match.Value == "new FileStream(" || match.Value == "File.Open(")
+                        && IsReadOnlyStream(Statement(lines, i, match.Index)))
                     {
                         continue;
                     }
@@ -163,12 +164,18 @@ public sealed partial class PrivateFileSourceTests
                     + "        System.IO.File.WriteAllText(p, \"x\");\n"
                     + "        using var s = new FileStream(\n            p, FileMode.Open, FileAccess.Read, FileShare.Read);\n"
                     + "        using var w = new FileStream(p, FileMode.Create);\n"
-                    + "        PrivateFile.OpenNew(p);\n    }\n}\n");
+                    + "        PrivateFile.OpenNew(p);\n"
+                    + "        File.Copy(p, p + \".bak\");\n"
+                    + "        using var r = File.Open(p, FileMode.Open, FileAccess.Read, FileShare.Read);\n    }\n}\n");
 
             List<string> hits = Hits(src);
 
             Assert.Equal(
-                ["Context.Core/Sample.cs:5 (Bad): File.WriteAll", "Context.Core/Sample.cs:8 (Bad): new FileStream("],
+                [
+                    "Context.Core/Sample.cs:5 (Bad): File.WriteAll",
+                    "Context.Core/Sample.cs:8 (Bad): new FileStream(",
+                    "Context.Core/Sample.cs:10 (Bad): File.Copy(",
+                ],
                 hits);
         }
         finally
