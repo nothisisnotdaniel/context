@@ -320,6 +320,9 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#364](backlog/364-times-panel-narrow-the-catch-in.md) Times panel: narrow the catch in DesktopState.TimesNow
 - [?] [#365](backlog/365-pin-icon-contrast-on-the-open.md) Pin icon contrast on the open note row
 - [?] [#366](backlog/366-pinned-list-roll-back-the-in.md) Pinned list: roll back the in-memory change when the file write fails
+- [?] [#367](backlog/367-commit-log-turn-off-signature-checks.md) Commit log: turn off signature checks in git log
+- [?] [#368](backlog/368-desktop-request-folder-tighten-an-existing.md) Desktop request folder: tighten an existing .desktop folder and refuse a symlinked lock
+- [?] [#369](backlog/369-work-item-read-the-linked-repos.md) Work item: read the linked repos in parallel
 
 ## Dropped with the terminal UI
 
