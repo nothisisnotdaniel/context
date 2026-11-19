@@ -125,6 +125,10 @@ internal static class OutlookStatusLine
         _ => null,
     };
 
+    /// <summary>The Mail digest's line (job 286): as <see cref="Text"/>, but a stopped Outlook names its mail.</summary>
+    public static string? MailText(OutlookStatus status) =>
+        status == OutlookStatus.NotRunning ? "Outlook isn't running. Start it to see its mail." : Text(status);
+
     /// <summary>The line's colour class: grey for not running, red for the failures.</summary>
     public static string Css(OutlookStatus status) => status == OutlookStatus.NotRunning ? "grey" : "red";
 }

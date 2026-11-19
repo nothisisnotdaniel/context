@@ -1,8 +1,15 @@
+using AngleSharp.Dom;
+using Bunit;
+using Microsoft.AspNetCore.Components;
+
 namespace Context.Tests;
 
-// 217 AC-2, AC-6: turning Outlook on and off in settings.json through DesktopActions.
+// 217 AC-2, AC-6: turning Outlook on and off in settings.json through DesktopActions. 286: the same for the Mail
+// digest's setting, its SettingsStore pair and its checkbox.
 public sealed class OutlookSettingsActionsTests : IDisposable
 {
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
+
     private readonly DesktopFixture data = new();
 
     public void Dispose() => data.Dispose();
@@ -87,5 +94,116 @@ public sealed class OutlookSettingsActionsTests : IDisposable
         // The refresh after the action has already read today's appointments anew, so this read is served from it.
         Assert.True(appointmentCalls >= 2);
         Assert.Equal(appointmentCalls, data.Outlook.AppointmentCalls);
+    }
+
+    // 286: SaveMailDigest stores exactly "mailDigest":{"enabled":…}, keeps the other properties; anything else is off.
+    [Fact]
+    public void SaveMailDigest_RoundTrips_KeepsOthers()
+    {
+        data.WriteFile(SettingsStore.FileName, "{\"theme\":\"dark\",\"outlook\":{\"enabled\":true}}");
+        SettingsStore store = new SettingsStore(data.Root);
+        Assert.False(store.ReadMailDigest());
+
+        store.SaveMailDigest(true);
+
+        Assert.True(store.ReadMailDigest());
+        Assert.True(store.ReadOutlook());
+        Assert.Contains("\"theme\": \"dark\"", File.ReadAllText(SettingsPath), StringComparison.Ordinal);
+
+        store.SaveMailDigest(false);
+        Assert.False(store.ReadMailDigest());
+        Assert.True(store.ReadOutlook());
+    }
+
+    // 286: a value other than true reads as off.
+    [Theory]
+    [InlineData("{\"mailDigest\":{\"enabled\":\"true\"}}")]
+    [InlineData("{\"mailDigest\":true}")]
+    [InlineData("{\"mailDigest\":{}}")]
+    public void ReadMailDigest_OtherValues_Off(string text)
+    {
+        data.WriteFile(SettingsStore.FileName, text);
+
+        Assert.False(new SettingsStore(data.Root).ReadMailDigest());
+    }
+
+    // 286: on and off answer Done with their texts, store the value and keep the Outlook setting.
+    [Fact]
+    public async Task SetMailDigestEnabled_OnThenOff_StoresIt()
+    {
+        new SettingsStore(data.Root).SaveOutlook(true);
+        await data.RefreshAsync();
+
+        ActionResult on = await data.Actions!.SetMailDigestEnabled(true);
+
+        Assert.Equal((ActionKind.Done, ActionReason.None, "Mail suggestions on."), (on.Kind, on.Reason, on.Text));
+        Assert.True(new SettingsStore(data.Root).ReadMailDigest());
+        Assert.True(Stored());
+
+        ActionResult off = await data.Actions.SetMailDigestEnabled(false);
+
+        Assert.Equal((ActionKind.Done, "Mail suggestions off."), (off.Kind, off.Text));
+        Assert.False(new SettingsStore(data.Root).ReadMailDigest());
+        Assert.Equal(0, data.Outlook.MailCalls);
+    }
+
+    // 286: turning it on without classic Outlook is refused and writes nothing; a broken file is Failed, unchanged.
+    [Fact]
+    public async Task SetMailDigestEnabled_NotAvailableOrBroken_Refused()
+    {
+        data.Outlook.Available = OutlookAvailability.Unsupported;
+        await data.RefreshAsync();
+
+        ActionResult refused = await data.Actions!.SetMailDigestEnabled(true);
+
+        Assert.Equal((ActionKind.Refused, ActionReason.Invalid, DesktopActions.OutlookUnavailableText), (refused.Kind, refused.Reason, refused.Text));
+        Assert.False(File.Exists(SettingsPath));
+
+        data.Outlook.Available = OutlookAvailability.Available;
+        data.WriteFile(SettingsStore.FileName, "not json");
+        byte[] before = File.ReadAllBytes(SettingsPath);
+
+        ActionResult failed = await data.Actions.SetMailDigestEnabled(true);
+
+        Assert.Equal((ActionKind.Failed, ActionReason.Unreadable), (failed.Kind, failed.Reason));
+        Assert.Equal(before, File.ReadAllBytes(SettingsPath));
+    }
+
+    // 286: the settings page's checkbox under the Outlook one shows the stored value and toggles it.
+    [Fact]
+    public async Task SettingsPanel_MailDigestCheckbox_ShowsAndToggles()
+    {
+        new SettingsStore(data.Root).SaveOutlook(true);
+        data.CreateState();
+        IRenderedComponent<SettingsPanel> cut = data.Bunit.Render<SettingsPanel>();
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Markup, StringComparison.Ordinal), Wait);
+
+        IElement box = cut.Find("label.mail-digest-line input.mail-digest-enabled");
+        Assert.Equal("checkbox", box.GetAttribute("type"));
+        Assert.False(box.HasAttribute("checked"));
+        Assert.Equal("Suggest todos from Outlook mail", cut.Find("label.mail-digest-line").TextContent.Trim());
+        Assert.Equal("outlook-hint grey", box.ParentElement!.PreviousElementSibling!.ClassName);
+
+        await cut.Find("input.mail-digest-enabled").ChangeAsync(new ChangeEventArgs { Value = true });
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("Mail suggestions on.", cut.Find(".outlook-result").TextContent);
+            Assert.True(cut.Find("input.mail-digest-enabled").HasAttribute("checked"));
+        }, Wait);
+        Assert.True(new SettingsStore(data.Root).ReadMailDigest());
+        Assert.Equal(0, data.Outlook.MailCalls);
+    }
+
+    // 286: without classic Outlook there is no Mail digest checkbox either.
+    [Fact]
+    public void SettingsPanel_NotAvailable_NoMailDigestCheckbox()
+    {
+        data.Outlook.Available = OutlookAvailability.NotInstalled;
+        data.CreateState();
+        IRenderedComponent<SettingsPanel> cut = data.Bunit.Render<SettingsPanel>();
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Markup, StringComparison.Ordinal), Wait);
+
+        Assert.Empty(cut.FindAll("input.mail-digest-enabled"));
     }
 }

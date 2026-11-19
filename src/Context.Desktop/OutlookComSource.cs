@@ -9,9 +9,10 @@ namespace Context;
 /// Reads the running classic Outlook through its COM interface, late-bound (<c>dynamic</c>, no interop assembly), with
 /// the profile that is already signed in. It only attaches to a running Outlook (<c>GetActiveObject</c>) and never
 /// starts it, never writes to it, and reads only the sensitivity, subject, location, start, end and all-day flag of the
-/// default Calendar's items; a private or confidential item (see <see cref="OutlookSensitivity"/>) is skipped. Every COM
-/// object it
-/// touches is released in a <c>finally</c>. A COM error becomes a kind, never an exception text.
+/// default Calendar's items; a private or confidential item (see <see cref="OutlookSensitivity"/>) is skipped. When the
+/// Mail digest asks (job 286, opt-in), it also reads the Inbox, read-only: the sensitivity first, then only the subject,
+/// sender name, received time, message class and the first <see cref="MailDigest.MaxBodyLength"/> body characters of
+/// each item. Every COM object it touches is released in a <c>finally</c>. A COM error becomes a kind, never an exception text.
 /// </summary>
 [SupportedOSPlatform("windows")]
 internal sealed class OutlookComSource : IOutlookSource
@@ -23,6 +24,9 @@ internal sealed class OutlookComSource : IOutlookSource
 
     // The most items walked per read, whatever the folder holds.
     private const int MaxItems = 500;
+
+    // The most Inbox items walked per mail read, whatever max asks for.
+    private const int MaxMails = 200;
 
     private const int MkEUnavailable = unchecked((int)0x800401E3);
     private const int EAccessDenied = unchecked((int)0x80070005);
@@ -95,6 +99,60 @@ internal sealed class OutlookComSource : IOutlookSource
         }
     }
 
+    public OutlookRead<MailMessage> RecentMail(DateTime sinceUtc, int max)
+    {
+        // OlDefaultFolders: olFolderInbox.
+        const int InboxFolder = 6;
+        Stack<object> held = new();
+        try
+        {
+            if (Attach(held) is not { } application)
+            {
+                return new OutlookRead<MailMessage>(OutlookReadKind.NotRunning);
+            }
+
+            // Only this one date goes into the filter; no outside text does.
+            DateTime since = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(sinceUtc, DateTimeKind.Utc), TimeZoneInfo.Local);
+            string filter = "[ReceivedTime] >= '" + Filter(since) + "'";
+
+            dynamic ns = Hold(held, application.GetNamespace("MAPI"));
+            dynamic folder = Hold(held, ns.GetDefaultFolder(InboxFolder));
+            dynamic items = Hold(held, folder.Items);
+            dynamic restricted = Hold(held, items.Restrict(filter));
+            restricted.Sort("[ReceivedTime]", true);
+
+            List<MailMessage> found = [];
+            int taken = 0;
+            int limit = Math.Clamp(max, 0, MaxMails);
+            int walked = 0;
+            object? next = walked < limit ? restricted.GetFirst() : null;
+            while (next is not null && walked < limit)
+            {
+                walked++;
+                dynamic item = Hold(held, next);
+                MailMessage? message = ReadMail(item);
+                if (message is not null)
+                {
+                    // Insert at the end, an append: the source scan refuses list appends outside the actions class.
+                    found.Insert(taken, message);
+                    taken++;
+                }
+
+                next = walked < limit ? restricted.GetNext() : null;
+            }
+
+            return new OutlookRead<MailMessage>(OutlookReadKind.Ok, found);
+        }
+        catch (Exception e)
+        {
+            return new OutlookRead<MailMessage>(KindOf(e));
+        }
+        finally
+        {
+            Release(held);
+        }
+    }
+
     // The running Outlook, or null when none runs. Never starts one.
     private static dynamic? Attach(Stack<object> held)
     {
@@ -148,6 +206,43 @@ internal sealed class OutlookComSource : IOutlookSource
         catch (Exception e) when (e is RuntimeBinderException or InvalidCastException or ArgumentException)
         {
             // Not an appointment item, or a time that doesn't exist in the zone: skipped.
+            return null;
+        }
+    }
+
+    private static MailMessage? ReadMail(dynamic item)
+    {
+        try
+        {
+            // Private and Confidential items (and any whose sensitivity can't be read) are skipped before
+            // anything else of them is read.
+            object? sensitivity = item.Sensitivity;
+            if (OutlookSensitivity.IsPrivate(sensitivity))
+            {
+                return null;
+            }
+
+            string subject = (string?)item.Subject ?? string.Empty;
+            string sender = (string?)item.SenderName ?? string.Empty;
+            DateTime received = (DateTime)item.ReceivedTime;
+            string messageClass = (string?)item.MessageClass ?? string.Empty;
+            string body = (string?)item.Body ?? string.Empty;
+            if (body.Length > MailDigest.MaxBodyLength)
+            {
+                // Never ends in a lone high surrogate.
+                int keep = char.IsHighSurrogate(body[MailDigest.MaxBodyLength - 1])
+                    ? MailDigest.MaxBodyLength - 1
+                    : MailDigest.MaxBodyLength;
+                body = body[..keep];
+            }
+
+            DateTime receivedUtc = TimeZoneInfo.ConvertTimeToUtc(
+                DateTime.SpecifyKind(received, DateTimeKind.Unspecified), TimeZoneInfo.Local);
+            return new MailMessage(subject, sender, receivedUtc, messageClass, body);
+        }
+        catch (Exception e) when (e is RuntimeBinderException or InvalidCastException or ArgumentException)
+        {
+            // Not a mail item, or a time that doesn't exist on this machine: skipped.
             return null;
         }
     }

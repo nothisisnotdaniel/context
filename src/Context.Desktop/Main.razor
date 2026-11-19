@@ -21,6 +21,10 @@
                 {
                     <TriagePanel Guard="TriageHeld" OnTriaged="Triaged" OnClose="CloseTriage" />
                 }
+                @if (page == Page.MailDigest)
+                {
+                    <MailDigestPanel OnClose="CloseMailDigest" />
+                }
                 @if (page == Page.Settings)
                 {
                     <SettingsPanel OnClose="CloseSettings" />
@@ -248,7 +252,7 @@ else
     private (string Note, string Text)? pendingSearchBack;
     private string? decisionsShown;
     private bool similarShown;
-    private enum Page { None, Triage, People, Tags, Settings, Appointment, Board, Search }
+    private enum Page { None, Triage, People, Tags, Settings, Appointment, Board, Search, MailDigest }
 
     // The board's tag (normalized) while Page.Board is shown (job 242).
     private string? boardShown;
@@ -549,6 +553,11 @@ else
     private void ShowTriage() => OpenPage(Page.Triage);
 
     private void CloseTriage() => page = Page.None;
+
+    // The Mail digest (job 286): suggestions from recent Outlook mail, read only on its Read mail button.
+    private void ShowMailDigest() => OpenPage(Page.MailDigest);
+
+    private void CloseMailDigest() => page = Page.None;
 
     // The people view (job 239): every person page by name; a click opens it through RequestOpen.
     private void ShowPeople() => OpenPage(Page.People);
@@ -1336,6 +1345,10 @@ else
                 break;
             case "/settings":
                 ShowSettings();
+                break;
+            case "/digest":
+                // The argument is ignored.
+                ShowMailDigest();
                 break;
             case "/triage":
                 // The argument is ignored.

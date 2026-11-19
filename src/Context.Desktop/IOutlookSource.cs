@@ -61,6 +61,13 @@ internal interface IOutlookSource
 
     /// <summary>The appointments touching <paramref name="day"/>, with times in <paramref name="zone"/>.</summary>
     public OutlookRead<Appointment> Appointments(DateOnly day, TimeZoneInfo zone);
+
+    /// <summary>
+    /// At most <paramref name="max"/> Inbox mails received since <paramref name="sinceUtc"/>, newest first, read-only
+    /// (job 286): only subject, sender name, received time, message class and the first
+    /// <see cref="MailDigest.MaxBodyLength"/> body characters; private items are skipped.
+    /// </summary>
+    public OutlookRead<MailMessage> RecentMail(DateTime sinceUtc, int max);
 }
 
 /// <summary>The Outlook source on an OS other than Windows: nothing can be read.</summary>
@@ -69,6 +76,8 @@ internal sealed class UnsupportedOutlookSource : IOutlookSource
     public OutlookAvailability Availability() => OutlookAvailability.Unsupported;
 
     public OutlookRead<Appointment> Appointments(DateOnly day, TimeZoneInfo zone) => new(OutlookReadKind.Failed);
+
+    public OutlookRead<MailMessage> RecentMail(DateTime sinceUtc, int max) => new(OutlookReadKind.Failed);
 }
 
 /// <summary>
@@ -91,6 +100,9 @@ internal sealed record OutlookSettingView
 
     /// <summary>True when <c>settings.json</c> couldn't be read.</summary>
     public bool Unreadable { get; }
+
+    /// <summary>Whether mail suggestions are on (job 286); false when unset or unreadable.</summary>
+    public bool MailDigestEnabled { get; init; }
 
     /// <summary>Only the type name, like the other view records.</summary>
     public override string ToString() => nameof(OutlookSettingView);
