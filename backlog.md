@@ -307,6 +307,10 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#350](backlog/350-standup-catch-feed-and-calendar-errors.md) Standup: catch feed and calendar errors while composing
 - [?] [#351](backlog/351-standup-opens-today-s-note-before.md) /standup opens today's note before writing
 - [?] [#353](backlog/353-fix-flaky-record-whileanotheractionisbusy-stilllis.md) Fix flaky Record_WhileAnotherActionIsBusy_StillListed test
+- [?] [#354](backlog/354-merge-notes-refuse-the-delete-when.md) Merge notes: refuse the delete when the second history save fails
+- [?] [#355](backlog/355-merge-notes-clearer-message-when-a.md) Merge notes: clearer message when a step after the save fails
+- [?] [#356](backlog/356-merge-notes-re-check-subpages-right.md) Merge notes: re-check subpages right before the delete
+- [?] [#357](backlog/357-similar-notes-limit-pairs-when-many.md) Similar notes: limit pairs when many notes share a title
 
 ## Dropped with the terminal UI
 
