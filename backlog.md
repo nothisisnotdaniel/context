@@ -285,6 +285,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#329](backlog/329-smart-paste-limit-concurrent-page-title.md) Smart paste: limit concurrent page-title fetches
 - [?] [#330](backlog/330-smart-paste-say-why-a-page.md) Smart paste: say why a page title wasn't used
 - [h] [#331](backlog/331-check-cmd-shift-v-plain-paste.md) Check Cmd+Shift+V plain paste in the macOS app
+- [?] [#332](backlog/332-carry-over-and-k-more-line.md) Carry-over: "… and k more" line is not an open point
+- [?] [#333](backlog/333-fix-flaky-editingflowtests-palettecurrent-isnocomm.md) Fix flaky EditingFlowTests.PaletteCurrent_IsNoCommand test
 
 ## Dropped with the terminal UI
 
