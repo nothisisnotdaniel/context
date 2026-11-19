@@ -366,6 +366,12 @@ internal sealed class DesktopActions
     /// <summary>The red line when a file of the day's end can't be written.</summary>
     public static string DayEndWriteFailedText(string name) => $"Can't write {name}.";
 
+    /// <summary>The grey line after a successful <see cref="WriteStandup"/>.</summary>
+    public static string StandupWrittenText(DateOnly day) => $"Standup written to {DailyNote.NameFor(day)}.";
+
+    /// <summary>The red line when the daily note for the standup is sensitive.</summary>
+    public static string StandupSensitiveText(string name) => $"{name} is sensitive, so no standup can be written.";
+
     /// <summary>The answer of <see cref="AutoDayEnd"/> when <c>settings.json</c> can't be read or written.</summary>
     public const string SettingsUnreadableText = "Can't read settings.json. The day was not closed automatically.";
 
@@ -929,6 +935,15 @@ internal sealed class DesktopActions
     /// or when <c>settings.json</c> is broken. Never throws and never asks anything.
     /// </summary>
     public Task<ActionResult> AutoDayEnd() => Run(AutoDayEndNow);
+
+    /// <summary>
+    /// Writes the <c>## Standup</c> section of <paramref name="day"/>'s daily note through
+    /// <see cref="DayEnd.RefreshStandup"/> (job 265), with done times read in the calendar's zone. The note is created
+    /// first when missing; a sensitive note is never read or written (Refused/<see cref="ActionReason.Locked"/>,
+    /// <see cref="StandupSensitiveText"/>); a failed write is Failed with <c>Can't write &lt;name&gt;.</c>. Done text
+    /// <see cref="StandupWrittenText"/> (<see cref="ActionReason.Unchanged"/> when the note already held the same bytes).
+    /// </summary>
+    public Task<ActionResult> WriteStandup(DateOnly day) => Run(() => WriteStandupNow(day));
 
     /// <summary>The name of today's briefing (<see cref="Briefing.NameFor"/>, the day from the injected local clock).</summary>
     public string BriefingName() => Briefing.NameFor(DateOnly.FromDateTime(localNow()));
@@ -2352,6 +2367,22 @@ internal sealed class DesktopActions
     {
         DayEndResult result = dayEnd.CloseDay(day);
         return DayEndAnswer(result, DayClosedText(result.Moved.Count, result.To));
+    }
+
+    private ActionResult WriteStandupNow(DateOnly day)
+    {
+        DayEndResult result = dayEnd.RefreshStandup(day, calendar.Zone);
+        return result.Kind switch
+        {
+            DayEndKind.Done => new ActionResult(
+                ActionKind.Done, result.Changed ? ActionReason.None : ActionReason.Unchanged, StandupWrittenText(day)),
+            DayEndKind.Sensitive => new ActionResult(
+                result.Changed ? ActionKind.Done : ActionKind.Refused, ActionReason.Locked,
+                StandupSensitiveText(result.Name)),
+            _ => new ActionResult(
+                result.Changed ? ActionKind.Done : ActionKind.Failed, ActionReason.WriteFailed,
+                DayEndWriteFailedText(result.Name)),
+        };
     }
 
     private ActionResult AutoDayEndNow()

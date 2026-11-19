@@ -3750,7 +3750,7 @@ public sealed class MainTests : IDisposable
 
         await TodayAndOpen(cut, js);
         string[] today = await MenuIdsAsync(cut);
-        Assert.Equal(["end-day", .. plan], today);
+        Assert.Equal(["end-day", "standup", .. plan], today);
         await OpenMenuAsync(cut);
         IElement item = cut.Find(".page-menu button.end-day");
         Assert.Equal("End the day", item.TextContent);
@@ -3850,7 +3850,7 @@ public sealed class MainTests : IDisposable
         await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal("Can't unlock 2026-10-29.", cut.Find(".unreadable").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Contains(cut.FindAll(".links-panel p"), p => p.TextContent == "Sensitive notes have no links."), Wait);
-        Assert.Equal(["end-day", "rename", "delete", "history", "make-plain", "lock"], await MenuIdsAsync(cut));
+        Assert.Equal(["end-day", "standup", "rename", "delete", "history", "make-plain", "lock"], await MenuIdsAsync(cut));
         int agrees = data.Keys.Agrees;
         byte[] bytes = File.ReadAllBytes(Path.Combine(data.Root, "2026-10-29.ctxs"));
 
@@ -3860,6 +3860,153 @@ public sealed class MainTests : IDisposable
         Assert.True(cut.Find("p.main-status").ClassList.Contains("red"));
         Assert.Equal(agrees, data.Keys.Agrees);
         Assert.Equal(bytes, File.ReadAllBytes(Path.Combine(data.Root, "2026-10-29.ctxs")));
+    }
+
+    // 265 AC-10: Standup is right after End the day, on today's daily note only.
+    [Fact]
+    public async Task Standup_InTheMenuOnlyOnTodaysNote_AfterEndDay()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await Open(cut, js, "Plan");
+        Assert.DoesNotContain("standup", await MenuIdsAsync(cut));
+
+        await TodayAndOpen(cut, js);
+        string[] ids = await MenuIdsAsync(cut);
+        Assert.Equal(["end-day", "standup"], ids[..2]);
+        await OpenMenuAsync(cut);
+        IElement item = cut.Find(".page-menu button.standup");
+        Assert.Equal("Standup", item.TextContent);
+        Assert.Equal("menuitem", item.GetAttribute("role"));
+    }
+
+    // 265 AC-8, AC-10: Standup on today's note writes the section, shows the grey status line and reloads the editor
+    // so it shows ## Standup; Times' folder is untouched (AC-11).
+    [Fact]
+    public async Task Standup_FromTheMenu_GreyStatus_EditorShowsSection()
+    {
+        WriteTodaysTimes();
+        data.AddTodo("call Anna", DesktopFixture.Today);
+        SortedDictionary<string, string> times = FileSnapshot.Take(data.TimesFolder);
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await TodayAndOpen(cut, js);
+        int mounts = js.Calls("ContextEditor.mount").Count;
+
+        await ChooseAsync(cut, "standup");
+
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        IElement line = cut.Find("p.main-status");
+        Assert.Equal("Standup written to 2026-10-29.", line.TextContent);
+        Assert.True(line.ClassList.Contains("grey"));
+        string text = File.ReadAllText(Path.Combine(data.Root, "2026-10-29.md"));
+        Assert.Contains("\n## Standup\n\nYesterday (", text, StringComparison.Ordinal);
+        Assert.Contains("\nToday\n- call Anna\n", text, StringComparison.Ordinal);
+        Assert.Equal(text, js.MountedText());
+        Assert.Equal(times, FileSnapshot.Take(data.TimesFolder));
+        Assert.False(File.Exists(Path.Combine(data.Root, SettingsStore.FileName)));
+        cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
+    }
+
+    // 265 AC-10: unsaved text is saved first, then the section is written on top of it.
+    [Fact]
+    public async Task Standup_DirtyEditor_SavesFirst()
+    {
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await TodayAndOpen(cut, js);
+        int mounts = js.Calls("ContextEditor.mount").Count;
+        js.Edit("# 2026-10-29\n\nTyped first\n");
+
+        await ChooseAsync(cut, "standup");
+
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        string text = File.ReadAllText(Path.Combine(data.Root, "2026-10-29.md"));
+        Assert.StartsWith("# 2026-10-29\n\nTyped first\n\n## Standup\n\n", text, StringComparison.Ordinal);
+        Assert.Equal(text, js.MountedText());
+        Assert.Equal("Standup written to 2026-10-29.", cut.Find("p.main-status").TextContent);
+    }
+
+    // 265 AC-10: when that save fails, the red line asks to save first and nothing is written.
+    [Fact]
+    public async Task Standup_SaveFails_RedLine_NothingWritten()
+    {
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await TodayAndOpen(cut, js);
+        int mounts = js.Calls("ContextEditor.mount").Count;
+        js.EditUnsavable("# 2026-10-29\n\nUnsaved\n");
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
+
+        await ChooseAsync(cut, "standup");
+
+        cut.WaitForAssertion(() => Assert.Equal("Save 2026-10-29 first.", cut.Find("p.main-status").TextContent), Wait);
+        Assert.True(cut.Find("p.main-status").ClassList.Contains("red"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
+        Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
+        Assert.True(js.Dirty);
+    }
+
+    // 265 AC-9: a sensitive today's note: the red line, no key-store call, the file unchanged.
+    [Fact]
+    public async Task Standup_Sensitive_RedStatus()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("2026-10-29", "# secret day\n");
+        data.Keys.AgreeThrows = true;
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("Can't unlock 2026-10-29.", cut.Find(".unreadable").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Contains(cut.FindAll(".links-panel p"), p => p.TextContent == "Sensitive notes have no links."), Wait);
+        int agrees = data.Keys.Agrees;
+        byte[] bytes = File.ReadAllBytes(Path.Combine(data.Root, "2026-10-29.ctxs"));
+
+        await ChooseAsync(cut, "standup");
+
+        cut.WaitForAssertion(() => Assert.Equal("2026-10-29 is sensitive, so no standup can be written.", cut.Find("p.main-status").TextContent), Wait);
+        Assert.True(cut.Find("p.main-status").ClassList.Contains("red"));
+        Assert.Equal(agrees, data.Keys.Agrees);
+        Assert.Equal(bytes, File.ReadAllBytes(Path.Combine(data.Root, "2026-10-29.ctxs")));
+    }
+
+    // 265 AC-10: /standup (an argument ignored) with another note open opens today's note, writes the section, shows
+    // the grey line and the editor shows ## Standup.
+    [Theory]
+    [InlineData("/standup")]
+    [InlineData("/standup extra words")]
+    public async Task PaletteStandup_OpensTodayAndWrites(string command)
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await Open(cut, js, "Plan");
+
+        await RunPalette(cut, command);
+
+        cut.WaitForAssertion(() => Assert.Equal("Standup written to 2026-10-29.", cut.Find("p.main-status").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Contains("## Standup", js.MountedText(), StringComparison.Ordinal), Wait);
+        Assert.Equal("2026-10-29", cut.Find(".note-title").TextContent);
+        Assert.True(cut.Find("p.main-status").ClassList.Contains("grey"));
+        Assert.Equal(File.ReadAllText(Path.Combine(data.Root, "2026-10-29.md")), js.MountedText());
+        Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+    }
+
+    // 265 AC-10: /standup with today's note already open writes into it and reloads the editor.
+    [Fact]
+    public async Task PaletteStandup_TodayOpen_WritesAndReloads()
+    {
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await TodayAndOpen(cut, js);
+        int mounts = js.Calls("ContextEditor.mount").Count;
+
+        await RunPalette(cut, "/standup");
+
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        Assert.Equal("Standup written to 2026-10-29.", cut.Find("p.main-status").TextContent);
+        Assert.Contains("\n## Standup\n\n", js.MountedText(), StringComparison.Ordinal);
     }
 
     // 212 AC-5: another note's unsaved changes are saved first, then the picked day's note opens.

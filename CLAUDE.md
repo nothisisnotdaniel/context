@@ -586,6 +586,10 @@ Every factory agent reads this file before working on Context. Keep it short and
   `Updated <D>.` and `Moved <n> todo(s) to <D+1>.`, exit 0; a sensitive D or D+1 note `Cli.SensitiveText`, a bad
   `todos.json` `Can't read todos.json.`, a failed write `Can't write <name>.`, all stderr only, exit 1; any other or a
   second argument, or `--json`, is a usage error before the folder is read; never reads or writes `settings.json`),
+  `standup` (job 265, see Standup: prints `Standup.Compose` for today and exits 0 after the usual migrate; a bad
+  `todos.json` still prints the text with its `- Can't read todos.json.` lines, writes `Can't read todos.json.` to
+  stderr and exits 1; any argument, `--json` too, is the usage error `Type: context standup.` before the folder is
+  read; writes nothing apart from the migrate),
   `meeting <n>` (job 167, see Meeting note: prints the note for appointment `n` of today's `current` list like
   `note show`, creating it first; no appointments is `There are no appointments today.`, a number beyond them
   `There is no appointment <n> today.`, a sensitive one `Cli.SensitiveText`, a failed write `Can't write <name>.`, all
@@ -880,7 +884,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     file bytes, read through `BoundedFile`): a bigger or non-seekable note can't be opened (`Can't read <name>.`), a save
     that would be bigger is refused, and a file that grew past it counts as changed on disk. New components are styled
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
-    `/board`, `/briefing`, `/capture`, `/decisions`, `/done`, `/export`, `/find`, `/import`, `/meeting`, `/new`, `/open`, `/review`, `/save`, `/search`, `/settings`, `/share`, `/tags`, `/today`, `/todo`, `/triage` (no `/current` since job 216) with `CommandMatcher` (in Core; ties
+    `/board`, `/briefing`, `/capture`, `/decisions`, `/done`, `/export`, `/find`, `/import`, `/meeting`, `/new`, `/open`, `/review`, `/save`, `/search`, `/settings`, `/share`, `/standup`, `/tags`, `/today`, `/todo`, `/triage` (no `/current` since job 216) with `CommandMatcher` (in Core; ties
     in Levenshtein score are ordered by `SwapDistance`, which counts an adjacent swap as one edit, so `/opne` runs `/open`).
     `/todo every <weekday|day|month> <text>` (job 168) adds a recurring todo (`TryParseRepeat`, then `AddTodo`), accent
     `Added: <text>`; a missing or bad unit or missing text is red `Type /todo every <weekday|day|month> <text>.`; a bad
@@ -950,6 +954,16 @@ Every factory agent reads this file before working on Context. Keep it short and
     into the Times folder. `DayEnd(notes, todos, calendar, feed, timesFolder, settings?)`: `RefreshWorked(D)` replaces
     or adds D's `## Worked` section (`- Arrived HH:mm, left HH:mm, worked h:mm`, a missing arrival `--:--`, one line
     per group; or the missing/unreadable/absent/not-left line), creating the daily note through `DailyNote.Ensure`;
+    `RefreshStandup(D, zone)` (job 265) replaces or adds D's `## Standup` section (`## Standup\n\n` + `Standup.Compose`)
+    the same way (never for a sensitive D). **Standup:** `Standup.Compose(todos, calendar, feed, timesFolder, today,
+    zone[, out todosUnreadable])` (Core, read only) gives `Yesterday (<last workday>)` (`Standup.LastWorkday`: the
+    latest of today-1..today-7 with Times entries, an unreadable file met first, else the latest Monday to Friday
+    with `- No Times bookings in the last 7 days.`; the groups as `DayEnd.FormatGroup`, then `- Done: <text>` for todos
+    done (local date in zone) from that day to yesterday, oldest first; else `- Nothing logged.`), `Today` (the daily
+    note's appointment lines via `DailyNote.AppendAppointmentLines` without `- No appointments.`, then the due
+    non-waiting todos as in `## Todos`; else `- Nothing planned.`) and `Blocked` (every open waiting-for todo, `- Person:
+    Rest (follow up yyyy-MM-dd)`, `- Person (follow up …)` when there is no rest; else `- Nothing blocked.`), blank lines
+    between blocks; a bad `todos.json` puts `- Can't read todos.json.` in place of each block's todo lines.
     `MoveTodos(D)` calls `TodoStore.MoveDue(D, D+1)` (open todos due on or before D get due D+1, id/created/repeat
     kept, one write, none when nothing is due) and appends `- <text>` lines to `## Moved to tomorrow` in D's note and
     `## Moved from <D>` in D+1's (created after the move); `CloseDay(D)` does both. Every edit is `ReadForEdit` +
@@ -976,7 +990,11 @@ Every factory agent reads this file before working on Context. Keep it short and
     first (a failed save is red `Save <name> first.` and nothing is written), calls
     `DesktopActions.EndDay(Snapshot.Today)`, shows the result in `p.main-status` (grey on Done/Unchanged, `Day closed.
     Moved <n> todo(s) to <D+1>.`, else red) and then reloads the editor (`NoteEditor.ReloadAsync`) so the new
-    `## Worked` and `## Moved to tomorrow` sections show and a later save is not refused as changed on disk; `Program.cs` calls `DesktopActions.AutoDayEnd()`
+    `## Worked` and `## Moved to tomorrow` sections show and a later save is not refused as changed on disk; Standup
+    (`standup`, job 265) is the next item on today's note and works the same way through
+    `DesktopActions.WriteStandup(Snapshot.Today)` (grey `Standup written to <D>.`, red `<D> is sensitive, so no standup
+    can be written.` or `Can't write <name>.`); `/standup` (hint `Write today's standup`, argument ignored) runs it
+    on today's note, opening it first (from another note it writes, then opens today's note); `Program.cs` calls `DesktopActions.AutoDayEnd()`
     at start and every `DayEndInterval` (30 s) from its own timer (Busy: Refused, skipped), followed by `AutoBriefing()`.
     **Corrections and balance** (job 172): `TimesDay.Corrections` reads Times' `"corrections":[{"minutes":<int>,
     "reason":<string>}]` (exactly those two properties; minutes never 0, at most `MaxCorrectionMinutes` 59999 either
@@ -1184,7 +1202,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     Rename/New subpage/Move form) and `EventCallback<string> OnPageAction`. `PageAction(id, label, checked)` is a
     public record (a parameter type must be public); its id is the item's class, `checked` non-null makes a
     `menuitemcheckbox` with `aria-checked`. `Main.PageActionsFor(snapshot)` builds the list: none while a page
-    (Triage, People, Tags, Settings, Appointment) is shown and with no note open; `end-day` first on today's daily note (`DailyNote.NameFor(Snapshot.Today)`); for a plain note `rename`,
+    (Triage, People, Tags, Settings, Appointment) is shown and with no note open; `end-day` then `standup` first on today's daily note (`DailyNote.NameFor(Snapshot.Today)`); for a plain note `rename`,
     `delete`, `history`, `new-subpage`, `move`, `open-external`, `export`, `share`, `mark-sensitive` (when supported); for a
     sensitive note `rename`, `delete`, `history`, `make-plain`, `lock`. `Main.RunPageAction(id)` (the bound handler)
     runs the chosen one. Keys in the menu (default prevented): opening focuses the first item, ArrowDown/ArrowUp
@@ -1531,7 +1549,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `wwwroot/index.html` (CSP meta tag, `img-src 'self' blob:` for attachment images, `frame-src 'self'` for the Mermaid frame (job 263), only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
     and `wwwroot/editor/editor.css`.
   - **Desktop rules:** the Core writing calls (`Create`, `Save`, `SaveIfUnchanged`, `Add`, `Complete` (also `NoteTodos.Complete`), `Set`, `Clear`, `Delete`,
-    `Rename`, `CreateChild`, `Move`, `MoveWithNote`, `RemoveUnlinked` (`NoteAttachments`), `ClearCache`, `Capture` (`Inbox.Capture`), `MarkNotified` (named only in `TodoStore.cs` and `DesktopActions.cs`), `Snooze` (`InboxTriage.Snooze`; `InboxTriage.Remove` is checked on its own, since components remove from their own lists), `Ensure` (`DailyNote.Ensure`, `MeetingNote.Ensure`, `Briefing.Ensure`), the note history (`Keep`, `RemoveHistory`, `RestoreVersion`; only the call `Actions.RestoreVersion(` in a `.razor` file is allowed), `CreateWithText` (`CreateNoteFromTemplate`), the day's end (`CloseDay`, `RefreshWorked`, `MoveTodos`, `AutoClose`, `MoveDue`, `SaveDayEnd`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
+    `Rename`, `CreateChild`, `Move`, `MoveWithNote`, `RemoveUnlinked` (`NoteAttachments`), `ClearCache`, `Capture` (`Inbox.Capture`), `MarkNotified` (named only in `TodoStore.cs` and `DesktopActions.cs`), `Snooze` (`InboxTriage.Snooze`; `InboxTriage.Remove` is checked on its own, since components remove from their own lists), `Ensure` (`DailyNote.Ensure`, `MeetingNote.Ensure`, `Briefing.Ensure`), the note history (`Keep`, `RemoveHistory`, `RestoreVersion`; only the call `Actions.RestoreVersion(` in a `.razor` file is allowed), `CreateWithText` (`CreateNoteFromTemplate`), the day's end (`CloseDay`, `RefreshWorked`, `RefreshStandup`, `MoveTodos`, `AutoClose`, `MoveDue`, `SaveDayEnd`), and for sensitive notes `Seal`, `AddRecipient`, `DeleteSensitive`, `CreateMachineKey`,
     `StoreRecoveryPublicKey`) appear only in `DesktopActions.cs` (exemptions: `DotNetObjectReference.Create(` once in
     `EditorInterop.cs`, `ECDiffieHellman.Create(` in `SealedNote.cs`, and `WindowsKeyStore.cs`, whose .NET calls change
     the certificate store and which names no Core store, `File.`, `Directory.` or `Path.`; the reads still write
@@ -1593,7 +1611,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `LinkCreateActionsTests` (`CreateLinkedNote`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `ShareActionsTests` (`ShareNote`) and `ShareDialogTests` (Share through `Main`), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `PeoplePanelTests`, `ReviewPanelTests`, `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `LinkCreateActionsTests` (`CreateLinkedNote`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `ShareActionsTests` (`ShareNote`) and `ShareDialogTests` (Share through `Main`), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `PeoplePanelTests`, `ReviewPanelTests`, `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StandupActionsTests` (`WriteStandup`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
     CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules, the transfer calls and no file system class in `.razor`), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),

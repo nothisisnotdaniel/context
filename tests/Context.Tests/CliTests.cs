@@ -2353,4 +2353,76 @@ public sealed class CliTests : IDisposable
         AssertError(Run("todo", "done", "call"), 1, "2 todos match \"call\". Type more of the todo's text.");
         Assert.Equal(before, SnapshotWithoutDb());
     }
+
+    // 265 ----------------------------------------------------------------------------------------
+
+    // 265 AC-7: standup prints the text and exits 0; it writes nothing (AC-11) and help lists it.
+    [Fact]
+    public void Standup_PrintsText()
+    {
+        Directory.CreateDirectory(times);
+        File.WriteAllText(Path.Combine(times, "2026-10-28.json"), TimesDayTests.Example);
+        Run("todo", "add", "today", "call Anna");
+        Run("todo", "add", "2026-11-02", "waiting: @[Ben] the slides");
+        Dictionary<string, string> before = Snapshot();
+        SortedDictionary<string, string> timesBefore = FileSnapshot.Take(times);
+
+        Result result = Run("standup");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(string.Empty, result.Err);
+        Assert.Equal(
+            "Yesterday (2026-10-28)\n- #12 A: 4:00\n- B: 4:30\n\nToday\n- call Anna\n\nBlocked\n"
+            + "- Ben: the slides (follow up 2026-11-02)\n",
+            result.Out);
+        Assert.Equal(before, Snapshot());
+        Assert.Equal(timesBefore, FileSnapshot.Take(times));
+        Assert.Contains(Run("help").Out.Split('\n'), l => l.StartsWith("context standup ", StringComparison.Ordinal));
+    }
+
+    // 265 AC-7: bad todo ids are fixed first with the usual line on stderr.
+    [Fact]
+    public void Standup_MigratesBadIds()
+    {
+        WriteTodosJson("[{\"id\":\"nope\",\"text\":\"Old\",\"due\":\"2026-10-01\",\"created\":\"2026-10-01T00:00:00Z\"}]");
+
+        Result result = Run("standup");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(["Fixed a bad todo id in todos.json."], result.ErrLines);
+        Assert.Contains("\nToday\n- Old (due 2026-10-01)\n", result.Out, StringComparison.Ordinal);
+        Assert.Empty(Run("standup").ErrLines);
+    }
+
+    // 265 AC-6, AC-7: an unreadable todos.json: the text still prints with its lines, stderr says so, exit 1.
+    [Fact]
+    public void Standup_TodosUnreadable_Exit1()
+    {
+        WriteTodosJson("not json");
+
+        Result result = Run("standup");
+
+        Assert.Equal(Cli.ExitError, result.Code);
+        Assert.Equal(["Can't read todos.json."], result.ErrLines);
+        Assert.Equal(
+            "Yesterday (2026-10-28)\n- No Times bookings in the last 7 days.\n- Can't read todos.json.\n\nToday\n"
+            + "- Can't read todos.json.\n\nBlocked\n- Can't read todos.json.\n",
+            result.Out);
+        Assert.Equal("not json", Read(TodoStore.FileName));
+    }
+
+    // 265 AC-7: any argument, --json too, is the usage error before the folder is read.
+    [Theory]
+    [InlineData("standup", "x")]
+    [InlineData("standup", "--json")]
+    [InlineData("STANDUP", "today")]
+    [InlineData("--json", "standup")]
+    public void Standup_Arguments_UsageError(params string[] args)
+    {
+        Result result = Run(args);
+
+        AssertUsage(result);
+        Assert.Equal(["Type: context standup. Run 'context help'."], result.ErrLines);
+        Assert.False(Directory.Exists(root));
+    }
 }
