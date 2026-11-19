@@ -9,6 +9,8 @@
   },
   "devDependencies": {
     "esbuild": "0.28.2",
+    "highlight.js": "11.11.2",
+    "lowlight": "3.3.0",
     "mermaid": "12.3.0",
     "prosemirror-commands": "1.7.2",
     "prosemirror-history": "1.5.1",

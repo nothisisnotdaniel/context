@@ -21,6 +21,8 @@ internal sealed class EditorJs
         js = context.JSInterop;
         js.SetupVoid("ContextEditor.mount", _ => true).SetVoidResult();
         js.SetupVoid("ContextEditor.focus", _ => true).SetVoidResult();
+        js.SetupVoid("ContextEditor.toggleInlineCode", _ => true).SetVoidResult();
+        js.SetupVoid("ContextEditor.toggleCodeBlock", _ => true).SetVoidResult();
         js.SetupVoid("ContextEditor.markClean", _ => MarkClean()).SetVoidResult();
         js.Setup<bool>("ContextEditor.markCleanIf", i => CleanIf(i)).SetResult(true);
         js.Setup<bool>("ContextEditor.markCleanIf", i => !Same(i)).SetResult(false);

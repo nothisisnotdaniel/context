@@ -1,9 +1,10 @@
 // The bundle's entry: everything the page and the tests use hangs off globalThis.ContextEditor.
 import { roundTrip, isLossless, inlineNodes, docJson, splitTitle, outline, attributeRows, editAttributes, attributeSplit } from "./markdown.js";
 import { chipDom, headingDom } from "./schema.js";
-import { opensChip, typedBlock, typedMarkdown, mount, getMarkdown, isDirty, markClean, markCleanIf, destroy, focus, insertAttachment, headings, scrollToHeading, attributes, setAttributes, setLinkTitle } from "./view.js";
+import { opensChip, typedBlock, typedMarkdown, commandMarkdown, typedAtMarkdown, changedCodeBlocksJson, copyText, toggleInlineCodeIn, toggleCodeBlockIn, mount, getMarkdown, isDirty, markClean, markCleanIf, destroy, focus, insertAttachment, headings, scrollToHeading, attributes, setAttributes, setLinkTitle } from "./view.js";
 import { pastedMarkdown, titledMarkdown } from "./paste.js";
 import { isMermaidFence, mermaidResultJson, shouldRender } from "./mermaid.js";
+import { tokensJson, languageOptionsJson, withLanguage } from "./highlight.js";
 
 // A file dropped anywhere in the window must never navigate the web view: the editor handles its own drops.
 if (typeof globalThis.addEventListener === "function") {
@@ -46,6 +47,15 @@ globalThis.ContextEditor = Object.freeze({
   isMermaidFence,
   mermaidResultJson,
   shouldRender,
+  // Code (job 283): the selection-marked command and typing hooks, the changed-block rule, syntax tokens, the language
+  // picker's options and params rule, and the copy fallback chain (given its clipboard functions).
+  commandMarkdown,
+  typedAtMarkdown,
+  changedCodeBlocksJson,
+  tokensJson,
+  languageOptionsJson,
+  withLanguage,
+  copyText,
   // Need a page.
   mount,
   getMarkdown,
@@ -60,4 +70,6 @@ globalThis.ContextEditor = Object.freeze({
   attributes,
   setAttributes,
   setLinkTitle,
+  toggleInlineCode: toggleInlineCodeIn,
+  toggleCodeBlock: toggleCodeBlockIn,
 });

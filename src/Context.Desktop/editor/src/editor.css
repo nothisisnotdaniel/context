@@ -90,16 +90,117 @@
 }
 
 .note-editor-body pre {
-  background: var(--panel);
+  background: var(--code-bg);
   border: 1px solid var(--line);
   border-radius: 6px;
+  color: var(--code-text);
   margin: 0 0 10px;
+  overflow-x: auto;
   padding: 8px 10px;
 }
 
 .note-editor-body code {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 13px;
+}
+
+/* 283: inline code gets its own background; code in a block takes the block's. */
+.note-editor-body :not(pre) > code {
+  background: var(--code-bg);
+  border-radius: 4px;
+  color: var(--code-text);
+  padding: 1px 4px;
+}
+
+.note-editor-body pre > code {
+  white-space: pre;
+}
+
+/* 283: a code block's header (language picker, Copy) sits on the block's top edge; the pre below keeps its look. */
+.note-editor-body .code-block {
+  margin: 0 0 10px;
+}
+
+.note-editor-body .code-block > pre {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  margin: 0;
+}
+
+.note-editor-body .code-header {
+  align-items: center;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  display: flex;
+  gap: 6px;
+  justify-content: space-between;
+  padding: 3px 6px;
+  user-select: none;
+}
+
+.note-editor-body .code-language {
+  background: var(--background);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 1px 4px;
+}
+
+.note-editor-body .code-copy {
+  font-size: 12px;
+  padding: 1px 8px;
+}
+
+/* 283: syntax colours, from class decorations on the block's text. */
+.note-editor-body .hljs-keyword,
+.note-editor-body .hljs-selector-tag,
+.note-editor-body .hljs-doctag {
+  color: var(--code-keyword);
+}
+
+.note-editor-body .hljs-string,
+.note-editor-body .hljs-regexp {
+  color: var(--code-string);
+}
+
+.note-editor-body .hljs-comment,
+.note-editor-body .hljs-meta {
+  color: var(--code-comment);
+  font-style: italic;
+}
+
+.note-editor-body .hljs-number {
+  color: var(--code-number);
+}
+
+.note-editor-body .hljs-title,
+.note-editor-body .hljs-section,
+.note-editor-body .hljs-selector-class,
+.note-editor-body .hljs-selector-id {
+  color: var(--code-title);
+}
+
+.note-editor-body .hljs-built_in,
+.note-editor-body .hljs-type {
+  color: var(--code-built-in);
+}
+
+.note-editor-body .hljs-literal,
+.note-editor-body .hljs-symbol,
+.note-editor-body .hljs-variable {
+  color: var(--code-literal);
+}
+
+.note-editor-body .hljs-attr,
+.note-editor-body .hljs-attribute,
+.note-editor-body .hljs-name,
+.note-editor-body .hljs-tag,
+.note-editor-body .hljs-property {
+  color: var(--code-attr);
 }
 
 .note-editor-body .chip {

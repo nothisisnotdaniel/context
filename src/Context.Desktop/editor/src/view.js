@@ -2,16 +2,18 @@
 // renderer and document.createElement; tag, link, mention and attachment PDF clicks (and Enter on a focused chip) and
 // dropped files are reported to .NET, which decides what to open or store. A pasted lone link is reported too (job 244):
 // .NET may answer with its page title through setLinkTitle.
-import { EditorState, Selection, TextSelection } from "prosemirror-state";
-import { EditorView } from "prosemirror-view";
+import { EditorState, Selection, TextSelection, Plugin, PluginKey } from "prosemirror-state";
+import { EditorView, Decoration, DecorationSet } from "prosemirror-view";
+import { Fragment } from "prosemirror-model";
 import { keymap } from "prosemirror-keymap";
-import { history, undo, redo } from "prosemirror-history";
-import { baseKeymap, toggleMark, setBlockType, chainCommands } from "prosemirror-commands";
+import { history, undo, redo, closeHistory } from "prosemirror-history";
+import { baseKeymap, toggleMark, setBlockType, chainCommands, newlineInCode } from "prosemirror-commands";
 import { splitListItem, liftListItem, sinkListItem } from "prosemirror-schema-list";
 import { inputRules, wrappingInputRule, textblockTypeInputRule, InputRule } from "prosemirror-inputrules";
 import { schema } from "./schema.js";
 import { smartPaste, linkMeta, linkTitleTransaction } from "./paste.js";
-import { codeBlockView, mermaidEditing } from "./mermaid.js";
+import { codeBlockView, mermaidEditing, isMermaidFence } from "./mermaid.js";
+import { tokens, firstWord, languageOptions, withLanguage } from "./highlight.js";
 import { parse, serialize, splitTitle, joinTitle, headingList, attributeSplit, attributeBlockRowsJson, editAttributes, normalizePerson, isNetWhite } from "./markdown.js";
 
 const editors = new WeakMap();
@@ -179,20 +181,382 @@ function rules() {
     }
     return state.tr.replaceWith(start, end, schema.text(node.attrs.raw + "("));
   });
+  // The block rules never fire in a code block (inputrules skips rules without inCode there) nor in inline code: the
+  // builders take no options, so inCodeMark is set on each returned rule.
+  const blockRules = [
+    wrappingInputRule(/^\s*>\s$/, schema.nodes.blockquote),
+    wrappingInputRule(/^\s*-\s$/, schema.nodes.bullet_list),
+    wrappingInputRule(/^(\d+)\.\s$/, schema.nodes.ordered_list, m => ({ order: +m[1] })),
+    // "# " gives level 2 too: the page title is the only level-1 heading.
+    textblockTypeInputRule(/^(#{1,6})\s$/, schema.nodes.heading, m => ({ level: Math.max(m[1].length, 2) })),
+    textblockTypeInputRule(/^```$/, schema.nodes.code_block),
+  ];
+  for (const rule of blockRules) {
+    rule.inCodeMark = false;
+  }
   return inputRules({
     rules: [
-      wrappingInputRule(/^\s*>\s$/, schema.nodes.blockquote),
-      wrappingInputRule(/^\s*-\s$/, schema.nodes.bullet_list),
-      wrappingInputRule(/^(\d+)\.\s$/, schema.nodes.ordered_list, m => ({ order: +m[1] })),
-      // "# " gives level 2 too: the page title is the only level-1 heading.
-      textblockTypeInputRule(/^(#{1,6})\s$/, schema.nodes.heading, m => ({ level: Math.max(m[1].length, 2) })),
-      textblockTypeInputRule(/^```$/, schema.nodes.code_block),
+      ...blockRules,
       tagRule,
       linkRule,
       mentionRule,
       mentionParenRule,
     ],
   });
+}
+
+// ---- Code (job 283): inline code and code blocks, their commands, syntax colours and the code-block header. ----
+
+/** Toggles the code mark on the selection, or (empty selection) the stored mark, so the next typed text is code or not. */
+export const toggleInlineCode = toggleMark(schema.marks.code);
+
+// The text a leaf node stands for when its block becomes code: a chip's raw text, a line break, an image's markdown.
+function leafText(leaf) {
+  if (leaf.type === schema.nodes.hard_break) {
+    return "\n";
+  }
+  if (typeof leaf.attrs.raw === "string") {
+    return leaf.attrs.raw;
+  }
+  if (leaf.type === schema.nodes.image) {
+    return "![" + (leaf.attrs.alt || "") + "](" + leaf.attrs.src + ")";
+  }
+  return "";
+}
+
+function blockText(node, to) {
+  return node.textBetween(0, to === undefined ? node.content.size : to, "", leafText);
+}
+
+// A code block back to paragraphs: one per line, the selection kept on the same characters.
+function codeToParagraphs(state, dispatch) {
+  const { $from, $to } = state.selection;
+  if (!$from.sameParent($to)) {
+    return false;
+  }
+  const block = $from.parent;
+  const start = $from.before();
+  const text = block.textContent;
+  const paragraphs = text.split("\n").map(line => schema.nodes.paragraph.create(null, line.length > 0 ? schema.text(line) : null));
+  const $start = state.doc.resolve(start);
+  if (!$start.parent.canReplace($start.index(), $start.index() + 1, Fragment.from(paragraphs))) {
+    return false;
+  }
+  if (dispatch) {
+    const at = offset => {
+      const lines = text.slice(0, offset).split("\n");
+      let pos = start;
+      for (let i = 0; i < lines.length - 1; i++) {
+        pos += paragraphs[i].nodeSize;
+      }
+      return pos + 1 + lines[lines.length - 1].length;
+    };
+    const tr = state.tr.replaceWith(start, start + block.nodeSize, paragraphs);
+    tr.setSelection(TextSelection.create(tr.doc, at($from.parentOffset), at($to.parentOffset)));
+    dispatch(tr.scrollIntoView());
+  }
+  return true;
+}
+
+/**
+ * In a code block, makes each of its lines a paragraph again. Elsewhere, makes the paragraphs and headings the
+ * selection touches (siblings only) one code block without a language, one line per block.
+ */
+export function toggleCodeBlock(state, dispatch) {
+  const { $from, $to } = state.selection;
+  if ($from.parent.type === schema.nodes.code_block) {
+    return codeToParagraphs(state, dispatch);
+  }
+  const blocks = [];
+  state.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
+    if (node.isTextblock) {
+      blocks.push({ node, pos });
+      return false;
+    }
+    return true;
+  });
+  if (blocks.length === 0 || blocks.some(b => b.node.type !== schema.nodes.paragraph && b.node.type !== schema.nodes.heading)) {
+    return false;
+  }
+  const $first = state.doc.resolve(blocks[0].pos);
+  const parentStart = $first.start();
+  if (blocks.some(b => state.doc.resolve(b.pos).start() !== parentStart)) {
+    return false;
+  }
+  const texts = blocks.map(b => blockText(b.node));
+  const text = texts.join("\n");
+  const node = schema.nodes.code_block.create(null, text.length > 0 ? schema.text(text) : null);
+  if (!$first.parent.canReplace($first.index(), $first.index() + blocks.length, Fragment.from(node))) {
+    return false;
+  }
+  if (dispatch) {
+    const last = blocks[blocks.length - 1];
+    const from = blocks[0].pos;
+    const offsetOf = pos => {
+      let prefix = 0;
+      for (let i = 0; i < blocks.length; i++) {
+        const start = blocks[i].pos + 1;
+        const end = blocks[i].pos + blocks[i].node.nodeSize - 1;
+        if (pos <= end) {
+          return prefix + (pos <= start ? 0 : blockText(blocks[i].node, pos - start).length);
+        }
+        prefix += texts[i].length + 1;
+      }
+      return text.length;
+    };
+    const tr = state.tr.replaceWith(from, last.pos + last.node.nodeSize, node);
+    tr.setSelection(TextSelection.create(tr.doc, from + 1 + offsetOf($from.pos), from + 1 + offsetOf($to.pos)));
+    dispatch(tr.scrollIntoView());
+  }
+  return true;
+}
+
+// Every code block of doc in document order, with its position.
+function codeBlocks(doc) {
+  const found = [];
+  doc.descendants((node, pos) => {
+    if (node.type === schema.nodes.code_block) {
+      found.push({ node, pos });
+      return false;
+    }
+    return !node.isTextblock;
+  });
+  return found;
+}
+
+/**
+ * The indexes (document order, in newDoc) of the code blocks whose text or params differ from the block at the same
+ * index of oldDoc, or that oldDoc has no block for. DOM-free.
+ */
+export function changedCodeBlocks(oldDoc, newDoc) {
+  const before = codeBlocks(oldDoc);
+  const changed = [];
+  codeBlocks(newDoc).forEach(({ node }, index) => {
+    const old = before[index];
+    if (!old || (old.node !== node && (old.node.attrs.params !== node.attrs.params || old.node.textContent !== node.textContent))) {
+      changed.push(index);
+    }
+  });
+  return changed;
+}
+
+// The class decorations of one code block: none for Mermaid or an unknown language.
+function blockDecorations(node, pos) {
+  if (isMermaidFence(node.attrs.params)) {
+    return [];
+  }
+  return tokens(node.textContent, firstWord(node.attrs.params))
+    .map(([from, to, className]) => Decoration.inline(pos + 1 + from, pos + 1 + to, { class: className }));
+}
+
+const highlightKey = new PluginKey("codeHighlight");
+
+// Syntax colours as inline class decorations; only the blocks a transaction changed are highlighted again. The
+// document (and so the saved markdown) is never touched.
+function codeHighlight() {
+  return new Plugin({
+    key: highlightKey,
+    state: {
+      init(config, state) {
+        const decorations = [];
+        for (const { node, pos } of codeBlocks(state.doc)) {
+          decorations.push(...blockDecorations(node, pos));
+        }
+        return DecorationSet.create(state.doc, decorations);
+      },
+      apply(tr, set, oldState, newState) {
+        if (!tr.docChanged) {
+          return set;
+        }
+        let next = set.map(tr.mapping, tr.doc);
+        const changed = changedCodeBlocks(oldState.doc, newState.doc);
+        if (changed.length === 0) {
+          return next;
+        }
+        const blocks = codeBlocks(newState.doc);
+        for (const index of changed) {
+          const { node, pos } = blocks[index];
+          next = next.remove(next.find(pos + 1, pos + node.nodeSize - 1));
+          next = next.add(newState.doc, blockDecorations(node, pos));
+        }
+        return next;
+      },
+    },
+    props: {
+      decorations(state) {
+        return highlightKey.getState(state);
+      },
+    },
+  });
+}
+
+/**
+ * Copies text: writeText(text) first; when it is missing, throws or rejects, execCopy(text). Resolves to "Copied", or
+ * to "Can't copy" when both fail (a false result or a throw); never rejects. DOM-free.
+ */
+export function copyText(text, options) {
+  const { writeText, execCopy } = options || {};
+  const fallback = () => {
+    try {
+      return typeof execCopy === "function" && execCopy(text) ? "Copied" : "Can't copy";
+    } catch {
+      return "Can't copy";
+    }
+  };
+  if (typeof writeText !== "function") {
+    return Promise.resolve(fallback());
+  }
+  let written;
+  try {
+    written = Promise.resolve(writeText(text));
+  } catch {
+    return Promise.resolve(fallback());
+  }
+  return written.then(() => "Copied", () => fallback());
+}
+
+// The page's clipboard: navigator.clipboard.writeText when there is one.
+function clipboardWrite() {
+  const clipboard = globalThis.navigator && globalThis.navigator.clipboard;
+  return clipboard && typeof clipboard.writeText === "function" ? text => clipboard.writeText(text) : undefined;
+}
+
+// The fallback copy: the text (a value, never markup) in a hidden textarea outside the editor, selected and copied.
+function copyThroughSelection(text) {
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.readOnly = true;
+  area.className = "code-copy-buffer";
+  area.style.position = "fixed";
+  area.style.left = "-10000px";
+  area.style.opacity = "0";
+  const active = document.activeElement;
+  document.body.appendChild(area);
+  try {
+    area.select();
+    return document.execCommand("copy");
+  } finally {
+    area.remove();
+    if (active && typeof active.focus === "function") {
+      active.focus();
+    }
+  }
+}
+
+// A code block that is not Mermaid: a non-editable header (language picker, Copy) above pre > code.
+function plainCodeView(node, view, getPos) {
+  const dom = document.createElement("div");
+  dom.className = "code-block";
+  const header = document.createElement("div");
+  header.className = "code-header";
+  header.contentEditable = "false";
+  const select = document.createElement("select");
+  select.className = "code-language";
+  select.setAttribute("aria-label", "Language");
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.className = "code-copy";
+  copy.textContent = "Copy";
+  header.appendChild(select);
+  header.appendChild(copy);
+  const pre = document.createElement("pre");
+  const code = document.createElement("code");
+  pre.appendChild(code);
+  dom.appendChild(header);
+  dom.appendChild(pre);
+
+  let shown = null;
+  const fill = () => {
+    if (shown === node.attrs.params) {
+      return;
+    }
+    shown = node.attrs.params;
+    const options = languageOptions(shown);
+    select.replaceChildren(...options.map(o => {
+      const option = document.createElement("option");
+      option.value = o.value;
+      option.textContent = o.label;
+      return option;
+    }));
+    select.value = (options.find(o => o.selected) || options[0]).value;
+  };
+  fill();
+
+  // One transaction, its own undo step; the dirty flag follows from the changed document.
+  select.addEventListener("change", () => {
+    const pos = getPos();
+    const params = withLanguage(node.attrs.params, select.value);
+    if (typeof pos !== "number" || params === node.attrs.params) {
+      return;
+    }
+    view.dispatch(closeHistory(view.state.tr.setNodeMarkup(pos, null, { ...node.attrs, params })));
+  });
+  // Copy changes only the button's text, never the document.
+  copy.addEventListener("click", event => {
+    event.preventDefault();
+    copyText(node.textContent, { writeText: clipboardWrite(), execCopy: copyThroughSelection }).then(label => {
+      copy.textContent = label;
+    });
+  });
+  copy.addEventListener("mouseleave", () => {
+    copy.textContent = "Copy";
+  });
+
+  return {
+    dom,
+    contentDOM: code,
+    update(next) {
+      if (next.type !== node.type || isMermaidFence(next.attrs.params)) {
+        return false;
+      }
+      node = next;
+      fill();
+      return true;
+    },
+    stopEvent(event) { return header.contains(event.target); },
+    ignoreMutation(mutation) {
+      if (header.contains(mutation.target)) {
+        return true;
+      }
+      return mutation.type !== "selection" && !code.contains(mutation.target) && mutation.target !== pre;
+    },
+  };
+}
+
+// Mermaid fences keep their diagram view; every other code block gets the header.
+function codeView(node, view, getPos) {
+  return codeBlockView(node, view, getPos) || plainCodeView(node, view, getPos);
+}
+
+// A line break: "\n" in a code block, a hard_break node anywhere else.
+const lineBreak = chainCommands(newlineInCode, (state, dispatch) => {
+  if (dispatch) {
+    dispatch(state.tr.replaceSelectionWith(schema.nodes.hard_break.create()).scrollIntoView());
+  }
+  return true;
+});
+
+// The editor's own key bindings, in front of baseKeymap. Enter in a code block is a newline first, so a code block in
+// a list item never splits the item; Mod-Enter (baseKeymap's exitCode) still leaves the block.
+function editorKeys() {
+  return {
+    "Mod-z": undo,
+    "Shift-Mod-z": redo,
+    "Mod-y": redo,
+    "Mod-b": toggleMark(schema.marks.strong),
+    "Mod-i": toggleMark(schema.marks.em),
+    "Mod-e": toggleInlineCode,
+    "Mod-`": toggleInlineCode,
+    "Mod-Alt-c": toggleCodeBlock,
+    "Enter": chainCommands(newlineInCode, splitItem),
+    "Tab": sinkListItem(schema.nodes.list_item),
+    "Shift-Tab": liftListItem(schema.nodes.list_item),
+    "Shift-Ctrl-0": setBlockType(schema.nodes.paragraph),
+    "Mod-s": swallow,
+    "Mod-k": swallow,
+    "Ctrl-k": swallow,
+    "Shift-Enter": lineBreak,
+  };
 }
 
 // A task item: a clickable box (not an input, so the browser never toggles it on its own) and the content.
@@ -310,7 +674,13 @@ export function typedMarkdown(text) {
 
 function typedDoc(text) {
   const plugin = rules();
-  let state = EditorState.create({ doc: schema.topNodeType.create(null, schema.nodes.paragraph.create()), plugins: [plugin] });
+  const state = EditorState.create({ doc: schema.topNodeType.create(null, schema.nodes.paragraph.create()), plugins: [plugin] });
+  return typeText(state, plugin, text).doc;
+}
+
+// Types text one character at a time through the input rules of plugin, as the view does; returns the new state.
+function typeText(start, plugin, text) {
+  let state = start;
   const typing = {
     get state() { return state; },
     composing: false,
@@ -322,7 +692,80 @@ function typedDoc(text) {
       typing.dispatch(state.tr.insertText(ch, from, to));
     }
   }
-  return state.doc;
+  return state;
+}
+
+const SelectionOpen = "\u27e6";
+const SelectionClose = "\u27e7";
+
+// The text position of the first marker in doc, or -1.
+function markerPos(doc, marker) {
+  let found = -1;
+  doc.descendants((node, pos) => {
+    if (found !== -1) {
+      return false;
+    }
+    if (node.isText) {
+      const at = node.text.indexOf(marker);
+      if (at !== -1) {
+        found = pos + at;
+      }
+    }
+    return true;
+  });
+  return found;
+}
+
+// The state the test hooks start from: markdown parsed, the ⟦ ⟧ markers taken out and made the selection (a lone
+// ⟦ is a caret), with the page editor's input rules, highlighting, history and keymaps.
+function markedState(markdown) {
+  const plugin = rules();
+  let doc = parse(String(markdown));
+  const close = markerPos(doc, SelectionClose);
+  if (close !== -1) {
+    doc = EditorState.create({ doc }).tr.delete(close, close + 1).doc;
+  }
+  const open = markerPos(doc, SelectionOpen);
+  if (open === -1) {
+    throw new Error("No \u27e6 marker in the markdown.");
+  }
+  doc = EditorState.create({ doc }).tr.delete(open, open + 1).doc;
+  const head = close === -1 ? open : close - 1;
+  const state = EditorState.create({
+    doc,
+    selection: TextSelection.create(doc, open, head),
+    plugins: [plugin, codeHighlight(), history(), keymap(editorKeys()), keymap(baseKeymap)],
+  });
+  return { state, plugin };
+}
+
+/**
+ * Test hook: the markdown after running the editor's binding for key (editorKeys, then baseKeymap) on markdown with the
+ * selection marked by ⟦ ⟧ (or a caret by a lone ⟦), then typing typed through the input rules. DOM-free.
+ */
+export function commandMarkdown(markdown, key, typed) {
+  const marked = markedState(markdown);
+  let state = marked.state;
+  const command = editorKeys()[key] || baseKeymap[key];
+  if (!command) {
+    throw new Error("No binding for " + key + ".");
+  }
+  command(state, tr => { state = state.apply(tr); });
+  state = typeText(state, marked.plugin, typed === undefined ? "" : typed);
+  return serialize(state.doc);
+}
+
+/** Test hook: the markdown after typing text at the ⟦ caret (or over the ⟦ ⟧ selection) of markdown. DOM-free. */
+export function typedAtMarkdown(markdown, text) {
+  const marked = markedState(markdown);
+  return serialize(typeText(marked.state, marked.plugin, text).doc);
+}
+
+/** Test hook: changedCodeBlocks before and after typing text at the ⟦ caret of markdown, as JSON. DOM-free. */
+export function changedCodeBlocksJson(markdown, text) {
+  const marked = markedState(markdown);
+  const after = typeText(marked.state, marked.plugin, text);
+  return JSON.stringify(changedCodeBlocks(marked.state.doc, after.doc));
 }
 
 /**
@@ -349,33 +792,14 @@ export function mount(element, markdown, dotnet, images, name) {
       rules(),
       mermaidEditing(),
       history(),
-      keymap({
-        "Mod-z": undo,
-        "Shift-Mod-z": redo,
-        "Mod-y": redo,
-        "Mod-b": toggleMark(schema.marks.strong),
-        "Mod-i": toggleMark(schema.marks.em),
-        "Mod-`": toggleMark(schema.marks.code),
-        "Enter": splitItem,
-        "Tab": sinkListItem(schema.nodes.list_item),
-        "Shift-Tab": liftListItem(schema.nodes.list_item),
-        "Shift-Ctrl-0": setBlockType(schema.nodes.paragraph),
-        "Mod-s": swallow,
-        "Mod-k": swallow,
-        "Ctrl-k": swallow,
-        "Shift-Enter": chainCommands((s, d) => {
-          if (d) {
-            d(s.tr.replaceSelectionWith(schema.nodes.hard_break.create()).scrollIntoView());
-          }
-          return true;
-        }),
-      }),
+      codeHighlight(),
+      keymap(editorKeys()),
       keymap(baseKeymap),
     ],
   });
   const view = new EditorView(element, {
     state,
-    nodeViews: { list_item: listItemView, image: imageView(editor), code_block: codeBlockView },
+    nodeViews: { list_item: listItemView, image: imageView(editor), code_block: codeView },
     attributes: { class: "note-editor-body", spellcheck: "true" },
     dispatchTransaction(tr) {
       view.updateState(view.state.apply(tr));
@@ -572,6 +996,24 @@ export function destroy(element) {
 export function focus(element) {
   const editor = editors.get(element);
   if (editor) {
+    editor.view.focus();
+  }
+}
+
+/** Toggles inline code in the editor of element (the toolbar button) and puts the cursor back in it. */
+export function toggleInlineCodeIn(element) {
+  runCommand(element, toggleInlineCode);
+}
+
+/** Toggles a code block in the editor of element (the toolbar button) and puts the cursor back in it. */
+export function toggleCodeBlockIn(element) {
+  runCommand(element, toggleCodeBlock);
+}
+
+function runCommand(element, command) {
+  const editor = editors.get(element);
+  if (editor) {
+    command(editor.view.state, editor.view.dispatch, editor.view);
     editor.view.focus();
   }
 }

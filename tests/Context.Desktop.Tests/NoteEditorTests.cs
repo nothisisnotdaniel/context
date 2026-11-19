@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using AngleSharp.Dom;
 using Bunit;
 using Microsoft.AspNetCore.Components;
@@ -420,7 +421,8 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Empty(cut.FindAll(".dirty-dot"));
     }
 
-    // 209 AC-1, AC-2: an open note, plain or sensitive, has no Save button; a clean editor bar holds only the title.
+    // 209 AC-1, AC-2: an open note, plain or sensitive, has no Save button; a clean editor bar holds only the title
+    // (and, since 283, the formatting toolbar).
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -430,7 +432,7 @@ public sealed class NoteEditorTests : IDisposable
 
         AssertNoSaveButton(cut);
         Assert.Equal(
-            ["H2.note-title cut"],
+            ["H2.note-title cut", "DIV.format-bar"],
             cut.Find(".editor-bar").Children.Select(c => c.TagName + "." + c.ClassName).ToArray());
     }
 
@@ -497,7 +499,7 @@ public sealed class NoteEditorTests : IDisposable
         IElement title = cut.Find(".editor-bar h2.note-title");
         AssertNoSaveButton(cut);
         Assert.Equal(
-            ["H2.note-title cut", "SPAN.dirty-dot"],
+            ["H2.note-title cut", "SPAN.dirty-dot", "DIV.format-bar"],
             cut.Find(".editor-bar").Children.Select(c => c.TagName + "." + c.ClassName).ToArray());
         Assert.Empty(title.QuerySelectorAll(".dirty-dot"));
         Assert.Equal("Plan", title.TextContent);
@@ -788,7 +790,8 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Equal("a/b/c", title.GetAttribute("title"));
     }
 
-    // 235 AC-2: a top-level note shows its whole name in both, and the bar is still the title, then the dirty dot.
+    // 235 AC-2: a top-level note shows its whole name in both, and the bar is still the title, then the dirty dot
+    // (then the formatting toolbar, 283).
     [Fact]
     public async Task Title_TopLevel_ShowsWholeName_BarUnchanged()
     {
@@ -798,13 +801,13 @@ public sealed class NoteEditorTests : IDisposable
         Assert.Equal("Plan", title.TextContent);
         Assert.Equal("Plan", title.GetAttribute("title"));
         Assert.Equal(
-            ["H2.note-title cut"],
+            ["H2.note-title cut", "DIV.format-bar"],
             cut.Find(".editor-bar").Children.Select(c => c.TagName + "." + c.ClassName).ToArray());
 
         await cut.InvokeAsync(() => PageOf(cut).OnDirty(true));
 
         Assert.Equal(
-            ["H2.note-title cut", "SPAN.dirty-dot"],
+            ["H2.note-title cut", "SPAN.dirty-dot", "DIV.format-bar"],
             cut.Find(".editor-bar").Children.Select(c => c.TagName + "." + c.ClassName).ToArray());
     }
 
@@ -1390,6 +1393,89 @@ public sealed class NoteEditorTests : IDisposable
         data.Session!.Lock();
 
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".note-attributes")), Wait);
+    }
+
+    // 283 AC-3: the formatting toolbar in the editor bar: two buttons with the platform's shortcut names in their titles.
+    [Theory]
+    [InlineData(true, "Inline code (Cmd+E)", "Code block (Cmd+Option+C)")]
+    [InlineData(false, "Inline code (Ctrl+E)", "Code block (Ctrl+Alt+C)")]
+    public async Task FormatBar_ShowsButtonsWithShortcuts(bool isMac, string inlineTitle, string blockTitle)
+    {
+        data.IsMac = isMac;
+        data.WriteNote("Plan", "# Plan\n\nText\n");
+        EditorJs js = new EditorJs(data.Bunit);
+
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+        cut.WaitForAssertion(() => Assert.NotEmpty(js.Calls("ContextEditor.mount")), Wait);
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".editor-bar > div.format-bar")), Wait);
+
+        IElement bar = cut.Find(".editor-bar > div.format-bar");
+        Assert.Equal("toolbar", bar.GetAttribute("role"));
+        Assert.Equal("Formatting", bar.GetAttribute("aria-label"));
+        IReadOnlyList<IElement> buttons = bar.QuerySelectorAll("button").ToList();
+        Assert.Equal(["Inline code", "Code block"], buttons.Select(b => b.TextContent));
+        Assert.All(buttons, b => Assert.Equal("button", b.GetAttribute("type")));
+        Assert.Equal([inlineTitle, blockTitle], buttons.Select(b => b.GetAttribute("title")));
+    }
+
+    // 283 AC-3: a click runs the command on the editor's own element (the one mounted); mousedown keeps the selection.
+    [Theory]
+    [InlineData("Inline code", "ContextEditor.toggleInlineCode", "ContextEditor.toggleCodeBlock")]
+    [InlineData("Code block", "ContextEditor.toggleCodeBlock", "ContextEditor.toggleInlineCode")]
+    public async Task FormatBar_ClickRunsTheCommand(string label, string called, string notCalled)
+    {
+        data.WriteNote("Plan", "# Plan\n\nText\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+        cut.WaitForAssertion(() => Assert.NotEmpty(js.Calls("ContextEditor.mount")), Wait);
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".format-bar")), Wait);
+
+        await cut.FindAll(".format-bar button").Single(b => b.TextContent == label).ClickAsync(new MouseEventArgs());
+
+        JSRuntimeInvocation call = Assert.Single(js.Calls(called));
+        Assert.Equal(js.Calls("ContextEditor.mount")[^1].Arguments[0], call.Arguments[0]);
+        Assert.Empty(js.Calls(notCalled));
+        string razor = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "NoteEditor.razor"));
+        Assert.Equal(2, Regex.Matches(razor, @"<button type=""button"" class=""format-[a-z-]+""[^>]*@onmousedown:preventDefault=""true""").Count);
+    }
+
+    // 283 AC-3: no toolbar for an unreadable note or an editor that failed to start.
+    [Fact]
+    public async Task FormatBar_UnreadableOrFailed_NoBar()
+    {
+        data.WriteNote("Bad", "text");
+        EditorJs js = new EditorJs(data.Bunit);
+        await data.RefreshAsync();
+        using (new FileStream(Path.Combine(data.Root, "Bad.md"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            IRenderedComponent<NoteEditor> unreadable = data.Bunit.Render<NoteEditor>(p => p.Add(e => e.Name, "Bad"));
+            unreadable.WaitForAssertion(() => Assert.Single(unreadable.FindAll(".unreadable")), Wait);
+            Assert.Empty(unreadable.FindAll(".format-bar"));
+        }
+
+        data.WriteNote("Plan", "# Plan\n");
+        js.Fail("ContextEditor.mount", new JSException("boom-283"));
+        IRenderedComponent<NoteEditor> failed = await RenderFailed("Plan");
+        Assert.Empty(failed.FindAll(".format-bar"));
+    }
+
+    // 283 AC-3: a sensitive note's toolbar goes when the session locks.
+    [Fact]
+    public async Task FormatBar_SensitiveLock_BarGone()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("Plan", "# Plan\n\nText\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        await data.RefreshAsync();
+        IRenderedComponent<NoteEditor> cut = data.Bunit.Render<NoteEditor>(p => p
+            .Add(e => e.Name, "Plan")
+            .Add(e => e.Sensitive, true));
+        cut.WaitForAssertion(() => Assert.NotEmpty(js.Calls("ContextEditor.mount")), Wait);
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".format-bar")), Wait);
+
+        data.Session!.Lock();
+
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".format-bar")), Wait);
     }
 
     private async Task<IRenderedComponent<NoteEditor>> RenderAttributes(string name)
