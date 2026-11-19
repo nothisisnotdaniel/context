@@ -136,7 +136,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#90](backlog/090-keep-mixed-line-endings.md) Keep mixed line endings → 271-mixed-line-endings
 - [x] [#372](backlog/372-code-blocks-and-inline-code-in.md) Code blocks and inline code in notes → 283-code-blocks-inline
 - [x] [#373](backlog/373-app-icon-for-the-window-and.md) App icon for the window and the taskbar → 284-app-icon
-- [ ] [#374](backlog/374-search-results-on-their-own-full.md) Search results on their own full-size page
+- [x] [#374](backlog/374-search-results-on-their-own-full.md) Search results on their own full-size page → 285-search-results-page
 - [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4; #108)
 - [x] [#234](backlog/234-release-and-ci-workflow-hardening.md) Release and CI workflow hardening → 272-release-ci-hardening
 - [x] [#113](backlog/113-refuse-removed-secret-options-after-a.md) Refuse removed secret options after a command → 273-refuse-removed-secret-options
