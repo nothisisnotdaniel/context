@@ -720,6 +720,7 @@ public sealed class CliJsonTests : IDisposable
         File.WriteAllText(Path.Combine(root, TodoStore.FileName), "["
             + "{\"text\":\"Sent\",\"due\":\"2026-10-20\",\"created\":\"2026-10-01T00:00:00Z\",\"done\":\"2026-10-27T10:00:00Z\"},"
             + "{\"text\":\"Late\",\"due\":\"2026-10-25\",\"created\":\"2026-10-01T00:00:00Z\"}]");
+        WriteDoneLog("# done\n- 2026-10-27 Sent (due 2026-10-20)\n- 2026-10-28 Called\n");
         WriteIcs("a.ics", "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Trip\r\nDTSTART:20261031T200000\r\n"
             + "DTEND:20261102T100000\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
 
@@ -732,29 +733,71 @@ public sealed class CliJsonTests : IDisposable
         Assert.Equal(
             "{\"from\":\"2026-10-23\",\"to\":\"2026-10-29\","
             + "\"changedNotes\":[{\"name\":\"Plan\",\"modified\":\"2026-10-28T14:05:00\\u002B01:00\"}],"
-            + "\"doneTodos\":[{\"due\":\"2026-10-20\",\"done\":\"2026-10-27\",\"text\":\"Sent\"}],"
+            + "\"doneTodos\":[{\"due\":null,\"done\":\"2026-10-28\",\"text\":\"Called\"},"
+            + "{\"due\":\"2026-10-20\",\"done\":\"2026-10-27\",\"text\":\"Sent\"}],"
             + "\"overdue\":[{\"due\":\"2026-10-25\",\"text\":\"Late\"}],"
             + $"\"appointments\":[{trip},{trip},{trip}],"
             + "\"calendar\":{\"status\":\"notConfigured\",\"cachedAt\":null,\"unreadableFiles\":[]}}\n",
             result.Out);
     }
 
-    // 169 AC-6: doneTodos and overdue are null when todos.json can't be read; the stderr line and exit 1 stay.
+    // 169 AC-6, job 293 AC-12: overdue is null when todos.json can't be read; doneTodos still comes from the log.
     [Fact]
-    public void Review_UnreadableTodos_Null()
+    public void Review_UnreadableTodos_OverdueNull_DoneFilled()
     {
         Directory.CreateDirectory(root);
         File.WriteAllText(Path.Combine(root, TodoStore.FileName), "{ bad");
+        WriteDoneLog("# done\n- 2026-10-29 Shipped\n");
         WriteIcs("bad.ics", "not a calendar");
 
         Result result = Run("review", "--json");
 
         JsonElement doc = AssertDocument(result, Cli.ExitError);
         Assert.Equal(["Can't read calendar/bad.ics", "Can't read todos.json."], result.ErrLines);
-        Assert.Equal(JsonValueKind.Null, doc.GetProperty("doneTodos").ValueKind);
+        JsonElement done = Assert.Single(doc.GetProperty("doneTodos").EnumerateArray());
+        Assert.Equal("Shipped", done.GetProperty("text").GetString());
+        Assert.Equal(JsonValueKind.Null, done.GetProperty("due").ValueKind);
         Assert.Equal(JsonValueKind.Null, doc.GetProperty("overdue").ValueKind);
         Assert.Equal(JsonValueKind.Array, doc.GetProperty("changedNotes").ValueKind);
         Assert.Equal("bad.ics", doc.GetProperty("calendar").GetProperty("unreadableFiles")[0].GetString());
         Assert.False(File.Exists(Path.Combine(root, TagIndex.FileName)));
+    }
+
+    // Job 293 AC-12: no entries in the week give doneTodos [] and exit 0.
+    [Fact]
+    public void Review_NoDoneEntries_EmptyArray()
+    {
+        WriteDoneLog("# done\n- 2026-10-01 Long ago\n");
+
+        Result result = Run("review", "--json");
+
+        JsonElement doc = AssertDocument(result);
+        Assert.Equal(string.Empty, result.Err);
+        Assert.Equal(0, doc.GetProperty("doneTodos").GetArrayLength());
+    }
+
+    // Job 293 AC-12: an unreadable done.md makes doneTodos null, prints the stderr line and exits 1.
+    [Fact]
+    public void Review_UnreadableDoneLog_Null()
+    {
+        Directory.CreateDirectory(root);
+        using (FileStream big = File.Create(Path.Combine(root, "done.md")))
+        {
+            big.SetLength(NoteStore.MaxNoteBytes + 1);
+        }
+
+        Result result = Run("review", "--json");
+
+        JsonElement doc = AssertDocument(result, Cli.ExitError);
+        Assert.Equal(["Can't read the done log."], result.ErrLines);
+        Assert.Equal(JsonValueKind.Null, doc.GetProperty("doneTodos").ValueKind);
+        Assert.Equal(JsonValueKind.Array, doc.GetProperty("overdue").ValueKind);
+    }
+
+    // done.md with a last-write time before every review window, so it is no changed note.
+    private void WriteDoneLog(string text)
+    {
+        WriteNote(DoneLog.NoteName, text);
+        File.SetLastWriteTimeUtc(Path.Combine(root, "done.md"), new DateTime(2026, 9, 1, 8, 0, 0, DateTimeKind.Utc));
     }
 }

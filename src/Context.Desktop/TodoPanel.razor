@@ -48,7 +48,11 @@
     }
     @if (result is { } shown)
     {
-        @if (shown.Kind == ActionKind.Done)
+        @if (shown.Kind == ActionKind.Done && shown.Reason == ActionReason.DoneLogLeft)
+        {
+            <p class="result red" role="status">@DesktopActions.DoneLogLeftText</p>
+        }
+        else if (shown.Kind == ActionKind.Done)
         {
             @if (shown.NextDue is { } nextDue)
             {

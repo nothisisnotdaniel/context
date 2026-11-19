@@ -186,7 +186,7 @@ public sealed class EditingFlowTests : IDisposable
             cut.Find(".palette-input").GetAttribute("blazor:elementReference"),
             ((Microsoft.AspNetCore.Components.ElementReference)focus.Arguments[0]!).Id);
         Assert.Equal(
-            ["/board <tag>", "/briefing", "/capture <text>", "/decisions [tag]", "/digest", "/done <text>", "/export", "/find <attribute> <value>", "/import", "/meeting <number>", "/new <title> [--template <name>]", "/open <note>", "/review", "/save", "/search <text>", "/settings", "/share", "/similar", "/standup", "/tags [tag]", "/today", "/todo <<yyyy-MM-dd|today|tomorrow> [HH:mm]|every <weekday|day|month>> <text>", "/triage"],
+            ["/board <tag>", "/briefing", "/capture <text>", "/decisions [tag]", "/digest", "/done <text>", "/donelog", "/export", "/find <attribute> <value>", "/import", "/meeting <number>", "/new <title> [--template <name>]", "/open <note>", "/review", "/save", "/search <text>", "/settings", "/share", "/similar", "/standup", "/tags [tag]", "/today", "/todo <<yyyy-MM-dd|today|tomorrow> [HH:mm]|every <weekday|day|month>> <text>", "/triage"],
             cut.FindAll(".palette-row .usage").Select(u => u.TextContent).ToArray());
 
         await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
@@ -201,7 +201,7 @@ public sealed class EditingFlowTests : IDisposable
         await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "k", CtrlKey = true });
 
         await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/opne" });
-        Assert.Equal(["/open <note>", "/done <text>"], cut.FindAll(".palette-row .usage").Select(u => u.TextContent).ToArray());
+        Assert.Equal(["/open <note>", "/done <text>", "/donelog"], cut.FindAll(".palette-row .usage").Select(u => u.TextContent).ToArray());
 
         await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/t" });
         Assert.Equal(["/tags [tag]", "/today", "/todo <<yyyy-MM-dd|today|tomorrow> [HH:mm]|every <weekday|day|month>> <text>", "/triage"], cut.FindAll(".palette-row .usage").Select(u => u.TextContent).ToArray());

@@ -62,14 +62,29 @@ internal static class Inbox
     internal static CaptureResult Capture(NoteStore store, string text, DateTime now, Action? beforeSave)
     {
         string line = $"- {now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)} {Clean(text)}\n";
+        return AppendLine(store, NoteName, line, beforeSave);
+    }
+
+    /// <summary>
+    /// Appends <paramref name="line"/> (one line ending in <c>\n</c>) to the note <paramref name="noteName"/>, adding a
+    /// missing final newline first, through <see cref="NoteStore.ReadForEdit"/> and
+    /// <see cref="NoteStore.SaveIfUnchanged(EditableNote, string, out EditableNote?)"/> (every other byte kept, CRLF and
+    /// BOM included). A missing note is created as <c># &lt;noteName&gt;\n</c> plus the line. When the note changed on
+    /// disk between reading and saving it is read again, at most <see cref="MaxRetries"/> more times;
+    /// <paramref name="beforeSave"/> runs after each read and before each save. Shared by the inbox capture and
+    /// <see cref="DoneLog.Append(NoteStore, DateOnly, string, DateOnly?)"/>. Throws <see cref="IOException"/> or
+    /// <see cref="UnauthorizedAccessException"/> when the note can't be read or written.
+    /// </summary>
+    internal static CaptureResult AppendLine(NoteStore store, string noteName, string line, Action? beforeSave)
+    {
         for (int attempt = 0; attempt <= MaxRetries; attempt++)
         {
-            if (!store.TryFind(NoteName, out NoteInfo? match) || match is null)
+            if (!store.TryFind(noteName, out NoteInfo? match) || match is null)
             {
                 beforeSave?.Invoke();
                 try
                 {
-                    store.CreateWithText(NoteName, $"# {NoteName}\n{line}");
+                    store.CreateWithText(noteName, $"# {noteName}\n{line}");
                     return CaptureResult.Captured;
                 }
                 catch (NoteExistsException)

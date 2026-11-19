@@ -1289,7 +1289,7 @@ internal sealed class DesktopState
     /// The weekly review (<see cref="ReviewView.Build"/>) for today: the notes changed and the todos done in the last 7
     /// days, the overdue todos and the next 7 days' appointments, off the calling thread. It never opens
     /// <c>context.db</c> and never throws: any failure gives an empty view with <see cref="ReviewView.TodosUnreadable"/>
-    /// set.
+    /// and <see cref="ReviewView.DoneLogUnreadable"/> set.
     /// </summary>
     public Task<ReviewView> Review() => Task.Run(() =>
     {
@@ -1307,6 +1307,7 @@ internal sealed class DesktopState
                 [],
                 true,
                 [],
+                true,
                 [],
                 [],
                 calendar.Folder,
@@ -1314,6 +1315,22 @@ internal sealed class DesktopState
                 CalendarFeedStatus.NotConfigured,
                 null,
                 null);
+        }
+    });
+
+    /// <summary>
+    /// The done log grouped by week (<see cref="DoneLogView.Build"/>), off the calling thread. Reads only, never opens
+    /// <c>context.db</c> and never throws: any failure gives an empty view with <see cref="DoneLogView.Unreadable"/>.
+    /// </summary>
+    public Task<DoneLogView> DoneWeeks() => Task.Run(() =>
+    {
+        try
+        {
+            return DoneLogView.Build(notes);
+        }
+        catch (Exception)
+        {
+            return new DoneLogView([], true);
         }
     });
 

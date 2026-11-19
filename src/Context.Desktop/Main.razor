@@ -21,6 +21,10 @@
                 {
                     <TriagePanel Guard="TriageHeld" OnTriaged="Triaged" OnClose="CloseTriage" />
                 }
+                @if (page == Page.Done)
+                {
+                    <DonePanel OnClose="CloseDone" />
+                }
                 @if (page == Page.MailDigest)
                 {
                     <MailDigestPanel OnClose="CloseMailDigest" />
@@ -258,7 +262,7 @@ else
     private (string Note, string Text)? pendingSearchBack;
     private string? decisionsShown;
     private bool similarShown;
-    private enum Page { None, Triage, People, Tags, Settings, Appointment, Board, Search, MailDigest }
+    private enum Page { None, Triage, People, Tags, Settings, Appointment, Board, Search, MailDigest, Done }
 
     // The board's tag (normalized) while Page.Board is shown (job 242).
     private string? boardShown;
@@ -559,6 +563,11 @@ else
     private void ShowTriage() => OpenPage(Page.Triage);
 
     private void CloseTriage() => page = Page.None;
+
+    // The done log (job 293): done.md grouped by week, a page in place of the note area.
+    private void ShowDone() => OpenPage(Page.Done);
+
+    private void CloseDone() => page = Page.None;
 
     // The Mail digest (job 286): suggestions from recent Outlook mail, read only on its Read mail button.
     private void ShowMailDigest() => OpenPage(Page.MailDigest);
@@ -1351,6 +1360,10 @@ else
                 break;
             case "/settings":
                 ShowSettings();
+                break;
+            case "/donelog":
+                // The argument is ignored.
+                ShowDone();
                 break;
             case "/digest":
                 // The argument is ignored.

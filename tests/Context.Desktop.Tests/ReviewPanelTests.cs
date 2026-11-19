@@ -57,10 +57,12 @@ public sealed class ReviewPanelTests : IDisposable
         WriteNote("Plan", new DateTime(2026, 10, 28, 9, 0, 0, DateTimeKind.Utc));
         WriteNote("Old", new DateTime(2026, 10, 10, 9, 0, 0, DateTimeKind.Utc));
         WriteTodos("["
-            + Todo("Sent report", "2026-10-20", done: "2026-10-27T09:00:00Z") + ","
+            + Todo("Stored done", "2026-10-20", done: "2026-10-27T09:00:00Z") + ","
             + Todo("Pay bill", "2026-10-25") + ","
             + Todo("Later", "2026-11-03")
             + "]");
+        data.WriteNote("done", "# done\n- 2026-10-27 Sent report (due 2026-10-20)\n- 2026-10-20 too old\n");
+        File.SetLastWriteTimeUtc(Path.Combine(data.Root, "done.md"), new DateTime(2026, 9, 1, 9, 0, 0, DateTimeKind.Utc));
         data.WriteCalendar("a.ics", DesktopFixture.Calendar(
             DesktopFixture.Event("Standup", "20261030T090000", "20261030T091500", "Room 1"),
             DesktopFixture.Event("Lunch", "20261030T120000", "20261030T130000"),
@@ -84,7 +86,8 @@ public sealed class ReviewPanelTests : IDisposable
         Assert.Equal("Plan", button.TextContent);
         Assert.All(cut.FindAll("button"), b => Assert.Equal("button", b.GetAttribute("type")));
 
-        IElement done = cut.Find(".done-todos .review-todo");
+        // 293 AC-10: the done-log entries of the week, not the todos.json done todos.
+        IElement done = Assert.Single(cut.FindAll(".done-todos .review-todo"));
         Assert.Equal("2026-10-27", done.QuerySelector(".date")!.TextContent);
         Assert.Equal("Sent report", done.QuerySelector(".text")!.TextContent);
         IElement overdue = Assert.Single(cut.FindAll(".overdue-todos .review-todo"));
@@ -143,7 +146,8 @@ public sealed class ReviewPanelTests : IDisposable
         Assert.Empty(cut.FindAll(".review-panel .red"));
     }
 
-    // AC-8: an unreadable todos.json shows the red text in both todo sections; calendar errors use the current texts.
+    // AC-8: an unreadable todos.json shows the red text in the Overdue section (293: the done log is still read, so
+    // Done todos shows "No todos done."); calendar errors use the current texts.
     [Fact]
     public void Render_Errors_RedTexts()
     {
@@ -155,13 +159,36 @@ public sealed class ReviewPanelTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".review-range")), Wait);
         string[] red = cut.FindAll(".review-panel p.red").Select(p => p.TextContent).ToArray();
-        Assert.Equal(4, red.Length);
+        Assert.Equal(3, red.Length);
         Assert.Equal("Can't read todos.json.", red[0]);
-        Assert.Equal("Can't read todos.json.", red[1]);
-        Assert.Equal("Can't read calendar/bad.ics", red[2]);
-        Assert.StartsWith("Can't download the Exchange calendar (", red[3]);
+        Assert.Equal("Can't read calendar/bad.ics", red[1]);
+        Assert.StartsWith("Can't download the Exchange calendar (", red[2]);
+        Assert.Contains("No todos done.", cut.FindAll(".review-panel p.grey").Select(p => p.TextContent));
         Assert.True(cut.Find(".review-panel p.red.feed").ClassList.Contains("feed"));
         Assert.DoesNotContain(FakeHttpHandler.PathToken, cut.Markup);
+    }
+
+    // 293 AC-10: an unreadable done.md shows the red line in Done todos; Overdue is still filled.
+    [Fact]
+    public void Render_UnreadableDoneLog_RedLine()
+    {
+        WriteTodos("[" + Todo("Pay bill", "2026-10-25") + "]");
+        Directory.CreateDirectory(data.Root);
+        using (FileStream big = File.Create(Path.Combine(data.Root, "done.md")))
+        {
+            big.SetLength(NoteStore.MaxNoteBytes + 1);
+        }
+
+        IRenderedComponent<ReviewPanel> cut = Render();
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.DoesNotContain("Loading", cut.Markup, StringComparison.Ordinal);
+            Assert.Single(cut.FindAll(".review-range"));
+            Assert.Single(cut.FindAll(".overdue-todos .review-todo"));
+        }, Wait);
+        Assert.Equal(["Can't read the done log."], cut.FindAll(".review-panel p.red").Select(p => p.TextContent).ToArray());
+        Assert.Empty(cut.FindAll(".done-todos"));
     }
 
     // AC-8: an offline feed with a cached copy shows the grey stale line.
