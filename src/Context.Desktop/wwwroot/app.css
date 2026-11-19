@@ -2334,6 +2334,88 @@ nav.saved-searches ul {
     color: var(--grey);
 }
 
+/* The heading opens the month calendar (job 289): it looks like the heading, no button chrome, with a focus ring. */
+.day-appointments .day-appointments-open {
+    background: none;
+    border: none;
+    border-radius: 4px;
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+    max-width: 100%;
+    overflow: hidden;
+    padding: 0 2px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.day-appointments .day-appointments-open:hover {
+    color: var(--accent-strong);
+}
+
+.day-appointments .day-appointments-open:focus-visible {
+    outline: 2px solid var(--accent-strong);
+    outline-offset: 1px;
+}
+
+/* Back to today, shown only off today: a small text button after the arrows. */
+.day-appointments .day-today {
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    color: var(--text);
+    flex: none;
+    font-size: 0.85em;
+    padding: 1px 6px;
+}
+
+.day-appointments .day-today:hover {
+    background: var(--background);
+    color: var(--accent-strong);
+}
+
+.day-appointments .day-today:focus-visible,
+.day-pick .day-pick-today:focus-visible {
+    outline: 2px solid var(--accent-strong);
+    outline-offset: 1px;
+}
+
+/* The sidebar's calendar: anchored under the bar and centred in the panel, never wider than the sidebar, so the
+   scrolling sidebar gets no horizontal scrollbar. */
+.todos-region .day-appointments {
+    position: relative;
+}
+
+.day-appointments .day-pick {
+    left: 50%;
+    max-width: 100%;
+    right: auto;
+    top: 2em;
+    transform: translateX(-50%);
+    z-index: 5;
+}
+
+/* Above the top bar's icons (z-index 3), so a click there first closes this calendar and never opens a second one. */
+.day-appointments .day-pick-backdrop {
+    z-index: 4;
+}
+
+/* Today below the sidebar calendar's grid. */
+.day-pick .day-pick-today {
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    color: var(--text);
+    display: block;
+    margin: 6px auto 0;
+    padding: 2px 10px;
+}
+
+.day-pick .day-pick-today:hover {
+    background: var(--background);
+    color: var(--accent-strong);
+}
+
 .day-appointments .appointment-items {
     list-style: none;
     margin: 0;

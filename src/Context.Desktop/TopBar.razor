@@ -38,51 +38,7 @@
     }
     @if (open)
     {
-        <div class="day-pick-backdrop" @onclick="Close"></div>
-        string monthLabel = MonthGrid.MonthLabel(shownMonth);
-        DateOnly gridStart = MonthGrid.Start(shownMonth);
-        <div class="day-pick">
-            <div class="day-pick-header">
-                <button type="button" class="day-pick-prev" aria-label="Previous month" title="Previous month" disabled="@(shownMonth <= MonthGrid.First)" @onclick="PreviousMonth"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 18l-6-6 6-6"/></svg></button>
-                <span class="day-pick-month">@monthLabel</span>
-                <button type="button" class="day-pick-next" aria-label="Next month" title="Next month" disabled="@(shownMonth >= MonthGrid.MonthOf(MonthGrid.Last))" @onclick="NextMonth"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 18l6-6-6-6"/></svg></button>
-            </div>
-            <table class="day-pick-grid" role="grid" aria-label="@monthLabel">
-                <thead>
-                    <tr>
-                        <th role="columnheader" class="week"></th>
-                        @foreach (string name in DayNames)
-                        {
-                            <th role="columnheader">@name</th>
-                        }
-                    </tr>
-                </thead>
-                <tbody>
-                    @for (int row = 0; row < MonthGrid.Days / 7; row++)
-                    {
-                        DateOnly monday = gridStart.AddDays(row * 7);
-                        int week = MonthGrid.Week(monday);
-                        <tr>
-                            <th role="rowheader" class="week" aria-label="@($"Week {week}")">@week</th>
-                            @for (int column = 0; column < 7; column++)
-                            {
-                                int index = (row * 7) + column;
-                                DateOnly day = monday.AddDays(column);
-                                bool isSelected = Selected == day;
-                                bool isToday = Today == day;
-                                bool isFocus = day == focusDay;
-                                <td role="gridcell" aria-selected="@(isSelected ? "true" : null)">
-                                    <button type="button" class="@DayClass(day, isToday, isSelected)" aria-label="@MonthGrid.DayLabel(day)"
-                                            aria-current="@(isToday ? "date" : null)" tabindex="@(isFocus ? "0" : "-1")"
-                                            disabled="@(!MonthGrid.InRange(day))" @ref="dayButtons[index]"
-                                            @onclick="() => PickDayAsync(day)" @onkeydown="DayKey">@day.Day</button>
-                                </td>
-                            }
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
+        <DayPicker Today="Today" Selected="Selected" OnPick="PickDayAsync" OnClose="Close" />
     }
     @if (MenuShown)
     {
@@ -108,13 +64,7 @@
 </div>
 
 @code {
-    private static readonly string[] DayNames = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
-
     private bool open;
-    private bool focusDayPending;
-    private DateOnly shownMonth;
-    private DateOnly focusDay;
-    private readonly ElementReference[] dayButtons = new ElementReference[MonthGrid.Days];
     private bool captureOpen;
     private bool focusCapture;
     private bool capturing;
@@ -138,17 +88,6 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        // The calendar just opened or a key moved the focus day: that day's button takes the focus.
-        if (focusDayPending && open)
-        {
-            focusDayPending = false;
-            int index = focusDay.DayNumber - MonthGrid.Start(shownMonth).DayNumber;
-            if (index >= 0 && index < MonthGrid.Days)
-            {
-                await dayButtons[index].FocusAsync();
-            }
-        }
-
         // The capture popover just opened: its text field takes the focus.
         if (focusCapture && captureOpen)
         {
@@ -239,15 +178,9 @@
 
     private void Toggle()
     {
+        // The calendar (DayPicker) is rendered only while open, so every opening starts again from the selected day
+        // (or today), never from the month browsed last time.
         open = !open;
-        focusDayPending = open;
-        if (open)
-        {
-            // Every opening starts again from the selected day (or today), never from the month browsed last time.
-            focusDay = MonthGrid.Clamp(Selected ?? Today);
-            shownMonth = MonthGrid.MonthOf(focusDay);
-        }
-
         captureOpen = false;
         searchOpen = false;
         menuOpen = false;
@@ -405,47 +338,8 @@
         }
     }
 
-    private string DayClass(DateOnly day, bool isToday, bool isSelected)
-    {
-        string css = "day";
-        if (day.Year != shownMonth.Year || day.Month != shownMonth.Month)
-        {
-            css += " outside";
-        }
-
-        if (isToday)
-        {
-            css += " today";
-        }
-
-        if (isSelected)
-        {
-            css += " selected";
-        }
-
-        return css;
-    }
-
-    // Prev and next show the month before or after; the focus day keeps its day of month (clamped), so the grid
-    // still has exactly one tab stop, but the focus stays on the clicked button.
-    private void PreviousMonth() => ShowMonth(-1);
-
-    private void NextMonth() => ShowMonth(1);
-
-    private void ShowMonth(int months)
-    {
-        DateOnly month = MonthGrid.MonthOf(MonthGrid.AddMonths(shownMonth, months));
-        if (month == shownMonth)
-        {
-            return;
-        }
-
-        shownMonth = month;
-        focusDay = MonthGrid.AddMonths(focusDay, months);
-    }
-
-    // A day was chosen (click, or Return through DayKey): the calendar closes and the parent opens the day. A second
-    // event for the same choice (the browser's click after Return) finds the calendar closed and does nothing.
+    // A day was chosen in the calendar: it closes and the parent opens the day. A second event for the same choice
+    // finds the calendar closed and does nothing.
     private async Task PickDayAsync(DateOnly day)
     {
         if (!open || !MonthGrid.InRange(day))
@@ -454,45 +348,6 @@
         }
 
         open = false;
-        focusDayPending = false;
         await OnPick.InvokeAsync(day);
-    }
-
-    // Keys on a day button: arrows move the focus day by a day or a week, PageUp/PageDown by a month (day of month
-    // clamped), never outside 1900..2100; the shown month follows the focus day. Return picks the focus day. Esc
-    // bubbles to the bar, which closes the popover.
-    private async Task DayKey(KeyboardEventArgs e)
-    {
-        DateOnly next;
-        switch (e.Key)
-        {
-            case "ArrowLeft":
-                next = MonthGrid.AddDays(focusDay, -1);
-                break;
-            case "ArrowRight":
-                next = MonthGrid.AddDays(focusDay, 1);
-                break;
-            case "ArrowUp":
-                next = MonthGrid.AddDays(focusDay, -7);
-                break;
-            case "ArrowDown":
-                next = MonthGrid.AddDays(focusDay, 7);
-                break;
-            case "PageUp":
-                next = MonthGrid.AddMonths(focusDay, -1);
-                break;
-            case "PageDown":
-                next = MonthGrid.AddMonths(focusDay, 1);
-                break;
-            case "Enter":
-                await PickDayAsync(focusDay);
-                return;
-            default:
-                return;
-        }
-
-        focusDay = next;
-        shownMonth = MonthGrid.MonthOf(next);
-        focusDayPending = true;
     }
 }

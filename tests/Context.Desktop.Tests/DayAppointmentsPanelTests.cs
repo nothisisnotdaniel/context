@@ -1,5 +1,6 @@
 using AngleSharp.Dom;
 using Bunit;
+using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 
 namespace Context.Tests;
@@ -49,7 +50,7 @@ public sealed class DayAppointmentsPanelTests : IDisposable
 
         await next.ClickAsync(new MouseEventArgs());
         WaitForItems(cut, 1);
-        Assert.Equal("Friday, 30 October 2026", Heading(cut));
+        Assert.Equal("Friday, 30 Oct 2026", Heading(cut));
         Assert.Equal(["10:00-11:00 Retro"], Items(cut));
 
         await cut.Find(".day-appointments button.day-prev").ClickAsync(new MouseEventArgs());
@@ -57,7 +58,7 @@ public sealed class DayAppointmentsPanelTests : IDisposable
         Assert.Equal("Today", Heading(cut));
 
         await cut.Find(".day-appointments button.day-prev").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal("Wednesday, 28 October 2026", Heading(cut)), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Wednesday, 28 Oct 2026", Heading(cut)), Wait);
         WaitForItems(cut, 2);
         Assert.Equal(["10:00-11:00 Old", "12:00-13:00 Older"], Items(cut));
 
@@ -92,7 +93,7 @@ public sealed class DayAppointmentsPanelTests : IDisposable
 
         await cut.Find(".day-appointments button.day-prev").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Monday, 1 January 1900", Heading(cut)), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Monday, 1 Jan 1900", Heading(cut)), Wait);
         Assert.True(cut.Find(".day-appointments button.day-prev").HasAttribute("disabled"));
         Assert.False(cut.Find(".day-appointments button.day-next").HasAttribute("disabled"));
     }
@@ -204,7 +205,7 @@ public sealed class DayAppointmentsPanelTests : IDisposable
         Assert.Equal(line, cut.Find(".day-appointments").Children[^1]);
 
         await cut.Find(".day-appointments button.day-next").ClickAsync(new MouseEventArgs());
-        cut.WaitForAssertion(() => Assert.Equal("Friday, 30 October 2026", Heading(cut)), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Friday, 30 Oct 2026", Heading(cut)), Wait);
         WaitForEmpty(cut);
         Assert.Equal(
             "Exchange calendar offline, showing the copy from 2026-10-29 08:30.",
@@ -367,5 +368,341 @@ public sealed class DayAppointmentsPanelTests : IDisposable
         WaitForEmpty(cut);
 
         Assert.DoesNotContain("Doctor", cut.Markup, StringComparison.Ordinal);
+    }
+
+    // 289: the sidebar's day picker (heading button, month calendar popover, Today buttons).
+    private static IElement OpenButton(IRenderedComponent<Main> cut) => cut.Find(".day-appointments h2.day-appointments-day button.day-appointments-open");
+
+    private static async Task OpenPickAsync(IRenderedComponent<Main> cut)
+    {
+        await OpenButton(cut).ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".day-appointments .day-pick")), Wait);
+    }
+
+    private static IElement PickFocusDay(IRenderedComponent<Main> cut) =>
+        Assert.Single(cut.FindAll(".day-appointments .day-pick button.day[tabindex='0']"));
+
+    private static string? PickFocusLabel(IRenderedComponent<Main> cut) => PickFocusDay(cut).GetAttribute("aria-label");
+
+    private static string? PickMonth(IRenderedComponent<Main> cut) => cut.Find(".day-appointments .day-pick .day-pick-month").TextContent;
+
+    private static IElement PickDay(IRenderedComponent<Main> cut, string label) =>
+        cut.Find($".day-appointments .day-pick button.day[aria-label='{label}']");
+
+    private static Task PickKeyAsync(IRenderedComponent<Main> cut, string key) =>
+        PickFocusDay(cut).KeyDownAsync(new KeyboardEventArgs { Key = key });
+
+    private static string HeadingTitle(IRenderedComponent<Main> cut) =>
+        cut.Find(".day-appointments h2.day-appointments-day").GetAttribute("title") ?? string.Empty;
+
+    private static string[] BarChildren(IRenderedComponent<Main> cut) =>
+        cut.Find(".day-appointments .day-appointments-bar").Children.Select(c => c.ClassList[0]).ToArray();
+
+    private static string? RefOf(IElement element)
+    {
+
+        string? id = element.GetAttribute("blazor:elementReference");
+        Assert.False(string.IsNullOrEmpty(id));
+        return id;
+    }
+
+    // The heading button's element reference (bUnit leaves its markup attribute empty once the panel re-rendered).
+    private static string OpenButtonId(IRenderedComponent<Main> cut)
+    {
+        string id = cut.FindComponent<DayAppointmentsPanel>().Instance.OpenButtonReference.Id;
+        Assert.False(string.IsNullOrEmpty(id));
+        return id;
+    }
+
+    private string? LastFocusId()
+    {
+        JSRuntimeInvocation? last = data.Bunit.JSInterop.Invocations
+            .LastOrDefault(i => i.Identifier == "Blazor._internal.domWrapper.focus");
+        return last is { } call ? Assert.IsType<ElementReference>(call.Arguments[0]).Id : null;
+    }
+
+    private static void WaitForHeading(IRenderedComponent<Main> cut, string text) =>
+        cut.WaitForAssertion(() => Assert.Equal(text, Heading(cut)), Wait);
+
+    // AC-1: off today the short month name, on today "Today"; the title is always the full day.
+    [Fact]
+    public async Task Heading_ShortMonth_TitleFullDay()
+    {
+        WriteDays();
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        WaitForItems(cut, 2);
+        Assert.Equal("Today", Heading(cut));
+        Assert.Equal("Thursday, 29 October 2026", HeadingTitle(cut));
+
+        await cut.Find(".day-appointments button.day-next").ClickAsync(new MouseEventArgs());
+        WaitForItems(cut, 1);
+        Assert.Equal("Friday, 30 Oct 2026", Heading(cut));
+        Assert.Equal("Friday, 30 October 2026", HeadingTitle(cut));
+
+        // Five months back from 30 October through the calendar: 30 May, then four on: 30 September.
+        await OpenPickAsync(cut);
+        for (int i = 0; i < 5; i++)
+        {
+            await PickKeyAsync(cut, "PageUp");
+        }
+
+        await PickKeyAsync(cut, "ArrowLeft");
+        Assert.Equal("Friday, 29 May 2026", PickFocusLabel(cut));
+        await PickKeyAsync(cut, "Enter");
+        WaitForHeading(cut, "Friday, 29 May 2026");
+        WaitForEmpty(cut);
+        Assert.Equal("Friday, 29 May 2026", HeadingTitle(cut));
+
+        await OpenPickAsync(cut);
+        for (int i = 0; i < 4; i++)
+        {
+            await PickKeyAsync(cut, "PageDown");
+        }
+
+        await PickKeyAsync(cut, "Enter");
+        WaitForHeading(cut, "Tuesday, 29 Sep 2026");
+        WaitForEmpty(cut);
+        Assert.Equal("Tuesday, 29 September 2026", HeadingTitle(cut));
+    }
+
+    // AC-2, AC-3: the heading is one named button that toggles the popover; the popover opens on the shown day, marks
+    // it and today, and that day is the one tab stop and takes the focus.
+    [Fact]
+    public async Task HeadingButton_TogglesPopover_OnTheShownDay()
+    {
+        WriteDays();
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        WaitForItems(cut, 2);
+
+        IElement h2 = cut.Find(".day-appointments h2.day-appointments-day");
+        IElement button = Assert.Single(h2.Children);
+        Assert.Equal("BUTTON", button.TagName);
+        Assert.Contains("day-appointments-open", button.ClassList);
+        Assert.Equal(("button", "dialog", "false"), (button.GetAttribute("type"), button.GetAttribute("aria-haspopup"), button.GetAttribute("aria-expanded")));
+        Assert.Equal("Today", button.TextContent);
+        Assert.False(button.HasAttribute("blazor:onkeydown"));
+        Assert.Empty(cut.FindAll(".day-pick"));
+
+        await OpenPickAsync(cut);
+        Assert.Equal("true", OpenButton(cut).GetAttribute("aria-expanded"));
+        Assert.Single(cut.FindAll("section.day-appointments .day-pick-backdrop"));
+        Assert.Equal("October 2026", PickMonth(cut));
+        Assert.Equal("October 2026", cut.Find(".day-appointments .day-pick table[role=grid]").GetAttribute("aria-label"));
+        IElement focus = PickFocusDay(cut);
+        Assert.Equal("Thursday, 29 October 2026", focus.GetAttribute("aria-label"));
+        Assert.Contains("today", focus.ClassList);
+        Assert.Contains("selected", focus.ClassList);
+        Assert.Equal("date", focus.GetAttribute("aria-current"));
+        Assert.Equal("true", Assert.Single(cut.FindAll(".day-appointments .day-pick td[aria-selected]")).GetAttribute("aria-selected"));
+        Assert.Equal(41, cut.FindAll(".day-appointments .day-pick button.day[tabindex='-1']").Count);
+        Assert.Equal(RefOf(focus), LastFocusId());
+
+        await OpenButton(cut).ClickAsync(new MouseEventArgs());
+        Assert.Empty(cut.FindAll(".day-pick"));
+        Assert.Equal("false", OpenButton(cut).GetAttribute("aria-expanded"));
+
+        // Off today: the shown day is selected, today only marked; browsing another month is forgotten on reopening.
+        await cut.Find(".day-appointments button.day-next").ClickAsync(new MouseEventArgs());
+        WaitForItems(cut, 1);
+        await OpenPickAsync(cut);
+        focus = PickFocusDay(cut);
+        Assert.Equal("Friday, 30 October 2026", focus.GetAttribute("aria-label"));
+        Assert.Contains("selected", focus.ClassList);
+        Assert.DoesNotContain("today", focus.ClassList);
+        IElement today = Assert.Single(cut.FindAll(".day-appointments .day-pick button.day.today"));
+        Assert.Equal("Thursday, 29 October 2026", today.GetAttribute("aria-label"));
+        Assert.DoesNotContain("selected", today.ClassList);
+        Assert.Equal(RefOf(focus), LastFocusId());
+
+        await cut.Find(".day-appointments .day-pick button.day-pick-next").ClickAsync(new MouseEventArgs());
+        Assert.Equal("November 2026", PickMonth(cut));
+        await OpenButton(cut).ClickAsync(new MouseEventArgs());
+        await OpenPickAsync(cut);
+        Assert.Equal("October 2026", PickMonth(cut));
+        Assert.Equal("Friday, 30 October 2026", PickFocusLabel(cut));
+        Assert.Equal("Friday, 30 Oct 2026", Heading(cut));
+    }
+
+    // AC-4: arrows move by a day or a week, PageUp/PageDown by a month; the month arrows step the shown month.
+    [Fact]
+    public async Task Popover_Keys_MoveTheFocusDay()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        WaitForEmpty(cut);
+        await OpenPickAsync(cut);
+
+        await PickKeyAsync(cut, "ArrowRight");
+        await PickKeyAsync(cut, "ArrowRight");
+        Assert.Equal("Saturday, 31 October 2026", PickFocusLabel(cut));
+        await PickKeyAsync(cut, "ArrowDown");
+        Assert.Equal("November 2026", PickMonth(cut));
+        Assert.Equal("Saturday, 7 November 2026", PickFocusLabel(cut));
+        await PickKeyAsync(cut, "ArrowLeft");
+        await PickKeyAsync(cut, "ArrowUp");
+        Assert.Equal("Friday, 30 October 2026", PickFocusLabel(cut));
+        await PickKeyAsync(cut, "PageDown");
+        Assert.Equal("Monday, 30 November 2026", PickFocusLabel(cut));
+        await PickKeyAsync(cut, "PageUp");
+        Assert.Equal("October 2026", PickMonth(cut));
+        await cut.Find(".day-appointments .day-pick button.day-pick-prev").ClickAsync(new MouseEventArgs());
+        Assert.Equal("September 2026", PickMonth(cut));
+        Assert.Equal("Today", Heading(cut));
+    }
+
+    // AC-4: at the bounds the month arrows are disabled and no key leaves 1900-01-01..2100-12-31.
+    [Theory]
+    [InlineData(1900, 1, 2, "day-prev", "Monday, 1 January 1900", "January 1900", "day-pick-prev")]
+    [InlineData(2100, 12, 30, "day-next", "Friday, 31 December 2100", "December 2100", "day-pick-next")]
+    public async Task Popover_AtTheBounds_StaysInRange(int year, int month, int day, string arrow, string edge, string monthLabel, string disabled)
+    {
+        data.Day = new DateOnly(year, month, day);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        WaitForEmpty(cut);
+        await cut.Find($".day-appointments button.{arrow}").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.NotEqual("Today", Heading(cut)), Wait);
+        WaitForEmpty(cut);
+
+        await OpenPickAsync(cut);
+        Assert.True(cut.Find($".day-appointments .day-pick button.{disabled}").HasAttribute("disabled"));
+        Assert.Equal(edge, PickFocusLabel(cut));
+        string[] keys = year == 1900 ? ["ArrowLeft", "ArrowUp", "PageUp"] : ["ArrowRight", "ArrowDown", "PageDown"];
+        foreach (string key in keys)
+        {
+            await PickKeyAsync(cut, key);
+            Assert.Equal(monthLabel, PickMonth(cut));
+            Assert.Equal(edge, PickFocusLabel(cut));
+        }
+    }
+
+    // AC-5: a click on a day shows it, closes the popover and loads that day once; picking today follows today again.
+    [Fact]
+    public async Task Popover_ClickDay_ShowsIt_LoadsOnce()
+    {
+        WriteDays();
+        new SettingsStore(data.Root).SaveOutlook(true);
+        DateOnly friday = new DateOnly(2026, 10, 30);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        WaitForItems(cut, 2);
+
+        await OpenPickAsync(cut);
+        await PickDay(cut, "Friday, 30 October 2026").ClickAsync(new MouseEventArgs());
+
+        WaitForItems(cut, 1);
+        Assert.Equal(["10:00-11:00 Retro"], Items(cut));
+        Assert.Equal("Friday, 30 Oct 2026", Heading(cut));
+        Assert.Empty(cut.FindAll(".day-pick"));
+        Assert.Empty(cut.FindAll(".day-pick-backdrop"));
+        Assert.Equal(1, data.Outlook.AppointmentArguments.Count(a => a.Day == friday));
+
+        await OpenPickAsync(cut);
+        await PickDay(cut, "Thursday, 29 October 2026").ClickAsync(new MouseEventArgs());
+        WaitForHeading(cut, "Today");
+        WaitForItems(cut, 2);
+        Assert.Equal(["08:30-09:30 Standup", "11:00-12:00 Plan"], Items(cut));
+        Assert.Empty(cut.FindAll(".day-appointments button.day-today"));
+    }
+
+    // AC-5: Enter picks the focus day once; the click the browser sends after it finds the popover closed.
+    [Fact]
+    public async Task Popover_Enter_PicksOnce_ClickAfterDoesNothing()
+    {
+        WriteDays();
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        WaitForItems(cut, 2);
+        await OpenPickAsync(cut);
+        await PickKeyAsync(cut, "ArrowRight");
+        IElement focus = PickFocusDay(cut);
+
+        await focus.KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        // The day buttons are gone with the closed popover, so the browser's follow-up click reaches no handler (one
+        // already queued finds the popover closed: DayPicker and the panel both ignore a second pick).
+        Assert.Empty(cut.FindAll(".day-pick"));
+        Assert.Empty(cut.FindAll(".day-appointments button.day"));
+
+        WaitForItems(cut, 1);
+        Assert.Equal("Friday, 30 Oct 2026", Heading(cut));
+        Assert.Equal(OpenButtonId(cut), LastFocusId());
+    }
+
+    // AC-6, AC-8: the popover's Today shows today and closes it, focus back on the heading; only the sidebar has it.
+    [Fact]
+    public async Task PopoverToday_ShowsToday_OnlyInTheSidebar()
+    {
+        WriteDays();
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        WaitForItems(cut, 2);
+        await cut.Find(".day-appointments button.day-next").ClickAsync(new MouseEventArgs());
+        WaitForItems(cut, 1);
+
+        await OpenPickAsync(cut);
+        IElement today = cut.Find(".day-appointments .day-pick button.day-pick-today");
+        Assert.Equal(("button", "Today"), (today.GetAttribute("type"), today.TextContent));
+        Assert.Empty(cut.FindAll(".top-bar .day-pick"));
+        await today.ClickAsync(new MouseEventArgs());
+
+        WaitForHeading(cut, "Today");
+        WaitForItems(cut, 2);
+        Assert.Empty(cut.FindAll(".day-pick"));
+        Assert.Equal(OpenButtonId(cut), LastFocusId());
+
+        // AC-9: the top bar's calendar has no Today button and opens without the sidebar's.
+        await cut.Find(".top-bar button.day-pick-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".top-bar .day-pick")), Wait);
+        Assert.Empty(cut.FindAll(".day-pick-today"));
+        Assert.Empty(cut.FindAll(".day-appointments .day-pick"));
+        Assert.Equal("false", OpenButton(cut).GetAttribute("aria-expanded"));
+    }
+
+    // AC-7: off today the bar ends in Today (Back to today); a click shows today and the button goes.
+    [Fact]
+    public async Task BarToday_OffToday_BackToToday()
+    {
+        WriteDays();
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        WaitForItems(cut, 2);
+        Assert.Equal(["day-prev", "day-appointments-day", "day-next"], BarChildren(cut));
+        Assert.Empty(cut.FindAll(".day-appointments button.day-today"));
+
+        await cut.Find(".day-appointments button.day-prev").ClickAsync(new MouseEventArgs());
+        WaitForItems(cut, 2);
+        Assert.Equal(["day-prev", "day-appointments-day", "day-next", "day-today"], BarChildren(cut));
+        IElement back = cut.Find(".day-appointments button.day-today");
+        Assert.Equal(("button", "Today", "Back to today"), (back.GetAttribute("type"), back.TextContent, back.GetAttribute("title")));
+
+        await back.ClickAsync(new MouseEventArgs());
+        WaitForHeading(cut, "Today");
+        WaitForItems(cut, 2);
+        Assert.Equal(["08:30-09:30 Standup", "11:00-12:00 Plan"], Items(cut));
+        Assert.Equal(["day-prev", "day-appointments-day", "day-next"], BarChildren(cut));
+    }
+
+    // AC-8: Escape and the backdrop close the popover, change no day and give the focus back to the heading button.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Popover_EscapeOrBackdrop_Closes_FocusBack(bool escape)
+    {
+        WriteDays();
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        WaitForItems(cut, 2);
+        await cut.Find(".day-appointments button.day-next").ClickAsync(new MouseEventArgs());
+        WaitForItems(cut, 1);
+        await OpenPickAsync(cut);
+        await PickKeyAsync(cut, "ArrowRight");
+
+        if (escape)
+        {
+            await PickKeyAsync(cut, "Escape");
+        }
+        else
+        {
+            await cut.Find(".day-appointments .day-pick-backdrop").ClickAsync(new MouseEventArgs());
+        }
+
+        Assert.Empty(cut.FindAll(".day-pick"));
+        Assert.Equal("false", OpenButton(cut).GetAttribute("aria-expanded"));
+        Assert.Equal("Friday, 30 Oct 2026", Heading(cut));
+        Assert.Equal(["10:00-11:00 Retro"], Items(cut));
+        Assert.Equal(OpenButtonId(cut), LastFocusId());
     }
 }

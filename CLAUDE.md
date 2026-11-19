@@ -1336,7 +1336,10 @@ Every factory agent reads this file before working on Context. Keep it short and
     starts on `Selected ?? Today` with that day as the one `tabindex="0"` day (roving tabindex) and focuses it; arrows
     move ±1/±7 days, PageUp/PageDown ±1 month (day clamped), never outside the range, the shown month follows; a click or
     Enter calls `OnPick` once and closes (a later event finds it closed). Date maths in `MonthGrid.cs`; styles only
-    theme variables, `.day.today.selected` keeps an inner ring). Esc, the backdrop or the button
+    theme variables, `.day.today.selected` keeps an inner ring). Job 289 moved the popover into `DayPicker.razor`
+    (parameters `Today`, `Selected`, `OnPick`, `OnClose`, optional `OnToday`; rendered only while open, so each opening
+    is a new instance; Esc inside `.day-pick` or the backdrop calls `OnClose`), shared with `DayAppointmentsPanel`; the
+    top bar passes no `OnToday`, so it has no `button.day-pick-today`. Esc, the backdrop or the button
     closes a popover; opening one closes the others, so at most one is open. `Main.ShowToday` (the `Today` button and `/today`, job 216) opens today's daily note in the page editor as
     `/today` describes (created when missing; another dirty note saved first, else the discard dialog; today's note
     itself stays as it is and a shown page closes). At start `Program.cs` calls `DesktopActions.AutoOpenToday()`, which
@@ -1576,9 +1579,14 @@ Every factory agent reads this file before working on Context. Keep it short and
     `OutlinePanel.MinHeadings` (3) on; a click calls `scrollToHeading` with its index and never takes focus by itself.
     **Sidebar appointments** (job 214): `DayAppointmentsPanel` (`section.day-appointments`, `aria-label="Appointments"`)
     is the first child of `aside.todos-region` in every state. Its `h2.day-appointments-day` reads `Today` for
-    `Snapshot.Today`, else `dddd, d MMMM yyyy` (invariant); icon-only `button.day-prev`/`day-next` (`Previous day`/`Next day`)
+    `Snapshot.Today`, else `dddd, d MMM yyyy` (invariant, job 289), `title` always the full `dddd, d MMMM yyyy`; icon-only `button.day-prev`/`day-next` (`Previous day`/`Next day`)
     step the day, disabled at 1900-01-01/2100-12-31 (the chosen day is in memory only; back on today it follows the
-    snapshot). It lists `DesktopState.DayAppointments(day)` (calendar files plus the feed's cached copy through
+    snapshot). Job 289: the `h2` holds one `button.day-appointments-open` (`aria-haspopup="dialog"`, `aria-expanded`)
+    that toggles a `DayPicker` (see Top bar) inside the section, on the shown day, with `button.day-pick-today`
+    (`Today`); a pick or Today shows that day as the arrows do and closes it; Esc, the backdrop, a pick and Today give
+    the focus back to the heading button (`DayAppointmentsPanel.OpenButtonReference` for tests). Off today the bar ends
+    in `button.day-today` (`Today`, `title` `Back to today`), which shows today. CSS: the section is `position: relative`,
+    its `.day-pick` centred under the bar (`max-width: 100%`, z-index above the top bar's icons). It lists `DesktopState.DayAppointments(day)` (calendar files plus the feed's cached copy through
     `ReadCache` + `CurrentView.FeedEvents`, never a download; `Task.Run`, never throws, with the state's UTC clock in
     `Zone` as `LocalNow`) through `AppointmentList.Shown` (Core, pure: on today the last past appointment, `End <= now`,
     last in `CalendarStore.Day` order, plus every one not yet past; other days all) as `button.appointment-item`

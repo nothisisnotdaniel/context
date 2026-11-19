@@ -1,7 +1,8 @@
 @inherits StateComponent
 @* The shown day's appointments at the top of the right sidebar (DesktopState.DayAppointments: the calendar files,
    the feed's cached copy and Outlook when it is on, never a download). On today it lists the last past appointment
-   and every one not yet past (AppointmentList.Shown), on any other day all of them. The arrows step the day; a click
+   and every one not yet past (AppointmentList.Shown), on any other day all of them. The arrows step the day, the
+   heading opens a month calendar (DayPicker) to jump to any day, and Today comes back to today; a click
    on an appointment asks Main to show its appointment page. Below the list, on every day, how reading Outlook went
    and the Exchange feed's status from the snapshot's current view (offline or failed; the link is never shown). It
    reads only, and reloads whenever the state changes, keeping the shown rows. *@
@@ -9,9 +10,17 @@
 <section class="day-appointments" aria-label="Appointments">
     <div class="day-appointments-bar">
         <button type="button" class="day-prev" aria-label="Previous day" title="Previous day" disabled="@(Shown <= First)" @onclick="Previous"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 18l-6-6 6-6"/></svg></button>
-        <h2 class="day-appointments-day cut" title="@Heading">@Heading</h2>
+        <h2 class="day-appointments-day cut" title="@FullDay"><button type="button" class="day-appointments-open" aria-haspopup="dialog" aria-expanded="@(pickOpen ? "true" : "false")" @ref="openButton" @onclick="TogglePick">@Heading</button></h2>
         <button type="button" class="day-next" aria-label="Next day" title="Next day" disabled="@(Shown >= Last)" @onclick="Next"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 18l6-6-6-6"/></svg></button>
+        @if (Shown != Today)
+        {
+            <button type="button" class="day-today" title="Back to today" @onclick="BackToToday">Today</button>
+        }
     </div>
+    @if (pickOpen)
+    {
+        <DayPicker Today="Today" Selected="Shown" OnPick="PickAsync" OnClose="ClosePick" OnToday="PickTodayAsync" />
+    }
     @if (view is null)
     {
         <p class="grey" role="status">Loading…</p>
@@ -79,8 +88,15 @@
     private DateOnly? loaded;
     private int request;
 
-    // The day the arrows chose; null follows the snapshot's today.
+    // The day the arrows or the calendar chose; null follows the snapshot's today.
     private DateOnly? chosen;
+
+    private bool pickOpen;
+    private bool focusOpenButton;
+    private ElementReference openButton;
+
+    /// <summary>The heading button, which takes the focus back when the calendar closes (for tests).</summary>
+    internal ElementReference OpenButtonReference => openButton;
 
     /// <summary>Called with an appointment's raw title and the shown day when it is clicked.</summary>
     [Parameter]
@@ -92,7 +108,20 @@
 
     private string Heading => Shown == Today
         ? "Today"
-        : Shown.ToString("dddd, d MMMM yyyy", CultureInfo.InvariantCulture);
+        : Shown.ToString("dddd, d MMM yyyy", CultureInfo.InvariantCulture);
+
+    // The shown day's full name, today too: the heading's title.
+    private string FullDay => Shown.ToString("dddd, d MMMM yyyy", CultureInfo.InvariantCulture);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // The calendar just closed (or Today went away): the focus goes back to the heading button, never to the page.
+        if (focusOpenButton && !pickOpen)
+        {
+            focusOpenButton = false;
+            await openButton.FocusAsync();
+        }
+    }
 
     protected override Task OnParametersSetAsync() => LoadIfMoved();
 
@@ -122,8 +151,52 @@
             return Task.CompletedTask;
         }
 
-        DateOnly next = shown.AddDays(days);
-        chosen = next == Today ? null : next;
+        return ShowDay(shown.AddDays(days));
+    }
+
+    // The heading opens the calendar (a new DayPicker on the shown day each time) or closes it.
+    private void TogglePick()
+    {
+        pickOpen = !pickOpen;
+        focusOpenButton = false;
+    }
+
+    private void ClosePick()
+    {
+        if (!pickOpen)
+        {
+            return;
+        }
+
+        pickOpen = false;
+        focusOpenButton = true;
+    }
+
+    // A day was picked: the calendar closes and the panel shows that day, as the arrows do (today follows the
+    // snapshot again). A second event for the same choice finds the calendar closed and does nothing.
+    private Task PickAsync(DateOnly day)
+    {
+        if (!pickOpen || day < First || day > Last)
+        {
+            return Task.CompletedTask;
+        }
+
+        ClosePick();
+        return ShowDay(day);
+    }
+
+    private Task PickTodayAsync() => pickOpen ? PickAsync(Today) : Task.CompletedTask;
+
+    // The Today button goes away with the click, so the focus moves to the heading button instead of the page.
+    private Task BackToToday()
+    {
+        focusOpenButton = true;
+        return ShowDay(Today);
+    }
+
+    private Task ShowDay(DateOnly day)
+    {
+        chosen = day == Today ? null : day;
         return LoadIfMoved();
     }
 
