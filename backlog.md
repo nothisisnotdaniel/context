@@ -343,6 +343,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#386](backlog/386-meeting-todos-cap-and-clean-a.md) Meeting todos: cap and clean a stored meeting title on read
 - [?] [#387](backlog/387-meeting-todos-move-focus-to-the.md) Meeting todos: move focus to the meeting picker when Push finds no next meeting
 - [?] [#389](backlog/389-appointmentpaneltests-read-both-elements-of-an.md) AppointmentPanelTests: read both elements of an order check at the same moment
+- [?] [#390](backlog/390-sidebar-day-picker-fit-the-calendar.md) Sidebar day picker: fit the calendar in a narrow sidebar
 
 ## Dropped with the terminal UI
 
