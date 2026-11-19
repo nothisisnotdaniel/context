@@ -52,7 +52,7 @@ internal static class Briefing
 
     /// <summary>
     /// The briefing's text for <paramref name="today"/>: <c># yyyy-MM-dd</c>, the daily note's <c>## Appointments</c>
-    /// and <c>## Todos</c> sections (<see cref="DailyNote.AppendSections"/>), <c>## Open checkpoint</c> and
+    /// and <c>## Todos</c> sections (<see cref="DailyNote.AppendSections"/>), <c>## Follow-ups</c>, <c>## Open checkpoint</c> and
     /// <c>## Flexitime balance</c>, each after a blank line. Every Times name is cleaned to one line. <c>\n</c> line
     /// ends, ending in <c>\n</c>. Never writes.
     /// </summary>
@@ -62,6 +62,7 @@ internal static class Briefing
         StringBuilder text = new StringBuilder();
         text.Append("# ").Append(DailyNote.NameFor(today)).Append('\n');
         DailyNote.AppendSections(text, todos, calendar, feed, today);
+        AppendFollowUps(text, todos, today);
         AppendOpenCheckpoint(text, timesFolder, today);
         AppendBalance(text, TimesBalance.Compute(timesFolder, today.AddDays(-1)), today.AddDays(-1));
         return text.ToString();
@@ -139,6 +140,45 @@ internal static class Briefing
         catch (NoteExistsException)
         {
             return new BriefingResult(BriefingKind.Existing, folder.Name + "/" + title);
+        }
+    }
+
+    // ## Follow-ups: the open waiting-for todos due today or earlier, in List() order; an overdue one with its date.
+    private static void AppendFollowUps(StringBuilder text, TodoStore todos, DateOnly today)
+    {
+        text.Append("\n## Follow-ups\n");
+        IReadOnlyList<TodoItem> open;
+        try
+        {
+            open = todos.List();
+        }
+        catch (TodoStoreException)
+        {
+            text.Append("- Can't read todos.json.\n");
+            return;
+        }
+
+        bool any = false;
+        foreach (TodoItem todo in open)
+        {
+            if (todo.Due > today || WaitingFor.TryParse(todo.Text) is not { } item)
+            {
+                continue;
+            }
+
+            any = true;
+            text.Append("- ").Append(OneLine(item.Person)).Append(": ").Append(OneLine(item.Rest));
+            if (todo.Due < today)
+            {
+                text.Append(" (due ").Append(DailyNote.NameFor(todo.Due)).Append(')');
+            }
+
+            text.Append('\n');
+        }
+
+        if (!any)
+        {
+            text.Append("- No follow-ups due.\n");
         }
     }
 

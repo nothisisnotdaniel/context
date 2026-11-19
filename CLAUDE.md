@@ -759,7 +759,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
     `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs`, note templates in `NoteTemplates.cs`, the inbox capture in `Inbox.cs` (its triage queue, remove and snooze in `InboxTriage.cs`), the day's end in `DayEnd.cs` (Times' day file in `TimesDay.cs`, `settings.json` in `SettingsStore.cs`), the morning briefing in `Briefing.cs` (Times' flexitime balance in `TimesBalance.cs`), the todo input rules (`TryParseDate`,
-    `MaxTextLength`, `TryParseRepeat`, `NextDue`) in `TodoInput.cs`, the todo repeat in `TodoRepeat.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`), `SearchView.cs` (`search`), `TagFilter.cs` (tag filters), `DecisionsView.cs` (`decisions`, with `DecisionParser.cs`), `BoardView.cs` (tag boards), `ReviewView.cs` (the weekly review) and `CalendarLinkView.cs`
+    `MaxTextLength`, `TryParseRepeat`, `NextDue`) in `TodoInput.cs`, the todo repeat in `TodoRepeat.cs`, waiting-for todos in `WaitingFor.cs`, `TagsView.cs` (tags), `LinksView.cs` (links), `PersonView.cs` (a person page), `FindView.cs` (`find`), `SearchView.cs` (`search`), `TagFilter.cs` (tag filters), `DecisionsView.cs` (`decisions`, with `DecisionParser.cs`), `BoardView.cs` (tag boards), `ReviewView.cs` (the weekly review) and `CalendarLinkView.cs`
     (the calendar link), and the command ranking for the desktop palette in `CommandMatcher.cs`; the notes list is `NoteStore.List()` itself.
   - **Data step in Core, drawing in the front end:** a view's Core data step returns plain types (a kind plus raw
     text, never markup, never cleaned or escaped, no exception messages). The front ends (`Cli`, and the desktop
@@ -973,7 +973,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     **Morning briefing** (job 172, Core `Briefing.cs`): the stored page `briefings/yyyy-MM-dd`, a subpage of the
     top-level `briefings` note (`# briefings\n`, created when missing). `Compose(todos, calendar, feed, timesFolder,
     today)` writes `# yyyy-MM-dd`, the daily note's `## Appointments` and `## Todos` byte for byte
-    (`DailyNote.AppendSections`), `## Open checkpoint` (one `- <date>: #<n> <names>` / `- <date>: <name>` line per
+    (`DailyNote.AppendSections`), `## Follow-ups` (job 243, see Waiting for), `## Open checkpoint` (one `- <date>: #<n> <names>` / `- <date>: <name>` line per
     open group of the latest day from today-1 back to today-7 with at least one entry; else `- None open on <date>.`,
     `- No Times bookings in the last 7 days.` or `- Can't read Times' day file for <date>.` for the first unreadable
     file met) and `## Flexitime balance` (`- <+|->H:mm through <today-1>.`, `+0:00` for zero, plus `- Skipped <n>
@@ -1176,7 +1176,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     view) shows the first line of `DesktopState.Triage()` (`InboxTriage.Items`: every `- ` line; text without the
     `- `, a leading `yyyy-MM-dd HH:mm ` stamp, shown grey, and a final ` snooze:yyyy-MM-dd`; lines snoozed past today
     are left out and counted, due snoozed lines come first by day, then file order), `<n> left` and the buttons
-    `Note (N)`, `Todo (T)`, `Add to note (A)`, `Drop (D)`, `Later (L)`; the keys n/t/a/d/l (any case, outside a text
+    `Note (N)`, `Todo (T)`, `Delegate (W)` (job 243), `Add to note (A)`, `Drop (D)`, `Later (L)`; the keys n/t/w/a/d/l (any case, outside a text
     field, whose keys stop at the field) do the same, 1/2 pick Tomorrow/Next week in the Later form, Esc closes the
     form or the panel, Enter in a field submits, and after every Done the next line shows with the focus on the panel.
     Empty: grey `The inbox is empty.` plus ` <n> lines are snoozed.` (` 1 line is snoozed.`); a sensitive inbox: red
@@ -1193,6 +1193,19 @@ Every factory agent reads this file before working on Context. Keep it short and
     still in the inbox.` (test hook `BeforeTriageRemove`). `Main.TriageHeld` (the panel's `Guard`) refuses with `Save
     <name> first.` while the open inbox or the open target has unsaved changes; `Main.Triaged` reloads an open clean
     inbox or target (a sensitive one through `ShowSavedAsync`).
+    **Waiting for (job 243, Core `WaitingFor.cs`):** a todo whose text starts with `waiting: @[Full Name] <text>`
+    (`WaitingFor.TryParse`: optional leading whitespace, `waiting:` ignoring ASCII case, optional spaces/tabs, then a
+    valid `@[Name]` mention right there; `Person` normalized, `Rest` trimmed) is a waiting-for todo; its due date is the
+    follow-up date and nothing else is stored (`todos.json`, `context.db` unchanged). `TodoPanel` leaves open ones out
+    of `ul.todo-list` and shows them, same rows and order, in `section.waiting-for` (`h3` `Waiting for`,
+    `ul.waiting-list`) below it, only with rows. `PersonView.Waiting` holds the open stored ones waiting on the person
+    (`aliases.PersonKey`), left out of `OpenTodos`; `PersonPanel` shows them as `Waiting for` before `Open todos`.
+    `Briefing.Compose` writes `## Follow-ups` after `## Todos`: `- <Person>: <Rest>` per open stored one with
+    `Due <= today` (` (due yyyy-MM-dd)` when overdue), else `- No follow-ups due.` or `- Can't read todos.json.`.
+    Triage's `Delegate (W)` (after Todo; key w) form has Person (focused), Todo text (prefilled) and Follow-up date
+    (empty: today+7); `DesktopActions.TriageDelegate` adds `WaitingFor.Compose(person, text)` through `AddTodo` and
+    removes the line like `TriageToTodo`; a name `NormalizeTyped` refuses or that doesn't read back (a `]`) is red
+    `Type a person's name.` (`TriagePersonText`).
     `TodoPanel` has an entry row (`DesktopActions.AddTodo`). `NotesPanel` has a new-note entry row (text field + `New
     note`; Enter or the button calls `CreateNote`; on Done the field clears, the note opens through `Main`'s `RequestOpen`
     (a dirty editor asks first) and a `role="status"` line shows `Created <name>` (accent), else the red text). While a

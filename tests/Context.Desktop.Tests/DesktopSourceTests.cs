@@ -2091,7 +2091,7 @@ public sealed class DesktopSourceTests
         Assert.DoesNotContain(RawMarkup, m => razor.Contains(m, StringComparison.Ordinal));
         Assert.DoesNotContain(RazorForbidden, m => razor.Contains(m, StringComparison.Ordinal));
         Assert.Equal(
-            ["AppendToNote", "CreateFromItem", "DropConfirmed", "PanelKeyDown", "SnoozeChosen", "SnoozeTyped", "TodoFromItem"],
+            ["AppendToNote", "CreateFromItem", "DelegateItem", "DropConfirmed", "PanelKeyDown", "SnoozeChosen", "SnoozeTyped", "TodoFromItem"],
             ActionCallers(razor).Order(StringComparer.Ordinal).ToArray());
         Assert.Empty(ActionCallProblems(razor));
         Assert.Empty(UntypedButtons(razor));

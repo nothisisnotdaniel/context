@@ -56,7 +56,7 @@ public sealed class TriagePanelTests : IDisposable
         Assert.Equal("call Anna", cut.Find(".triage-item .text").TextContent);
         Assert.Equal("2 left", cut.Find(".triage-left").TextContent);
         Assert.Equal(
-            ["Note (N)", "Todo (T)", "Add to note (A)", "Drop (D)", "Later (L)"],
+            ["Note (N)", "Todo (T)", "Delegate (W)", "Add to note (A)", "Drop (D)", "Later (L)"],
             cut.FindAll(".triage-buttons button").Select(b => b.TextContent).ToArray());
         Assert.All(cut.FindAll("button"), b => Assert.Equal("button", b.GetAttribute("type")));
     }
@@ -210,6 +210,115 @@ public sealed class TriagePanelTests : IDisposable
         TodoItem todo = Assert.Single(data.State!.Snapshot!.Todos);
         Assert.Equal(DesktopFixture.Today, todo.Due);
         Assert.Equal("# inbox\n- second\n", File.ReadAllText(InboxPath));
+    }
+
+    // 243 AC-6: W opens the delegate form after Todo (pressed), Person focused, text prefilled; Esc closes it.
+    [Theory]
+    [InlineData("w")]
+    [InlineData("W")]
+    public async Task KeyW_OpensDelegateForm_EscCloses(string key)
+    {
+        data.WriteNote("inbox", InboxText);
+        IRenderedComponent<TriagePanel> cut = await Render();
+        Assert.Equal("false", cut.Find("button.triage-delegate").GetAttribute("aria-pressed"));
+        Assert.Equal("triage-delegate", cut.Find("button.triage-todo").NextElementSibling!.ClassName);
+
+        await Key(cut, key);
+
+        Assert.Equal("true", cut.Find("button.triage-delegate").GetAttribute("aria-pressed"));
+        IElement person = cut.Find("input.triage-person");
+        Assert.Equal(("Person", "Name", string.Empty), (person.GetAttribute("aria-label"), person.GetAttribute("placeholder"), person.GetAttribute("value") ?? string.Empty));
+        Assert.Equal(person.GetAttribute("blazor:elementReference"), LastFocusId());
+        IElement text = cut.Find("input.triage-delegate-text");
+        Assert.Equal(("Todo text", "call Anna"), (text.GetAttribute("aria-label"), text.GetAttribute("value")));
+        IElement date = cut.Find("input.triage-follow-up");
+        Assert.Equal(("Follow-up date", "Empty: in a week"), (date.GetAttribute("aria-label"), date.GetAttribute("placeholder")));
+        Assert.Equal("Cancel", cut.Find(".triage-form button.triage-cancel").TextContent);
+
+        await person.KeyDownAsync(new KeyboardEventArgs { Key = "d" });
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        await cut.Find("input.triage-person").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+
+        Assert.Empty(cut.FindAll(".triage-form"));
+        Assert.Equal(0, closed);
+        Assert.Equal(InboxText, File.ReadAllText(InboxPath));
+    }
+
+    // 243 AC-6: the w key inside another form's text field types, it doesn't switch forms.
+    [Fact]
+    public async Task KeyW_InTextField_NoDelegateForm()
+    {
+        data.WriteNote("inbox", InboxText);
+        IRenderedComponent<TriagePanel> cut = await Render();
+        await Key(cut, "t");
+
+        await cut.Find("input.triage-todo-text").KeyDownAsync(new KeyboardEventArgs { Key = "w" });
+
+        Assert.Empty(cut.FindAll("input.triage-person"));
+        Assert.Single(cut.FindAll("input.triage-todo-text"));
+    }
+
+    // 243 AC-7: Enter with an empty follow-up date adds the waiting-for todo for today+7 and moves on.
+    [Fact]
+    public async Task Delegate_EmptyDate_InAWeek_NextItemShown()
+    {
+        data.WriteNote("inbox", InboxText);
+        IRenderedComponent<TriagePanel> cut = await Render();
+        await cut.Find("button.triage-delegate").ClickAsync(new MouseEventArgs());
+        await cut.Find("input.triage-person").InputAsync(new ChangeEventArgs { Value = "Anna" });
+        await cut.Find("input.triage-delegate-text").InputAsync(new ChangeEventArgs { Value = "send the offer" });
+
+        await cut.Find("input.triage-follow-up").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+
+        cut.WaitForAssertion(() => Assert.Equal("Added: waiting: @[Anna] send the offer", cut.Find(".triage-status").TextContent), Wait);
+        Assert.True(cut.Find(".triage-status").ClassList.Contains("accent"));
+        Assert.Equal("second", cut.Find(".triage-item .text").TextContent);
+        Assert.Empty(cut.FindAll(".triage-form"));
+        TodoItem todo = Assert.Single(data.State!.Snapshot!.Todos);
+        Assert.Equal(("waiting: @[Anna] send the offer", new DateOnly(2026, 11, 5)), (todo.Text, todo.Due));
+        Assert.Equal("# inbox\n- second\n", File.ReadAllText(InboxPath));
+        Assert.Equal([string.Empty], triaged);
+    }
+
+    // 243 AC-7: a typed follow-up date is used.
+    [Fact]
+    public async Task Delegate_TypedDate_DueThen()
+    {
+        data.WriteNote("inbox", InboxText);
+        IRenderedComponent<TriagePanel> cut = await Render();
+        await Key(cut, "w");
+        await cut.Find("input.triage-person").InputAsync(new ChangeEventArgs { Value = "Anna" });
+        await cut.Find("input.triage-follow-up").InputAsync(new ChangeEventArgs { Value = "tomorrow" });
+
+        await cut.Find("input.triage-person").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+
+        cut.WaitForAssertion(() => Assert.Equal("Added: waiting: @[Anna] call Anna", cut.Find(".triage-status").TextContent), Wait);
+        Assert.Equal(DesktopFixture.Today.AddDays(1), Assert.Single(data.State!.Snapshot!.Todos).Due);
+    }
+
+    // 243 AC-8: no person and a bad date are red; nothing is written and the line stays.
+    [Fact]
+    public async Task Delegate_NoPersonOrBadDate_RedNothingWritten()
+    {
+        data.WriteNote("inbox", InboxText);
+        IRenderedComponent<TriagePanel> cut = await Render();
+        await Key(cut, "w");
+
+        await cut.Find("input.triage-person").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+
+        cut.WaitForAssertion(() => Assert.Equal(DesktopActions.TriagePersonText, cut.Find(".triage-status").TextContent), Wait);
+        Assert.True(cut.Find(".triage-status").ClassList.Contains("red"));
+        Assert.False(File.Exists(Path.Combine(data.Root, TodoStore.FileName)));
+
+        await cut.Find("input.triage-person").InputAsync(new ChangeEventArgs { Value = "Anna" });
+        await cut.Find("input.triage-follow-up").InputAsync(new ChangeEventArgs { Value = "someday" });
+        await cut.Find("input.triage-follow-up").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+
+        Assert.Equal(DesktopActions.TriageDateText, cut.Find(".triage-status").TextContent);
+        Assert.True(cut.Find(".triage-status").ClassList.Contains("red"));
+        Assert.False(File.Exists(Path.Combine(data.Root, TodoStore.FileName)));
+        Assert.Equal(InboxText, File.ReadAllText(InboxPath));
+        Assert.Equal("call Anna", cut.Find(".triage-item .text").TextContent);
     }
 
     // AC-4, AC-7: A opens the name form; a name matched like /open gets the line; no match is red.

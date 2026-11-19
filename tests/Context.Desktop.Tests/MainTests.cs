@@ -817,7 +817,7 @@ public sealed class MainTests : IDisposable
 
         Assert.Empty(cut.FindAll("button.page-menu-open"));
         Assert.Equal(
-            ["triage-note", "triage-todo", "triage-append", "triage-drop", "triage-later"],
+            ["triage-note", "triage-todo", "triage-delegate", "triage-append", "triage-drop", "triage-later"],
             cut.FindAll(".triage-panel .triage-buttons > button").Select(b => b.ClassName ?? string.Empty).ToArray());
         Assert.Single(cut.FindAll(".triage-panel > .panel-bar button.close"));
     }

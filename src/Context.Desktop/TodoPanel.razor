@@ -14,9 +14,11 @@
         {
             <p class="red note-todos-unreadable">Can't read the note todos.</p>
         }
-        @if (entries.Count == 0)
+        List<TodoEntry> plain = entries.Where(e => !IsWaiting(e)).ToList();
+        List<TodoEntry> waiting = entries.Where(IsWaiting).ToList();
+        @if (plain.Count == 0)
         {
-            @if (!snapshot.TodosUnreadable && !snapshot.NoteTodosUnreadable)
+            @if (waiting.Count == 0 && !snapshot.TodosUnreadable && !snapshot.NoteTodosUnreadable)
             {
                 <p class="grey">No todos yet</p>
             }
@@ -24,55 +26,24 @@
         else
         {
             <ul class="todo-list">
-                @foreach (TodoEntry entry in entries)
+                @foreach (TodoEntry entry in plain)
                 {
-                    @if (entry.Stored is { } todo)
-                    {
-                        string text = DesktopText.OneLine(todo.Text);
-                        string when = DateClass(todo.Due, snapshot.Today);
-                        <li class="todo">
-                            <label class="todo-line">
-                                <input type="checkbox" class="done" checked="@(asking?.Id == todo.Id)"
-                                       disabled="@busy" @onchange="() => Ask(todo)" />
-                                <span class="date @when">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
-                                @if (todo.Time is { } time)
-                                {
-                                    @(" ")<span class="time">@time.ToString(TodoStore.StoredTimeFormat, CultureInfo.InvariantCulture)</span>
-                                }
-                                @* A code block drops the whitespace around it, so the space before the text is written out. *@
-                                @(" ")
-                                @TodoText(text)
-                                @if (todo.Repeat is { } repeat)
-                                {
-                                    <span class="repeat" title="@repeat.Label">@repeat.Label</span>
-                                }
-                            </label>
-                        </li>
-                    }
-                    else if (entry.Note is { } noteTodo)
-                    {
-                        string text = DesktopText.OneLine(noteTodo.Text);
-                        string noteName = DesktopText.OneLine(noteTodo.Note);
-                        <li class="todo note-todo">
-                            <label class="todo-line">
-                                <input type="checkbox" class="done" checked="@(askingNote == noteTodo)"
-                                       disabled="@busy" @onchange="() => AskNote(noteTodo)" />
-                                @if (noteTodo.Due is { } noteDue)
-                                {
-                                    <span class="date @DateClass(noteDue, snapshot.Today)">@noteDue.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
-                                    @(" ")
-                                }
-                                @TodoText(text)
-                                @(" ")
-                                @* The note's name opens it (with the editor's discard check); its click never ticks the checkbox. *@
-                                <button type="button" class="todo-note" title="@noteName"
-                                        @onclick="() => OnOpen.InvokeAsync(noteTodo.Note)"
-                                        @onclick:preventDefault="true" @onclick:stopPropagation="true">@noteName</button>
-                            </label>
-                        </li>
-                    }
+                    @Row(entry, snapshot.Today, busy)
                 }
             </ul>
+        }
+        @if (waiting.Count > 0)
+        {
+            @* Waiting-for todos (waiting: @[Name] text) are their own group, so delegated work stays in view. *@
+            <section class="waiting-for" aria-label="Waiting for">
+                <h3>Waiting for</h3>
+                <ul class="waiting-list">
+                    @foreach (TodoEntry entry in waiting)
+                    {
+                        @Row(entry, snapshot.Today, busy)
+                    }
+                </ul>
+            </section>
         }
     }
     @if (result is { } shown)
@@ -272,6 +243,59 @@
             askingNote = null;
         }
     }
+
+    private static bool IsWaiting(TodoEntry entry) =>
+        WaitingFor.TryParse(entry.Stored?.Text ?? entry.Note?.Text) is not null;
+
+    // One todo row (a stored todo or a todo inside a note), the same in the todo list and the waiting-for group.
+    private RenderFragment Row(TodoEntry entry, DateOnly today, bool busy) => __builder =>
+    {
+        @if (entry.Stored is { } todo)
+        {
+            string text = DesktopText.OneLine(todo.Text);
+            string when = DateClass(todo.Due, today);
+            <li class="todo">
+                <label class="todo-line">
+                    <input type="checkbox" class="done" checked="@(asking?.Id == todo.Id)"
+                           disabled="@busy" @onchange="() => Ask(todo)" />
+                    <span class="date @when">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                    @if (todo.Time is { } time)
+                    {
+                        @(" ")<span class="time">@time.ToString(TodoStore.StoredTimeFormat, CultureInfo.InvariantCulture)</span>
+                    }
+                    @* A code block drops the whitespace around it, so the space before the text is written out. *@
+                    @(" ")
+                    @TodoText(text)
+                    @if (todo.Repeat is { } repeat)
+                    {
+                        <span class="repeat" title="@repeat.Label">@repeat.Label</span>
+                    }
+                </label>
+            </li>
+        }
+        else if (entry.Note is { } noteTodo)
+        {
+            string text = DesktopText.OneLine(noteTodo.Text);
+            string noteName = DesktopText.OneLine(noteTodo.Note);
+            <li class="todo note-todo">
+                <label class="todo-line">
+                    <input type="checkbox" class="done" checked="@(askingNote == noteTodo)"
+                           disabled="@busy" @onchange="() => AskNote(noteTodo)" />
+                    @if (noteTodo.Due is { } noteDue)
+                    {
+                        <span class="date @DateClass(noteDue, today)">@noteDue.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                        @(" ")
+                    }
+                    @TodoText(text)
+                    @(" ")
+                    @* The note's name opens it (with the editor's discard check); its click never ticks the checkbox. *@
+                    <button type="button" class="todo-note" title="@noteName"
+                            @onclick="() => OnOpen.InvokeAsync(noteTodo.Note)"
+                            @onclick:preventDefault="true" @onclick:stopPropagation="true">@noteName</button>
+                </label>
+            </li>
+        }
+    };
 
     private static string DateClass(DateOnly day, DateOnly today) =>
         day < today ? "overdue" : day == today ? "today" : "later";

@@ -319,6 +319,47 @@ public sealed class PersonViewTests : IDisposable
         Assert.Empty(bob.DoneTodos);
     }
 
+    // 243 AC-4: the open waiting-for todos on the person (by name or alias) are in Waiting, in List() order, and not
+    // in OpenTodos; a done one is not waiting; a todo waiting on Anna that mentions Bob is still under Bob's open todos.
+    [Fact]
+    public void Build_Waiting_ByNameAndAlias_LeftOutOfOpenTodos()
+    {
+        WriteNote("people", "# people");
+        WriteNote("people/Anna Schmidt", "# Anna Schmidt\naliases:: AS");
+        TodoItem late = AddTodo("waiting: @[Anna Schmidt] slides for @[Bob]", 9);
+        TodoItem soon = AddTodo("Waiting:@[as] the contract", 3);
+        TodoItem plain = AddTodo("Call @[Anna Schmidt]", 5);
+        TodoItem done = AddTodo("waiting: @[Anna Schmidt] old answer", 2, doneHours: 1);
+        AddTodo("waiting: @[Bob] budget", 4);
+
+        PersonView anna = BuildWithTodos("Anna Schmidt");
+
+        Assert.Equal(PersonViewKind.Mentions, anna.Kind);
+        Assert.Equal([soon.Id, late.Id], anna.Waiting.Select(t => t.Id));
+        Assert.Equal([plain.Id], anna.OpenTodos.Select(t => t.Id));
+        Assert.Equal([done.Id], anna.DoneTodos.Select(t => t.Id));
+
+        PersonView bob = BuildWithTodos("Bob");
+        Assert.Equal(["waiting: @[Bob] budget"], bob.Waiting.Select(t => t.Text));
+        Assert.Equal([late.Id], bob.OpenTodos.Select(t => t.Id));
+    }
+
+    // 243 AC-4: a person with only a waiting-for todo has kind Mentions; a bad todos.json empties Waiting too.
+    [Fact]
+    public void Build_Waiting_OnlyWaiting_AndUnreadable()
+    {
+        AddTodo("waiting: @[Carl] the keys", 3);
+        PersonView carl = BuildWithTodos("Carl");
+        Assert.Equal(PersonViewKind.Mentions, carl.Kind);
+        Assert.Single(carl.Waiting);
+        Assert.Empty(carl.OpenTodos);
+
+        File.WriteAllText(Path.Combine(root, TodoStore.FileName), "{ broken");
+        PersonView broken = BuildWithTodos("Carl");
+        Assert.True(broken.TodosUnreadable);
+        Assert.Empty(broken.Waiting);
+    }
+
     // 159 AC-5: an ambiguous alias links to no page; a todo without a mention is on no page.
     [Fact]
     public void Build_Todos_AmbiguousAlias_NoPage_AndNoMention_NoPage()
