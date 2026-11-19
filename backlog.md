@@ -127,6 +127,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#79](backlog/079-share-a-note.md) Share a note → 250-share-a-note
 - [x] [#81](backlog/081-topics-for-the-next-1-1.md) Topics for the next 1:1 → 253-next-one-on-one-topics
 - [x] [#82](backlog/082-review-dates.md) Review dates → 256-review-dates
+- [ ] [#341](backlog/341-fix-flaky-toreviewpaneltests-main-dirtyopennote-sa.md) Fix flaky ToReviewPanelTests.Main_DirtyOpenNote_SaveFirst
 - [ ] [#84](backlog/084-screenshot-to-inbox.md) Screenshot to inbox
 - [ ] [#86](backlog/086-mermaid-diagrams.md) Mermaid diagrams
 - [ ] [#87](backlog/087-standup-notes.md) Standup notes
