@@ -274,7 +274,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#318](backlog/318-attribute-values-show-bidi-controls-as.md) Attribute values show bidi controls as placeholders
 - [?] [#319](backlog/319-crash-hint-bar-doesn-t-cover.md) Crash hint bar doesn't cover the header
 - [?] [#320](backlog/320-crash-log-link-checks-close-the.md) Crash log link checks: close the check-then-act window
-- [?] [#321](backlog/321-fix-flaky-palettemeeting-privateappointment-notnum.md) Fix flaky PaletteMeeting_PrivateAppointment_NotNumbered test
+- [ ] [#321](backlog/321-fix-flaky-palettemeeting-privateappointment-notnum.md) Fix flaky PaletteMeeting_PrivateAppointment_NotNumbered test
 - [?] [#322](backlog/322-recent-notes-sidebar-keep-the-parent.md) Recent notes sidebar: keep the parent name visible on long titles
 - [?] [#323](backlog/323-tag-board-cache-note-reads-by.md) Tag board: cache note reads by note version
 - [?] [#324](backlog/324-tag-board-show-the-target-column.md) Tag board: show the target column name on the move buttons
@@ -286,7 +286,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#330](backlog/330-smart-paste-say-why-a-page.md) Smart paste: say why a page title wasn't used
 - [h] [#331](backlog/331-check-cmd-shift-v-plain-paste.md) Check Cmd+Shift+V plain paste in the macOS app
 - [?] [#332](backlog/332-carry-over-and-k-more-line.md) Carry-over: "… and k more" line is not an open point
-- [?] [#333](backlog/333-fix-flaky-editingflowtests-palettecurrent-isnocomm.md) Fix flaky EditingFlowTests.PaletteCurrent_IsNoCommand test
+- [ ] [#333](backlog/333-fix-flaky-editingflowtests-palettecurrent-isnocomm.md) Fix flaky EditingFlowTests.PaletteCurrent_IsNoCommand test
 
 ## Dropped with the terminal UI
 
