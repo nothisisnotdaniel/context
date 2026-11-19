@@ -864,10 +864,13 @@ Every factory agent reads this file before working on Context. Keep it short and
     main region (`Main` keeps the open name; a dirty editor saves first, job 203, and asks `Discard changes to <name>?`
     only when that save failed). `NoteEditor`
     reads through `DesktopState.ReadForEdit` (`NoteStore.ReadForEdit` -> `EditableNote`: text with `\n`, raw-byte
-    SHA-256 `Version`, CRLF and BOM flags), mounts the page editor through `EditorInterop` (the only class that touches
+    SHA-256 `Version`, CRLF and BOM flags; job 271: `HadCrlf` is the most common ending (a tie goes to the first
+    break), `LineCrlf` one flag per `\n` for a mixed file, `null` when uniform; `LineEndings.Read`/`Apply` is the one
+    place for endings, used by `NoteStore` and `SensitiveSession`: lines `TextDiff.Lines` marks `Same` keep their
+    ending, added lines and a `TooDifferent` diff get the majority), mounts the page editor through `EditorInterop` (the only class that touches
     `IJSRuntime`; `[JSInvokable]` `OnTag`/`OnLink`/`OnPerson`/`OnAttachment` only navigate, `OnDrop` only raises `FilesDropped`, `OnChanged` only raises `Changed`) and saves through
     `DesktopActions.SaveNote` -> `NoteStore.SaveIfUnchanged` (unchanged text writes nothing; version re-checked before
-    the move; CRLF and BOM kept; temp file mode `0600`). **Auto save** (job 203): `view.js` calls `OnChanged` on every
+    the move; per-line endings and BOM kept, `saved` has the flags of the bytes written; temp file mode `0600`). **Auto save** (job 203): `view.js` calls `OnChanged` on every
     `docChanged` transaction; each `Changed` restarts the pause (`IAutoSavePause`, real `AutoSavePause.Pause` = 1 s,
     tests `FakeAutoSavePause.Elapse()`), and when it elapses a dirty editor saves. `NoteEditor.SaveAsync(bool auto)` is
     the one save path, serialized by a `SemaphoreSlim` (cancels the pending pause, waits for a running save): grey

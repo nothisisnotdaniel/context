@@ -156,5 +156,22 @@ public sealed class SensitiveSessionTests
         Assert.Equal(sealedText, SensitiveSession.ToSealedText(note, note.Text));
     }
 
+    // 271 AC-8: mixed sealed text round-trips unedited, and a one-line edit keeps the other lines' endings.
+    [Theory]
+    [InlineData("a\r\nb\nc\nd\r\n", "a\nb\nc\nd\n", "a\nB\nc\nd\n", "a\r\nB\r\nc\nd\r\n")]
+    [InlineData("\uFEFFa\r\nb\r\nc\nd", "a\nb\nc\nd", "a\nb\nc\nD", "\uFEFFa\r\nb\r\nc\nD")]
+    [InlineData("a\nb\r\nc\n", "a\nb\nc\n", "A\nb\nc\n", "A\nb\r\nc\n")]
+    public void ToEditable_ThenToSealedText_Mixed(string sealedText, string text, string edited, string expected)
+    {
+        NoteInfo found = new NoteInfo("Plan", DateTime.UnixEpoch, "/x/Plan.ctxs");
+
+        EditableNote note = SensitiveSession.ToEditable(found, sealedText, "v1");
+
+        Assert.Equal(text, note.Text);
+        Assert.NotNull(note.LineCrlf);
+        Assert.Equal(sealedText, SensitiveSession.ToSealedText(note, note.Text));
+        Assert.Equal(expected, SensitiveSession.ToSealedText(note, edited));
+    }
+
     private static EditableNote Note(string name) => new EditableNote(name, "/x/" + name + ".ctxs", "text", "v", false, false);
 }

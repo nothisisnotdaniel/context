@@ -451,6 +451,50 @@ public sealed class SensitiveActionsTests : IDisposable
         Assert.Equal(3, data.Keys.Agrees);
     }
 
+    // 271 AC-10: a mixed sensitive note saved, edited on another line and saved again keeps every untouched line's ending.
+    [Fact]
+    public async Task SaveNote_Sensitive_MixedEndings_KeptAcrossTwoSaves()
+    {
+        await Sealed("Plan", "# Plan\r\none\ntwo\nthree\r\nfour\n");
+        EditableNote opened = (await data.State!.ReadSensitive("Plan"))!;
+        Assert.NotNull(opened.LineCrlf);
+
+        ActionResult first = await data.Actions!.SaveNote(opened, "# Plan\none\nTWO\nthree\nfour\n");
+        Assert.Equal(ActionKind.Done, first.Kind);
+        byte[] afterFirst = File.ReadAllBytes(opened.Path);
+        Assert.Equal("# Plan\r\none\nTWO\nthree\r\nfour\n", SealedNote.Open("Plan", afterFirst, data.Keys.MachinePublicKey()!, data.Keys.Agree));
+        EditableNote reread = SensitiveSession.ToEditable(
+            new NoteInfo("Plan", DateTime.UnixEpoch, opened.Path), "# Plan\r\none\nTWO\nthree\r\nfour\n", "v");
+        Assert.Equal(reread.HadCrlf, first.Note!.HadCrlf);
+        Assert.Equal(reread.LineCrlf, first.Note.LineCrlf);
+
+        ActionResult second = await data.Actions.SaveNote(first.Note, "# Plan\none\nTWO\nthree\nFOUR\n");
+
+        Assert.Equal(ActionKind.Done, second.Kind);
+        byte[] afterSecond = File.ReadAllBytes(opened.Path);
+        Assert.Equal("# Plan\r\none\nTWO\nthree\r\nFOUR\n", SealedNote.Open("Plan", afterSecond, data.Keys.MachinePublicKey()!, data.Keys.Agree));
+        AssertMarkerNowhere();
+    }
+
+    // 271 AC-10: after renaming a mixed sensitive note, a save still keeps the untouched lines' endings.
+    [Fact]
+    public async Task SaveNote_Sensitive_MixedEndings_KeptAfterRename()
+    {
+        await Sealed("Plan", "\uFEFF# Plan\r\none\ntwo\nthree\r\n");
+        await data.State!.ReadSensitive("Plan");
+
+        ActionResult renamed = await data.Actions!.RenameNote("Plan", "Project", null);
+        Assert.Equal(ActionKind.Done, renamed.Kind);
+        EditableNote open = (await data.State.ReadSensitive("Project"))!;
+        Assert.Equal(open.Text.Count(c => c == '\n'), open.LineCrlf!.Count);
+
+        ActionResult saved = await data.Actions.SaveNote(open, "# Plan\none\nTWO\nthree\n");
+
+        Assert.Equal(ActionKind.Done, saved.Kind);
+        byte[] file = File.ReadAllBytes(Path.Combine(data.Root, "Project.ctxs"));
+        Assert.Equal("\uFEFF# Plan\r\none\nTWO\r\nthree\r\n", SealedNote.Open("Project", file, data.Keys.MachinePublicKey()!, data.Keys.Agree));
+    }
+
     // AC-7: rename seals the open text under the new name; only <new>.ctxs is left.
     [Fact]
     public async Task RenameNote_Sensitive_Open_ReSealsUnderTheNewName()

@@ -571,8 +571,8 @@ internal sealed class NoteStore
         byte[] raw = BoundedFile.Read(note.Path, MaxEditBytes);
         bool hadBom = raw.AsSpan().StartsWith(Utf8Bom);
         string text = DecodeText(raw);
-        bool hadCrlf = text.Contains("\r\n", StringComparison.Ordinal);
-        return new EditableNote(note.Name, note.Path, text.Replace("\r\n", "\n", StringComparison.Ordinal), EditableNote.Hash(raw), hadCrlf, hadBom);
+        (string plain, bool hadCrlf, IReadOnlyList<bool>? lineCrlf) = LineEndings.Read(text);
+        return new EditableNote(note.Name, note.Path, plain, EditableNote.Hash(raw), hadCrlf, hadBom, lineCrlf);
     }
 
     /// <summary>
@@ -580,7 +580,7 @@ internal sealed class NoteStore
     /// changed since. Writes nothing and returns <see cref="NoteSaveResult.Unchanged"/> when the text equals the text
     /// as opened, <see cref="NoteSaveResult.Missing"/> when the file is gone and <see cref="NoteSaveResult.ChangedOnDisk"/>
     /// when its bytes no longer hash to <see cref="EditableNote.Version"/>. Otherwise writes the text through a temp
-    /// file and a move, with CRLF line endings and a BOM when the file had them, and
+    /// file and a move, with the line endings of <see cref="LineEndings.Apply"/> and a BOM when the file had one, and
     /// returns the note as saved in <paramref name="saved"/>. The file is hashed again just before the move. Throws
     /// <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> when it can't write.
     /// </summary>
@@ -608,7 +608,7 @@ internal sealed class NoteStore
             return check;
         }
 
-        string onDisk = opened.HadCrlf ? plainText.Replace("\n", "\r\n", StringComparison.Ordinal) : plainText;
+        string onDisk = LineEndings.Apply(opened, plainText);
         byte[] body = Utf8NoBom.GetBytes(onDisk);
         byte[] plain = opened.HadBom ? [.. Utf8Bom, .. body] : body;
         if (plain.Length > MaxEditBytes)
@@ -648,7 +648,8 @@ internal sealed class NoteStore
             }
         }
 
-        saved = new EditableNote(opened.Name, opened.Path, plainText, EditableNote.Hash(plain), opened.HadCrlf, opened.HadBom);
+        (_, bool savedCrlf, IReadOnlyList<bool>? savedLines) = LineEndings.Read(onDisk);
+        saved = new EditableNote(opened.Name, opened.Path, plainText, EditableNote.Hash(plain), savedCrlf, opened.HadBom, savedLines);
         return NoteSaveResult.Saved;
     }
 
