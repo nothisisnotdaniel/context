@@ -124,17 +124,11 @@ internal sealed record SearchView
             index.Sync(store);
             List<SearchHit> hits = [];
             HashSet<string> seen = new(StringComparer.Ordinal);
-            foreach ((string note, string body) in index.Search(query))
+            // Each body is only looked at for its row: the selector keeps the hit, never the text.
+            foreach (SearchHit hit in index.Search(query, (note, body) => FirstLine(note, body, query)))
             {
-                if (seen.Contains(note))
+                if (seen.Add(hit.Note))
                 {
-                    continue;
-                }
-
-                SearchHit? hit = FirstLine(note, body, query);
-                if (hit is not null)
-                {
-                    seen.Add(note);
                     hits.Add(hit);
                 }
             }

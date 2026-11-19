@@ -968,6 +968,22 @@ public sealed class CliTests : IDisposable
         Assert.Equal((0, string.Empty, string.Empty), (unknown.Code, unknown.Out, unknown.Err));
     }
 
+    // 295 AC-3: a note over the cap changes nothing in the tags output (no skipped line).
+    [Fact]
+    public void Tags_SkippedNote_OutputUnchanged()
+    {
+        WriteNote("A", "#work");
+        using (FileStream stream = new FileStream(Path.Combine(root, "Big.md"), FileMode.Create))
+        {
+            stream.Write(System.Text.Encoding.UTF8.GetBytes("#big\n"));
+            stream.SetLength(NoteStore.MaxNoteBytes + 1);
+        }
+
+        Result all = Run("tags");
+
+        Assert.Equal((0, "#work\t1\n", string.Empty), (all.Code, all.Out, all.Err));
+    }
+
     [Theory]
     [InlineData("tags")]
     public void TagCommands_BadContextDb_IsError(params string[] args)

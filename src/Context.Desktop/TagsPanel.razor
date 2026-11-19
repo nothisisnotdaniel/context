@@ -35,9 +35,16 @@
             }
         </ul>
     }
+    @if (view is { Skipped.Count: > 0 } shownView)
+    {
+        <p class="grey tags-skipped">@SkippedText(shownView.Skipped)</p>
+    }
 </section>
 
 @code {
+    /// <summary>At most this many skipped note names are named; the rest are counted as <c>… k more</c>.</summary>
+    internal const int MaxSkippedNames = 10;
+
     private TagsView? view;
     private int request;
 
@@ -58,6 +65,16 @@
     {
         await Load();
         StateHasChanged();
+    }
+
+    // The grey line naming the notes the index left out because they are over 5 MB (NoteStore.MaxNoteBytes).
+    internal static string SkippedText(IReadOnlyList<string> skipped)
+    {
+        string names = string.Join(", ", skipped.Take(MaxSkippedNames).Select(DesktopText.OneLine));
+        string rest = skipped.Count > MaxSkippedNames
+            ? $", {CurrentView.Outside} {(skipped.Count - MaxSkippedNames).ToString(CultureInfo.InvariantCulture)} more"
+            : string.Empty;
+        return $"Not indexed (over 5 MB): {names}{rest}.";
     }
 
     // Keeps the shown tags while it reloads; only the newest request's result is used.

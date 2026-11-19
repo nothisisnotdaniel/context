@@ -389,7 +389,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(13, TagIndex.ParserVersion);
+        Assert.Equal(14, TagIndex.ParserVersion);
     }
 
     // 024 AC-6
@@ -847,7 +847,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(13, TagIndex.ParserVersion);
+        Assert.Equal(14, TagIndex.ParserVersion);
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
         Assert.Equal(["A", "Beta"], NoteRows());
         Assert.Equal([("A", "work"), ("Beta", "home")], Rows());
@@ -1216,7 +1216,7 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal(["Anna|1", "AS|1"], index.People().Select(Describe));
         Assert.Empty(index.NotesMentioning("Anna Schmidt"));
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(13, TagIndex.ParserVersion);
+        Assert.Equal(14, TagIndex.ParserVersion);
     }
 
     // 170 ----------------------------------------------------------------------------------------
@@ -1261,8 +1261,8 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal([("Other", "nothing"), ("Plan", "# Plan\nBudget 2027"), ("Plan/Child", "child budget")], TextRows());
         Assert.Equal(
             ["Plan", "Plan/Child"],
-            index.Search("BUDGET").Select(r => r.Note).Order(StringComparer.Ordinal));
-        Assert.Equal("# Plan\nBudget 2027", Assert.Single(index.Search("et 20")).Body);
+            index.Search("BUDGET", (note, _) => note).Order(StringComparer.Ordinal));
+        Assert.Equal("# Plan\nBudget 2027", Assert.Single(index.Search("et 20", (_, body) => body)));
     }
 
     // 268 AC-3: NoteTexts gives every note_text row (plain notes only), sorted by note, and reads through one query.
@@ -1296,7 +1296,7 @@ public sealed class TagIndexTests : IDisposable
         WriteNote("Words", "a b x y abc OR NEAR");
         index.Sync(store);
 
-        Assert.Equal(["Literal"], index.Search(query).Select(r => r.Note));
+        Assert.Equal(["Literal"], index.Search(query, (note, _) => note));
     }
 
     // 170 AC-4: an edited, renamed or deleted note's row is replaced or removed; an orphan row is removed.
@@ -1309,7 +1309,9 @@ public sealed class TagIndexTests : IDisposable
         using (SqliteConnection connection = Open())
         using (SqliteCommand command = connection.CreateCommand())
         {
-            command.CommandText = "INSERT INTO note_text(note, body) VALUES('Ghost', 'boo')";
+            // 295: an orphan text row is one whose note_text_rows entry names no note.
+            command.CommandText = "INSERT INTO note_text(note, body) VALUES('Ghost', 'boo'); "
+                + "INSERT INTO note_text_rows(note, row) VALUES('Ghost', last_insert_rowid())";
             command.ExecuteNonQuery();
         }
 
@@ -1718,7 +1720,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(["Plan|1|2026-12-01|review:2026-12-01"], ReviewRows(index));
-        Assert.Equal(13, UserVersion());
+        Assert.Equal(14, UserVersion());
     }
 
     // 256 AC-2, AC-9: a sensitive .ctxs note never has a review row.
@@ -1876,5 +1878,337 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(["Gamma|To|True|"], index.Links("A").Select(Describe));
+    }
+
+    // 295: writes a note of exactly `size` bytes: `start`, then `a` padding.
+    private string WriteSized(string name, byte[] start, long size)
+    {
+        Directory.CreateDirectory(root);
+        string path = Path.Combine(root, name + ".md");
+        byte[] bytes = new byte[size];
+        Array.Fill(bytes, (byte)'a');
+        start.CopyTo(bytes, 0);
+        File.WriteAllBytes(path, bytes);
+        return path;
+    }
+
+    // 295: writes a note over the cap without filling memory (a sparse file after its first line).
+    private string WriteTooBig(string name)
+    {
+        Directory.CreateDirectory(root);
+        string path = Path.Combine(root, name + ".md");
+        using FileStream stream = new FileStream(path, FileMode.Create);
+        stream.Write(Encoding.UTF8.GetBytes("#big\n[[Other]]\n"));
+        stream.SetLength(NoteStore.MaxNoteBytes + 1);
+        return path;
+    }
+
+    private long Count(string sql)
+    {
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
+        return (long)command.ExecuteScalar()!;
+    }
+
+    // The (rowid, note) of every note_text row and the (row, note) of every note_text_rows row.
+    private (List<(long Row, string Note)> Text, List<(long Row, string Note)> Map) TextRowIds()
+    {
+        using SqliteConnection connection = Open();
+        List<(long, string)> Read(string sql)
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = sql;
+            using SqliteDataReader reader = command.ExecuteReader();
+            List<(long, string)> rows = [];
+            while (reader.Read())
+            {
+                rows.Add((reader.GetInt64(0), reader.GetString(1)));
+            }
+
+            return rows;
+        }
+
+        return (
+            Read("SELECT rowid, note FROM note_text ORDER BY rowid"),
+            Read("SELECT row, note FROM note_text_rows ORDER BY row"));
+    }
+
+    // 295 AC-1: the cap counts the bytes read: exactly MaxNoteBytes with a BOM is indexed (BOM not in the body), one
+    // byte more is not.
+    [Fact]
+    public void Sync_ExactlyCapBytesWithBom_Indexed_OneMoreNot()
+    {
+        byte[] start = [0xEF, 0xBB, 0xBF, .. Encoding.UTF8.GetBytes("#fits\n")];
+        WriteSized("Fits", start, NoteStore.MaxNoteBytes);
+        WriteSized("Over", [.. Encoding.UTF8.GetBytes("#over\n")], NoteStore.MaxNoteBytes + 1);
+
+        index.Sync(store);
+
+        Assert.Equal([("Fits", "fits")], Rows());
+        (string note, string body) = Assert.Single(TextRows());
+        Assert.Equal("Fits", note);
+        Assert.StartsWith("#fits\n", body, StringComparison.Ordinal);
+        Assert.Equal(NoteStore.MaxNoteBytes - 3, Encoding.UTF8.GetByteCount(body));
+        Assert.NotNull(StoredModified("Fits"));
+        Assert.Null(StoredModified("Over"));
+        Assert.Equal(["Over"], index.Skipped());
+    }
+
+    // 295 AC-1: invalid UTF-8 bytes count as read: a note of exactly MaxNoteBytes holding them is indexed (as U+FFFD),
+    // although its decoded text is more than MaxNoteBytes UTF-8 bytes.
+    [Fact]
+    public void Sync_ExactlyCapBytesWithInvalidUtf8_Indexed()
+    {
+        byte[] invalid = new byte[100_000];
+        Array.Fill(invalid, (byte)0xFF);
+        WriteSized("Bad", [.. Encoding.UTF8.GetBytes("#bad\n"), .. invalid], NoteStore.MaxNoteBytes);
+
+        index.Sync(store);
+
+        Assert.Equal([("Bad", "bad")], Rows());
+        (string _, string body) = Assert.Single(TextRows());
+        Assert.Contains('�', body);
+        Assert.True(Encoding.UTF8.GetByteCount(body) > NoteStore.MaxNoteBytes);
+        Assert.Empty(index.Skipped());
+    }
+
+    // 295 AC-2: a note over the cap has a note_skipped row and nothing else; Skipped() is sorted ignoring case, then
+    // ordinal; the row goes when the note shrinks, becomes unreadable for another reason, or is deleted.
+    [Fact]
+    public void Sync_SkippedRows_FollowTheNote()
+    {
+        WriteNote("Other", "[[zed]] #big");
+        string zed = WriteTooBig("zed");
+        string alpha = WriteTooBig("Alpha");
+        string beta = WriteTooBig("beta");
+
+        index.Sync(store);
+
+        Assert.Equal(["Alpha", "beta", "zed"], index.Skipped());
+        Assert.Equal([("Other", "big")], Rows());
+        Assert.Equal([("Other", "zed")], LinkRows());
+        Assert.Equal(["Other"], TextRows().Select(r => r.Note));
+        Assert.Null(StoredModified("zed"));
+        Assert.Equal(0, Count("SELECT COUNT(*) FROM note_links WHERE note = 'zed'"));
+
+        File.WriteAllText(zed, "small now #zed");
+        File.SetLastWriteTimeUtc(zed, DateTime.UtcNow.AddMinutes(1));
+        File.Delete(beta);
+        index.Sync(store);
+
+        Assert.Equal(["Alpha"], index.Skipped());
+        Assert.Equal(["Other", "zed"], TextRows().Select(r => r.Note).Order(StringComparer.Ordinal));
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        File.WriteAllText(alpha, "small");
+        File.SetUnixFileMode(alpha, UnixFileMode.None);
+        if (CanRead(alpha))
+        {
+            return; // Running as root: the file can't be made unreadable.
+        }
+
+        index.Sync(store);
+
+        Assert.Empty(index.Skipped());
+        Assert.Null(StoredModified("Alpha"));
+    }
+
+    // 295 AC-2: an orphan note_skipped row (its note row gone by hand) is pruned.
+    [Fact]
+    public void Sync_OrphanSkippedRow_Pruned()
+    {
+        WriteNote("A", "a");
+        index.Sync(store);
+        using (SqliteConnection connection = Open())
+        using (SqliteCommand command = connection.CreateCommand())
+        {
+            command.CommandText = "INSERT INTO note_skipped(note) VALUES('Ghost')";
+            command.ExecuteNonQuery();
+        }
+
+        index.Sync(store);
+
+        Assert.Empty(index.Skipped());
+    }
+
+    // 295 AC-4: the Links statement reads note_links only through its indexes, never by a scan.
+    [Fact]
+    public void LinksSql_QueryPlan_HasNoScan()
+    {
+        WriteNote("A", "[[B]]");
+        WriteNote("B", "[[a.md]] [[A#Head]]");
+        WriteNote("Filler", string.Join(' ', Enumerable.Range(0, 50).Select(i => $"[[x{i}]]")));
+        index.Sync(store);
+
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "EXPLAIN QUERY PLAN " + TagIndex.LinksSql;
+        command.Parameters.AddWithValue("$note", "A");
+        command.Parameters.AddWithValue("$k", "A");
+        command.Parameters.AddWithValue("$kmd", "A.MD");
+        List<string> plan = [];
+        using (SqliteDataReader reader = command.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                plan.Add(reader.GetString(3));
+            }
+        }
+
+        Assert.NotEmpty(plan);
+        Assert.DoesNotContain(plan, d => d.Contains("SCAN note_links", StringComparison.Ordinal));
+        Assert.Contains(plan, d => d.Contains("note_links_whole_key", StringComparison.Ordinal));
+        Assert.Contains(plan, d => d.Contains("note_links_part_key", StringComparison.Ordinal));
+    }
+
+    // 295 AC-4: the stored keys are the upper-invariant target and note part, NULL when empty.
+    [Fact]
+    public void Sync_LinkKeys_UpperInvariant_NullWhenEmpty()
+    {
+        WriteNote("A", "[[Gamma#A]] [[#Intro]] [[c# Notes]]");
+        index.Sync(store);
+
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT target, whole_key, part_key FROM note_links ORDER BY target COLLATE BINARY";
+        using SqliteDataReader reader = command.ExecuteReader();
+        List<string> rows = [];
+        while (reader.Read())
+        {
+            rows.Add($"{reader.GetString(0)}|{reader.GetString(1)}|{(reader.IsDBNull(2) ? "NULL" : reader.GetString(2))}");
+        }
+
+        Assert.Equal(["#Intro|#INTRO|NULL", "Gamma#A|GAMMA#A|GAMMA", "c# Notes|C# NOTES|C"], rows);
+    }
+
+    // 295 AC-4: 500 link rows that don't concern the note leave the result as it was.
+    [Fact]
+    public void Links_ManyUnrelatedRows_SameResult()
+    {
+        WriteNote("A", "[[B]] [[Missing#X]] [[missing]] [[A]] #t");
+        WriteNote("B", "[[A]]");
+        WriteNote("C", "[[a.md]]");
+        WriteNote("C# notes", "[[A#Head]]");
+        WriteNote("D", "#t");
+        for (int i = 0; i < 5; i++)
+        {
+            WriteNote($"Filler{i}", string.Join(' ', Enumerable.Range(0, 100).Select(j => $"[[x{i}-{j}]] [[B]]")));
+        }
+
+        index.Sync(store);
+
+        Assert.Equal(505 + 7, Count("SELECT COUNT(*) FROM note_links"));
+        Assert.Equal(
+            ["B|Both|False|", "C|From|False|", "C# notes|From|False|", "D|None|False|t", "Missing|To|True|"],
+            index.Links("A").Select(Describe));
+    }
+
+    // 295 AC-7: every note_text row is mapped by rowid; editing one note replaces only its row.
+    [Fact]
+    public void Sync_EditOneOfThree_TextRowsMatchByRowid()
+    {
+        WriteNote("A", "alpha text");
+        WriteNote("B", "oldword here");
+        WriteNote("C", "gamma text");
+        index.Sync(store);
+        (List<(long Row, string Note)> text, List<(long Row, string Note)> map) = TextRowIds();
+        Assert.Equal(text, map);
+        Dictionary<string, long> before = map.ToDictionary(r => r.Note, r => r.Row);
+
+        EditNote("B", "newword here");
+        index.Sync(store);
+
+        (text, map) = TextRowIds();
+        Assert.Equal(3, text.Count);
+        Assert.Equal(text, map);
+        Dictionary<string, long> after = map.ToDictionary(r => r.Note, r => r.Row);
+        Assert.Equal(before["A"], after["A"]);
+        Assert.Equal(before["C"], after["C"]);
+        Assert.NotEqual(before["B"], after["B"]);
+        Assert.Equal(["B"], index.Search("newword", (note, _) => note));
+        Assert.Empty(index.Search("oldword", (note, _) => note));
+    }
+
+    // 295 AC-7: deleting a note removes its text row and mapping; no statement deletes note_text by note any more.
+    [Fact]
+    public void Sync_DeletedNote_TextRowGoneByRowid_NoDeleteByNote()
+    {
+        WriteNote("A", "alpha");
+        WriteNote("B", "beta");
+        index.Sync(store);
+        File.Delete(Path.Combine(root, "B.md"));
+
+        index.Sync(store);
+
+        (List<(long Row, string Note)> text, List<(long Row, string Note)> map) = TextRowIds();
+        Assert.Equal(["A"], text.Select(r => r.Note));
+        Assert.Equal(text, map);
+        string source = File.ReadAllText(Path.Combine(RepoRoot(), "src", "Context.Core", "TagIndex.cs"));
+        Assert.DoesNotContain("DELETE FROM note_text WHERE note", source, StringComparison.Ordinal);
+    }
+
+    // 295 AC-8: a database at user_version 13 (old note_links, no note_text_rows or note_skipped) is upgraded by the
+    // next Sync: note_text emptied and rewritten once, the new tables and columns filled, user_version 14.
+    [Fact]
+    public void Sync_Version13Database_Upgraded()
+    {
+        WriteNote("A", "alpha #t");
+        WriteNote("B", "[[a]] beta");
+        WriteTooBig("Big");
+        Directory.CreateDirectory(root);
+        long ticksA = File.GetLastWriteTimeUtc(Path.Combine(root, "A.md")).Ticks;
+        long ticksB = File.GetLastWriteTimeUtc(Path.Combine(root, "B.md")).Ticks;
+        using (SqliteConnection connection = Open())
+        using (SqliteCommand command = connection.CreateCommand())
+        {
+            // The version 13 schema of the tables this job changes, with rows as a version 13 sync left them.
+            command.CommandText = """
+                CREATE TABLE notes(name TEXT NOT NULL PRIMARY KEY, modified INTEGER);
+                CREATE TABLE note_tags(note TEXT NOT NULL, tag TEXT NOT NULL, PRIMARY KEY(note, tag));
+                CREATE TABLE note_links(note TEXT NOT NULL, target TEXT NOT NULL, heading TEXT, PRIMARY KEY(note, target));
+                CREATE VIRTUAL TABLE note_text USING fts5(note UNINDEXED, body, tokenize='trigram');
+                INSERT INTO notes(name, modified) VALUES('A', $a), ('B', $b), ('Big', NULL);
+                INSERT INTO note_tags(note, tag) VALUES('A', 't');
+                INSERT INTO note_links(note, target, heading) VALUES('B', 'a', NULL);
+                INSERT INTO note_text(note, body) VALUES('A', 'alpha #t'), ('B', '[[a]] beta'), ('A', 'stale copy');
+                PRAGMA user_version = 13;
+                """;
+            command.Parameters.AddWithValue("$a", ticksA);
+            command.Parameters.AddWithValue("$b", ticksB);
+            command.ExecuteNonQuery();
+        }
+
+        index.Sync(store);
+
+        Assert.Equal(14, UserVersion());
+        (List<(long Row, string Note)> text, List<(long Row, string Note)> map) = TextRowIds();
+        Assert.Equal(["A", "B"], text.Select(r => r.Note).Order(StringComparer.Ordinal));
+        Assert.Equal(text, map);
+        Assert.Empty(index.Search("stale", (note, _) => note));
+        Assert.Equal(["A"], index.Search("alpha", (note, _) => note));
+        Assert.Equal(["Big"], index.Skipped());
+        Assert.Equal(0, Count("SELECT COUNT(*) FROM note_links WHERE whole_key IS NULL"));
+        Assert.Equal(["B|From|False|"], index.Links("A").Select(Describe));
+    }
+
+    private static string RepoRoot()
+    {
+        DirectoryInfo? dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "Context.slnx")))
+            {
+                return dir.FullName;
+            }
+
+            dir = dir.Parent;
+        }
+
+        Assert.Fail("No folder containing Context.slnx found above " + AppContext.BaseDirectory);
+        return string.Empty;
     }
 }

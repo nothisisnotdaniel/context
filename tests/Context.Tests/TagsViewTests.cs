@@ -199,4 +199,44 @@ public sealed class TagsViewTests : IDisposable
         Assert.Equal(first.GetHashCode(), second.GetHashCode());
         Assert.NotEqual(first, new TagsView(TagsViewKind.NoSuchTag, string.Empty, tags, notes));
     }
+
+    private void WriteTooBig(string name)
+    {
+        Directory.CreateDirectory(root);
+        using FileStream stream = new FileStream(Path.Combine(root, name + ".md"), FileMode.Create);
+        stream.Write(System.Text.Encoding.UTF8.GetBytes("#big\n"));
+        stream.SetLength(NoteStore.MaxNoteBytes + 1);
+    }
+
+    // 295 AC-3: AllTags lists the notes over the cap (sorted ignoring case, then ordinal); other kinds leave it empty.
+    [Fact]
+    public void Build_Skipped_OnlyForAllTags()
+    {
+        WriteNote("A", "#work");
+        WriteTooBig("zed");
+        WriteTooBig("Big");
+
+        TagsView all = Build("");
+        TagsView work = Build("work");
+        TagsView none = Build("nothing");
+
+        Assert.Equal(TagsViewKind.AllTags, all.Kind);
+        Assert.Equal(["Big", "zed"], all.Skipped);
+        Assert.Equal(["work"], all.Tags.Select(t => t.Tag));
+        Assert.Empty(work.Skipped);
+        Assert.Empty(none.Skipped);
+    }
+
+    // 295 AC-3: an unreadable index gives no skipped names.
+    [Fact]
+    public void Build_IndexUnreadable_SkippedEmpty()
+    {
+        WriteTooBig("Big");
+        File.WriteAllText(DbPath, "not a database at all, not at all, really not, no no no no no");
+
+        TagsView view = Build("");
+
+        Assert.Equal(TagsViewKind.IndexUnreadable, view.Kind);
+        Assert.Empty(view.Skipped);
+    }
 }
