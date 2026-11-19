@@ -823,6 +823,9 @@ internal sealed class NoteStore
     /// <summary>
     /// Test seam: true when the file system holding the given path ignores case. By default it probes the deepest
     /// existing folder of the path (<see cref="ProbeIgnoresCase"/>); any doubt answers true.
+    /// <see cref="Contains"/> guards in both directions: for export and plain copies (and import) true refuses, but in
+    /// <c>NoteAttachments</c> and <c>NoteHistory</c> true allows a write or delete. The fail-safe true is the
+    /// refusing answer only for the first kind, so changing it for one caller changes it for the other.
     /// </summary>
     internal Func<string, bool> IgnoresCase { get; set; }
 
