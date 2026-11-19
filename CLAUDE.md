@@ -559,7 +559,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   working; a feature that changes what one of them prints or does updates it and its tests.
 - **Command line (scriptable):** `context <command> [args]` runs one command through `Cli`
   (`src/Context/Cli.cs`) and exits; no arguments is the usage error `No command given. Run 'context help'.`
-  (exit code 2, the data folder is not created). `Cli(stdout, stderr,
+  (exit code 2, the data folder is not created). Job 273: an argument that starts with the removed secret option is a usage error in any position (ignoring case), checked before anything else, `--json`, `help` and `version` included: `That option was removed. Run 'context help'.`, exit 2, never echoed, the folder untouched. `Cli(stdout, stderr,
   folder, today, now, HttpMessageHandler, timesFolder)` (it takes no stdin and no environment, so no command can read
   either; `Program.cs` resolves the Times folder, see Day's end) writes plain text only (results on stdout with `\n` line ends, tab-separated
   columns; errors on stderr), no markup and no prompt; `int Run(args)` never throws.
