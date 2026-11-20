@@ -147,6 +147,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#404](backlog/404-todos-page-opened-from-an-exclamation.md) Todos page opened from an exclamation-mark icon in the left sidebar → 331-todos-page-icon
 - [x] [#405](backlog/405-affiliation-as-a-comma-separated-list.md) Affiliation as a comma-separated list → 332-affiliation-list
 - [x] [#401](backlog/401-say-why-the-app-ended-in.md) Say why the app ended in the crash log → 334-exit-reason-log
+- [ ] [#59](backlog/059-ask-context.md) Ask Context
 - [ ] [#64](backlog/064-search-across-context-and-times.md) Search across Context and Times
 - [ ] [#83](backlog/083-glossary.md) Glossary
 - [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4)
@@ -202,7 +203,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#89](backlog/089-call-to-meeting-note.md) Call to meeting note
 - [ ] [#88](backlog/088-vacation-handover.md) Vacation handover
 - [ ] [#67](backlog/067-email-to-note.md) Email to note
-- [ ] [#59](backlog/059-ask-context.md) Ask Context
 - [ ] [#58](backlog/058-flagged-mail-to-the-inbox.md) Flagged mail to the inbox
 - [ ] [#56](backlog/056-one-project-list.md) One project list
 - [ ] [#42](backlog/042-label-shared-tag-rows.md) Label shared-tag rows
