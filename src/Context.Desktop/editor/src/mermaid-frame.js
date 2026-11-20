@@ -1,18 +1,26 @@
 // The Mermaid renderer frame (job 263), bundled to wwwroot/mermaid/mermaid-frame.js and loaded only by
 // wwwroot/mermaid/frame.html, which the page embeds with sandbox="allow-scripts" (an opaque origin, no access to the
-// page) under a CSP with no network. It takes { type: "render", id, text } from its parent only and answers
+// page) under a CSP with no network. It takes { type: "render", id, text, theme } from its parent only and answers
 // { type: "rendered", id, svg } or { type: "failed", id }; Mermaid's error text never leaves the frame.
 import mermaid from "mermaid";
 
-const dark = typeof globalThis.matchMedia === "function" && globalThis.matchMedia("(prefers-color-scheme: dark)").matches;
+// Job 341: the page chooses the theme for each render (its Settings choice or the OS); only "dark" and "default" are
+// taken, anything else counts as "default".
+function themeOf(value) {
+  return value === "dark" ? "dark" : "default";
+}
 
-mermaid.initialize({
-  startOnLoad: false,
-  securityLevel: "strict",
-  htmlLabels: false,
-  flowchart: { htmlLabels: false },
-  theme: dark ? "dark" : "default",
-});
+function configure(theme) {
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: "strict",
+    htmlLabels: false,
+    flowchart: { htmlLabels: false },
+    theme: themeOf(theme),
+  });
+}
+
+configure("default");
 
 // The SVG as a standalone image: well-formed XML (XMLSerializer), with its size from the viewBox so an <img> shows it
 // at its drawn size instead of the 300x150 default for a "100%" width.
@@ -36,10 +44,11 @@ let count = 0;
 // One render at a time: Mermaid keeps state per render.
 let queue = Promise.resolve();
 
-async function render(id, text) {
+async function render(id, text, theme) {
   let reply;
   try {
     count++;
+    configure(theme);
     const { svg } = await mermaid.render("diagram-" + count, text);
     const image = standalone(svg);
     reply = image === null ? { type: "failed", id } : { type: "rendered", id, svg: image };
@@ -64,5 +73,6 @@ window.addEventListener("message", event => {
   if (data === null || typeof data !== "object" || data.type !== "render" || !Number.isInteger(data.id) || typeof data.text !== "string") {
     return;
   }
-  queue = queue.then(() => render(data.id, data.text));
+  const theme = data.theme;
+  queue = queue.then(() => render(data.id, data.text, theme));
 });

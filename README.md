@@ -327,6 +327,15 @@ This has not yet been checked by hand on macOS.
 A `|` you type is now saved as `|` (it used to be saved as `\|`), so tables already in your notes survive editing.
 A `\|` written in a file outside Context is saved as `|` once you edit the note in the app.
 
+### Theme
+
+In the desktop app, Settings starts with *Appearance*: `System`, `Light` or `Dark`. `System` (the default) follows
+your OS colour scheme; `Light` and `Dark` keep that look whatever the OS uses. The choice is stored as
+`"appearance":{"theme":"system"}` (or `"light"`, `"dark"`) in `settings.json` and applies at once and at every start;
+a missing or unknown value means `System`. The editor and every popover follow it, and Mermaid diagrams take it the
+next time they are drawn (diagrams already on screen keep their colours until then). The command bar window keeps
+following the OS, and the app may briefly show the OS colours while it starts.
+
 ### Note templates
 
 Keep notes you write again and again (meetings, reviews) as plain Markdown files in the `templates` folder of the

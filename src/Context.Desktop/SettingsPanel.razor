@@ -1,5 +1,6 @@
 @inherits StateComponent
-@* The settings: the Exchange calendar link (set, replace, remove), whether Context reads classic Outlook (Windows
+@* The settings: the theme (job 341, DesktopState.ThemeSetting; Main applies it to the page through OnThemeChanged),
+   the Exchange calendar link (set, replace, remove), whether Context reads classic Outlook (Windows
    only; DesktopState.OutlookSetting), whether a pasted link's page title may be downloaded
    (DesktopState.FetchTitlesSetting, off by default), the watched screenshot folder and the screenshot hotkey (job 260,
    DesktopState.ScreenshotFolderSetting) and the key that opens sensitive notes. The link
@@ -12,6 +13,22 @@
         <h2>Settings</h2>
         <button type="button" class="close" disabled="@busy" aria-label="Close" title="Close" @onclick="Close"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" /></svg></button>
     </div>
+    <h3 id="appearance-heading">Appearance</h3>
+    @if (theme is not AppTheme shownTheme)
+    {
+        <p class="theme-state grey">Loading…</p>
+    }
+    else
+    {
+        <div class="theme-choice" role="group" aria-labelledby="appearance-heading">
+            @foreach ((AppTheme option, string css, string label) in ThemeOptions)
+            {
+                <button type="button" class="@css" aria-pressed="@(option == shownTheme ? "true" : "false")"
+                        disabled="@busy" @onclick="() => ChooseTheme(option)">@label</button>
+            }
+        </div>
+    }
+    <p class="theme-result @themeResultClass" role="status">@themeResultText</p>
     <h3>Exchange calendar</h3>
     @if (link is null)
     {
@@ -227,6 +244,14 @@
     public const string ScreenshotNotSetText = "No screenshot folder set. Once one is set, images saved into it are added to the inbox.";
     public const string RemoveQuestion = "Remove the calendar link? The downloaded calendar copy is deleted too.";
 
+    // The theme buttons in order: the value, the button's class and its label.
+    private static readonly (AppTheme Theme, string Css, string Label)[] ThemeOptions =
+    [
+        (AppTheme.System, "theme-system", "System"),
+        (AppTheme.Light, "theme-light", "Light"),
+        (AppTheme.Dark, "theme-dark", "Dark"),
+    ];
+
     private const string TimeFormat = "yyyy-MM-dd HH:mm";
     private const string DateFormat = "yyyy-MM-dd";
 
@@ -235,6 +260,9 @@
     private OutlookSettingView? outlook;
     private string outlookResultText = string.Empty;
     private string outlookResultClass = string.Empty;
+    private AppTheme? theme;
+    private string themeResultText = string.Empty;
+    private string themeResultClass = string.Empty;
     private bool? fetchTitles;
     private string fetchTitlesResultText = string.Empty;
     private string fetchTitlesResultClass = string.Empty;
@@ -267,6 +295,10 @@
     [Parameter]
     public EventCallback OnClose { get; set; }
 
+    /// <summary>Raised once a theme was saved, so the page applies the saved theme.</summary>
+    [Parameter]
+    public EventCallback OnThemeChanged { get; set; }
+
     protected override Task OnInitializedAsync() => Load();
 
     protected override async Task OnStateChangedAsync()
@@ -291,6 +323,7 @@
     private async Task Load()
     {
         int mine = ++request;
+        AppTheme themeNow = await State.ThemeSetting();
         CalendarLinkView linkNow = await State.CalendarLinkSetting();
         OutlookSettingView outlookNow = await State.OutlookSetting();
         bool fetchTitlesNow = await State.FetchTitlesSetting();
@@ -304,6 +337,7 @@
             link = linkNow;
             outlook = outlookNow;
             fetchTitles = fetchTitlesNow;
+            theme = themeNow;
             key = keyNow;
         }
     }
@@ -445,6 +479,42 @@
 
         outlookResultText = DesktopText.OneLine(result.Text);
         outlookResultClass = result.Kind == ActionKind.Done ? "accent" : "red";
+        await Load();
+    }
+
+    // A theme button: a pressed one does nothing; otherwise stores the choice and, once saved, has the page apply it.
+    // A failed save leaves the saved theme pressed and the page as it was.
+    private async Task ChooseTheme(AppTheme chosen)
+    {
+        if (busy || theme is not AppTheme current || chosen == current)
+        {
+            return;
+        }
+
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.SetTheme(chosen);
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        if (result.Kind == ActionKind.Done)
+        {
+            theme = chosen;
+            themeResultText = DesktopActions.ThemeText(chosen);
+            themeResultClass = "accent";
+            await OnThemeChanged.InvokeAsync();
+        }
+        else
+        {
+            themeResultText = DesktopActions.SettingsNotSavedText;
+            themeResultClass = "red";
+        }
+
         await Load();
     }
 

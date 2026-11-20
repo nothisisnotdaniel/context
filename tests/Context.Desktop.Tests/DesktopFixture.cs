@@ -148,6 +148,13 @@ internal sealed class DesktopFixture : IDisposable
 
     public DesktopState? State { get; private set; }
 
+    /// <summary>Released once per <c>ContextEditor.setTheme</c> call (job 341), so a test awaits a call off the renderer.</summary>
+    public SemaphoreSlim ThemeSet { get; } = new SemaphoreSlim(0);
+
+    /// <summary>The theme names passed to <c>ContextEditor.setTheme</c> so far, in order.</summary>
+    public IReadOnlyList<string> Themes() =>
+        Bunit.JSInterop.Invocations["ContextEditor.setTheme"].Select(i => (string)i.Arguments[0]!).ToList();
+
     public DesktopActions? Actions { get; private set; }
 
     /// <summary>The note store the state and the actions share (set by <see cref="CreateState"/>).</summary>
@@ -274,6 +281,13 @@ internal sealed class DesktopFixture : IDisposable
         Bunit.Services.AddSingleton(State);
         Bunit.Services.AddSingleton(Actions);
         Bunit.Services.AddTransient<EditorInterop>();
+        // Job 341: Main applies the saved theme on its first render and after a save in Settings; the calls are
+        // recorded in Bunit.JSInterop, and each one releases ThemeSet once.
+        Bunit.JSInterop.SetupVoid("ContextEditor.setTheme", _ =>
+        {
+            ThemeSet.Release();
+            return true;
+        }).SetVoidResult();
         Bunit.Services.AddSingleton<IFileDialog>(Dialog);
         Bunit.Services.AddSingleton<IAutoSavePause>(AutoSave);
         Bunit.Services.AddSingleton(Guard);

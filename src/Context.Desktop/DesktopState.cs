@@ -1034,6 +1034,24 @@ internal sealed class DesktopState
     public Task<bool> FetchTitlesSetting() => Task.Run(FetchTitlesOn);
 
     /// <summary>
+    /// The saved theme (job 341, <c>"appearance":{"theme":…}</c>), off the calling thread. Never throws: a missing,
+    /// broken or unreadable <c>settings.json</c> gives <see cref="AppTheme.System"/>.
+    /// </summary>
+    public Task<AppTheme> ThemeSetting() => Task.Run(ThemeNow);
+
+    private AppTheme ThemeNow()
+    {
+        try
+        {
+            return new SettingsStore(notes.Root).ReadTheme();
+        }
+        catch (Exception)
+        {
+            return AppTheme.System;
+        }
+    }
+
+    /// <summary>
     /// The page title for a link pasted into a plain note, or <c>null</c>. Asks the page-title source (once) only when
     /// the setting is on; with it off (or unreadable), without a source or once <paramref name="token"/> is cancelled,
     /// nothing is requested. Never throws.

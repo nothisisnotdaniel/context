@@ -5,6 +5,7 @@
 // writes to the document: the node view only shows or hides the code next to the picture.
 import { Plugin, TextSelection } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
+import { currentMermaidTheme } from "./theme.js";
 
 /** The longest fence text that is sent to the frame; a longer one shows the hint. */
 export const MaxDiagramChars = 50000;
@@ -107,7 +108,7 @@ function send(block, text) {
   const current = frame();
   const id = ++lastId;
   current.blocks.set(id, block);
-  const message = { type: "render", id, text };
+  const message = { type: "render", id, text, theme: currentMermaidTheme() };
   if (current.loaded && current.element.contentWindow !== null) {
     current.element.contentWindow.postMessage(message, "*");
   } else {

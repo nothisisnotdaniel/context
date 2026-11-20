@@ -27,6 +27,19 @@ internal sealed class SettingsTooLargeException : IOException
     }
 }
 
+/// <summary>The desktop colour theme (job 341): follow the OS, or always light or dark.</summary>
+internal enum AppTheme
+{
+    /// <summary>Follow the OS colour scheme.</summary>
+    System,
+
+    /// <summary>Always light.</summary>
+    Light,
+
+    /// <summary>Always dark.</summary>
+    Dark,
+}
+
 /// <summary>
 /// What the automatic day's end has already done: the last leaving it wrote into a <c>## Worked</c> section
 /// (<c>yyyy-MM-ddTHH:mm</c>, raw) and the last day whose todos it moved. Both <c>null</c> when not recorded.
@@ -310,6 +323,8 @@ internal sealed class SettingsStore
     private const string ScreenshotsKey = "screenshots";
     private const string FolderKey = "folder";
     private const string RepositoriesKey = "repositories";
+    private const string AppearanceKey = "appearance";
+    private const string ThemeKey = "theme";
 
     /// <summary>The longest screenshot folder path.</summary>
     public const int MaxScreenshotFolderLength = 1024;
@@ -466,6 +481,36 @@ internal sealed class SettingsStore
         document[PasteKey] = new JsonObject { [FetchTitlesKey] = enabled };
         Write(document);
     }
+
+    /// <summary>
+    /// The saved theme (job 341): <c>appearance</c> exactly <c>{"theme":"system"|"light"|"dark"}</c> (lower-case
+    /// strings). A missing file or section, or any other value, gives <see cref="AppTheme.System"/>. Throws
+    /// <see cref="SettingsStoreException"/> only when the file itself can't be read or isn't a JSON object.
+    /// </summary>
+    public AppTheme ReadTheme() => ThemeOf(ReadRoot());
+
+    /// <summary>
+    /// Writes <c>"appearance":{"theme":"<lower-case name>"}</c>, replacing whatever <c>appearance</c> held and keeping
+    /// every other property, creating the root folder if needed. Throws like <see cref="SaveOutlook"/>.
+    /// </summary>
+    public void SaveTheme(AppTheme theme)
+    {
+        string name = ThemeName(theme);
+        JsonObject document = ReadRoot();
+        DayEndOf(document);
+        SavedSearchesOf(document);
+        document[AppearanceKey] = new JsonObject { [ThemeKey] = name };
+        Write(document);
+    }
+
+    /// <summary>The stored and JS name of <paramref name="theme"/>: <c>system</c>, <c>light</c> or <c>dark</c>.</summary>
+    public static string ThemeName(AppTheme theme) => theme switch
+    {
+        AppTheme.System => "system",
+        AppTheme.Light => "light",
+        AppTheme.Dark => "dark",
+        _ => throw new ArgumentOutOfRangeException(nameof(theme)),
+    };
 
     /// <summary>
     /// The watched screenshot folder (job 260), or null when the file or <c>screenshots</c> is missing. Throws
@@ -868,6 +913,25 @@ internal sealed class SettingsStore
             JsonValueKind.True => true,
             JsonValueKind.False => false,
             _ => null,
+        };
+    }
+
+    // The stored theme, or System when "appearance" is missing or anything other than exactly {"theme":<known name>}.
+    private static AppTheme ThemeOf(JsonObject document)
+    {
+        if (!document.TryGetPropertyValue(AppearanceKey, out JsonNode? node)
+            || node is not JsonObject section
+            || section.Count != 1
+            || !section.TryGetPropertyValue(ThemeKey, out JsonNode? themeNode))
+        {
+            return AppTheme.System;
+        }
+
+        return StringOf(themeNode) switch
+        {
+            "light" => AppTheme.Light,
+            "dark" => AppTheme.Dark,
+            _ => AppTheme.System,
         };
     }
 

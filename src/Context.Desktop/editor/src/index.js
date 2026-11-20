@@ -5,6 +5,7 @@ import { opensChip, typedBlock, typedMarkdown, commandMarkdown, typedAtMarkdown,
 import { pastedMarkdown, titledMarkdown } from "./paste.js";
 import { isMermaidFence, mermaidResultJson, shouldRender } from "./mermaid.js";
 import { tokensJson, languageOptionsJson, withLanguage } from "./highlight.js";
+import { setTheme, mermaidTheme } from "./theme.js";
 
 // A file dropped anywhere in the window must never navigate the web view: the editor handles its own drops.
 if (typeof globalThis.addEventListener === "function") {
@@ -47,6 +48,9 @@ globalThis.ContextEditor = Object.freeze({
   isMermaidFence,
   mermaidResultJson,
   shouldRender,
+  // Theme (job 341): the root's data-theme, and the pure Mermaid theme rule.
+  setTheme,
+  mermaidTheme,
   // Code (job 283): the selection-marked command and typing hooks, the changed-block rule, syntax tokens, the language
   // picker's options and params rule, and the copy fallback chain (given its clipboard functions).
   commandMarkdown,

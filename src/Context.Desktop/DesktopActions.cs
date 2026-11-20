@@ -240,6 +240,9 @@ internal sealed class DesktopActions
     public const string FetchTitlesOnText = "Page titles on.";
     public const string FetchTitlesOffText = "Page titles off.";
     public const string SettingsNotSavedText = "Can't save settings.json.";
+    public const string ThemeSystemText = "Theme: System.";
+    public const string ThemeLightText = "Theme: Light.";
+    public const string ThemeDarkText = "Theme: Dark.";
     public const string RepositoryBlankText = "Type a folder path.";
     public const string RepositoryRelativeText = "Type an absolute folder path.";
     public const string RepositoryTooLongText = "A folder path can be at most 400 characters.";
@@ -1726,6 +1729,44 @@ internal sealed class DesktopActions
 
         return new ActionResult(ActionKind.Done, ActionReason.None, on ? FetchTitlesOnText : FetchTitlesOffText);
     }
+
+    /// <summary>
+    /// Stores the theme (job 341, <c>"appearance":{"theme":…}</c> in <c>settings.json</c>, every other property kept).
+    /// Done with <see cref="ThemeSystemText"/>, <see cref="ThemeLightText"/> or <see cref="ThemeDarkText"/>; a file that
+    /// can't be read, would be too large or can't be written is not changed: Refused or Failed with
+    /// <see cref="SettingsNotSavedText"/>.
+    /// </summary>
+    public Task<ActionResult> SetTheme(AppTheme theme) => Run(() => SetThemeNow(theme));
+
+    private ActionResult SetThemeNow(AppTheme theme)
+    {
+        try
+        {
+            settings.SaveTheme(theme);
+        }
+        catch (SettingsTooLargeException)
+        {
+            return Refused(ActionReason.Invalid, SettingsNotSavedText);
+        }
+        catch (SettingsStoreException)
+        {
+            return Failed(ActionReason.Unreadable, SettingsNotSavedText);
+        }
+        catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+        {
+            return Failed(ActionReason.WriteFailed, SettingsNotSavedText);
+        }
+
+        return new ActionResult(ActionKind.Done, ActionReason.None, ThemeText(theme));
+    }
+
+    /// <summary>The Done text for <paramref name="theme"/>.</summary>
+    public static string ThemeText(AppTheme theme) => theme switch
+    {
+        AppTheme.Light => ThemeLightText,
+        AppTheme.Dark => ThemeDarkText,
+        _ => ThemeSystemText,
+    };
 
     /// <summary>The notification and result text for a screenshot that was not stored: <c>Screenshot not saved: &lt;reason&gt;.</c></summary>
     public static string ScreenshotNotSavedText(string reason) => $"Screenshot not saved: {reason}.";

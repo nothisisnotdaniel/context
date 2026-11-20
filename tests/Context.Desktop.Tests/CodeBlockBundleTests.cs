@@ -302,12 +302,14 @@ public sealed class CodeBlockBundleTests : IClassFixture<EditorBundle>
 
         string light = Block(app, ":root {");
         string dark = Block(app, "@media (prefers-color-scheme: dark) {");
+        string chosenDark = Block(app, ":root[data-theme=\"dark\"] {");
         List<string> used = Regex.Matches(editor, @"var\((--code-[a-z-]+)\)").Select(m => m.Groups[1].Value).Distinct().ToList();
         Assert.True(used.Count >= 9, string.Join(", ", used));
         foreach (string name in used)
         {
             Assert.Contains(name + ":", light, StringComparison.Ordinal);
             Assert.Contains(name + ":", dark, StringComparison.Ordinal);
+            Assert.Contains(name + ":", chosenDark, StringComparison.Ordinal);
         }
     }
 

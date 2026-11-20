@@ -1,4 +1,5 @@
-/* Context desktop: steelblue1 accents, grey secondary text, red errors; light or dark from the system. */
+/* Context desktop: steelblue1 accents, grey secondary text, red errors; light or dark from the system, or as chosen in
+   Settings (job 341: data-theme on the root element; none follows the system). */
 :root {
     color-scheme: light dark;
     --accent: #63b8ff;
@@ -27,7 +28,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
         --accent-strong: #63b8ff;
         --text: #f5f5f7;
         --grey: #98989d;
@@ -49,6 +50,35 @@
         --task-local-bg: #262628;
         --task-global-bg: #1a2a3c;
     }
+}
+
+/* 341: the Settings theme. Light keeps the light variables above; dark is the same set as the media block. */
+:root[data-theme="light"] {
+    color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --accent-strong: #63b8ff;
+    --text: #f5f5f7;
+    --grey: #98989d;
+    --red: #ff453a;
+    --background: #1c1c1e;
+    --panel: #242426;
+    --line: #3a3a3c;
+    --on-accent: #1c1c1e;
+    --code-bg: #2c2c2e;
+    --code-text: #f5f5f7;
+    --code-keyword: #ff7b72;
+    --code-string: #a5d6ff;
+    --code-comment: #8b949e;
+    --code-number: #79c0ff;
+    --code-title: #d2a8ff;
+    --code-built-in: #ffa657;
+    --code-literal: #79c0ff;
+    --code-attr: #7ee787;
+    --task-local-bg: #262628;
+    --task-global-bg: #1a2a3c;
 }
 
 * {
@@ -448,7 +478,7 @@ input[type="password"] {
     border: 1px solid var(--line);
     border-radius: 6px;
     color: var(--text);
-    color-scheme: light dark;
+    color-scheme: inherit;
     font: inherit;
     min-width: 0;
     padding: 4px 8px;
