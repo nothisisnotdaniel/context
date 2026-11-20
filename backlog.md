@@ -309,7 +309,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#337](backlog/337-split-notehtml-cs-into-block-and.md) Split NoteHtml.cs into block and inline renderers
 - [?] [#338](backlog/338-fix-the-stale-comment-above-sharenotenow.md) Fix the stale comment above ShareNoteNow
 - [?] [#339](backlog/339-share-a-note-as-pdf.md) Share a note as PDF
-- [?] [#340](backlog/340-briefing-links-for-note-names-with.md) Briefing links for note names with brackets
+- [ ] [#340](backlog/340-briefing-links-for-note-names-with.md) Briefing links for note names with brackets
 - [?] [#342](backlog/342-cap-the-screenshot-folder-watcher-s.md) Cap the screenshot folder watcher's seen set
 - [h] [#343](backlog/343-check-the-screenshot-hotkey-and-watched.md) Check the screenshot hotkey and watched folder on macOS
 - [?] [#344](backlog/344-harden-the-mermaid-svg-blob-url.md) Harden the mermaid SVG blob: URL
