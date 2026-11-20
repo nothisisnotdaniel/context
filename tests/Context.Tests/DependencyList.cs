@@ -56,8 +56,9 @@ internal static partial class DependencyList
 
         CheckCsprojs(root, nuget, problems);
         CheckLockFiles(root, nuget, problems);
-        HashSet<(string Name, string Version)> packageJson = CheckPackageJson(root, npm, problems);
-        CheckLicences(root, npm, packageJson, problems);
+        List<(string Name, string Version, string Licence)> headings = Headings(root, problems);
+        HashSet<(string Name, string Version)> packageJson = CheckPackageJson(root, npm, headings, problems);
+        CheckLicences(npm, headings, packageJson, problems);
         CheckTools(root, tools, problems);
         CheckReadme(root, problems);
         return problems;
@@ -238,7 +239,8 @@ internal static partial class DependencyList
         }
     }
 
-    private static HashSet<(string Name, string Version)> CheckPackageJson(string root, List<Row> npm, List<string> problems)
+    private static HashSet<(string Name, string Version)> CheckPackageJson(
+        string root, List<Row> npm, List<(string Name, string Version, string Licence)> headings, List<string> problems)
     {
         HashSet<(string, string)> entries = [];
         string path = Path.Combine(root, PackageJsonPath);
@@ -248,7 +250,7 @@ internal static partial class DependencyList
             return entries;
         }
 
-        HashSet<(string, string)> bundled = [.. Headings(root, []).Select(heading => (heading.Name, heading.Version))];
+        HashSet<(string, string)> bundled = [.. headings.Select(heading => (heading.Name, heading.Version))];
         using JsonDocument document = JsonDocument.Parse(Read(path));
         foreach (string group in (string[])["dependencies", "devDependencies"])
         {
@@ -276,9 +278,9 @@ internal static partial class DependencyList
         return entries;
     }
 
-    private static void CheckLicences(string root, List<Row> npm, HashSet<(string Name, string Version)> packageJson, List<string> problems)
+    private static void CheckLicences(
+        List<Row> npm, List<(string Name, string Version, string Licence)> headings, HashSet<(string Name, string Version)> packageJson, List<string> problems)
     {
-        List<(string Name, string Version, string Licence)> headings = Headings(root, problems);
         HashSet<(string, string)> bundled = [];
         foreach ((string name, string version, string licence) in headings)
         {
