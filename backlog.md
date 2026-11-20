@@ -146,7 +146,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#406](backlog/406-carry-a-line-to-the-next.md) Carry a line to the next meeting with - [>] (after: #407) → 330-carry-over-marker
 - [x] [#404](backlog/404-todos-page-opened-from-an-exclamation.md) Todos page opened from an exclamation-mark icon in the left sidebar → 331-todos-page-icon
 - [x] [#405](backlog/405-affiliation-as-a-comma-separated-list.md) Affiliation as a comma-separated list → 332-affiliation-list
-- [ ] [#401](backlog/401-say-why-the-app-ended-in.md) Say why the app ended in the crash log
+- [x] [#401](backlog/401-say-why-the-app-ended-in.md) Say why the app ended in the crash log → 334-exit-reason-log
 - [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4)
 - [x] [#234](backlog/234-release-and-ci-workflow-hardening.md) Release and CI workflow hardening → 272-release-ci-hardening
 - [x] [#113](backlog/113-refuse-removed-secret-options-after-a.md) Refuse removed secret options after a command → 273-refuse-removed-secret-options
