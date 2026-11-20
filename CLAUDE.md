@@ -432,7 +432,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     sensitive note `Make plain` and `Lock` instead of `Open in default editor`; both mark and make-plain ask in a
     `ConfirmDialog` and need a saved note.
   - **Rules (tests):** no file in `src/Context.Core/` or `src/Context/` mentions `AesGcm`, `ECDiffieHellman`,
-    `IKeyStore` or `SealedNote`; `DllImport`/`LibraryImport`/`extern ` appear only in `MacKeyStore.cs`, `OutlookComSource.cs` and (job 260, 282) `MacGlobalHotkey.cs`; `X509Store`
+    `IKeyStore` or `SealedNote`; `DllImport`/`LibraryImport`/`extern ` appear only in `MacKeyStore.cs`, `OutlookComSource.cs`, (job 260, 282) `MacGlobalHotkey.cs` and (job 334) `SessionEndWatcher.cs`; `X509Store`
     and `CngKey` only in `WindowsKeyStore.cs`; no test references `WindowsKeyStore`, `MacKeyStore` or
     `PhotinoFileDialog` (tests use `FakeKeyStore`, which counts `Agree` and can throw, and `FakeFileDialog`), so
     `dotnet test` never touches a real key store, Keychain or file dialog; no new NuGet package.
@@ -1875,19 +1875,35 @@ Every factory agent reads this file before working on Context. Keep it short and
     (2000; only the home folder becomes `~`, other absolute paths in messages and stacks stay); never `Data`, environment, arguments or a machine/user field; below `MaxBytes` (64 KiB, later entries left
     out). It then keeps the newest `MaxLogs` (10) regular files named exactly like a log (no link; `File.Delete`, its only
     writing call besides `File.WriteAllText` and the `CreateNew` stream) and returns the path, or `null`; it never throws.
-    The session file `.logs/session` holds `running <ISO-8601 UTC start>` or `clean <start>` (written in place).
-    `Begin()` reads it (missing, unreadable, over 200 bytes or malformed: no session, no hint), returns a
+    The session file `.logs/session` holds `running <ISO-8601 UTC start>`, `running <start> <code>` or `clean <start>`
+    (written in place). **Exit reason** (job 334, `ExitReason.cs`): `RecordExit(ExitReason)` rewrites it as
+    `running <start> <code>` (codes `process-exit`, `logoff`, `shutdown`, `close-app`; `ExitReasons.Code`/`Text`/
+    `FromCode`); only the first reason counts, nothing is written before `Begin()` (a second copy) or after `End()`
+    (a normal exit raises `ProcessExit` after it), `End()` after it still writes `clean <start>`; the decision and every
+    session write happen under `gate`; it never throws. `ExitReasons.FromEndSession(ending, flags)` maps `WM_ENDSESSION`
+    (`ending` false: null; `ENDSESSION_LOGOFF` 0x80000000: `Logoff`; else `ENDSESSION_CLOSEAPP` 0x1: `CloseApp`; else
+    `Shutdown`; `ENDSESSION_CRITICAL` ignored).
+    `Begin()` reads it (missing, unreadable, over 200 bytes or malformed, including `clean <S> <code>` and four or more
+    words: no session, no hint; a third word that is none of the four codes is no reason), returns a
     `CrashHint(LogPath, Folder)` for the newest log whose name time is at or after the previous start, or after a
-    `running` session with none writes an `unclean-exit` log (`No exception was caught; the app was killed or the web
-    view stopped. Previous start: <S>.`) and returns that; then writes `running <now>`, where now is read after that
+    `running` session with none writes an `unclean-exit` log (`CrashLog.UncleanText(start, reason?)`: with a reason
+    `No exception was caught. The app recorded how it ended: <text>. Previous start: <S>.`, the texts `the .NET runtime
+    shut down (Environment.Exit or a normal process exit)`, `Windows was logging off`, `Windows was shutting down or
+    restarting (also for updates)`, `Windows asked the app to close (an installer or update)`; without one `No exception
+    was caught and no exit reason was recorded; the process was killed or ended without warning. Previous start: <S>.`)
+    and returns that; then writes `running <now>`, where now is read after that
     write and is at least 1 ms after the newest log's name time (so a shown log never shows again on the next start).
     `End()` writes `clean <start>`. Nothing is written through a link: when `.logs` is a link, a reparse point or not a
     folder (`CrashLog.IsPlainFolder`), or `session` is a link, a folder or a reparse point, the write is skipped.
     `Program.cs` builds it right after `VelopackApp.Build().Run()` (`NoteStore.DefaultFolder()`, OS description +
     architecture, `StartupUpdate.CurrentVersion`, the user profile), hooks `AppDomain.UnhandledException` (`unhandled`)
-    and `TaskScheduler.UnobservedTaskException` (`unobserved-task`, then `SetObserved()`), calls `Begin()` only through
+    and `TaskScheduler.UnobservedTaskException` (`unobserved-task`, then `SetObserved()`) and `AppDomain.ProcessExit`
+    (`RecordExit(ExitReason.ProcessExit)`; job 334), calls `Begin()` only through
     `DesktopStartup.Begin` once it holds `<root>/.desktop/running.lock` (job 315: a second copy never reads or writes
-    `session`), registers the
+    `session`), on Windows after the hand-over return starts `SessionEndWatcher` (job 334, user32 P/Invoke, no
+    package: a background thread with a hidden top-level window of its own class and a `GetMessage` loop;
+    `WM_QUERYENDSESSION` answers TRUE and records nothing, `WM_ENDSESSION` records `FromEndSession`'s reason before it
+    returns; never throws, a failed start leaves the app without it; no test loads it), registers the
     log and the hint (when there is one) as singletons, and calls `End()` after `app.Run()`. `App.razor` wraps `<Main />`
     in `CrashBoundary` (`ErrorBoundaryBase`; `OnErrorAsync` writes source `component`; shows red `p.crash-boundary`
     `Something went wrong. Crash log: <path>. Close and reopen Context.`). `Main` renders `CrashHintBar` first: with a
@@ -1895,7 +1911,10 @@ Every factory agent reads this file before working on Context. Keep it short and
     (path in `title`) with `Open folder` (`DesktopActions.OpenCrashFolder(hint)`, the launcher with `CrashHint.Folder`,
     only when it is a plain folder at click time; otherwise, or on a throw, red `Can't open the folder.`) and `Dismiss`. Both components get the optional services through
     `IServiceProvider.GetService`. `CrashLog.cs` names no `NoteStore`, `DesktopActions` or `Console.` (`DesktopSourceTests`).
-    Not covered: a web-view render crash while the app keeps running (only the next start's `unclean-exit` sees it).
+    Not covered: a web-view render crash while the app keeps running (only the next start's `unclean-exit` sees it);
+    WebView2 `ProcessFailed` (Photino exposes no `CoreWebView2`); restart versus shutdown; macOS logout (SIGTERM shows as
+    `process-exit`). Manual check on Windows: sign out or restart with the app open, then the next log names it;
+    after `taskkill /F` it says no reason was recorded.
     **Update:** `Program.Main` starts with `VelopackApp.Build().Run()` (Velopack's install/update hooks), and before
     the window opens `StartupUpdate(IUpdateSource).Start()` runs the silent update on a pool thread: it returns at once
     and never throws. Not `IsInstalled`: nothing is called. Otherwise `CheckAsync`; when a newer version is found,

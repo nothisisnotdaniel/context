@@ -36,6 +36,10 @@ internal static class Program
             e.SetObserved();
         };
 
+        // Job 334: how the app ends is recorded in the session while it still runs, so the next start's unclean-exit
+        // log can name it. A normal exit raises ProcessExit after End(), which then records nothing.
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => crashLog.RecordExit(ExitReason.ProcessExit);
+
         // A second copy (job 315): the running lock is taken before anything else, and only the copy that holds it
         // reads and writes the crash session, so a second start files no false unclean-exit log. On Windows a second
         // start leaves a show request for the open window and exits at once.
@@ -43,6 +47,12 @@ internal static class Program
         if (start.HandOver)
         {
             return;
+        }
+
+        // Job 334: the Windows session ending (logoff, shutdown or restart, an installer's close) is recorded too.
+        if (OperatingSystem.IsWindows())
+        {
+            _ = new SessionEndWatcher(crashLog).Start();
         }
 
         using FileStream? runningLock = start.Lock;
