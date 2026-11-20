@@ -100,22 +100,33 @@ internal static class Program
         }
 
         // Brings the window to the front (job 315): restored when minimized, then raised above the others for a moment.
-        // Runs on the window's thread; a Photino failure leaves the window where it is.
+        // Runs on the window's thread; a Photino failure, also from Invoke while the window closes, leaves the window
+        // where it is and never reaches the watcher's pool thread.
         static void BringToFront(PhotinoWindow shown)
         {
             try
             {
-                if (shown.Minimized)
+                shown.Invoke(() =>
                 {
-                    shown.SetMinimized(false);
-                }
+                    try
+                    {
+                        if (shown.Minimized)
+                        {
+                            shown.SetMinimized(false);
+                        }
 
-                shown.SetTopMost(true);
-                shown.SetTopMost(false);
+                        shown.SetTopMost(true);
+                        shown.SetTopMost(false);
+                    }
+                    catch (Exception)
+                    {
+                        // The window stays where it is.
+                    }
+                });
             }
             catch (Exception)
             {
-                // The window stays where it is.
+                // The window is closing or gone.
             }
         }
 
@@ -261,7 +272,7 @@ internal static class Program
         // it to the front on macOS. A show request from a second copy on Windows (job 315) brings this window to the front.
         using OpenRequestWatcher openRequests = new OpenRequestWatcher(folder);
         openRequests.ItemRequested += item => _ = actions.OpenRequestedItem(item);
-        openRequests.ShowRequested += () => app.MainWindow.Invoke(() => BringToFront(app.MainWindow));
+        openRequests.ShowRequested += () => BringToFront(app.MainWindow);
         openRequests.Start();
 
         // Screenshots into the inbox (job 260): the watched folder from the settings page follows every state change, and
