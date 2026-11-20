@@ -3203,8 +3203,9 @@ public sealed class DesktopSourceTests
         string app = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
         string light = ThemeBlock(app, ":root {");
         string dark = ThemeBlock(app, "@media (prefers-color-scheme: dark) {");
+        string chosenDark = ThemeBlock(app, ":root[data-theme=\"dark\"] {");
 
-        foreach (string theme in new[] { light, dark })
+        foreach (string theme in new[] { light, dark, chosenDark })
         {
             foreach (string background in new[] { "--task-local-bg", "--task-global-bg" })
             {
@@ -3325,6 +3326,101 @@ public sealed class DesktopSourceTests
             .ToList();
         Assert.Equal([ActionsFile], callers);
     }
+
+    // ---- 341: the theme setting ----
+
+    // 341 AC-7: data-theme="light" sets color-scheme light and keeps the light variables (no variable of its own),
+    // data-theme="dark" sets color-scheme dark and exactly the media block's dark variables, the media block applies
+    // only without data-theme="light", and app.css is the only stylesheet the page and editor use that queries the
+    // system scheme.
+    [Fact]
+    public void Css_ThemeBlocks_FollowDataTheme()
+    {
+        string desktop = Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder);
+        string app = File.ReadAllText(Path.Combine(desktop, "wwwroot", "app.css"));
+        string light = ThemeBlock(app, ":root {");
+        string media = ThemeBlock(app, "@media (prefers-color-scheme: dark) {");
+        string chosenLight = ThemeBlock(app, ":root[data-theme=\"light\"] {");
+        string chosenDark = ThemeBlock(app, ":root[data-theme=\"dark\"] {");
+
+        Assert.Contains("color-scheme: light dark;", light, StringComparison.Ordinal);
+        Assert.Contains(":root:not([data-theme=\"light\"]) {", media, StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(app, @"@media \(prefers-color-scheme"));
+        Assert.Single(Regex.Matches(app, @":root\[data-theme=""light""\] \{"));
+        Assert.Single(Regex.Matches(app, @":root\[data-theme=""dark""\] \{"));
+        Assert.Matches(@"\{\s*color-scheme: light;\s*\}", chosenLight);
+        Assert.Empty(Variables(chosenLight));
+        Assert.Contains("color-scheme: dark;", chosenDark, StringComparison.Ordinal);
+
+        Dictionary<string, string> mediaVars = Variables(media);
+        Dictionary<string, string> darkVars = Variables(chosenDark);
+        Assert.True(mediaVars.Count >= 20, string.Join(", ", mediaVars.Keys));
+        Assert.Equal(mediaVars.OrderBy(p => p.Key, StringComparer.Ordinal), darkVars.OrderBy(p => p.Key, StringComparer.Ordinal));
+        foreach (string name in darkVars.Keys)
+        {
+            Assert.Contains(name + ":", light, StringComparison.Ordinal);
+        }
+
+        // Text and grey keep 4.5:1 on the background and the panel in every block.
+        foreach (string theme in new[] { light, media, chosenDark })
+        {
+            foreach (string background in new[] { "--background", "--panel" })
+            {
+                foreach (string text in new[] { "--text", "--grey" })
+                {
+                    double ratio = Contrast(Colour(theme, text), Colour(theme, background));
+                    Assert.True(ratio >= 4.5, $"{text} on {background}: {ratio:F2}");
+                }
+            }
+        }
+
+        // Only .css files are scanned: theme.js needs the query to pick Mermaid's theme (AC-8).
+        List<string> querying = Directory.EnumerateFiles(Path.Combine(desktop, "wwwroot"), "*.css", SearchOption.AllDirectories)
+            .Where(f => !Path.GetRelativePath(Path.Combine(desktop, "wwwroot"), f).Replace('\\', '/').StartsWith("commandbar/", StringComparison.Ordinal))
+            .Concat(Directory.EnumerateFiles(Path.Combine(desktop, "editor", "src"), "*.css", SearchOption.AllDirectories))
+            .Where(f => File.ReadAllText(f).Contains("prefers-color-scheme", StringComparison.Ordinal))
+            .Select(f => Path.GetRelativePath(desktop, f).Replace('\\', '/'))
+            .ToList();
+        Assert.Equal(["wwwroot/app.css"], querying);
+    }
+
+    // 341 (review round 1): the theme buttons sit in a row with a gap, the pressed one is filled with --accent-strong
+    // and --on-accent text (4.5:1 in every theme block), and the empty result line takes no room.
+    [Fact]
+    public void Css_ThemeChoice_RowAndVisiblePressedState()
+    {
+        string app = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+
+        Assert.Matches(@"\.settings-panel \.theme-choice \{[^}]*display: flex;[^}]*gap: 6px;", app);
+        string pressed = ThemeBlock(app, ".settings-panel .theme-choice button[aria-pressed=\"true\"] {");
+        Assert.Contains("background: var(--accent-strong);", pressed, StringComparison.Ordinal);
+        Assert.Contains("border-color: var(--accent-strong);", pressed, StringComparison.Ordinal);
+        Assert.Contains("color: var(--on-accent);", pressed, StringComparison.Ordinal);
+        Assert.Matches(@"\.settings-panel \.theme-result:empty \{\s*display: none;\s*\}", app);
+
+        string light = ThemeBlock(app, ":root {");
+        foreach (string theme in new[] { light, ThemeBlock(app, "@media (prefers-color-scheme: dark) {"), ThemeBlock(app, ":root[data-theme=\"dark\"] {") })
+        {
+            // Every block sets both --accent-strong and --on-accent.
+            double ratio = Contrast(Colour(theme, "--on-accent"), Colour(theme, "--accent-strong"));
+            Assert.True(ratio >= 4.5, $"--on-accent on --accent-strong: {ratio:F2}");
+        }
+    }
+
+    // 341: text fields take the root's colour scheme, so a chosen theme reaches their native parts too.
+    [Fact]
+    public void Css_TextFields_InheritColourScheme()
+    {
+        string app = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+
+        Assert.Single(Regex.Matches(app, "color-scheme: light dark;"));
+        Assert.Matches(@"input\[type=""password""\] \{[^}]*color-scheme: inherit;", app);
+    }
+
+    // The custom properties (--name: value) set directly in a block, by name.
+    private static Dictionary<string, string> Variables(string block) =>
+        Regex.Matches(block, @"(--[a-z0-9-]+):\s*([^;]+);")
+            .ToDictionary(m => m.Groups[1].Value, m => m.Groups[2].Value.Trim(), StringComparer.Ordinal);
 
     // The text of the first block that opens with start, up to its matching brace (nested blocks included).
     private static string ThemeBlock(string css, string start)

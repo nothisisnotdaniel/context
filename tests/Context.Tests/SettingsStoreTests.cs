@@ -798,4 +798,159 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Throws<ArgumentException>(() => new SettingsStore(root).SaveScreenshotFolder(folder));
         Assert.False(Directory.Exists(root));
     }
+
+    // ---- 341: the theme ----
+
+    // 341 AC-1: a missing file or section, or anything but exactly {"theme":"system"|"light"|"dark"}, is System; a
+    // missing file creates nothing.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("{}")]
+    [InlineData("{\"appearance\":{\"theme\":\"system\"}}")]
+    [InlineData("{\"appearance\":{\"theme\":\"Dark\"}}")]
+    [InlineData("{\"appearance\":{\"theme\":\"LIGHT\"}}")]
+    [InlineData("{\"appearance\":{\"theme\":\" dark\"}}")]
+    [InlineData("{\"appearance\":{\"theme\":\"blue\"}}")]
+    [InlineData("{\"appearance\":{\"theme\":1}}")]
+    [InlineData("{\"appearance\":{\"theme\":null}}")]
+    [InlineData("{\"appearance\":{\"theme\":[\"dark\"]}}")]
+    [InlineData("{\"appearance\":{\"theme\":\"dark\",\"x\":1}}")]
+    [InlineData("{\"appearance\":{}}")]
+    [InlineData("{\"appearance\":\"dark\"}")]
+    [InlineData("{\"appearance\":[\"dark\"]}")]
+    [InlineData("{\"theme\":\"dark\"}")]
+    public void ReadTheme_MissingOrOther_IsSystem(string? text)
+    {
+        if (text is not null)
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllText(FilePath, text);
+        }
+
+        Assert.Equal(AppTheme.System, new SettingsStore(root).ReadTheme());
+        Assert.Equal(text is not null, Directory.Exists(root));
+    }
+
+    // 341 AC-1: each valid value is read as its theme, a broken dayEnd elsewhere included.
+    [Theory]
+    [InlineData("light", nameof(AppTheme.Light))]
+    [InlineData("dark", nameof(AppTheme.Dark))]
+    [InlineData("system", nameof(AppTheme.System))]
+    public void ReadTheme_ValidValue_GivesTheme(string name, string expectedName)
+    {
+        AppTheme expected = Enum.Parse<AppTheme>(expectedName);
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, "{\"dayEnd\":{\"moved\":5},\"appearance\":{\"theme\":\"" + name + "\"}}");
+
+        Assert.Equal(expected, new SettingsStore(root).ReadTheme());
+    }
+
+    // 341 AC-1: a file that isn't a JSON object, or can't be read, throws.
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("[1]")]
+    [InlineData("\"dark\"")]
+    public void ReadTheme_Broken_Throws(string text)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, text);
+
+        Assert.Throws<SettingsStoreException>(() => new SettingsStore(root).ReadTheme());
+    }
+
+    // 341 AC-1: a folder in place of the file can't be read.
+    [Fact]
+    public void ReadTheme_FolderInPlace_Throws()
+    {
+        Directory.CreateDirectory(FilePath);
+
+        Assert.Throws<SettingsStoreException>(() => new SettingsStore(root).ReadTheme());
+    }
+
+    // 341 AC-2: each theme is written as {"theme":"<lower-case name>"}, replacing what appearance held, keeping every
+    // other property equal in value.
+    [Theory]
+    [InlineData(nameof(AppTheme.System), "system")]
+    [InlineData(nameof(AppTheme.Light), "light")]
+    [InlineData(nameof(AppTheme.Dark), "dark")]
+    public void SaveTheme_WritesName_ReplacesAppearance_KeepsOthers(string themeName, string name)
+    {
+        AppTheme theme = Enum.Parse<AppTheme>(themeName);
+        Directory.CreateDirectory(root);
+        File.WriteAllText(
+            FilePath,
+            "{\"theme\":\"x\",\"dayEnd\":{\"worked\":\"2026-11-14T17:00\",\"moved\":\"2026-11-14\"},"
+            + "\"savedSearches\":[{\"name\":\"Work\",\"query\":\"#work\"}],"
+            + "\"boards\":[{\"tag\":\"work\",\"columns\":[\"todo\",\"done\"]}],\"outlook\":{\"enabled\":true},"
+            + "\"paste\":{\"fetchTitles\":true},\"appearance\":{\"theme\":\"blue\",\"extra\":[1]}}");
+        SettingsStore store = new SettingsStore(root);
+        System.Text.Json.Nodes.JsonNode before = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(FilePath))!;
+
+        store.SaveTheme(theme);
+
+        Assert.Equal(theme, store.ReadTheme());
+        System.Text.Json.Nodes.JsonNode after = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(FilePath))!;
+        foreach (string key in new[] { "theme", "dayEnd", "savedSearches", "boards", "outlook", "paste" })
+        {
+            Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(before[key], after[key]), key);
+        }
+
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(
+            System.Text.Json.Nodes.JsonNode.Parse("{\"theme\":\"" + name + "\"}"), after["appearance"]));
+        Assert.Equal(7, after.AsObject().Count);
+        Assert.Equal([SettingsStore.FileName], Directory.GetFiles(root).Select(f => Path.GetFileName(f)!).ToArray());
+    }
+
+    // 341 AC-2: a save creates the folder and the file when there are none.
+    [Fact]
+    public void SaveTheme_CreatesTheFile()
+    {
+        SettingsStore store = new SettingsStore(root);
+
+        store.SaveTheme(AppTheme.Dark);
+
+        Assert.Equal(AppTheme.Dark, store.ReadTheme());
+        Assert.Equal("{\n  \"appearance\": {\n    \"theme\": \"dark\"\n  }\n}\n", File.ReadAllText(FilePath));
+    }
+
+    // 341 AC-2: a broken file (not an object, not JSON, a broken dayEnd or savedSearches) is never overwritten.
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("[1]")]
+    [InlineData("{\"dayEnd\":{\"moved\":5}}")]
+    [InlineData("{\"savedSearches\":[{\"name\":\"\",\"query\":\"#work\"}]}")]
+    [InlineData("{\"savedSearches\":5}")]
+    public void SaveTheme_Broken_Throws_AndIsNeverOverwritten(string text)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, text);
+        byte[] before = File.ReadAllBytes(FilePath);
+
+        Assert.Throws<SettingsStoreException>(() => new SettingsStore(root).SaveTheme(AppTheme.Light));
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+        Assert.Equal([SettingsStore.FileName], Directory.GetFiles(root).Select(f => Path.GetFileName(f)!).ToArray());
+    }
+
+    // 341 AC-2: a save that would make the file over MaxBytes throws and writes nothing.
+    [Fact]
+    public void SaveTheme_OverTheLimit_Throws_Unchanged()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(FilePath, "{\"padding\":\"" + new string('x', 65_516) + "\"}");
+        byte[] before = File.ReadAllBytes(FilePath);
+
+        Assert.Throws<SettingsTooLargeException>(() => new SettingsStore(root).SaveTheme(AppTheme.Dark));
+        Assert.Equal(before, File.ReadAllBytes(FilePath));
+        Assert.Equal([SettingsStore.FileName], Directory.GetFiles(root).Select(f => Path.GetFileName(f)!).ToArray());
+    }
+
+    // 341: the fixed names, the only theme text that reaches the page.
+    [Fact]
+    public void ThemeName_IsLowerCaseName()
+    {
+        Assert.Equal("system", SettingsStore.ThemeName(AppTheme.System));
+        Assert.Equal("light", SettingsStore.ThemeName(AppTheme.Light));
+        Assert.Equal("dark", SettingsStore.ThemeName(AppTheme.Dark));
+        Assert.Throws<ArgumentOutOfRangeException>(() => SettingsStore.ThemeName((AppTheme)7));
+    }
 }

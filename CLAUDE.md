@@ -817,7 +817,16 @@ Every factory agent reads this file before working on Context. Keep it short and
   lang)`, drawn as class decorations by the `codeHighlight` plugin for the blocks `changedCodeBlocks` names (over
   20,000 chars stay plain). The non-Mermaid code-block view has a header with `select.code-language` (replaces the first
   params word, one undo step) and `button.code-copy` (`copyText`: clipboard, else `execCommand("copy")`). Colours are
-  the `--code-*` variables in both theme blocks of `app.css`. Jint test hooks: `commandMarkdown(markdown, key[, typed[, before]])` (`before` is typed first; the key runs `editorKeys`, then `baseKeymap`)
+  the `--code-*` variables in the theme blocks of `app.css`. Theme (job 341, `src/theme.js`): `setTheme(name)` sets
+  `data-theme` on `document.documentElement` for `light`/`dark` and removes it otherwise; `app.css` has
+  `:root[data-theme="light"]` (`color-scheme: light`, the first `:root {` block's light variables),
+  `:root[data-theme="dark"]` (`color-scheme: dark` and the same dark variables as the media block, kept equal by
+  `DesktopSourceTests`) and `@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {…} }`; no other
+  `.css` under `wwwroot/` (but `commandbar/`, which follows the OS) or `editor/src/` queries `prefers-color-scheme`,
+  and text fields use `color-scheme: inherit`. Each Mermaid render message carries `theme` (`currentMermaidTheme()`:
+  `mermaidTheme(dataTheme, prefersDark)`, a pure test hook: `dark` for `data-theme="dark"`, or no `data-theme` and a dark
+  system, else `default`); the frame re-initializes Mermaid per render with it, anything but `dark` counting as
+  `default`. Drawn diagrams are not redrawn on a change. Jint test hooks: `commandMarkdown(markdown, key[, typed[, before]])` (`before` is typed first; the key runs `editorKeys`, then `baseKeymap`)
   and `typedAtMarkdown` (`⟦ ⟧` mark the selection, a lone `⟦` the caret), `changedCodeBlocksJson`, `tokensJson`,
   `languageOptionsJson`, `withLanguage`; `EditorBundle.Settled` waits for a promise. `node_modules` is ignored and `editor/**` is excluded from the C# project.
   A package change (a `.csproj`, a lock file, `editor/package.json` or `THIRD-PARTY-LICENSES.txt`) also updates the
@@ -1241,7 +1250,21 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Close`) last in `.panel-bar`; `TagPanel` keeps its text `Close`.
     **Settings:** `SettingsPanel` (the `Settings` button in `NotesPanel`, or `/settings`; `Main`'s `page`;
     a page in place of the note area; the × (job 193), opening a note or `Today` hides it) has these sections (the *Repository folders* one is job 280's, see Work items), all
-    reloaded after every `State.Changed`. *Exchange calendar* shows `DesktopState.CalendarLinkSetting()`
+    reloaded after every `State.Changed`. **Appearance** (job 341, the first section): `h3#appearance-heading` `Appearance`, then
+    `div.theme-choice` (`role="group"`, `aria-labelledby` the heading) with `button.theme-system`/`-light`/`-dark`
+    (`System`, `Light`, `Dark`, in a flex row; exactly the saved one `aria-pressed="true"`, filled with `--accent-strong` and `--on-accent`; all disabled while busy; grey `Loading…` in
+    `p.theme-state` until `DesktopState.ThemeSetting()` (never throws, `System` on error) has loaded) and
+    `p.theme-result` (`role="status"`). Clicking a button that isn't pressed runs `DesktopActions.SetTheme(AppTheme)`
+    (Core `SettingsStore.ReadTheme`/`SaveTheme`, exactly `"appearance":{"theme":"system"|"light"|"dark"}`, anything else
+    reads as `System`, a broken file throws only when it can't be read or isn't an object; the save replaces
+    `appearance`, keeps the rest, re-checks `dayEnd` and `savedSearches`, 64 KiB limit; `SettingsStore.ThemeName` gives
+    the fixed lower-case names): Done gives accent `Theme: System.`/`Theme: Light.`/`Theme: Dark.`
+    (`DesktopActions.ThemeText`) and raises `OnThemeChanged`, Refused or Failed red `SettingsNotSavedText` with the
+    pressed state kept. `Main` (which injects its own `EditorInterop` as `ThemeInterop`) calls
+    `EditorInterop.SetThemeAsync(ThemeSetting())` (`ContextEditor.setTheme` with the fixed name) on its first render and
+    on each `OnThemeChanged`. `DesktopFixture` plans `ContextEditor.setTheme` for every test, records the calls
+    (`Themes()`) and releases `ThemeSet` once per call; `ThemeActionsTests` covers the action, the state read and
+    `Main`'s first call. *Exchange calendar* shows `DesktopState.CalendarLinkSetting()`
     (`CalendarLinkView.Show`: grey `No calendar link set.`, the masked link with the last download in the calendar's
     zone, or red `Can't read calendar-link.txt. …`), one `<input type="password">` (no `value`, no `@bind`,
     `maxlength` `DesktopActions.MaxCalendarLinkLength` = 2048; rebuilt with a new `@key` after a save so the typed
@@ -2005,7 +2028,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `LinkCreateActionsTests` (`CreateLinkedNote`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `MailDigestPanelTests` (the Mail digest page and `/digest` through `Main`, with `FakeOutlookSource`) and `MailDigestActionsTests` (`AcceptSuggestion`, `SetMailDigestEnabled`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `ShareActionsTests` (`ShareNote`) and `ShareDialogTests` (Share through `Main`), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `PeoplePanelTests`, `ReviewPanelTests`, `DoneLogActionsTests` (the done-log append on completion) and `DonePanelTests` (the Done log page and `/donelog` through `Main`), `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StandupActionsTests` (`WriteStandup`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `LinkCreateActionsTests` (`CreateLinkedNote`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `MailDigestPanelTests` (the Mail digest page and `/digest` through `Main`, with `FakeOutlookSource`) and `MailDigestActionsTests` (`AcceptSuggestion`, `SetMailDigestEnabled`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `ShareActionsTests` (`ShareNote`) and `ShareDialogTests` (Share through `Main`), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `ThemeActionsTests` (job 341), `PeoplePanelTests`, `ReviewPanelTests`, `DoneLogActionsTests` (the done-log append on completion) and `DonePanelTests` (the Done log page and `/donelog` through `Main`), `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StandupActionsTests` (`WriteStandup`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
     CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules, the transfer calls and no file system class in `.razor`), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),

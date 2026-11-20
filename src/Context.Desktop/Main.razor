@@ -31,7 +31,7 @@
                 }
                 @if (page == Page.Settings)
                 {
-                    <SettingsPanel OnClose="CloseSettings" />
+                    <SettingsPanel OnClose="CloseSettings" OnThemeChanged="ApplySavedTheme" />
                 }
                 @if (page == Page.Appointment && appointmentShown is { } shownAppointment)
                 {
@@ -321,6 +321,10 @@ else
     internal static string BriefingReadyText(string name) =>
         $"Today's briefing is ready: {DesktopText.OneLine(name)}. Type /briefing to open it.";
 
+    /// <summary>Applies the theme to the page (job 341); this component mounts no editor through it.</summary>
+    [Inject]
+    internal EditorInterop ThemeInterop { get; set; } = null!;
+
     /// <summary>The OS file dialogs.</summary>
     [Inject]
     internal IFileDialog Dialog { get; set; } = null!;
@@ -458,6 +462,11 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            await ApplySavedTheme();
+        }
+
         if (focusRename && renaming)
         {
             focusRename = false;
@@ -609,6 +618,10 @@ else
     private void ShowSettings() => OpenPage(Page.Settings);
 
     private void CloseSettings() => page = Page.None;
+
+    // Job 341: the saved theme, at first render and after each theme saved in Settings; the page only ever gets a fixed
+    // name, and an unreadable settings.json gives System.
+    private async Task ApplySavedTheme() => await ThemeInterop.SetThemeAsync(await State.ThemeSetting());
 
     // A tag's board (job 242): a page in place of the note area; a text that is no tag shows the usage line instead.
     private void ShowBoard(string tag)

@@ -37,6 +37,9 @@ internal sealed class FakeKeyStore : IKeyStore, IDisposable
     /// <summary>How often <see cref="MachineKeyDetails"/> was called.</summary>
     public int DetailsReads { get; private set; }
 
+    /// <summary>When set, <see cref="MachineKeyDetails"/> waits (at most 30 s) until it is set, holding a read in flight.</summary>
+    public ManualResetEventSlim? DetailsHold { get; set; }
+
     /// <summary>A store that already has a machine key and a recovery public key (whose private half is dropped).</summary>
     public static FakeKeyStore Ready()
     {
@@ -54,6 +57,7 @@ internal sealed class FakeKeyStore : IKeyStore, IDisposable
 
     public KeyDetails? MachineKeyDetails()
     {
+        DetailsHold?.Wait(TimeSpan.FromSeconds(30));
         DetailsReads++;
         if (DetailsThrow)
         {

@@ -47,7 +47,7 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.Equal("Close", close.GetAttribute("aria-label"));
         Assert.Equal("Close", close.GetAttribute("title"));
         Assert.NotNull(close.QuerySelector("svg"));
-        Assert.Equal(["Exchange calendar", "Outlook", "Pasting", "Screenshots", "Command bar", "Repository folders", "Sensitive notes"], cut.FindAll("h3").Select(h => h.TextContent).ToArray());
+        Assert.Equal(["Appearance", "Exchange calendar", "Outlook", "Pasting", "Screenshots", "Command bar", "Repository folders", "Sensitive notes"], cut.FindAll("h3").Select(h => h.TextContent).ToArray());
         IElement line = cut.Find(".calendar-link-state");
         Assert.Equal("No calendar link set.", line.TextContent);
         Assert.True(line.ClassList.Contains("grey"));
@@ -749,6 +749,259 @@ public sealed class SettingsPanelTests : IDisposable
         {
             File.SetUnixFileMode(data.Root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
+    }
+
+    // ---- 341: the theme ----
+
+    private string SettingsPath => Path.Combine(data.Root, SettingsStore.FileName);
+
+    private static readonly string[] ThemeButtons = ["button.theme-system", "button.theme-light", "button.theme-dark"];
+
+    // The aria-pressed values of System, Light and Dark, in order.
+    private static string[] Pressed<T>(IRenderedComponent<T> cut)
+        where T : IComponent =>
+        ThemeButtons.Select(b => cut.Find(b).GetAttribute("aria-pressed") ?? "missing").ToArray();
+
+    // 341 AC-3: Appearance is the first section: its heading, then a labelled group of three plain buttons in order,
+    // exactly the saved one pressed, an empty status line and no new input.
+    [Theory]
+    [InlineData(null, 0)]
+    [InlineData("{\"appearance\":{\"theme\":\"system\"}}", 0)]
+    [InlineData("{\"appearance\":{\"theme\":\"light\"}}", 1)]
+    [InlineData("{\"appearance\":{\"theme\":\"dark\"}}", 2)]
+    [InlineData("{\"appearance\":{\"theme\":\"Dark\"}}", 0)]
+    [InlineData("not json", 0)]
+    public async Task Appearance_Section_GroupButtonsAndPressedState(string? settings, int pressed)
+    {
+        data.Outlook.Available = OutlookAvailability.Unsupported;
+        if (settings is not null)
+        {
+            data.WriteFile(SettingsStore.FileName, settings);
+        }
+
+        IRenderedComponent<SettingsPanel> cut = await Show();
+
+        IElement heading = cut.FindAll("h3")[0];
+        Assert.Equal("Appearance", heading.TextContent);
+        IElement group = cut.Find("div.theme-choice");
+        Assert.Equal("theme-choice", heading.NextElementSibling!.ClassName);
+        Assert.Equal("group", group.GetAttribute("role"));
+        Assert.False(string.IsNullOrEmpty(heading.Id));
+        Assert.Equal(heading.Id, group.GetAttribute("aria-labelledby"));
+        Assert.Single(cut.FindAll("#" + heading.Id));
+        IElement[] buttons = group.Children.ToArray();
+        Assert.Equal(["BUTTON", "BUTTON", "BUTTON"], buttons.Select(b => b.TagName).ToArray());
+        Assert.Equal(["theme-system", "theme-light", "theme-dark"], buttons.Select(b => b.ClassName ?? string.Empty).ToArray());
+        Assert.Equal(["System", "Light", "Dark"], buttons.Select(b => b.TextContent).ToArray());
+        Assert.All(buttons, b => Assert.Equal("button", b.GetAttribute("type")));
+        Assert.All(buttons, b => Assert.False(b.HasAttribute("disabled")));
+        string[] expected = ["false", "false", "false"];
+        expected[pressed] = "true";
+        Assert.Equal(expected, Pressed(cut));
+        IElement result = cut.Find("p.theme-result");
+        Assert.Contains("theme-result", group.NextElementSibling!.ClassList);
+        Assert.Equal("status", result.GetAttribute("role"));
+        Assert.Equal(string.Empty, result.TextContent);
+        Assert.Empty(group.QuerySelectorAll("input"));
+        Assert.Equal(
+            ["calendar-link-field", "fetch-titles", "screenshot-folder-field", "repository-field"],
+            cut.FindAll("input").Select(i => i.ClassName!.Split(' ')[0]).ToArray());
+    }
+
+    // 341 AC-3: while the settings load (the key read is held, so the panel's Load can't finish) the section shows grey
+    // Loading… and no buttons; once it finishes the buttons replace it.
+    [Fact]
+    public void Appearance_WhileLoading_GreyLoadingNoButtons()
+    {
+        using ManualResetEventSlim hold = new ManualResetEventSlim();
+        data.Keys.DetailsHold = hold;
+        data.CreateState();
+        IRenderedComponent<SettingsPanel> cut;
+        try
+        {
+            cut = data.Bunit.Render<SettingsPanel>();
+
+            IElement state = cut.Find("p.theme-state");
+            Assert.Equal("Loading…", state.TextContent);
+            Assert.Contains("grey", state.ClassList);
+            Assert.Equal("Appearance", state.PreviousElementSibling!.TextContent);
+            Assert.Empty(cut.FindAll("div.theme-choice"));
+            Assert.Empty(cut.FindAll("button.theme-system"));
+        }
+        finally
+        {
+            hold.Set();
+        }
+
+        cut.WaitForAssertion(() => Assert.NotEmpty(cut.FindAll("div.theme-choice")), Wait);
+        Assert.Empty(cut.FindAll("p.theme-state"));
+    }
+
+    // 341 AC-4: clicking Light then Dark then System saves each through SetTheme (other properties kept), moves the
+    // pressed state, shows the accent line and has Main call setTheme once per save with the fixed name.
+    [Fact]
+    public async Task Appearance_Click_SavesMovesPressedAndAppliesTheme()
+    {
+        data.WriteFile(SettingsStore.FileName, "{\"paste\":{\"fetchTitles\":true}}");
+        IRenderedComponent<Main> cut = await OpenSettingsInMain();
+        Assert.Equal(["system"], data.Themes());
+
+        (string Button, string Name, string Text, string[] Pressed)[] steps =
+        [
+            ("button.theme-light", "light", "Theme: Light.", ["false", "true", "false"]),
+            ("button.theme-dark", "dark", "Theme: Dark.", ["false", "false", "true"]),
+            ("button.theme-system", "system", "Theme: System.", ["true", "false", "false"]),
+        ];
+        List<string> applied = ["system"];
+        foreach ((string button, string name, string text, string[] pressed) in steps)
+        {
+            await cut.Find(button).ClickAsync(new MouseEventArgs());
+
+            cut.WaitForAssertion(() => Assert.Equal(text, cut.Find("p.theme-result").TextContent), Wait);
+            Assert.Contains("accent", cut.Find("p.theme-result").ClassList);
+            Assert.Equal(pressed, Pressed(cut));
+            applied.Add(name);
+            Assert.Equal(applied, data.Themes());
+            Assert.Equal(Enum.Parse<AppTheme>(name, ignoreCase: true), new SettingsStore(data.Root).ReadTheme());
+            Assert.True(new SettingsStore(data.Root).ReadFetchTitles());
+        }
+    }
+
+    // 341 AC-4: clicking the pressed button does nothing: no save, no line, no setTheme.
+    [Fact]
+    public async Task Appearance_ClickPressed_DoesNothing()
+    {
+        data.WriteFile(SettingsStore.FileName, "{\"appearance\":{\"theme\":\"dark\"}}");
+        IRenderedComponent<Main> cut = await OpenSettingsInMain();
+        byte[] before = File.ReadAllBytes(SettingsPath);
+        int builds = data.State!.Builds;
+
+        await cut.Find("button.theme-dark").ClickAsync(new MouseEventArgs());
+
+        Assert.Equal(string.Empty, cut.Find("p.theme-result").TextContent);
+        Assert.Equal(["false", "false", "true"], Pressed(cut));
+        Assert.Equal(["dark"], data.Themes());
+        Assert.Equal(before, File.ReadAllBytes(SettingsPath));
+        Assert.Equal(builds, data.State.Builds);
+    }
+
+    // 341 AC-4: a broken settings.json (Failed) shows the red line, keeps the saved theme pressed, leaves the file
+    // and calls no setTheme.
+    [Fact]
+    public async Task Appearance_BrokenSettings_RedLine_PressedStays_NoSetTheme()
+    {
+        data.WriteFile(SettingsStore.FileName, "{\"dayEnd\":{\"moved\":5},\"appearance\":{\"theme\":\"light\"}}");
+        IRenderedComponent<Main> cut = await OpenSettingsInMain();
+        byte[] before = File.ReadAllBytes(SettingsPath);
+
+        await cut.Find("button.theme-dark").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(
+            () => Assert.Equal(DesktopActions.SettingsNotSavedText, cut.Find("p.theme-result").TextContent), Wait);
+        Assert.Contains("red", cut.Find("p.theme-result").ClassList);
+        Assert.Equal(["false", "true", "false"], Pressed(cut));
+        Assert.Equal(["light"], data.Themes());
+        Assert.Equal(before, File.ReadAllBytes(SettingsPath));
+    }
+
+    // 341 AC-4: a file that would be over 64 KiB (Refused) shows the red line, keeps the pressed state, writes nothing.
+    [Fact]
+    public async Task Appearance_TooLarge_RedLine_PressedStays_NoSetTheme()
+    {
+        data.WriteFile(SettingsStore.FileName, "{\"padding\":\"" + new string('x', 65_516) + "\"}");
+        IRenderedComponent<Main> cut = await OpenSettingsInMain();
+        byte[] before = File.ReadAllBytes(SettingsPath);
+
+        await cut.Find("button.theme-light").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(
+            () => Assert.Equal(DesktopActions.SettingsNotSavedText, cut.Find("p.theme-result").TextContent), Wait);
+        Assert.Contains("red", cut.Find("p.theme-result").ClassList);
+        Assert.Equal(["true", "false", "false"], Pressed(cut));
+        Assert.Equal(["system"], data.Themes());
+        Assert.Equal(before, File.ReadAllBytes(SettingsPath));
+    }
+
+    // 341 AC-4: a folder that can't be written (Failed) shows the red line and keeps the saved theme pressed.
+    [Fact]
+    public async Task Appearance_ReadOnlyFolder_RedLine_PressedStays()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        data.WriteFile(SettingsStore.FileName, "{\"appearance\":{\"theme\":\"dark\"}}");
+        IRenderedComponent<SettingsPanel> cut = await Show();
+        byte[] before = File.ReadAllBytes(SettingsPath);
+        File.SetUnixFileMode(data.Root, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            if (CanWriteIn(data.Root))
+            {
+                // Running as root: the folder stays writable, nothing to check.
+                return;
+            }
+
+            await cut.Find("button.theme-system").ClickAsync(new MouseEventArgs());
+
+            cut.WaitForAssertion(
+                () => Assert.Equal(DesktopActions.SettingsNotSavedText, cut.Find("p.theme-result").TextContent), Wait);
+            Assert.Contains("red", cut.Find("p.theme-result").ClassList);
+            Assert.Equal(["false", "false", "true"], Pressed(cut));
+            Assert.Equal(before, File.ReadAllBytes(SettingsPath));
+        }
+        finally
+        {
+            File.SetUnixFileMode(data.Root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    // 341 AC-4: while SetTheme runs all three buttons are disabled; afterwards they are enabled again.
+    [Fact]
+    public async Task Appearance_WhileSaving_ButtonsDisabled()
+    {
+        IRenderedComponent<SettingsPanel> cut = await Show();
+        using ManualResetEventSlim entered = new ManualResetEventSlim();
+        using ManualResetEventSlim release = new ManualResetEventSlim();
+        data.Actions!.BeforeWrite = () =>
+        {
+            entered.Set();
+            release.Wait(Wait);
+        };
+
+        Task click = cut.Find("button.theme-dark").ClickAsync(new MouseEventArgs());
+        try
+        {
+            Assert.True(entered.Wait(Wait));
+            cut.WaitForAssertion(
+                () => Assert.All(ThemeButtons, b => Assert.True(cut.Find(b).HasAttribute("disabled"), b)), Wait);
+        }
+        finally
+        {
+            release.Set();
+        }
+
+        await click;
+        cut.WaitForAssertion(() => Assert.Equal("Theme: Dark.", cut.Find("p.theme-result").TextContent), Wait);
+        Assert.All(ThemeButtons, b => Assert.False(cut.Find(b).HasAttribute("disabled"), b));
+        Assert.Equal(["false", "false", "true"], Pressed(cut));
+    }
+
+    // Renders Main, waits for its first setTheme and for every load of the page, then opens Settings and waits until
+    // nothing on the page shows Loading….
+    private async Task<IRenderedComponent<Main>> OpenSettingsInMain()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        Assert.True(await data.ThemeSet.WaitAsync(Wait));
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Markup, StringComparison.Ordinal), Wait);
+        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() =>
+        {
+            Assert.NotEmpty(cut.FindAll(".settings-panel div.theme-choice"));
+            Assert.DoesNotContain("Loading…", cut.Markup, StringComparison.Ordinal);
+        }, Wait);
+        return cut;
     }
 
     private static bool CanWriteIn(string folder)

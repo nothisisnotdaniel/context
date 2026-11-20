@@ -189,6 +189,13 @@ internal sealed class EditorInterop
     public ValueTask<bool> ScrollToHeadingAsync(ElementReference element, int index) =>
         js.InvokeAsync<bool>("ContextEditor.scrollToHeading", element, index);
 
+    /// <summary>
+    /// Applies <paramref name="theme"/> to the page (job 341): <c>ContextEditor.setTheme</c> with one of the fixed
+    /// names <c>system</c>, <c>light</c> or <c>dark</c>. Needs no mounted editor.
+    /// </summary>
+    public ValueTask SetThemeAsync(AppTheme theme) =>
+        js.InvokeVoidAsync("ContextEditor.setTheme", SettingsStore.ThemeName(theme));
+
     /// <summary>Called by the editor when a tag is clicked.</summary>
     [JSInvokable]
     public Task OnTag(string raw) => TagClicked?.Invoke(raw) ?? Task.CompletedTask;

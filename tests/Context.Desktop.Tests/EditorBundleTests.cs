@@ -589,7 +589,7 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
     public void Sources_NeverSetLevelOne()
     {
         string folder = Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "editor", "src");
-        string[] files = ["highlight.js", "index.js", "markdown.js", "mermaid-frame.js", "mermaid.js", "paste.js", "schema.js", "view.js"];
+        string[] files = ["highlight.js", "index.js", "markdown.js", "mermaid-frame.js", "mermaid.js", "paste.js", "schema.js", "theme.js", "view.js"];
         Assert.Equal(files, Directory.EnumerateFiles(folder, "*.js").Select(f => Path.GetFileName(f)).Order(StringComparer.Ordinal).ToArray());
 
         foreach (string file in files)
@@ -1405,6 +1405,91 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
         string json = bundle.Json($"ContextEditor.commandMarkdown({Js(markdown)}, \"Mod-Alt-n\")");
 
         Assert.Equal(expected, JsonSerializer.Deserialize<string>(json));
+    }
+
+    // ---- 341: the theme ----
+
+    // 341 AC-6: setTheme sets data-theme on the root element for "light" and "dark", and removes it for "system" and
+    // any other value; it starts from a set attribute so a removal shows.
+    [Theory]
+    [InlineData("\"light\"", "light")]
+    [InlineData("\"dark\"", "dark")]
+    [InlineData("\"system\"", null)]
+    [InlineData("\"Dark\"", null)]
+    [InlineData("\"blue\"", null)]
+    [InlineData("\"\"", null)]
+    [InlineData("null", null)]
+    [InlineData("undefined", null)]
+    [InlineData("1", null)]
+    public void SetTheme_SetsOrRemovesDataTheme(string argument, string? expected)
+    {
+        string json = bundle.Json($$"""
+            (() => {
+              const attrs = { "data-theme": "dark" };
+              const root = {
+                setAttribute(name, value) { attrs[name] = String(value); },
+                removeAttribute(name) { delete attrs[name]; },
+              };
+              globalThis.document = { documentElement: root };
+              try {
+                ContextEditor.setTheme({{argument}});
+              } finally {
+                delete globalThis.document;
+              }
+              return Object.prototype.hasOwnProperty.call(attrs, "data-theme") ? attrs["data-theme"] : null;
+            })()
+            """);
+
+        Assert.Equal(expected is null ? "null" : Js(expected), json);
+        Assert.Equal("\"undefined\"", bundle.Json("typeof document"));
+    }
+
+    // 341 AC-6: without a document setTheme does nothing and doesn't throw.
+    [Fact]
+    public void SetTheme_NoDocument_DoesNothing()
+    {
+        Assert.Equal("true", bundle.Json("ContextEditor.setTheme(\"dark\") === undefined"));
+    }
+
+    // 341 AC-8: dark when data-theme is dark, or when there is none and the system prefers dark; otherwise default.
+    [Theory]
+    [InlineData("\"dark\"", "true", "dark")]
+    [InlineData("\"dark\"", "false", "dark")]
+    [InlineData("\"light\"", "true", "default")]
+    [InlineData("\"light\"", "false", "default")]
+    [InlineData("null", "true", "dark")]
+    [InlineData("null", "false", "default")]
+    [InlineData("undefined", "true", "dark")]
+    [InlineData("\"\"", "true", "dark")]
+    [InlineData("\"\"", "false", "default")]
+    [InlineData("\"blue\"", "true", "default")]
+    [InlineData("\"Dark\"", "false", "default")]
+    public void MermaidTheme_EveryCombination(string dataTheme, string prefersDark, string expected)
+    {
+        Assert.Equal(Js(expected), bundle.Json($"ContextEditor.mermaidTheme({dataTheme}, {prefersDark})"));
+    }
+
+    // 341 AC-8: every render message carries the page's theme; the frame reconfigures Mermaid with the message's theme
+    // for each render and takes only "dark", anything else as "default" (source and committed frame bundle).
+    [Fact]
+    public void Mermaid_RenderMessageCarriesTheme_FrameFallsBackToDefault()
+    {
+        string desktop = Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder);
+        string mermaid = File.ReadAllText(Path.Combine(desktop, "editor", "src", "mermaid.js"));
+        string frame = File.ReadAllText(Path.Combine(desktop, "editor", "src", "mermaid-frame.js"));
+        string frameBundle = File.ReadAllText(Path.Combine(desktop, "wwwroot", "mermaid", "mermaid-frame.js"));
+        string theme = File.ReadAllText(Path.Combine(desktop, "editor", "src", "theme.js"));
+
+        Assert.Contains("const message = { type: \"render\", id, text, theme: currentMermaidTheme() };", mermaid, StringComparison.Ordinal);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(mermaid, @"type: ""render"""));
+        Assert.Contains("return mermaidTheme(dataTheme, prefersDark);", theme, StringComparison.Ordinal);
+        Assert.Contains("getAttribute(\"data-theme\")", theme, StringComparison.Ordinal);
+        Assert.Contains("return value === \"dark\" ? \"dark\" : \"default\";", frame, StringComparison.Ordinal);
+        Assert.Matches(@"async function render\(id, text, theme\) \{[^}]*configure\(theme\);", frame);
+        Assert.Contains("render(data.id, data.text, theme)", frame, StringComparison.Ordinal);
+        Assert.DoesNotContain("matchMedia", frame, StringComparison.Ordinal);
+        Assert.Matches(@"return [a-zA-Z_$][\w$]*===""dark""\?""dark"":""default""", frameBundle);
+        Assert.DoesNotContain("prefers-color-scheme", frameBundle, StringComparison.Ordinal);
     }
 
     private string TypedAt(string markdown, string typed) =>
