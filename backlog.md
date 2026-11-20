@@ -361,6 +361,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#399](backlog/399-payment-provider-spike.md) Payment provider spike
 - [ ] [#402](backlog/402-throttle-repeated-show-requests.md) Throttle repeated show requests
 - [h] [#403](backlog/403-check-the-second-start-on-windows.md) Check the second start on Windows
+- [?] [#408](backlog/408-tooltip-on-the-global-todo-marker.md) Tooltip on the global todo marker
+- [?] [#409](backlog/409-build-notehistory-after-the-todo-braces.md) Build NoteHistory after the todo-braces record check
 
 ## Dropped with the terminal UI
 
