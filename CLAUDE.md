@@ -820,6 +820,8 @@ Every factory agent reads this file before working on Context. Keep it short and
   the `--code-*` variables in both theme blocks of `app.css`. Jint test hooks: `commandMarkdown(markdown, key[, typed[, before]])` (`before` is typed first; the key runs `editorKeys`, then `baseKeymap`)
   and `typedAtMarkdown` (`⟦ ⟧` mark the selection, a lone `⟦` the caret), `changedCodeBlocksJson`, `tokensJson`,
   `languageOptionsJson`, `withLanguage`; `EditorBundle.Settled` waits for a promise. `node_modules` is ignored and `editor/**` is excluded from the C# project.
+  A package change (a `.csproj`, a lock file, `editor/package.json` or `THIRD-PARTY-LICENSES.txt`) also updates the
+  root `DEPENDENCIES.md` (one row per name + version with licence, `Use` and licence link); `DependencyListTests` checks it.
 - **Build:** `dotnet build` (must stay at 0 warnings)
 - **Strong name:** (job 161) every assembly is public-signed (`PublicSign`) with the committed `Context.snk`, which
   holds the public key only; no private key exists anywhere, so no real signing happens. Its purpose is that
