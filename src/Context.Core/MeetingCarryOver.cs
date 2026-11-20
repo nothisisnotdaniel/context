@@ -135,8 +135,11 @@ internal static class MeetingCarryOver
         foreach (ParsedNoteTodo carried in NoteTodoParser.ParseCarried(markdown))
         {
             string line = lines[carried.Line - 1];
-            int start = line.Length - line.TrimStart(' ', '\t').Length;
-            kept[carried.Line - 1] = "- " + NoteTodoParser.OpenBox + " " + line[(start + 6)..];
+            int indent = line.Length - line.TrimStart(' ', '\t').Length;
+
+            // The text starts after the list marker, its space, the box and the space after it ("- [>] ").
+            int text = indent + 2 + NoteTodoParser.CarryBox.Length + 1;
+            kept[carried.Line - 1] = "- " + NoteTodoParser.OpenBox + " " + line[text..];
         }
 
         return kept.Values.ToList();

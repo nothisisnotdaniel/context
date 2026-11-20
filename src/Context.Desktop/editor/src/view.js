@@ -220,9 +220,10 @@ function taskAttrs(box) {
   return { checked: box[1] !== " ", kind: box[0] === "{" ? "global" : "local" };
 }
 
-// Job 329: "- [ ] ", "- [x] ", "- { } " or "- {x} " (job 330: also "- [>] ") (also with * or +) at a paragraph start, or the box and a space at
-// the start of an empty plain list item (what "- " leaves), turns the block into a task item of that kind at once. The
-// typed text goes and the caret stays where it was put: right after the box, at the item's text start.
+// Job 329: "- [ ] ", "- [x] ", "- { } " or "- {x} " (job 330: also "- [>] "), with -, * or +, at a paragraph start,
+// or the box and a space at the start of an empty plain list item (what "- " leaves), turns the block into a task item
+// of that kind at once. The typed text goes and the caret stays where it was put: right after the box, at the item's
+// text start.
 function taskRules() {
   const paragraphRule = new InputRule(/^\s*[-*+]\s(\[[ xX>]\]|\{[ x]\})\s$/, (state, match, start, end) => {
     const $start = state.doc.resolve(start);

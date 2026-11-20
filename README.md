@@ -104,11 +104,13 @@ named after its date and title (for example `2026-10-29 Review Q4 plan`). When i
 tagged `#meeting`, with the appointment's title, time, location and attendees; an existing note is printed as it is and
 never changed. A new note also gets the still-open points of the same meeting's previous note (its open
 `- { }` todos and `- [ ]` checkboxes, and the lines under an `Open points` heading) under `## From last time`, with a link to that note; the
-previous note is only read, never changed. To carry one point over without moving it under `Open points`, mark its
-checkbox `- [>]`: right-click the box in the editor, or press Ctrl+Alt+N (Cmd+Option+N on a Mac) with the caret in the
-line, and do the same again to take the mark off. The box shows an arrow, and the next note lists the point as an open
-`- [ ]` checkbox. A `- [>]` line stays in its note like any checkbox: no todo view lists it. In the desktop app, `/meeting 2` in the command palette opens the same note (numbered as
+previous note is only read, never changed. In the desktop app, `/meeting 2` in the command palette opens the same note (numbered as
 `context current` numbers them).
+
+To carry one point over without moving it under `Open points`, mark its checkbox `- [>]`: right-click the box in the
+editor, or press Ctrl+Alt+N (Cmd+Option+N on a Mac) with the caret in the line, and do the same again to take the mark
+off. The box shows an arrow, and the next note lists the point as an open `- [ ]` checkbox. A `- [>]` line stays in its
+note like any checkbox: no todo view lists it.
 
 ### Day's end
 
