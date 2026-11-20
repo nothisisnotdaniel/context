@@ -162,6 +162,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     page without one is `person`. `FindView.Build(index, store, key, value)` (`Found`, `NoMatches`, `InvalidQuery`
     without reading, `IndexUnreadable`) syncs and lists the matching notes sorted ignoring case then ordinal;
     `type person` also lists untyped person pages. An attribute value `[[X]]` is a note link through the link parser.
+    `affiliation::` (job 332, `ParserVersion` 16) is a list: `Sync` stores one `note_attributes` row per
+    `AttributeParser.ListParts` part (split at `,` outside `[[...]]`, collapsed, empties dropped), each `value_key` once
+    per note, first spelling kept; other keys are never split.
     The command line has `context find <attribute> <value...>`; the desktop `/find` and the type pages.
   - **Full-text search** (job 170, `SearchView.cs`): `SearchView.Build(index, store, text)` trims the text; under
     `MinQueryLength` (3) is `TooShort`, over `MaxQueryLength` (200) `TooLong`, both without opening the index; else

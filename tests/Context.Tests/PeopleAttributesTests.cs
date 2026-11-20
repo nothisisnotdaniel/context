@@ -65,6 +65,23 @@ public sealed class PeopleAttributesTests : IDisposable
         Assert.True(view.People["people/Carl"].HasRole("lead"));
     }
 
+    // 332 AC-5: a comma-separated affiliation gives the person each part (shown, so [[ACME]] is ACME) and each part is
+    // its own option; the whole line is never an option.
+    [Fact]
+    public void Build_AffiliationList_PartsAndOptions()
+    {
+        Write("people", "# people\n");
+        Write("people/Anna", "# Anna\naffiliation:: [[ACME]], Beta GmbH\n");
+
+        PeopleAttributes view = Build();
+
+        Assert.Equal(["ACME", "Beta GmbH"], view.People["people/Anna"].Affiliations);
+        Assert.True(view.People["people/Anna"].HasAffiliation("acme"));
+        Assert.True(view.People["people/Anna"].HasAffiliation("beta gmbh"));
+        Assert.Equal([("acme", "ACME"), ("beta gmbh", "Beta GmbH")], view.Affiliations.Select(o => (o.Key, o.Label)));
+        Assert.DoesNotContain(view.Affiliations, o => o.Label.Contains(',', StringComparison.Ordinal));
+    }
+
     // AC-2: the label comes from the first person page in ordinal name order, whichever spelling that is.
     [Fact]
     public void Build_LabelFromFirstPageInOrdinalOrder()

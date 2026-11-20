@@ -1534,6 +1534,17 @@ public sealed class CliTests : IDisposable
         Assert.Equal("Anna\n", Run("find", "affiliation", "[[ACME Corp]]").Out);
     }
 
+    // 332 AC-3: find matches any one part of a comma-separated affiliation.
+    [Fact]
+    public void Find_AffiliationListPart_Matches()
+    {
+        WriteNote("Anna", "affiliation:: [[ACME]], Beta GmbH");
+
+        Result beta = Run("find", "affiliation", "Beta", "GmbH");
+        Assert.Equal((0, "Anna\n"), (beta.Code, beta.Out));
+        Assert.Equal("Anna\n", Run("find", "affiliation", "acme").Out);
+    }
+
     [Fact]
     public void Find_NoMatch_NoOutput_ExitZero()
     {

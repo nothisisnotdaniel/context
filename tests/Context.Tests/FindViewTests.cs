@@ -50,6 +50,19 @@ public sealed class FindViewTests : IDisposable
         Assert.Equal(nameof(FindView), view.ToString());
     }
 
+    // 332 AC-3: find matches a person on any one part of a comma-separated affiliation; a typed comma value is not
+    // split, so it matches no part.
+    [Fact]
+    public void Build_AffiliationList_MatchesEachPart()
+    {
+        Write("people", "# people\n");
+        Write("people/Anna", "# Anna\naffiliation:: [[ACME]], Beta GmbH\n");
+
+        Assert.Equal(["people/Anna"], Build("affiliation", "beta gmbh").Notes);
+        Assert.Equal(["people/Anna"], Build("affiliation", "ACME").Notes);
+        Assert.Equal(FindViewKind.NoMatches, Build("affiliation", "ACME, Beta GmbH").Kind);
+    }
+
     // AC-7: no match is its own kind with no notes.
     [Fact]
     public void Build_NoMatches()

@@ -670,6 +670,18 @@ public sealed class CliJsonTests : IDisposable
         }
     }
 
+    // 332 AC-3: find --json lists a page by one part of its comma-separated affiliation.
+    [Fact]
+    public void Find_AffiliationListPart_InNotes()
+    {
+        WriteNote("Anna", "affiliation:: [[ACME]], Beta GmbH");
+
+        Result result = Run("find", "--json", "affiliation", "Beta", "GmbH");
+
+        AssertDocument(result);
+        Assert.Equal("{\"key\":\"affiliation\",\"value\":\"Beta GmbH\",\"notes\":[\"Anna\"]}\n", result.Out);
+    }
+
     // 157 AC-8: find pins its field names and order; no match gives an empty array; a bad index is the error line.
     [Fact]
     public void Find_FieldsInOrder()

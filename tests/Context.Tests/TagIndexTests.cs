@@ -389,7 +389,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(15, TagIndex.ParserVersion);
+        Assert.Equal(16, TagIndex.ParserVersion);
     }
 
     // 024 AC-6
@@ -438,13 +438,13 @@ public sealed class TagIndexTests : IDisposable
         using (SqliteConnection connection = Open())
         {
             using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 16";
+            command.CommandText = "PRAGMA user_version = 17";
             command.ExecuteNonQuery();
         }
 
         index.Sync(store);
 
-        Assert.Equal(16, UserVersion());
+        Assert.Equal(17, UserVersion());
     }
 
     // 048 AC-4: the old constructor means a tag link only.
@@ -847,7 +847,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(15, TagIndex.ParserVersion);
+        Assert.Equal(16, TagIndex.ParserVersion);
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
         Assert.Equal(["A", "Beta"], NoteRows());
         Assert.Equal([("A", "work"), ("Beta", "home")], Rows());
@@ -1001,6 +1001,63 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal([("bob", "ACME")], index.AttributeValues("affiliation"));
         Assert.Empty(index.AttributeValues("aliases"));
         Assert.Empty(index.AttributeValues("role' OR 1=1 --"));
+    }
+
+    // 332 AC-2 / AC-8: an affiliation list is stored as one row per part; another key with a comma stays one row.
+    [Fact]
+    public void Sync_AffiliationList_OneRowPerPart()
+    {
+        WriteNote("Anna", "# Anna\naffiliation:: [[ACME]], Beta GmbH\nrole:: Lead, Sales\n");
+        index.Sync(store);
+
+        Assert.Equal([("Anna", "[[ACME]]"), ("Anna", "Beta GmbH")], index.AttributeValues("affiliation"));
+        Assert.Equal([("Anna", "Lead, Sales")], index.AttributeValues("role"));
+        Assert.Equal(
+            [
+                ("Anna", "affiliation", "acme", "[[ACME]]"),
+                ("Anna", "affiliation", "beta gmbh", "Beta GmbH"),
+                ("Anna", "role", "lead, sales", "Lead, Sales"),
+            ],
+            AttributeRows());
+    }
+
+    // 332 AC-4: a single value still works, and repeated lines store each distinct affiliation once per note, the
+    // first spelling kept.
+    [Fact]
+    public void Sync_AffiliationLines_EachPartOncePerNote()
+    {
+        WriteNote("Anna", "affiliation:: [[ACME]]\n");
+        WriteNote("Bob", "affiliation:: ACME\naffiliation:: Beta, acme\naffiliation:: , \n");
+        index.Sync(store);
+
+        Assert.Equal([("Anna", "[[ACME]]")], index.AttributeValues("affiliation").Where(r => r.Note == "Anna"));
+        Assert.Equal([("Bob", "ACME"), ("Bob", "Beta")], index.AttributeValues("affiliation").Where(r => r.Note == "Bob"));
+        Assert.Equal(["Anna", "Bob"], index.NotesWithAttribute("affiliation", "acme"));
+        Assert.Equal(["Bob"], index.NotesWithAttribute("affiliation", "BETA"));
+    }
+
+    // 332 AC-9: a version 15 database with the old whole-line affiliation row is re-parsed on the next Sync and then
+    // holds the part rows.
+    [Fact]
+    public void Sync_Version15Database_SplitsAffiliations()
+    {
+        WriteNote("Anna", "affiliation:: [[ACME]], Beta GmbH\n");
+        File.SetLastWriteTimeUtc(Path.Combine(root, "Anna.md"), new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc));
+        index.Sync(store);
+        using (SqliteConnection connection = Open())
+        {
+            // As the version 15 parser left it: the whole line was one value.
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "PRAGMA user_version = 15; DELETE FROM note_attributes; "
+                + "INSERT INTO note_attributes(note, key, value_key, value) "
+                + "VALUES('Anna', 'affiliation', '[[acme]], beta gmbh', '[[ACME]], Beta GmbH');";
+            command.ExecuteNonQuery();
+        }
+
+        index.Sync(store);
+
+        Assert.Equal(16, UserVersion());
+        Assert.Equal([("Anna", "[[ACME]]"), ("Anna", "Beta GmbH")], index.AttributeValues("affiliation"));
     }
 
     // 157 AC-3: Sync stores each note's attributes with the value key, keeps them up to date and drops them with the note.
@@ -1216,7 +1273,7 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal(["Anna|1", "AS|1"], index.People().Select(Describe));
         Assert.Empty(index.NotesMentioning("Anna Schmidt"));
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(15, TagIndex.ParserVersion);
+        Assert.Equal(16, TagIndex.ParserVersion);
     }
 
     // 170 ----------------------------------------------------------------------------------------
@@ -1650,7 +1707,7 @@ public sealed class TagIndexTests : IDisposable
     }
 
     // 329 AC-2: a database written by version 14 (where "- [ ] a" was a note todo) is re-parsed once: the stale row
-    // goes, the "- { }" todo stays, and the index ends at version 15.
+    // goes, the "- { }" todo stays, and the index ends at version 16.
     [Fact]
     public void Sync_Version14Database_ReparsedForBraceTodos()
     {
@@ -1669,7 +1726,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(["Plan|2|-|b|- { } b"], index.NoteTodos().Select(Describe));
-        Assert.Equal(15, UserVersion());
+        Assert.Equal(16, UserVersion());
     }
 
     // 253 AC-3: a sensitive .ctxs note never has topic rows.
@@ -1744,7 +1801,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(["Plan|1|2026-12-01|review:2026-12-01"], ReviewRows(index));
-        Assert.Equal(15, UserVersion());
+        Assert.Equal(16, UserVersion());
     }
 
     // 256 AC-2, AC-9: a sensitive .ctxs note never has a review row.
@@ -2239,7 +2296,7 @@ public sealed class TagIndexTests : IDisposable
     }
 
     // 295 AC-8: a database at user_version 13 (old note_links, no note_text_rows or note_skipped) is upgraded by the
-    // next Sync: note_text emptied and rewritten once, the new tables and columns filled, user_version 15.
+    // next Sync: note_text emptied and rewritten once, the new tables and columns filled, user_version 16.
     [Fact]
     public void Sync_Version13Database_Upgraded()
     {
@@ -2271,7 +2328,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(15, UserVersion());
+        Assert.Equal(16, UserVersion());
         (List<(long Row, string Note)> text, List<(long Row, string Note)> map) = TextRowIds();
         Assert.Equal(["A", "B"], text.Select(r => r.Note).Order(StringComparer.Ordinal));
         Assert.Equal(text, map);

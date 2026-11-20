@@ -109,6 +109,51 @@ internal static class AttributeParser
         return collapsed.ToLowerInvariant();
     }
 
+    /// <summary>
+    /// The parts of a list value (<c>[[ACME]], Beta GmbH</c>), in order: <paramref name="value"/> split at every
+    /// <c>,</c> outside a <c>[[...]]</c> pair (a <c>[[</c> with a later <c>]]</c>), each part's whitespace collapsed
+    /// and trimmed, empty parts dropped. Not deduped. So <c>[[ACME, Inc.]], Beta</c> gives <c>[[ACME, Inc.]]</c> and
+    /// <c>Beta</c>.
+    /// </summary>
+    public static IReadOnlyList<string> ListParts(string value)
+    {
+        List<string> parts = [];
+        int start = 0;
+        int i = 0;
+        while (i < value.Length)
+        {
+            if (value[i] == '[' && i + 1 < value.Length && value[i + 1] == '[')
+            {
+                int close = value.IndexOf("]]", i + 2, StringComparison.Ordinal);
+                if (close >= 0)
+                {
+                    i = close + 2;
+                    continue;
+                }
+            }
+
+            if (value[i] == ',')
+            {
+                AddPart(parts, value.AsSpan(start, i - start));
+                start = i + 1;
+            }
+
+            i++;
+        }
+
+        AddPart(parts, value.AsSpan(start));
+        return parts;
+    }
+
+    private static void AddPart(List<string> parts, ReadOnlySpan<char> part)
+    {
+        string collapsed = TagParser.CollapseWhitespace(part);
+        if (collapsed.Length > 0)
+        {
+            parts.Add(collapsed);
+        }
+    }
+
     // The length of the key at the start of the line: 0 when it doesn't start with a letter.
     private static int KeyEnd(string line)
     {

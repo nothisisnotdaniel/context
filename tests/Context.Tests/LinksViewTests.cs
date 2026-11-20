@@ -232,6 +232,19 @@ public sealed class LinksViewTests : IDisposable
         Assert.Equal(("people/Anna", NoteLinkDirection.From), (from.Note, from.Direction));
     }
 
+    // 332 AC-7: the [[ACME]] part of a comma-separated affiliation is a note link to ACME.
+    [Fact]
+    public void Build_AffiliationListLinkPart_LinkedFrom()
+    {
+        WriteNote("people", "# people");
+        Directory.CreateDirectory(Path.Combine(root, "people"));
+        File.WriteAllText(Path.Combine(root, "people", "Anna.md"), "# Anna\n\naffiliation:: [[ACME]], Beta GmbH\n");
+        WriteNote("ACME", "# ACME\n");
+
+        NoteLink from = Assert.Single(Build("ACME").Links);
+        Assert.Equal(("people/Anna", NoteLinkDirection.From), (from.Note, from.Direction));
+    }
+
     // 205 AC-4/5: a heading link is a link to the note; a missing one shows its note part.
     [Fact]
     public void Build_HeadingLinks_LinkTheNote()
