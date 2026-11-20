@@ -150,7 +150,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#398](backlog/398-people-should-never-show-up-in.md) People should never show up in the recent notes list → 338-person-pages-flat
 - [x] [#377](backlog/377-dependency-list-with-licence-links.md) Dependency list with licence links → 339-dependency-licence-list
 - [x] [#310](backlog/310-choose-light-dark-or-system-theme.md) Choose light, dark or system theme in Settings → 341-theme-setting
-- [ ] [#255](backlog/255-decisions-longer-than-one-line-a.md) Numbered #!d decisions: a marked paragraph, referenced as #!d1234
+- [x] [#255](backlog/255-decisions-longer-than-one-line-a.md) Numbered #!d decisions: a marked paragraph, referenced as #!d1234 → 343-numbered-decisions
 - [ ] [#262](backlog/262-rename-a-note-update-its-title.md) Rename a note: update its # title line too
 - [ ] [#257](backlog/257-web-links-work-in-the-note.md) Web links work in the note editor
 - [ ] [#191](backlog/191-archive-done-todos-a-month-after.md) Archive done todos a month after they are done
