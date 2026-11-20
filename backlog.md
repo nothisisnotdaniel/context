@@ -147,6 +147,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#404](backlog/404-todos-page-opened-from-an-exclamation.md) Todos page opened from an exclamation-mark icon in the left sidebar → 331-todos-page-icon
 - [x] [#405](backlog/405-affiliation-as-a-comma-separated-list.md) Affiliation as a comma-separated list → 332-affiliation-list
 - [x] [#401](backlog/401-say-why-the-app-ended-in.md) Say why the app ended in the crash log → 334-exit-reason-log
+- [ ] [#377](backlog/377-dependency-list-with-licence-links.md) Dependency list with licence links
 - [ ] [#310](backlog/310-choose-light-dark-or-system-theme.md) Choose light, dark or system theme in Settings
 - [ ] [#255](backlog/255-decisions-longer-than-one-line-a.md) Numbered #!d decisions: a marked paragraph, referenced as #!d1234
 - [ ] [#262](backlog/262-rename-a-note-update-its-title.md) Rename a note: update its # title line too
@@ -340,7 +341,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#371](backlog/371-command-bar-fit-the-window-to.md) Command bar: fit the window to its content and check the rounded corners
 - [?] [#375](backlog/375-code-block-copy-announce-the-result.md) Code block Copy: announce the result to screen readers
 - [?] [#376](backlog/376-code-blocks-track-changed-blocks-by.md) Code blocks: track changed blocks by identity, not index
-- [ ] [#377](backlog/377-dependency-list-with-licence-links.md) Dependency list with licence links
 - [?] [#378](backlog/378-app-icon-full-bleed-variant-for.md) App icon: full-bleed variant for Windows and Linux
 - [?] [#379](backlog/379-search-page-arrow-keys-move-between.md) Search page: arrow keys move between results without scrolling the page
 - [?] [#380](backlog/380-mail-digest-hint-under-the-settings.md) Mail digest: hint under the Settings checkbox
