@@ -401,6 +401,71 @@ public sealed class RecentNotesActionsTests : IDisposable
         cut.WaitForAssertion(() => Assert.Contains("Plan", cut.Find(".search-panel").TextContent, StringComparison.Ordinal), Wait);
     }
 
+    // 338 AC-2: opening a person page through /open with no recent.json yet records nothing and creates no file.
+    [Fact]
+    public async Task OpenPersonPage_NoFile_RecordsNothing_WritesNothing()
+    {
+        data.WriteNote("people", "# people\n");
+        data.WriteFile(Path.Combine("people", "Anna.md"), "# Anna\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await Open(cut, js, "people/Anna");
+        data.WaitForRecentWrites();
+
+        Assert.Empty(data.State!.Recent);
+        Assert.False(File.Exists(Path.Combine(data.Root, RecentNotesStore.FileName)));
+        Assert.Empty(cut.FindAll("ul.recent-notes button.name"));
+        Assert.Equal("No recently opened notes.", cut.Find(".recent-empty").TextContent);
+    }
+
+    // 338 AC-2: with 10 other notes recently opened, opening a person page through /open and through the People panel
+    // keeps all 10 listed and leaves recent.json's bytes unchanged.
+    [Fact]
+    public async Task OpenPersonPage_TenListed_AllStay_FileUnchanged()
+    {
+        string[] names = Enumerable.Range(1, 10).Select(i => $"N{i:00}").ToArray();
+        foreach (string name in names)
+        {
+            data.WriteNote(name, "x\n");
+        }
+
+        data.WriteNote("people", "# people\n");
+        data.WriteFile(Path.Combine("people", "Anna.md"), "# Anna\n");
+        data.WriteFile(Path.Combine("people", "Bob.md"), "# Bob\n");
+        await data.RefreshAsync();
+        foreach (string name in names)
+        {
+            await data.Actions!.RecordOpened(name).WaitAsync(Wait);
+        }
+
+        string path = Path.Combine(data.Root, RecentNotesStore.FileName);
+        byte[] before = File.ReadAllBytes(path);
+        string[] listed = names.Reverse().ToArray();
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        WaitListed(cut, listed);
+
+        await Open(cut, js, "people/Anna");
+        data.WaitForRecentWrites();
+        Assert.Equal(listed, data.State!.Recent);
+        WaitListed(cut, listed);
+
+        int mounts = js.Calls("ContextEditor.mount").Count;
+        await cut.Find("button.people-open").ClickAsync(new MouseEventArgs());
+        // The panel re-renders once its attributes load, which gives each row a new handler, so find the row after.
+        cut.WaitForState(() => cut.FindComponent<PeoplePanel>().Instance.Loaded, Wait);
+        await cut.FindAll(".people-panel button.person-open").Single(b => b.TextContent == "Bob").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("people/Bob", cut.Find(".note-title").GetAttribute("title")), Wait);
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);
+        data.WaitForRecentWrites();
+
+        Assert.Equal(listed, data.State.Recent);
+        WaitListed(cut, listed);
+        Assert.Equal(before, File.ReadAllBytes(path));
+    }
+
     private static void WaitListed<T>(IRenderedComponent<T> cut, params string[] names)
         where T : IComponent =>
         cut.WaitForAssertion(() => Assert.Equal(

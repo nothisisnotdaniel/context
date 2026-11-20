@@ -312,6 +312,39 @@ public sealed class SearchPanelTests : IDisposable
         Assert.Equal(["beta"], opened);
     }
 
+    // 338 AC-6: in text and tag-filter results a person page's button shows only the person's name, with the full
+    // name in its title, and opens the page; other notes, people/Anna/Notes too, keep their full name.
+    [Theory]
+    [InlineData("budget")]
+    [InlineData("#money")]
+    public async Task Render_PersonPage_ShowsPersonName_FullNameInTitle(string query)
+    {
+        data.WriteNote("people", "# people\n");
+        data.WriteFile(Path.Combine("people", "Anna.md"), "# Anna\nbudget #money\n");
+        data.WriteFile(Path.Combine("people", "Anna", "Notes.md"), "# Notes\nbudget #money\n");
+        data.WriteNote("Plan", "budget #money\n");
+        await data.RefreshAsync();
+        List<string> opened = [];
+        IRenderedComponent<SearchPanel> cut = data.Bunit.Render<SearchPanel>(p => p
+            .Add(c => c.Text, query)
+            .Add(c => c.OnOpen, ((string Note, string Text) hit) => opened.Add(hit.Note)));
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.DoesNotContain("Loading…", cut.Find("section.search-panel").TextContent, StringComparison.Ordinal);
+            Assert.NotNull(cut.Find("p.search-count"));
+            Assert.Equal(3, cut.FindAll(".search-hits button.note-button").Count);
+        }, Wait);
+        Dictionary<string, string> shown = cut.FindAll(".search-hits button.note-button")
+            .ToDictionary(b => b.GetAttribute("title")!, b => b.TextContent);
+        Assert.Equal("Anna", shown["people/Anna"]);
+        Assert.Equal("people/Anna/Notes", shown["people/Anna/Notes"]);
+        Assert.Equal("Plan", shown["Plan"]);
+
+        await cut.FindAll(".search-hits button.note-button").Single(b => b.GetAttribute("title") == "people/Anna").ClickAsync(new MouseEventArgs());
+        Assert.Equal(["people/Anna"], opened);
+    }
+
     // 207 AC-4: a tag filter shows at most 100 notes, then the grey "… n more" line.
     [Fact]
     public async Task Render_TagFilter_ManyNotes_CappedWithMoreLine()

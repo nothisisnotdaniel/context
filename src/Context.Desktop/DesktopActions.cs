@@ -1237,14 +1237,16 @@ internal sealed class DesktopActions
     /// Records that the note <paramref name="name"/> (a full name) was opened (job 240): it moves to the front of
     /// <see cref="DesktopState.Recent"/> right away, then, off the calling thread, <see cref="DesktopState.Changed"/> is
     /// raised and <c>recent.json</c> is written. Runs outside the one-at-a-time gate, so it is never refused as Busy;
-    /// never refreshes, never rescans the notes folder and never throws. A name that could not name a note is ignored.
+    /// never refreshes, never rescans the notes folder and never throws. A name that could not name a note, or a person
+    /// page (job 338), is ignored.
     /// A failed write is swallowed and the in-memory list stays. The task ends after the write.
     /// </summary>
     public Task RecordOpened(string name)
     {
         try
         {
-            if (!RecentNotes.IsValidName(name))
+            // 338: a person page never enters the list, so opening one changes nothing and writes nothing.
+            if (People.PersonOf(name) is not null || !RecentNotes.IsValidName(name))
             {
                 return Task.CompletedTask;
             }

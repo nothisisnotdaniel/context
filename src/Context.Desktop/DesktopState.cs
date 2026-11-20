@@ -108,7 +108,8 @@ internal sealed class DesktopState
         KeyStore = keyStore ?? new UnsupportedKeyStore();
         Session = session ?? new SensitiveSession(utcNow);
         HistoryStore = new NoteHistory(notes, utcNow);
-        recent = new RecentNotesStore(notes.Root).Read();
+        // 338: stored person pages are dropped in memory only; the file changes only with the next normal write.
+        recent = RecentNotes.WithoutPeople(new RecentNotesStore(notes.Root).Read());
         pinned = new PinnedNotesStore(notes.Root).Read();
     }
 

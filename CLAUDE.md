@@ -1275,7 +1275,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     bar between Triage and Tags, `OnPeople`; `Main`'s `page`, `Page.People`) lists the person pages (`People.PersonOf`)
     of `Snapshot.Notes` only (no index, no file read), sorted by `Title` ignoring case, then ordinal, in
     `ul.people-list` (`aria-label="People"`): one `button.person-open.cut` per page, text `DesktopText.NoteName(Title)`,
-    `title` through `OneLine`, opening it through `RequestOpen`; none: grey `p[role=status]` `No people yet. Mention
+    `title` through `OneLine`, opening it through `RequestOpen` (job 338: person pages are flat: never in the recent list,
+    no grey parent in the pinned list, no Subpages section, no `New subpage`/`Move`); none: grey `p[role=status]` `No people yet. Mention
     someone as @[Name] and open the mention to add their page.`. Sensitive notes are not listed. Its × closes it.
     **Filters** (job 291, Core `PeopleAttributes.cs`): `PeopleAttributes.Build(index, store)` (`Found`,
     `IndexUnreadable`) syncs and reads `AttributeValues("affiliation"/"role")` of the direct person pages only: `People`
@@ -1572,10 +1573,15 @@ Every factory agent reads this file before working on Context. Keep it short and
     lists): the entries of `State.Recent` that name an existing note (ordinal match against `Snapshot.Notes` or
     `Snapshot.Sensitive`), newest first, at most `RecentNotes.MaxCount` (10). Each `li.note` holds a `button.name.cut`
     with `DesktopText.NoteName(Title)`, for a subpage followed by a grey `span.note-parent` with the parent's full name
-    (through `OneLine`); its `title` is the full name, the row of `OpenName` has `aria-current="page"`, and a sensitive
+    (through `OneLine`; none for a person page, job 338); its `title` is the full name, the row of `OpenName` has `aria-current="page"`, and a sensitive
     note keeps the visible `locked`. With notes but no listed entry it shows grey `No recently opened notes.`
     (`p.recent-empty`); `No notes yet` and the red unreadable line stay. Core `RecentNotes.cs` holds the pure steps
-    (`Touch`, `Renamed`, `Removed`, `IsValidName`) and `RecentNotesStore`: `<root>/recent.json`,
+    (`Touch`, `Renamed`, `Removed`, `IsValidName`, `WithoutPeople`) and `RecentNotesStore`. **Person pages** (job 338,
+    `People.PersonOf`) never enter the list: `Touch` returns the list without that name, `Renamed` drops an entry that
+    becomes a person page, `RecordOpened` returns early for one (no change, no `Changed`, no write), and the list read
+    from `recent.json` goes through `WithoutPeople` in memory only (start-up writes nothing; the next normal write
+    rewrites the file). In search results (text and tag filter) a person page's button text is
+    `DesktopText.NoteName(<person>)`, the full name stays in its `title`. `RecentNotesStore`: `<root>/recent.json`,
     `{"recent":[…]}` UTF-8 without BOM, relaxed escaping, temp file then move, never creating the root; read through
     `BoundedFile` (64 KiB), anything broken, of another shape or with an invalid name reads as empty and the next write
     replaces it. `DataWatcher` ignores the file; the CLI never names it. `DesktopState` loads the list once
@@ -1613,7 +1619,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     class="subpages" aria-label="Subpages">` (`h2` `Subpages`; job 238): one `button.subpage-link cut` per direct child
     from `Snapshot.Notes` (no disk read; `Title` ignoring case, then ordinal), text `DesktopText.NoteName(Title)`,
     `title` the full name through `OneLine`, opening it through `RequestOpen`, and a grey `span.subpage-count`
-    (`1 subpage`/`<n> subpages`) for a child with children of its own; no children, no `nav`.
+    (`1 subpage`/`<n> subpages`) for a child with children of its own; no children, no `nav`. A person page
+    (`People.PersonOf`, job 338) is a flat page: no `nav.subpages` even with children, and its More actions leave out
+    `New subpage` and `Move` (menu only; the actions themselves don't refuse). `people` and deeper pages keep both.
     Below it the editor's `h2.note-title` shows only the page's own name (the last segment) and its `title` attribute
     holds the full name (job 235); the unreadable and editor-failed lines and the status lines keep the full name. Both
     go through `DesktopText.NoteName` (`OneLine`, then every bidi control U+202A-202E/U+2066-2069 becomes `�`).

@@ -48,10 +48,11 @@
                     string name = note;
                     int index = i;
                     string shown = DesktopText.NoteName(name);
+                    string label = RowText(name);
                     <li>
                         <button type="button" class="note-button cut" title="@shown" tabindex="@(index == Active ? "0" : "-1")"
                                 @ref="rowButtons[index]" @onfocus="() => active = index" @onkeydown="e => RowKey(e, index, name)"
-                                @onkeyup="RowKeyUp" @onclick="() => RowClick(index, name)">@shown</button>
+                                @onkeyup="RowKeyUp" @onclick="() => RowClick(index, name)">@label</button>
                     </li>
                 }
             </ul>
@@ -88,13 +89,14 @@
                     string name = hit.Note;
                     int index = i;
                     string shown = DesktopText.NoteName(name);
+                    string label = RowText(name);
                     string line = DesktopText.OneLine(hit.Line);
                     Snippet snippet = SnippetOf(hit, current.Trim().Length);
                     <li>
                         <div class="hit-head">
                             <button type="button" class="note-button cut" title="@shown" tabindex="@(index == Active ? "0" : "-1")"
                                     @ref="rowButtons[index]" @onfocus="() => active = index" @onkeydown="e => RowKey(e, index, name)"
-                                    @onkeyup="RowKeyUp" @onclick="() => RowClick(index, name)">@shown</button>
+                                    @onkeyup="RowKeyUp" @onclick="() => RowClick(index, name)">@label</button>
                             @if (hit.Types.Count > 0)
                             {
                                 <span class="type grey cut" title="@DesktopText.OneLine(string.Join(", ", hit.Types))">@DesktopText.OneLine(string.Join(", ", hit.Types))</span>
@@ -206,6 +208,10 @@
 
     private static string More(int count) =>
         $"{CurrentView.Outside} {(count - MaxRows).ToString(CultureInfo.InvariantCulture)} more";
+
+    // 338: a person page's row shows only the person's name; the full name stays in the title.
+    private static string RowText(string name) =>
+        People.PersonOf(name) is { } person ? DesktopText.NoteName(person) : DesktopText.NoteName(name);
 
     private string Heading => current.Trim().Length == 0 ? "Search" : $"Search: {DesktopText.OneLine(current.Trim())}";
 
