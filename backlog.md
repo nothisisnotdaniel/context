@@ -364,6 +364,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#408](backlog/408-tooltip-on-the-global-todo-marker.md) Tooltip on the global todo marker
 - [?] [#409](backlog/409-build-notehistory-after-the-todo-braces.md) Build NoteHistory after the todo-braces record check
 - [?] [#410](backlog/410-check-the-carry-over-arrow-box.md) Check the carry-over arrow box width in both themes
+- [?] [#411](backlog/411-loading-state-and-group-counts-on.md) Loading state and group counts on the Todos page
+- [?] [#412](backlog/412-check-the-contrast-of-grey-source.md) Check the contrast of grey source buttons in dark mode
 
 ## Dropped with the terminal UI
 
