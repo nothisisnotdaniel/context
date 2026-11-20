@@ -356,6 +356,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#398](backlog/398-people-should-never-show-up-in.md) People should never show up in the recent notes list
 - [?] [#399](backlog/399-payment-provider-spike.md) Payment provider spike
 - [ ] [#402](backlog/402-throttle-repeated-show-requests.md) Throttle repeated show requests
+- [h] [#403](backlog/403-check-the-second-start-on-windows.md) Check the second start on Windows
 
 ## Dropped with the terminal UI
 
