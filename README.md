@@ -4,6 +4,7 @@ A personal app for keeping notes, todos and the day's appointments in one place,
 scriptable command-line tool, `context`.
 The desktop app shows the Context icon (a white "C" around an amber dot) in the window, the Dock, the taskbar and
 the Windows installer; the artwork and how the icon files are made are in `src/Context.Desktop/Assets/`.
+Every package and tool Context uses or ships, with its licence, is listed in [DEPENDENCIES.md](DEPENDENCIES.md).
 
 ## Command line
 
