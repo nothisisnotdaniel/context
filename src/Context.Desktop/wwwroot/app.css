@@ -321,6 +321,7 @@ ol {
 }
 
 .todo .todo-note:focus-visible,
+.all-todos-panel .todo .todo-meeting:focus-visible,
 .topic .topic-note:focus-visible,
 .to-review .review-note:focus-visible {
     outline: 2px solid var(--accent-strong);
@@ -1446,6 +1447,49 @@ input[type="password"]:disabled {
     color: var(--accent-strong);
     max-width: 100%;
     min-width: 0;
+}
+
+/* The Todos page (job 331): every open global todo, grouped by due date under h3 headings, rows laid out like the
+   sidebar's todo rows; a tied meeting is a link-like button like a note todo's note. */
+.all-todos-panel {
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+}
+
+.all-todos-panel .all-todos-group h3 {
+    color: var(--grey);
+    font-size: 13px;
+    margin: 14px 0 4px;
+    text-transform: uppercase;
+}
+
+.all-todos-list {
+    list-style: none;
+    margin: 0 0 8px;
+    padding: 0;
+}
+
+.all-todos-panel .todo .todo-meeting {
+    background: none;
+    border: none;
+    color: var(--grey);
+    cursor: pointer;
+    flex: 0 1 auto;
+    font: inherit;
+    font-size: 12px;
+    max-width: 16em;
+    min-width: 0;
+    overflow: hidden;
+    padding: 0;
+    text-decoration: underline;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.all-todos-panel .meeting-hint {
+    flex: none;
+    font-size: 12px;
 }
 
 /* The People filters (job 291): native selects with a visible label; a long value is cut by the select's width. */

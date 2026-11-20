@@ -12,7 +12,7 @@
     {
         <div class="layout" @onkeydown="OpenPalette">
             <aside class="notes-region">
-                <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" OnTriage="ShowTriage" OnPeople="ShowPeople" OnSearch="ShowSearch" />
+                <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" OnTriage="ShowTriage" OnPeople="ShowPeople" OnTodos="ShowTodos" OnSearch="ShowSearch" />
             </aside>
             <main class="current-region">
                 <TopBar Today="@snapshot.Today" Selected="@SelectedDay()" OnToday="ShowToday" OnPick="PickDay" OnCapture="CaptureAsync" OnSearch="ShowSearch" PageActions="@PageActionsFor(snapshot)"
@@ -48,6 +48,10 @@
                 @if (page == Page.People)
                 {
                     <PeoplePanel OnOpen="RequestOpen" OnClose="ClosePeople" />
+                }
+                @if (page == Page.Todos)
+                {
+                    <AllTodosPanel OnOpen="RequestOpen" OnMeeting="OpenAppointment" OnPerson="OpenMention" OnClose="CloseTodos" />
                 }
                 @if (page == Page.Tags)
                 {
@@ -262,7 +266,7 @@ else
     private (string Note, string Text)? pendingSearchBack;
     private string? decisionsShown;
     private bool similarShown;
-    private enum Page { None, Triage, People, Tags, Settings, Appointment, Board, Search, MailDigest, Done }
+    private enum Page { None, Triage, People, Tags, Settings, Appointment, Board, Search, MailDigest, Done, Todos }
 
     // The board's tag (normalized) while Page.Board is shown (job 242).
     private string? boardShown;
@@ -594,6 +598,11 @@ else
     private void ShowPeople() => OpenPage(Page.People);
 
     private void ClosePeople() => page = Page.None;
+
+    // The Todos page (job 331): every open global todo grouped by due date, in place of the note area.
+    private void ShowTodos() => OpenPage(Page.Todos);
+
+    private void CloseTodos() => page = Page.None;
 
     // The settings: shown at the top of the main region until closed or until a note opens.
     private void ShowSettings() => OpenPage(Page.Settings);

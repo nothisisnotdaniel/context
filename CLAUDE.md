@@ -990,7 +990,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `DataWatcher` (one `FileSystemWatcher` with subfolders, `IsRelevant` filter: the top-level files as before, plus
     a `.md` at any depth except under a folder starting with `.` or under the top-level `calendar/`, and the top-level
     `settings.json` (job 207: saved searches edited outside the app; any case, not in a subfolder); 300 ms
-    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `TodoPanel`, `NotesPanel`, `TagsPanel`, `PeoplePanel`, `LinksPanel`, `OutlinePanel`, `DayAppointmentsPanel`, `TimesTodayPanel`, `AppointmentPanel`, `PersonPanel`, `ItemPanel`, `ReviewPanel`, `TriagePanel`, `MailDigestPanel`, `ToReviewPanel`, `SimilarPanel`)
+    debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `TodoPanel`, `AllTodosPanel`, `NotesPanel`, `TagsPanel`, `PeoplePanel`, `LinksPanel`, `OutlinePanel`, `DayAppointmentsPanel`, `TimesTodayPanel`, `AppointmentPanel`, `PersonPanel`, `ItemPanel`, `ReviewPanel`, `TriagePanel`, `MailDigestPanel`, `ToReviewPanel`, `SimilarPanel`)
     inherit `StateComponent`, which injects the state and `DesktopActions` (internal types can't be
     public parameters). `DesktopActions` (with `ActionResult`: `ActionKind` `Done`/`Refused`/`Failed`, `ActionReason`,
     raw text) is the only write path: it never throws, runs one action at a time (`Busy`), refreshes the state after a change and has the test
@@ -1229,7 +1229,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     state change) and opens the page when no note has unsaved changes and no dialog or edit field is open; otherwise the
     editor is left alone and the accent status reads `Today's briefing is ready: briefings/<day>. Type /briefing to open
     it.`. The page is a snapshot, never refreshed.
-    **Pages (job 193):** `Main` holds one `page` (none, triage, people, tags, settings, appointment, board, search); opening one replaces another. The note area
+    **Pages (job 193):** `Main` holds one `page` (none, triage, people, tags, settings, appointment, board, search, todos); opening one replaces another. The note area
     (`div.note-area`: breadcrumb to `LinksPanel`, or with no note open only the grey `p.no-note` `No note open. Click
     Today to open today's note.`, job 216) gets `hidden` while a page shows, but stays mounted so
     unsaved editor text survives. Each page's root has class `page` and an icon-only `button.close` (aria-label and title
@@ -1286,6 +1286,17 @@ Every factory agent reads this file before working on Context. Keep it short and
     filters.` in place of the list, and per row a grey `span.person-details` in the button (roles `, ` joined, ` · `,
     affiliations, through `OneLine`). A bad index: everyone, no filters, red `Can't read the attributes.`. Reloads on
     `State.Changed` keeping the rows; a selection that is gone resets to `All`; older results are dropped.
+    **Todos page (job 331):** `AllTodosPanel` (`section.page.all-todos-panel`, `aria-label` `Todos`; the exclamation-mark
+    icon `button.todos-open` in `NotesPanel`'s bar between Tags and Settings, `OnTodos`; `Main`'s `Page.Todos` through
+    `OpenPage`) lists every open global todo from the snapshot only (`NoteTodos.Merge(Todos, NoteTodos)`: `todos.json`
+    todos, tied ones included, and `- { }` note lines; never `- [ ]`/`- [>]`), in that order split into `section`s with an
+    `h3` and `ul.all-todos-list`: `Overdue`, `Today`, `Upcoming`, `No due date` (only groups with rows; waiting-for todos
+    in their date group). Rows are built like `TodoPanel`'s (checkbox, `span.date` class, time, repeat, text with mention
+    buttons to `OnPerson`); a note todo has `button.todo-note` (`OnOpen`, Main's `RequestOpen`), a tied todo
+    `button.todo-meeting` (`OnMeeting((Title, Day))`, Main's `OpenAppointment`) plus grey `Meeting cancelled or moved` for
+    an id in `MeetingHints`. Ticking asks the same `Mark this todo done?` dialog and shows the same `p.result` texts as
+    `TodoPanel`; grey `No open todos. Add one in the todo list or type - { } in a note.` only when both lists are empty and
+    readable, red `Can't read todos.json` / `Can't read the note todos.` otherwise. The sidebar `TodoPanel` stays as it is.
     **Tags and links:** `TagsPanel` (the `Tags` button in `NotesPanel`, or `/tags` without an argument; `Main`'s
     `page`) lists `DesktopState.Tags()` (`TagsView.Build`): one button per tag with its grey note count; job 295: when `TagsView.Skipped` (filled for `AllTags` only) is not empty, a grey `p.tags-skipped` `Not indexed (over 5 MB): <a>, <b>.` follows (names through `DesktopText.OneLine`, at most `MaxSkippedNames` (10), then `, … <k> more`), in the empty-tags state too; the command line `tags` output is unchanged; a click
     shows `TagPanel` for it below the list (`aria-pressed` on that button); its × hides both, `TagPanel`'s only
@@ -1404,8 +1415,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     save dialog shows nothing, else `ShareNote`'s text in the main status line (accent Done, red otherwise).
     Rules (`DesktopSourceTests`): `WritePlainCopy` and `ReadImport` are named in
     `Context.Desktop` only in `DesktopActions.cs`, and no `.razor` file matches `\b(File|Directory|Path)\.`.
-    **Sidebar bar (job 197):** `NotesPanel`'s bar holds only the icon buttons (`.notes-bar-buttons`: triage, people, tags, settings; Search moved to the top bar in job 218, `NotesPanel.OnSearch` stays for saved searches), right-aligned (`justify-content: flex-end`); no logo and no visible "Notes" heading, the list `ul.note-list.recent-notes` carries `aria-label="Recent notes"` (job 240). Between the bar and the list, `nav.saved-searches` (job 207, `aria-label="Saved searches"`, only with entries; `DesktopSnapshot.SavedSearches`) has per entry `button.saved-search` (name through `OneLine`, cut, `title` the query; `OnSearch(query)`) and `button.saved-search-remove` (`×`, `aria-label`/`title` `Remove <name>`; `Actions.RemoveSavedSearch`, result in grey/red `p.saved-search-result`); `SavedSearchesUnreadable` shows red `Can't read saved searches.` instead. **Placeholders:** a box's placeholder says only what it is for (`New todo`, `Capture to inbox`), never a `Return to …` hint; Return still submits and there are no submit buttons.
-    **Tidy layout (job 192):** the Triage, People (job 239), Tags and Settings buttons in `NotesPanel`'s bar are icon-only (inline `svg`, `aria-hidden`, `currentColor`; `aria-label` and `title` carry the name), note rows show no modified date, and `.top-bar` is a band (`--panel` background, `--line` bottom border).
+    **Sidebar bar (job 197):** `NotesPanel`'s bar holds only the icon buttons (`.notes-bar-buttons`: triage, people, tags, todos (job 331), settings; Search moved to the top bar in job 218, `NotesPanel.OnSearch` stays for saved searches), right-aligned (`justify-content: flex-end`); no logo and no visible "Notes" heading, the list `ul.note-list.recent-notes` carries `aria-label="Recent notes"` (job 240). Between the bar and the list, `nav.saved-searches` (job 207, `aria-label="Saved searches"`, only with entries; `DesktopSnapshot.SavedSearches`) has per entry `button.saved-search` (name through `OneLine`, cut, `title` the query; `OnSearch(query)`) and `button.saved-search-remove` (`×`, `aria-label`/`title` `Remove <name>`; `Actions.RemoveSavedSearch`, result in grey/red `p.saved-search-result`); `SavedSearchesUnreadable` shows red `Can't read saved searches.` instead. **Placeholders:** a box's placeholder says only what it is for (`New todo`, `Capture to inbox`), never a `Return to …` hint; Return still submits and there are no submit buttons.
+    **Tidy layout (job 192):** the Triage, People (job 239), Tags, Todos (job 331) and Settings buttons in `NotesPanel`'s bar are icon-only (inline `svg`, `aria-hidden`, `currentColor`; `aria-label` and `title` carry the name), note rows show no modified date, and `.top-bar` is a band (`--panel` background, `--line` bottom border).
     **Top bar (job 198):** `TopBar` replaces the capture box as the first child of `Main`'s `main.current-region` (not with
     `Can't read the data folder.`): an empty `.top-bar-start` and right-aligned `.top-bar-buttons` with icon buttons in the order Today, Search, Capture, Pick a day, More actions (job 241)
     `button.today-open` (`Today`), `button.search-open` (`Search`, job 218: the magnifying glass; a `.search-pop` popover

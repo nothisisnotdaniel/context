@@ -1,0 +1,282 @@
+@inherits StateComponent
+@* The Todos page (job 331): every open global todo (todos.json todos, meeting-tied ones included, and - { } lines in
+   notes; never a note's own - [ ] or - [>] checkboxes) in NoteTodos.Merge order, grouped by due date, each with where it
+   comes from, and a checkbox that marks it done after the same question TodoPanel asks. It reads only the snapshot,
+   so it reloads whenever the state changes. *@
+
+<section class="page all-todos-panel" aria-label="Todos">
+    <div class="panel-bar">
+        <h2>Todos</h2>
+        <button type="button" class="close" aria-label="Close" title="Close" @onclick="() => OnClose.InvokeAsync()"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" /></svg></button>
+    </div>
+    @if (Snapshot is not { } snapshot)
+    {
+        <p class="grey" role="status">Loading…</p>
+    }
+    else
+    {
+        IReadOnlyList<TodoEntry> entries = NoteTodos.Merge(snapshot.Todos, snapshot.NoteTodos);
+        bool busy = asking is not null || askingNote is not null || running;
+        @if (snapshot.TodosUnreadable)
+        {
+            <p class="red">Can't read todos.json</p>
+        }
+        @if (snapshot.NoteTodosUnreadable)
+        {
+            <p class="red note-todos-unreadable">Can't read the note todos.</p>
+        }
+        @if (entries.Count == 0)
+        {
+            @if (!snapshot.TodosUnreadable && !snapshot.NoteTodosUnreadable)
+            {
+                <p class="grey" role="status">No open todos. Add one in the todo list or type - { } in a note.</p>
+            }
+        }
+        else
+        {
+            @foreach ((string heading, List<TodoEntry> rows) in Groups(entries, snapshot.Today))
+            {
+                <section class="all-todos-group">
+                    <h3>@heading</h3>
+                    <ul class="all-todos-list">
+                        @foreach (TodoEntry entry in rows)
+                        {
+                            @Row(entry, snapshot, busy)
+                        }
+                    </ul>
+                </section>
+            }
+        }
+    }
+    @if (result is { } shown)
+    {
+        @if (shown.Kind == ActionKind.Done && shown.Reason == ActionReason.DoneLogLeft)
+        {
+            <p class="result red" role="status">@DesktopActions.DoneLogLeftText</p>
+        }
+        else if (shown.Kind == ActionKind.Done)
+        {
+            @if (shown.NextDue is { } nextDue)
+            {
+                <p class="result accent" role="status">Done: @(DesktopText.OneLine(shown.Text)). Next due @(nextDue.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)).</p>
+            }
+            else
+            {
+                <p class="result accent" role="status">Done: @DesktopText.OneLine(shown.Text)</p>
+            }
+        }
+        else
+        {
+            <p class="result red" role="status">@shown.Text</p>
+        }
+    }
+    else
+    {
+        <p class="result" role="status"></p>
+    }
+    @if (asking is { } todoAsked)
+    {
+        <ConfirmDialog Question="@($"Mark this todo done? {todoAsked.Text}")" ConfirmLabel="Mark done"
+                       Busy="running" OnConfirm="CompleteAsked" OnCancel="CloseDialog" />
+    }
+    else if (askingNote is { } noteAsked)
+    {
+        <ConfirmDialog Question="@($"Mark this todo done? {noteAsked.Text}")" ConfirmLabel="Mark done"
+                       Busy="running" OnConfirm="CompleteNoteAsked" OnCancel="CloseDialog" />
+    }
+</section>
+
+@code {
+    /// <summary>Called with the full name of the note a todo inside a note comes from, when its name is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    /// <summary>Called with the title and day of the meeting a stored todo is tied to, when its title is clicked.</summary>
+    [Parameter]
+    public EventCallback<(string Title, DateOnly Day)> OnMeeting { get; set; }
+
+    /// <summary>Called with the normalized name of a person mention clicked in a todo's text.</summary>
+    [Parameter]
+    public EventCallback<string> OnPerson { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    private TodoItem? asking;
+    private NoteTodo? askingNote;
+    private bool running;
+    private ActionResult? result;
+
+    // The merged rows split into Overdue, Today, Upcoming and No due date; Merge sorts by date with undated note todos
+    // last, so each group is one run of rows. A group without rows is left out.
+    private static IEnumerable<(string Heading, List<TodoEntry> Rows)> Groups(IReadOnlyList<TodoEntry> entries, DateOnly today)
+    {
+        string[] headings = ["Overdue", "Today", "Upcoming", "No due date"];
+        for (int i = 0; i < headings.Length; i++)
+        {
+            int group = i;
+            List<TodoEntry> rows = entries.Where(e => GroupOf(DueOf(e), today) == group).ToList();
+            if (rows.Count > 0)
+            {
+                yield return (headings[i], rows);
+            }
+        }
+    }
+
+    private static DateOnly? DueOf(TodoEntry entry) => entry.Stored is { } todo ? todo.Due : entry.Note?.Due;
+
+    private static int GroupOf(DateOnly? due, DateOnly today) =>
+        due is not { } day ? 3 : day < today ? 0 : day == today ? 1 : 2;
+
+    private void Ask(TodoItem todo)
+    {
+        if (!running)
+        {
+            asking = todo;
+        }
+    }
+
+    private void AskNote(NoteTodo todo)
+    {
+        if (!running)
+        {
+            askingNote = todo;
+        }
+    }
+
+    private void CloseDialog()
+    {
+        if (!running)
+        {
+            asking = null;
+            askingNote = null;
+        }
+    }
+
+    private async Task CompleteAsked(Confirmation confirmed)
+    {
+        if (asking is not { } todoAsked || running)
+        {
+            return;
+        }
+
+        running = true;
+        try
+        {
+            result = await Actions.CompleteTodo(todoAsked, confirmed);
+        }
+        finally
+        {
+            running = false;
+            asking = null;
+        }
+    }
+
+    private async Task CompleteNoteAsked(Confirmation confirmed)
+    {
+        if (askingNote is not { } todoAsked || running)
+        {
+            return;
+        }
+
+        running = true;
+        try
+        {
+            result = await Actions.CompleteNoteTodo(todoAsked, confirmed);
+        }
+        finally
+        {
+            running = false;
+            askingNote = null;
+        }
+    }
+
+    // One row: the checkbox, the date (and time and repeat for a stored todo), the text, then where it comes from.
+    private RenderFragment Row(TodoEntry entry, DesktopSnapshot snapshot, bool busy) => __builder =>
+    {
+        @if (entry.Stored is { } todo)
+        {
+            string text = DesktopText.OneLine(todo.Text);
+            <li class="todo">
+                <label class="todo-line">
+                    <input type="checkbox" class="done" checked="@(asking?.Id == todo.Id)"
+                           disabled="@busy" @onchange="() => Ask(todo)" />
+                    <span class="date @DateClass(todo.Due, snapshot.Today)">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                    @if (todo.Time is { } time)
+                    {
+                        @(" ")<span class="time">@time.ToString(TodoStore.StoredTimeFormat, CultureInfo.InvariantCulture)</span>
+                    }
+                    @(" ")
+                    @TodoText(text)
+                    @if (todo.Repeat is { } repeat)
+                    {
+                        <span class="repeat" title="@repeat.Label">@repeat.Label</span>
+                    }
+                    @if (todo.Meeting is { } meeting)
+                    {
+                        string meetingTitle = DesktopText.OneLine(meeting.Title);
+                        @* The meeting's title opens its appointment page; its click never ticks the checkbox. *@
+                        <button type="button" class="todo-meeting" title="@meetingTitle"
+                                @onclick="() => OnMeeting.InvokeAsync((meeting.Title, meeting.Day))"
+                                @onclick:preventDefault="true" @onclick:stopPropagation="true">@meetingTitle</button>
+                        @if (snapshot.MeetingHints.Contains(todo.Id))
+                        {
+                            <span class="meeting-hint grey">Meeting cancelled or moved</span>
+                        }
+                    }
+                </label>
+            </li>
+        }
+        else if (entry.Note is { } noteTodo)
+        {
+            string text = DesktopText.OneLine(noteTodo.Text);
+            string noteName = DesktopText.OneLine(noteTodo.Note);
+            <li class="todo note-todo">
+                <label class="todo-line">
+                    <input type="checkbox" class="done" checked="@(askingNote == noteTodo)"
+                           disabled="@busy" @onchange="() => AskNote(noteTodo)" />
+                    @if (noteTodo.Due is { } noteDue)
+                    {
+                        <span class="date @DateClass(noteDue, snapshot.Today)">@noteDue.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                        @(" ")
+                    }
+                    @TodoText(text)
+                    @(" ")
+                    @* The note's name opens it (with the editor's discard check); its click never ticks the checkbox. *@
+                    <button type="button" class="todo-note" title="@noteName"
+                            @onclick="() => OnOpen.InvokeAsync(noteTodo.Note)"
+                            @onclick:preventDefault="true" @onclick:stopPropagation="true">@noteName</button>
+                </label>
+            </li>
+        }
+    };
+
+    private static string DateClass(DateOnly day, DateOnly today) =>
+        day < today ? "overdue" : day == today ? "today" : "later";
+
+    // A todo's one-line text; a mention opens the person's page and its click stops there, so the checkbox never ticks.
+    private RenderFragment TodoText(string text) => __builder =>
+    {
+        IReadOnlyList<PersonSegment> segments = PersonParser.Segments(text);
+        <span class="text cut" title="@text">@if (segments.Any(s => s.IsMention))
+            {
+                @foreach (PersonSegment segment in segments)
+                {
+                    @if (segment.Name is { } mentioned)
+                    {
+                        <button type="button" class="mention" title="@segment.Text"
+                                @onclick="() => OnPerson.InvokeAsync(mentioned)"
+                                @onclick:preventDefault="true" @onclick:stopPropagation="true">@segment.Text</button>
+                    }
+                    else
+                    {
+                        <span class="plain">@segment.Text</span>
+                    }
+                }
+            }
+            else
+            {
+                @text
+            }</span>
+    };
+}
