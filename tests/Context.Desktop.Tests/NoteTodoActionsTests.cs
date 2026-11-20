@@ -37,7 +37,7 @@ public sealed class NoteTodoActionsTests : IDisposable
     [Fact]
     public async Task Refresh_FillsNoteTodos()
     {
-        Write("Meeting", Utf8("- [ ] call Anna due:2026-11-20\n- [x] done\n"));
+        Write("Meeting", Utf8("- { } call Anna due:2026-11-20\n- {x} done\n"));
 
         DesktopSnapshot snapshot = await data.RefreshAsync();
 
@@ -46,21 +46,76 @@ public sealed class NoteTodoActionsTests : IDisposable
         Assert.False(snapshot.NoteTodosUnreadable);
     }
 
-    // AC-6: only the first "[ ]" of the line becomes "[x]", CRLF and BOM kept, the old bytes kept as a version, and the
+    // 329 AC-2: a note with a checkbox and a todo gives only the "{ }" todo in the snapshot.
+    [Fact]
+    public async Task Refresh_CheckboxAndTodo_OnlyTheTodo()
+    {
+        Write("Meeting", Utf8("- [ ] a\n- { } b\n"));
+
+        DesktopSnapshot snapshot = await data.RefreshAsync();
+
+        Assert.Equal("b", Assert.Single(snapshot.NoteTodos).Text);
+    }
+
+    // 329 AC-9, AC-10: ConvertTodoMarkers converts the old lines once, keeps the old bytes as a version and offers its
+    // report for the status line; the second call (record written) changes nothing and offers nothing.
+    [Fact]
+    public async Task ConvertTodoMarkers_ConvertsOnce_OffersTheReport()
+    {
+        Write("Meeting", Utf8("- [ ] call Anna\r\n- [x] old\r\n", bom: true));
+        DesktopState state = data.CreateState();
+
+        ActionResult result = await data.Actions!.ConvertTodoMarkers();
+
+        Assert.Equal((ActionKind.Done, ActionReason.None), (result.Kind, result.Reason));
+        Assert.Equal("Changed 2 todo line(s) in 1 note(s) to - { }.", result.Text);
+        Assert.Same(result, state.TakeConversion());
+        Assert.Null(state.TakeConversion());
+        Assert.Equal(Utf8("- { } call Anna\r\n- {x} old\r\n", bom: true), File.ReadAllBytes(PathOf("Meeting")));
+        NoteInfo note = new NoteStore(data.Root).List().Single(n => n.Name == "Meeting");
+        Assert.Single(state.HistoryStore.Versions(note));
+        Assert.True(File.Exists(TodoMarkerConversion.RecordPath(data.Root)));
+
+        Write("Meeting", Utf8("- [ ] later\n"));
+        ActionResult second = await data.Actions.ConvertTodoMarkers();
+
+        Assert.Equal((ActionKind.Done, ActionReason.Unchanged, string.Empty), (second.Kind, second.Reason, second.Text));
+        Assert.Null(state.TakeConversion());
+        Assert.Equal(Utf8("- [ ] later\n"), File.ReadAllBytes(PathOf("Meeting")));
+    }
+
+    // 329 AC-10: a note that can't be converted is named in a failed result, and keeps its bytes.
+    [Fact]
+    public async Task ConvertTodoMarkers_TooLargeNote_FailedAndNamed()
+    {
+        byte[] big = new byte[NoteStore.MaxNoteBytes + 1];
+        Array.Fill(big, (byte)'a');
+        Utf8("- [ ] one\n").CopyTo(big, 0);
+        Write("Big", big);
+        DesktopState state = data.CreateState();
+
+        ActionResult result = await data.Actions!.ConvertTodoMarkers();
+
+        AssertRefused(result, ActionKind.Failed, ActionReason.WriteFailed, "Can't convert the todos in Big.");
+        Assert.Same(result, state.TakeConversion());
+        Assert.Equal(big, File.ReadAllBytes(PathOf("Big")));
+    }
+
+    // AC-6: only the first "{ }" of the line becomes "{x}", CRLF and BOM kept, the old bytes kept as a version, and the
     // todo is gone after the refresh.
     [Fact]
     public async Task CompleteNoteTodo_TicksTheLine_KeepsVersion_AndRefreshes()
     {
-        byte[] before = Utf8("# Meeting\r\n- [ ] call Anna [ ] due:2026-11-20\r\n- [ ] other\r\n", bom: true);
+        byte[] before = Utf8("# Meeting\r\n- { } call Anna { } due:2026-11-20\r\n- { } other\r\n", bom: true);
         Write("Meeting", before);
         DesktopSnapshot snapshot = await data.RefreshAsync();
         NoteTodo todo = snapshot.NoteTodos.Single(t => t.Text.StartsWith("call", StringComparison.Ordinal));
 
         ActionResult result = await data.Actions!.CompleteNoteTodo(todo, new Confirmation());
 
-        Assert.Equal((ActionKind.Done, ActionReason.None, "call Anna [ ]"), (result.Kind, result.Reason, result.Text));
+        Assert.Equal((ActionKind.Done, ActionReason.None, "call Anna { }"), (result.Kind, result.Reason, result.Text));
         Assert.Equal(
-            Utf8("# Meeting\r\n- [x] call Anna [ ] due:2026-11-20\r\n- [ ] other\r\n", bom: true), File.ReadAllBytes(PathOf("Meeting")));
+            Utf8("# Meeting\r\n- {x} call Anna { } due:2026-11-20\r\n- { } other\r\n", bom: true), File.ReadAllBytes(PathOf("Meeting")));
         Assert.Equal(before, File.ReadAllBytes(Path.Combine(data.Root, ".history", "Meeting", Id + ".md")));
         Assert.Equal(["other"], data.State!.Snapshot!.NoteTodos.Select(t => t.Text).ToArray());
     }
@@ -69,7 +124,7 @@ public sealed class NoteTodoActionsTests : IDisposable
     [Fact]
     public async Task CompleteNoteTodo_NotConfirmed_WritesNothing()
     {
-        Write("Meeting", Utf8("- [ ] call Anna\n"));
+        Write("Meeting", Utf8("- { } call Anna\n"));
         NoteTodo todo = Assert.Single((await data.RefreshAsync()).NoteTodos);
         SortedDictionary<string, string> files = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 
@@ -81,12 +136,12 @@ public sealed class NoteTodoActionsTests : IDisposable
 
     // AC-7: an edited, moved or already ticked line is refused with the fixed text; the file bytes stay.
     [Theory]
-    [InlineData("- [ ] call Anna today\n")]
-    [InlineData("intro\n- [ ] call Anna\n")]
-    [InlineData("- [x] call Anna\n")]
+    [InlineData("- { } call Anna today\n")]
+    [InlineData("intro\n- { } call Anna\n")]
+    [InlineData("- {x} call Anna\n")]
     public async Task CompleteNoteTodo_ChangedLine_RefusedAndWritesNothing(string now)
     {
-        Write("Meeting", Utf8("- [ ] call Anna\n"));
+        Write("Meeting", Utf8("- { } call Anna\n"));
         NoteTodo todo = Assert.Single((await data.RefreshAsync()).NoteTodos);
         Write("Meeting", Utf8(now));
         SortedDictionary<string, string> files = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
@@ -102,14 +157,14 @@ public sealed class NoteTodoActionsTests : IDisposable
     [Fact]
     public async Task CompleteNoteTodo_LineEditedInBetween_IsChanged()
     {
-        Write("Meeting", Utf8("- [ ] call Anna\n"));
+        Write("Meeting", Utf8("- { } call Anna\n"));
         NoteTodo todo = Assert.Single((await data.RefreshAsync()).NoteTodos);
-        data.Actions!.BeforeWrite = () => File.WriteAllBytes(PathOf("Meeting"), Utf8("- [ ] call Anna now\n"));
+        data.Actions!.BeforeWrite = () => File.WriteAllBytes(PathOf("Meeting"), Utf8("- { } call Anna now\n"));
 
         ActionResult result = await data.Actions.CompleteNoteTodo(todo, new Confirmation());
 
         Assert.Equal(ActionReason.Changed, result.Reason);
-        Assert.Equal(Utf8("- [ ] call Anna now\n"), File.ReadAllBytes(PathOf("Meeting")));
+        Assert.Equal(Utf8("- { } call Anna now\n"), File.ReadAllBytes(PathOf("Meeting")));
         Assert.False(Directory.Exists(Path.Combine(data.Root, ".history")));
     }
 
@@ -117,7 +172,7 @@ public sealed class NoteTodoActionsTests : IDisposable
     [Fact]
     public async Task CompleteNoteTodo_NoteGone_Missing()
     {
-        Write("Meeting", Utf8("- [ ] call Anna\n"));
+        Write("Meeting", Utf8("- { } call Anna\n"));
         NoteTodo todo = Assert.Single((await data.RefreshAsync()).NoteTodos);
         File.Delete(PathOf("Meeting"));
 
@@ -136,7 +191,7 @@ public sealed class NoteTodoActionsTests : IDisposable
             return;
         }
 
-        Write("Meeting", Utf8("- [ ] call Anna\n"));
+        Write("Meeting", Utf8("- { } call Anna\n"));
         NoteTodo todo = Assert.Single((await data.RefreshAsync()).NoteTodos);
         UnixFileMode mode = File.GetUnixFileMode(data.Root);
         File.SetUnixFileMode(PathOf("Meeting"), UnixFileMode.UserRead);
@@ -153,18 +208,18 @@ public sealed class NoteTodoActionsTests : IDisposable
             File.SetUnixFileMode(PathOf("Meeting"), UnixFileMode.UserRead | UnixFileMode.UserWrite);
         }
 
-        Assert.Equal(Utf8("- [ ] call Anna\n"), File.ReadAllBytes(PathOf("Meeting")));
+        Assert.Equal(Utf8("- { } call Anna\n"), File.ReadAllBytes(PathOf("Meeting")));
     }
 
-    // AC-8: ticking "[x]" in the editor (a save) removes the todo once the save's refresh is in.
+    // AC-8: ticking "{x}" in the editor (a save) removes the todo once the save's refresh is in.
     [Fact]
     public async Task EditorSave_TickedLine_RemovesTheTodo()
     {
-        Write("Meeting", Utf8("- [ ] call Anna\n"));
+        Write("Meeting", Utf8("- { } call Anna\n"));
         Assert.Single((await data.RefreshAsync()).NoteTodos);
         EditableNote opened = (await data.State!.ReadForEdit("Meeting"))!;
 
-        ActionResult saved = await data.Actions!.SaveNote(opened, "- [x] call Anna\n");
+        ActionResult saved = await data.Actions!.SaveNote(opened, "- {x} call Anna\n");
 
         Assert.Equal(ActionKind.Done, saved.Kind);
         Assert.Empty(data.State.Snapshot!.NoteTodos);
@@ -174,9 +229,9 @@ public sealed class NoteTodoActionsTests : IDisposable
     [Fact]
     public async Task OutsideEdit_TickedLine_RemovedOnRefresh()
     {
-        Write("Meeting", Utf8("- [ ] call Anna\n- [ ] other\n"));
+        Write("Meeting", Utf8("- { } call Anna\n- { } other\n"));
         Assert.Equal(2, (await data.RefreshAsync()).NoteTodos.Count);
-        File.WriteAllText(PathOf("Meeting"), "- [x] call Anna\n- [ ] other\n");
+        File.WriteAllText(PathOf("Meeting"), "- {x} call Anna\n- { } other\n");
 
         DesktopSnapshot after = await data.State!.Refresh();
 
@@ -187,7 +242,7 @@ public sealed class NoteTodoActionsTests : IDisposable
     [Fact]
     public async Task Refresh_BadDb_NoteTodosUnreadable_StoredTodosStay()
     {
-        Write("Meeting", Utf8("- [ ] call Anna\n"));
+        Write("Meeting", Utf8("- { } call Anna\n"));
         data.AddTodo("Stored", DesktopFixture.Today);
         data.WriteFile(TagIndex.FileName, "not a database at all, not at all, really not");
 
@@ -205,8 +260,8 @@ public sealed class NoteTodoActionsTests : IDisposable
     public async Task SensitiveSetUp_PlainTodosListAndTick_NoKeyStoreCall()
     {
         data.Keys = FakeKeyStore.Ready();
-        data.WriteSensitive("Secret", "- [ ] secret todo\n");
-        Write("Meeting", Utf8("- [ ] call Anna\n"));
+        data.WriteSensitive("Secret", "- { } secret todo\n");
+        Write("Meeting", Utf8("- { } call Anna\n"));
 
         DesktopSnapshot snapshot = await data.RefreshAsync();
         NoteTodo todo = Assert.Single(snapshot.NoteTodos);
@@ -214,7 +269,7 @@ public sealed class NoteTodoActionsTests : IDisposable
 
         Assert.Equal("Meeting", todo.Note);
         Assert.Equal(ActionKind.Done, result.Kind);
-        Assert.Equal("- [x] call Anna\n", File.ReadAllText(PathOf("Meeting")));
+        Assert.Equal("- {x} call Anna\n", File.ReadAllText(PathOf("Meeting")));
         Assert.Empty(data.State!.Snapshot!.NoteTodos);
         Assert.Equal(0, data.Keys.Agrees);
     }

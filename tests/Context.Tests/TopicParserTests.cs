@@ -84,4 +84,13 @@ public sealed class TopicParserTests
         Assert.Equal("ParsedTopic", topic.ToString());
         Assert.Equal("NoteTopic", new NoteTopic("n", 1, "Ann Lee", "secret", "raw").ToString());
     }
+
+    // 329 AC-1: a topic keeps the "[ ]" box (DoneForm still writes "[x]"); a "{ }" line is a todo, never a topic.
+    [Fact]
+    public void ParseLine_BracketIsTopic_BraceIsNot()
+    {
+        Assert.NotNull(TopicParser.ParseLine(1, "- [ ] next: @[X] t"));
+        Assert.Equal("- [x] next: @[X] t", TopicParser.DoneForm("- [ ] next: @[X] t"));
+        Assert.Null(TopicParser.ParseLine(1, "- { } next: @[X] t"));
+    }
 }

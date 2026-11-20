@@ -39,6 +39,7 @@ internal sealed class DesktopState
     private readonly ICommitLog commitLog;
     private readonly Func<string?>? timesCommand;
     private string? offeredItemPage;
+    private ActionResult? offeredConversion;
 
     // Guards the Outlook cache: one call per day (appointments), each with its start time.
     private readonly object outlookGate = new();
@@ -236,6 +237,15 @@ internal sealed class DesktopState
 
     /// <summary>The offered work item page's name once, then <c>null</c> until the next offer.</summary>
     public string? TakeItemPage() => Interlocked.Exchange(ref offeredItemPage, null);
+
+    /// <summary>
+    /// Offers the result of the start-up todo marker conversion (job 329) for <c>Main</c> to show in its status line.
+    /// An in-memory value only. Called only by the todo marker conversion of the actions (job 329).
+    /// </summary>
+    public void OfferConversion(ActionResult result) => Interlocked.Exchange(ref offeredConversion, result);
+
+    /// <summary>The offered conversion result once, then <c>null</c> until the next offer.</summary>
+    public ActionResult? TakeConversion() => Interlocked.Exchange(ref offeredConversion, null);
 
     /// <summary>Counts one more running reload; called before a <see cref="Changed"/> handler dispatches it.</summary>
     internal void BeginReload() => Interlocked.Increment(ref reloads);

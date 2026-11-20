@@ -98,14 +98,14 @@ public sealed class BoardViewTests : IDisposable
     public void TagParser_IsUnchanged()
     {
         Assert.Equal(["status"], TagParser.Parse("#status/doing"));
-        Assert.Equal(14, TagIndex.ParserVersion);
+        Assert.Equal(15, TagIndex.ParserVersion);
     }
 
     // AC-3: a note card's column is its first token outside fences, code spans and open todo lines.
     [Fact]
     public void Build_NoteCard_TakesTheFirstTokenOutsideFencesSpansAndTodoLines()
     {
-        Write("Plan", "# Plan #launch\n```\n#status/done\n```\n`#status/done`\n- [ ] item #status/todo\n- [x] closed #status/doing\nend #status/done\n");
+        Write("Plan", "# Plan #launch\n```\n#status/done\n```\n`#status/done`\n- { } item #status/todo\n- {x} closed #status/doing\nend #status/done\n");
 
         BoardCard card = Card("Plan");
 
@@ -120,7 +120,7 @@ public sealed class BoardViewTests : IDisposable
     [Fact]
     public void Build_TodoCards_HaveTheTagInTheirOwnText()
     {
-        Write("Work", "intro\n- [ ] ship it #launch #status/doing\n- [ ] other #status/done\n  * [ ] later #Launch\n");
+        Write("Work", "intro\n- { } ship it #launch #status/doing\n- { } other #status/done\n  * { } later #Launch\n");
 
         BoardView view = Build();
 
@@ -136,11 +136,31 @@ public sealed class BoardViewTests : IDisposable
         Assert.Equal("later #Launch", later.Todo!.Text);
     }
 
+    // 329 AC-2, AC-3: a "- [ ]" checkbox line is no todo card; a "{ }" todo's token right after its box is found and
+    // moved in place.
+    [Fact]
+    public void Build_CheckboxLine_NoTodoCard_BraceTokenAfterBoxMoves()
+    {
+        Write("Work", "#launch\n- [ ] box #launch #status/doing\n  - { } #status/todo ship #launch\n");
+
+        BoardView view = Build();
+
+        List<BoardCard> cards = view.Columns.SelectMany(c => c.Cards).ToList();
+        BoardCard todo = cards.Single(c => c.Todo is not null);
+        Assert.Equal((3, "todo"), (todo.Todo!.Line, todo.Column));
+        Assert.Equal(2, cards.Count);
+
+        Assert.Equal(BoardMoveResult.Done, BoardView.Move(store, todo, "done"));
+        Assert.Equal(
+            Utf8("#launch\n- [ ] box #launch #status/doing\n  - { } #status/done ship #launch\n"),
+            File.ReadAllBytes(PathOf("Work")));
+    }
+
     // AC-3: a note whose only tag is on a todo line still gets a note card; an untagged note gets none.
     [Fact]
     public void Build_TagOnlyOnATodoLine_StillGivesANoteCard()
     {
-        Write("Only", "- [ ] do #launch\n");
+        Write("Only", "- { } do #launch\n");
         Write("Untagged", "#other #status/doing\n");
 
         BoardView view = Build();
@@ -153,7 +173,7 @@ public sealed class BoardViewTests : IDisposable
     public void Build_SensitiveNotes_NeverAppear()
     {
         Write("Plain", "#launch\n");
-        File.WriteAllText(Path.Combine(root, "Secret.ctxs"), "#launch\n- [ ] hidden #launch\n");
+        File.WriteAllText(Path.Combine(root, "Secret.ctxs"), "#launch\n- { } hidden #launch\n");
 
         BoardView view = Build();
 
@@ -165,7 +185,7 @@ public sealed class BoardViewTests : IDisposable
     [Fact]
     public void Build_OrdersColumnsAndCards()
     {
-        Write("beta", "#launch #status/todo\n- [ ] b2 #launch #status/todo\n- [ ] b1 #launch #status/todo\n");
+        Write("beta", "#launch #status/todo\n- { } b2 #launch #status/todo\n- { } b1 #launch #status/todo\n");
         Write("Alpha", "#launch #status/todo\n");
         Write("gamma", "#launch\n");
         Write("delta", "#launch #status/done\n");
@@ -262,24 +282,24 @@ public sealed class BoardViewTests : IDisposable
     [Fact]
     public void Move_TodoCard_ReplacesItsOwnToken()
     {
-        Write("Work", "#status/todo\r\n- [ ] ship #launch #status/todo\r\n", bom: true);
+        Write("Work", "#status/todo\r\n- { } ship #launch #status/todo\r\n", bom: true);
         BoardCard card = Card("Work", todo: true);
 
         Assert.Equal(BoardMoveResult.Done, BoardView.Move(store, card, "doing"));
 
-        Assert.Equal(Utf8("#status/todo\r\n- [ ] ship #launch #status/doing\r\n", bom: true), File.ReadAllBytes(PathOf("Work")));
+        Assert.Equal(Utf8("#status/todo\r\n- { } ship #launch #status/doing\r\n", bom: true), File.ReadAllBytes(PathOf("Work")));
     }
 
     // AC-5: a todo without a token gets " #status/<col>" at its line's end.
     [Fact]
     public void Move_TodoWithoutToken_AppendsToItsLine()
     {
-        Write("Work", "a\r\n- [ ] ship #launch\r\nb");
+        Write("Work", "a\r\n- { } ship #launch\r\nb");
         BoardCard card = Card("Work", todo: true);
 
         Assert.Equal(BoardMoveResult.Done, BoardView.Move(store, card, "done"));
 
-        Assert.Equal(Utf8("a\r\n- [ ] ship #launch #status/done\r\nb"), File.ReadAllBytes(PathOf("Work")));
+        Assert.Equal(Utf8("a\r\n- { } ship #launch #status/done\r\nb"), File.ReadAllBytes(PathOf("Work")));
     }
 
     // AC-5: an edit between Build and Move that changes the card's token or todo line is Changed and writes nothing.
@@ -288,12 +308,12 @@ public sealed class BoardViewTests : IDisposable
     [InlineData(false, "#launch\n")]
     [InlineData(false, "intro\n#launch #status/todo\n")]
     [InlineData(false, "#launch #status/todo2\n")]
-    [InlineData(true, "#launch\n- [ ] ship #launch #status/todo later\n")]
-    [InlineData(true, "#launch\n- [x] ship #launch #status/todo\n")]
-    [InlineData(true, "- [ ] ship #launch #status/todo\n")]
+    [InlineData(true, "#launch\n- { } ship #launch #status/todo later\n")]
+    [InlineData(true, "#launch\n- {x} ship #launch #status/todo\n")]
+    [InlineData(true, "- { } ship #launch #status/todo\n")]
     public void Move_EditedAfterBuild_IsChanged(bool todo, string now)
     {
-        Write("Plan", "#launch #status/todo\n- [ ] ship #launch #status/todo\n");
+        Write("Plan", "#launch #status/todo\n- { } ship #launch #status/todo\n");
         BoardCard card = Card("Plan", todo);
         Write("Plan", now);
 

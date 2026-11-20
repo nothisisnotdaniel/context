@@ -238,6 +238,10 @@ internal static class Program
         });
         using Timer idle = new Timer(_ => session.Tick(), null, TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15));
 
+        // Old "- [ ]" note todos become "- { }" once per data folder (job 329), before the todo migrate, the watcher and
+        // the first refresh, so the first index sync already sees them as todos; Main shows the result.
+        actions.ConvertTodoMarkers().GetAwaiter().GetResult();
+
         // Todos stored without a usable id get their derived ids written once, before the watcher and the first
         // refresh; an unreadable file is left alone and shows as unreadable.
         todos.Migrate();

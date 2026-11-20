@@ -23,7 +23,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Pooling=False`, parameterized SQL only): `notes(name, modified)` (last-write UTC ticks, NULL for a
     note that couldn't be read so it is retried), `note_tags(note, tag)`, `note_links(note, target, heading)` (job 205: `heading` is the text after the first `#` or NULL; primary key stays `(note, target)`; a database without the column gets it through `ALTER TABLE` on every open, before any query; job 295: also `whole_key` and `part_key`, the upper-invariant of the target and of `NoteLinkParser.Split(target).Note`, NULL when empty, each with an index (`note_links_whole_key`, `note_links_part_key`), added the same way), `note_people(note, person, spelling)`, `note_decisions(note, line, text)` (job 180, primary key `(note, line)`; one row per `DecisionParser` line, written and pruned with the note's other rows), `note_todos(note, line, due, text, raw)` (job 201, primary key `(note, line)`; one row per open `NoteTodoParser` line, `due` `yyyy-MM-dd` or NULL, written and pruned like `note_decisions`), `note_topics(note, line, person, text, raw)` (job 253, primary key `(note, line)`; one row per `TopicParser` line, written and pruned like `note_decisions`; read by `Topics()`, plain notes only), `note_reviews(note, line, due, raw)` (job 256, primary key `(note)`; the first `ReviewDateParser` line of a plain note, `due` `yyyy-MM-dd`, written and pruned like `note_decisions`; read by `Reviews()`) and `note_attributes(note, key, value_key, value)` (job 157, primary key `(note, key, value_key)`, index on `(key, value_key)`) and `note_text` (job 170: FTS5 `fts5(note UNINDEXED, body, tokenize='trigram')` with FTS5 `secure-delete` on, set once in `Sync` after checking `note_text_config`; one row per plain note with its whole text, none for a note that can't be read or is over `NoteStore.MaxNoteBytes` (job 275: such a note is treated as unreadable, so it has no tag, link, people, attribute, decision, todo, topic, review or text rows and a NULL stored time); sensitive notes are never listed, so never indexed; every connection sets `PRAGMA secure_delete = ON`, so a deleted note's text doesn't linger in free pages of `context.db`; the rollback journal `context.db-journal` briefly holds the old pages and is unlinked, not zeroed, after each commit, which is outside this guarantee), `note_text_rows(note, row)` (job 295: note name -> its `note_text` rowid; re-indexing, deleting or pruning a note deletes its `note_text` row by that rowid, never `WHERE note`, and only while that row still names the note; the orphan prune goes through it; every non-upgrade `Sync` first drops each `note_text` row that is not its note's mapped row and each mapping whose row is gone or names another note, as an older version writing the same `context.db` leaves them, and clears those notes' stored time so they are re-parsed in that sync) and `note_skipped(note)` (job 295: one row per note over the cap, gone once the note is back under it, unreadable for another reason or gone). The cap counts the bytes actually read (`BoundedFile.Read` stops in its read loop): a note of exactly `MaxNoteBytes` bytes, a BOM or invalid UTF-8 bytes included, is indexed (invalid bytes decode as U+FFFD), one byte more is not. `Sync(NoteStore)` updates it
     in one transaction and only re-parses files whose time changed. `PRAGMA user_version` holds the parser
-    version (`TagIndex.ParserVersion`, now 14: `note_text_rows`, `note_skipped` and the `note_links` key columns; 13 was `#<n>` work item references in `note_items`; 12 was `review:yyyy-MM-dd` lines in `note_reviews`; 11 was `next: @[Name] topic` lines in `note_topics`, no longer note todos; 10 was the heading of a `[[Note#Heading]]` link in `note_links.heading`; 9 was open `- [ ]` lines in `note_todos`; 8 was `Decision:` lines in `note_decisions`; 7 was note text in `note_text`; 6 was a link target that runs into a code span is no link); when it is lower, `Sync` clears every stored time and empties `note_text` and `note_text_rows` in the same
+    version (`TagIndex.ParserVersion`, now 15: note todos are `- { }` lines, `- [ ]` is a note checkbox (job 329); 14 was `note_text_rows`, `note_skipped` and the `note_links` key columns; 13 was `#<n>` work item references in `note_items`; 12 was `review:yyyy-MM-dd` lines in `note_reviews`; 11 was `next: @[Name] topic` lines in `note_topics`, no longer note todos; 10 was the heading of a `[[Note#Heading]]` link in `note_links.heading`; 9 was open `- [ ]` lines in `note_todos`; 8 was `Decision:` lines in `note_decisions`; 7 was note text in `note_text`; 6 was a link target that runs into a code span is no link); when it is lower, `Sync` clears every stored time and empties `note_text` and `note_text_rows` in the same
     transaction (so all notes are re-parsed and their text written once) and then sets it. Bump it whenever parsing changes. Queries: `Tags()`, `Reviews()`, `NotesWithTag`,
     `NoteTags()`, `FindNote`, `Links` (job 295: reads `note_links` only through `TagIndex.LinksSql`, `WHERE note = $note OR whole_key IN ($k, $kmd) OR part_key IN ($k, $kmd)` with `$k` the upper-invariant name and `$kmd` = `$k` + `.MD`, so no `SCAN note_links`; then `NameLookup.ResolveLink` as before), `Skipped()` (job 295: the `note_skipped` names, ignoring case, then ordinal), `People()`, `NotesMentioning`, `NotesWithAttribute(key, value)` (by `AttributeParser.ValueKey`), `NotesWithoutAttribute(key)`, `AttributeValues(key)` (job 291: the `(Note, Value)` rows of `note_attributes` for the key, value as stored, by note (ordinal), then `rowid`), `Search(text, select)` (job 295: calls `select(note, body)` per row of `note_text MATCH $q` and keeps the non-null results, so no body is held after its row; `$q` the text as one FTS5 phrase: `"` + text with `"` doubled + `"`, always a parameter, so FTS syntax is literal), `Decisions(tag?)` (`(Note, Line, Text, Modified)` rows of `note_decisions` joined to `notes` with a stored time, `Modified` UTC; a tag keeps the notes with that `note_tags` row), `NoteTodos()` (`NoteTodo` rows of `note_todos` joined to `notes` with a stored time). A database that can't be opened or isn't valid throws `TagIndexException` (an
     `IOException`) and is never deleted or overwritten. The file database waits up to `TagIndex.BusyTimeout` (5 s; an
@@ -624,16 +624,37 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Missing(link, appointmentsOfDay)`. The Uid is never shown; an older build drops `meeting` on its next write.
     **Todos inside notes** (job 201, `NoteTodoParser.cs`, `NoteTodo.cs`): `NoteTodoParser.Parse(markdown)` gives a
     `ParsedNoteTodo(Line, Text, Due?, Raw)` for each line outside fences (`TagParser.NumberedLinesOutsideFences`) that is
-    optional spaces/tabs, `-`/`*`/`+`, one space, `[ ]`, one space, then text; the first whitespace-delimited token
+    optional spaces/tabs, `-`/`*`/`+`, one space, `{ }` (`NoteTodoParser.TodoBox`; job 329, before it `[ ]`), one
+    space, then text; the first whitespace-delimited token
     `due:yyyy-MM-dd` (ASCII digits, a real date, not in a code span) sets `Due` and leaves the text, which is collapsed
     (`TagParser.Collapse`) and cut to `MaxTextLength` (1000, never inside a surrogate pair); an empty text is no todo;
-    a topic line (`TopicParser.ParseLine` gives one, job 253) is no todo either.
+    a topic line (`TopicParser.ParseLine` gives one, job 253) is no todo either. Job 329: `- [ ] text`
+    (`NoteTodoParser.OpenBox`, which `TopicParser` keeps using) is a checkbox that stays in its note: no todo view
+    lists it; `ParseCheckboxes(markdown)` reads those lines by the same rules (used by the carry-over). The editor
+    (`schema.js` `list_item` attr `kind`: `"global"` for `{ }`/`{x}`, `"local"` for `[ ]`/`[x]`, null for a plain item;
+    `markdown.js` `TaskRe`/`taskPrefix`; `view.js` `taskRules`, `toggleTask`, `splitItem` keep the kind) gives the li the
+    classes `task global`/`task local` (plus `done`), the box `aria-label` `Todo`/`Checkbox` and a global item a
+    `span.task-marker` (`aria-hidden`); `editor.css` tints the line with `--task-global-bg`/`--task-local-bg` (`app.css`,
+    both themes, text and grey at least 4.5:1). Test hook `toggledMarkdown(markdown, index)`.
+    **Todo marker conversion** (job 329, `TodoMarkerConversion.cs`): `Run(store, history, utcNow)` once per data
+    folder rewrites, in every `NoteStore.List()` note (`.md` only; `.ctxs` is never opened), each line outside fences
+    that is `IsOldTodo` (`-`/`*`/`+`, one space, `[ ]`/`[x]`/`[X]`, one space, text, its open form a
+    `ParseCheckboxLine`; no topic, no numbered list) to `{ }`/`{x}`: only those three characters change. Each note goes
+    `ReadForEdit` -> `Convert` -> `SaveIfUnchanged(..., history)`; a note too large, unreadable, failing to write or
+    changed in between keeps its bytes and is in `Skipped`. Then it writes `<root>/.migrations/todo-braces`
+    (`PrivateFile`, also when notes were skipped); while that record (file or folder) exists or the root is missing,
+    `Run` reads and writes nothing (`Ran` false). `Report(result, clean)` gives `ChangedText` (`Changed <n> todo
+    line(s) in <m> note(s) to - { }.`, only when a line changed) and one `SkippedText` (`Can't convert the todos in
+    <note>.`) per skipped note. CLI: `Cli.MigrateTodos` runs it first and writes those lines to stderr (stdout and the
+    exit code unchanged). Desktop: `Program.cs` calls `DesktopActions.ConvertTodoMarkers()` once before
+    `todos.Migrate()`; a non-empty report is offered through `DesktopState.OfferConversion`/`TakeConversion` and `Main`
+    shows it in the status line (accent when lines changed, red otherwise).
     `TagIndex` stores them per plain note (`note_todos`); the note stays the only source. `NoteTodos.Load(store, index)`
     syncs and returns them; `NoteTodos.Merge(stored, notes)` gives the `TodoEntry` list both front ends show: by due date,
     on one date the `todos.json` todos first (`List()` order), then note todos by note name ignoring case, then ordinal,
     then line; undated note todos last. `TodoPicker.PickEntry(entries, query)` applies the `Pick` rules to that list.
     `NoteTodos.Complete(store, todo, history?)` (a Core write) re-reads the note (`ReadForEdit`), and only when line
-    `Line` still parses to the same todo with `Raw` equal (ordinal) turns its first `[ ]` into `[x]` and saves through
+    `Line` still parses to the same todo with `Raw` equal (ordinal) turns its first `{ }` into `{x}` and saves through
     `SaveIfUnchanged` (CRLF, BOM and every other byte kept; a change in between is `Changed`); results `Done`, `Changed`,
     `Missing`, `Failed`, texts `NoteTodos.ChangedText`/`MissingText`/`FailedText(note)`. Desktop:
     `DesktopSnapshot.NoteTodos`/`NoteTodosUnreadable` (filled by `DesktopState.Build` under the index lock after the
@@ -736,7 +757,9 @@ Every factory agent reads this file before working on Context. Keep it short and
   `import <path>`, `export <note> <path>` (paths relative to the current directory, no `~`). When `Migrate(out n)`
   replaced bad todo ids, `todos`, `todo add`, `todo done`, `current` and `review` first write one extra stderr line,
   `Fixed a bad todo id in todos.json.` or `Fixed <n> bad todo ids in todos.json.` (fixed text, the bad value is never
-  echoed), and otherwise behave, print and exit as on a valid file; the next run writes no such line. Exit codes: 0 success,
+  echoed), and otherwise behave, print and exit as on a valid file; the next run writes no such line. Before that, the
+  same commands (and `standup` and `item`) run the one-off todo marker conversion (job 329) and write its report lines
+  to stderr. Exit codes: 0 success,
   1 error (one stderr line, nothing on stdout; `current` may write both), 2 usage error (one stderr line ending in
   `Run 'context help'.`; unknown commands never touch the folder). All text from disk goes through `SafeText.Clean`
   (one-line fields also `\n` to space). Tests (`CliTests`) use the
@@ -1098,7 +1121,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     never moved. **Carry-over** (job 245, `MeetingCarryOver.cs`): only when `Ensure` creates the note, it appends
     `MeetingCarryOver.Section` for the previous occurrence: `Previous(notes, meetingPage, date)` is the latest direct
     subpage of the same `Meetings/<part>` page (any case) titled exactly `yyyy-MM-dd` (a real date) before the day;
-    `Extract(markdown)` gives, in line order, every open `NoteTodoParser` todo (`Raw`, leading spaces/tabs removed)
+    `Extract(markdown)` gives, in line order, every open `NoteTodoParser` todo and checkbox (`Parse` plus
+    `ParseCheckboxes`, job 329; `Raw`, leading spaces/tabs removed)
     and the lines of every ATX `Open points` section (ignoring case, outside fences, up to the next heading of the same
     or higher level outside fences; copied as written without its heading, outer blank lines dropped; a todo in it once),
     `\r` dropped; `Section(name, lines)` writes `\n## From last time\n\nFrom [[<name>]]:\n\n` (plain `From <name>:`

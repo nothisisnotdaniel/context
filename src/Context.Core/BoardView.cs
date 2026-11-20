@@ -359,9 +359,9 @@ internal sealed record BoardView
 
     private static bool IsColumnChar(char c) => char.IsAsciiLetterOrDigit(c) || c is '-' or '_';
 
-    // Where a todo line's text starts: just after "[ ] " (the line is a todo line, so its first "[ ]" is the box).
+    // Where a todo line's text starts: just after "{ } " (the line is a todo line, so its first "{ }" is the box).
     private static int TodoTextStart(string line) =>
-        line.IndexOf(NoteTodoParser.OpenBox, StringComparison.Ordinal) + NoteTodoParser.OpenBox.Length + 1;
+        line.IndexOf(NoteTodoParser.TodoBox, StringComparison.Ordinal) + NoteTodoParser.TodoBox.Length + 1;
 
     // The leading No status column only with cards, then the board's columns; each column's cards by note name
     // ignoring case, then ordinal, a note card before its todos, todos in line order.

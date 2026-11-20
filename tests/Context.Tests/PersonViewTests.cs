@@ -289,6 +289,22 @@ public sealed class PersonViewTests : IDisposable
         Assert.Equal(expected, unreadable.AliasClashes.Select(c => c.Text));
     }
 
+    // 329 AC-2: a person page's topics stay "[ ]" lines; a "- { } next:" line is a note todo, never a topic, and a
+    // "- [ ]" checkbox naming the person is neither.
+    [Fact]
+    public void Build_Topics_OnlyBracketTopicLines()
+    {
+        File.WriteAllText(
+            Path.Combine(root, "Plan.md"),
+            "- [ ] next: @[Anna] budget\n- { } next: @[Anna] hiring\n- [ ] call @[Anna]\n");
+
+        PersonView view = BuildWithTodos("Anna");
+
+        NoteTopic topic = Assert.Single(view.Topics);
+        Assert.Equal(("Plan", 1, "budget"), (topic.Note, topic.Line, topic.Text));
+        Assert.Empty(view.OpenTodos);
+    }
+
     // 159 AC-5: open and done todos that mention the person by full name, alias or any case/space variant.
     [Fact]
     public void Build_Todos_ByNameAliasAndVariant_OpenThenDone()

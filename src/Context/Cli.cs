@@ -517,11 +517,20 @@ internal sealed class Cli
     }
 
     /// <summary>
-    /// Stores missing todo ids before the first read; when bad ids were replaced, says so in one stderr line
-    /// (a fixed text with the count, never the bad value).
+    /// Before the first read: converts the old <c>- [ ]</c> note todos to <c>- { }</c> once per data folder (job 329,
+    /// <see cref="TodoMarkerConversion"/>; its report lines on stderr, the exit code unchanged), then stores missing
+    /// todo ids; when bad ids were replaced, says so in one stderr line (a fixed text with the count, never the bad value).
     /// </summary>
     private void MigrateTodos(Session session)
     {
+        NoteHistory history = new NoteHistory(session.Notes, () => now().ToUniversalTime());
+        TodoMarkerConversionResult converted =
+            TodoMarkerConversion.Run(session.Notes, history, () => now().ToUniversalTime());
+        foreach (string line in TodoMarkerConversion.Report(converted, OneLine))
+        {
+            Err(line);
+        }
+
         session.Todos.Migrate(out int badIds);
         if (badIds == 1)
         {

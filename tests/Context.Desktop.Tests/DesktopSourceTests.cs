@@ -1653,7 +1653,8 @@ public sealed class DesktopSourceTests
             .Select(m => m.Groups[1].Value)
             .ToArray();
         Assert.Equal(
-            ["AutoDayEnd", "AutoBriefing", "AutoReminders", "AutoOpenToday", "AutoReminders", "OpenRequestedItem", "ImportScreenshot", "CaptureScreenshot"],
+            // 329: ConvertTodoMarkers runs once at start, before todos.Migrate().
+            ["ConvertTodoMarkers", "AutoDayEnd", "AutoBriefing", "AutoReminders", "AutoOpenToday", "AutoReminders", "OpenRequestedItem", "ImportScreenshot", "CaptureScreenshot"],
             calls);
         Assert.Contains(
             "static Task AutoWrites(DesktopActions actions) =>\n            actions.AutoDayEnd().ContinueWith("
@@ -3132,5 +3133,122 @@ public sealed class DesktopSourceTests
             string text = File.ReadAllText(Path.Combine(root, file));
             Assert.False(text.Contains("ContextMenuEnabled", StringComparison.Ordinal), file + " names the context-menu switch");
         }
+    }
+
+    // ---- 329: global todos and note checkboxes ----
+
+    // 329 AC-7: both line backgrounds are defined in app.css's light and dark blocks, and in each theme the text and
+    // the grey (done) text have a contrast of at least 4.5:1 on each of them.
+    [Fact]
+    public void TaskLineColours_BothThemes_Readable()
+    {
+        string app = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+        string light = ThemeBlock(app, ":root {");
+        string dark = ThemeBlock(app, "@media (prefers-color-scheme: dark) {");
+
+        foreach (string theme in new[] { light, dark })
+        {
+            foreach (string background in new[] { "--task-local-bg", "--task-global-bg" })
+            {
+                foreach (string text in new[] { "--text", "--grey" })
+                {
+                    double ratio = Contrast(Colour(theme, text), Colour(theme, background));
+                    Assert.True(ratio >= 4.5, $"{text} on {background}: {ratio:F2}");
+                }
+            }
+        }
+
+        Assert.NotEqual(Colour(light, "--task-local-bg"), Colour(light, "--task-global-bg"));
+        Assert.NotEqual(Colour(dark, "--task-local-bg"), Colour(dark, "--task-global-bg"));
+    }
+
+    // 329 AC-7: editor.css paints the whole li line by its kind and draws the todo marker; view.js names each box's
+    // kind and adds the marker (aria-hidden) to a global item only; the committed bundle has both.
+    [Fact]
+    public void TaskItems_ClassesLabelsAndMarker()
+    {
+        string desktop = Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder);
+        string editorCss = File.ReadAllText(Path.Combine(desktop, "editor", "src", "editor.css"));
+        string view = File.ReadAllText(Path.Combine(desktop, "editor", "src", "view.js"));
+        string schema = File.ReadAllText(Path.Combine(desktop, "editor", "src", "schema.js"));
+        string bundle = File.ReadAllText(Path.Combine(desktop, "wwwroot", "editor", "editor.js"));
+        string builtCss = File.ReadAllText(Path.Combine(desktop, "wwwroot", "editor", "editor.css"));
+
+        Assert.Matches(@"\.note-editor-body li\.task\.local \{[^}]*background: var\(--task-local-bg\)", editorCss);
+        Assert.Matches(@"\.note-editor-body li\.task\.global \{[^}]*background: var\(--task-global-bg\)", editorCss);
+        Assert.Matches(@"\.note-editor-body \.task-marker \{[^}]*background: var\(--accent-strong\)", editorCss);
+        Assert.Contains(editorCss, builtCss, StringComparison.Ordinal);
+        Assert.Contains("\"task \" + kind + (node.attrs.checked ? \" done\" : \"\")", schema, StringComparison.Ordinal);
+        Assert.Contains("box.setAttribute(\"aria-label\", global ? \"Todo\" : \"Checkbox\");", view, StringComparison.Ordinal);
+        Assert.Matches(
+            @"if \(global\) \{\s*const marker = document\.createElement\(""span""\);\s*marker\.className = ""task-marker"";\s*marker\.setAttribute\(""aria-hidden"", ""true""\);",
+            view);
+        foreach (string needle in new[] { "task-marker", "\"Todo\"", "\"Checkbox\"", "toggledMarkdown" })
+        {
+            Assert.Contains(needle, bundle, StringComparison.Ordinal);
+        }
+    }
+
+    // 329: Program.cs converts the todo markers once, before todos.Migrate(); only DesktopActions runs the conversion.
+    [Fact]
+    public void TodoMarkerConversion_RunsOnceAtStart_OnlyThroughTheActions()
+    {
+        string root = RepoFiles.Root();
+        string program = File.ReadAllText(Path.Combine(root, ProgramFile));
+
+        int convert = program.IndexOf("actions.ConvertTodoMarkers()", StringComparison.Ordinal);
+        Assert.True(convert >= 0);
+        Assert.Equal(convert, program.LastIndexOf("actions.ConvertTodoMarkers()", StringComparison.Ordinal));
+        Assert.True(convert < program.IndexOf("todos.Migrate();", StringComparison.Ordinal));
+        List<string> callers = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
+            .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains("TodoMarkerConversion.Run(", StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal([ActionsFile], callers);
+    }
+
+    // The text of the first block that opens with start, up to its matching brace (nested blocks included).
+    private static string ThemeBlock(string css, string start)
+    {
+        int at = css.IndexOf(start, StringComparison.Ordinal);
+        Assert.True(at >= 0, start);
+        int depth = 0;
+        for (int i = at; i < css.Length; i++)
+        {
+            if (css[i] == '{')
+            {
+                depth++;
+            }
+            else if (css[i] == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return css[at..(i + 1)];
+                }
+            }
+        }
+
+        return css[at..];
+    }
+
+    // The #rrggbb value of the custom property name in block.
+    private static (double R, double G, double B) Colour(string block, string name)
+    {
+        Match match = Regex.Match(block, Regex.Escape(name) + @":\s*#([0-9a-fA-F]{6});");
+        Assert.True(match.Success, name);
+        string hex = match.Groups[1].Value;
+        double Channel(int i) => Convert.ToInt32(hex.Substring(i, 2), 16) / 255.0;
+        return (Channel(0), Channel(2), Channel(4));
+    }
+
+    // The WCAG 2 contrast ratio of two sRGB colours.
+    private static double Contrast((double R, double G, double B) a, (double R, double G, double B) b)
+    {
+        static double Linear(double c) => c <= 0.04045 ? c / 12.92 : Math.Pow((c + 0.055) / 1.055, 2.4);
+        static double Luminance((double R, double G, double B) c) =>
+            (0.2126 * Linear(c.R)) + (0.7152 * Linear(c.G)) + (0.0722 * Linear(c.B));
+        double la = Luminance(a);
+        double lb = Luminance(b);
+        return (Math.Max(la, lb) + 0.05) / (Math.Min(la, lb) + 0.05);
     }
 }

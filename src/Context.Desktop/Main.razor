@@ -358,6 +358,8 @@ else
             ShowNote(offered);
         }
 
+        TakeConversion();
+
         _ = TakeItemPage();
     }
 
@@ -378,6 +380,19 @@ else
         }
 
         await RequestOpen(itemPage, null);
+        return true;
+    }
+
+    // The start-up todo marker conversion's result (job 329) shows in the status line like an action's: accent when
+    // lines changed, red when only notes were skipped. True when one was shown.
+    private bool TakeConversion()
+    {
+        if (State.TakeConversion() is not { } converted)
+        {
+            return false;
+        }
+
+        ShowStatus(converted.Text, converted.Kind == ActionKind.Done ? "accent" : "red");
         return true;
     }
 
@@ -409,7 +424,8 @@ else
     // line points to /briefing.
     protected override async Task OnStateChangedAsync()
     {
-        bool started = TakeStartNote();
+        bool started = TakeConversion();
+        started |= TakeStartNote();
         started |= await TakeItemPage();
         if (State.TakeBriefing() is not { } offered || string.Equals(offered, openName, StringComparison.Ordinal))
         {

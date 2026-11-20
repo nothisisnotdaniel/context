@@ -63,7 +63,8 @@ internal static class MeetingCarryOver
 
     /// <summary>
     /// The open points of <paramref name="markdown"/> in line order: every open todo <see cref="NoteTodoParser.Parse"/>
-    /// finds (its raw line with leading spaces and tabs removed), and the lines of every section whose ATX heading
+    /// finds and every open checkbox <see cref="NoteTodoParser.ParseCheckboxes"/> finds (job 329; its raw line with
+    /// leading spaces and tabs removed), and the lines of every section whose ATX heading
     /// (outside fences) is <see cref="OpenPointsHeading"/> ignoring case, up to the next heading of the same or higher
     /// level outside fences, copied as written without the heading and without leading and trailing blank lines. A
     /// todo inside such a section appears once, as written. <c>\r</c> is dropped from every line.
@@ -78,7 +79,7 @@ internal static class MeetingCarryOver
 
         // Kept lines by 0-based index: the text to copy.
         SortedDictionary<int, string> kept = [];
-        foreach (ParsedNoteTodo todo in NoteTodoParser.Parse(markdown))
+        foreach (ParsedNoteTodo todo in NoteTodoParser.Parse(markdown).Concat(NoteTodoParser.ParseCheckboxes(markdown)))
         {
             kept[todo.Line - 1] = lines[todo.Line - 1].TrimStart(' ', '\t');
         }
