@@ -142,6 +142,10 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#385](backlog/385-filter-the-people-panel-by-affiliation.md) Filter the People panel by affiliation and role → 291-people-affiliation-filter
 - [x] [#395](backlog/395-fix-flaky-recent-json-test-that.md) Fix flaky recent.json test that failed CI after job 295 → 297-flaky-recent-test
 - [x] [#400](backlog/400-no-crash-report-when-a-second.md) No crash report when a second copy starts → 315-second-copy-no-crash
+- [ ] [#407](backlog/407-global-todos-as-note-local-checkboxes.md) Global todos as - { }, note-local checkboxes as - [ ]
+- [ ] [#406](backlog/406-carry-a-line-to-the-next.md) Carry a line to the next meeting with - [>] (after: #407)
+- [ ] [#404](backlog/404-todos-page-opened-from-an-exclamation.md) Todos page opened from an exclamation-mark icon in the left sidebar
+- [ ] [#405](backlog/405-affiliation-as-a-comma-separated-list.md) Affiliation as a comma-separated list
 - [ ] [#401](backlog/401-say-why-the-app-ended-in.md) Say why the app ended in the crash log
 - [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4)
 - [x] [#234](backlog/234-release-and-ci-workflow-hardening.md) Release and CI workflow hardening → 272-release-ci-hardening
@@ -357,10 +361,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#399](backlog/399-payment-provider-spike.md) Payment provider spike
 - [ ] [#402](backlog/402-throttle-repeated-show-requests.md) Throttle repeated show requests
 - [h] [#403](backlog/403-check-the-second-start-on-windows.md) Check the second start on Windows
-- [ ] [#404](backlog/404-todos-page-opened-from-an-exclamation.md) Todos page opened from an exclamation-mark icon in the left sidebar
-- [ ] [#405](backlog/405-affiliation-as-a-comma-separated-list.md) Affiliation as a comma-separated list
-- [ ] [#406](backlog/406-carry-a-line-to-the-next.md) Carry a line to the next meeting with - [>] (after: #407)
-- [ ] [#407](backlog/407-global-todos-as-note-local-checkboxes.md) Global todos as - { }, note-local checkboxes as - [ ]
 
 ## Dropped with the terminal UI
 
