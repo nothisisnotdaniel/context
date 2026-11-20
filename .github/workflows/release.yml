@@ -1,0 +1,718 @@
+# Builds, tests and packs Context as a .NET tool, then attaches the .nupkg and the desktop builds to a GitHub
+# release. Four jobs: release creates the release as a draft, desktop-macos and desktop-windows upload into
+# the draft, and publish makes it public once every asset is there.
+# - A push to develop makes a prerelease X.Y.(Z+1)-develop.<run number>, one patch above the
+#   highest release tag (.github/scripts/develop-version.sh). A push whose changes are all in the root
+#   backlog.md and/or backlog/** (the user stories) is skipped (paths-ignore), so it makes no prerelease.
+# - A merged pull request from develop into main titled "release vX.Y.Z" makes the release vX.Y.Z
+#   (and its tag) on the merge commit (.github/scripts/release-pr-version.sh). Closed-unmerged PRs,
+#   PRs from other branches and fork PRs are skipped by the job's if:.
+# - A pushed version tag vX.Y.Z makes the release for that tag. The tag's commit must be on main,
+#   and -develop tags are refused (those are only made by develop builds).
+# - After a proper release vX.Y.Z is published, the publish job deletes every -develop prerelease below X.Y.Z
+#   with its tag (.github/scripts/old-prereleases.sh); proper releases and newer prereleases stay. A failed
+#   prune only warns (continue-on-error), the release still counts.
+# - What ships, on every release (develop prerelease, release PR, tag):
+#   - the command-line tool as the .NET tool package Context.<version>.nupkg (command context), from the release job;
+#   - the desktop app for macOS as Context-<version>-osx-arm64.zip and Context-<version>-osx-x64.zip (a
+#     Context.app built by .github/scripts/macos-app.sh), from the desktop-macos job;
+#   - the desktop app for Windows, packed by vpk (Velopack), from the desktop-windows job: Setup.exe, the
+#     portable zip, this version's full .nupkg, a delta .nupkg when an earlier published release of the channel
+#     could be downloaded, and the feed files (releases.<channel>.json, assets.<channel>.json, RELEASES*).
+#   Both desktop jobs need the release job: they take its version, tag and commit (job outputs) and upload to
+#   the draft it created; re-running a desktop job replaces its own assets (--clobber).
+# - The release is a draft until the publish job runs. publish needs all three other jobs, checks that the
+#   draft sits on the release's commit and holds the command-line tool package, both macOS zips and the Windows
+#   installer, full package and feed, and only then publishes it. A failed desktop job leaves an unpublished
+#   draft: users and the updater never see a half-filled release (re-run the failed job, publish then runs).
+#   This is what makes immutable releases work: GitHub refuses uploads into a published immutable release,
+#   so every asset is uploaded before the release is published. A draft has no git tag yet (develop and
+#   release-PR runs); GitHub creates the tag on the draft's commit when it is published.
+# - One run at a time: the workflow-level concurrency group "release" (cancel-in-progress: false) covers all
+#   three triggers, so two runs never create, upload, publish or prune at once. GitHub keeps only one pending
+#   run per group: a newer run cancels an older pending one (for example a queued release-PR run); re-run it.
+#   Each job has a timeout (release 30 minutes, desktop-macos 60, desktop-windows 45, publish 15).
+# - Stale drafts: before it creates the draft, the release job deletes every draft of this run's tag (left by
+#   an earlier failed run), so re-running the whole workflow works. Drafts of other tags are left alone.
+# - The Windows delta base is an earlier published release only (gh release list --exclude-drafts, and
+#   --exclude-pre-releases for a proper release), never a draft, never this run's own tag.
+# - The tag check: before it publishes, the publish job reads the tag from the repository (git ls-remote, the
+#   token only through gh auth git-credential). When the tag already exists and points at another commit than
+#   the draft's, nothing is published. A tag pushed between that check and the publish is not caught.
+# - Every version, tag and target that reaches $GITHUB_ENV, $GITHUB_OUTPUT or a later job is refused when it
+#   holds a line break; the publish step counts only fully uploaded assets.
+# - Two update channels: a prerelease version (X.Y.Z-develop.<n>) is packed with --channel develop, a proper
+#   release with vpk's default channel (win). A copy installed by Setup.exe looks at start-up for a newer
+#   build on the channel it was installed from and puts it in place after the app closes (when the app stays
+#   open longer than Velopack's updater waits, 60 s, the build is put in place at the next start, which then
+#   restarts into it). The portable copy and the macOS zips never update themselves.
+# - Signing: the macOS app can be signed and notarized, the Windows build is unsigned, and the updater checks no
+#   signature.
+#   - The switch is the repository variable MACOS_SIGNING (empty, off or on; anything else fails the macOS
+#     job). It reaches the release and desktop-macos jobs as the job-level environment variable MACOS_SIGNING,
+#     and every script and step if: reads it only from there. Each job reads the variable when it starts:
+#     changing it during a run, or before re-running a failed desktop-macos job, can leave release notes that
+#     name the other kind of build, so change it only between runs.
+#   - Not on (the default): the macOS apps get only an ad-hoc signature (codesign identity "-", which Apple
+#     silicon needs to run anything), and no secret is read.
+#   - On: the step "Bundle, sign, notarize and zip" builds each Context.app (.github/scripts/macos-app.sh),
+#     signs it with the one Developer ID Application identity of the certificate for the hardened runtime
+#     (.github/scripts/macos-sign.sh with .github/scripts/macos-entitlements.plist: allow-jit only), has Apple
+#     notarize it, staples the ticket and zips it (.github/scripts/macos-notarize.sh). Its secrets are
+#     MACOS_CERTIFICATE_P12 (the certificate and key as base64 of the .p12 file), MACOS_CERTIFICATE_PASSWORD
+#     (the .p12 password), NOTARY_KEY_P8 (the text of the App Store Connect API key file), NOTARY_KEY_ID and
+#     NOTARY_ISSUER_ID. Only that one step sees them, and it has no GitHub token. The certificate is imported
+#     into a throwaway keychain under $RUNNER_TEMP that is deleted when the step ends. It fails closed: a
+#     missing secret or a failed stage (import, sign, verify, notarize, staple, assess) fails the job, nothing
+#     is uploaded and nothing falls back to the ad-hoc signature, so the release stays an unpublished draft.
+#   - The asset names are the same either way, and the release notes header
+#     (.github/scripts/release-notes.sh) says which kind of macOS build it is.
+#   - github.token is the only credential every other step has. The updater checks no signature: an update
+#     is trusted only because it comes over HTTPS from this repository's releases, which only this workflow
+#     writes. Whoever can write a release here can run code on every installed copy. The repository URL is
+#     fixed in every installed copy: never rename, transfer or delete the repository or the account while
+#     installed copies exist (whoever registers the old name afterwards controls their update feed); ship a
+#     build with the new URL first.
+# - vpk is pinned to an exact version, the same as the Velopack package in Context.Desktop.csproj.
+# Refs, PR fields and the run number reach the shell only through environment variables (GITHUB_REF_NAME,
+# GITHUB_REF_TYPE, GITHUB_RUN_NUMBER, GITHUB_SHA, and the Version step's env:), never through ${{ }}
+# inside a run: script.
+# Actions are pinned to full commit SHAs (the tag each one had is in the trailing comment), so a moved
+# tag cannot run new code with the contents: write token. LC_ALL=C keeps the SemVer check ASCII-only.
+name: Release
+
+on:
+  push:
+    branches:
+      - "develop"
+    tags:
+      - "v*"
+    paths-ignore:
+      - "backlog.md"
+      - "backlog/**"
+  pull_request:
+    types:
+      - "closed"
+    branches:
+      - "main"
+
+permissions:
+  contents: write
+
+# One run at a time across all three triggers; a running job is never cancelled (see the header).
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # Every push runs; a pull_request event runs only for a merged PR from develop in this repository.
+    if: github.event_name == 'push' || (github.event.pull_request.merged == true && github.event.pull_request.head.ref == 'develop' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The macOS signing switch (a repository variable, no secret): the release notes say which build ships.
+    env:
+      MACOS_SIGNING: ${{ vars.MACOS_SIGNING }}
+    # For the desktop jobs: the version, the release's tag and the commit it was made on.
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      target: ${{ steps.version.outputs.target }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # No later step needs git credentials (gh uses GH_TOKEN), so the write token is not left in .git/config.
+          persist-credentials: false
+          # All history and tags: develop builds read the release tags, and release tags are
+          # checked against origin/main (without it the check fails rather than passes).
+          fetch-depth: 0
+          # A release PR builds its merge commit; empty for pushes, which keep the pushed commit.
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Version
+        id: version
+        # PR fields are attacker-influenced text: they reach the shell only as quoted variables.
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            # Merged release PR: re-check what the job's if: checked, then take the version from the title.
+            if [ "$PR_MERGED" != "true" ]; then
+              echo "Pull request is not merged; nothing to release" >&2
+              exit 1
+            fi
+            if [ "$PR_HEAD_REF" != "develop" ]; then
+              echo "Release pull requests must come from develop" >&2
+              exit 1
+            fi
+            if [ "$PR_HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+              echo "Release pull requests must come from this repository" >&2
+              exit 1
+            fi
+            case "$MERGE_SHA" in
+              '' | *[!0-9a-f]*)
+                echo "Merge commit '$MERGE_SHA' is not a lowercase hex commit id" >&2
+                exit 1
+                ;;
+            esac
+            if [ "${#MERGE_SHA}" -ne 40 ]; then
+              echo "Merge commit '$MERGE_SHA' is not 40 characters long" >&2
+              exit 1
+            fi
+            if [ "$(git rev-parse HEAD)" != "$MERGE_SHA" ]; then
+              echo "Checked-out commit is not the merge commit '$MERGE_SHA'" >&2
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$MERGE_SHA" origin/main; then
+              echo "Merge commit '$MERGE_SHA' is not on main" >&2
+              exit 1
+            fi
+            if ! VERSION="$(git tag --list 'v*' | sh .github/scripts/release-pr-version.sh "$PR_TITLE")"; then
+              echo "Release pull request title must be exactly 'release vX.Y.Z' for a new version" >&2
+              exit 1
+            fi
+            TAG="v$VERSION"
+            TARGET="$MERGE_SHA"
+          elif [ "$GITHUB_REF_TYPE" = "branch" ]; then
+            # Push to develop: one patch above the highest release tag, as a prerelease.
+            VERSION="$(git tag --list 'v*' | sh .github/scripts/develop-version.sh "$GITHUB_RUN_NUMBER")"
+            TAG="v$VERSION"
+            TARGET="$GITHUB_SHA"
+          else
+            # Pushed tag: refuse develop tags and tags whose commit is not on main.
+            case "$GITHUB_REF_NAME" in
+              *-develop*)
+                echo "Tag '$GITHUB_REF_NAME' is a develop tag; only develop builds make those" >&2
+                exit 1
+                ;;
+            esac
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+              echo "Tag '$GITHUB_REF_NAME' is not on main; release tags must be made on main" >&2
+              exit 1
+            fi
+            VERSION="${GITHUB_REF_NAME#v}"
+            TAG="$GITHUB_REF_NAME"
+            TARGET="$GITHUB_SHA"
+          fi
+          # A line break would let a second line past the line-based SemVer check below and into $GITHUB_ENV or
+          # $GITHUB_OUTPUT (for example a tag 'v1.2.3<LF>X=y'), so it is refused before anything is written.
+          case "$VERSION$TAG$TARGET" in
+            *[$'\n\r']*)
+              echo "The version, tag or target holds a line break; nothing is released" >&2
+              exit 1
+              ;;
+          esac
+          # Check the version where it enters, before it reaches msbuild (-p: would split on ';').
+          # LC_ALL=C: the [A-Za-z] ranges mean ASCII letters only, whatever the runner's locale.
+          if ! printf '%s' "$VERSION" | LC_ALL=C grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+            echo "Version '$VERSION' (ref '$GITHUB_REF_NAME') is not SemVer" >&2
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "TARGET=$TARGET" >> "$GITHUB_ENV"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+
+      # The tests run on the normal build (no version override): some tests pin the csproj version.
+      - name: Test
+        run: dotnet test -c Release
+
+      # ValidateVersion in Context.csproj fails the pack unless $VERSION is SemVer.
+      - name: Pack
+        run: dotnet pack src/Context -c Release -p:Version="$VERSION"
+
+      - name: Smoke check the packed tool
+        run: |
+          REPO="$GITHUB_WORKSPACE"
+          # Outside the repo. A throwaway nuget.config with <clear /> and only the local folder keeps
+          # nuget.org out: the package ID Context is not reserved there, so a package published under
+          # that name could otherwise be installed and run here instead of ours.
+          cd "$RUNNER_TEMP"
+          cat > smoke-nuget.config <<XML
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="local" value="$REPO/nupkg" />
+            </packageSources>
+          </configuration>
+          XML
+          export PATH="$HOME/.dotnet/tools:$PATH"
+          dotnet tool install --global --configfile "$RUNNER_TEMP/smoke-nuget.config" --add-source "$REPO/nupkg" --version "$VERSION" Context
+          ACTUAL="$(context --version)"
+          if [ "$ACTUAL" != "Context $VERSION" ]; then
+            echo "context --version printed '$ACTUAL', expected 'Context $VERSION'" >&2
+            exit 1
+          fi
+          # A command that opens the tag index, against a fresh and empty data folder (on Linux the
+          # data folder is $XDG_CONFIG_HOME/Context): exit 0 proves the packed SQLite native library loads.
+          SMOKE_CONFIG="$(mktemp -d "$RUNNER_TEMP/smoke-config.XXXXXX")"
+          XDG_CONFIG_HOME="$SMOKE_CONFIG" context tags
+
+      # A draft: the desktop jobs upload into it and the publish job makes it public (see the header).
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PRERELEASE=""
+          case "$VERSION" in
+            *-*) PRERELEASE="--prerelease" ;;
+          esac
+          # The header says how to open the desktop builds; a switch value other than empty, off or on fails here.
+          sh .github/scripts/release-notes.sh "$MACOS_SIGNING" > "$RUNNER_TEMP/release-notes.md"
+          # Drafts of this exact tag left by an earlier failed run go first, so this run's draft is the only one
+          # (and re-running the whole workflow works). Every id is checked before the first delete.
+          if ! DRAFTS="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '.[] | select(.draft == true and .tag_name == env.TAG) | .id')"; then
+            echo "Can't list the drafts of $TAG; nothing is created" >&2
+            exit 1
+          fi
+          if [ -n "$DRAFTS" ]; then
+            while IFS= read -r ID; do
+              case "$ID" in
+                '' | *[!0-9]*)
+                  echo "A listed draft id of $TAG is not a number; nothing is deleted or created" >&2
+                  exit 1
+                  ;;
+              esac
+            done <<< "$DRAFTS"
+            while IFS= read -r ID; do
+              if ! gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$ID" > /dev/null; then
+                echo "Can't delete stale draft $ID of $TAG; nothing is created" >&2
+                exit 1
+              fi
+              echo "Deleted stale draft $ID of $TAG"
+            done <<< "$DRAFTS"
+          fi
+          gh release create "$TAG" "nupkg/Context.$VERSION.nupkg" --title "Context $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" --generate-notes --target "$TARGET" --draft $PRERELEASE
+
+  # The desktop app for macOS: one Context.app per architecture, zipped and added to the release. Signed and
+  # notarized when the repository variable MACOS_SIGNING is on, else only ad-hoc signed (see the header).
+  desktop-macos:
+    needs: release
+    runs-on: macos-latest
+    timeout-minutes: 60
+    # The release job's outputs and the signing switch reach the scripts only as environment variables.
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+      TAG: ${{ needs.release.outputs.tag }}
+      MACOS_SIGNING: ${{ vars.MACOS_SIGNING }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Uploads go through gh (GH_TOKEN), so the write token is not left in .git/config.
+          persist-credentials: false
+          # The commit the release was made on.
+          ref: ${{ needs.release.outputs.target }}
+
+      - name: Check version
+        run: |
+          # A line break would let a second line past the line-based SemVer check, so it is refused first.
+          case "$VERSION$TAG" in
+            *[$'\n\r']*)
+              echo "The version or tag holds a line break" >&2
+              exit 1
+              ;;
+          esac
+          # The version came from another job: check it again before it reaches msbuild or a file name.
+          if ! printf '%s' "$VERSION" | LC_ALL=C grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+            echo "Version '$VERSION' is not SemVer" >&2
+            exit 1
+          fi
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "Tag '$TAG' is not 'v$VERSION'" >&2
+            exit 1
+          fi
+          # The signing switch: only empty, off or on. A typo must not quietly ship the ad-hoc build.
+          case "$MACOS_SIGNING" in
+            '' | off | on) ;;
+            *)
+              echo "MACOS_SIGNING must be empty, 'off' or 'on'" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Publish
+        run: |
+          for RID in osx-arm64 osx-x64; do
+            dotnet publish src/Context.Desktop -c Release --self-contained -p:Version="$VERSION" -r "$RID" -o "publish/$RID"
+          done
+
+      # Signing off: no certificate and no notarization. The identity "-" makes an ad-hoc signature, which Apple
+      # silicon needs to run any code. Gatekeeper still warns; the release notes say how to open it.
+      - name: Bundle, ad-hoc sign and zip
+        if: env.MACOS_SIGNING != 'on'
+        run: |
+          for RID in osx-arm64 osx-x64; do
+            sh .github/scripts/macos-app.sh "publish/$RID" "$VERSION" "app/$RID"
+            codesign --force --deep -s - "app/$RID/Context.app"
+            codesign --verify --deep --strict "app/$RID/Context.app"
+            # ditto keeps the modes and the signature's extended attributes; the zip holds Context.app itself.
+            ditto -c -k --keepParent "app/$RID/Context.app" "Context-$VERSION-$RID.zip"
+          done
+
+      # Signing on: Developer ID signature, hardened runtime, notarization and a stapled ticket. The only step
+      # that sees a secret, and it has no GitHub token. It fails closed: any failure ends the job before Upload,
+      # and nothing falls back to the ad-hoc signature.
+      - name: Bundle, sign, notarize and zip
+        if: env.MACOS_SIGNING == 'on'
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          # Every secret must be there before any tool is called. Only the name is printed, never a value.
+          # ${!NAME-} is bash's indirect expansion: this step needs bash, the macOS runner's default shell.
+          for NAME in MACOS_CERTIFICATE_P12 MACOS_CERTIFICATE_PASSWORD NOTARY_KEY_P8 NOTARY_KEY_ID NOTARY_ISSUER_ID; do
+            if [ -z "${!NAME-}" ]; then
+              echo "$NAME is not set; nothing was signed" >&2
+              exit 1
+            fi
+          done
+          # Everything secret lives in one folder that only this user can read, and goes away on every exit.
+          # The tight umask covers only the key files and the keychain: it is put back before the first bundle
+          # is built, so the Context.app that ships keeps the modes of the ad-hoc build.
+          UMASK_BEFORE="$(umask)"
+          umask 077
+          WORK="$(mktemp -d "$RUNNER_TEMP/macos-signing.XXXXXX")"
+          KEYCHAIN="$WORK/signing.keychain-db"
+          P12="$WORK/certificate.p12"
+          P8="$WORK/notary-key.p8"
+          cleanup() {
+            security delete-keychain "$KEYCHAIN" > /dev/null 2>&1 || true
+            rm -rf "$WORK"
+          }
+          trap cleanup EXIT
+          # One line of this step's own per failure: the stage and the architecture. No file stays at the asset name.
+          fail() {
+            if [ -n "${2-}" ]; then
+              rm -f "Context-$VERSION-$2.zip"
+            fi
+            echo "macOS signing failed: $1 (${2:-before any architecture}); nothing is uploaded" >&2
+            exit 1
+          }
+          # The certificate goes into a new keychain with a random password; codesign may use its key unasked.
+          import_certificate() {
+            KEYCHAIN_PASSWORD="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')" &&
+              [ "${#KEYCHAIN_PASSWORD}" -eq 48 ] &&
+              printf '%s' "$MACOS_CERTIFICATE_P12" | base64 --decode > "$P12" &&
+              printf '%s\n' "$NOTARY_KEY_P8" > "$P8" &&
+              security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN" &&
+              security set-keychain-settings -lut 21600 "$KEYCHAIN" &&
+              security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN" &&
+              security import "$P12" -k "$KEYCHAIN" -f pkcs12 -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign > /dev/null &&
+              security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null &&
+              security list-keychains -d user -s "$KEYCHAIN" &&
+              IDENTITIES="$(security find-identity -v -p codesigning "$KEYCHAIN")"
+          }
+          import_certificate || fail import
+          # Exactly one Developer ID Application identity, named by its SHA-1 hash from here on.
+          IDENTITY="$(printf '%s\n' "$IDENTITIES" | sed -n 's/^ *[0-9][0-9]*) \([0-9A-F]\{40\}\) "Developer ID Application: .*$/\1/p')"
+          if [ "$(printf '%s' "$IDENTITY" | grep -c '' || true)" != "1" ]; then
+            echo "The certificate must hold exactly one 'Developer ID Application:' identity" >&2
+            fail import
+          fi
+          umask "$UMASK_BEFORE"
+          for RID in osx-arm64 osx-x64; do
+            APP="app/$RID/Context.app"
+            sh .github/scripts/macos-app.sh "publish/$RID" "$VERSION" "app/$RID" || fail bundle "$RID"
+            CODE=0
+            sh .github/scripts/macos-sign.sh "$APP" "$IDENTITY" .github/scripts/macos-entitlements.plist || CODE="$?"
+            case "$CODE" in
+              0) ;;
+              3) fail verify "$RID" ;;
+              *) fail sign "$RID" ;;
+            esac
+            CODE=0
+            sh .github/scripts/macos-notarize.sh "$APP" "Context-$VERSION-$RID.zip" "$P8" "$NOTARY_KEY_ID" "$NOTARY_ISSUER_ID" || CODE="$?"
+            case "$CODE" in
+              0) ;;
+              3) fail staple "$RID" ;;
+              4) fail assess "$RID" ;;
+              *) fail notarize "$RID" ;;
+            esac
+          done
+
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$TAG" "Context-$VERSION-osx-arm64.zip" "Context-$VERSION-osx-x64.zip" --clobber
+
+  # The desktop app for Windows: a Velopack installer that updates itself, plus the packages and feed it reads.
+  desktop-windows:
+    needs: release
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    # The release job's outputs reach the scripts only as environment variables.
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+      TAG: ${{ needs.release.outputs.tag }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Uploads go through gh (GH_TOKEN), so the write token is not left in .git/config.
+          persist-credentials: false
+          # The commit the release was made on.
+          ref: ${{ needs.release.outputs.target }}
+
+      - name: Check version
+        run: |
+          # A line break would let a second line past the line-based SemVer check, so it is refused first.
+          case "$VERSION$TAG" in
+            *[$'\n\r']*)
+              echo "The version or tag holds a line break" >&2
+              exit 1
+              ;;
+          esac
+          # The version came from another job: check it again before it reaches msbuild or a file name.
+          if ! printf '%s' "$VERSION" | LC_ALL=C grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+            echo "Version '$VERSION' is not SemVer" >&2
+            exit 1
+          fi
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "Tag '$TAG' is not 'v$VERSION'" >&2
+            exit 1
+          fi
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "10.0.x"
+
+      # Exact version, equal to the Velopack package in Context.Desktop.csproj (ReleaseWorkflowTests compares them).
+      - name: Install vpk
+        run: dotnet tool install --global vpk --version 1.2.161
+
+      - name: Publish
+        run: dotnet publish src/Context.Desktop -c Release --self-contained -p:Version="$VERSION" -r win-x64 -o publish/win-x64
+
+      - name: Pack
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          export PATH="$HOME/.dotnet/tools:$PATH"
+          # A prerelease goes to the develop channel; a proper release to vpk's default channel (win).
+          CHANNEL=""
+          NAME="win"
+          EXCLUDE="--exclude-pre-releases"
+          case "$VERSION" in
+            *-*)
+              CHANNEL="--channel develop"
+              NAME="develop"
+              EXCLUDE=""
+              ;;
+          esac
+          # The newest earlier published release of the same channel, so vpk can make a delta against it: only
+          # published releases (never a draft, so a stale draft can't become the base), only v+SemVer tags, never
+          # this run's own tag. Each try must bring down the channel's feed and a full package; else Releases/ is
+          # emptied and the next tag is tried. With none, the pack goes on without a delta.
+          has_full() {
+            for FILE in Releases/ContextDesktop-*-full.nupkg; do
+              if [ -f "$FILE" ]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+          BASE=""
+          if TAGS="$(gh release list --exclude-drafts $EXCLUDE --limit 10 --json tagName --jq '.[].tagName')"; then
+            while IFS= read -r CANDIDATE; do
+              case "$CANDIDATE" in
+                v*) ;;
+                *) continue ;;
+              esac
+              if [ "$CANDIDATE" = "$TAG" ] || ! printf '%s' "${CANDIDATE#v}" | LC_ALL=C grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+                continue
+              fi
+              if gh release download "$CANDIDATE" --pattern "releases.$NAME.json" --pattern "ContextDesktop-*-full.nupkg" --dir Releases && [ -f "Releases/releases.$NAME.json" ] && has_full; then
+                BASE="$CANDIDATE"
+                break
+              fi
+              rm -rf Releases
+            done <<< "$TAGS"
+          fi
+          if [ -z "$BASE" ]; then
+            rm -rf Releases
+            echo "::warning::No earlier release downloaded; packing without a delta"
+          fi
+          # The pack needs no credential.
+          unset GH_TOKEN
+          vpk pack --packId ContextDesktop --packVersion "$VERSION" --packDir publish/win-x64 --mainExe Context.Desktop.exe --packTitle Context --icon src/Context.Desktop/Assets/Context.ico --runtime win-x64 --outputDir Releases $CHANNEL
+
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NAME="win"
+          SUFFIX=""
+          case "$VERSION" in
+            *-*)
+              NAME="develop"
+              SUFFIX="-develop"
+              ;;
+          esac
+          SETUP="Releases/ContextDesktop-$NAME-Setup.exe"
+          FULL="Releases/ContextDesktop-$VERSION$SUFFIX-full.nupkg"
+          DELTA="Releases/ContextDesktop-$VERSION$SUFFIX-delta.nupkg"
+          for FILE in "$SETUP" "$FULL"; do
+            if [ ! -f "$FILE" ]; then
+              echo "$FILE is missing" >&2
+              exit 1
+            fi
+          done
+          # Only this version's files: Releases/ also holds the earlier package the delta was made against.
+          set -- "$SETUP" "Releases/ContextDesktop-$NAME-Portable.zip" "$FULL" "Releases/releases.$NAME.json" "Releases/assets.$NAME.json" "Releases/RELEASES$SUFFIX"
+          if [ -f "$DELTA" ]; then
+            set -- "$@" "$DELTA"
+          fi
+          gh release upload "$TAG" "$@" --clobber
+
+  # Makes the draft public. It needs all three jobs and has no if:, so it is skipped when one of them fails
+  # (or is skipped): the release then stays an unpublished draft.
+  publish:
+    needs:
+      - release
+      - desktop-macos
+      - desktop-windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The release job's outputs reach the scripts only as environment variables.
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+      TAG: ${{ needs.release.outputs.tag }}
+      TARGET: ${{ needs.release.outputs.target }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # gh and the tag check get the token from GH_TOKEN, so the write token is not left in .git/config.
+          persist-credentials: false
+          # The commit the release was made on (the prune step runs its script from there).
+          ref: ${{ needs.release.outputs.target }}
+
+      - name: Check version
+        run: |
+          # A line break would let a second line past the line-based SemVer check, so it is refused first.
+          case "$VERSION$TAG" in
+            *[$'\n\r']*)
+              echo "The version or tag holds a line break" >&2
+              exit 1
+              ;;
+          esac
+          # The version came from another job: check it again before it reaches a file name.
+          if ! printf '%s' "$VERSION" | LC_ALL=C grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+            echo "Version '$VERSION' is not SemVer" >&2
+            exit 1
+          fi
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "Tag '$TAG' is not 'v$VERSION'" >&2
+            exit 1
+          fi
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NAME="win"
+          SUFFIX=""
+          PRE=""
+          case "$VERSION" in
+            *-*)
+              NAME="develop"
+              SUFFIX="-develop"
+              PRE="--prerelease"
+              ;;
+          esac
+          # One read: line 1 is the draft flag, line 2 the commit the release sits on, then one asset name a line
+          # (only fully uploaded assets: the parentheses matter, | binds looser than ,).
+          INFO="$(gh release view "$TAG" --json isDraft,targetCommitish,assets --jq '.isDraft, .targetCommitish, (.assets[] | select(.state == "uploaded") | .name)')"
+          DRAFT="$(sed -n '1p' <<< "$INFO")"
+          COMMIT="$(sed -n '2p' <<< "$INFO")"
+          ASSETS="$(sed -n '3,$p' <<< "$INFO")"
+          # Only this run's own draft is published: GitHub puts the tag on the draft's commit at that moment.
+          if [ "$DRAFT" != "true" ]; then
+            echo "Release $TAG is not a draft; nothing is published" >&2
+            exit 1
+          fi
+          if [ "$COMMIT" != "$TARGET" ]; then
+            echo "Release $TAG sits on '$COMMIT', not on '$TARGET'; nothing is published" >&2
+            exit 1
+          fi
+          # What every release must hold before users or the updater can see it.
+          for ASSET in "Context.$VERSION.nupkg" "Context-$VERSION-osx-arm64.zip" "Context-$VERSION-osx-x64.zip" "ContextDesktop-$NAME-Setup.exe" "ContextDesktop-$VERSION$SUFFIX-full.nupkg" "releases.$NAME.json"; do
+            if ! grep -Fxq -- "$ASSET" <<< "$ASSETS"; then
+              echo "Release $TAG has no asset $ASSET; nothing is published" >&2
+              exit 1
+            fi
+          done
+          # The tag, when it already exists (a pushed tag, or one made by hand), must point at the draft's commit:
+          # GitHub would publish the draft on the tag as it is. git reads the token from GH_TOKEN through gh,
+          # never from argv, and never prompts (GIT_TERMINAL_PROMPT=0). A tag pushed after this check is not caught.
+          if ! REFS="$(GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c 'credential.helper=!gh auth git-credential' ls-remote "https://github.com/$GITHUB_REPOSITORY" "refs/tags/$TAG" "refs/tags/$TAG^{}")"; then
+            echo "Can't read tag $TAG; nothing is published" >&2
+            exit 1
+          fi
+          PLAIN=""
+          PEELED=""
+          while read -r SHA REF; do
+            if [ "$REF" = "refs/tags/$TAG^{}" ]; then
+              PEELED="$SHA"
+            elif [ "$REF" = "refs/tags/$TAG" ]; then
+              PLAIN="$SHA"
+            fi
+          done <<< "$REFS"
+          TAGGED="${PEELED:-$PLAIN}"
+          if [ -n "$TAGGED" ] && [ "$TAGGED" != "$TARGET" ]; then
+            echo "Tag $TAG points at $TAGGED, not at $TARGET; nothing is published" >&2
+            exit 1
+          fi
+          gh release edit "$TAG" --draft=false $PRE
+
+      # Housekeeping after a proper release: delete the -develop prereleases (and their tags) whose
+      # version is lower than the release (.github/scripts/old-prereleases.sh). It runs only after the
+      # release was published, so continue-on-error cannot hide a failed release, only a failed prune.
+      - name: Prune old prereleases
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "$VERSION" in
+            *-*)
+              echo "Version '$VERSION' is a prerelease; nothing to prune"
+              exit 0
+              ;;
+          esac
+          # Without a shell: key, run: is bash -e with no pipefail: a failed listing must fail the step (a warning).
+          set -o pipefail
+          # Tag names are external text: they reach the shell only as data, and only exact
+          # v<X.Y.Z>-develop.<n> matches at or below the release come out of the filter.
+          gh release list --limit 1000 --json tagName,isPrerelease --jq '.[] | select(.isPrerelease) | .tagName' |
+            sh .github/scripts/old-prereleases.sh "$VERSION" |
+            while IFS= read -r tag; do
+              echo "Deleting prerelease $tag"
+              gh release delete "$tag" --cleanup-tag --yes || echo "::warning::Could not delete prerelease $tag"
+            done

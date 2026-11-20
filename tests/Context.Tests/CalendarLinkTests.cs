@@ -162,33 +162,44 @@ public sealed class CalendarLinkTests : IDisposable
         Assert.DoesNotContain(FakeHttpHandler.PathToken, e.ToString(), StringComparison.Ordinal);
     }
 
-    // AC-4
+    // 275 AC-3: a file over MaxFileBytes (4096) can't be read, even when it holds a valid link; the message has no content.
     [Fact]
-    public void Encrypted_SetWritesCiphertext_GetReadsIt()
+    public void Get_OverMaxFileBytes_Throws_WithoutTheContent_AtLimitReads()
     {
-        Encryption encryption = SampleData.On(root);
-        CalendarLink link = new CalendarLink(root, encryption);
+        Directory.CreateDirectory(root);
+        CalendarLink link = new CalendarLink(root);
+        string valid = "https://example.com/" + FakeHttpHandler.PathToken;
+        File.WriteAllText(link.FilePath, valid + new string(' ', (int)CalendarLink.MaxFileBytes + 1 - valid.Length));
 
-        link.Set(FakeHttpHandler.Link);
+        CalendarLinkException e = Assert.Throws<CalendarLinkException>(() => link.Get());
 
-        byte[] bytes = File.ReadAllBytes(link.FilePath);
-        Assert.True(Vault.IsEncrypted(bytes));
-        Assert.DoesNotContain(
-            FakeHttpHandler.PathToken, System.Text.Encoding.Latin1.GetString(bytes), StringComparison.Ordinal);
-        Assert.Equal(FakeHttpHandler.Link, link.Get()!.AbsoluteUri);
+        Assert.Equal("Can't read calendar-link.txt.", e.Message);
+        Assert.DoesNotContain(FakeHttpHandler.PathToken, e.ToString(), StringComparison.Ordinal);
+
+        File.WriteAllText(link.FilePath, valid + new string(' ', (int)CalendarLink.MaxFileBytes - valid.Length));
+        Assert.Equal(4096, new FileInfo(link.FilePath).Length);
+
+        Assert.Equal(new Uri(valid), link.Get());
     }
 
-    // AC-7
-    [Fact]
-    public void Encrypted_TamperedFile_ThrowsCalendarLinkException_WithoutTheLink()
+    // 275 AC-3: a FIFO calendar-link.txt with no writer can't be read and doesn't block.
+    [Fact(Timeout = 30_000)]
+    public async Task Get_Fifo_Throws_WithoutBlocking()
     {
-        Encryption encryption = SampleData.On(root);
-        CalendarLink link = new CalendarLink(root, encryption);
-        link.Set(FakeHttpHandler.Link);
-        SampleData.Tamper(link.FilePath);
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
 
-        CalendarLinkException ex = Assert.Throws<CalendarLinkException>(() => link.Get());
+        Directory.CreateDirectory(root);
+        CalendarLink link = new CalendarLink(root);
+        using (System.Diagnostics.Process mkfifo = System.Diagnostics.Process.Start("mkfifo", link.FilePath))
+        {
+            mkfifo.WaitForExit();
+        }
 
-        Assert.DoesNotContain(FakeHttpHandler.PathToken, ex.ToString(), StringComparison.Ordinal);
+        CalendarLinkException e = await Assert.ThrowsAsync<CalendarLinkException>(() => Task.Run(link.Get));
+
+        Assert.Equal("Can't read calendar-link.txt.", e.Message);
     }
 }

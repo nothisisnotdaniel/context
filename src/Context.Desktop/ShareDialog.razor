@@ -1,0 +1,36 @@
+@* Share (plain notes only): asks whether to leave out lines tagged #private before the save dialog opens. *@
+
+<ConfirmDialog Question="@($"Share {DesktopText.OneLine(Name)} as an HTML page?")" ConfirmLabel="Choose file…"
+               Busy="Busy" OnConfirm="Choose" OnCancel="Cancel">
+    <label class="share-option">
+        <input type="checkbox" checked="@leaveOutPrivate" disabled="@Busy" @onchange="Toggle" />
+        Leave out lines tagged #private
+    </label>
+</ConfirmDialog>
+
+@code {
+    private bool leaveOutPrivate = true;
+
+    /// <summary>The note's name, shown on one line.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>While true the buttons are disabled and Esc does nothing.</summary>
+    [Parameter]
+    public bool Busy { get; set; }
+
+    /// <summary>Choose file was pressed: true to leave out lines tagged #private.</summary>
+    [Parameter]
+    public EventCallback<bool> OnChoose { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private void Toggle(ChangeEventArgs e) => leaveOutPrivate = e.Value is true || (e.Value is string text && bool.TryParse(text, out bool on) && on);
+
+    // ConfirmDialog hands over a Confirmation; Share needs none, so it is not passed on.
+    private Task Choose(Confirmation _) => OnChoose.InvokeAsync(leaveOutPrivate);
+
+    private Task Cancel() => OnCancel.InvokeAsync();
+}

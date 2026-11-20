@@ -1,0 +1,166 @@
+@inherits StateComponent
+@* The weekly review (DesktopState.Review): the notes changed and the todos done (from the done log) in the last 7 days, the overdue todos
+   and the next 7 days' appointments grouped by day. It reads only, and reloads whenever the state changes, keeping
+   the shown rows meanwhile. *@
+
+<section class="review-panel" aria-label="Week review">
+    <div class="panel-bar">
+        <h2>Week review</h2>
+        <button type="button" class="close" @onclick="() => OnClose.InvokeAsync()">Close</button>
+    </div>
+    @if (view is null)
+    {
+        <p class="grey" role="status">Loading…</p>
+    }
+    else
+    {
+        <p class="review-range grey">@Date(view.From) to @Date(view.To)</p>
+
+        <h3>Changed notes</h3>
+        @if (view.ChangedNotes.Count == 0)
+        {
+            <p class="grey">No notes changed.</p>
+        }
+        else
+        {
+            <ul class="review-notes">
+                @foreach (ChangedNote note in view.ChangedNotes)
+                {
+                    string name = note.Name;
+                    string shown = DesktopText.OneLine(name);
+                    <li class="review-note">
+                        <span class="date grey">@note.Modified.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)</span>
+                        <button type="button" class="note-button cut" title="@shown" @onclick="() => OnOpen.InvokeAsync(name)">@shown</button>
+                    </li>
+                }
+            </ul>
+        }
+
+        <h3>Done todos</h3>
+        @if (view.DoneLogUnreadable)
+        {
+            <p class="red">Can't read the done log.</p>
+        }
+        else if (view.Done.Count == 0)
+        {
+            <p class="grey">No todos done.</p>
+        }
+        else
+        {
+            <ul class="review-todos done-todos">
+                @foreach (DoneEntry entry in view.Done)
+                {
+                    string text = DesktopText.OneLine(entry.Text);
+                    <li class="review-todo">
+                        <span class="date grey">@Date(entry.Date)</span>
+                        <span class="text cut" title="@text">@text</span>
+                    </li>
+                }
+            </ul>
+        }
+
+        <h3>Overdue</h3>
+        @if (view.TodosUnreadable)
+        {
+            <p class="red">Can't read todos.json.</p>
+        }
+        else if (view.Overdue.Count == 0)
+        {
+            <p class="grey">Nothing overdue.</p>
+        }
+        else
+        {
+            <ul class="review-todos overdue-todos">
+                @foreach (TodoItem todo in view.Overdue)
+                {
+                    string text = DesktopText.OneLine(todo.Text);
+                    <li class="review-todo">
+                        <span class="date overdue">@Date(todo.Due)</span>
+                        <span class="text cut" title="@text">@text</span>
+                    </li>
+                }
+            </ul>
+        }
+
+        <h3>Next week</h3>
+        @if (view.Days.All(d => d.Appointments.Count == 0))
+        {
+            <p class="grey">No appointments next week.</p>
+        }
+        else
+        {
+            @foreach (ReviewDay day in view.Days.Where(d => d.Appointments.Count > 0))
+            {
+                <h4 class="review-day">@Date(day.Date)</h4>
+                <ul class="review-appointments">
+                    @foreach (Appointment appointment in day.Appointments)
+                    {
+                        string title = DesktopText.OneLine(appointment.Title.Length == 0 ? "(no title)" : appointment.Title);
+                        string location = DesktopText.OneLine(appointment.Location ?? string.Empty);
+                        <li class="review-appointment">
+                            <span class="time accent">@day.TimeText(appointment)</span>
+                            <span class="title cut" title="@title">@title</span>
+                            @if (location.Length > 0)
+                            {
+                                <span class="location grey cut" title="@location">@location</span>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+        }
+
+        @foreach (string file in view.UnreadableCalendarFiles)
+        {
+            <p class="red">Can't read @CalendarStore.FolderName/@DesktopText.OneLine(file)</p>
+        }
+
+        @if (view.Status == CalendarFeedStatus.Stale && view.CachedAtUtc is { } cachedAt)
+        {
+            <p class="grey feed">Exchange calendar offline, showing the copy from @CacheTime(view, cachedAt).</p>
+        }
+        else if (view.Status == CalendarFeedStatus.Failed)
+        {
+            <p class="red feed">Can't download the Exchange calendar (@DesktopText.OneLine(view.Reason ?? string.Empty)).</p>
+        }
+    }
+</section>
+
+@code {
+    private ReviewView? view;
+    private int request;
+
+    /// <summary>Opens a changed note (through <c>Main.RequestOpen</c>, which asks first when the editor is dirty).</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    protected override Task OnInitializedAsync() => Load();
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    // Keeps the shown review while it reloads; only the newest request's result is used.
+    private async Task Load()
+    {
+        int mine = ++request;
+        ReviewView result = await State.Review();
+        if (mine == request)
+        {
+            view = result;
+        }
+    }
+
+    private static string Date(DateOnly date) => date.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture);
+
+    private static string CacheTime(ReviewView shown, DateTime cachedAtUtc)
+    {
+        DateTime local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(cachedAtUtc, DateTimeKind.Utc), shown.Zone);
+        return local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+    }
+}

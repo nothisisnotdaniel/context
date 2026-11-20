@@ -1,0 +1,251 @@
+@inherits StateComponent
+@* Mail digest (job 286): with its setting on, "Read mail" reads the last week of Inbox mail once
+   (DesktopState.MailDigest, bounded by the Outlook timeout) and lists suggested todos, follow-ups and meeting notes.
+   Nothing is read when the page opens or on a state change, and nothing is written before Accept
+   (DesktopActions.AcceptSuggestion). Dismiss hides a suggestion for the session only. All mail text is shown as text,
+   one line each. Esc closes the page. *@
+
+<section class="page mail-digest-panel" aria-label="Mail digest" tabindex="-1" @ref="panel" @onkeydown="PanelKeyDown">
+    <div class="panel-bar">
+        <h2>Mail digest</h2>
+        <button type="button" class="close" aria-label="Close" title="Close" @onclick="() => OnClose.InvokeAsync()"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" /></svg></button>
+    </div>
+    @if (on is not bool enabled)
+    {
+        <p class="grey mail-digest-loading">Loading…</p>
+    }
+    else if (!enabled)
+    {
+        <p class="grey mail-digest-off">@OffText</p>
+    }
+    else
+    {
+        <div class="mail-digest-bar">
+            <button type="button" class="read-mail" disabled="@(reading || running)" @ref="readButton" @onclick="ReadMail">Read mail</button>
+        </div>
+        @if (reading)
+        {
+            <p class="grey mail-digest-reading" role="status">@ReadingText</p>
+        }
+        else if (status is { } shown && OutlookStatusLine.MailText(shown) is { } line)
+        {
+            <p class="mail-digest-status @OutlookStatusLine.Css(shown)" role="status">@line</p>
+        }
+        else if (status == OutlookStatus.Ok && rows.Count == 0)
+        {
+            <p class="grey mail-digest-empty" role="status">@EmptyText</p>
+        }
+        @if (rows.Count > 0)
+        {
+            <ul class="digest-rows">
+                @for (int i = 0; i < rows.Count; i++)
+                {
+                    int index = i;
+                    Row row = rows[index];
+                    MailSuggestion s = row.Suggestion;
+                    <li class="digest-row" @key="row">
+                        <span class="digest-kind">@KindText(s.Kind)</span>
+                        <span class="digest-text">@DesktopText.OneLine(s.Text)</span>
+                        <span class="digest-source grey">@SourceText(s)</span>
+                        <span class="digest-buttons">
+                            <button type="button" class="digest-accept" aria-label="@("Accept: " + DesktopText.OneLine(s.Text))" disabled="@running" @ref="row.AcceptButton" @onclick="() => Accept(row, index)">Accept</button>
+                            <button type="button" class="digest-dismiss" aria-label="@("Dismiss: " + DesktopText.OneLine(s.Text))" disabled="@running" @onclick="() => Dismiss(row, index)">Dismiss</button>
+                        </span>
+                        @if (row.Result is { } result)
+                        {
+                            <p class="digest-result red" role="status">@result</p>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+        <p class="mail-digest-result @resultClass" role="status">@resultText</p>
+    }
+</section>
+
+@code {
+    /// <summary>Shown when the digest may not read mail.</summary>
+    public const string OffText = "Turn on mail suggestions in Settings.";
+
+    /// <summary>Shown while the mail is read.</summary>
+    public const string ReadingText = "Reading mail…";
+
+    /// <summary>Shown when a read found nothing to suggest.</summary>
+    public const string EmptyText = "No suggestions.";
+
+    /// <summary>The Accepted line.</summary>
+    public const string AcceptedText = "Accepted.";
+
+    private ElementReference panel;
+    private ElementReference readButton;
+    private bool? on;
+    private bool reading;
+    private bool running;
+    private OutlookStatus? status;
+    private List<Row> rows = [];
+    private string resultText = string.Empty;
+    private string resultClass = string.Empty;
+    private int request;
+
+    // After an Accept or Dismiss: the row index whose Accept button gets the focus (the read button when none is left).
+    private int? focusIndex;
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    /// <summary>The kind's label in a row.</summary>
+    internal static string KindText(MailSuggestionKind kind) => kind switch
+    {
+        MailSuggestionKind.Todo => "Todo",
+        MailSuggestionKind.FollowUp => "Follow-up",
+        _ => "Meeting note",
+    };
+
+    protected override Task OnInitializedAsync()
+    {
+        base.OnInitialized();
+        return LoadOn();
+    }
+
+    // A state change only rechecks the setting; mail is read only on Read mail.
+    protected override async Task OnStateChangedAsync()
+    {
+        await LoadOn();
+        StateHasChanged();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await panel.FocusAsync();
+        }
+
+        if (focusIndex is int index && !running)
+        {
+            focusIndex = null;
+            if (index < rows.Count)
+            {
+                await rows[index].AcceptButton.FocusAsync();
+            }
+            else if (on == true)
+            {
+                await readButton.FocusAsync();
+            }
+        }
+    }
+
+    private async Task LoadOn()
+    {
+        int mine = ++request;
+        bool result = await State.MailDigestOn();
+        if (mine != request)
+        {
+            return;
+        }
+
+        on = result;
+    }
+
+    private async Task ReadMail()
+    {
+        if (reading || running || on != true)
+        {
+            return;
+        }
+
+        reading = true;
+        resultText = string.Empty;
+        resultClass = string.Empty;
+        StateHasChanged();
+        MailDigestView view;
+        try
+        {
+            view = await State.MailDigest();
+        }
+        finally
+        {
+            reading = false;
+        }
+
+        status = view.Status;
+        if (view.Status == OutlookStatus.Off)
+        {
+            on = false;
+        }
+
+        rows = [.. view.Suggestions.Select(s => new Row(s))];
+    }
+
+    private async Task Accept(Row row, int index)
+    {
+        if (running || reading)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.AcceptSuggestion(row.Suggestion);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        if (result.Kind == ActionKind.Done)
+        {
+            rows.Remove(row);
+            resultText = AcceptedText + " " + DesktopText.OneLine(result.Text);
+            resultClass = "accent";
+            focusIndex = index;
+            return;
+        }
+
+        row.Result = DesktopText.OneLine(result.Text);
+        resultText = string.Empty;
+        resultClass = string.Empty;
+        focusIndex = index;
+    }
+
+    private void Dismiss(Row row, int index)
+    {
+        if (running || reading)
+        {
+            return;
+        }
+
+        State.HideMailSuggestion(row.Suggestion);
+        rows.Remove(row);
+        resultText = string.Empty;
+        resultClass = string.Empty;
+        focusIndex = index;
+    }
+
+    private async Task PanelKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            await OnClose.InvokeAsync();
+        }
+    }
+
+    // "Sender · yyyy-MM-dd HH:mm" in the calendar's zone, as one line.
+    private string SourceText(MailSuggestion s)
+    {
+        DateTime received = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(s.Source.Received, DateTimeKind.Utc), State.Zone);
+        return DesktopText.OneLine(s.Source.Sender) + " · " + received.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+    }
+
+    // One shown suggestion, its Accept button and the line of a refused or failed Accept.
+    private sealed class Row(MailSuggestion suggestion)
+    {
+        public MailSuggestion Suggestion { get; } = suggestion;
+
+        public ElementReference AcceptButton { get; set; }
+
+        public string? Result { get; set; }
+    }
+}

@@ -1,0 +1,190 @@
+@inherits StateComponent
+@* Every person page (People.PersonOf: a direct child of the top-level people note) by name, from the snapshot's note
+   list; clicking one opens it. Once DesktopState.PeopleAttributes() has loaded (job 291), each row shows its roles and
+   affiliations and two selects filter the list by them. It reads no file itself, and reloads whenever the state
+   changes, keeping the shown rows meanwhile. *@
+
+<section class="page people-panel" aria-label="People">
+    <div class="panel-bar">
+        <h2>People</h2>
+        <button type="button" class="close" aria-label="Close" title="Close" @onclick="() => OnClose.InvokeAsync()"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" /></svg></button>
+    </div>
+    @if (Snapshot is { } snapshot)
+    {
+        IReadOnlyList<NoteInfo> people = PeopleIn(snapshot.Notes);
+        @if (people.Count == 0)
+        {
+            <p class="grey" role="status">No people yet. Mention someone as @("@[Name]") and open the mention to add their page.</p>
+        }
+        else
+        {
+            PeopleAttributes? found = attributes is { Kind: PeopleAttributesKind.Found } a ? a : null;
+            IReadOnlyList<AttributeOption> affiliations = found?.Affiliations ?? [];
+            IReadOnlyList<AttributeOption> roles = found?.Roles ?? [];
+            @if (affiliations.Count > 0 || roles.Count > 0)
+            {
+                <div class="people-filters">
+                    @if (affiliations.Count > 0)
+                    {
+                        <label class="people-filter">
+                            <span class="grey">Affiliation</span>
+                            <select class="people-affiliation" aria-label="Affiliation" value="@affiliation"
+                                    @onchange="e => SetAffiliation(e.Value as string)">
+                                <option value="" selected="@(affiliation.Length == 0)">All</option>
+                                @foreach (AttributeOption option in affiliations)
+                                {
+                                    string text = DesktopText.OneLine(option.Label);
+                                    <option value="@option.Key" title="@text" selected="@(option.Key == affiliation)">@text</option>
+                                }
+                            </select>
+                        </label>
+                    }
+                    @if (roles.Count > 0)
+                    {
+                        <label class="people-filter">
+                            <span class="grey">Role</span>
+                            <select class="people-role" aria-label="Role" value="@role"
+                                    @onchange="e => SetRole(e.Value as string)">
+                                <option value="" selected="@(role.Length == 0)">All</option>
+                                @foreach (AttributeOption option in roles)
+                                {
+                                    string text = DesktopText.OneLine(option.Label);
+                                    <option value="@option.Key" title="@text" selected="@(option.Key == role)">@text</option>
+                                }
+                            </select>
+                        </label>
+                    }
+                    @if (affiliation.Length > 0 || role.Length > 0)
+                    {
+                        <button type="button" class="people-clear" @onclick="ClearFilters">Clear filters</button>
+                    }
+                </div>
+            }
+            IReadOnlyList<NoteInfo> shown = Matching(people, found, affiliation, role);
+            @if (shown.Count == 0)
+            {
+                <p class="grey" role="status">No people match these filters.</p>
+            }
+            else
+            {
+                <ul class="people-list" aria-label="People">
+                    @foreach (NoteInfo person in shown)
+                    {
+                        string name = person.Name;
+                        string? details = found is not null && found.People.TryGetValue(name, out PersonAttributes? of)
+                            ? DetailsOf(of)
+                            : null;
+                        <li>
+                            <button type="button" class="person-open cut" title="@ShownTitle(person.Title)"
+                                    @onclick="() => OnOpen.InvokeAsync(name)">@ShownName(person.Title)@if (details is not null) {<span class="person-details grey cut" title="@details">@details</span>}</button>
+                        </li>
+                    }
+                </ul>
+            }
+        }
+        @if (attributes is { Kind: PeopleAttributesKind.IndexUnreadable })
+        {
+            <p class="red" role="status">Can't read the attributes.</p>
+        }
+    }
+</section>
+
+@code {
+    /// <summary>Called with a person page's full name (<c>people/&lt;Name&gt;</c>) when its button is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    // The loaded attributes (null until the first load), the newest request's number and the two filters' value keys
+    // ("" = All).
+    private PeopleAttributes? attributes;
+    private int request;
+    private string affiliation = string.Empty;
+    private string role = string.Empty;
+
+    /// <summary>True once the first attribute load has finished (for tests: a load that changes nothing on the page).</summary>
+    internal bool Loaded => attributes is not null;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    // Keeps the shown rows while it reloads; only the newest request's result is used. A selected value that no
+    // longer exists goes back to All.
+    private async Task Load()
+    {
+        int mine = ++request;
+        PeopleAttributes result = await State.PeopleAttributes();
+        if (mine != request)
+        {
+            return;
+        }
+
+        attributes = result;
+        affiliation = Kept(affiliation, result.Kind == PeopleAttributesKind.Found ? result.Affiliations : []);
+        role = Kept(role, result.Kind == PeopleAttributesKind.Found ? result.Roles : []);
+    }
+
+    private static string Kept(string selected, IReadOnlyList<AttributeOption> options) =>
+        options.Any(o => string.Equals(o.Key, selected, StringComparison.Ordinal)) ? selected : string.Empty;
+
+    private void SetAffiliation(string? key) =>
+        affiliation = Kept(key ?? string.Empty, attributes is { Kind: PeopleAttributesKind.Found } a ? a.Affiliations : []);
+
+    private void SetRole(string? key) =>
+        role = Kept(key ?? string.Empty, attributes is { Kind: PeopleAttributesKind.Found } a ? a.Roles : []);
+
+    private void ClearFilters()
+    {
+        affiliation = string.Empty;
+        role = string.Empty;
+    }
+
+    // The people that have the chosen affiliation and role (by value key; "" matches everyone), in the given order.
+    internal static IReadOnlyList<NoteInfo> Matching(
+        IReadOnlyList<NoteInfo> people, PeopleAttributes? found, string affiliation, string role)
+    {
+        if (found is null || (affiliation.Length == 0 && role.Length == 0))
+        {
+            return people;
+        }
+
+        return people
+            .Where(p => found.People.TryGetValue(p.Name, out PersonAttributes? of)
+                && (affiliation.Length == 0 || of.HasAffiliation(affiliation))
+                && (role.Length == 0 || of.HasRole(role)))
+            .ToList();
+    }
+
+    // A row's details: the roles joined with ", ", then " · ", then the affiliations; an empty part and its separator
+    // left out; one line, control and bidi characters replaced. Null when the person has neither.
+    internal static string? DetailsOf(PersonAttributes of)
+    {
+        string roles = string.Join(", ", of.Roles);
+        string affiliations = string.Join(", ", of.Affiliations);
+        string text = roles.Length > 0 && affiliations.Length > 0
+            ? roles + " · " + affiliations
+            : roles + affiliations;
+        return text.Length == 0 ? null : DesktopText.OneLine(text);
+    }
+
+    // The person pages, sorted by title ignoring case, then ordinal so the order is the same on every OS.
+    internal static IReadOnlyList<NoteInfo> PeopleIn(IEnumerable<NoteInfo> notes) =>
+        notes
+            .Where(note => People.PersonOf(note.Name) is not null)
+            .OrderBy(note => note.Title, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(note => note.Title, StringComparer.Ordinal)
+            .ToList();
+
+    // A row's text: the person's name with control and bidi characters replaced (job 235's note-name rule).
+    internal static string ShownName(string title) => DesktopText.NoteName(title);
+
+    // A row's title attribute: the name on one line, control characters replaced.
+    internal static string ShownTitle(string title) => DesktopText.OneLine(title);
+}

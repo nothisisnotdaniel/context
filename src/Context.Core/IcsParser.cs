@@ -11,13 +11,24 @@ internal sealed record Appointment
     /// <param name="start">Start in the local zone (all-day events: midnight of the first day).</param>
     /// <param name="end">End in the local zone (all-day events: midnight after the last day, exclusive).</param>
     /// <param name="allDay">True for a <c>VALUE=DATE</c> start.</param>
-    public Appointment(string title, string? location, DateTime start, DateTime end, bool allDay)
+    /// <param name="attendees">The <c>CN</c> names of the <c>ATTENDEE</c>s; none when left out.</param>
+    /// <param name="uid">The event's <c>UID</c> (or Outlook's <c>outlook:</c> id); <c>null</c> without one.</param>
+    public Appointment(
+        string title,
+        string? location,
+        DateTime start,
+        DateTime end,
+        bool allDay,
+        IReadOnlyList<string>? attendees = null,
+        string? uid = null)
     {
         Title = title;
         Location = location;
         Start = start;
         End = end;
         AllDay = allDay;
+        Attendees = attendees ?? [];
+        Uid = uid;
     }
 
     /// <summary><c>SUMMARY</c>, or an empty string when it is missing.</summary>
@@ -34,13 +45,46 @@ internal sealed record Appointment
 
     /// <summary>True for an all-day event.</summary>
     public bool AllDay { get; }
+
+    /// <summary>
+    /// The names (<c>CN</c> parameter) of the event's <c>ATTENDEE</c>s, unescaped and normalized like a mention
+    /// (<see cref="PersonParser.Normalize"/>), in file order. Attendees without a valid name are left out, and the
+    /// attendee's address (the property value) is never read.
+    /// </summary>
+    public IReadOnlyList<string> Attendees { get; }
+
+    /// <summary>
+    /// The event's trimmed <c>UID</c> (the same on every occurrence and override of a series), or for Outlook
+    /// <c>outlook:</c> + its global id; <c>null</c> without one. Untrusted outside text, never shown. Not part of
+    /// <see cref="Equals(Appointment?)"/> or <see cref="GetHashCode"/>.
+    /// </summary>
+    public string? Uid { get; }
+
+    /// <summary>Only the type name, so the Uid and the calendar text never leak through formatting.</summary>
+    public override string ToString() => nameof(Appointment);
+
+    /// <summary>Equal when every field but <see cref="Uid"/> is, with <see cref="Attendees"/> compared name by name (ordinal).</summary>
+    public bool Equals(Appointment? other) =>
+        other is not null
+        && string.Equals(Title, other.Title, StringComparison.Ordinal)
+        && string.Equals(Location, other.Location, StringComparison.Ordinal)
+        && Start == other.Start
+        && End == other.End
+        && AllDay == other.AllDay
+        && Attendees.SequenceEqual(other.Attendees, StringComparer.Ordinal);
+
+    public override int GetHashCode() => HashCode.Combine(Title, Location, Start, End, AllDay, Attendees.Count);
 }
 
 /// <summary>
-/// Reads the part of iCalendar (RFC 5545) that <c>/current</c> needs: the <c>SUMMARY</c>, <c>LOCATION</c>,
-/// <c>DTSTART</c>, <c>DTEND</c> and <c>STATUS</c> of each <c>VEVENT</c>. Everything else, including recurrence
-/// (<c>RRULE</c>, <c>RDATE</c>, <c>EXDATE</c>) and nested components such as <c>VALARM</c>, is ignored.
-/// The input is untrusted: it is scanned once, line by line, with no regexes.
+/// Reads the part of iCalendar (RFC 5545) that <c>/current</c> and the person pages need: the <c>SUMMARY</c>,
+/// <c>LOCATION</c>, <c>DTSTART</c>, <c>DTEND</c>, <c>STATUS</c>, <c>CLASS</c> and <c>ATTENDEE</c> names of each
+/// <c>VEVENT</c>, and
+/// for <see cref="Parse(string, TimeZoneInfo, DateOnly)"/> its recurrence (<c>UID</c>, <c>RRULE</c> through
+/// <see cref="RecurrenceRule"/>, <c>RDATE</c>, <c>EXDATE</c>, <c>RECURRENCE-ID</c>). Everything else, including
+/// nested components such as <c>VALARM</c> and <c>VTIMEZONE</c>, is ignored. The input is untrusted: it is scanned
+/// once, line by line, with no regexes, and rule expansion is bounded (<see cref="RecurrenceRule.MaxPeriodsPerEvent"/>,
+/// <see cref="RecurrenceBudget.StepsPerParse"/>).
 /// </summary>
 internal static class IcsParser
 {
@@ -49,15 +93,264 @@ internal static class IcsParser
 
     /// <summary>
     /// Returns every event in <paramref name="text"/> that has a valid <c>DTSTART</c>, isn't
-    /// <c>STATUS:CANCELLED</c> and doesn't end before it starts, in file order. Times are converted to
+    /// <c>STATUS:CANCELLED</c>, isn't private (<c>CLASS:PRIVATE</c> or <c>CLASS:CONFIDENTIAL</c>) and doesn't end
+    /// before it starts, in file order. Times are converted to
     /// <paramref name="local"/>.
     /// </summary>
+    /// <remarks>Recurrence is not expanded: each <c>VEVENT</c> gives at most one appointment, its <c>DTSTART</c>.</remarks>
     /// <exception cref="FormatException">The text has no <c>BEGIN:VCALENDAR</c> line.</exception>
     public static IReadOnlyList<Appointment> Parse(string text, TimeZoneInfo local)
     {
+        List<Appointment> result = [];
+        foreach (EventBuilder builder in Scan(text))
+        {
+            Appointment? appointment = builder.Build(local);
+            if (appointment is not null)
+            {
+                result.Add(appointment);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Returns every occurrence whose local span touches <paramref name="day"/> (the rule of
+    /// <see cref="CalendarStore.Overlaps"/>), in file order: each series expanded (<c>DTSTART</c>, the
+    /// <c>RRULE</c>, <c>RDATE</c>s, without <c>EXDATE</c>s and without the occurrences replaced by a
+    /// <c>RECURRENCE-ID</c> event of the same <c>UID</c>), plus every override and single event. Each occurrence
+    /// keeps <c>DTSTART</c>'s wall-clock time in its source zone and the event's duration, converted to
+    /// <paramref name="local"/>. An unsupported or invalid rule only drops the rule's occurrences. A cancelled or
+    /// private (<c>CLASS:PRIVATE</c>/<c>CONFIDENTIAL</c>) series shows none of its occurrences and none of its
+    /// overrides; a cancelled or private override only removes the occurrence it replaces.
+    /// </summary>
+    /// <exception cref="FormatException">The text has no <c>BEGIN:VCALENDAR</c> line.</exception>
+    public static IReadOnlyList<Appointment> Parse(string text, TimeZoneInfo local, DateOnly day)
+    {
+        List<EventBuilder> events = Scan(text);
+        DateTime from = day.ToDateTime(TimeOnly.MinValue);
+        DateTime to = day == DateOnly.MaxValue ? DateTime.MaxValue : from.AddDays(1);
+
+        Dictionary<string, Exclusions> replaced = new Dictionary<string, Exclusions>(StringComparer.Ordinal);
+        // Cancelled or private series: their overrides are hidden too.
+        HashSet<string> hiddenSeries = new HashSet<string>(StringComparer.Ordinal);
+        foreach (EventBuilder builder in events)
+        {
+            if (builder.Uid is null)
+            {
+                continue;
+            }
+
+            if (builder.RecurrenceId is not null)
+            {
+                if (!replaced.TryGetValue(builder.Uid, out Exclusions? exclusions))
+                {
+                    exclusions = new Exclusions();
+                    replaced.Add(builder.Uid, exclusions);
+                }
+
+                exclusions.Add(builder.RecurrenceId.Value, builder.RecurrenceId, local);
+            }
+            else if (builder.Cancelled || builder.Private)
+            {
+                hiddenSeries.Add(builder.Uid);
+            }
+        }
+
+        RecurrenceBudget budget = new RecurrenceBudget();
+        List<Appointment> result = [];
+        foreach (EventBuilder builder in events)
+        {
+            if (builder.RecurrenceId is not null)
+            {
+                Appointment? single = builder.Uid is not null && hiddenSeries.Contains(builder.Uid)
+                    ? null
+                    : builder.Build(local);
+                if (single is not null && CalendarStore.Overlaps(single, from, to))
+                {
+                    result.Add(single);
+                }
+
+                continue;
+            }
+
+            Exclusions? overridden = null;
+            if (builder.Uid is not null)
+            {
+                replaced.TryGetValue(builder.Uid, out overridden);
+            }
+
+            foreach (Appointment occurrence in Occurrences(builder, local, day, overridden, budget))
+            {
+                if (CalendarStore.Overlaps(occurrence, from, to))
+                {
+                    result.Add(occurrence);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// The occurrences of one series that could touch <paramref name="day"/>: <c>DTSTART</c>, the rule's
+    /// occurrences near the day, the <c>RDATE</c>s, minus the <c>EXDATE</c>s and <paramref name="overridden"/>.
+    /// </summary>
+    private static List<Appointment> Occurrences(
+        EventBuilder builder, TimeZoneInfo local, DateOnly day, Exclusions? overridden, RecurrenceBudget budget)
+    {
+        Appointment? first = builder.Build(local);
+        if (first is null || builder.Start is null)
+        {
+            return [];
+        }
+
+        SourceTime? source = ReadSource(builder.Start.Value, builder.Start, local);
+        if (source is null)
+        {
+            return [];
+        }
+
+        TimeSpan duration = first.End - first.Start;
+        List<DateTime> starts = [first.Start];
+        HashSet<DateTime> seen = [first.Start];
+
+        RecurrenceRule? rule = builder.Rules.Count == 1 ? RecurrenceRule.Parse(builder.Rules[0]) : null;
+        if (rule is not null && TryUntil(rule.Until, source.Value, local, out DateTime? until))
+        {
+            long days = (long)Math.Ceiling(Math.Max(0, duration.TotalDays));
+            long fromDay = Math.Max(0, day.DayNumber - Math.Min(days, DateOnly.MaxValue.DayNumber) - 2);
+            long toDay = Math.Min(DateOnly.MaxValue.DayNumber, (long)day.DayNumber + 2);
+            List<DateTime>? walls = rule.Occurrences(
+                source.Value.Wall,
+                until,
+                DateOnly.FromDayNumber((int)fromDay),
+                DateOnly.FromDayNumber((int)toDay),
+                budget);
+            foreach (DateTime wall in walls ?? [])
+            {
+                DateTime? start = TryLocal(source.Value.At(wall), local);
+                if (start is not null && seen.Add(start.Value))
+                {
+                    starts.Add(start.Value);
+                }
+            }
+        }
+
+        foreach (ContentLine line in builder.RecurrenceDates)
+        {
+            if (string.Equals(line.Parameter("VALUE"), "PERIOD", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            foreach (string part in line.Value.Split(','))
+            {
+                if (part.Contains('/'))
+                {
+                    continue;
+                }
+
+                SourceTime? added = ReadSource(part, line, local);
+                if (added is null)
+                {
+                    continue;
+                }
+
+                DateTime? start;
+                if (source.Value.Date)
+                {
+                    start = TryLocal(added.Value, local)?.Date;
+                }
+                else if (added.Value.Date)
+                {
+                    start = TryLocal(source.Value.At(added.Value.Wall + source.Value.Wall.TimeOfDay), local);
+                }
+                else
+                {
+                    start = TryLocal(added.Value, local);
+                }
+
+                if (start is not null && seen.Add(start.Value))
+                {
+                    starts.Add(start.Value);
+                }
+            }
+        }
+
+        Exclusions excluded = new Exclusions();
+        foreach (ContentLine line in builder.ExceptionDates)
+        {
+            foreach (string part in line.Value.Split(','))
+            {
+                excluded.Add(part, line, local);
+            }
+        }
+
+        List<Appointment> result = [];
+        foreach (DateTime start in starts)
+        {
+            if (excluded.Contains(start, first.AllDay) || (overridden is not null && overridden.Contains(start, first.AllDay)))
+            {
+                continue;
+            }
+
+            if (DateTime.MaxValue - start < duration)
+            {
+                continue;
+            }
+
+            result.Add(new Appointment(first.Title, first.Location, start, start + duration, first.AllDay, first.Attendees, first.Uid));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// The rule's <c>UNTIL</c> in the wall clock of <paramref name="source"/> (a date: the end of that day), or
+    /// <c>null</c> without one. False when it can't be converted, which makes the rule unusable.
+    /// </summary>
+    private static bool TryUntil(RecurrenceUntil? value, SourceTime source, TimeZoneInfo local, out DateTime? until)
+    {
+        until = null;
+        if (value is null)
+        {
+            return true;
+        }
+
+        if (value.Date)
+        {
+            until = value.Value.AddTicks(TimeSpan.TicksPerDay - 1);
+            return true;
+        }
+
+        if (!value.Utc || source.Utc)
+        {
+            until = value.Value;
+            return true;
+        }
+
+        try
+        {
+            TimeZoneInfo zone = source.Zone ?? local;
+            until = Unspecified(TimeZoneInfo.ConvertTimeFromUtc(value.Value, zone));
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reads the <c>VEVENT</c>s, in file order, with their properties. Nested components are skipped.
+    /// </summary>
+    /// <exception cref="FormatException">The text has no <c>BEGIN:VCALENDAR</c> line.</exception>
+    private static List<EventBuilder> Scan(string text)
+    {
         List<string> lines = Unfold(text);
         bool calendar = false;
-        List<Appointment> result = [];
+        List<EventBuilder> result = [];
         EventBuilder? current = null;
         int nested = 0;
         foreach (string line in lines)
@@ -101,12 +394,7 @@ internal static class IcsParser
                 }
                 else
                 {
-                    Appointment? appointment = current.Build(local);
-                    if (appointment is not null)
-                    {
-                        result.Add(appointment);
-                    }
-
+                    result.Add(current);
                     current = null;
                 }
 
@@ -226,52 +514,158 @@ internal static class IcsParser
         public bool Date { get; }
     }
 
-    /// <summary>Reads a date or date-time in one of the four supported forms, or <c>null</c> if it isn't valid.</summary>
-    private static When? ReadWhen(ContentLine content, TimeZoneInfo local)
+    /// <summary>
+    /// A date or date-time as written, with the zone it is in: <see cref="Utc"/> for <c>…Z</c>, <see cref="Zone"/>
+    /// for a known <c>TZID</c> other than the local one, else (floating, unknown or local <c>TZID</c>, date) local.
+    /// </summary>
+    private readonly record struct SourceTime
     {
-        string value = content.Value.Trim();
-        string? valueType = content.Parameter("VALUE");
-        bool dateOnly = string.Equals(valueType, "DATE", StringComparison.OrdinalIgnoreCase)
-            || (value.Length == DateFormat.Length && !value.Contains('T'));
+        public SourceTime(DateTime wall, bool date, bool utc, TimeZoneInfo? zone)
+        {
+            Wall = wall;
+            Date = date;
+            Utc = utc;
+            Zone = zone;
+        }
+
+        public DateTime Wall { get; }
+
+        public bool Date { get; }
+
+        public bool Utc { get; }
+
+        public TimeZoneInfo? Zone { get; }
+
+        /// <summary>The same kind of time and zone at another wall-clock time.</summary>
+        public SourceTime At(DateTime wall) => new SourceTime(wall, Date, Utc, Zone);
+    }
+
+    /// <summary>Reads a date or date-time in one of the four supported forms, or <c>null</c> if it isn't valid.</summary>
+    private static When? ReadWhen(ContentLine content, TimeZoneInfo local) => ReadWhen(content.Value, content, local);
+
+    /// <summary>Like <see cref="ReadWhen(ContentLine, TimeZoneInfo)"/> for one value of a (list) property.</summary>
+    private static When? ReadWhen(string value, ContentLine content, TimeZoneInfo local)
+    {
+        SourceTime? source = ReadSource(value, content, local);
+        if (source is null)
+        {
+            return null;
+        }
+
         try
         {
-            if (dateOnly)
-            {
-                if (!DateTime.TryParseExact(
-                    value, DateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime date))
-                {
-                    return null;
-                }
-
-                return new When(DateTime.SpecifyKind(date, DateTimeKind.Unspecified), true);
-            }
-
-            bool utc = value.EndsWith('Z') || value.EndsWith('z');
-            string bare = utc ? value[..^1] : value;
-            if (!DateTime.TryParseExact(
-                bare, DateTimeFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime time))
-            {
-                return null;
-            }
-
-            time = DateTime.SpecifyKind(time, DateTimeKind.Unspecified);
-            if (utc)
-            {
-                return new When(Unspecified(TimeZoneInfo.ConvertTimeFromUtc(time, local)), false);
-            }
-
-            string? zoneId = content.Parameter("TZID");
-            TimeZoneInfo? source = zoneId is null ? null : FindZone(zoneId);
-            if (source is null || source.Id == local.Id)
-            {
-                return new When(time, false);
-            }
-
-            return new When(Unspecified(Convert(time, source, local)), false);
+            return new When(ToLocal(source.Value, local), source.Value.Date);
         }
         catch (ArgumentOutOfRangeException)
         {
             return null;
+        }
+    }
+
+    /// <summary>Reads <paramref name="raw"/> with <paramref name="content"/>'s <c>VALUE</c> and <c>TZID</c>, without converting it.</summary>
+    private static SourceTime? ReadSource(string raw, ContentLine content, TimeZoneInfo local)
+    {
+        string value = raw.Trim();
+        string? valueType = content.Parameter("VALUE");
+        bool dateOnly = string.Equals(valueType, "DATE", StringComparison.OrdinalIgnoreCase)
+            || (value.Length == DateFormat.Length && !value.Contains('T'));
+        if (dateOnly)
+        {
+            if (!DateTime.TryParseExact(
+                value, DateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime date))
+            {
+                return null;
+            }
+
+            return new SourceTime(DateTime.SpecifyKind(date, DateTimeKind.Unspecified), true, false, null);
+        }
+
+        bool utc = value.EndsWith('Z') || value.EndsWith('z');
+        string bare = utc ? value[..^1] : value;
+        if (!DateTime.TryParseExact(
+            bare, DateTimeFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime time))
+        {
+            return null;
+        }
+
+        time = DateTime.SpecifyKind(time, DateTimeKind.Unspecified);
+        if (utc)
+        {
+            return new SourceTime(time, false, true, null);
+        }
+
+        TimeZoneInfo? source = content.Zone();
+        if (source is null || source.Id == local.Id)
+        {
+            return new SourceTime(time, false, false, null);
+        }
+
+        return new SourceTime(time, false, false, source);
+    }
+
+    /// <summary>Converts <paramref name="time"/> to <paramref name="local"/>; may throw <see cref="ArgumentOutOfRangeException"/>.</summary>
+    private static DateTime ToLocal(SourceTime time, TimeZoneInfo local)
+    {
+        if (time.Utc)
+        {
+            return Unspecified(TimeZoneInfo.ConvertTimeFromUtc(time.Wall, local));
+        }
+
+        if (time.Zone is null)
+        {
+            return time.Wall;
+        }
+
+        return Unspecified(Convert(time.Wall, time.Zone, local));
+    }
+
+    /// <summary>Like <see cref="ToLocal"/>, but <c>null</c> instead of an exception near the ends of the calendar.</summary>
+    private static DateTime? TryLocal(SourceTime time, TimeZoneInfo local)
+    {
+        try
+        {
+            return ToLocal(time, local);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The occurrence starts an <c>EXDATE</c> or a <c>RECURRENCE-ID</c> removes: exact local times, and whole local
+    /// days for date values (and for any value on an all-day event).
+    /// </summary>
+    private sealed class Exclusions
+    {
+        private readonly HashSet<DateTime> times = [];
+        private readonly HashSet<DateOnly> dates = [];
+        private readonly HashSet<DateOnly> timeDates = [];
+
+        public void Add(string value, ContentLine content, TimeZoneInfo local)
+        {
+            When? when = ReadWhen(value, content, local);
+            if (when is null)
+            {
+                return;
+            }
+
+            DateOnly date = DateOnly.FromDateTime(when.Value.Time);
+            if (when.Value.Date)
+            {
+                dates.Add(date);
+            }
+            else
+            {
+                times.Add(when.Value.Time);
+                timeDates.Add(date);
+            }
+        }
+
+        public bool Contains(DateTime start, bool allDay)
+        {
+            DateOnly date = DateOnly.FromDateTime(start);
+            return times.Contains(start) || dates.Contains(date) || (allDay && timeDates.Contains(date));
         }
     }
 
@@ -326,9 +720,73 @@ internal static class IcsParser
         private ContentLine? start;
         private ContentLine? end;
         private bool cancelled;
+        private bool isPrivate;
+        private readonly List<string> attendees = [];
+        private readonly List<string> rules = [];
+        private readonly List<ContentLine> recurrenceDates = [];
+        private readonly List<ContentLine> exceptionDates = [];
+
+        /// <summary>The first <c>DTSTART</c> line, or <c>null</c>.</summary>
+        public ContentLine? Start => start;
+
+        /// <summary>The trimmed first <c>UID</c>, or <c>null</c> when it is missing or empty.</summary>
+        public string? Uid { get; private set; }
+
+        /// <summary>The first <c>RECURRENCE-ID</c> line, or <c>null</c> for a series or single event.</summary>
+        public ContentLine? RecurrenceId { get; private set; }
+
+        /// <summary>True for <c>STATUS:CANCELLED</c>.</summary>
+        public bool Cancelled => cancelled;
+
+        /// <summary>True when any <c>CLASS</c> line is <c>PRIVATE</c> or <c>CONFIDENTIAL</c> (trimmed, ignoring case).</summary>
+        public bool Private => isPrivate;
+
+        /// <summary>Every <c>RRULE</c> value; only exactly one is expanded.</summary>
+        public IReadOnlyList<string> Rules => rules;
+
+        /// <summary>Every <c>RDATE</c> line.</summary>
+        public IReadOnlyList<ContentLine> RecurrenceDates => recurrenceDates;
+
+        /// <summary>Every <c>EXDATE</c> line.</summary>
+        public IReadOnlyList<ContentLine> ExceptionDates => exceptionDates;
 
         public void Add(ContentLine content)
         {
+            if (content.Is("UID"))
+            {
+                if (Uid is null)
+                {
+                    string uid = content.Value.Trim();
+                    Uid = uid.Length == 0 ? null : uid;
+                }
+
+                return;
+            }
+
+            if (content.Is("RECURRENCE-ID"))
+            {
+                RecurrenceId ??= content;
+                return;
+            }
+
+            if (content.Is("RRULE"))
+            {
+                rules.Add(content.Value);
+                return;
+            }
+
+            if (content.Is("RDATE"))
+            {
+                recurrenceDates.Add(content);
+                return;
+            }
+
+            if (content.Is("EXDATE"))
+            {
+                exceptionDates.Add(content);
+                return;
+            }
+
             if (content.Is("SUMMARY"))
             {
                 summary ??= Unescape(content.Value);
@@ -345,15 +803,38 @@ internal static class IcsParser
             {
                 end ??= content;
             }
+            else if (content.Is("ATTENDEE"))
+            {
+                // Only the CN name; the value (the mailto: address) is never read.
+                string? common = content.Parameter("CN");
+                string? name = common is null ? null : PersonParser.Normalize(Unescape(common));
+                if (name is not null)
+                {
+                    attendees.Add(name);
+                }
+            }
             else if (content.Is("STATUS"))
             {
                 cancelled = content.Value.Trim().Equals("CANCELLED", StringComparison.OrdinalIgnoreCase);
             }
+            else if (content.Is("CLASS"))
+            {
+                string value = content.Value.Trim();
+                if (value.Equals("PRIVATE", StringComparison.OrdinalIgnoreCase)
+                    || value.Equals("CONFIDENTIAL", StringComparison.OrdinalIgnoreCase))
+                {
+                    isPrivate = true;
+                }
+            }
         }
 
+        /// <summary>
+        /// The event at its <c>DTSTART</c>, or <c>null</c> when it is cancelled, private, has no valid start or ends
+        /// before it starts.
+        /// </summary>
         public Appointment? Build(TimeZoneInfo local)
         {
-            if (cancelled || start is null)
+            if (cancelled || isPrivate || start is null)
             {
                 return null;
             }
@@ -391,7 +872,7 @@ internal static class IcsParser
                 return null;
             }
 
-            return new Appointment(summary ?? string.Empty, location, startTime, endTime, allDay);
+            return new Appointment(summary ?? string.Empty, location, startTime, endTime, allDay, attendees, Uid);
         }
     }
 
@@ -400,6 +881,8 @@ internal static class IcsParser
     {
         private readonly string name;
         private readonly List<KeyValuePair<string, string>> parameters;
+        private bool zoneRead;
+        private TimeZoneInfo? zone;
 
         private ContentLine(string name, List<KeyValuePair<string, string>> parameters, string value)
         {
@@ -409,6 +892,22 @@ internal static class IcsParser
         }
 
         public string Value { get; }
+
+        /// <summary>
+        /// The zone named by the <c>TZID</c> parameter, or <c>null</c> (local) when there is none or it is unknown.
+        /// Looked up once per line, so a list property with many values resolves its zone only once.
+        /// </summary>
+        public TimeZoneInfo? Zone()
+        {
+            if (!zoneRead)
+            {
+                string? zoneId = Parameter("TZID");
+                zone = zoneId is null ? null : FindZone(zoneId);
+                zoneRead = true;
+            }
+
+            return zone;
+        }
 
         public bool Is(string property) => name.Equals(property, StringComparison.OrdinalIgnoreCase);
 

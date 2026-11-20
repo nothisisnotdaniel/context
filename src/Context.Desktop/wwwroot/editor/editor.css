@@ -1,0 +1,360 @@
+.ProseMirror {
+  position: relative;
+}
+
+.ProseMirror {
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  white-space: break-spaces;
+  -webkit-font-variant-ligatures: none;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0; /* the above doesn't seem to work in Edge */
+}
+
+.ProseMirror pre {
+  white-space: pre-wrap;
+}
+
+.ProseMirror li {
+  position: relative;
+}
+
+.ProseMirror-hideselection *::selection { background: transparent; }
+.ProseMirror-hideselection *::-moz-selection { background: transparent; }
+.ProseMirror-hideselection { caret-color: transparent; }
+
+/* See https://code.haverbeke.berlin/prosemirror/prosemirror/issues/1421#issuecomment-1759320191 */
+.ProseMirror [draggable][contenteditable=false] { user-select: text }
+
+.ProseMirror-selectednode {
+  outline: 2px solid #8cf;
+}
+
+/* Make sure li selections wrap around markers */
+
+li.ProseMirror-selectednode {
+  outline: none;
+}
+
+li.ProseMirror-selectednode:after {
+  content: "";
+  position: absolute;
+  left: -32px;
+  right: -2px; top: -2px; bottom: -2px;
+  border: 2px solid #8cf;
+  pointer-events: none;
+}
+
+/* Protect against generic img rules */
+
+img.ProseMirror-separator {
+  display: inline !important;
+  border: none !important;
+  margin: 0 !important;
+}
+
+/* The note editor. Colours come from app.css (--accent-strong, --grey, --line, --panel). */
+.note-editor-body {
+  min-height: 300px;
+  outline: none;
+  line-height: 1.5;
+}
+
+.note-editor-body p {
+  margin: 0 0 10px;
+}
+
+.note-editor-body h1,
+.note-editor-body h2,
+.note-editor-body h3,
+.note-editor-body h4,
+.note-editor-body h5,
+.note-editor-body h6 {
+  color: var(--accent-strong);
+  margin: 14px 0 8px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+/* Level 1 (drawn as h2.heading-level-1) > level 2 (h2) > level 3 (h3); h4 to h6 keep the browser defaults. */
+.note-editor-body h2 {
+  font-size: 1.6em;
+}
+
+.note-editor-body h2.heading-level-1 {
+  font-size: 2em;
+}
+
+.note-editor-body h3 {
+  font-size: 1.3em;
+}
+
+.note-editor-body ul {
+  list-style: disc;
+  margin: 0 0 10px;
+  padding-left: 24px;
+}
+
+.note-editor-body ol {
+  list-style: decimal;
+  margin: 0 0 10px;
+  padding-left: 28px;
+}
+
+.note-editor-body li > p,
+.note-editor-body li > div > p {
+  margin: 0;
+}
+
+.note-editor-body li.task {
+  list-style: none;
+  display: flex;
+  gap: 6px;
+  margin-left: -20px;
+}
+
+.note-editor-body .task-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.note-editor-body .task-box {
+  cursor: pointer;
+  flex: none;
+  user-select: none;
+}
+
+.note-editor-body .task-box::before {
+  content: "\2610";
+}
+
+.note-editor-body li.task.done > .task-box::before {
+  content: "\2611";
+}
+
+/* 330: an open checkbox carried to the next meeting (- [>]) shows an arrow in its box; its line keeps the local tint. */
+.note-editor-body li.task.carry > .task-box::before {
+  content: "\21E5";
+}
+
+.note-editor-body li.task.done > .task-body {
+  color: var(--grey);
+  text-decoration: line-through;
+}
+
+/* 329: the whole line of a task item is tinted by its kind: a global todo (- { }) that the todo views list, or a
+   checkbox that stays in its note (- [ ]). Colour is not the only cue: a todo also shows its marker and the box names
+   its kind (aria-label). */
+.note-editor-body li.task.local {
+  background: var(--task-local-bg);
+  border-radius: 4px;
+}
+
+.note-editor-body li.task.global {
+  background: var(--task-global-bg);
+  border-radius: 4px;
+}
+
+.note-editor-body .task-marker {
+  align-self: center;
+  background: var(--accent-strong);
+  border-radius: 50%;
+  flex: none;
+  height: 6px;
+  user-select: none;
+  width: 6px;
+}
+
+.note-editor-body blockquote {
+  border-left: 3px solid var(--line);
+  color: var(--grey);
+  margin: 0 0 10px;
+  padding-left: 12px;
+}
+
+.note-editor-body pre {
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--code-text);
+  margin: 0 0 10px;
+  overflow-x: auto;
+  padding: 8px 10px;
+}
+
+.note-editor-body code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+/* 283: inline code gets its own background; code in a block takes the block's. */
+.note-editor-body :not(pre) > code {
+  background: var(--code-bg);
+  border-radius: 4px;
+  color: var(--code-text);
+  padding: 1px 4px;
+}
+
+.note-editor-body pre > code {
+  white-space: pre;
+}
+
+/* 283: a code block's header (language picker, Copy) sits on the block's top edge; the pre below keeps its look. */
+.note-editor-body .code-block {
+  margin: 0 0 10px;
+}
+
+.note-editor-body .code-block > pre {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  margin: 0;
+}
+
+.note-editor-body .code-header {
+  align-items: center;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  display: flex;
+  gap: 6px;
+  justify-content: space-between;
+  padding: 3px 6px;
+  user-select: none;
+}
+
+.note-editor-body .code-language {
+  background: var(--background);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 1px 4px;
+}
+
+.note-editor-body .code-copy {
+  font-size: 12px;
+  padding: 1px 8px;
+}
+
+/* 283: syntax colours, from class decorations on the block's text. */
+.note-editor-body .hljs-keyword,
+.note-editor-body .hljs-selector-tag,
+.note-editor-body .hljs-doctag {
+  color: var(--code-keyword);
+}
+
+.note-editor-body .hljs-string,
+.note-editor-body .hljs-regexp {
+  color: var(--code-string);
+}
+
+.note-editor-body .hljs-comment,
+.note-editor-body .hljs-meta {
+  color: var(--code-comment);
+  font-style: italic;
+}
+
+.note-editor-body .hljs-number {
+  color: var(--code-number);
+}
+
+.note-editor-body .hljs-title,
+.note-editor-body .hljs-section,
+.note-editor-body .hljs-selector-class,
+.note-editor-body .hljs-selector-id {
+  color: var(--code-title);
+}
+
+.note-editor-body .hljs-built_in,
+.note-editor-body .hljs-type {
+  color: var(--code-built-in);
+}
+
+.note-editor-body .hljs-literal,
+.note-editor-body .hljs-symbol,
+.note-editor-body .hljs-variable {
+  color: var(--code-literal);
+}
+
+.note-editor-body .hljs-attr,
+.note-editor-body .hljs-attribute,
+.note-editor-body .hljs-name,
+.note-editor-body .hljs-tag,
+.note-editor-body .hljs-property {
+  color: var(--code-attr);
+}
+
+.note-editor-body .chip {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+  padding: 0 6px;
+}
+
+.note-editor-body .chip:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+/* A person mention: a long name is cut, the full text stays in the chip's title. */
+.note-editor-body .chip.mention {
+  border-style: dashed;
+  display: inline-block;
+  max-width: 24em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.note-editor-body .link {
+  text-decoration: underline;
+}
+
+.note-editor-body img {
+  max-width: 100%;
+}
+
+.note-editor-body .image-placeholder {
+  color: var(--grey);
+  font-style: italic;
+}
+
+.note-editor-body hr {
+  border: none;
+  border-top: 1px solid var(--line);
+}
+
+/* Mermaid diagrams (job 263): a drawn block shows the diagram and hides its code until the selection is inside it. */
+.note-editor-body .mermaid-block {
+  margin: 0 0 10px;
+}
+
+.note-editor-body .mermaid-block.drawn:not(.mermaid-editing) > pre {
+  display: none;
+}
+
+.note-editor-body .mermaid-hint {
+  color: var(--grey);
+  font-size: 0.9em;
+  font-style: italic;
+  margin: -6px 0 10px;
+}
+
+.note-editor-body .mermaid-hint[hidden],
+.note-editor-body .mermaid-block:not(.drawn) > .mermaid-diagram {
+  display: none;
+}
+
+.note-editor-body .mermaid-diagram {
+  cursor: text;
+  overflow-x: auto;
+}
+
+.note-editor-body .mermaid-diagram img {
+  display: block;
+  height: auto;
+  max-width: 100%;
+}

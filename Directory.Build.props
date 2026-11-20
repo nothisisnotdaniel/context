@@ -1,5 +1,18 @@
 <Project>
   <PropertyGroup>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- Every project writes and commits a packages.lock.json (direct and transitive packages, pinned by content hash). -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- On GitHub Actions (CI=true) restore fails when a lock file doesn't match; local restores update the lock files. -->
+    <RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
+    <!-- Strong name by public signing: Context.snk holds only the public key (no private key exists anywhere).
+         It gives every assembly an identity with a public key, so InternalsVisibleTo can name friends by name and key
+         and an assembly that only copies a friend's name gets no access. It is not a security boundary: .NET does not
+         verify strong-name signatures, and anyone can public-sign with this key. -->
+    <SignAssembly>true</SignAssembly>
+    <PublicSign>true</PublicSign>
+    <AssemblyOriginatorKeyFile>$(MSBuildThisFileDirectory)Context.snk</AssemblyOriginatorKeyFile>
+    <!-- The bytes of Context.snk as lower-case hex, for the Key of every InternalsVisibleTo item. -->
+    <ContextPublicKey>00240000048000001401000006020000002400005253413100080000010001007f2fff2c11abd9e57aea230bed11b9173da5946e52766425bfa84ed720bcc2678eb12a006ee4f6c5585f8eb70d3271341ccf2bac2e0ec2dcc631bc9a55ee728a42608c4027d82dc5c94b517ff17e92fcf2b84670398e88a7c7313f98b770fb69048eb96af469e10de5906fc2d6157cd02a1351374b395b445439abb6dca323469bc40a9810b2ddaf8f9a3ebfae5f028c22f62ef64cb957f6c82ea638a160d1ed40e6a6d0353ea9567f07d07dc0d55c826578ca76950e6b478c97a2d5e7462aaf36c9a83301b39c97458382ac021821df7465c81cb51bd0b4ae8f3fa72421ec5796adef8aed84022786e3485d9180d2ab6b075ce040fb66f35b36354ea79f8bbf</ContextPublicKey>
   </PropertyGroup>
 </Project>

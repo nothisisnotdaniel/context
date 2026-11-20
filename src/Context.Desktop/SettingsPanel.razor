@@ -1,0 +1,645 @@
+@inherits StateComponent
+@* The settings: the Exchange calendar link (set, replace, remove), whether Context reads classic Outlook (Windows
+   only; DesktopState.OutlookSetting), whether a pasted link's page title may be downloaded
+   (DesktopState.FetchTitlesSetting, off by default), the watched screenshot folder and the screenshot hotkey (job 260,
+   DesktopState.ScreenshotFolderSetting) and the key that opens sensitive notes. The link
+   is a bearer secret: it is typed into a password field that has no value, kept in one field of this component
+   until it is saved or the panel closes, handed only to DesktopActions and never rendered back; what is shown is
+   the masked link from DesktopState.CalendarLinkSetting. Every section reloads whenever the state changes. *@
+
+<section class="page settings-panel" aria-label="Settings">
+    <div class="panel-bar">
+        <h2>Settings</h2>
+        <button type="button" class="close" disabled="@busy" aria-label="Close" title="Close" @onclick="Close"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" /></svg></button>
+    </div>
+    <h3>Exchange calendar</h3>
+    @if (link is null)
+    {
+        <p class="calendar-link-state grey">Loading…</p>
+    }
+    else if (link.Kind == CalendarLinkViewKind.Unreadable)
+    {
+        <p class="calendar-link-state red">@UnreadableText</p>
+    }
+    else if (link.Kind == CalendarLinkViewKind.Shown)
+    {
+        <p class="calendar-link-state">Calendar link: <span class="masked accent">@DesktopText.OneLine(link.Masked ?? string.Empty)</span> <span class="downloaded grey">(@Downloaded(link))</span></p>
+    }
+    else
+    {
+        <p class="calendar-link-state grey">@DesktopActions.CalendarLinkNotSetText</p>
+    }
+    <div class="calendar-link-entry">
+        <input type="password" class="calendar-link-field" @key="fieldKey" maxlength="@DesktopActions.MaxCalendarLinkLength"
+               autocomplete="off" spellcheck="false" disabled="@busy" aria-label="Calendar link"
+               placeholder="https:// or webcal:// link" @oninput="LinkTyped" @onkeydown="e => Save(e)" />
+        @if (link is not null && link.Kind != CalendarLinkViewKind.NotSet)
+        {
+            <button type="button" class="calendar-link-remove" disabled="@busy" @onclick="AskRemove">Remove link</button>
+        }
+    </div>
+    <p class="settings-result @resultClass" role="status">@resultText</p>
+    <h3>Outlook</h3>
+    @if (outlook is null)
+    {
+        <p class="outlook-state grey">Loading…</p>
+    }
+    else if (outlook.Availability == OutlookAvailability.Unsupported)
+    {
+        <p class="outlook-state grey">@OutlookUnsupportedText</p>
+    }
+    else if (outlook.Availability == OutlookAvailability.NotInstalled)
+    {
+        <p class="outlook-state grey">@OutlookNotInstalledText</p>
+    }
+    else
+    {
+        <label class="outlook-line">
+            <input type="checkbox" class="outlook-enabled" checked="@outlook.Enabled" disabled="@busy"
+                   @onchange="ToggleOutlook" />
+            Read calendar from Outlook
+        </label>
+        <p class="outlook-hint grey">@OutlookHintText</p>
+        <label class="mail-digest-line">
+            <input type="checkbox" class="mail-digest-enabled" checked="@outlook.MailDigestEnabled" disabled="@busy"
+                   @onchange="ToggleMailDigest" />
+            Suggest todos from Outlook mail
+        </label>
+    }
+    <p class="outlook-result @outlookResultClass" role="status">@outlookResultText</p>
+    <h3>Pasting</h3>
+    @if (fetchTitles is not bool fetchOn)
+    {
+        <p class="fetch-titles-state grey">Loading…</p>
+    }
+    else
+    {
+        <label class="fetch-titles-line" @key="fetchTitlesKey">
+            <input type="checkbox" class="fetch-titles" checked="@fetchOn" disabled="@busy"
+                   @onchange="ToggleFetchTitles" />
+            @FetchTitlesLabel
+        </label>
+        <p class="fetch-titles-hint grey">@FetchTitlesHintText</p>
+    }
+    <p class="fetch-titles-result @fetchTitlesResultClass" role="status">@fetchTitlesResultText</p>
+    <h3>Screenshots</h3>
+    <p class="screenshot-hotkey grey">@(State.IsMac ? ScreenshotHotkeyText : ScreenshotWindowsText)</p>
+    @if (screenshots is null)
+    {
+        <p class="screenshot-folder-state grey">Loading…</p>
+    }
+    else if (screenshots.Kind == ScreenshotFolderKind.Unreadable)
+    {
+        <p class="screenshot-folder-state red">@ScreenshotUnreadableText</p>
+    }
+    else if (screenshots.Kind == ScreenshotFolderKind.Set)
+    {
+        <p class="screenshot-folder-state grey cut" title="@DesktopText.OneLine(screenshots.Folder ?? string.Empty)">Folder: @DesktopText.OneLine(screenshots.Folder ?? string.Empty)</p>
+        @if (!screenshots.Exists)
+        {
+            <p class="screenshot-folder-missing red" role="status">@ScreenshotMissingText</p>
+        }
+    }
+    else
+    {
+        <p class="screenshot-folder-state grey">@ScreenshotNotSetText</p>
+    }
+    <div class="screenshot-folder-entry">
+        <input type="text" class="screenshot-folder-field" @key="screenshotFieldKey"
+               maxlength="@SettingsStore.MaxScreenshotFolderLength" autocomplete="off" spellcheck="false"
+               disabled="@busy" aria-label="Screenshot folder" placeholder="Folder's full path"
+               @oninput="ScreenshotFolderTyped" @onkeydown="e => SaveScreenshotFolder(e)" />
+        <button type="button" class="screenshot-folder-save" disabled="@busy" @onclick="() => SaveScreenshotFolder(null)">Save folder</button>
+        @if (screenshots is not null && screenshots.Kind != ScreenshotFolderKind.NotSet)
+        {
+            <button type="button" class="screenshot-folder-remove" disabled="@busy" @onclick="RemoveScreenshotFolder">Remove folder</button>
+        }
+    </div>
+    <p class="screenshot-result @screenshotResultClass" role="status">@screenshotResultText</p>
+    <h3>Command bar</h3>
+    <p class="command-bar-hotkey grey">@(State.IsMac ? CommandBarHotkeyText : CommandBarOtherText)</p>
+    @if (!State.TimesCommandFound)
+    {
+        <p class="command-bar-times grey">@CommandBarNoTimesText</p>
+    }
+    <h3>Repository folders</h3>
+    @if (repositories is null)
+    {
+        <p class="repository-state grey">Loading…</p>
+    }
+    else if (repositories.Unreadable)
+    {
+        <p class="repository-state red">Can't read settings.json.</p>
+    }
+    else if (repositories.Folders.Count == 0)
+    {
+        <p class="repository-state grey">@RepositoriesNotSetText</p>
+    }
+    else
+    {
+        <ul class="repository-list" aria-label="Repository folders">
+            @foreach (string repository in repositories.Folders)
+            {
+                string shownFolder = DesktopText.OneLine(repository);
+                <li class="repository-row">
+                    <span class="repository-folder cut" title="@shownFolder">@shownFolder</span>
+                    <button type="button" class="repository-remove" disabled="@busy" aria-label="@($"Remove {shownFolder}")"
+                            @onclick="() => RemoveRepository(repository)">Remove</button>
+                </li>
+            }
+        </ul>
+    }
+    <div class="repository-entry">
+        <input type="text" class="repository-field" @key="repositoryFieldKey"
+               maxlength="@Repositories.MaxPathLength" autocomplete="off" spellcheck="false"
+               disabled="@busy" aria-label="Repository folder" placeholder="Folder's full path"
+               @oninput="RepositoryTyped" @onkeydown="e => AddRepository(e)" />
+        <button type="button" class="repository-add" disabled="@busy" @onclick="() => AddRepository(null)">Add</button>
+    </div>
+    <p class="repository-result @repositoryResultClass" role="status">@repositoryResultText</p>
+    <h3>Sensitive notes</h3>
+    @if (key is null)
+    {
+        <p class="sensitive-key-state grey">Loading…</p>
+    }
+    else if (key.Kind == SensitiveKeyKind.Unsupported)
+    {
+        <p class="sensitive-key-state grey">@DesktopActions.UnsupportedText</p>
+    }
+    else if (key.Kind == SensitiveKeyKind.Unreadable || key.Details is null && key.Kind == SensitiveKeyKind.Shown)
+    {
+        <p class="sensitive-key-state red">Can't read the key.</p>
+    }
+    else if (key.Details is { } details)
+    {
+        <table class="key-details">
+            <tbody>
+                <tr>
+                    <th scope="row">Name</th>
+                    <td class="key-name">@DesktopText.OneLine(details.Name)</td>
+                </tr>
+                <tr>
+                    <th scope="row">Thumbprint</th>
+                    <td class="key-thumbprint">@DesktopText.OneLine(details.Fingerprint)</td>
+                </tr>
+                <tr>
+                    <th scope="row">Expires</th>
+                    <td class="key-expires">@Expires(details)</td>
+                </tr>
+            </tbody>
+        </table>
+    }
+    else
+    {
+        <p class="sensitive-key-state grey">Sensitive notes are not set up.</p>
+    }
+    @if (replacing)
+    {
+        <ConfirmDialog Question="@ReplaceQuestion" ConfirmLabel="Replace" Busy="busy"
+                       OnConfirm="ReplaceConfirmed" OnCancel="CancelDialog" />
+    }
+    @if (removing)
+    {
+        <ConfirmDialog Question="@RemoveQuestion" ConfirmLabel="Remove" Busy="busy"
+                       OnConfirm="RemoveConfirmed" OnCancel="CancelDialog" />
+    }
+</section>
+
+@code {
+    public const string UnreadableText = "Can't read calendar-link.txt. Set the link again or remove it.";
+    public const string ReplaceQuestion = "Replace the calendar link? The downloaded calendar copy is deleted too.";
+    public const string OutlookUnsupportedText = "Outlook is only available on Windows.";
+    public const string OutlookNotInstalledText =
+        "Classic Outlook isn't installed. The new Outlook can't be read; use a calendar link instead.";
+    public const string OutlookHintText = "Outlook may ask whether Context may access it.";
+    public const string FetchTitlesLabel = "Fetch page titles for pasted links";
+    public const string FetchTitlesHintText = "When on, Context downloads a pasted link's page to read its title.";
+    public const string ScreenshotHotkeyText = "Press Control+Option+Shift+S to add a screen area to the inbox.";
+    public const string ScreenshotWindowsText =
+        "The screenshot hotkey works on macOS. On Windows, set the folder to the Snipping Tool's screenshots folder.";
+    public const string CommandBarHotkeyText = "Press Control+Option+Space anywhere to open the command bar.";
+    public const string CommandBarOtherText = "The command bar is only on macOS.";
+    public const string CommandBarNoTimesText = "Times commands need the tm command, which wasn't found.";
+    public const string RepositoriesNotSetText =
+        "No repository folders set. Add a git repository's folder to see its commits on work item pages.";
+    public const string ScreenshotUnreadableText = "Can't read the screenshot folder setting.";
+    public const string ScreenshotMissingText = "Folder not found.";
+    public const string ScreenshotNotSetText = "No screenshot folder set. Once one is set, images saved into it are added to the inbox.";
+    public const string RemoveQuestion = "Remove the calendar link? The downloaded calendar copy is deleted too.";
+
+    private const string TimeFormat = "yyyy-MM-dd HH:mm";
+    private const string DateFormat = "yyyy-MM-dd";
+
+    private CalendarLinkView? link;
+    private SensitiveKeyView? key;
+    private OutlookSettingView? outlook;
+    private string outlookResultText = string.Empty;
+    private string outlookResultClass = string.Empty;
+    private bool? fetchTitles;
+    private string fetchTitlesResultText = string.Empty;
+    private string fetchTitlesResultClass = string.Empty;
+
+    // Changes after every toggle, so the checkbox is built anew and shows what is stored, also after a failed save.
+    private int fetchTitlesKey;
+    private int request;
+    private ScreenshotFolderView? screenshots;
+    private RepositoryFoldersView? repositories;
+    private string typedRepository = string.Empty;
+    private int repositoryFieldKey;
+    private string repositoryResultText = string.Empty;
+    private string repositoryResultClass = string.Empty;
+    private string typedFolder = string.Empty;
+    private int screenshotFieldKey;
+    private string screenshotResultText = string.Empty;
+    private string screenshotResultClass = string.Empty;
+
+    // The typed link: never rendered, cleared once it is saved and when the panel closes.
+    private string typed = string.Empty;
+
+    // Changes after a save, so the field is built anew and the page keeps no copy of what was typed.
+    private int fieldKey;
+    private bool busy;
+    private bool replacing;
+    private bool removing;
+    private string resultText = string.Empty;
+    private string resultClass = string.Empty;
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    protected override Task OnInitializedAsync() => Load();
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    private static string Expires(KeyDetails details) =>
+        details.ExpiresUtc is DateTime expires
+            ? expires.ToString(DateFormat, CultureInfo.InvariantCulture)
+            : "Does not expire";
+
+    // The console's wording, with the time in the calendar's zone.
+    private string Downloaded(CalendarLinkView shown) =>
+        shown.CachedAtUtc is DateTime cached
+            ? "last download " + TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(cached, DateTimeKind.Utc), State.Zone)
+                .ToString(TimeFormat, CultureInfo.InvariantCulture)
+            : "not downloaded yet";
+
+    // Keeps what is shown while it reloads; only the newest request's result is used. Both reads change nothing.
+    private async Task Load()
+    {
+        int mine = ++request;
+        CalendarLinkView linkNow = await State.CalendarLinkSetting();
+        OutlookSettingView outlookNow = await State.OutlookSetting();
+        bool fetchTitlesNow = await State.FetchTitlesSetting();
+        ScreenshotFolderView screenshotsNow = await State.ScreenshotFolderSetting();
+        RepositoryFoldersView repositoriesNow = await State.RepositoryFolders();
+        SensitiveKeyView keyNow = await State.SensitiveKey();
+        if (mine == request)
+        {
+            screenshots = screenshotsNow;
+            repositories = repositoriesNow;
+            link = linkNow;
+            outlook = outlookNow;
+            fetchTitles = fetchTitlesNow;
+            key = keyNow;
+        }
+    }
+
+    private void LinkTyped(ChangeEventArgs e)
+    {
+        typed = e.Value?.ToString() ?? string.Empty;
+        ShowResult(string.Empty, string.Empty);
+    }
+
+    // Enter in the field or Save link. With a link already stored the action answers "not confirmed" (after it
+    // checked the value), and the dialog asks before the old link and its downloaded copy go.
+    private async Task Save(KeyboardEventArgs? pressed)
+    {
+        if ((pressed is not null && pressed.Key != "Enter") || busy || typed.Length == 0)
+        {
+            return;
+        }
+
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.SetCalendarLink(typed, null);
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        if (result.Kind == ActionKind.Refused && result.Reason == ActionReason.NotConfirmed)
+        {
+            ShowResult(string.Empty, string.Empty);
+            replacing = true;
+            return;
+        }
+
+        await Saved(result);
+    }
+
+    private async Task ReplaceConfirmed(Confirmation confirmed)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.SetCalendarLink(typed, confirmed);
+        }
+        finally
+        {
+            busy = false;
+            replacing = false;
+        }
+
+        await Saved(result);
+    }
+
+    private void AskRemove()
+    {
+        if (!busy)
+        {
+            ShowResult(string.Empty, string.Empty);
+            removing = true;
+        }
+    }
+
+    private async Task RemoveConfirmed(Confirmation confirmed)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.RemoveCalendarLink(confirmed);
+        }
+        finally
+        {
+            busy = false;
+            removing = false;
+        }
+
+        ShowResult(DesktopText.OneLine(result.Text), result.Kind == ActionKind.Done ? "accent" : "red");
+        await Load();
+    }
+
+    // The digest checkbox (job 286): stores the new value, then shows what is stored.
+    private async Task ToggleMailDigest(ChangeEventArgs e)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        bool on = e.Value is bool value ? value : string.Equals(e.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.SetMailDigestEnabled(on);
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        outlookResultText = DesktopText.OneLine(result.Text);
+        outlookResultClass = result.Kind == ActionKind.Done ? "accent" : "red";
+        await Load();
+    }
+
+    // The checkbox: stores the new value, then shows what is stored.
+    private async Task ToggleOutlook(ChangeEventArgs e)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        bool on = e.Value is bool value ? value : string.Equals(e.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.SetOutlookEnabled(on);
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        outlookResultText = DesktopText.OneLine(result.Text);
+        outlookResultClass = result.Kind == ActionKind.Done ? "accent" : "red";
+        await Load();
+    }
+
+    // The pasting checkbox: stores the new value, then shows what is stored (the old value when the save failed).
+    private async Task ToggleFetchTitles(ChangeEventArgs e)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        bool on = e.Value is bool value ? value : string.Equals(e.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.SetFetchTitles(on);
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        fetchTitlesResultText = DesktopText.OneLine(result.Text);
+        fetchTitlesResultClass = result.Kind == ActionKind.Done ? "accent" : "red";
+        fetchTitlesKey++;
+        await Load();
+    }
+
+    private void ScreenshotFolderTyped(ChangeEventArgs e)
+    {
+        typedFolder = e.Value?.ToString() ?? string.Empty;
+        screenshotResultText = string.Empty;
+        screenshotResultClass = string.Empty;
+    }
+
+    // Enter in the folder field or Save folder; a saved folder empties the field.
+    private async Task SaveScreenshotFolder(KeyboardEventArgs? pressed)
+    {
+        if ((pressed is not null && pressed.Key != "Enter") || busy)
+        {
+            return;
+        }
+
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.SetScreenshotFolder(typedFolder);
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        if (result.Kind == ActionKind.Done)
+        {
+            typedFolder = string.Empty;
+            screenshotFieldKey++;
+        }
+
+        await ScreenshotDone(result);
+    }
+
+    private async Task RemoveScreenshotFolder()
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.ClearScreenshotFolder();
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        await ScreenshotDone(result);
+    }
+
+    private async Task ScreenshotDone(ActionResult result)
+    {
+        screenshotResultText = DesktopText.OneLine(result.Text);
+        screenshotResultClass = result.Kind == ActionKind.Done ? "accent" : "red";
+        await Load();
+    }
+
+    private void RepositoryTyped(ChangeEventArgs e)
+    {
+        typedRepository = e.Value?.ToString() ?? string.Empty;
+        repositoryResultText = string.Empty;
+        repositoryResultClass = string.Empty;
+    }
+
+    // Enter in the repository field or Add; an added folder empties the field.
+    private async Task AddRepository(KeyboardEventArgs? pressed)
+    {
+        if ((pressed is not null && pressed.Key != "Enter") || busy)
+        {
+            return;
+        }
+
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.AddRepository(typedRepository);
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        if (result.Kind == ActionKind.Done)
+        {
+            typedRepository = string.Empty;
+            repositoryFieldKey++;
+        }
+
+        await RepositoryDone(result);
+    }
+
+    private async Task RemoveRepository(string repository)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.RemoveRepository(repository);
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        await RepositoryDone(result);
+    }
+
+    private async Task RepositoryDone(ActionResult result)
+    {
+        repositoryResultText = DesktopText.OneLine(result.Text);
+        repositoryResultClass = result.Kind == ActionKind.Done ? "accent" : "red";
+        await Load();
+    }
+
+    private void CancelDialog()
+    {
+        if (!busy)
+        {
+            replacing = false;
+            removing = false;
+        }
+    }
+
+    // After a save the typed link is dropped and the field replaced by a new, empty one.
+    private async Task Saved(ActionResult result)
+    {
+        if (result.Kind == ActionKind.Done)
+        {
+            typed = string.Empty;
+            fieldKey++;
+            ShowResult(DesktopText.OneLine(result.Text), "accent");
+        }
+        else
+        {
+            ShowResult(DesktopText.OneLine(result.Text), "red");
+        }
+
+        await Load();
+    }
+
+    private Task Close()
+    {
+        if (busy)
+        {
+            return Task.CompletedTask;
+        }
+
+        typed = string.Empty;
+        return OnClose.InvokeAsync();
+    }
+
+    private void ShowResult(string text, string cssClass)
+    {
+        resultText = text;
+        resultClass = cssClass;
+    }
+}

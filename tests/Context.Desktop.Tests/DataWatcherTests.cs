@@ -4,6 +4,8 @@ namespace Context.Tests;
 
 public sealed class DataWatcherTests : IDisposable
 {
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(20);
+
     private static readonly string Root = Path.Combine(Path.GetTempPath(), "watch-root", "Context");
 
     private readonly DesktopFixture data = new();
@@ -17,9 +19,10 @@ public sealed class DataWatcherTests : IDisposable
     [InlineData("with space.Md")]
     [InlineData("todos.json")]
     [InlineData("calendar-link.ics")]
-    [InlineData("encryption.json")]
     [InlineData("calendar/work.ics")]
     [InlineData("calendar/WORK.ICS")]
+    [InlineData("settings.json")]
+    [InlineData("SETTINGS.JSON")]
     public void IsRelevant_DataFiles_True(string relative)
     {
         Assert.True(DataWatcher.IsRelevant(Root, Path.Combine(Root, relative)));
@@ -31,14 +34,20 @@ public sealed class DataWatcherTests : IDisposable
     [InlineData("context.db-journal")]
     [InlineData("context.db-wal")]
     [InlineData(".todos.json.0123456789abcdef.tmp")]
+    [InlineData(".settings.json.0123456789abcdef.tmp")]
+    [InlineData("../settings.json")]
     [InlineData(".Note.md.0123456789abcdef.tmp")]
     [InlineData(".calendar-link.ics.0123456789abcdef.tmp")]
     [InlineData("calendar-link.txt")]
-    [InlineData("sub/Note.md")]
     [InlineData("calendar/sub/work.ics")]
     [InlineData("calendar/notes.md")]
     [InlineData("calendar")]
     [InlineData("other.json")]
+    [InlineData(RecentNotesStore.FileName)] // 240 AC-8: recording an open never triggers a rescan.
+    [InlineData(".recent.json.0123456789abcdef.tmp")]
+    [InlineData(PinnedNotesStore.FileName)] // 278 AC-9: pinning never triggers a rescan.
+    [InlineData(".pinned.json.0123456789abcdef.tmp")]
+    [InlineData(RemovedFeature.KeyFileName)]
     [InlineData(".md")]
     [InlineData("")]
     [InlineData("../Note.md")]
@@ -47,6 +56,61 @@ public sealed class DataWatcherTests : IDisposable
     public void IsRelevant_Others_False(string relative)
     {
         Assert.False(DataWatcher.IsRelevant(Root, Path.Combine(Root, relative)));
+    }
+
+    // 152 AC-11: a subpage at any depth is relevant.
+    [Theory]
+    [InlineData("Meetings/Meeting 1.md")]
+    [InlineData("Meetings/Meeting 1/Notes.MD")]
+    [InlineData("a/b/c/d/e.md")]
+    public void IsRelevant_Subpages_True(string relative)
+    {
+        Assert.True(DataWatcher.IsRelevant(Root, Path.Combine(Root, relative)));
+    }
+
+    // 152 AC-11: not below a hidden folder or the top-level calendar folder, and no temp files or other files below.
+    [Theory]
+    [InlineData(".hidden/Note.md")]
+    [InlineData("Meetings/.git/Note.md")]
+    [InlineData("calendar/notes.md")]
+    [InlineData("Calendar/sub/notes.md")]
+    [InlineData("Meetings/.Meeting 1.md.0123456789abcdef.tmp")]
+    [InlineData("Meetings/todos.json")]
+    [InlineData("sub/settings.json")]
+    [InlineData("Meetings/work.ics")]
+    [InlineData("Meetings/Meeting 1.ctxs")]
+    [InlineData("Meetings/.md")]
+    [InlineData(".history/Plan/20261029T090000000Z.md")]
+    [InlineData("Work/Projects/.history/N/20261029T090000000Z.md")]
+    [InlineData(".history/Plan/20261029T090000000Z~Plan.ctxs")]
+    public void IsRelevant_Subfolders_False(string relative)
+    {
+        Assert.False(DataWatcher.IsRelevant(Root, Path.Combine(Root, relative)));
+    }
+
+    // 207 AC-10: settings.json edited outside the app shows its saved searches after the refresh the watcher runs.
+    [Fact]
+    public async Task SettingsEditedOutside_RefreshShowsSavedSearches()
+    {
+        data.WriteNote("Plan", "p");
+        DesktopSnapshot first = await data.RefreshAsync();
+        Assert.Empty(first.SavedSearches);
+        Assert.False(first.SavedSearchesUnreadable);
+
+        data.WriteFile(
+            SettingsStore.FileName, "{\"savedSearches\":[{\"name\":\"Work\",\"query\":\"#work and not #done\"}]}");
+        Assert.True(DataWatcher.IsRelevant(data.Root, Path.Combine(data.Root, SettingsStore.FileName)));
+        await data.State!.Refresh();
+
+        SavedSearch entry = Assert.Single(data.State.Snapshot!.SavedSearches);
+        Assert.Equal("Work", entry.Name);
+        Assert.Equal("#work and not #done", entry.Query);
+
+        data.WriteFile(SettingsStore.FileName, "{\"savedSearches\":5}");
+        await data.State.Refresh();
+
+        Assert.Empty(data.State.Snapshot!.SavedSearches);
+        Assert.True(data.State.Snapshot.SavedSearchesUnreadable);
     }
 
     // AC-9: absolute paths elsewhere are never relevant.
@@ -82,7 +146,7 @@ public sealed class DataWatcherTests : IDisposable
 
         await Task.Delay(1000);
         Assert.Equal(2, state.Builds);
-        cut.WaitForAssertion(() => Assert.Contains("New 4", cut.Markup), TimeSpan.FromSeconds(5));
+        cut.WaitForAssertion(() => Assert.Contains("New 4", cut.Markup), Wait);
         Assert.Equal(6, cut.FindAll("li.todo").Count);
     }
 

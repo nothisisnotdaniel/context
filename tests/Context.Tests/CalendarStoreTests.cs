@@ -38,6 +38,33 @@ public sealed class CalendarStoreTests : IDisposable
 
     private static string[] Titles(CalendarDay day) => day.Appointments.Select(a => a.Title).ToArray();
 
+    // 132 AC-7: an .ics file that starts with the old magic bytes is just a file that is not a calendar.
+    [Fact]
+    public void Day_FileStartingWithTheOldMagicBytes_IsUnreadableLikeAnyBadFile_OthersStillRead()
+    {
+        Write("good.ics", Event("Standup", ":20261029T090000"));
+        byte[] bytes = [0x00, 0x43, 0x54, 0x58, 0x45, 0x01, 0x02, 0x03];
+        string old = Path.Combine(folder, "old.ics");
+        File.WriteAllBytes(old, bytes);
+
+        CalendarDay day = Day();
+
+        Assert.Equal(["Standup"], Titles(day));
+        Assert.Equal(["old.ics"], day.Unreadable);
+        Assert.Equal(bytes, File.ReadAllBytes(old));
+    }
+
+    // 132 AC-7: with a calendar header after them, the old magic bytes are read as plain text like any others.
+    [Fact]
+    public void ReadText_ReturnsTheBytesAsText_WhateverTheyStartWith()
+    {
+        Directory.CreateDirectory(folder);
+        string path = Path.Combine(folder, "old.ics");
+        File.WriteAllBytes(path, [0x00, 0x43, 0x54, 0x58, 0x45, .. "\nBEGIN:VCALENDAR\n"u8]);
+
+        Assert.Equal("\0CTXE\nBEGIN:VCALENDAR\n", CalendarStore.ReadText(path));
+    }
+
     // AC-4
     [Fact]
     public void Day_NoFolder_IsEmpty()
@@ -150,41 +177,147 @@ public sealed class CalendarStoreTests : IDisposable
         Assert.Equal(["Café"], Titles(Day()));
     }
 
-    // AC-4
+    // 162 AC-7: an occurrence over midnight shows on both days; yesterday's and today's both touch today.
     [Fact]
-    public void Encrypted_IcsFileIsRead_AndPlainOneToo()
+    public void Day_RecurringOverMidnight_ShowsOnBothDays()
     {
-        Encryption encryption = SampleData.On(root);
-        Directory.CreateDirectory(folder);
-        File.WriteAllBytes(
-            Path.Combine(folder, "enc.ics"),
-            encryption.Vault!.Encrypt(Vault.KindCalendar, System.Text.Encoding.UTF8.GetBytes(SampleData.Ics("Hidden"))));
-        File.WriteAllText(Path.Combine(folder, "plain.ics"), SampleData.Ics("Shown"));
+        Write("late.ics", Event("Night shift", ":20261001T230000", ":20261002T010000", "RRULE:FREQ=DAILY\r\n"));
 
-        CalendarDay day = new CalendarStore(root, TimeZoneInfo.Utc, encryption).Day(Today);
+        CalendarDay day = Day();
 
-        Assert.Equal(["Hidden", "Shown"], Titles(day));
+        Assert.Equal(
+            [new DateTime(2026, 10, 28, 23, 0, 0), new DateTime(2026, 10, 29, 23, 0, 0)],
+            day.Appointments.Select(a => a.Start));
+        Assert.Equal(new DateTime(2026, 10, 29, 1, 0, 0), day.Appointments[0].End);
         Assert.Empty(day.Unreadable);
     }
 
-    // AC-7
+    // 162 AC-7: a daily series from 1990 without COUNT shows today.
     [Fact]
-    public void Encrypted_TamperedOrWrongKindOrLocked_IsUnreadable()
+    public void Day_DailySeriesFrom1990_ShowsToday()
     {
-        Encryption encryption = SampleData.On(root);
+        Write("old.ics", Event("Standup", ":19900101T090000", ":19900101T091500", "RRULE:FREQ=DAILY\r\n"));
+
+        Appointment a = Assert.Single(Day().Appointments);
+
+        Assert.Equal(new DateTime(2026, 10, 29, 9, 0, 0), a.Start);
+        Assert.Equal(new DateTime(2026, 10, 29, 9, 15, 0), a.End);
+    }
+
+    // 162 AC-10: All keeps one entry per VEVENT.
+    [Fact]
+    public void All_RecurringEvent_OneEntry()
+    {
+        Write("old.ics", Event("Standup", ":19900101T090000", ":19900101T091500", "RRULE:FREQ=DAILY\r\n"));
+
+        Appointment a = Assert.Single(new CalendarStore(root, IcsParserTests.Zone).All([]).Appointments);
+
+        Assert.Equal(new DateTime(1990, 1, 1, 9, 0, 0), a.Start);
+    }
+
+    // 162 AC-8, AC-9: a file just under 5 MB of rules that never match (and of bad rules) returns within 5 s
+    // and is not unreadable; the good event after them still shows.
+    [Fact]
+    public void Day_HostileRules_FastAndReadable()
+    {
+        string[] rules =
+        [
+            "RRULE:FREQ=DAILY;BYMONTH=2;BYMONTHDAY=31",
+            "RRULE:FREQ=YEARLY;COUNT=2000000000;BYMONTH=2;BYMONTHDAY=30",
+            "RRULE:FREQ=DAILY;COUNT=2000000000;BYMONTH=2;BYMONTHDAY=31",
+            "RRULE:FREQ=YEARLY;BYDAY=MO,TU,WE,TH,FR,SA,SU,-1MO,-2MO,-3MO,1SU,2SU,3SU;BYMONTH=2;BYMONTHDAY=31",
+            "RRULE:FREQ=HOURLY;BYSETPOS=1",
+        ];
+        System.Text.StringBuilder text = new System.Text.StringBuilder("BEGIN:VCALENDAR\r\n");
+        int i = 0;
+        while (text.Length < CalendarStore.MaxFileBytes - 4096)
+        {
+            text.Append(Event("x", ":00010101T090000", null, rules[i % rules.Length] + "\r\n"));
+            i++;
+        }
+
+        text.Append(Event("Real", ":20261029T100000"));
+        text.Append("END:VCALENDAR\r\n");
         Directory.CreateDirectory(folder);
-        byte[] plain = System.Text.Encoding.UTF8.GetBytes(SampleData.Ics("Hidden"));
-        string tampered = Path.Combine(folder, "a.ics");
-        File.WriteAllBytes(tampered, encryption.Vault!.Encrypt(Vault.KindCalendar, plain));
-        SampleData.Tamper(tampered);
-        File.WriteAllBytes(Path.Combine(folder, "b.ics"), encryption.Vault.Encrypt(Vault.KindNote, plain));
-        byte[] before = File.ReadAllBytes(tampered);
+        File.WriteAllText(Path.Combine(folder, "hostile.ics"), text.ToString());
+        Assert.True(new FileInfo(Path.Combine(folder, "hostile.ics")).Length <= CalendarStore.MaxFileBytes);
 
-        CalendarDay day = new CalendarStore(root, TimeZoneInfo.Utc, encryption).Day(Today);
-        CalendarDay locked = new CalendarStore(root, TimeZoneInfo.Utc).Day(Today);
+        System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+        CalendarDay day = Day();
+        watch.Stop();
 
-        Assert.Equal(["a.ics", "b.ics"], day.Unreadable);
-        Assert.Equal(["a.ics", "b.ics"], locked.Unreadable);
-        Assert.Equal(before, File.ReadAllBytes(tampered));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
+        Assert.Empty(day.Unreadable);
+        Assert.Equal(["Real"], Titles(day));
+    }
+
+    // Job 227 AC-4: private and confidential events in a calendar file are left out of the day.
+    [Fact]
+    public void Day_PrivateEventsInFile_LeftOut()
+    {
+        Write(
+            "work.ics",
+            Event("Open", ":20261029T090000"),
+            Event("Secret", ":20261029T100000", extra: "CLASS:PRIVATE\r\n"),
+            Event("Hush", ":20261029T110000", extra: "CLASS:confidential\r\n"),
+            Event("Public", ":20261029T120000", extra: "CLASS:PUBLIC\r\n"));
+
+        CalendarDay day = Day();
+
+        Assert.Equal(["Open", "Public"], Titles(day));
+        Assert.Empty(day.Unreadable);
+    }
+
+    // Job 227 AC-4: the feed's events (passed as extra) come through the parser, so its private ones are gone too.
+    [Fact]
+    public void Day_PrivateFeedEventsAsExtra_LeftOut()
+    {
+        string feed = "BEGIN:VCALENDAR\r\n" + Event("Feed open", ":20261029T090000")
+            + Event("Feed secret", ":20261029T100000", extra: "CLASS:PRIVATE\r\n") + "END:VCALENDAR\r\n";
+        CalendarFeedResult result = new CalendarFeedResult(CalendarFeedStatus.Fresh, feed, null, null);
+        IReadOnlyList<Appointment> extra = CurrentView.FeedEvents(result, IcsParserTests.Zone, Today);
+        Write("work.ics", Event("File open", ":20261029T080000"));
+
+        CalendarDay day = new CalendarStore(root, IcsParserTests.Zone).Day(Today, extra);
+
+        Assert.Equal(["File open", "Feed open"], Titles(day));
+    }
+
+    // 275 AC-1: a FIFO .ics with no writer next to a valid file doesn't hang the day; the valid file's events show.
+    [Fact(Timeout = 30_000)]
+    public async Task Day_FifoNextToValidFile_DoesNotHang()
+    {
+        Write("a.ics", Event("Standup", ":20261029T090000", ":20261029T093000"));
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using (System.Diagnostics.Process mkfifo = System.Diagnostics.Process.Start("mkfifo", Path.Combine(folder, "x.ics")))
+        {
+            mkfifo.WaitForExit();
+        }
+
+        CalendarDay day = await Task.Run(Day);
+
+        Assert.Equal(["Standup"], Titles(day));
+    }
+
+    // 275 AC-1: ReadText reads a file of exactly MaxFileBytes and refuses one a byte bigger.
+    [Fact]
+    public void ReadText_AtAndOverMaxFileBytes()
+    {
+        Directory.CreateDirectory(folder);
+        string exact = Path.Combine(folder, "exact.ics");
+        File.WriteAllText(exact, "BEGIN:VCALENDAR" + new string(' ', (int)CalendarStore.MaxFileBytes - 15));
+        string over = Path.Combine(folder, "over.ics");
+        File.WriteAllText(over, "BEGIN:VCALENDAR" + new string(' ', (int)CalendarStore.MaxFileBytes - 14));
+
+        string? text = CalendarStore.ReadText(exact);
+
+        Assert.NotNull(text);
+        Assert.Equal(CalendarStore.MaxFileBytes, text.Length);
+        Assert.StartsWith("BEGIN:VCALENDAR", text);
+        Assert.Null(CalendarStore.ReadText(over));
     }
 }

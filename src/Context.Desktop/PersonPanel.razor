@@ -1,0 +1,248 @@
+@inherits StateComponent
+@* The person page of the open note (DesktopState.Person): the notes that mention the person with @[...], the
+   appointments from the calendar files and the cached published calendar that mention them or list them as an
+   attendee, then the open topics for the next 1:1 (job 253, each with a checkbox that ticks it off in its note after a
+   confirmation), the waiting-for todos and the open and the done todos that mention them, with one red line above them per alias on the page
+   that links to no one or to another person. It reads only (no download), and reloads whenever the state changes. *@
+
+<section class="person-panel" aria-label="Person">
+    @if (view is null)
+    {
+        <p class="grey" role="status">Loading…</p>
+    }
+    else
+    {
+        @foreach (AliasClash clash in view.AliasClashes)
+        {
+            <p class="red alias-clash" role="status">@DesktopText.OneLine(clash.Text)</p>
+        }
+        @if (view.Kind != PersonViewKind.Mentions)
+        {
+            @if (view.IndexUnreadable)
+            {
+                <p class="red" role="status">Can't read the mentions.</p>
+            }
+            else if (view.Topics.Count > 0)
+            {
+                @TopicsSection(view)
+            }
+            else if (!view.TodosUnreadable)
+            {
+                <p class="grey" role="status">No notes, appointments or todos mention @DesktopText.OneLine(Person).</p>
+            }
+            @TopicResult()
+        }
+        else
+        {
+            @if (view.IndexUnreadable)
+            {
+                <p class="red" role="status">Can't read the mentions.</p>
+            }
+            else if (view.Notes.Count > 0)
+            {
+                <h2>Mentioned in</h2>
+                <ul class="person-notes">
+                    @foreach (string note in view.Notes)
+                    {
+                        string shown = DesktopText.OneLine(note);
+                        <li>
+                            <button type="button" class="name note-button cut" title="@shown" @onclick="() => OnOpen.InvokeAsync(note)">@shown</button>
+                        </li>
+                    }
+                </ul>
+            }
+            @if (view.Appointments.Count > 0)
+            {
+                <h2>Appointments</h2>
+                <ul class="person-appointments">
+                    @foreach (Appointment appointment in view.Appointments)
+                    {
+                        string title = DesktopText.OneLine(appointment.Title.Length == 0 ? "(no title)" : appointment.Title);
+                        string location = DesktopText.OneLine(appointment.Location ?? string.Empty);
+                        <li class="person-appointment">
+                            <span class="date grey">@appointment.Start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</span>
+                            <span class="time grey">@PersonView.TimeText(appointment)</span>
+                            <span class="title cut" title="@title">@title</span>
+                            @if (location.Length > 0)
+                            {
+                                <span class="location grey cut" title="@location">@location</span>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+            @TopicsSection(view)
+            @TopicResult()
+            @if (view.Waiting.Count > 0)
+            {
+                <h2>Waiting for</h2>
+                <ul class="person-todos waiting-todos">
+                    @foreach (TodoItem todo in view.Waiting)
+                    {
+                        string text = DesktopText.OneLine(WaitingFor.TryParse(todo.Text)?.Rest ?? todo.Text);
+                        <li class="person-todo">
+                            <span class="date grey">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                            <span class="text cut" title="@text">@text</span>
+                        </li>
+                    }
+                </ul>
+            }
+            @if (view.OpenTodos.Count > 0)
+            {
+                <h2>Open todos</h2>
+                <ul class="person-todos open-todos">
+                    @foreach (TodoItem todo in view.OpenTodos)
+                    {
+                        string text = DesktopText.OneLine(todo.Text);
+                        <li class="person-todo">
+                            <span class="date grey">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                            <span class="text cut" title="@text">@text</span>
+                        </li>
+                    }
+                </ul>
+            }
+            @if (view.DoneTodos.Count > 0)
+            {
+                <h2>Done todos</h2>
+                <ul class="person-todos done-todos">
+                    @foreach (TodoItem todo in view.DoneTodos)
+                    {
+                        string text = DesktopText.OneLine(todo.Text);
+                        <li class="person-todo">
+                            <span class="date grey">@view.DoneDate(todo).ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                            <span class="text cut" title="@text">@text</span>
+                        </li>
+                    }
+                </ul>
+            }
+        }
+        @if (view.TodosUnreadable)
+        {
+            <p class="red" role="status">Can't read the todos.</p>
+        }
+    }
+    @if (askingTopic is { } topicAsked)
+    {
+        <ConfirmDialog Question="@($"Mark this topic done? {topicAsked.Text}")" ConfirmLabel="Mark done"
+                       Busy="running" OnConfirm="CompleteTopicAsked" OnCancel="CloseDialog" />
+    }
+</section>
+
+@code {
+    private PersonView? view;
+    private NoteTopic? askingTopic;
+    private ActionResult? topicResult;
+    private bool running;
+    private string? loaded;
+    private int request;
+
+    /// <summary>The person's name: the title of the open person page.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Person { get; set; } = string.Empty;
+
+    /// <summary>Called with a mentioning note's name when it is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    // The red line of a failed tick, right under the Topics list.
+    private RenderFragment TopicResult() => __builder =>
+    {
+        @if (topicResult is { Kind: not ActionKind.Done } failed)
+        {
+            <p class="red topic-result" role="status">@DesktopText.OneLine(failed.Text)</p>
+        }
+    };
+
+    // The open topics (job 253): a checkbox asks first, the text, and the note's name opening the note.
+    private RenderFragment TopicsSection(PersonView shown) => __builder =>
+    {
+        @if (shown.Topics.Count > 0)
+        {
+            <h2>Topics</h2>
+            <ul class="person-todos topics-list">
+                @foreach (NoteTopic topic in shown.Topics)
+                {
+                    string text = DesktopText.OneLine(topic.Text);
+                    string noteName = DesktopText.OneLine(topic.Note);
+                    <li class="person-todo topic">
+                        <label class="topic-line">
+                            <input type="checkbox" class="done" checked="@(askingTopic == topic)" disabled="@running"
+                                   @onchange="() => AskTopic(topic)" />
+                            <span class="text cut" title="@text">@text</span>
+                        </label>
+                        <button type="button" class="topic-note cut" title="@noteName" @onclick="() => OnOpen.InvokeAsync(topic.Note)">@noteName</button>
+                    </li>
+                }
+            </ul>
+        }
+    };
+
+    private void AskTopic(NoteTopic topic)
+    {
+        if (!running)
+        {
+            askingTopic = topic;
+        }
+    }
+
+    private void CloseDialog()
+    {
+        if (!running)
+        {
+            askingTopic = null;
+        }
+    }
+
+    private async Task CompleteTopicAsked(Confirmation confirmed)
+    {
+        if (askingTopic is not { } topic || running)
+        {
+            return;
+        }
+
+        running = true;
+        try
+        {
+            topicResult = await Actions.CompleteTopic(topic, confirmed);
+        }
+        finally
+        {
+            running = false;
+            askingTopic = null;
+        }
+    }
+
+    protected override Task OnParametersSetAsync()
+    {
+        if (string.Equals(loaded, Person, StringComparison.Ordinal))
+        {
+            return Task.CompletedTask;
+        }
+
+        // Another person: their rows are not known yet, so the old ones go.
+        loaded = Person;
+        view = null;
+        topicResult = null;
+        return Load();
+    }
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    // Keeps the shown rows while it reloads. A result for a person who is no longer the open one, or an older
+    // request's result, is dropped.
+    private async Task Load()
+    {
+        int mine = ++request;
+        string person = Person;
+        PersonView result = await State.Person(person);
+        if (mine == request && string.Equals(person, Person, StringComparison.Ordinal))
+        {
+            view = result;
+        }
+    }
+}

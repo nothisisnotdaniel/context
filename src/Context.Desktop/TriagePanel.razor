@@ -1,0 +1,666 @@
+@inherits StateComponent
+@* Inbox triage: shows the first line of the inbox queue (DesktopState.Triage) and turns it into a note, a todo or an
+   addition to a note, drops it or snoozes it, through the DesktopActions triage methods. Outside a text field the
+   keys n, t, w, a, d and l pick the action (1 and 2 in the Later form), Esc closes the form or the panel. The parent may
+   hold an action back (Guard: the inbox or the target is open with unsaved changes) and hears what was written
+   (OnTriaged). A sensitive target is unlocked here (one key-store call) and locked again afterwards. *@
+
+<section class="page triage-panel" aria-label="Inbox triage" tabindex="-1" @ref="panel" @onkeydown="PanelKeyDown">
+    <div class="panel-bar">
+        <h2>Inbox triage</h2>
+        <button type="button" class="close" aria-label="Close" title="Close" @onclick="() => OnClose.InvokeAsync()"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" /></svg></button>
+    </div>
+    @if (view is null)
+    {
+        <p class="grey triage-loading">Loading…</p>
+    }
+    else if (view.Kind == TriageKind.Sensitive)
+    {
+        <p class="red triage-sensitive">@DesktopActions.TriageSensitiveText</p>
+    }
+    else if (view.Kind == TriageKind.Unreadable)
+    {
+        <p class="red triage-unreadable">Can't read @Inbox.NoteName.</p>
+    }
+    else if (Current is not { } item)
+    {
+        <p class="grey triage-empty">The inbox is empty.@SnoozedText(view.Queue.SnoozedCount)</p>
+    }
+    else
+    {
+        string text = DesktopText.OneLine(item.Text);
+        <p class="triage-item">
+            @if (item.Captured is { } stamp)
+            {
+                <span class="stamp grey">@stamp.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)</span>
+            }
+            <span class="text">@text</span>
+        </p>
+        <p class="triage-left grey">@view.Queue.Items.Count.ToString(CultureInfo.InvariantCulture) left</p>
+        <div class="triage-buttons">
+            <button type="button" class="triage-note" disabled="@running" aria-pressed="@Pressed(TriageForm.Note)" @onclick="() => OpenForm(TriageForm.Note)">Note (N)</button>
+            <button type="button" class="triage-todo" disabled="@running" aria-pressed="@Pressed(TriageForm.Todo)" @onclick="() => OpenForm(TriageForm.Todo)">Todo (T)</button>
+            <button type="button" class="triage-delegate" disabled="@running" aria-pressed="@Pressed(TriageForm.Delegate)" @onclick="() => OpenForm(TriageForm.Delegate)">Delegate (W)</button>
+            <button type="button" class="triage-append" disabled="@running" aria-pressed="@Pressed(TriageForm.Append)" @onclick="() => OpenForm(TriageForm.Append)">Add to note (A)</button>
+            <button type="button" class="triage-drop" disabled="@running" @onclick="AskDrop">Drop (D)</button>
+            <button type="button" class="triage-later" disabled="@running" aria-pressed="@Pressed(TriageForm.Later)" @onclick="() => OpenForm(TriageForm.Later)">Later (L)</button>
+        </div>
+        @switch (form)
+        {
+            case TriageForm.Note:
+                <div class="triage-form">
+                    <input type="text" class="triage-title" value="@titleText" maxlength="@NoteStore.MaxNameLength" disabled="@running"
+                           aria-label="Note title" placeholder="Note title" @ref="field" @oninput="TitleTyped" @onkeydown="e => CreateFromItem(e)"
+                           @onkeydown:stopPropagation="true" />
+                    <button type="button" class="triage-cancel" disabled="@running" @onclick="CloseForm">Cancel</button>
+                </div>
+                break;
+            case TriageForm.Todo:
+                <div class="triage-form">
+                    <input type="text" class="triage-todo-text" value="@todoText" maxlength="@DesktopActions.MaxTodoLength" disabled="@running"
+                           aria-label="Todo text" placeholder="Todo text" @ref="field" @oninput="TodoTyped" @onkeydown="e => TodoFromItem(e)"
+                           @onkeydown:stopPropagation="true" />
+                    <input type="text" class="triage-date" value="@dateText" maxlength="10" disabled="@running"
+                           aria-label="Due date" placeholder="Empty: today" @oninput="DateTyped" @onkeydown="e => TodoFromItem(e)"
+                           @onkeydown:stopPropagation="true" />
+                    <button type="button" class="triage-cancel" disabled="@running" @onclick="CloseForm">Cancel</button>
+                </div>
+                break;
+            case TriageForm.Delegate:
+                <div class="triage-form">
+                    <input type="text" class="triage-person" value="@personText" maxlength="@NoteStore.MaxTitleLength" disabled="@running"
+                           aria-label="Person" placeholder="Name" @ref="field" @oninput="PersonTyped" @onkeydown="e => DelegateItem(e)"
+                           @onkeydown:stopPropagation="true" />
+                    <input type="text" class="triage-delegate-text" value="@todoText" maxlength="@DesktopActions.MaxTodoLength" disabled="@running"
+                           aria-label="Todo text" placeholder="Todo text" @oninput="TodoTyped" @onkeydown="e => DelegateItem(e)"
+                           @onkeydown:stopPropagation="true" />
+                    <input type="text" class="triage-follow-up" value="@dateText" maxlength="10" disabled="@running"
+                           aria-label="Follow-up date" placeholder="Empty: in a week" @oninput="DateTyped" @onkeydown="e => DelegateItem(e)"
+                           @onkeydown:stopPropagation="true" />
+                    <button type="button" class="triage-cancel" disabled="@running" @onclick="CloseForm">Cancel</button>
+                </div>
+                break;
+            case TriageForm.Append:
+                <div class="triage-form">
+                    <input type="text" class="triage-target" value="@nameText" maxlength="@NoteStore.MaxNameLength" disabled="@running"
+                           aria-label="Note name" placeholder="Note name" @ref="field" @oninput="NameTyped" @onkeydown="e => AppendToNote(e)"
+                           @onkeydown:stopPropagation="true" />
+                    <button type="button" class="triage-cancel" disabled="@running" @onclick="CloseForm">Cancel</button>
+                </div>
+                break;
+            case TriageForm.Later:
+                <div class="triage-form">
+                    <button type="button" class="triage-tomorrow" disabled="@running" @onclick="() => SnoozeChosen(1)">Tomorrow (1)</button>
+                    <button type="button" class="triage-week" disabled="@running" @onclick="() => SnoozeChosen(7)">Next week (2)</button>
+                    <input type="text" class="triage-until" value="@laterText" maxlength="10" disabled="@running"
+                           aria-label="Snooze until" placeholder="yyyy-MM-dd" @oninput="LaterTyped" @onkeydown="e => SnoozeTyped(e)"
+                           @onkeydown:stopPropagation="true" />
+                    <button type="button" class="triage-cancel" disabled="@running" @onclick="CloseForm">Cancel</button>
+                </div>
+                break;
+        }
+    }
+    <p class="triage-status cut @statusClass" role="status" title="@statusText">@statusText</p>
+</section>
+@if (dropping && formItem is { } doomed)
+{
+    <ConfirmDialog Question="@($"Drop this line? {DesktopText.OneLine(doomed.Text)}")" ConfirmLabel="Drop" Busy="running"
+                   OnConfirm="DropConfirmed" OnCancel="CancelDrop" />
+}
+
+@code {
+    private TriageView? view;
+    private int request;
+    private TriageForm form;
+    private InboxItem? formItem;
+    private string titleText = string.Empty;
+    private string todoText = string.Empty;
+    private string dateText = string.Empty;
+    private string nameText = string.Empty;
+    private string personText = string.Empty;
+    private string laterText = string.Empty;
+    private bool dropping;
+    private bool running;
+    private bool focusPanel;
+    private bool focusField;
+    private ElementReference panel;
+    private ElementReference field;
+    private string statusText = string.Empty;
+    private string statusClass = string.Empty;
+
+    private enum TriageForm
+    {
+        None,
+        Note,
+        Todo,
+        Delegate,
+        Append,
+        Later,
+    }
+
+    /// <summary>
+    /// Asked before every action with the target note's name (<c>null</c> when only the inbox is written): the reason
+    /// nothing may be written now (shown in red), or <c>null</c>.
+    /// </summary>
+    [Parameter]
+    public Func<string?, Task<string?>>? Guard { get; set; }
+
+    /// <summary>
+    /// Called after an action wrote something: the name of the existing note it added to, or an empty string when it
+    /// wrote only the inbox or a new note or todo.
+    /// </summary>
+    [Parameter]
+    public EventCallback<string> OnTriaged { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    // The line on top of the queue.
+    private InboxItem? Current =>
+        view is { Kind: TriageKind.Shown } shown && shown.Queue.Items.Count > 0 ? shown.Queue.Items[0] : null;
+
+    protected override Task OnInitializedAsync()
+    {
+        base.OnInitialized();
+        return Load();
+    }
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender || focusPanel)
+        {
+            focusPanel = false;
+            await panel.FocusAsync();
+        }
+
+        if (focusField && form is TriageForm.Note or TriageForm.Todo or TriageForm.Delegate or TriageForm.Append && !running)
+        {
+            focusField = false;
+            await field.FocusAsync();
+        }
+    }
+
+    // Keeps the shown line while it reloads; only the newest request's result is used. A form for a line that is no
+    // longer on top is closed.
+    private async Task Load()
+    {
+        int mine = ++request;
+        TriageView result = await State.Triage();
+        if (mine != request)
+        {
+            return;
+        }
+
+        view = result;
+        if (formItem is not null && !dropping && !string.Equals(Current?.Line, formItem.Line, StringComparison.Ordinal))
+        {
+            form = TriageForm.None;
+            formItem = null;
+        }
+    }
+
+    private static string SnoozedText(int count) => count switch
+    {
+        0 => string.Empty,
+        1 => " 1 line is snoozed.",
+        _ => $" {count.ToString(CultureInfo.InvariantCulture)} lines are snoozed.",
+    };
+
+    private string Pressed(TriageForm which) => form == which ? "true" : "false";
+
+    private void TitleTyped(ChangeEventArgs e) => titleText = e.Value?.ToString() ?? string.Empty;
+
+    private void TodoTyped(ChangeEventArgs e) => todoText = e.Value?.ToString() ?? string.Empty;
+
+    private void DateTyped(ChangeEventArgs e) => dateText = e.Value?.ToString() ?? string.Empty;
+
+    private void PersonTyped(ChangeEventArgs e) => personText = e.Value?.ToString() ?? string.Empty;
+
+    private void NameTyped(ChangeEventArgs e) => nameText = e.Value?.ToString() ?? string.Empty;
+
+    private void LaterTyped(ChangeEventArgs e) => laterText = e.Value?.ToString() ?? string.Empty;
+
+    // A button or a key: shows the form for the line on top, pre-filled from it.
+    private void OpenForm(TriageForm which)
+    {
+        if (running || Current is not { } item)
+        {
+            return;
+        }
+
+        formItem = item;
+        form = which;
+        ShowStatus(string.Empty, string.Empty);
+        switch (which)
+        {
+            case TriageForm.Note:
+                string title = item.Text.Trim();
+                titleText = title.Length > DesktopActions.TriageTitleLength ? title[..DesktopActions.TriageTitleLength] : title;
+                focusField = true;
+                break;
+            case TriageForm.Todo:
+                todoText = item.Text.Trim();
+                dateText = string.Empty;
+                focusField = true;
+                break;
+            case TriageForm.Delegate:
+                personText = string.Empty;
+                todoText = item.Text.Trim();
+                dateText = string.Empty;
+                focusField = true;
+                break;
+            case TriageForm.Append:
+                nameText = string.Empty;
+                focusField = true;
+                break;
+            default:
+                // Later: the panel keeps the focus, so 1 and 2 pick a day.
+                laterText = string.Empty;
+                focusPanel = true;
+                break;
+        }
+    }
+
+    private void CloseForm()
+    {
+        form = TriageForm.None;
+        formItem = null;
+        focusPanel = true;
+    }
+
+    private void AskDrop()
+    {
+        if (running || Current is not { } item)
+        {
+            return;
+        }
+
+        form = TriageForm.None;
+        formItem = item;
+        dropping = true;
+        ShowStatus(string.Empty, string.Empty);
+    }
+
+    // Drop in the confirm dialog: removes the line.
+    private async Task DropConfirmed(Confirmation confirmed)
+    {
+        if (formItem is not { } item)
+        {
+            return;
+        }
+
+        if (!await Begin(null))
+        {
+            dropping = false;
+            formItem = null;
+            focusPanel = true;
+            return;
+        }
+
+        ActionResult result;
+        try
+        {
+            result = await Actions.TriageDrop(item, confirmed);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        await Finish(result, string.Empty);
+        if (result.Kind != ActionKind.Done)
+        {
+            formItem = null;
+            focusPanel = true;
+        }
+    }
+
+    private void CancelDrop()
+    {
+        dropping = false;
+        formItem = null;
+        focusPanel = true;
+    }
+
+    // Keys on the panel outside a text field (text fields stop their keys): the action keys, 1 and 2 in the Later
+    // form, Esc.
+    private async Task PanelKeyDown(KeyboardEventArgs e)
+    {
+        if (dropping || running || e.CtrlKey || e.MetaKey || e.AltKey)
+        {
+            return;
+        }
+
+        if (e.Key == "Escape")
+        {
+            if (form != TriageForm.None)
+            {
+                CloseForm();
+            }
+            else
+            {
+                await OnClose.InvokeAsync();
+            }
+
+            return;
+        }
+
+        if (form == TriageForm.Later && formItem is { } item && view is { } shown && e.Key is "1" or "2")
+        {
+            if (!await Begin(null))
+            {
+                return;
+            }
+
+            ActionResult snoozed;
+            try
+            {
+                snoozed = await Actions.TriageSnooze(item, shown.Today.AddDays(e.Key == "1" ? 1 : 7));
+            }
+            finally
+            {
+                running = false;
+            }
+
+            await Finish(snoozed, string.Empty);
+            return;
+        }
+
+        switch (e.Key.ToLowerInvariant())
+        {
+            case "n":
+                OpenForm(TriageForm.Note);
+                break;
+            case "t":
+                OpenForm(TriageForm.Todo);
+                break;
+            case "w":
+                OpenForm(TriageForm.Delegate);
+                break;
+            case "a":
+                OpenForm(TriageForm.Append);
+                break;
+            case "d":
+                AskDrop();
+                break;
+            case "l":
+                OpenForm(TriageForm.Later);
+                break;
+        }
+    }
+
+    // Enter in the title field or Create note; Esc closes the form.
+    private async Task CreateFromItem(KeyboardEventArgs? key)
+    {
+        if (FieldKey(key) is not { } item || !await Begin(null))
+        {
+            return;
+        }
+
+        ActionResult result;
+        try
+        {
+            result = await Actions.TriageToNote(item, titleText);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        await Finish(result, string.Empty);
+    }
+
+    // Enter in the text or date field, or Add todo; an empty date is today.
+    private async Task TodoFromItem(KeyboardEventArgs? key)
+    {
+        if (FieldKey(key) is not { } item || view is not { } shown)
+        {
+            return;
+        }
+
+        string typed = dateText.Trim();
+        DateOnly due = shown.Today;
+        if (typed.Length > 0 && !TodoInput.TryParseDate(typed, shown.Today, out due))
+        {
+            ShowStatus(DesktopActions.TriageDateText, "red");
+            return;
+        }
+
+        if (!await Begin(null))
+        {
+            return;
+        }
+
+        ActionResult result;
+        try
+        {
+            result = await Actions.TriageToTodo(item, todoText, due);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        await Finish(result, string.Empty);
+    }
+
+    // Enter in a Delegate field: a waiting-for todo for the person; an empty follow-up date is in a week.
+    private async Task DelegateItem(KeyboardEventArgs? key)
+    {
+        if (FieldKey(key) is not { } item || view is not { } shown)
+        {
+            return;
+        }
+
+        string typed = dateText.Trim();
+        DateOnly followUp = shown.Today.AddDays(WaitingFor.DefaultFollowUpDays);
+        if (typed.Length > 0 && !TodoInput.TryParseDate(typed, shown.Today, out followUp))
+        {
+            ShowStatus(DesktopActions.TriageDateText, "red");
+            return;
+        }
+
+        if (!await Begin(null))
+        {
+            return;
+        }
+
+        ActionResult result;
+        try
+        {
+            result = await Actions.TriageDelegate(item, personText, todoText, followUp);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        await Finish(result, string.Empty);
+    }
+
+    // Enter in the name field or Add: the name is matched like /open; a sensitive note is unlocked for this one write.
+    private async Task AppendToNote(KeyboardEventArgs? key)
+    {
+        if (FieldKey(key) is not { } item)
+        {
+            return;
+        }
+
+        string typed = nameText.Trim();
+        if (typed.Length == 0 || State.ResolveNote(typed) is not { } name)
+        {
+            ShowStatus(DesktopText.OneLine(DesktopActions.NoNoteNamedText(typed)), "red");
+            return;
+        }
+
+        if (string.Equals(name, Inbox.NoteName, StringComparison.OrdinalIgnoreCase))
+        {
+            ShowStatus(DesktopActions.TriageInboxTargetText, "red");
+            return;
+        }
+
+        if (!await Begin(name))
+        {
+            return;
+        }
+
+        bool sensitive = Snapshot is { } snapshot && snapshot.Sensitive.Any(n => string.Equals(n.Name, name, StringComparison.Ordinal));
+        EditableNote? before = State.Session.Note;
+        bool held = before is not null && string.Equals(before.Name, name, StringComparison.Ordinal);
+        ActionResult result;
+        try
+        {
+            EditableNote? unlocked = null;
+            if (sensitive)
+            {
+                unlocked = await State.ReadSensitive(name);
+                if (unlocked is null)
+                {
+                    ShowStatus(DesktopText.OneLine(DesktopActions.CantUnlockText(name)), "red");
+                    return;
+                }
+            }
+
+            result = await Actions.TriageAppend(item, name, unlocked);
+        }
+        finally
+        {
+            if (sensitive && !held)
+            {
+                // Locked again: the note this panel unlocked leaves the session, and a note open before comes back.
+                State.Session.Close(name);
+                if (before is not null)
+                {
+                    State.Session.Open(before);
+                }
+            }
+
+            running = false;
+        }
+
+        await Finish(result, name);
+    }
+
+    // Tomorrow or Next week in the Later form.
+    private async Task SnoozeChosen(int days)
+    {
+        if (formItem is not { } item || view is not { } shown || !await Begin(null))
+        {
+            return;
+        }
+
+        ActionResult result;
+        try
+        {
+            result = await Actions.TriageSnooze(item, shown.Today.AddDays(days));
+        }
+        finally
+        {
+            running = false;
+        }
+
+        await Finish(result, string.Empty);
+    }
+
+    // Enter in the Later form's date field or Snooze: a day after today.
+    private async Task SnoozeTyped(KeyboardEventArgs? key)
+    {
+        if (FieldKey(key) is not { } item || view is not { } shown)
+        {
+            return;
+        }
+
+        if (!TodoInput.TryParseDate(laterText.Trim(), shown.Today, out DateOnly until))
+        {
+            ShowStatus(DesktopActions.TriageDateText, "red");
+            return;
+        }
+
+        if (until <= shown.Today)
+        {
+            ShowStatus(DesktopActions.TriagePastDayText, "red");
+            return;
+        }
+
+        if (!await Begin(null))
+        {
+            return;
+        }
+
+        ActionResult result;
+        try
+        {
+            result = await Actions.TriageSnooze(item, until);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        await Finish(result, string.Empty);
+    }
+
+    // A form field's key (or a button: null): the form's line for Enter or a button, else null; Esc closes the form.
+    private InboxItem? FieldKey(KeyboardEventArgs? key)
+    {
+        if (key is not null && key.Key == "Escape" && !running)
+        {
+            CloseForm();
+            return null;
+        }
+
+        return (key is null || key.Key == "Enter") && !running ? formItem : null;
+    }
+
+    // Starts an action: one at a time, and only when the parent doesn't hold it back.
+    private async Task<bool> Begin(string? target)
+    {
+        if (running)
+        {
+            return false;
+        }
+
+        running = true;
+        if (Guard is not null && await Guard(target) is { } held)
+        {
+            running = false;
+            ShowStatus(DesktopText.OneLine(held), "red");
+            return false;
+        }
+
+        return true;
+    }
+
+    // Shows how the action ended; after Done the form closes, the next line shows and the panel has the focus.
+    private async Task Finish(ActionResult result, string target)
+    {
+        dropping = false;
+        bool done = result.Kind == ActionKind.Done;
+        ShowStatus(DesktopText.OneLine(result.Text), done ? "accent" : "red");
+        if (done)
+        {
+            form = TriageForm.None;
+            formItem = null;
+            focusPanel = true;
+        }
+
+        if (done || result.Reason == ActionReason.LineKept)
+        {
+            await OnTriaged.InvokeAsync(target);
+        }
+
+        await Load();
+    }
+
+    private void ShowStatus(string text, string cssClass)
+    {
+        statusText = text;
+        statusClass = cssClass;
+    }
+}

@@ -1,0 +1,295 @@
+@inherits StateComponent
+@* The todos tied to one meeting (job 287), on the appointment page and above a meeting note: the open todos.json
+   todos tied to any of the appointments (DesktopState.MeetingAppointments: the day's appointments with the title, or
+   whose meeting note is NoteName). A new todo or a tied one goes to the first appointment. Push moves a todo to the
+   next occurrence of its meeting (DesktopState.NextMeeting); with none, it offers the next 14 days' appointments.
+   Keyboard order: the text field, Add, the tie select, then each row's checkbox and Push. Renders nothing until the
+   appointments are read, or when there are none. *@
+
+@if (appointments is { Count: > 0 } shown)
+{
+    Appointment first = shown[0];
+    bool canHold = MeetingLink.For(first) is not null;
+    <section class="meeting-todos" aria-label="Meeting todos">
+        <h3>Todos</h3>
+        @if (!canHold)
+        {
+            <p class="grey" role="status">@DesktopActions.NoMeetingTodosText</p>
+        }
+        else
+        {
+            IReadOnlyList<TodoItem> tied = State.MeetingTodos(shown);
+            List<TodoItem> untied = (Snapshot?.Todos ?? []).Where(t => t.Done is null && t.Meeting is null).ToList();
+            <div class="meeting-todo-entry">
+                <input type="text" class="meeting-todo-text" value="@newText" maxlength="@DesktopActions.MaxTodoLength"
+                       disabled="@running" aria-label="Todo for this meeting" placeholder="Todo for this meeting"
+                       @oninput="TextTyped" @onkeydown="e => Add(e)" />
+                <button type="button" class="add-meeting-todo" disabled="@running" @onclick="() => Add(null)">Add</button>
+                <select @key="tieGeneration" class="tie-todo" aria-label="Tie an open todo" disabled="@running"
+                        @onchange="e => Tie(e, first)">
+                    <option value="" selected>Tie an open todo…</option>
+                    @foreach (TodoItem todo in untied)
+                    {
+                        string text = DesktopText.OneLine(todo.Text);
+                        <option value="@todo.Id.ToString("D", CultureInfo.InvariantCulture)">@text</option>
+                    }
+                </select>
+            </div>
+            @if (tied.Count > 0)
+            {
+                <ul class="meeting-todo-list">
+                    @foreach (TodoItem todo in tied)
+                    {
+                        string text = DesktopText.OneLine(todo.Text);
+                        <li class="todo meeting-todo">
+                            <label class="todo-line">
+                                <input type="checkbox" class="done" checked="@(asking?.Id == todo.Id)" disabled="@running"
+                                       @onchange="() => Ask(todo)" />
+                                <span class="text cut" title="@text">@text</span>
+                            </label>
+                            <button type="button" class="push-todo" disabled="@running" aria-label="@($"Push to next meeting: {text}")"
+                                    @onclick="() => Push(todo)">Push to next meeting</button>
+                        </li>
+                    }
+                </ul>
+            }
+        }
+        @if (result is { } done)
+        {
+            @if (done.Kind == ActionKind.Done && done.Reason == ActionReason.DoneLogLeft)
+            {
+                <p class="red meeting-todo-result" role="status">@DesktopActions.DoneLogLeftText</p>
+            }
+            else if (done.Kind == ActionKind.Done && done.NextDue is { } moved)
+            {
+                <p class="accent meeting-todo-result" role="status">Moved to @moved.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture).</p>
+            }
+            else if (done.Kind != ActionKind.Done)
+            {
+                <p class="red meeting-todo-result" role="status">@DesktopText.OneLine(done.Text)</p>
+            }
+        }
+        @if (picking is { } pickFor && upcoming is { } choices)
+        {
+            @if (choices.Count == 0)
+            {
+                <p class="grey meeting-picker-none" role="status">No other appointments in the next @DesktopState.UpcomingDays days.</p>
+            }
+            else
+            {
+                <p class="meeting-picker-heading" role="status">No next meeting found. Pick another appointment:</p>
+                <ul class="meeting-picker">
+                    @foreach (Appointment choice in choices)
+                    {
+                        string label = Label(choice);
+                        <li><button type="button" class="pick-meeting cut" title="@label" disabled="@running"
+                                    @onclick="() => TieTo(pickFor, choice)">@label</button></li>
+                    }
+                </ul>
+            }
+        }
+        @if (asking is { } todoAsked)
+        {
+            <ConfirmDialog Question="@($"Mark this todo done? {todoAsked.Text}")" ConfirmLabel="Mark done"
+                           Busy="running" OnConfirm="CompleteAsked" OnCancel="CloseDialog" />
+        }
+    </section>
+}
+
+@code {
+    private IReadOnlyList<Appointment>? appointments;
+    private (DateOnly Day, string? Title, string? NoteName)? loaded;
+    private int request;
+    private string newText = string.Empty;
+    private bool running;
+    private ActionResult? result;
+    private TodoItem? asking;
+    private TodoItem? picking;
+    private IReadOnlyList<Appointment>? upcoming;
+    private int tieGeneration;
+
+    /// <summary>The day of the appointments.</summary>
+    [Parameter]
+    [EditorRequired]
+    public DateOnly Day { get; set; }
+
+    /// <summary>The appointments' title (ordinal); <c>null</c> picks them by <see cref="NoteName"/>.</summary>
+    [Parameter]
+    public string? Title { get; set; }
+
+    /// <summary>The open meeting note's full name, used when <see cref="Title"/> is <c>null</c>.</summary>
+    [Parameter]
+    public string? NoteName { get; set; }
+
+    protected override Task OnParametersSetAsync()
+    {
+        if (loaded == (Day, Title, NoteName))
+        {
+            return Task.CompletedTask;
+        }
+
+        loaded = (Day, Title, NoteName);
+        appointments = null;
+        result = null;
+        picking = null;
+        upcoming = null;
+        return Load();
+    }
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    // Keeps the shown appointments while it reloads; an older request's or another meeting's result is dropped.
+    private async Task Load()
+    {
+        int mine = ++request;
+        (DateOnly Day, string? Title, string? NoteName) asked = (Day, Title, NoteName);
+        IReadOnlyList<Appointment> found = await State.MeetingAppointments(asked.Day, asked.Title, asked.NoteName);
+        if (mine == request && loaded == asked)
+        {
+            appointments = found;
+        }
+    }
+
+    private static string Label(Appointment appointment)
+    {
+        string date = appointment.Start.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture);
+        string time = appointment.AllDay ? string.Empty : " " + appointment.Start.ToString("HH:mm", CultureInfo.InvariantCulture);
+        return DesktopText.OneLine($"{date}{time} {appointment.Title}");
+    }
+
+    private void TextTyped(ChangeEventArgs e) => newText = e.Value?.ToString() ?? string.Empty;
+
+    private async Task Add(KeyboardEventArgs? key)
+    {
+        if ((key is not null && key.Key != "Enter") || running || appointments is not { Count: > 0 } shown)
+        {
+            return;
+        }
+
+        running = true;
+        picking = null;
+        try
+        {
+            ActionResult added = await Actions.AddMeetingTodo(shown[0], newText);
+            result = added.Kind == ActionKind.Done ? null : added;
+            if (added.Kind == ActionKind.Done)
+            {
+                newText = string.Empty;
+            }
+        }
+        finally
+        {
+            running = false;
+        }
+    }
+
+    private async Task Tie(ChangeEventArgs e, Appointment first)
+    {
+        if (running || !Guid.TryParseExact(e.Value?.ToString(), "D", out Guid id))
+        {
+            return;
+        }
+
+        running = true;
+        picking = null;
+        try
+        {
+            ActionResult tied = await Actions.TieTodo(id, first);
+            result = tied.Kind == ActionKind.Done ? null : tied;
+        }
+        finally
+        {
+            running = false;
+            tieGeneration++;
+        }
+    }
+
+    private async Task Push(TodoItem todo)
+    {
+        if (running || Snapshot is not { } snapshot)
+        {
+            return;
+        }
+
+        running = true;
+        picking = null;
+        upcoming = null;
+        result = null;
+        try
+        {
+            if (await State.NextMeeting(todo) is { } next)
+            {
+                result = await Actions.TieTodo(todo.Id, next);
+                return;
+            }
+
+            IReadOnlyList<Appointment> found = await State.UpcomingAppointments(snapshot.Today);
+            upcoming = found.Where(a => todo.Meeting is not { } link || !link.Matches(a)).ToList();
+            picking = todo;
+        }
+        finally
+        {
+            running = false;
+        }
+    }
+
+    private async Task TieTo(TodoItem todo, Appointment chosen)
+    {
+        if (running)
+        {
+            return;
+        }
+
+        running = true;
+        try
+        {
+            result = await Actions.TieTodo(todo.Id, chosen);
+            picking = null;
+            upcoming = null;
+        }
+        finally
+        {
+            running = false;
+        }
+    }
+
+    private void Ask(TodoItem todo)
+    {
+        if (!running)
+        {
+            asking = todo;
+        }
+    }
+
+    private void CloseDialog()
+    {
+        if (!running)
+        {
+            asking = null;
+        }
+    }
+
+    private async Task CompleteAsked(Confirmation confirmed)
+    {
+        if (asking is not { } todo || running)
+        {
+            return;
+        }
+
+        running = true;
+        try
+        {
+            ActionResult completed = await Actions.CompleteTodo(todo, confirmed);
+            result = completed.Kind == ActionKind.Done && completed.Reason != ActionReason.DoneLogLeft ? null : completed;
+        }
+        finally
+        {
+            running = false;
+            asking = null;
+        }
+    }
+}

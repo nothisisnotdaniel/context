@@ -1,0 +1,201 @@
+@inherits StateComponent
+@* A tag's board (job 242, DesktopState.Board): one column per board column from settings.json, each note and note todo
+   with the tag as a card in the column of its #status/<column> token. Dropping a card on another column, or its move
+   buttons (the keyboard path), rewrite that token through DesktopActions.MoveBoardCard. It reloads whenever the state
+   changes, keeping the shown cards meanwhile. *@
+
+<section class="page board-panel" aria-label="Board">
+    <div class="panel-bar">
+        <h2 class="cut" title="@Heading">@Heading</h2>
+        <button type="button" class="close" aria-label="Close" title="Close" @onclick="() => OnClose.InvokeAsync()"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" /></svg></button>
+    </div>
+    @if (!Valid)
+    {
+        <p class="red" role="status">Type /board &lt;tag&gt;.</p>
+    }
+    else if (page is null)
+    {
+        <p class="grey" role="status">Loading…</p>
+    }
+    else if (page.Kind is BoardPageKind.InvalidTag)
+    {
+        <p class="red" role="status">Type /board &lt;tag&gt;.</p>
+    }
+    else if (page.Kind is BoardPageKind.SettingsUnreadable)
+    {
+        <p class="red" role="status">Can't read settings.json.</p>
+    }
+    else if (page.Kind is BoardPageKind.NoBoard)
+    {
+        <p class="grey" role="status">No board for @Shown. Add it under "boards" in settings.json.</p>
+    }
+    else if (page.Kind is BoardPageKind.Unreadable || page.View is not { } view)
+    {
+        <p class="red" role="status">Can't read the board.</p>
+    }
+    else if (view.CardCount == 0)
+    {
+        <p class="grey" role="status">No notes or todos have @Shown.</p>
+    }
+    else
+    {
+        <p class="board-result cut @resultClass" role="status" title="@result">@result</p>
+        <div class="board-columns">
+            @foreach (BoardColumn lane in view.Columns)
+            {
+                string? laneName = lane.Name;
+                string label = laneName is null ? NoStatus : DesktopText.OneLine(laneName);
+                <section class="board-column@(laneName is null ? " no-status" : string.Empty)" aria-label="@label"
+                         @ondragover:preventDefault @ondrop="() => Move(dragged, laneName)" @ondrop:preventDefault>
+                    <h3 class="cut" title="@label">@label</h3>
+                    <ul class="board-cards">
+                        @foreach (BoardCard card in lane.Cards)
+                        {
+                            BoardCard shown = card;
+                            string name = card.Note;
+                            string title = DesktopText.OneLine(name);
+                            <li class="board-card" draggable="true" @ondragstart="() => dragged = shown">
+                                <button type="button" class="note-button cut" title="@title" @onclick="() => OnOpen.InvokeAsync(name)">@title</button>
+                                @if (card.Todo is { } todo)
+                                {
+                                    string text = DesktopText.OneLine(todo.Text);
+                                    <span class="board-todo cut" title="@text">@text</span>
+                                }
+                                <span class="board-moves">
+                                    @if (Before(card) is { } before)
+                                    {
+                                        string beforeLabel = $"Move to {DesktopText.OneLine(before)}";
+                                        <button type="button" class="board-move" aria-label="@beforeLabel" title="@beforeLabel" @onclick="() => Move(shown, before)">←</button>
+                                    }
+                                    @if (After(card) is { } after)
+                                    {
+                                        string afterLabel = $"Move to {DesktopText.OneLine(after)}";
+                                        <button type="button" class="board-move" aria-label="@afterLabel" title="@afterLabel" @onclick="() => Move(shown, after)">→</button>
+                                    }
+                                </span>
+                            </li>
+                        }
+                    </ul>
+                </section>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    /// <summary>The name of the leading column of cards without a status token.</summary>
+    internal const string NoStatus = "No status";
+
+    private BoardPage? page;
+    private string? loaded;
+    private int request;
+    private BoardCard? dragged;
+    private string result = string.Empty;
+    private string resultClass = string.Empty;
+
+    /// <summary>The tag as typed after <c>/board</c> or as <c>TagPanel</c> shows it.</summary>
+    [Parameter]
+    public string Tag { get; set; } = string.Empty;
+
+    /// <summary>Called with a note's name when its card's name is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    private bool Valid => BoardView.TryNormalizeTag(Tag, out _);
+
+    private string Shown => DesktopText.OneLine(TagParser.Format(BoardView.TryNormalizeTag(Tag, out string tag) ? tag : Tag));
+
+    private string Heading => Valid ? $"Board {Shown}" : "Board";
+
+    // The board column before the card's, or null (none for the first column or a card without status).
+    private static string? Before(BoardCard card)
+    {
+        int at = card.Column is null ? -1 : IndexOf(card);
+        return at > 0 ? card.Columns[at - 1] : null;
+    }
+
+    // The board column after the card's (the first one for a card without status), or null after the last.
+    private static string? After(BoardCard card)
+    {
+        int at = card.Column is null ? -1 : IndexOf(card);
+        return at + 1 < card.Columns.Count ? card.Columns[at + 1] : null;
+    }
+
+    private static int IndexOf(BoardCard card)
+    {
+        for (int i = 0; i < card.Columns.Count; i++)
+        {
+            if (string.Equals(card.Columns[i], card.Column, StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    protected override Task OnParametersSetAsync()
+    {
+        if (string.Equals(loaded, Tag, StringComparison.Ordinal))
+        {
+            return Task.CompletedTask;
+        }
+
+        // Another tag: its cards are not known yet, so the old ones go.
+        loaded = Tag;
+        page = null;
+        result = string.Empty;
+        return Load();
+    }
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    // The one move handler: a drop on a column (with the dragged card) or a move button. A drop with no dragged card,
+    // on the No status column or on the card's own column writes nothing. Done reloads the board; anything else shows its red line.
+    private async Task Move(BoardCard? card, string? column)
+    {
+        dragged = null;
+        if (card is null || column is null || string.Equals(card.Column, column, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        ActionResult moved = await Actions.MoveBoardCard(card, column);
+        if (moved.Kind == ActionKind.Done)
+        {
+            result = string.Empty;
+            resultClass = string.Empty;
+            await Load();
+        }
+        else
+        {
+            result = DesktopText.OneLine(moved.Text);
+            resultClass = "red";
+        }
+    }
+
+    // Keeps the shown cards while it reloads. A result for another tag, or an older request's result, is dropped. An
+    // invalid tag reads nothing.
+    private async Task Load()
+    {
+        int mine = ++request;
+        string tag = Tag;
+        if (!BoardView.TryNormalizeTag(tag, out _))
+        {
+            return;
+        }
+
+        BoardPage loadedPage = await State.Board(tag);
+        if (mine == request && string.Equals(tag, Tag, StringComparison.Ordinal))
+        {
+            page = loadedPage;
+        }
+    }
+}

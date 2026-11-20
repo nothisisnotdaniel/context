@@ -7,7 +7,6 @@ namespace Context;
 internal sealed record DesktopSnapshot
 {
     public DesktopSnapshot(
-        bool locked,
         bool failed,
         DateOnly today,
         CurrentView? current,
@@ -15,9 +14,18 @@ internal sealed record DesktopSnapshot
         bool todosUnreadable,
         IReadOnlyList<NoteInfo> notes,
         bool notesUnreadable,
-        string folder)
+        string folder,
+        IReadOnlyList<NoteInfo>? sensitive = null,
+        bool sensitiveSupported = false,
+        bool recoveryReady = false,
+        IReadOnlyList<NoteTodo>? noteTodos = null,
+        bool noteTodosUnreadable = false,
+        IReadOnlyList<SavedSearch>? savedSearches = null,
+        bool savedSearchesUnreadable = false,
+        IReadOnlyList<NoteReview>? reviews = null,
+        bool reviewsUnreadable = false,
+        IReadOnlySet<Guid>? meetingHints = null)
     {
-        Locked = locked;
         Failed = failed;
         Today = today;
         Current = current;
@@ -26,13 +34,20 @@ internal sealed record DesktopSnapshot
         Notes = notes;
         NotesUnreadable = notesUnreadable;
         Folder = folder;
+        Sensitive = sensitive ?? [];
+        SensitiveSupported = sensitiveSupported;
+        RecoveryReady = recoveryReady;
+        NoteTodos = noteTodos ?? [];
+        NoteTodosUnreadable = noteTodosUnreadable;
+        SavedSearches = savedSearches ?? [];
+        SavedSearchesUnreadable = savedSearchesUnreadable;
+        Reviews = reviews ?? [];
+        ReviewsUnreadable = reviewsUnreadable;
+        MeetingHints = meetingHints ?? new HashSet<Guid>();
     }
 
     /// <summary>Returns only the type name, so formatting a snapshot never prints its raw text.</summary>
     public override string ToString() => nameof(DesktopSnapshot);
-
-    /// <summary>True when <c>encryption.json</c> exists: nothing else was read and the window shows only the lock.</summary>
-    public bool Locked { get; }
 
     /// <summary>True when building the snapshot threw; the window shows a fixed error line.</summary>
     public bool Failed { get; }
@@ -40,7 +55,7 @@ internal sealed record DesktopSnapshot
     /// <summary>The day the snapshot is for (todo date classes compare against it).</summary>
     public DateOnly Today { get; }
 
-    /// <summary>The <c>/current</c> view, or <c>null</c> when <see cref="Locked"/> or <see cref="Failed"/>.</summary>
+    /// <summary>Today's current view (as <c>context current</c>: the <c>/meeting</c> numbers and the feed status), or <c>null</c> when <see cref="Failed"/>.</summary>
     public CurrentView? Current { get; }
 
     /// <summary>Every todo in <see cref="TodoStore.List"/> order.</summary>
@@ -58,11 +73,44 @@ internal sealed record DesktopSnapshot
     /// <summary>The data folder (raw).</summary>
     public string Folder { get; }
 
-    /// <summary>The snapshot shown while the data is encrypted.</summary>
-    public static DesktopSnapshot ForLocked(string folder, DateOnly today) =>
-        new(true, false, today, null, [], false, [], false, folder);
+    /// <summary>Every sensitive note in <see cref="NoteStore.ListSensitive"/> order: names and times only, never text.</summary>
+    public IReadOnlyList<NoteInfo> Sensitive { get; }
+
+    /// <summary>True when this OS has a key store for sensitive notes (macOS, Windows).</summary>
+    public bool SensitiveSupported { get; }
+
+    /// <summary>True when the key store holds a recovery public key, so notes can be marked sensitive.</summary>
+    public bool RecoveryReady { get; }
+
+    /// <summary>The open todos inside plain notes (<see cref="TagIndex.NoteTodos"/>), read after a <c>Sync</c>.</summary>
+    public IReadOnlyList<NoteTodo> NoteTodos { get; }
+
+    /// <summary>True when <c>context.db</c> can't be read; then <see cref="NoteTodos"/> is empty.</summary>
+    public bool NoteTodosUnreadable { get; }
+
+    /// <summary>The saved searches in <c>settings.json</c> (<see cref="SettingsStore.ReadSavedSearches"/>), in saved order.</summary>
+    public IReadOnlyList<SavedSearch> SavedSearches { get; }
+
+    /// <summary>True when <c>settings.json</c> or its saved searches can't be read; then <see cref="SavedSearches"/> is empty.</summary>
+    public bool SavedSearchesUnreadable { get; }
+
+    /// <summary>
+    /// The plain notes whose review date is today or earlier (<see cref="NoteReviews.Due"/> over
+    /// <see cref="TagIndex.Reviews"/>), read after a <c>Sync</c> (job 256).
+    /// </summary>
+    public IReadOnlyList<NoteReview> Reviews { get; }
+
+    /// <summary>True when <c>context.db</c> can't be read for the review dates; then <see cref="Reviews"/> is empty.</summary>
+    public bool ReviewsUnreadable { get; }
+
+    /// <summary>
+    /// The ids of the open tied todos (job 287) whose day is today through <see cref="MeetingLink.MaxSearchDays"/> days
+    /// on and whose occurrence is <see cref="MeetingLink.Missing"/> from a source that was read: the todo list shows
+    /// "Meeting cancelled or moved" for them.
+    /// </summary>
+    public IReadOnlySet<Guid> MeetingHints { get; }
 
     /// <summary>The snapshot shown when building one threw.</summary>
     public static DesktopSnapshot ForFailure(string folder, DateOnly today) =>
-        new(false, true, today, null, [], false, [], false, folder);
+        new(true, today, null, [], false, [], false, folder);
 }

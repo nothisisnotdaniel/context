@@ -104,6 +104,40 @@ public sealed class CalendarLinkViewTests : IDisposable
         AssertNoSecret(view, string.Empty);
     }
 
+    // 138: Show is the read the desktop settings use: the same view as a blank argument, and it changes nothing
+    // and downloads nothing.
+    [Fact]
+    public void Show_SameAsABlankArgument_ReadsOnly()
+    {
+        FakeHttpHandler http = FakeHttpHandler.Throw();
+        CalendarLink link = new CalendarLink(root);
+        CalendarFeed feed = new CalendarFeed(root, link, http, () => Now);
+
+        Assert.Equal(CalendarLinkViewKind.NotSet, CalendarLinkView.Show(link, feed).Kind);
+        Assert.False(Directory.Exists(root));
+
+        link.Set(FakeHttpHandler.Link);
+        DateTime at = new(2026, 10, 29, 7, 30, 0, DateTimeKind.Utc);
+        WriteCache(at);
+        byte[] linkBytes = File.ReadAllBytes(LinkPath);
+
+        CalendarLinkView view = CalendarLinkView.Show(link, feed);
+
+        Assert.Equal(Run(string.Empty), view);
+        Assert.Equal(CalendarLinkViewKind.Shown, view.Kind);
+        Assert.Equal(Masked, view.Masked);
+        Assert.Equal(at, view.CachedAtUtc);
+        AssertNoSecret(view, string.Empty);
+        Assert.Equal(linkBytes, File.ReadAllBytes(LinkPath));
+        Assert.Equal(at, File.GetLastWriteTimeUtc(CachePath));
+        Assert.Equal(0, http.Requests);
+
+        File.WriteAllText(LinkPath, "not a link\n");
+
+        Assert.Equal(CalendarLinkViewKind.Unreadable, CalendarLinkView.Show(link, feed).Kind);
+        Assert.Equal("not a link\n", File.ReadAllText(LinkPath));
+    }
+
     // AC-6: set saves the link and drops the old cache; only the mask comes back.
     [Theory]
     [InlineData(FakeHttpHandler.Link)]
@@ -228,35 +262,36 @@ public sealed class CalendarLinkViewTests : IDisposable
         Assert.True(File.Exists(LinkPath));
     }
 
-    // AC-7: the renderer only maps the view.
+    // AC-6 (145): every kind in one run, each with exactly its mask and download time and nothing else.
     [Fact]
-    public void Render_HandBuiltViews_MatchGolden()
+    public void Run_EveryKind_KindMaskAndTime()
     {
-        TimeZoneInfo zone = IcsParserTests.Zone;
-        (string Golden, CalendarLinkView View)[] cases =
-        [
-            ("Link_NotSet", new CalendarLinkView(CalendarLinkViewKind.NotSet)),
-            ("Link_Off_NotSet", new CalendarLinkView(CalendarLinkViewKind.NotSet)),
-            ("Link_Shown_NotDownloaded", new CalendarLinkView(CalendarLinkViewKind.Shown, Masked)),
-            (
-                "Link_Shown_Downloaded",
-                new CalendarLinkView(
-                    CalendarLinkViewKind.Shown, Masked, new DateTime(2026, 10, 29, 7, 30, 0, DateTimeKind.Utc))
-            ),
-            ("Link_Saved", new CalendarLinkView(CalendarLinkViewKind.Saved, Masked)),
-            ("Link_Removed", new CalendarLinkView(CalendarLinkViewKind.Removed)),
-            ("Link_Invalid", new CalendarLinkView(CalendarLinkViewKind.Invalid)),
-            ("Link_Unreadable", new CalendarLinkView(CalendarLinkViewKind.Unreadable)),
-            ("Link_NotSaved", new CalendarLinkView(CalendarLinkViewKind.NotSaved)),
-            ("Link_NotRemoved", new CalendarLinkView(CalendarLinkViewKind.NotRemoved)),
-        ];
+        DateTime downloaded = new(2026, 10, 29, 7, 30, 0, DateTimeKind.Utc);
 
-        foreach ((string golden, CalendarLinkView view) in cases)
+        Assert.Equal(new CalendarLinkView(CalendarLinkViewKind.NotSet), Run(string.Empty));
+        Assert.Equal(new CalendarLinkView(CalendarLinkViewKind.NotSet), Run("OFF"));
+        Assert.Equal(new CalendarLinkView(CalendarLinkViewKind.Saved, Masked), Run(FakeHttpHandler.Link));
+        Assert.Equal(new CalendarLinkView(CalendarLinkViewKind.Shown, Masked), Run(string.Empty));
+        WriteCache(downloaded);
+        Assert.Equal(new CalendarLinkView(CalendarLinkViewKind.Shown, Masked, downloaded), Run(string.Empty));
+        Assert.Equal(new CalendarLinkView(CalendarLinkViewKind.Removed), Run("off"));
+        Assert.Equal(new CalendarLinkView(CalendarLinkViewKind.Invalid), Run("http://example.com/secret"));
+        File.WriteAllText(LinkPath, "http://example.com/x");
+        Assert.Equal(new CalendarLinkView(CalendarLinkViewKind.Unreadable), Run(string.Empty));
+
+        Directory.Delete(root, recursive: true);
+        File.WriteAllText(root, "a file where the folder should be");
+        Assert.Equal(new CalendarLinkView(CalendarLinkViewKind.NotSaved), Run(FakeHttpHandler.Link));
+        File.Delete(root);
+
+        if (OperatingSystem.IsWindows())
         {
-            Assert.Equal(
-                ViewParityTests.Goldens[golden],
-                ViewParityTests.Render(CalendarLinkCommands.Render(view, zone), "/r"));
+            return;
         }
+
+        new CalendarLink(root).Set(FakeHttpHandler.Link);
+        File.SetUnixFileMode(root, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        Assert.Equal(new CalendarLinkView(CalendarLinkViewKind.NotRemoved), Run("off"));
     }
 
     // AC-5 (042)

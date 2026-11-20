@@ -101,5 +101,127 @@ public sealed class DesktopDependencyTests
         Assert.True(found.Length == 0, "Files in Context.Desktop mention Spectre: " + string.Join(", ", found));
     }
 
+    // 094 AC-12: Jint runs the editor bundle in tests only; it never reaches a shipped project.
+    [Theory]
+    [InlineData("src/Context.Desktop/Context.Desktop.csproj")]
+    [InlineData("src/Context.Core/Context.Core.csproj")]
+    [InlineData("src/Context/Context.csproj")]
+    public void ShippedProjects_HaveNoJint(string project)
+    {
+        string path = Path.Combine(RepoFiles.Root(), project);
+        Assert.True(File.Exists(path), "Project file not found: " + path);
+
+        Assert.DoesNotContain("Jint", File.ReadAllText(path), StringComparison.OrdinalIgnoreCase);
+    }
+
+    // 094 AC-12: the editor's npm packages are pinned to exact versions.
+    [Fact]
+    public void EditorPackages_AreExactVersions()
+    {
+        string path = Path.Combine(RepoFiles.Root(), "src/Context.Desktop/editor/package.json");
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+        Assert.False(document.RootElement.TryGetProperty("dependencies", out _), "The editor bundles everything; use devDependencies.");
+        JsonElement packages = document.RootElement.GetProperty("devDependencies");
+
+        string[] loose = packages.EnumerateObject()
+            .Where(p => !System.Text.RegularExpressions.Regex.IsMatch(p.Value.GetString() ?? string.Empty, @"^\d+\.\d+\.\d+$"))
+            .Select(p => p.Name + "@" + p.Value.GetString())
+            .ToArray();
+
+        Assert.Contains(packages.EnumerateObject(), p => p.Name == "prosemirror-markdown");
+        Assert.True(loose.Length == 0, "Editor packages without an exact version: " + string.Join(", ", loose));
+    }
+
+    // 263 AC-9: Mermaid is pinned to exactly 12.3.0, and the license file covers the Mermaid frame bundle.
+    [Fact]
+    public void Mermaid_IsPinnedAndLicensed()
+    {
+        string editor = Path.Combine(RepoFiles.Root(), "src/Context.Desktop/editor");
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(Path.Combine(editor, "package.json")));
+        Assert.Equal("12.3.0", document.RootElement.GetProperty("devDependencies").GetProperty("mermaid").GetString());
+
+        string licenses = File.ReadAllText(Path.Combine(editor, "THIRD-PARTY-LICENSES.txt"));
+        Assert.Contains("mermaid 12.3.0 (MIT)", licenses, StringComparison.Ordinal);
+        Assert.Contains("mermaid-frame.js", licenses, StringComparison.Ordinal);
+    }
+
+    // 283 AC-11: the syntax highlighter's packages are pinned and their licenses ship with editor.js.
+    [Fact]
+    public void Highlighter_IsPinnedAndLicensed()
+    {
+        string editor = Path.Combine(RepoFiles.Root(), "src/Context.Desktop/editor");
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(Path.Combine(editor, "package.json")));
+        JsonElement dev = document.RootElement.GetProperty("devDependencies");
+        Assert.Equal("3.3.0", dev.GetProperty("lowlight").GetString());
+        Assert.Equal("11.11.2", dev.GetProperty("highlight.js").GetString());
+
+        string licenses = File.ReadAllText(Path.Combine(editor, "THIRD-PARTY-LICENSES.txt"));
+        int mermaidPart = licenses.IndexOf("Third-party software bundled into wwwroot/mermaid/mermaid-frame.js", StringComparison.Ordinal);
+        int lowlight = licenses.IndexOf("lowlight 3.3.0 (MIT)", StringComparison.Ordinal);
+        int highlight = licenses.IndexOf("highlight.js 11.11.2 (BSD-3-Clause)", StringComparison.Ordinal);
+        Assert.InRange(lowlight, 0, mermaidPart);
+        Assert.InRange(highlight, 0, mermaidPart);
+        Assert.Contains("Copyright (c) 2006, Ivan Sagalaev.", licenses, StringComparison.Ordinal);
+    }
+
+    // 133 AC-4: Velopack (installer and updater) is a package of the desktop app only, at an exact version.
+    [Fact]
+    public void Velopack_IsReferencedOnlyByTheDesktopProject_AtAnExactVersion()
+    {
+        string root = RepoFiles.Root();
+        XDocument desktop = XDocument.Load(Path.Combine(root, DesktopProject));
+        XElement reference = Assert.Single(
+            desktop.Descendants("PackageReference"),
+            e => e.Attribute("Include")?.Value == "Velopack");
+        Assert.Matches(@"^\d+\.\d+\.\d+$", reference.Attribute("Version")?.Value ?? string.Empty);
+
+        foreach (string project in new[]
+        {
+            "src/Context.Core/Context.Core.csproj", "src/Context/Context.csproj",
+            "tests/Context.Tests/Context.Tests.csproj", "tests/Context.Desktop.Tests/Context.Desktop.Tests.csproj",
+        })
+        {
+            Assert.DoesNotContain("Velopack", File.ReadAllText(Path.Combine(root, project)), StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Core and the console app never get it through a reference either.
+        foreach (string assets in new[] { "src/Context.Core/obj/project.assets.json", "src/Context/obj/project.assets.json" })
+        {
+            string path = Path.Combine(root, assets);
+            Assert.True(File.Exists(path), path + " is missing. Run `dotnet restore` first.");
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+            Assert.DoesNotContain(
+                document.RootElement.GetProperty("libraries").EnumerateObject(),
+                p => p.Name.StartsWith("Velopack", StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
     private static bool IsSpectre(string name) => name.StartsWith("Spectre", StringComparison.OrdinalIgnoreCase);
+
+    // 136 AC-10: sensitive notes use only what .NET ships; the desktop project gets no new package.
+    [Fact]
+    public void DesktopProject_HasExactlyItsTwoPackages()
+    {
+        XDocument desktop = XDocument.Load(Path.Combine(RepoFiles.Root(), DesktopProject));
+
+        Assert.Equal(
+            ["Photino.Blazor", "Velopack"],
+            desktop.Descendants("PackageReference").Select(e => e.Attribute("Include")?.Value ?? string.Empty).Order(StringComparer.Ordinal).ToArray());
+    }
+
+    // 217 AC-8: Outlook is read late-bound through dynamic: no Office interop assembly and no Outlook package, in the
+    // assembly's references or the desktop's lock file.
+    [Fact]
+    public void Desktop_HasNoOfficeInterop()
+    {
+        string[] found = typeof(DesktopState).Assembly.GetReferencedAssemblies()
+            .Select(r => r.Name ?? string.Empty)
+            .Where(n => n.Contains("Office", StringComparison.OrdinalIgnoreCase) || n.Contains("Outlook", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        string lockFile = File.ReadAllText(Path.Combine(RepoFiles.Root(), "src/Context.Desktop/packages.lock.json"));
+
+        Assert.Empty(found);
+        Assert.DoesNotContain("Office", lockFile, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Outlook", lockFile, StringComparison.OrdinalIgnoreCase);
+    }
 }

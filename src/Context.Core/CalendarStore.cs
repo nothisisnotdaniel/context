@@ -38,16 +38,13 @@ internal sealed class CalendarStore
     private static readonly Encoding Utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
     private readonly TimeZoneInfo local;
-    private readonly Encryption? encryption;
 
     /// <param name="root">The folder that holds <c>calendar/</c>.</param>
     /// <param name="local">The zone events are converted to.</param>
-    /// <param name="encryption">The session's encryption state, to read encrypted <c>.ics</c> files.</param>
-    public CalendarStore(string root, TimeZoneInfo local, Encryption? encryption = null)
+    public CalendarStore(string root, TimeZoneInfo local)
     {
         Folder = Path.Combine(root, FolderName);
         this.local = local;
-        this.encryption = encryption;
     }
 
     /// <summary>The full path of the <c>calendar</c> folder.</summary>
@@ -71,12 +68,27 @@ internal sealed class CalendarStore
     {
         DateTime from = day.ToDateTime(TimeOnly.MinValue);
         DateTime to = from.AddDays(1);
-        List<Appointment> appointments = extra.Where(a => Overlaps(a, from, to)).ToList();
+        return Read(extra, a => Overlaps(a, from, to), text => IcsParser.Parse(text, local, day));
+    }
+
+    /// <summary>
+    /// Every event in the files plus <paramref name="extra"/>, sorted like <see cref="Day(DateOnly, IReadOnlyList{Appointment})"/>
+    /// (all-day first, then by start, then by title), and the names of the files that couldn't be read.
+    /// </summary>
+    public CalendarDay All(IReadOnlyList<Appointment> extra) =>
+        Read(extra, _ => true, text => IcsParser.Parse(text, local));
+
+    private CalendarDay Read(
+        IReadOnlyList<Appointment> extra,
+        Func<Appointment, bool> keep,
+        Func<string, IReadOnlyList<Appointment>> parse)
+    {
+        List<Appointment> appointments = extra.Where(keep).ToList();
         List<string> unreadable = [];
         foreach (string path in Files(unreadable))
         {
             string name = Path.GetFileName(path);
-            string? text = ReadText(path, encryption, Vault.KindCalendar);
+            string? text = ReadText(path);
             if (text is null)
             {
                 unreadable.Add(name);
@@ -85,9 +97,9 @@ internal sealed class CalendarStore
 
             try
             {
-                foreach (Appointment appointment in IcsParser.Parse(text, local))
+                foreach (Appointment appointment in parse(text))
                 {
-                    if (Overlaps(appointment, from, to))
+                    if (keep(appointment))
                     {
                         appointments.Add(appointment);
                     }
@@ -108,7 +120,10 @@ internal sealed class CalendarStore
         return new CalendarDay(sorted, unreadable);
     }
 
-    private static bool Overlaps(Appointment appointment, DateTime from, DateTime to)
+    /// <summary>
+    /// True when the appointment's span overlaps <c>[from, to)</c>, or it has no length and starts in it.
+    /// </summary>
+    internal static bool Overlaps(Appointment appointment, DateTime from, DateTime to)
     {
         if (appointment.End < appointment.Start)
         {
@@ -152,50 +167,14 @@ internal sealed class CalendarStore
     }
 
     /// <summary>
-    /// The file's text (UTF-8, BOM dropped), or <c>null</c> if it can't be read, can't be decrypted or is too large.
-    /// An encrypted file is decrypted as <paramref name="kind"/>; it may be <see cref="Vault.Overhead"/> bytes
-    /// larger than <see cref="MaxFileBytes"/>, but its plain text may not.
+    /// The file's text (UTF-8, BOM dropped), or <c>null</c> if it can't be read or is larger than
+    /// <see cref="MaxFileBytes"/>.
     /// </summary>
-    internal static string? ReadText(string path, Encryption? encryption = null, string kind = Vault.KindCalendar)
+    internal static string? ReadText(string path)
     {
-        const long Limit = MaxFileBytes + Vault.Overhead;
         try
         {
-            using FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            if (stream.Length > Limit)
-            {
-                return null;
-            }
-
-            // Read at most one byte past the cap, in case the file grows while it is read.
-            byte[] buffer = new byte[(int)stream.Length + 1];
-            int total = 0;
-            while (total < buffer.Length)
-            {
-                int read = stream.Read(buffer, total, buffer.Length - total);
-                if (read == 0)
-                {
-                    break;
-                }
-
-                total += read;
-                if (total == buffer.Length && buffer.Length <= Limit)
-                {
-                    Array.Resize(ref buffer, (int)Math.Min(buffer.Length * 2L, Limit + 1));
-                }
-            }
-
-            if (total > Limit)
-            {
-                return null;
-            }
-
-            byte[] bytes = Encryption.Unprotect(encryption, kind, buffer[..total]);
-            if (bytes.Length > MaxFileBytes)
-            {
-                return null;
-            }
-
+            byte[] bytes = BoundedFile.Read(path, MaxFileBytes);
             string text = Utf8.GetString(bytes);
             return text.Length > 0 && text[0] == '﻿' ? text[1..] : text;
         }

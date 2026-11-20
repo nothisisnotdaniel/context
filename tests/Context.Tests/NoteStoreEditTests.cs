@@ -1,0 +1,417 @@
+using System.Security.Cryptography;
+using System.Text;
+
+namespace Context.Tests;
+
+// 094 AC-5 / AC-6: NoteStore.ReadForEdit and SaveIfUnchanged keep files byte for byte unless the text changed, keep
+// CRLF and a BOM, and write nothing when the file changed on disk or is gone.
+public sealed class NoteStoreEditTests : IDisposable
+{
+    private static readonly byte[] Bom = [0xEF, 0xBB, 0xBF];
+
+    private readonly string root = Path.Combine(Path.GetTempPath(), "context-edit-" + Guid.NewGuid().ToString("N"));
+    private readonly NoteStore store;
+
+    public NoteStoreEditTests()
+    {
+        Directory.CreateDirectory(root);
+        store = new NoteStore(root);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    // 298 AC-4: SaveIfUnchanged with a 72-character CJK title succeeds and leaves no temp file.
+    [Fact]
+    public void SaveIfUnchanged_LongMultiByteTitle_NoTempLeft()
+    {
+        string title = new string('漢', 72);
+        NoteInfo note = Write(title, Encoding.UTF8.GetBytes("# old\n"));
+        EditableNote opened = store.ReadForEdit(note);
+
+        NoteSaveResult result = store.SaveIfUnchanged(opened, "# new\n", out EditableNote? saved);
+
+        Assert.Equal(NoteSaveResult.Saved, result);
+        Assert.NotNull(saved);
+        Assert.Equal("# new\n", File.ReadAllText(note.Path));
+        Assert.Empty(Directory.GetFiles(root, "*.tmp"));
+    }
+
+    [Fact]
+    public void ReadForEdit_PlainLf_TextAndVersion()
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes("# Plan\n\nText #tag\n");
+        NoteInfo note = Write("Plan", bytes);
+
+        EditableNote opened = store.ReadForEdit(note);
+
+        Assert.Equal("Plan", opened.Name);
+        Assert.Equal(note.Path, opened.Path);
+        Assert.Equal("# Plan\n\nText #tag\n", opened.Text);
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(bytes)), opened.Version);
+        Assert.False(opened.HadCrlf);
+        Assert.False(opened.HadBom);
+        Assert.Equal("EditableNote", opened.ToString());
+    }
+
+    [Fact]
+    public void ReadForEdit_CrlfAndBom_TextHasLfOnly()
+    {
+        NoteInfo note = Write("Win", [.. Bom, .. Encoding.UTF8.GetBytes("# Win\r\n\r\nLine\r\n")]);
+
+        EditableNote opened = store.ReadForEdit(note);
+
+        Assert.Equal("# Win\n\nLine\n", opened.Text);
+        Assert.True(opened.HadCrlf);
+        Assert.True(opened.HadBom);
+    }
+
+    // AC-5: saving the text as opened writes nothing: same bytes, same last-write time.
+    [Theory]
+    [InlineData("# Plain\n\nText\n", false)]
+    [InlineData("# Win\r\n\r\nLine\r\n", true)]
+    [InlineData("* lossy list\n__b__\n", false)]
+    public void SaveIfUnchanged_SameText_WritesNothing(string text, bool bom)
+    {
+        NoteInfo note = Write("Note", bom ? [.. Bom, .. Encoding.UTF8.GetBytes(text)] : Encoding.UTF8.GetBytes(text));
+        File.SetLastWriteTimeUtc(note.Path, new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc));
+        EditableNote opened = store.ReadForEdit(note);
+        SortedDictionary<string, string> before = FileSnapshot.Take(root);
+
+        NoteSaveResult result = store.SaveIfUnchanged(opened, opened.Text, out EditableNote? saved);
+
+        Assert.Equal(NoteSaveResult.Unchanged, result);
+        Assert.Null(saved);
+        Assert.Equal(before, FileSnapshot.Take(root));
+    }
+
+    // AC-5: an edit keeps CRLF line endings and the BOM.
+    [Fact]
+    public void SaveIfUnchanged_Edit_KeepsCrlfAndBom()
+    {
+        NoteInfo note = Write("Win", [.. Bom, .. Encoding.UTF8.GetBytes("# Win\r\n\r\nLine\r\n")]);
+        EditableNote opened = store.ReadForEdit(note);
+
+        NoteSaveResult result = store.SaveIfUnchanged(opened, "# Win\n\nLine\nMore\n", out EditableNote? saved);
+
+        Assert.Equal(NoteSaveResult.Saved, result);
+        byte[] expected = [.. Bom, .. Encoding.UTF8.GetBytes("# Win\r\n\r\nLine\r\nMore\r\n")];
+        Assert.Equal(expected, File.ReadAllBytes(note.Path));
+        Assert.NotNull(saved);
+        Assert.Equal("# Win\n\nLine\nMore\n", saved.Text);
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(expected)), saved.Version);
+        Assert.True(saved.HadCrlf);
+        Assert.True(saved.HadBom);
+        Assert.Equal(["Win.md"], Directory.GetFiles(root).Select(f => Path.GetFileName(f)).ToArray());
+    }
+
+    // AC-5: a plain LF file gets exactly the new text, and the saved note can be saved again.
+    [Fact]
+    public void SaveIfUnchanged_Edit_PlainBytesAndSavesAgain()
+    {
+        NoteInfo note = Write("Plain", Encoding.UTF8.GetBytes("Old\n"));
+        EditableNote opened = store.ReadForEdit(note);
+
+        Assert.Equal(NoteSaveResult.Saved, store.SaveIfUnchanged(opened, "New #tag\n", out EditableNote? saved));
+        Assert.Equal(Encoding.UTF8.GetBytes("New #tag\n"), File.ReadAllBytes(note.Path));
+        Assert.Equal(NoteSaveResult.Saved, store.SaveIfUnchanged(saved!, "Newer\n", out _));
+        Assert.Equal(Encoding.UTF8.GetBytes("Newer\n"), File.ReadAllBytes(note.Path));
+    }
+
+    // AC-6: a file changed on disk since it was opened is not overwritten.
+    [Fact]
+    public void SaveIfUnchanged_ChangedOnDisk_WritesNothing()
+    {
+        NoteInfo note = Write("Note", Encoding.UTF8.GetBytes("Mine\n"));
+        EditableNote opened = store.ReadForEdit(note);
+        File.WriteAllText(note.Path, "Theirs\n");
+        SortedDictionary<string, string> before = FileSnapshot.Take(root);
+
+        NoteSaveResult result = store.SaveIfUnchanged(opened, "Mine, edited\n", out EditableNote? saved);
+
+        Assert.Equal(NoteSaveResult.ChangedOnDisk, result);
+        Assert.Null(saved);
+        Assert.Equal(before, FileSnapshot.Take(root));
+    }
+
+    // AC-6: a deleted file is not created again.
+    [Fact]
+    public void SaveIfUnchanged_Missing_WritesNothing()
+    {
+        NoteInfo note = Write("Gone", Encoding.UTF8.GetBytes("Text\n"));
+        EditableNote opened = store.ReadForEdit(note);
+        File.Delete(note.Path);
+
+        NoteSaveResult result = store.SaveIfUnchanged(opened, "Edited\n", out _);
+
+        Assert.Equal(NoteSaveResult.Missing, result);
+        Assert.Empty(Directory.GetFiles(root));
+    }
+
+    // An empty note reads as empty text with the hash of no bytes.
+    [Fact]
+    public void ReadForEdit_Empty_EmptyText()
+    {
+        NoteInfo note = Write("Empty", []);
+
+        EditableNote opened = store.ReadForEdit(note);
+
+        Assert.Equal(string.Empty, opened.Text);
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(Array.Empty<byte>())), opened.Version);
+        Assert.Equal(NoteSaveResult.Saved, store.SaveIfUnchanged(opened, "Now text\n", out _));
+        Assert.Equal("Now text\n", File.ReadAllText(note.Path));
+    }
+
+    // A note over the limit is not opened; one exactly at the limit is.
+    [Fact]
+    public void ReadForEdit_OverLimit_Refused()
+    {
+        NoteInfo big = Write("Big", Encoding.ASCII.GetBytes(new string('a', (int)NoteStore.MaxEditBytes + 1)));
+        NoteInfo edge = Write("Edge", Encoding.ASCII.GetBytes(new string('a', (int)NoteStore.MaxEditBytes)));
+
+        Assert.ThrowsAny<IOException>(() => store.ReadForEdit(big));
+        Assert.Equal((int)NoteStore.MaxEditBytes, store.ReadForEdit(edge).Text.Length);
+    }
+
+    // Text that would be over the limit on disk (here through CRLF) writes nothing.
+    [Fact]
+    public void SaveIfUnchanged_OverLimitOnDisk_WritesNothing()
+    {
+        NoteInfo note = Write("Win", Encoding.ASCII.GetBytes("a\r\n"));
+        EditableNote opened = store.ReadForEdit(note);
+        SortedDictionary<string, string> before = FileSnapshot.Take(root);
+        string text = new string('\n', (int)(NoteStore.MaxEditBytes / 2) + 1);
+
+        NoteSaveResult result = store.SaveIfUnchanged(opened, text, out EditableNote? saved);
+
+        Assert.Equal(NoteSaveResult.TooLarge, result);
+        Assert.Null(saved);
+        Assert.Equal(before, FileSnapshot.Take(root));
+    }
+
+    // A file that grew over the limit since it was opened counts as changed and is not overwritten.
+    [Fact]
+    public void SaveIfUnchanged_GrewOverLimit_ChangedOnDisk()
+    {
+        NoteInfo note = Write("Plan", Encoding.UTF8.GetBytes("# Plan\n"));
+        EditableNote opened = store.ReadForEdit(note);
+        File.WriteAllBytes(note.Path, Encoding.ASCII.GetBytes(new string('b', (int)NoteStore.MaxEditBytes + 10)));
+        SortedDictionary<string, string> before = FileSnapshot.Take(root);
+
+        Assert.Equal(NoteSaveResult.ChangedOnDisk, store.SaveIfUnchanged(opened, "# Plan\n\nMore\n", out _));
+        Assert.Equal(before, FileSnapshot.Take(root));
+    }
+
+    // A FIFO named like a note is never opened (it reports length 0), so reading it returns at once as an empty note
+    // instead of blocking the reader, and a save over it (opened with other text) writes nothing.
+    [Fact]
+    public async Task Fifo_ReadWithoutBlocking_SaveWritesNothing()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        NoteInfo plan = Write("Plan", Encoding.UTF8.GetBytes("# Plan\n"));
+        EditableNote opened = store.ReadForEdit(plan);
+        File.Delete(plan.Path);
+        using (System.Diagnostics.Process mkfifo = System.Diagnostics.Process.Start("mkfifo", plan.Path))
+        {
+            await mkfifo.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(0, mkfifo.ExitCode);
+        }
+
+        EditableNote fifo = await Task.Run(() => store.ReadForEdit(plan)).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(string.Empty, fifo.Text);
+        NoteSaveResult result = await Task.Run(() => store.SaveIfUnchanged(opened, "# Plan\n\nMore\n", out _)).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(NoteSaveResult.ChangedOnDisk, result);
+        Assert.Equal(["Plan.md"], Directory.GetFiles(root).Select(f => Path.GetFileName(f)).ToArray());
+    }
+
+    // The temp file of a save is private to the owner.
+    [Fact]
+    public void SaveIfUnchanged_TempFileIsPrivate()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        NoteInfo note = Write("Plan", Encoding.UTF8.GetBytes("# Plan\n"));
+        EditableNote opened = store.ReadForEdit(note);
+        File.SetUnixFileMode(note.Path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+
+        Assert.Equal(NoteSaveResult.Saved, store.SaveIfUnchanged(opened, "# Plan\n\nMore\n", out _));
+
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(note.Path));
+    }
+
+    // 152 AC-8: saving a subpage lands on its own file; the temp file lives in its folder and is gone afterwards.
+    [Fact]
+    public void SaveIfUnchanged_Child_LandsOnItsFile_NoStrayFile()
+    {
+        Write("Meetings", Encoding.UTF8.GetBytes("# Meetings\n"));
+        Directory.CreateDirectory(Path.Combine(root, "Meetings"));
+        File.WriteAllText(Path.Combine(root, "Meetings", "Meeting 1.md"), "# Meeting 1\n");
+        Assert.True(store.TryFind("Meetings/Meeting 1", out NoteInfo? child));
+        EditableNote opened = store.ReadForEdit(child!);
+
+        Assert.Equal("Meetings/Meeting 1", opened.Name);
+        Assert.Equal(NoteSaveResult.Saved, store.SaveIfUnchanged(opened, "# Meeting 1\n\nAgenda\n", out EditableNote? saved));
+
+        Assert.Equal("Meetings/Meeting 1", saved!.Name);
+        Assert.Equal("# Meeting 1\n\nAgenda\n", File.ReadAllText(Path.Combine(root, "Meetings", "Meeting 1.md")));
+        Assert.Equal("# Meetings\n", File.ReadAllText(Path.Combine(root, "Meetings.md")));
+        Assert.Equal(["Meetings.md"], Directory.GetFiles(root).Select(f => Path.GetFileName(f)).ToArray());
+        Assert.Equal(["Meeting 1.md"], Directory.GetFiles(Path.Combine(root, "Meetings")).Select(f => Path.GetFileName(f)).ToArray());
+        Assert.Equal([Path.Combine(root, "Meetings")], Directory.GetDirectories(root));
+    }
+
+    // 152 AC-8: Save (used by import) stays top-level only: a title with / is still refused.
+    [Fact]
+    public void Save_TitleWithSlash_StillRefused()
+    {
+        Write("Meetings", Encoding.UTF8.GetBytes("# Meetings\n"));
+
+        Assert.Throws<ArgumentException>(() => store.Save("Meetings/Meeting 1", Encoding.UTF8.GetBytes("x")));
+
+        Assert.Equal(["Meetings.md"], Directory.GetFileSystemEntries(root).Select(f => Path.GetFileName(f)).ToArray());
+    }
+
+    // 271 AC-1: a mixed file reads with only \n, one flag per break and the majority ending; uniform files have no flags.
+    [Theory]
+    [InlineData("a\r\nb\nc\nd\r\n", true, "CLLC")]
+    [InlineData("a\nb\nc\r\n", false, "LLC")]
+    [InlineData("a\nb\n", false, null)]
+    [InlineData("a\r\nb\r\n", true, null)]
+    [InlineData("single", false, null)]
+    public void ReadForEdit_MixedEndings_FlagsAndMajority(string content, bool hadCrlf, string? flags)
+    {
+        NoteInfo note = Write("Mixed", [.. Bom, .. Encoding.UTF8.GetBytes(content)]);
+
+        EditableNote opened = store.ReadForEdit(note);
+
+        Assert.Equal(content.Replace("\r\n", "\n", StringComparison.Ordinal), opened.Text);
+        Assert.Equal(hadCrlf, opened.HadCrlf);
+        Assert.True(opened.HadBom);
+        Assert.Equal(flags, opened.LineCrlf is null ? null : new string(opened.LineCrlf.Select(f => f ? 'C' : 'L').ToArray()));
+    }
+
+    // 271 AC-2 / AC-6: one edited line in a mixed note (with a BOM) changes only that line's bytes; the saved note
+    // matches a fresh read, and a second edit still keeps the untouched lines' endings.
+    [Fact]
+    public void SaveIfUnchanged_MixedEdit_KeepsUntouchedEndings_AndSavesAgain()
+    {
+        NoteInfo note = Write("Mixed", [.. Bom, .. Encoding.UTF8.GetBytes("# Mixed\r\none\ntwo\nthree\r\nfour\n")]);
+        EditableNote opened = store.ReadForEdit(note);
+        Assert.False(opened.HadCrlf);
+
+        Assert.Equal(NoteSaveResult.Saved, store.SaveIfUnchanged(opened, "# Mixed\none\nTWO\nthree\nfour\n", out EditableNote? saved));
+
+        Assert.Equal([.. Bom, .. Encoding.UTF8.GetBytes("# Mixed\r\none\nTWO\nthree\r\nfour\n")], File.ReadAllBytes(note.Path));
+        Assert.NotNull(saved);
+        EditableNote fresh = store.ReadForEdit(note);
+        Assert.Equal(fresh.Text, saved.Text);
+        Assert.Equal(fresh.Version, saved.Version);
+        Assert.Equal(fresh.HadCrlf, saved.HadCrlf);
+        Assert.Equal(fresh.HadBom, saved.HadBom);
+        Assert.Equal(fresh.LineCrlf, saved.LineCrlf);
+
+        Assert.Equal(NoteSaveResult.Saved, store.SaveIfUnchanged(saved, "# Mixed\none\nTWO\nthree\nFOUR\nfive\n", out EditableNote? again));
+
+        Assert.Equal([.. Bom, .. Encoding.UTF8.GetBytes("# Mixed\r\none\nTWO\nthree\r\nFOUR\nfive\n")], File.ReadAllBytes(note.Path));
+        Assert.NotNull(again);
+        Assert.Equal(store.ReadForEdit(note).LineCrlf, again.LineCrlf);
+    }
+
+    // 271 AC-2: every line the diff marks Same keeps its own ending; only the edited line's bytes differ.
+    [Fact]
+    public void SaveIfUnchanged_MixedEdit_SameLinesKeepBytes()
+    {
+        string original = "a\r\nb\nc\r\nd\ne\r\nf";
+        NoteInfo note = Write("Mixed", Encoding.UTF8.GetBytes(original));
+        EditableNote opened = store.ReadForEdit(note);
+        string edited = "a\nb\nC!\nd\ne\nf";
+
+        Assert.Equal(NoteSaveResult.Saved, store.SaveIfUnchanged(opened, edited, out _));
+
+        string[] before = original.Split('\n');
+        string[] after = File.ReadAllText(note.Path).Split('\n');
+        List<DiffLine> diff = TextDiff.Lines(opened.Text, edited).Lines.ToList();
+        Assert.Equal(before.Length, after.Length);
+        for (int i = 0; i < before.Length; i++)
+        {
+            if (diff[i].Kind == DiffKind.Same)
+            {
+                Assert.Equal(before[i], after[i]);
+            }
+        }
+
+        Assert.Equal("a\r\nb\nC!\r\nd\ne\r\nf", File.ReadAllText(note.Path));
+    }
+
+    // 271 AC-7: uniform notes, with or without a BOM, are written exactly as before.
+    [Theory]
+    [InlineData("a\nb\n", false, "a\nb\nc\n")]
+    [InlineData("a\nb\n", true, "a\nb\nc\n")]
+    [InlineData("a\r\nb\r\n", false, "a\r\nb\r\nc\r\n")]
+    [InlineData("a\r\nb\r\n", true, "a\r\nb\r\nc\r\n")]
+    public void SaveIfUnchanged_Uniform_AsBefore(string content, bool bom, string expected)
+    {
+        byte[] start = Encoding.UTF8.GetBytes(content);
+        NoteInfo note = Write("Uniform", bom ? [.. Bom, .. start] : start);
+        EditableNote opened = store.ReadForEdit(note);
+
+        Assert.Equal(NoteSaveResult.Saved, store.SaveIfUnchanged(opened, "a\nb\nc\n", out EditableNote? saved));
+
+        byte[] written = Encoding.UTF8.GetBytes(expected);
+        Assert.Equal(bom ? [.. Bom, .. written] : written, File.ReadAllBytes(note.Path));
+        Assert.NotNull(saved);
+        Assert.Null(saved.LineCrlf);
+    }
+
+    // 271 AC-7: a mixed note saved without an edit writes nothing.
+    [Fact]
+    public void SaveIfUnchanged_MixedSameText_WritesNothing()
+    {
+        NoteInfo note = Write("Mixed", Encoding.UTF8.GetBytes("a\r\nb\nc\n"));
+        EditableNote opened = store.ReadForEdit(note);
+        SortedDictionary<string, string> before = FileSnapshot.Take(root);
+
+        Assert.Equal(NoteSaveResult.Unchanged, store.SaveIfUnchanged(opened, opened.Text, out EditableNote? saved));
+
+        Assert.Null(saved);
+        Assert.Equal(before, FileSnapshot.Take(root));
+    }
+
+    // 271 AC-9: the size check counts the bytes after the endings are applied.
+    [Fact]
+    public void SaveIfUnchanged_MixedOverLimitOnDisk_TooLarge()
+    {
+        NoteInfo note = Write("Mixed", Encoding.ASCII.GetBytes("a\r\nb\r\nc\n"));
+        EditableNote opened = store.ReadForEdit(note);
+        Assert.True(opened.HadCrlf);
+        SortedDictionary<string, string> before = FileSnapshot.Take(root);
+        // In plain \n this is under the limit; every added break becomes \r\n on disk, which is over it.
+        string text = "a\nb\nc\n" + new string('\n', (int)(NoteStore.MaxEditBytes / 2));
+        Assert.True(Encoding.UTF8.GetByteCount(text) <= NoteStore.MaxEditBytes);
+
+        Assert.Equal(NoteSaveResult.TooLarge, store.SaveIfUnchanged(opened, text, out EditableNote? saved));
+
+        Assert.Null(saved);
+        Assert.Equal(before, FileSnapshot.Take(root));
+    }
+
+    private NoteInfo Write(string name, byte[] bytes)
+    {
+        string path = Path.Combine(root, name + ".md");
+        File.WriteAllBytes(path, bytes);
+        return new NoteInfo(name, File.GetLastWriteTime(path), path);
+    }
+}

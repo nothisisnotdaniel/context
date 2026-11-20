@@ -23,20 +23,20 @@ internal sealed class CalendarLink
     /// <summary>The file name of the link inside the root.</summary>
     public const string FileName = "calendar-link.txt";
 
+    /// <summary>The largest <c>calendar-link.txt</c> that is read (4096 bytes); a bigger one can't be read.</summary>
+    public const long MaxFileBytes = 4096;
+
     private const string Https = "https";
     private const string Webcal = "webcal";
 
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
     private readonly string root;
-    private readonly Encryption? encryption;
 
     /// <param name="root">The folder <c>calendar-link.txt</c> lives in.</param>
-    /// <param name="encryption">The session's encryption state; <c>null</c> (or no vault) keeps the file plain.</param>
-    public CalendarLink(string root, Encryption? encryption = null)
+    public CalendarLink(string root)
     {
         this.root = Path.GetFullPath(root);
-        this.encryption = encryption;
     }
 
     /// <summary>The full path of <c>calendar-link.txt</c>.</summary>
@@ -57,7 +57,10 @@ internal sealed class CalendarLink
         string text;
         try
         {
-            text = Encryption.DecodeText(Encryption.ReadBytes(encryption, path, Vault.KindCalendarLink));
+            // Decoded like File.ReadAllText: UTF-8, or the encoding of a byte order mark.
+            using StreamReader reader = new StreamReader(
+                new MemoryStream(BoundedFile.Read(path, MaxFileBytes)), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            text = reader.ReadToEnd();
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -81,12 +84,11 @@ internal sealed class CalendarLink
     public Uri Set(string value)
     {
         Uri uri = Validate(value) ?? throw new ArgumentException("Not a valid calendar link.", nameof(value));
-        Directory.CreateDirectory(root);
+        PrivateFile.CreateFolder(root);
         string temp = Path.Combine(root, $".{FileName}.{Guid.NewGuid():N}.tmp");
         try
         {
-            byte[] plain = Utf8NoBom.GetBytes(uri.AbsoluteUri + "\n");
-            WritePrivate(temp, Encryption.Protect(encryption, Vault.KindCalendarLink, plain));
+            PrivateFile.Write(temp, Utf8NoBom.GetBytes(uri.AbsoluteUri + "\n"));
             File.Move(temp, FilePath, overwrite: true);
         }
         finally
@@ -177,22 +179,4 @@ internal sealed class CalendarLink
 
     /// <summary>The link without its path, query or port: <c>https://&lt;host&gt;/…</c>.</summary>
     public static string Mask(Uri uri) => $"https://{uri.Host}/…";
-
-    /// <summary>Creates <paramref name="path"/> (it must not exist) readable and writable only by the user.</summary>
-    internal static void WritePrivate(string path, byte[] bytes)
-    {
-        FileStreamOptions options = new FileStreamOptions
-        {
-            Mode = FileMode.CreateNew,
-            Access = FileAccess.Write,
-            Share = FileShare.None,
-        };
-        if (!OperatingSystem.IsWindows())
-        {
-            options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
-        }
-
-        using FileStream stream = new FileStream(path, options);
-        stream.Write(bytes);
-    }
 }

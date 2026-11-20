@@ -1,0 +1,353 @@
+@* The slim bar across the top of the main area: Today (home), Search (magnifying glass), Capture (a "T" with a text
+   caret) and Pick a day (calendar), then More actions. Capture opens a small popover with one text field; Return
+   hands the text to the parent, which captures it to the inbox and answers in the main status line. Search opens the
+   same kind of popover; Return hands the text to the parent, which shows the search panel, and Esc gives the focus
+   back to the icon. The pick opens a month calendar (Monday-first weeks with ISO week numbers, today and the shown
+   day marked); the picked day is handed to the parent, which opens that day's note (saving unsaved changes first).
+   More actions (three dots, last) opens the shown page's actions as a menu; the chosen item's id goes to the parent,
+   which runs it. At most one of the four popovers is open. *@
+
+<div class="top-bar" @onkeydown="Key">
+    <div class="top-bar-start"></div>
+    <div class="top-bar-buttons">
+        <button type="button" class="today-open" aria-label="Today" title="Today" @onclick="() => OnToday.InvokeAsync()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg></button>
+        <button type="button" class="search-open" aria-label="Search" title="Search" aria-expanded="@(searchOpen ? "true" : "false")" @ref="searchButton" @onclick="ToggleSearch"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/></svg></button>
+        <button type="button" class="capture-open" aria-label="Capture" title="Capture" aria-expanded="@(captureOpen ? "true" : "false")" @onclick="ToggleCapture"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 6h10"/><path d="M9 6v13"/><path d="M19 4v16"/><path d="M17 4h4"/><path d="M17 20h4"/></svg></button>
+        <button type="button" class="day-pick-open" aria-label="Pick a day" title="Pick a day" aria-expanded="@(open ? "true" : "false")" @onclick="Toggle"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>
+        @if (PageActions.Count > 0)
+        {
+            <button type="button" class="page-menu-open" aria-label="More actions" title="More actions" aria-haspopup="menu" aria-expanded="@(MenuShown ? "true" : "false")"
+                    disabled="@PageActionsDisabled" @ref="menuButton" @onclick="ToggleMenu"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" stroke="none" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+        }
+    </div>
+    @if (captureOpen)
+    {
+        <div class="capture-pop-backdrop" @onclick="Close"></div>
+        <div class="capture-pop">
+            <input type="text" aria-label="Capture" placeholder="Capture to inbox" maxlength="1000" @ref="captureField"
+                   value="@captureText" @oninput="CaptureInput" @onchange="CaptureInput" @onkeydown="CaptureKey" />
+        </div>
+    }
+    @if (searchOpen)
+    {
+        <div class="search-pop-backdrop" @onclick="Close"></div>
+        <div class="search-pop">
+            <input type="text" aria-label="Search" placeholder="Search notes" maxlength="200" @ref="searchField"
+                   value="@searchText" @oninput="SearchInput" @onchange="SearchInput" @onkeydown="SearchKey" />
+        </div>
+    }
+    @if (open)
+    {
+        <DayPicker Today="Today" Selected="Selected" OnPick="PickDayAsync" OnClose="Close" />
+    }
+    @if (MenuShown)
+    {
+        <div class="page-menu-backdrop" @onclick="Close"></div>
+        <div class="page-menu" role="menu" aria-label="More actions" @onkeydown="MenuKey" @onkeydown:preventDefault="true">
+            @for (int i = 0; i < PageActions.Count; i++)
+            {
+                int index = i;
+                PageAction action = PageActions[index];
+                @if (action.Checked is { } on)
+                {
+                    <button type="button" class="@action.Id" role="menuitemcheckbox" aria-checked="@(on ? "true" : "false")" tabindex="-1"
+                            @ref="items[index]" @onfocus="() => focused = index" @onclick="() => Choose(action.Id)">@action.Label</button>
+                }
+                else
+                {
+                    <button type="button" class="@action.Id" role="menuitem" tabindex="-1"
+                            @ref="items[index]" @onfocus="() => focused = index" @onclick="() => Choose(action.Id)">@action.Label</button>
+                }
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private bool open;
+    private bool captureOpen;
+    private bool focusCapture;
+    private bool capturing;
+    private string captureText = string.Empty;
+    private ElementReference captureField;
+    private bool searchOpen;
+    private bool focusSearch;
+    private bool focusSearchButton;
+    private string searchText = string.Empty;
+    private ElementReference searchField;
+    private ElementReference searchButton;
+    private bool menuOpen;
+    private int focusItem = -1;
+    private int focused = -1;
+    private bool focusMenuButton;
+    private ElementReference menuButton;
+    private ElementReference[] items = [];
+
+    // The menu shows only while it has items and its button is enabled, so a running action or an open form hides it.
+    private bool MenuShown => menuOpen && PageActions.Count > 0 && !PageActionsDisabled;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // The capture popover just opened: its text field takes the focus.
+        if (focusCapture && captureOpen)
+        {
+            focusCapture = false;
+            await captureField.FocusAsync();
+        }
+
+        // The search popover just opened: its text field takes the focus.
+        if (focusSearch && searchOpen)
+        {
+            focusSearch = false;
+            await searchField.FocusAsync();
+        }
+
+        // Esc closed the search popover: the focus goes back to its icon.
+        if (focusSearchButton)
+        {
+            focusSearchButton = false;
+            await searchButton.FocusAsync();
+        }
+
+        // The menu just opened or an arrow key moved: that item takes the focus.
+        if (focusItem >= 0 && MenuShown && focusItem < items.Length)
+        {
+            int index = focusItem;
+            focusItem = -1;
+            await items[index].FocusAsync();
+        }
+
+        // Esc closed the menu: the focus goes back to its button.
+        if (focusMenuButton && PageActions.Count > 0)
+        {
+            focusMenuButton = false;
+            await menuButton.FocusAsync();
+        }
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (items.Length != PageActions.Count)
+        {
+            items = new ElementReference[PageActions.Count];
+        }
+
+        // A menu hidden because the list emptied or the actions were disabled stays closed when they come back.
+        if (PageActions.Count == 0 || PageActionsDisabled)
+        {
+            menuOpen = false;
+            focusItem = -1;
+        }
+    }
+
+    /// <summary>Called when Today is clicked.</summary>
+    [Parameter]
+    public EventCallback OnToday { get; set; }
+
+    /// <summary>Today, marked in the calendar; the calendar opens on it when no day is selected.</summary>
+    [Parameter]
+    public DateOnly Today { get; set; }
+
+    /// <summary>The shown day (the open daily note, or today's view), or null; marked and opened on.</summary>
+    [Parameter]
+    public DateOnly? Selected { get; set; }
+
+    /// <summary>Called with a valid picked day (1900..2100).</summary>
+    [Parameter]
+    public EventCallback<DateOnly> OnPick { get; set; }
+
+    /// <summary>Called with the typed text on Return in the capture popover; true when it was captured.</summary>
+    [Parameter]
+    public Func<string, Task<bool>>? OnCapture { get; set; }
+
+    /// <summary>Called with the typed text (possibly empty) on Return in the search popover.</summary>
+    [Parameter]
+    public EventCallback<string> OnSearch { get; set; }
+
+    /// <summary>The shown page's actions, in menu order; empty hides the More actions button.</summary>
+    [Parameter]
+    public IReadOnlyList<PageAction> PageActions { get; set; } = [];
+
+    /// <summary>True while an action runs or a form is open: the More actions button is disabled.</summary>
+    [Parameter]
+    public bool PageActionsDisabled { get; set; }
+
+    /// <summary>Called with the chosen menu item's id.</summary>
+    [Parameter]
+    public EventCallback<string> OnPageAction { get; set; }
+
+    private void Toggle()
+    {
+        // The calendar (DayPicker) is rendered only while open, so every opening starts again from the selected day
+        // (or today), never from the month browsed last time.
+        open = !open;
+        captureOpen = false;
+        searchOpen = false;
+        menuOpen = false;
+    }
+
+    private void ToggleCapture()
+    {
+        captureOpen = !captureOpen;
+        focusCapture = captureOpen;
+        searchOpen = false;
+        open = false;
+        menuOpen = false;
+    }
+
+    // Every opening starts with an empty field.
+    private void ToggleSearch()
+    {
+        searchOpen = !searchOpen;
+        focusSearch = searchOpen;
+        searchText = string.Empty;
+        captureOpen = false;
+        open = false;
+        menuOpen = false;
+    }
+
+    private void ToggleMenu()
+    {
+        menuOpen = !menuOpen;
+        focusItem = menuOpen ? 0 : -1;
+        focused = menuOpen ? 0 : -1;
+        open = false;
+        captureOpen = false;
+        searchOpen = false;
+    }
+
+    private void Close()
+    {
+        open = false;
+        captureOpen = false;
+        searchOpen = false;
+        menuOpen = false;
+    }
+
+    // An item was chosen (click, or Return through MenuKey): the menu closes and the parent runs the action. A second
+    // event for the same choice (the browser's click after Return) finds the menu closed and does nothing.
+    private async Task Choose(string id)
+    {
+        if (!MenuShown)
+        {
+            return;
+        }
+
+        menuOpen = false;
+        focusItem = -1;
+        await OnPageAction.InvokeAsync(id);
+    }
+
+    // Keys inside the open menu (their browser default is prevented, so Return gives no second click and arrows don't
+    // scroll): arrows move between the items and wrap, Return or Space runs the focused one, Esc or Tab closes the menu
+    // and gives the focus back to its button.
+    private async Task MenuKey(KeyboardEventArgs e)
+    {
+        int count = PageActions.Count;
+        switch (e.Key)
+        {
+            case "ArrowDown":
+                focused = (focused + 1) % count;
+                focusItem = focused;
+                break;
+            case "ArrowUp":
+                focused = (focused - 1 + count) % count;
+                focusItem = focused;
+                break;
+            case "Enter":
+            case " ":
+                if (focused >= 0 && focused < count)
+                {
+                    await Choose(PageActions[focused].Id);
+                }
+
+                break;
+            case "Escape":
+            case "Tab":
+                menuOpen = false;
+                focusItem = -1;
+                focusMenuButton = true;
+                break;
+        }
+    }
+
+    private void Key(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            Close();
+        }
+    }
+
+    private void SearchInput(ChangeEventArgs e) => searchText = e.Value?.ToString() ?? string.Empty;
+
+    // Return closes the popover and hands the typed text to the parent (which shows the search panel); Esc closes it
+    // and gives the focus back to the icon (the bar's own Esc handler also runs, and finds it closed).
+    private async Task SearchKey(KeyboardEventArgs e)
+    {
+        if (!searchOpen)
+        {
+            return;
+        }
+
+        if (e.Key == "Escape")
+        {
+            searchOpen = false;
+            focusSearch = false;
+            focusSearchButton = true;
+            return;
+        }
+
+        if (e.Key != "Enter")
+        {
+            return;
+        }
+
+        string text = searchText;
+        searchText = string.Empty;
+        searchOpen = false;
+        focusSearch = false;
+        await OnSearch.InvokeAsync(text);
+    }
+
+    private void CaptureInput(ChangeEventArgs e) => captureText = e.Value?.ToString() ?? string.Empty;
+
+    // Return captures the typed text; the popover closes and the field empties only when the capture was done.
+    private async Task CaptureKey(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter" || capturing || OnCapture is null)
+        {
+            return;
+        }
+
+        capturing = true;
+        bool done;
+        try
+        {
+            done = await OnCapture(captureText);
+        }
+        finally
+        {
+            capturing = false;
+        }
+
+        if (done)
+        {
+            captureText = string.Empty;
+            captureOpen = false;
+        }
+    }
+
+    // A day was chosen in the calendar: it closes and the parent opens the day. A second event for the same choice
+    // finds the calendar closed and does nothing.
+    private async Task PickDayAsync(DateOnly day)
+    {
+        if (!open || !MonthGrid.InRange(day))
+        {
+            return;
+        }
+
+        open = false;
+        await OnPick.InvokeAsync(day);
+    }
+}

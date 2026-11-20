@@ -1,0 +1,194 @@
+@inherits StateComponent
+@* The appointment page in the main region: every note related to the shown day's appointments with this title
+   (DesktopState.AppointmentPage: meeting prep with no cap, over the title and the union of their attendees). A note
+   opens through OnOpen; with none, a link asks Main for the meeting note of the first such appointment. It reads only,
+   and reloads whenever the state changes, keeping the shown rows. Above the notes, the open topics for the next 1:1 with
+   the attendees (job 253) each have a checkbox that ticks the topic off in its note after a confirmation. Below them, the
+   todos tied to these appointments (job 287, MeetingTodosPanel). *@
+
+<section class="page appointment-page" aria-label="Appointment">
+    <div class="panel-bar">
+        <h2 class="cut" title="@Heading">@Heading</h2>
+        <button type="button" class="close" aria-label="Close" title="Close" @onclick="() => OnClose.InvokeAsync()"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" /></svg></button>
+    </div>
+    @if (view is { IndexUnreadable: false, Topics.Count: > 0 })
+    {
+        <section class="topics" aria-labelledby="appointment-topics-heading">
+            <h3 id="appointment-topics-heading">Topics</h3>
+            <ul class="topics-list">
+                @foreach (NoteTopic topic in view.Topics)
+                {
+                    string text = DesktopText.OneLine(topic.Person + ": " + topic.Text);
+                    string noteName = DesktopText.OneLine(topic.Note);
+                    <li class="topic">
+                        <label class="topic-line">
+                            <input type="checkbox" class="done" checked="@(askingTopic == topic)" disabled="@running"
+                                   @onchange="() => AskTopic(topic)" />
+                            <span class="text cut" title="@text">@text</span>
+                        </label>
+                        <button type="button" class="topic-note cut" title="@noteName" @onclick="() => OnOpen.InvokeAsync(topic.Note)">@noteName</button>
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+    @if (topicResult is { Kind: not ActionKind.Done } failed)
+    {
+        <p class="red topic-result" role="status">@DesktopText.OneLine(failed.Text)</p>
+    }
+    <MeetingTodosPanel Day="Day" Title="@Title" />
+    <h3 id="appointment-notes-heading">Notes</h3>
+    @if (view is null)
+    {
+        <p class="grey" role="status">Loading…</p>
+    }
+    else if (view.IndexUnreadable)
+    {
+        <p class="red" role="status">Can't read the related notes.</p>
+    }
+    else if (view.Related.Count == 0)
+    {
+        @if (view.First is not null)
+        {
+            <button type="button" class="create-note-link" @onclick="() => OnCreate.InvokeAsync()">Create a new note</button>
+        }
+        else
+        {
+            <p class="grey" role="status">No related notes.</p>
+        }
+    }
+    else
+    {
+        <ul class="appointment-notes" aria-labelledby="appointment-notes-heading">
+            @foreach (RelatedNote note in view.Related)
+            {
+                string name = note.Name;
+                string shownName = DesktopText.OneLine(name);
+                string noteTitle = DesktopText.OneLine(NoteTitle(name));
+                string matches = DesktopText.OneLine(Matches(note));
+                <li>
+                    <button type="button" class="note-button cut" title="@shownName" @onclick="() => OnOpen.InvokeAsync(name)">@noteTitle</button>
+                    <span class="matches grey cut" title="@matches">@matches</span>
+                </li>
+            }
+        </ul>
+    }
+    @if (askingTopic is { } topicAsked)
+    {
+        <ConfirmDialog Question="@($"Mark this topic done? {topicAsked.Text}")" ConfirmLabel="Mark done"
+                       Busy="running" OnConfirm="CompleteTopicAsked" OnCancel="CloseDialog" />
+    }
+</section>
+
+@code {
+    private AppointmentPageView? view;
+    private NoteTopic? askingTopic;
+    private ActionResult? topicResult;
+    private bool running;
+    private (string Title, DateOnly Day)? loaded;
+    private int request;
+
+    /// <summary>The appointments' title (raw; ordinal equality picks the appointments).</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>The day of the appointments.</summary>
+    [Parameter]
+    [EditorRequired]
+    public DateOnly Day { get; set; }
+
+    /// <summary>Called with a related note's full name when it is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    /// <summary>
+    /// Called when the create link is clicked; Main makes the meeting note of the day's first appointment with the
+    /// title (Appointment is internal, so it can't be a public parameter type).
+    /// </summary>
+    [Parameter]
+    public EventCallback OnCreate { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    private string Heading => DesktopText.OneLine(Title.Length == 0 ? "(no title)" : Title);
+
+    protected override Task OnParametersSetAsync()
+    {
+        if (loaded == (Title, Day))
+        {
+            return Task.CompletedTask;
+        }
+
+        // Another appointment: its rows are not known yet, so the old ones go.
+        loaded = (Title, Day);
+        view = null;
+        topicResult = null;
+        return Load();
+    }
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    private void AskTopic(NoteTopic topic)
+    {
+        if (!running)
+        {
+            askingTopic = topic;
+        }
+    }
+
+    private void CloseDialog()
+    {
+        if (!running)
+        {
+            askingTopic = null;
+        }
+    }
+
+    private async Task CompleteTopicAsked(Confirmation confirmed)
+    {
+        if (askingTopic is not { } topic || running)
+        {
+            return;
+        }
+
+        running = true;
+        try
+        {
+            topicResult = await Actions.CompleteTopic(topic, confirmed);
+        }
+        finally
+        {
+            running = false;
+            askingTopic = null;
+        }
+    }
+
+    // The last segment of a full note name, as NoteInfo.Title.
+    private static string NoteTitle(string name)
+    {
+        int slash = name.LastIndexOf('/');
+        return slash < 0 ? name : name[(slash + 1)..];
+    }
+
+    private static string Matches(RelatedNote note) =>
+        string.Join(' ', note.Tags.Select(TagParser.Format).Concat(note.Words));
+
+    // Keeps the shown rows while it reloads. A result for another appointment, or an older request's result, is dropped.
+    private async Task Load()
+    {
+        int mine = ++request;
+        string title = Title;
+        DateOnly day = Day;
+        AppointmentPageView result = await State.AppointmentPage(title, day);
+        if (mine == request && string.Equals(title, Title, StringComparison.Ordinal) && day == Day)
+        {
+            view = result;
+        }
+    }
+}

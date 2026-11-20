@@ -1,0 +1,95 @@
+@inherits StateComponent
+@* The notes with one attribute line, key:: value (DesktopState.Find), sorted ignoring case; clicking one opens it.
+   It reads only, and reloads whenever the state changes. *@
+
+<section class="find-panel" aria-label="Notes with this attribute">
+    <div class="panel-bar">
+        <h2 class="cut" title="@Heading">@Heading</h2>
+        <button type="button" class="close" @onclick="() => OnClose.InvokeAsync()">Close</button>
+    </div>
+    @if (view is null)
+    {
+        <p class="grey" role="status">Loading…</p>
+    }
+    else if (view.Kind is FindViewKind.InvalidQuery)
+    {
+        <p class="red" role="status">Type /find &lt;attribute&gt; &lt;value&gt;.</p>
+    }
+    else if (view.Kind is FindViewKind.IndexUnreadable)
+    {
+        <p class="red" role="status">Can't read the attributes.</p>
+    }
+    else if (view.Notes.Count == 0)
+    {
+        <p class="grey" role="status">No notes have @Heading.</p>
+    }
+    else
+    {
+        <ul class="find-notes">
+            @foreach (string name in view.Notes)
+            {
+                string shown = DesktopText.OneLine(name);
+                <li>
+                    <button type="button" class="note-button cut" title="@shown" @onclick="() => OnOpen.InvokeAsync(name)">@shown</button>
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+@code {
+    private FindView? view;
+    private (string Key, string Value)? loaded;
+    private int request;
+
+    /// <summary>The attribute key (normalized).</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Key { get; set; } = string.Empty;
+
+    /// <summary>The attribute value as typed (whitespace collapsed).</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Value { get; set; } = string.Empty;
+
+    /// <summary>Called with a note's name when it is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    private string Heading => $"{DesktopText.OneLine(Key)}:: {DesktopText.OneLine(Value)}";
+
+    protected override Task OnParametersSetAsync()
+    {
+        if (loaded == (Key, Value))
+        {
+            return Task.CompletedTask;
+        }
+
+        // Another query: its rows are not known yet, so the old ones go.
+        loaded = (Key, Value);
+        view = null;
+        return Load();
+    }
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    // Keeps the shown rows while it reloads. A result for another query, or an older request's result, is dropped.
+    private async Task Load()
+    {
+        int mine = ++request;
+        string key = Key;
+        string value = Value;
+        FindView result = await State.Find(key, value);
+        if (mine == request && string.Equals(key, Key, StringComparison.Ordinal) && string.Equals(value, Value, StringComparison.Ordinal))
+        {
+            view = result;
+        }
+    }
+}

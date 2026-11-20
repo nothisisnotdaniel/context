@@ -3,12 +3,23 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
+    <!-- The RIDs release.yml publishes, so a locked restore has their runtime packages in packages.lock.json. -->
+    <RuntimeIdentifiers>osx-arm64;osx-x64;win-x64</RuntimeIdentifiers>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- The editor's npm project: its built bundle lands in wwwroot/editor; the sources and node_modules are not content. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);editor/**</DefaultItemExcludes>
+    <!-- CS8002: Photino.Blazor and Photino.NET have no strong name. The app is public-signed only so that Core's
+         InternalsVisibleTo can name it by key; .NET does not check strong names when it loads assemblies. -->
+    <NoWarn>$(NoWarn);CS8002</NoWarn>
+    <!-- The exe icon (job 284); Assets/README.md says how the icon files are made from Assets/context-icon.svg. -->
+    <ApplicationIcon>Assets\Context.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Photino.Blazor" Version="4.0.13" />
+    <!-- Installer and updater for the Windows build; the version equals the vpk tool version in release.yml. -->
+    <PackageReference Include="Velopack" Version="1.2.161" />
   </ItemGroup>
 
   <ItemGroup>
@@ -21,8 +32,17 @@
     </Content>
   </ItemGroup>
 
+  <!-- The icon files ship next to the app (AppIcon, macos-app.sh); the SVG source and the README do not. -->
   <ItemGroup>
-    <InternalsVisibleTo Include="Context.Desktop.Tests" />
+    <None Remove="Assets\**" />
+    <Content Include="Assets\Context.icns;Assets\Context.ico;Assets\Context.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Context.Desktop.Tests" Key="$(ContextPublicKey)" />
   </ItemGroup>
 
 </Project>

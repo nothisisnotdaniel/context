@@ -16,6 +16,30 @@ internal sealed record TagCount
     public int Count { get; }
 }
 
+/// <summary>A person mentioned with <c>@[Name]</c> and how many notes mention them.</summary>
+internal sealed record PersonCount
+{
+    public PersonCount(string person, int count)
+    {
+        Person = person;
+        Count = count;
+    }
+
+    /// <summary>
+    /// Returns only the type name: the name is raw outside text, so formatting this record must never print it.
+    /// </summary>
+    public override string ToString() => nameof(PersonCount);
+
+    /// <summary>
+    /// The name shown for the person (raw): the title of their page under <c>people</c> when it exists, else the
+    /// ordinal-first spelling among the mentions.
+    /// </summary>
+    public string Person { get; }
+
+    /// <summary>The number of notes that mention the person, not counting the person's own page.</summary>
+    public int Count { get; }
+}
+
 /// <summary>Which way the <c>[[note links]]</c> between two notes go, seen from the note asked about.</summary>
 internal enum NoteLinkDirection
 {
@@ -111,6 +135,28 @@ internal sealed class NameLookup
 
         return found;
     }
+
+    /// <summary>
+    /// The note and heading a <c>[[link]]</c> target names: the whole target through <see cref="Resolve"/> first (so a
+    /// title with a <c>#</c>, like <c>C# notes</c>, still works, with no heading), then the note part of
+    /// <see cref="NoteLinkParser.Split"/> with its heading. <see cref="NoteLinkTarget.Note"/> is the resolved name.
+    /// <c>null</c> if no note matches (an empty note part, as in <c>[[#Intro]]</c>, names none).
+    /// </summary>
+    public NoteLinkTarget? ResolveLink(string target)
+    {
+        if (Resolve(target) is { } whole)
+        {
+            return new NoteLinkTarget(whole, null);
+        }
+
+        NoteLinkTarget split = NoteLinkParser.Split(target);
+        if (split.Note.Length == 0)
+        {
+            return null;
+        }
+
+        return Resolve(split.Note) is { } name ? new NoteLinkTarget(name, split.Heading) : null;
+    }
 }
 
 /// <summary>
@@ -129,16 +175,13 @@ internal sealed class TagIndexException : IOException
 /// The index of which note has which tag, kept in SQLite at <c>&lt;root&gt;/context.db</c>. The Markdown
 /// files are the source of truth: <see cref="Sync"/> rebuilds the index from them, never the other way
 /// round. Every value reaches SQL as a parameter.
-/// <para>
-/// While encryption is on (the shared <see cref="Encryption"/> has a vault), the index lives in an in-memory
-/// database instead (<c>PRAGMA temp_store=MEMORY</c>), rebuilt from the notes each session, and
-/// <c>context.db</c> is never opened or created. Turning encryption off drops it and goes back to the file.
-/// </para>
 /// </summary>
-internal sealed class TagIndex : IDisposable
+internal sealed class TagIndex
 {
     /// <summary>The file name of the database inside the root.</summary>
     public const string FileName = "context.db";
+
+    private const string DueFormat = "yyyy-MM-dd";
 
     private const string Schema = """
         CREATE TABLE IF NOT EXISTS notes(name TEXT NOT NULL PRIMARY KEY, modified INTEGER);
@@ -150,32 +193,109 @@ internal sealed class TagIndex : IDisposable
         CREATE TABLE IF NOT EXISTS note_links(
             note TEXT NOT NULL,
             target TEXT NOT NULL,
+            heading TEXT,
+            whole_key TEXT,
+            part_key TEXT,
             PRIMARY KEY(note, target));
+        CREATE TABLE IF NOT EXISTS note_people(
+            note TEXT NOT NULL,
+            person TEXT NOT NULL,
+            spelling TEXT NOT NULL,
+            PRIMARY KEY(note, person));
+        CREATE INDEX IF NOT EXISTS note_people_person ON note_people(person);
+        CREATE TABLE IF NOT EXISTS note_attributes(
+            note TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value_key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY(note, key, value_key));
+        CREATE INDEX IF NOT EXISTS note_attributes_key_value ON note_attributes(key, value_key);
+        CREATE TABLE IF NOT EXISTS note_decisions(
+            note TEXT NOT NULL,
+            line INTEGER NOT NULL,
+            text TEXT NOT NULL,
+            PRIMARY KEY(note, line));
+        CREATE TABLE IF NOT EXISTS note_todos(
+            note TEXT NOT NULL,
+            line INTEGER NOT NULL,
+            due TEXT,
+            text TEXT NOT NULL,
+            raw TEXT NOT NULL,
+            PRIMARY KEY(note, line));
+        CREATE TABLE IF NOT EXISTS note_topics(
+            note TEXT NOT NULL,
+            line INTEGER NOT NULL,
+            person TEXT NOT NULL,
+            text TEXT NOT NULL,
+            raw TEXT NOT NULL,
+            PRIMARY KEY(note, line));
+        CREATE TABLE IF NOT EXISTS note_reviews(
+            note TEXT NOT NULL,
+            line INTEGER NOT NULL,
+            due TEXT NOT NULL,
+            raw TEXT NOT NULL,
+            PRIMARY KEY(note));
+        CREATE TABLE IF NOT EXISTS note_items(
+            note TEXT NOT NULL,
+            item INTEGER NOT NULL,
+            PRIMARY KEY(note, item));
+        CREATE INDEX IF NOT EXISTS note_items_item ON note_items(item);
+        CREATE VIRTUAL TABLE IF NOT EXISTS note_text USING fts5(note UNINDEXED, body, tokenize='trigram');
+        CREATE TABLE IF NOT EXISTS note_text_rows(note TEXT PRIMARY KEY, row INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS note_skipped(note TEXT PRIMARY KEY);
         """;
+
+    /// <summary>
+    /// The one read of <c>note_links</c> in <see cref="Links"/>: only the note's own rows and the rows whose whole target
+    /// or note part could name it (<c>$k</c> = the note name upper-cased invariant, <c>$kmd</c> = <c>$k</c> + <c>.MD</c>),
+    /// through the primary key and the <c>whole_key</c> and <c>part_key</c> indexes, never a scan of the table.
+    /// </summary>
+    internal const string LinksSql =
+        "SELECT note, target FROM note_links "
+            + "WHERE note = $note OR whole_key IN ($k, $kmd) OR part_key IN ($k, $kmd) ORDER BY note, target";
 
     /// <summary>
     /// The parser version the stored tags were made with, kept in <c>PRAGMA user_version</c>. When the
     /// database has an older one, <see cref="Sync"/> re-parses every note once. 1: <c>#[bracket tags]</c>.
-    /// 2: <c>[[note links]]</c>.
+    /// 2: <c>[[note links]]</c>. 3: subpages (full names, link targets up to <see cref="NoteLinkParser.MaxTargetLength"/>).
+    /// 4: <c>@[person]</c> mentions (and <c>@[[x]]</c> is no link). 5: <c>key:: value</c> attributes. 6: a link target
+    /// that runs into a code span is no link. 7: note text (the full-text table <c>note_text</c>). 8: <c>Decision:</c> lines
+    /// (<c>note_decisions</c>). 9: open <c>- [ ]</c> todos (<c>note_todos</c>). 10: the heading of a
+    /// <c>[[Note#Heading]]</c> link (<c>note_links.heading</c>). 11: <c>next: @[Name]</c> topics (<c>note_topics</c>),
+    /// which are no longer note todos. 12: <c>review:yyyy-MM-dd</c> lines (<c>note_reviews</c>). 13: <c>#&lt;n&gt;</c> work item references
+    /// (<c>note_items</c>). 14: <c>note_text_rows</c> (note -> <c>note_text</c> rowid), <c>note_skipped</c> (notes over
+    /// <see cref="NoteStore.MaxNoteBytes"/>) and the link keys <c>note_links.whole_key</c>/<c>part_key</c>. 15: note
+    /// todos are <c>- { }</c> lines (job 329); a <c>- [ ]</c> line is a note-local checkbox and no longer in <c>note_todos</c>.
+    /// 16: an <c>affiliation::</c> value is a comma-separated list (job 332), one <c>note_attributes</c> row per part.
     /// </summary>
-    public const int ParserVersion = 2;
+    public const int ParserVersion = 16;
+
+    /// <summary>
+    /// How long opening <c>context.db</c> and starting <see cref="Sync"/>'s write transaction wait while another
+    /// process (the desktop app, another command line run) holds a lock on it, before giving up with a
+    /// <see cref="TagIndexException"/>.
+    /// </summary>
+    public static readonly TimeSpan BusyTimeout = TimeSpan.FromSeconds(5);
 
     private readonly string root;
-    private readonly Encryption? encryption;
-
-    // The in-memory database used while encryption is on; null otherwise.
-    private SqliteConnection? memory;
+    private readonly TimeSpan busyTimeout;
+    private int reads;
 
     /// <param name="root">The folder <c>context.db</c> lives in.</param>
-    /// <param name="encryption">The session's encryption state; while it has a vault the index stays in memory.</param>
-    public TagIndex(string root, Encryption? encryption = null)
+    public TagIndex(string root)
+        : this(root, BusyTimeout)
     {
-        this.root = Path.GetFullPath(root);
-        this.encryption = encryption;
     }
 
-    /// <summary>True while the index is kept in memory rather than in <c>context.db</c>.</summary>
-    public bool InMemory => encryption?.IsOn == true;
+    /// <summary>Like the public constructor with another busy timeout (tests use a short one).</summary>
+    internal TagIndex(string root, TimeSpan busyTimeout)
+    {
+        this.root = Path.GetFullPath(root);
+        this.busyTimeout = busyTimeout;
+    }
+
+    /// <summary>How many times this instance opened the database (one per sync or query); for tests.</summary>
+    internal int Reads => Volatile.Read(ref reads);
 
     /// <summary>The full path of <c>context.db</c>.</summary>
     public string FilePath => Path.Combine(root, FileName);
@@ -184,28 +304,48 @@ internal sealed class TagIndex : IDisposable
     /// Brings the index up to date with the notes in <paramref name="store"/>, in one transaction. Creates
     /// the root folder and the database if missing. A note is re-parsed (tags and <c>[[note links]]</c>) only
     /// when its last-write time (UTC ticks) differs from the stored one. Notes that are gone lose their rows.
-    /// A note that can't be read is kept with no tags, no links and no stored time, so it is retried on the
-    /// next sync. Link targets are stored as written and resolved against note names only when queried.
+    /// A note that can't be read or is over <see cref="NoteStore.MaxNoteBytes"/> is kept with no tags, no links,
+    /// no text and no stored time, so it is retried on the next sync. The cap counts the bytes actually read from the
+    /// file (<see cref="BoundedFile.Read"/> stops in its read loop), a UTF-8 BOM and invalid UTF-8 bytes included, never
+    /// the length of the decoded text: a note of exactly <see cref="NoteStore.MaxNoteBytes"/> bytes is indexed, one byte
+    /// more is not. A note over the cap gets a <c>note_skipped</c> row (<see cref="Skipped"/>), which goes once it is
+    /// back under the cap, unreadable for another reason, or gone. Link targets are stored as written and resolved
+    /// against note names only when queried. Each <c>note_text</c> row's rowid is kept in <c>note_text_rows</c> and the
+    /// row is deleted by that rowid; a sync first drops every <c>note_text</c> row that is not its note's mapped row and
+    /// every mapping whose row is gone or names another note (written by an older version, for example), and re-parses
+    /// those notes. A re-parsed
+    /// note's text is written to <c>note_text</c> again (no row for a note that can't be read or is over
+    /// <see cref="NoteStore.MaxNoteBytes"/>); sensitive notes are never listed, so never indexed.
     /// Throws <see cref="TagIndexException"/> if the database can't be opened or isn't valid.
     /// </summary>
     public void Sync(NoteStore store)
     {
-        Directory.CreateDirectory(root);
+        PrivateFile.CreateFolder(root);
         IReadOnlyList<NoteInfo> notes = store.List();
         Run(connection =>
         {
-            using SqliteTransaction transaction = connection.BeginTransaction();
+            // BEGIN IMMEDIATE: take the write lock up front (waiting up to the busy timeout), so a sync never fails
+            // half way when another process writes at the same time.
+            using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
             long version;
             using (SqliteCommand pragma = Command(connection, transaction, "PRAGMA user_version"))
             {
                 version = Convert.ToInt64(pragma.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
             }
 
+            EnsureSecureDelete(connection, transaction);
             bool upgrade = version < ParserVersion;
             if (upgrade)
             {
-                // Tags were parsed by an older parser: forget the stored times so every note is re-parsed.
+                // Tags were parsed by an older parser: forget the stored times so every note is re-parsed. Every note
+                // text is written again then, so the old rows go in one statement instead of one scan per note.
                 Execute(connection, transaction, "UPDATE notes SET modified = NULL");
+                Execute(connection, transaction, "DELETE FROM note_text");
+                Execute(connection, transaction, "DELETE FROM note_text_rows");
+            }
+            else
+            {
+                RepairText(connection, transaction);
             }
 
             Dictionary<string, long?> stored = new(StringComparer.Ordinal);
@@ -230,17 +370,44 @@ internal sealed class TagIndex : IDisposable
 
                 IReadOnlyList<string> tags;
                 IReadOnlyList<string> targets;
+                IReadOnlyList<string> people;
+                IReadOnlyList<PageAttribute> attributes;
+                IReadOnlyList<ParsedDecision> decisions;
+                IReadOnlyList<ParsedNoteTodo> noteTodos;
+                IReadOnlyList<ParsedTopic> topics;
+                ParsedReview? review;
+                IReadOnlyList<int> items;
+                string? body;
+                bool tooLarge = false;
                 long? newModified = modified;
                 try
                 {
+                    // A note over NoteStore.MaxNoteBytes throws FileTooLargeException and counts as unreadable.
                     string text = store.Read(note);
+                    body = text;
                     tags = TagParser.Parse(text);
                     targets = NoteLinkParser.Parse(text);
+                    people = PersonParser.Parse(text);
+                    attributes = AttributeParser.Parse(text);
+                    decisions = DecisionParser.Parse(text);
+                    noteTodos = NoteTodoParser.Parse(text);
+                    topics = TopicParser.Parse(text);
+                    review = ReviewDateParser.Parse(text);
+                    items = WorkItemParser.Parse(text);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
+                    tooLarge = ex is FileTooLargeException;
                     tags = [];
                     targets = [];
+                    people = [];
+                    attributes = [];
+                    decisions = [];
+                    noteTodos = [];
+                    topics = [];
+                    review = null;
+                    items = [];
+                    body = null;
                     newModified = null;
                 }
 
@@ -261,9 +428,138 @@ internal sealed class TagIndex : IDisposable
                     Execute(
                         connection,
                         transaction,
-                        "INSERT INTO note_links(note, target) VALUES($note, $target)",
+                        "INSERT INTO note_links(note, target, heading, whole_key, part_key) "
+                            + "VALUES($note, $target, $heading, $whole, $part)",
                         ("$note", note.Name),
-                        ("$target", target));
+                        ("$target", target),
+                        ("$heading", NoteLinkParser.Split(target).Heading),
+                        ("$whole", LinkKey(target)),
+                        ("$part", LinkKey(NoteLinkParser.Split(target).Note)));
+                }
+
+                Execute(connection, transaction, "DELETE FROM note_people WHERE note = $note", ("$note", note.Name));
+                foreach (string person in people)
+                {
+                    Execute(
+                        connection,
+                        transaction,
+                        "INSERT INTO note_people(note, person, spelling) VALUES($note, $person, $spelling)",
+                        ("$note", note.Name),
+                        ("$person", PersonParser.Key(person)),
+                        ("$spelling", person));
+                }
+
+                Execute(connection, transaction, "DELETE FROM note_attributes WHERE note = $note", ("$note", note.Name));
+                HashSet<string> affiliations = new(StringComparer.Ordinal);
+                foreach (PageAttribute attribute in attributes)
+                {
+                    if (attribute.Key == PeopleAttributes.AffiliationKey)
+                    {
+                        // An affiliation is a list: one row per part, each value_key once per note (first spelling).
+                        foreach (string part in AttributeParser.ListParts(attribute.Value))
+                        {
+                            string partKey = AttributeParser.ValueKey(part);
+                            if (affiliations.Add(partKey))
+                            {
+                                InsertAttribute(connection, transaction, note.Name, attribute.Key, partKey, part);
+                            }
+                        }
+
+                        continue;
+                    }
+
+                    InsertAttribute(
+                        connection, transaction, note.Name, attribute.Key, AttributeParser.ValueKey(attribute.Value), attribute.Value);
+                }
+
+                Execute(connection, transaction, "DELETE FROM note_decisions WHERE note = $note", ("$note", note.Name));
+                foreach (ParsedDecision decision in decisions)
+                {
+                    Execute(
+                        connection,
+                        transaction,
+                        "INSERT INTO note_decisions(note, line, text) VALUES($note, $line, $text)",
+                        ("$note", note.Name),
+                        ("$line", decision.Line),
+                        ("$text", decision.Text));
+                }
+
+                Execute(connection, transaction, "DELETE FROM note_todos WHERE note = $note", ("$note", note.Name));
+                foreach (ParsedNoteTodo todo in noteTodos)
+                {
+                    Execute(
+                        connection,
+                        transaction,
+                        "INSERT INTO note_todos(note, line, due, text, raw) VALUES($note, $line, $due, $text, $raw)",
+                        ("$note", note.Name),
+                        ("$line", todo.Line),
+                        ("$due", todo.Due?.ToString(DueFormat, System.Globalization.CultureInfo.InvariantCulture)),
+                        ("$text", todo.Text),
+                        ("$raw", todo.Raw));
+                }
+
+                Execute(connection, transaction, "DELETE FROM note_topics WHERE note = $note", ("$note", note.Name));
+                foreach (ParsedTopic topic in topics)
+                {
+                    Execute(
+                        connection,
+                        transaction,
+                        "INSERT INTO note_topics(note, line, person, text, raw) VALUES($note, $line, $person, $text, $raw)",
+                        ("$note", note.Name),
+                        ("$line", topic.Line),
+                        ("$person", topic.Person),
+                        ("$text", topic.Text),
+                        ("$raw", topic.Raw));
+                }
+
+                Execute(connection, transaction, "DELETE FROM note_reviews WHERE note = $note", ("$note", note.Name));
+                if (review is not null)
+                {
+                    Execute(
+                        connection,
+                        transaction,
+                        "INSERT INTO note_reviews(note, line, due, raw) VALUES($note, $line, $due, $raw)",
+                        ("$note", note.Name),
+                        ("$line", review.Line),
+                        ("$due", review.Due.ToString(DueFormat, System.Globalization.CultureInfo.InvariantCulture)),
+                        ("$raw", review.Raw));
+                }
+
+                Execute(connection, transaction, "DELETE FROM note_items WHERE note = $note", ("$note", note.Name));
+                foreach (int item in items)
+                {
+                    Execute(
+                        connection,
+                        transaction,
+                        "INSERT INTO note_items(note, item) VALUES($note, $item)",
+                        ("$note", note.Name),
+                        ("$item", item));
+                }
+
+                if (!upgrade)
+                {
+                    DeleteText(connection, transaction, note.Name);
+                }
+
+                if (body is not null)
+                {
+                    Execute(
+                        connection,
+                        transaction,
+                        "INSERT INTO note_text(note, body) VALUES($note, $body)",
+                        ("$note", note.Name),
+                        ("$body", body));
+                    Execute(
+                        connection,
+                        transaction,
+                        "INSERT INTO note_text_rows(note, row) VALUES($note, last_insert_rowid())",
+                        ("$note", note.Name));
+                }
+
+                Execute(connection, transaction, "DELETE FROM note_skipped WHERE note = $note", ("$note", note.Name));
+                if (tooLarge)
+                {
+                    Execute(connection, transaction, "INSERT INTO note_skipped(note) VALUES($note)", ("$note", note.Name));
                 }
 
                 Execute(
@@ -279,12 +575,30 @@ internal sealed class TagIndex : IDisposable
             {
                 Execute(connection, transaction, "DELETE FROM note_tags WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_links WHERE note = $note", ("$note", gone));
+                Execute(connection, transaction, "DELETE FROM note_people WHERE note = $note", ("$note", gone));
+                Execute(connection, transaction, "DELETE FROM note_attributes WHERE note = $note", ("$note", gone));
+                Execute(connection, transaction, "DELETE FROM note_decisions WHERE note = $note", ("$note", gone));
+                Execute(connection, transaction, "DELETE FROM note_todos WHERE note = $note", ("$note", gone));
+                Execute(connection, transaction, "DELETE FROM note_topics WHERE note = $note", ("$note", gone));
+                Execute(connection, transaction, "DELETE FROM note_reviews WHERE note = $note", ("$note", gone));
+                Execute(connection, transaction, "DELETE FROM note_items WHERE note = $note", ("$note", gone));
+                DeleteText(connection, transaction, gone);
+                Execute(connection, transaction, "DELETE FROM note_skipped WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM notes WHERE name = $note", ("$note", gone));
             }
 
             // Tag and link rows whose note row is missing (e.g. edited by hand) would otherwise never go away.
             Execute(connection, transaction, "DELETE FROM note_tags WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_links WHERE note NOT IN (SELECT name FROM notes)");
+            Execute(connection, transaction, "DELETE FROM note_people WHERE note NOT IN (SELECT name FROM notes)");
+            Execute(connection, transaction, "DELETE FROM note_attributes WHERE note NOT IN (SELECT name FROM notes)");
+            Execute(connection, transaction, "DELETE FROM note_decisions WHERE note NOT IN (SELECT name FROM notes)");
+            Execute(connection, transaction, "DELETE FROM note_todos WHERE note NOT IN (SELECT name FROM notes)");
+            Execute(connection, transaction, "DELETE FROM note_topics WHERE note NOT IN (SELECT name FROM notes)");
+            Execute(connection, transaction, "DELETE FROM note_reviews WHERE note NOT IN (SELECT name FROM notes)");
+            Execute(connection, transaction, "DELETE FROM note_items WHERE note NOT IN (SELECT name FROM notes)");
+            Execute(connection, transaction, "DELETE FROM note_skipped WHERE note NOT IN (SELECT name FROM notes)");
+            PruneOrphanText(connection, transaction);
             if (upgrade)
             {
                 // A constant, not user input: PRAGMA takes no parameters.
@@ -295,6 +609,218 @@ internal sealed class TagIndex : IDisposable
             return 0;
         });
     }
+
+    /// <summary>
+    /// Runs <paramref name="select"/> on each <c>(note, body)</c> row of <c>note_text</c> that contains
+    /// <paramref name="text"/> by the trigram tokenizer (ignoring case), unsorted, and keeps only its non-null results:
+    /// no body is kept, so each can be released once its row is done. The text reaches SQL only as a parameter, quoted
+    /// as one FTS5 phrase, so FTS syntax in it (<c>OR</c>, <c>NEAR</c>, <c>*</c>, <c>-</c>, quotes) is literal text.
+    /// Under 3 characters nothing matches. The match is only a pre-filter: <see cref="SearchView.Build"/> checks each
+    /// line itself.
+    /// </summary>
+    public IReadOnlyList<T> Search<T>(string text, Func<string, string, T?> select)
+        where T : class
+    {
+        string phrase = "\"" + text.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+        return Run(connection =>
+        {
+            List<T> rows = [];
+            using SqliteCommand command = Command(connection, null, "SELECT note, body FROM note_text WHERE note_text MATCH $q");
+            command.Parameters.AddWithValue("$q", phrase);
+            using SqliteDataReader reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                if (select(reader.GetString(0), reader.GetString(1)) is { } row)
+                {
+                    rows.Add(row);
+                }
+            }
+
+            return (IReadOnlyList<T>)rows;
+        });
+    }
+
+    /// <summary>
+    /// The notes the last <see cref="Sync"/> left out because they are over <see cref="NoteStore.MaxNoteBytes"/> (the
+    /// <c>note_skipped</c> rows), sorted by name ignoring case, then ordinal.
+    /// </summary>
+    public IReadOnlyList<string> Skipped() => Run(connection =>
+    {
+        List<string> names = [];
+        using SqliteCommand command = Command(connection, null, "SELECT note FROM note_skipped");
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            names.Add(reader.GetString(0));
+        }
+
+        return (IReadOnlyList<string>)SortNames(names);
+    });
+
+    /// <summary>
+    /// Every <c>(note, body)</c> row of <c>note_text</c> in one <c>SELECT</c> (no parameters), sorted by note
+    /// (ordinal): the whole text of each plain note the last <see cref="Sync"/> could read. Sensitive notes, notes that
+    /// couldn't be read and notes over <see cref="NoteStore.MaxNoteBytes"/> have no row. Used by
+    /// <see cref="SimilarNotesView.Build"/>.
+    /// </summary>
+    public IReadOnlyList<(string Note, string Body)> NoteTexts() => Run(connection =>
+    {
+        List<(string Note, string Body)> rows = [];
+        using SqliteCommand command = Command(connection, null, "SELECT note, body FROM note_text");
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            rows.Add((reader.GetString(0), reader.GetString(1)));
+        }
+
+        return (IReadOnlyList<(string Note, string Body)>)rows.OrderBy(r => r.Note, StringComparer.Ordinal).ToList();
+    });
+
+    /// <summary>
+    /// Every row of <c>note_decisions</c> with its note's stored last-write time (UTC), unsorted. With a non-blank
+    /// <paramref name="tag"/> (normalized by <see cref="NormalizeTag"/>, reaching SQL only as a parameter) only the
+    /// decisions of notes that have that tag. A note without a stored time (it couldn't be read) has no rows.
+    /// </summary>
+    public IReadOnlyList<(string Note, int Line, string Text, DateTime Modified)> Decisions(string? tag)
+    {
+        string? wanted = string.IsNullOrWhiteSpace(tag) ? null : NormalizeTag(tag);
+        return Run(connection =>
+        {
+            List<(string Note, int Line, string Text, DateTime Modified)> rows = [];
+            string sql = "SELECT d.note, d.line, d.text, n.modified FROM note_decisions d "
+                + "JOIN notes n ON n.name = d.note WHERE n.modified IS NOT NULL";
+            if (wanted is not null)
+            {
+                sql += " AND d.note IN (SELECT note FROM note_tags WHERE tag = $tag)";
+            }
+
+            using SqliteCommand command = Command(connection, null, sql);
+            if (wanted is not null)
+            {
+                command.Parameters.AddWithValue("$tag", wanted);
+            }
+
+            using SqliteDataReader reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                // A line or time edited by hand out of range is skipped, like a note that couldn't be read.
+                long line = reader.GetInt64(1);
+                long ticks = reader.GetInt64(3);
+                if (line < 1 || line > int.MaxValue || ticks < DateTime.MinValue.Ticks || ticks > DateTime.MaxValue.Ticks)
+                {
+                    continue;
+                }
+
+                rows.Add((reader.GetString(0), (int)line, reader.GetString(2), new DateTime(ticks, DateTimeKind.Utc)));
+            }
+
+            return (IReadOnlyList<(string Note, int Line, string Text, DateTime Modified)>)rows;
+        });
+    }
+
+    /// <summary>
+    /// Every row of <c>note_todos</c> of a note with a stored time, unsorted (<see cref="NoteTodos.Merge"/> orders
+    /// them). A row edited by hand out of range (line, a due that is no <c>yyyy-MM-dd</c> date) is skipped.
+    /// </summary>
+    public IReadOnlyList<NoteTodo> NoteTodos() => Run(connection =>
+    {
+        List<NoteTodo> rows = [];
+        using SqliteCommand command = Command(
+            connection,
+            null,
+            "SELECT t.note, t.line, t.due, t.text, t.raw FROM note_todos t "
+                + "JOIN notes n ON n.name = t.note WHERE n.modified IS NOT NULL");
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            long line = reader.GetInt64(1);
+            if (line < 1 || line > int.MaxValue)
+            {
+                continue;
+            }
+
+            DateOnly? due = null;
+            if (!reader.IsDBNull(2))
+            {
+                if (!DateOnly.TryParseExact(
+                    reader.GetString(2),
+                    DueFormat,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None,
+                    out DateOnly parsed))
+                {
+                    continue;
+                }
+
+                due = parsed;
+            }
+
+            rows.Add(new NoteTodo(reader.GetString(0), (int)line, reader.GetString(3), due, reader.GetString(4)));
+        }
+
+        return (IReadOnlyList<NoteTodo>)rows;
+    });
+
+    /// <summary>
+    /// Every row of <c>note_topics</c> of a note with a stored time, unsorted (<see cref="MeetingTopics.For"/> picks and
+    /// orders them). A row edited by hand with a line out of range is skipped.
+    /// </summary>
+    public IReadOnlyList<NoteTopic> Topics() => Run(connection =>
+    {
+        List<NoteTopic> rows = [];
+        using SqliteCommand command = Command(
+            connection,
+            null,
+            "SELECT t.note, t.line, t.person, t.text, t.raw FROM note_topics t "
+                + "JOIN notes n ON n.name = t.note WHERE n.modified IS NOT NULL");
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            long line = reader.GetInt64(1);
+            if (line < 1 || line > int.MaxValue)
+            {
+                continue;
+            }
+
+            rows.Add(new NoteTopic(
+                reader.GetString(0), (int)line, reader.GetString(2), reader.GetString(3), reader.GetString(4)));
+        }
+
+        return (IReadOnlyList<NoteTopic>)rows;
+    });
+
+    /// <summary>
+    /// Every row of <c>note_reviews</c> of a note with a stored time, unsorted (<see cref="NoteReviews.Due"/> picks and
+    /// orders them). A row edited by hand out of range (line, a due that is no <c>yyyy-MM-dd</c> date) is skipped.
+    /// </summary>
+    public IReadOnlyList<NoteReview> Reviews() => Run(connection =>
+    {
+        List<NoteReview> rows = [];
+        using SqliteCommand command = Command(
+            connection,
+            null,
+            "SELECT r.note, r.line, r.due, r.raw FROM note_reviews r "
+                + "JOIN notes n ON n.name = r.note WHERE n.modified IS NOT NULL");
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            long line = reader.GetInt64(1);
+            if (line < 1 || line > int.MaxValue
+                || !DateOnly.TryParseExact(
+                    reader.GetString(2),
+                    DueFormat,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None,
+                    out DateOnly due))
+            {
+                continue;
+            }
+
+            rows.Add(new NoteReview(reader.GetString(0), (int)line, due, reader.GetString(3)));
+        }
+
+        return (IReadOnlyList<NoteReview>)rows;
+    });
 
     /// <summary>Every tag with the number of notes that have it, sorted by tag (ordinal).</summary>
     public IReadOnlyList<TagCount> Tags() => Run(connection =>
@@ -308,6 +834,26 @@ internal sealed class TagIndex : IDisposable
         }
 
         return tags.OrderBy(t => t.Tag, StringComparer.Ordinal).ToList();
+    });
+
+    /// <summary>
+    /// Every <c>(note, tag)</c> row of <c>note_tags</c> in one <c>SELECT</c> (tags normalized, no <c>#</c>), sorted by
+    /// note, then tag (ordinal). Used by the current view to match all appointments in memory.
+    /// </summary>
+    public IReadOnlyList<(string Note, string Tag)> NoteTags() => Run(connection =>
+    {
+        List<(string Note, string Tag)> rows = [];
+        using SqliteCommand command = Command(connection, null, "SELECT note, tag FROM note_tags");
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            rows.Add((reader.GetString(0), reader.GetString(1)));
+        }
+
+        return rows
+            .OrderBy(r => r.Note, StringComparer.Ordinal)
+            .ThenBy(r => r.Tag, StringComparer.Ordinal)
+            .ToList();
     });
 
     /// <summary>
@@ -331,6 +877,122 @@ internal sealed class TagIndex : IDisposable
             return SortNames(names);
         });
     }
+
+    /// <summary>
+    /// The notes that mention the work item <c>#<paramref name="item"/></c> (<see cref="WorkItemParser"/>), sorted by
+    /// name ignoring case, then ordinal. Never the item's own page (<see cref="WorkItems.ItemOf"/>).
+    /// </summary>
+    public IReadOnlyList<string> NotesWithItem(int item) => Run(connection =>
+    {
+        List<string> names = [];
+        using SqliteCommand command = Command(connection, null, "SELECT note FROM note_items WHERE item = $item");
+        command.Parameters.AddWithValue("$item", item);
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            string note = reader.GetString(0);
+            if (WorkItems.ItemOf(note) != item)
+            {
+                names.Add(note);
+            }
+        }
+
+        return (IReadOnlyList<string>)SortNames(names);
+    });
+
+    /// <summary>
+    /// The stored mention spellings (<c>@[...]</c>) of each of <paramref name="notes"/>, as <c>(note, spelling)</c> rows
+    /// in no order.
+    /// </summary>
+    public IReadOnlyList<(string Note, string Spelling)> MentionsIn(IReadOnlyCollection<string> notes) => Run(connection =>
+    {
+        HashSet<string> wanted = new(notes, StringComparer.Ordinal);
+        List<(string Note, string Spelling)> found = [];
+        using SqliteCommand command = Command(connection, null, "SELECT note, spelling FROM note_people");
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            string note = reader.GetString(0);
+            if (wanted.Contains(note))
+            {
+                found.Add((note, reader.GetString(1)));
+            }
+        }
+
+        return (IReadOnlyList<(string Note, string Spelling)>)found;
+    });
+
+    /// <summary>
+    /// The notes with the attribute <paramref name="key"/><c>::</c> <paramref name="value"/>, matched by the key as
+    /// given (already normalized with <see cref="AttributeParser.NormalizeKey"/>) and by
+    /// <see cref="AttributeParser.ValueKey"/> of the value, so <c>ACME</c> finds <c>[[ACME]]</c>. Each note once, sorted
+    /// by name ignoring case, then ordinal.
+    /// </summary>
+    public IReadOnlyList<string> NotesWithAttribute(string key, string value)
+    {
+        string valueKey = AttributeParser.ValueKey(value);
+        return Run(connection =>
+        {
+            List<string> names = [];
+            using SqliteCommand command = Command(
+                connection,
+                null,
+                "SELECT DISTINCT note FROM note_attributes WHERE key = $key AND value_key = $valueKey");
+            command.Parameters.AddWithValue("$key", key);
+            command.Parameters.AddWithValue("$valueKey", valueKey);
+            using SqliteDataReader reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                names.Add(reader.GetString(0));
+            }
+
+            return SortNames(names);
+        });
+    }
+
+    /// <summary>
+    /// The indexed notes that have no attribute with the key <paramref name="key"/> (normalized), sorted by name
+    /// ignoring case, then ordinal. A note that couldn't be read has no attributes, so it is among them.
+    /// </summary>
+    public IReadOnlyList<string> NotesWithoutAttribute(string key) => Run(connection =>
+    {
+        List<string> names = [];
+        using SqliteCommand command = Command(
+            connection,
+            null,
+            "SELECT name FROM notes WHERE name NOT IN (SELECT note FROM note_attributes WHERE key = $key)");
+        command.Parameters.AddWithValue("$key", key);
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            names.Add(reader.GetString(0));
+        }
+
+        return (IReadOnlyList<string>)SortNames(names);
+    });
+
+    /// <summary>
+    /// Every stored attribute with the key <paramref name="key"/> (already normalized with
+    /// <see cref="AttributeParser.NormalizeKey"/>) as <c>(Note, Value)</c> rows, the value spelled as stored (raw),
+    /// ordered by note (ordinal), then line order (<c>rowid</c>). A key nobody uses gives an empty list.
+    /// </summary>
+    public IReadOnlyList<(string Note, string Value)> AttributeValues(string key) => Run(connection =>
+    {
+        List<(string Note, string Value)> rows = [];
+        using SqliteCommand command = Command(
+            connection,
+            null,
+            "SELECT note, value FROM note_attributes WHERE key = $key ORDER BY rowid");
+        command.Parameters.AddWithValue("$key", key);
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            rows.Add((reader.GetString(0), reader.GetString(1)));
+        }
+
+        // A stable sort by note (ordinal, the same on every OS) keeps each note's rows in line order.
+        return (IReadOnlyList<(string Note, string Value)>)rows.OrderBy(r => r.Note, StringComparer.Ordinal).ToList();
+    });
 
     /// <summary>
     /// The indexed note called <paramref name="name"/> (trimmed): an exact match first, then one ignoring
@@ -383,20 +1045,32 @@ internal sealed class TagIndex : IDisposable
 
         Dictionary<string, NoteLinkDirection> directions = new(StringComparer.Ordinal);
         Dictionary<string, string> missing = new(StringComparer.OrdinalIgnoreCase);
-        using (SqliteCommand command = Command(connection, null, "SELECT note, target FROM note_links"))
-        using (SqliteDataReader reader = command.ExecuteReader())
+        // Sorted, so of two spellings of one missing note ("Gamma#A", "gamma") the first stored is the one shown.
+        // Only the rows that concern the note (LinksSql): its own, and those whose whole target or note part is its name
+        // or its name + ".md" ignoring case, which are exactly the targets NameLookup.ResolveLink could resolve to it.
+        string key = note.ToUpperInvariant();
+        using (SqliteCommand command = Command(connection, null, LinksSql))
         {
+            command.Parameters.AddWithValue("$note", note);
+            command.Parameters.AddWithValue("$k", key);
+            command.Parameters.AddWithValue("$kmd", key + ".MD");
+            using SqliteDataReader reader = command.ExecuteReader();
             while (reader.Read())
             {
                 string from = reader.GetString(0);
                 string target = reader.GetString(1);
-                string? to = names.Resolve(target);
+                string? to = names.ResolveLink(target)?.Note;
                 if (string.Equals(from, note, StringComparison.Ordinal))
                 {
                     if (to is null)
                     {
-                        // One row per missing note: "Gamma" and "gamma.md" would both become the same note.
-                        missing.TryAdd(StripMd(target), target);
+                        // One row per missing note, shown by its note part: "Gamma", "gamma.md" and "Gamma#A" are one
+                        // note. "[[#Intro]]" names no note at all, so it gives no row.
+                        string part = NoteLinkParser.Split(target).Note;
+                        if (part.Length > 0)
+                        {
+                            missing.TryAdd(StripMd(part), part);
+                        }
                     }
                     else if (!string.Equals(to, note, StringComparison.Ordinal))
                     {
@@ -432,6 +1106,291 @@ internal sealed class TagIndex : IDisposable
 
         return SortNames(rows.Keys).Select(n => rows[n]).ToList();
     });
+
+    /// <summary>
+    /// Every person mentioned with <c>@[Name]</c> in a note other than their own page, once, with the number of such
+    /// notes, sorted by the shown name ignoring case, then ordinal. A mention is resolved by <see cref="Aliases"/>, so a
+    /// note that mentions <c>@[Anna]</c> and <c>@[Anna Schmidt]</c> counts once under <c>Anna Schmidt</c>; an unresolved
+    /// name is its own entry. The shown name is the title of the person's page (<see cref="Context.People.PersonOf"/>)
+    /// when it exists, else the ordinal-first spelling among the mentions.
+    /// </summary>
+    public IReadOnlyList<PersonCount> People() => Run(connection =>
+    {
+        Dictionary<string, string> pages = PersonPages(connection);
+        PersonAliases aliases = BuildAliases(connection);
+        Dictionary<string, (HashSet<string> Notes, string Spelling)> people = new(StringComparer.Ordinal);
+        using (SqliteCommand command = Command(connection, null, "SELECT note, person, spelling FROM note_people"))
+        using (SqliteDataReader reader = command.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                string note = reader.GetString(0);
+                string spelling = reader.GetString(2);
+                string person = aliases.PersonKey(reader.GetString(1));
+                if (IsOwnPage(note, person))
+                {
+                    continue;
+                }
+
+                if (people.TryGetValue(person, out (HashSet<string> Notes, string Spelling) known))
+                {
+                    known.Notes.Add(note);
+                    if (string.CompareOrdinal(spelling, known.Spelling) < 0)
+                    {
+                        people[person] = (known.Notes, spelling);
+                    }
+                }
+                else
+                {
+                    people[person] = (new HashSet<string>(StringComparer.Ordinal) { note }, spelling);
+                }
+            }
+        }
+
+        return (IReadOnlyList<PersonCount>)people
+            .Select(p => new PersonCount(pages.GetValueOrDefault(p.Key, p.Value.Spelling), p.Value.Notes.Count))
+            .OrderBy(p => p.Person, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(p => p.Person, StringComparer.Ordinal)
+            .ToList();
+    });
+
+    /// <summary>
+    /// The notes that mention <paramref name="person"/> with <c>@[...]</c>, matched by <see cref="PersonParser.Key"/>
+    /// of the trimmed name with whitespace runs collapsed (so <c>anna schmidt</c> finds <c>@[ANNA  schmidt]</c>) after
+    /// resolving both the name and each mention through <see cref="Aliases"/> (so <c>AS</c> and <c>Anna Schmidt</c>
+    /// both find <c>@[AS]</c>), sorted by name ignoring case, then ordinal. Never the person's own page.
+    /// </summary>
+    public IReadOnlyList<string> NotesMentioning(string person) => Run(connection =>
+    {
+        PersonAliases aliases = BuildAliases(connection);
+        string key = aliases.PersonKey(person);
+        HashSet<string> names = new(StringComparer.Ordinal);
+        foreach ((string note, string _) in MentionsOf(connection, aliases, key))
+        {
+            names.Add(note);
+        }
+
+        return (IReadOnlyList<string>)SortNames(names);
+    });
+
+    /// <summary>
+    /// The name shown for <paramref name="person"/> (resolved and matched like <see cref="NotesMentioning"/>): the
+    /// title of their page when it exists, else the ordinal-first spelling among the mentions in other notes, else
+    /// <c>null</c>.
+    /// </summary>
+    public string? PersonName(string person) => Run(connection =>
+    {
+        PersonAliases aliases = BuildAliases(connection);
+        string key = aliases.PersonKey(person);
+        if (PersonPages(connection).TryGetValue(key, out string? title))
+        {
+            return title;
+        }
+
+        string? first = null;
+        foreach ((string _, string spelling) in MentionsOf(connection, aliases, key))
+        {
+            if (first is null || string.CompareOrdinal(spelling, first) < 0)
+            {
+                first = spelling;
+            }
+        }
+
+        return first;
+    });
+
+    /// <summary>
+    /// The alias rule (<see cref="PersonAliases"/>) as indexed: the person pages among the indexed notes and the
+    /// <c>aliases::</c> values stored for them. Re-read on every call, so an alias change counts after the next
+    /// <see cref="Sync"/>.
+    /// </summary>
+    public PersonAliases Aliases() => Run(BuildAliases);
+
+    // The (note, spelling) of every mention whose resolved key is the person key, never on the person's own page.
+    private static List<(string Note, string Spelling)> MentionsOf(SqliteConnection connection, PersonAliases aliases, string key)
+    {
+        List<(string Note, string Spelling)> found = [];
+        using SqliteCommand command = Command(connection, null, "SELECT note, person, spelling FROM note_people");
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            string note = reader.GetString(0);
+            if (string.Equals(aliases.PersonKey(reader.GetString(1)), key, StringComparison.Ordinal) && !IsOwnPage(note, key))
+            {
+                found.Add((note, reader.GetString(2)));
+            }
+        }
+
+        return found;
+    }
+
+    // The alias rule from the indexed person pages, in full-name order (ordinal), with their stored aliases:: values
+    // in the order they were parsed.
+    private static PersonAliases BuildAliases(SqliteConnection connection)
+    {
+        Dictionary<string, List<PageAttribute>> values = new(StringComparer.Ordinal);
+        using (SqliteCommand command = Command(
+            connection,
+            null,
+            "SELECT note, value FROM note_attributes WHERE key = $key ORDER BY rowid"))
+        {
+            command.Parameters.AddWithValue("$key", PersonAliases.AttributeKey);
+            using SqliteDataReader reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                string note = reader.GetString(0);
+                if (Context.People.PersonOf(note) is null)
+                {
+                    continue;
+                }
+
+                if (!values.TryGetValue(note, out List<PageAttribute>? list))
+                {
+                    list = [];
+                    values[note] = list;
+                }
+
+                list.Add(new PageAttribute(PersonAliases.AttributeKey, reader.GetString(1)));
+            }
+        }
+
+        List<(string Title, IReadOnlyList<string> Aliases)> pages = [];
+        foreach (string name in NoteNames(connection).Order(StringComparer.Ordinal))
+        {
+            if (Context.People.PersonOf(name) is { } title)
+            {
+                pages.Add((title, values.TryGetValue(name, out List<PageAttribute>? found) ? PersonAliases.Parse(found, title) : []));
+            }
+        }
+
+        return new PersonAliases(pages);
+    }
+
+    // The person pages in the index by key: the title of each note directly under the top-level people note. With two
+    // pages of one key (People/anna and people/Anna) the ordinal-first full name wins.
+    private static Dictionary<string, string> PersonPages(SqliteConnection connection)
+    {
+        Dictionary<string, string> pages = new(StringComparer.Ordinal);
+        foreach (string name in NoteNames(connection).Order(StringComparer.Ordinal))
+        {
+            if (Context.People.PersonOf(name) is { } title)
+            {
+                pages.TryAdd(PersonParser.Key(title), title);
+            }
+        }
+
+        return pages;
+    }
+
+    private static bool IsOwnPage(string note, string key) =>
+        Context.People.PersonOf(note) is { } title && string.Equals(PersonParser.Key(title), key, StringComparison.Ordinal);
+
+    // The stored lookup key of a link target or its note part: upper-cased invariant, NULL when empty.
+    private static string? LinkKey(string text) => text.Length == 0 ? null : text.ToUpperInvariant();
+
+    // Deletes the note's note_text row by its rowid (from note_text_rows), so the FTS table is never scanned by note.
+    // The row goes only if it still names the note; the mapping goes either way.
+    private static void DeleteText(SqliteConnection connection, SqliteTransaction transaction, string note)
+    {
+        object? row;
+        using (SqliteCommand select = Command(connection, transaction, "SELECT row FROM note_text_rows WHERE note = $note"))
+        {
+            select.Parameters.AddWithValue("$note", note);
+            row = select.ExecuteScalar();
+        }
+
+        if (row is long rowid)
+        {
+            Execute(
+                connection,
+                transaction,
+                "DELETE FROM note_text WHERE rowid = $row AND note = $note",
+                ("$row", rowid),
+                ("$note", note));
+            Execute(connection, transaction, "DELETE FROM note_text_rows WHERE note = $note", ("$note", note));
+        }
+    }
+
+    // Once per sync, before the notes are read: a note_text row that is not its note's mapped row (none, or a
+    // mapping to another row) goes by rowid, and so does a mapping whose row is gone or names another note. An older
+    // version writing the same context.db leaves such rows. The notes they belonged to lose their stored time, so
+    // this sync re-parses those still there and writes their text and mapping again.
+    private static void RepairText(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        List<(long Row, string Note)> extra = [];
+        using (SqliteCommand select = Command(
+            connection,
+            transaction,
+            "SELECT t.rowid, t.note FROM note_text t WHERE NOT EXISTS "
+                + "(SELECT 1 FROM note_text_rows r WHERE r.note = t.note AND r.row = t.rowid)"))
+        using (SqliteDataReader reader = select.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                extra.Add((reader.GetInt64(0), reader.GetString(1)));
+            }
+        }
+
+        List<string> stale = [];
+        using (SqliteCommand select = Command(
+            connection,
+            transaction,
+            "SELECT r.note FROM note_text_rows r WHERE NOT EXISTS "
+                + "(SELECT 1 FROM note_text t WHERE t.rowid = r.row AND t.note = r.note)"))
+        using (SqliteDataReader reader = select.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                stale.Add(reader.GetString(0));
+            }
+        }
+
+        foreach ((long row, _) in extra)
+        {
+            Execute(connection, transaction, "DELETE FROM note_text WHERE rowid = $row", ("$row", row));
+        }
+
+        foreach (string note in stale)
+        {
+            Execute(connection, transaction, "DELETE FROM note_text_rows WHERE note = $note", ("$note", note));
+        }
+
+        foreach (string note in extra.Select(e => e.Note).Concat(stale).Distinct(StringComparer.Ordinal))
+        {
+            Execute(connection, transaction, "UPDATE notes SET modified = NULL WHERE name = $note", ("$note", note));
+        }
+    }
+
+    // The note_text rows of notes whose note row is missing (edited by hand) go by rowid, through note_text_rows,
+    // only while the row still names that note.
+    private static void PruneOrphanText(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        List<(long Row, string Note)> rows = [];
+        using (SqliteCommand select = Command(
+            connection, transaction, "SELECT row, note FROM note_text_rows WHERE note NOT IN (SELECT name FROM notes)"))
+        using (SqliteDataReader reader = select.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                rows.Add((reader.GetInt64(0), reader.GetString(1)));
+            }
+        }
+
+        foreach ((long row, string note) in rows)
+        {
+            Execute(
+                connection,
+                transaction,
+                "DELETE FROM note_text WHERE rowid = $row AND note = $note",
+                ("$row", row),
+                ("$note", note));
+        }
+
+        if (rows.Count > 0)
+        {
+            Execute(connection, transaction, "DELETE FROM note_text_rows WHERE note NOT IN (SELECT name FROM notes)");
+        }
+    }
 
     private static string StripMd(string target) =>
         target.EndsWith(".md", StringComparison.OrdinalIgnoreCase) && target.Length > 3 ? target[..^3] : target;
@@ -482,35 +1441,59 @@ internal sealed class TagIndex : IDisposable
             .ThenBy(n => n, StringComparer.Ordinal)
             .ToList();
 
+    // Turns on FTS5's secure-delete for note_text (stored in the table, so set once): a deleted or rewritten note's
+    // text is then removed from the index pages instead of only being marked deleted. Checked first, so a sync with
+    // nothing to do writes nothing.
+    private static void EnsureSecureDelete(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        using (SqliteCommand check = Command(connection, transaction, "SELECT v FROM note_text_config WHERE k = 'secure-delete'"))
+        {
+            object? value = check.ExecuteScalar();
+            if (value is long on && on == 1)
+            {
+                return;
+            }
+        }
+
+        Execute(connection, transaction, "INSERT INTO note_text(note_text, rank) VALUES('secure-delete', 1)");
+    }
+
     // Opens the database, creates the tables if needed and runs the work. Any SQLite error becomes a
     // TagIndexException. The file is never deleted or replaced.
     private T Run<T>(Func<SqliteConnection, T> work)
     {
-        if (InMemory)
-        {
-            try
-            {
-                return work(Memory());
-            }
-            catch (SqliteException ex)
-            {
-                throw new TagIndexException($"Can't read {FileName}.", ex);
-            }
-        }
-
-        DropMemory();
+        Interlocked.Increment(ref reads);
         string connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = FilePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
             Pooling = false,
+            // Microsoft.Data.Sqlite retries a busy statement until this many seconds have passed.
+            DefaultTimeout = (int)Math.Max(1, Math.Ceiling(busyTimeout.TotalSeconds)),
         }.ToString();
 
+        PreparePrivateFile();
         try
         {
             using SqliteConnection connection = new SqliteConnection(connectionString);
             connection.Open();
+            // A constant number, not user input: PRAGMA takes no parameters.
+            Execute(
+                connection,
+                null,
+                "PRAGMA busy_timeout = "
+                    + ((long)busyTimeout.TotalMilliseconds).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            // Freed pages are zeroed, so the text of a deleted note (one just marked sensitive) doesn't linger in the file.
+            Execute(connection, null, "PRAGMA secure_delete = ON");
             Execute(connection, null, Schema);
+            EnsureLinkColumn(connection, "heading");
+            EnsureLinkColumn(connection, "whole_key");
+            EnsureLinkColumn(connection, "part_key");
+            Execute(
+                connection,
+                null,
+                "CREATE INDEX IF NOT EXISTS note_links_whole_key ON note_links(whole_key); "
+                    + "CREATE INDEX IF NOT EXISTS note_links_part_key ON note_links(part_key);");
             return work(connection);
         }
         catch (SqliteException ex)
@@ -519,41 +1502,74 @@ internal sealed class TagIndex : IDisposable
         }
     }
 
-    /// <summary>Closes the in-memory database, if one is open.</summary>
-    public void Dispose() => DropMemory();
-
-    // The open in-memory database, created (with the schema) on first use.
-    private SqliteConnection Memory()
+    // Job 274: before SQLite opens it, context.db is an owner-only (0600 off Windows) file, so its journal, which SQLite
+    // gives the database's mode, is too. A missing file is created empty (SQLite takes an empty file as a new database)
+    // when the root exists; a missing root is left to SQLite as before. An existing file with any group or other bits
+    // is set to 0600 (best effort: a file system that can't change modes still opens).
+    private void PreparePrivateFile()
     {
-        if (memory is null)
+        if (!Directory.Exists(root))
         {
-            SqliteConnection connection = new SqliteConnection(new SqliteConnectionStringBuilder
-            {
-                DataSource = ":memory:",
-                Pooling = false,
-            }.ToString());
-            try
-            {
-                connection.Open();
-                Execute(connection, null, "PRAGMA temp_store=MEMORY");
-                Execute(connection, null, Schema);
-            }
-            catch
-            {
-                connection.Dispose();
-                throw;
-            }
-
-            memory = connection;
+            return;
         }
 
-        return memory;
+        try
+        {
+            using (PrivateFile.OpenNew(FilePath))
+            {
+            }
+        }
+        catch (IOException) when (File.Exists(FilePath) || Directory.Exists(FilePath))
+        {
+            // Already there (or made by another process meanwhile).
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new TagIndexException($"Can't read {FileName}.", ex);
+        }
+
+        try
+        {
+            PrivateFile.Tighten(FilePath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Left as it is; the database still opens. Its journal then takes the same loose mode, which exposes
+            // nothing the readable database doesn't already.
+        }
     }
 
-    private void DropMemory()
+    // A database from before ParserVersion 10 has note_links without the heading column, one from before 14 without
+    // whole_key and part_key: add the column (NULL until the next Sync re-parses every note). Another process may add it
+    // at the same time; then its column is the one kept. The column name is one of three constants, never user input.
+    private static void EnsureLinkColumn(SqliteConnection connection, string column)
     {
-        memory?.Dispose();
-        memory = null;
+        if (column is not ("heading" or "whole_key" or "part_key"))
+        {
+            throw new ArgumentException("Not a note_links column: " + column, nameof(column));
+        }
+
+        if (LinksHaveColumn(connection, column))
+        {
+            return;
+        }
+
+        try
+        {
+            Execute(connection, null, $"ALTER TABLE note_links ADD COLUMN {column} TEXT");
+        }
+        catch (SqliteException) when (LinksHaveColumn(connection, column))
+        {
+            // Added by another process meanwhile.
+        }
+    }
+
+    private static bool LinksHaveColumn(SqliteConnection connection, string column)
+    {
+        using SqliteCommand command = Command(
+            connection, null, "SELECT COUNT(*) FROM pragma_table_info('note_links') WHERE name = $column");
+        command.Parameters.AddWithValue("$column", column);
+        return Convert.ToInt64(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) > 0;
     }
 
     private static SqliteCommand Command(SqliteConnection connection, SqliteTransaction? transaction, string sql)
@@ -563,6 +1579,17 @@ internal sealed class TagIndex : IDisposable
         command.CommandText = sql;
         return command;
     }
+
+    private static void InsertAttribute(
+        SqliteConnection connection, SqliteTransaction transaction, string note, string key, string valueKey, string value) =>
+        Execute(
+            connection,
+            transaction,
+            "INSERT INTO note_attributes(note, key, value_key, value) VALUES($note, $key, $valueKey, $value)",
+            ("$note", note),
+            ("$key", key),
+            ("$valueKey", valueKey),
+            ("$value", value));
 
     private static void Execute(
         SqliteConnection connection,

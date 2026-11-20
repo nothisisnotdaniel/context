@@ -5,9 +5,8 @@ namespace Context;
 /// <summary>A todo due today or earlier, as shown in the <c>/current</c> view.</summary>
 internal sealed record DueTodo
 {
-    public DueTodo(int number, DateOnly due, string text, bool overdue)
+    public DueTodo(DateOnly due, string text, bool overdue)
     {
-        Number = number;
         Due = due;
         Text = text;
         Overdue = overdue;
@@ -18,9 +17,6 @@ internal sealed record DueTodo
     /// print them. Front ends draw it through their <c>Render</c> step.
     /// </summary>
     public override string ToString() => nameof(DueTodo);
-
-    /// <summary>The todo's number as shown in the sidebar (1-based, in <see cref="TodoStore.List"/> order).</summary>
-    public int Number { get; }
 
     public DateOnly Due { get; }
 
@@ -55,9 +51,10 @@ internal sealed record LinkedNote
 
 /// <summary>
 /// The data of the <c>/current</c> view, with no rendering: today's appointments, every todo due today or
-/// earlier and the notes linked to them. Any front end builds it with <see cref="Build"/> and draws it its own
-/// way. All text in it (appointment titles and locations, file names, todo text, note names, tags) is raw
-/// outside text: every front end must clean it (<see cref="SafeText.Clean"/>) and escape it for its own output.
+/// earlier, the notes linked to them and the notes related to each appointment. Any front end builds it with
+/// <see cref="Build"/> and draws it its own way. All text in it (appointment titles and locations, file names,
+/// todo text, note names, tags) is raw outside text: every front end must clean it (<see cref="SafeText.Clean"/>)
+/// and escape it for its own output.
 /// </summary>
 internal sealed record CurrentView
 {
@@ -78,7 +75,8 @@ internal sealed record CurrentView
         bool todosUnreadable,
         IReadOnlyList<DueTodo> due,
         IReadOnlyList<LinkedNote> linkedNotes,
-        bool indexUnreadable)
+        bool indexUnreadable,
+        IReadOnlyList<IReadOnlyList<RelatedNote>>? related = null)
     {
         Today = today;
         Zone = zone;
@@ -92,6 +90,7 @@ internal sealed record CurrentView
         Due = due;
         LinkedNotes = linkedNotes;
         IndexUnreadable = indexUnreadable;
+        Related = related ?? appointments.Select(_ => (IReadOnlyList<RelatedNote>)[]).ToList();
     }
 
     /// <summary>
@@ -157,31 +156,35 @@ internal sealed record CurrentView
     /// <summary>The linked notes, sorted by name ignoring case (then ordinally).</summary>
     public IReadOnlyList<LinkedNote> LinkedNotes { get; }
 
-    /// <summary>True when <c>context.db</c> can't be read; then <see cref="LinkedNotes"/> is empty.</summary>
+    /// <summary>
+    /// The notes related to each appointment (meeting prep, <see cref="MeetingPrep.Related"/>): runs parallel to
+    /// <see cref="Appointments"/>, same count and order, so <c>Related[i]</c> belongs to <c>Appointments[i]</c>. Each
+    /// list holds at most <see cref="MeetingPrep.MaxRelated"/> notes, ranked; empty when none match or when
+    /// <see cref="IndexUnreadable"/> is set. Names and tags are raw: clean them before showing them.
+    /// </summary>
+    public IReadOnlyList<IReadOnlyList<RelatedNote>> Related { get; }
+
+    /// <summary>
+    /// True when <c>context.db</c> can't be read; then <see cref="LinkedNotes"/> and every list in
+    /// <see cref="Related"/> are empty.
+    /// </summary>
     public bool IndexUnreadable { get; }
 
     /// <summary>
-    /// Reads everything the view needs. The feed (if any) is fetched once; when <c>todos.json</c> can't be read
-    /// there are no due todos and the index isn't touched, and when nothing is due the index isn't touched either.
+    /// Reads everything the view needs. The feed (if any) is fetched once. The index is synced once and read through
+    /// one <see cref="TagIndex.NoteTags"/> call when there is at least one appointment, and synced when something is
+    /// due; <paramref name="dueOnDayOnly"/> keeps only the todos due exactly on <paramref name="today"/> (a chosen day's
+    /// view: none is overdue); with no appointments and nothing due (also when <c>todos.json</c> can't be read) it isn't touched.
+    /// <paramref name="extra"/> appointments (in the calendar's zone, for example Outlook's) are filtered and sorted
+    /// together with the files' and the feed's events through <see cref="CalendarStore.Day(DateOnly, IReadOnlyList{Appointment})"/>.
     /// </summary>
     public static CurrentView Build(
-        TodoStore todos, TagIndex index, NoteStore notes, CalendarStore calendar, CalendarFeed? feed, DateOnly today)
+        TodoStore todos, TagIndex index, NoteStore notes, CalendarStore calendar, CalendarFeed? feed, DateOnly today,
+        bool dueOnDayOnly = false, IReadOnlyList<Appointment>? extra = null)
     {
-        CalendarFeedResult result = feed?.Fetch() ?? new CalendarFeedResult(CalendarFeedStatus.NotConfigured);
-        IReadOnlyList<Appointment> extra = [];
-        if (result.Text is not null)
-        {
-            try
-            {
-                extra = IcsParser.Parse(result.Text, calendar.Zone);
-            }
-            catch (FormatException)
-            {
-                // The feed only caches text that parsed, so this only happens if the cache was changed by hand.
-            }
-        }
-
-        CalendarDay day = calendar.Day(today, extra);
+        CalendarFeedResult result = Fetch(feed);
+        IReadOnlyList<Appointment> feedEvents = FeedEvents(result, calendar.Zone, today);
+        CalendarDay day = calendar.Day(today, extra is null || extra.Count == 0 ? feedEvents : [.. feedEvents, .. extra]);
 
         IReadOnlyList<TodoItem> items;
         bool todosUnreadable = false;
@@ -195,26 +198,36 @@ internal sealed record CurrentView
             todosUnreadable = true;
         }
 
-        List<DueTodo> due = [];
-        for (int i = 0; i < items.Count; i++)
+        List<DueTodo> due = DueOn(items, today);
+        if (dueOnDayOnly)
         {
-            TodoItem todo = items[i];
-            if (todo.Due <= today)
-            {
-                due.Add(new DueTodo(i + 1, todo.Due, todo.Text, todo.Due < today));
-            }
+            due = due.Where(t => t.Due == today).ToList();
         }
 
         IReadOnlyList<LinkedNote> linked = [];
+        IReadOnlyList<IReadOnlyList<RelatedNote>>? related = null;
         bool indexUnreadable = false;
-        if (due.Count > 0)
+        if (due.Count > 0 || day.Appointments.Count > 0)
         {
             try
             {
-                linked = Linked(index, notes, due);
+                index.Sync(notes);
+                if (due.Count > 0)
+                {
+                    linked = Linked(index, due);
+                }
+
+                if (day.Appointments.Count > 0)
+                {
+                    IReadOnlyList<(string Note, string Tag)> noteTags = index.NoteTags();
+                    IReadOnlyList<NoteInfo> listed = notes.List();
+                    related = day.Appointments.Select(a => MeetingPrep.Related(a, listed, noteTags)).ToList();
+                }
             }
             catch (TagIndexException)
             {
+                linked = [];
+                related = null;
                 indexUnreadable = true;
             }
         }
@@ -231,7 +244,45 @@ internal sealed record CurrentView
             todosUnreadable,
             due,
             linked,
-            indexUnreadable);
+            indexUnreadable,
+            related);
+    }
+
+    /// <summary>Fetches the feed once; no feed is <see cref="CalendarFeedStatus.NotConfigured"/>.</summary>
+    internal static CalendarFeedResult Fetch(CalendarFeed? feed) =>
+        feed?.Fetch() ?? new CalendarFeedResult(CalendarFeedStatus.NotConfigured);
+
+    /// <summary>The feed's events touching <paramref name="day"/>, or none when it has no text or doesn't parse.</summary>
+    internal static IReadOnlyList<Appointment> FeedEvents(CalendarFeedResult result, TimeZoneInfo zone, DateOnly day)
+    {
+        if (result.Text is not null)
+        {
+            try
+            {
+                return IcsParser.Parse(result.Text, zone, day);
+            }
+            catch (FormatException)
+            {
+                // The feed only caches text that parsed, so this only happens if the cache was changed by hand.
+            }
+        }
+
+        return [];
+    }
+
+    /// <summary>Every todo of <paramref name="items"/> due on or before <paramref name="today"/>, in their order.</summary>
+    internal static List<DueTodo> DueOn(IReadOnlyList<TodoItem> items, DateOnly today)
+    {
+        List<DueTodo> due = [];
+        foreach (TodoItem todo in items)
+        {
+            if (todo.Due <= today)
+            {
+                due.Add(new DueTodo(todo.Due, todo.Text, todo.Due < today));
+            }
+        }
+
+        return due;
     }
 
     /// <summary>The time text of <paramref name="appointment"/> on <see cref="Today"/>.</summary>
@@ -258,9 +309,8 @@ internal sealed record CurrentView
         return $"{start}-{end}";
     }
 
-    private static List<LinkedNote> Linked(TagIndex index, NoteStore notes, IReadOnlyList<DueTodo> due)
+    private static List<LinkedNote> Linked(TagIndex index, IReadOnlyList<DueTodo> due)
     {
-        index.Sync(notes);
         Dictionary<string, SortedSet<string>> linked = new(StringComparer.Ordinal);
         IEnumerable<string> tags = due
             .SelectMany(t => TagParser.Parse(t.Text))

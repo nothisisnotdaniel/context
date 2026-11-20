@@ -1,29 +1,448 @@
 @inherits StateComponent
 
 <section class="notes">
-    <h2>Notes</h2>
+    <div class="notes-bar">
+        <div class="notes-bar-buttons">
+            <button type="button" class="triage-open" aria-label="Triage" title="Triage" @onclick="() => OnTriage.InvokeAsync()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z"/></svg></button>
+            <button type="button" class="people-open" aria-label="People" title="People" @onclick="() => OnPeople.InvokeAsync()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></button>
+            <button type="button" class="tags-open" aria-label="Tags" title="Tags" @onclick="() => OnTags.InvokeAsync()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z"/><circle cx="7" cy="7" r="1.5"/></svg></button>
+            <button type="button" class="todos-open" aria-label="Todos" title="Todos" @onclick="() => OnTodos.InvokeAsync()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><line x1="12" y1="4" x2="12" y2="14"/><circle cx="12" cy="19" r="1"/></svg></button>
+            <button type="button" class="settings-open" aria-label="Settings" title="Settings" @onclick="() => OnSettings.InvokeAsync()"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="8" cy="18" r="2"/></svg></button>
+        </div>
+    </div>
     @if (Snapshot is { } snapshot)
     {
+        @if (snapshot.SavedSearchesUnreadable)
+        {
+            <p class="saved-searches-unreadable red">Can't read saved searches.</p>
+        }
+        else if (snapshot.SavedSearches.Count > 0)
+        {
+            <nav class="saved-searches" aria-label="Saved searches">
+                <ul>
+                    @foreach (SavedSearch search in snapshot.SavedSearches)
+                    {
+                        (string rawName, string rawQuery) = search;
+                        string searchName = DesktopText.OneLine(rawName);
+                        string searchQuery = DesktopText.OneLine(rawQuery);
+                        string removeLabel = "Remove " + searchName;
+                        <li class="saved-search-row" @key="rawName">
+                            <button type="button" class="saved-search cut" title="@searchQuery" @onclick="() => OnSearch.InvokeAsync(rawQuery)">@searchName</button>
+                            <button type="button" class="saved-search-remove" aria-label="@removeLabel" title="@removeLabel" disabled="@removing" @onclick="() => RemoveSearch(rawName)">×</button>
+                        </li>
+                    }
+                </ul>
+            </nav>
+        }
+        @if (removed is { } removedResult)
+        {
+            string removedText = DesktopText.OneLine(removedResult.Text);
+            <p class="saved-search-result cut @(removedResult.Kind == ActionKind.Done ? "grey" : "red")" role="status" title="@removedText">@removedText</p>
+        }
         @if (snapshot.NotesUnreadable)
         {
             <p class="red">Can't read the notes folder.</p>
         }
-        else if (snapshot.Notes.Count == 0)
+        else if (snapshot.Notes.Count == 0 && snapshot.Sensitive.Count == 0)
         {
             <p class="grey">No notes yet</p>
         }
         else
         {
-            <ul class="note-list">
-                @foreach (NoteInfo note in snapshot.Notes)
+            List<(NoteInfo Note, bool Locked)> pinnedRows = PinnedRows(snapshot);
+            @if (pinnedRows.Count > 0)
+            {
+                <ul class="note-list pinned-notes" aria-label="Pinned notes">
+                    @foreach ((NoteInfo note, bool locked) in pinnedRows)
+                    {
+                        @NoteRow(note, locked, true)
+                    }
+                </ul>
+            }
+            List<(NoteInfo Note, bool Locked)> recentRows = RecentRows(snapshot);
+            @if (recentRows.Count > 0)
+            {
+                <ul class="note-list recent-notes" aria-label="Recent notes">
+                    @foreach ((NoteInfo note, bool locked) in recentRows)
+                    {
+                        @NoteRow(note, locked, false)
+                    }
+                </ul>
+            }
+            else
+            {
+                <p class="recent-empty grey">No recently opened notes.</p>
+            }
+        }
+        <div class="note-entry">
+            <input type="text" class="note-new-title" value="@newTitle" maxlength="200" disabled="@creating"
+                   aria-label="New note" placeholder="New note title" @oninput="TitleTyped" @onkeydown="e => Create(e)" />
+        </div>
+        <div class="note-import">
+            <button type="button" class="import" disabled="@importing" @onclick="Import">Import</button>
+        </div>
+        <div class="import-result" role="status">
+            @foreach (ImportLine line in importLines)
+            {
+                @if (line.Text is { } lineText)
                 {
-                    string name = DesktopText.OneLine(note.Name);
-                    <li class="note">
-                        <span class="name cut" title="@name">@name</span>
-                        <span class="time grey">@note.Modified.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)</span>
-                    </li>
+                    <p class="import-line cut @line.Css" title="@lineText">@lineText</p>
                 }
-            </ul>
+            }
+        </div>
+        @if (replaceQuestion is { } question)
+        {
+            <ConfirmDialog Question="@question" ConfirmLabel="Replace" Busy="importing"
+                           OnConfirm="ReplaceConfirmed" OnCancel="ReplaceCancelled" />
+        }
+        @if (snapshot.SensitiveSupported)
+        {
+            <div class="sensitive-entry">
+                @if (!snapshot.RecoveryReady)
+                {
+                    <button type="button" class="sensitive-setup-open" @onclick="OpenSetup">Set up sensitive notes</button>
+                }
+                <button type="button" class="sensitive-restore-open" @onclick="OpenRestore">Restore from recovery file</button>
+            </div>
+            @if (sensitiveDone.Length > 0)
+            {
+                <p class="sensitive-result accent" role="status" title="@sensitiveDone">@sensitiveDone</p>
+            }
+        }
+        @if (setupOpen)
+        {
+            <SensitiveSetup Restore="restoring" OnDone="SetupDone" OnCancel="CloseSetup" />
+        }
+        @if (created is { } shown)
+        {
+            @if (shown.Kind == ActionKind.Done)
+            {
+                string createdText = $"Created {DesktopText.OneLine(shown.Text)}";
+                <p class="note-entry-result accent" role="status" title="@createdText">@createdText</p>
+            }
+            else
+            {
+                string failedText = DesktopText.OneLine(shown.Text);
+                <p class="note-entry-result red" role="status" title="@failedText">@failedText</p>
+            }
         }
     }
 </section>
+
+@code {
+    private string newTitle = string.Empty;
+    private bool creating;
+    private ActionResult? created;
+    private bool setupOpen;
+    private bool restoring;
+    private string sensitiveDone = string.Empty;
+
+    /// <summary>The most files one import takes.</summary>
+    public const int MaxImportFiles = 100;
+
+    public const string TooManyFilesText = "Choose at most 100 files.";
+
+    private IReadOnlyList<ImportLine> importLines = [];
+    private bool importing;
+    private string? replaceQuestion;
+
+    /// <summary>The OS file dialogs.</summary>
+    [Inject]
+    internal IFileDialog Dialog { get; set; } = null!;
+
+    /// <summary>Called with a note's name when it is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    /// <summary>The open note's full name, or null; its row in the recent list gets <c>aria-current="page"</c>.</summary>
+    [Parameter]
+    public string? OpenName { get; set; }
+
+    /// <summary>Called when the Tags button is clicked.</summary>
+    [Parameter]
+    public EventCallback OnTags { get; set; }
+
+    /// <summary>Called when the Settings button is clicked.</summary>
+    [Parameter]
+    public EventCallback OnSettings { get; set; }
+
+    [Parameter]
+    public EventCallback OnTriage { get; set; }
+
+    /// <summary>Called when the People button is clicked (job 239).</summary>
+    [Parameter]
+    public EventCallback OnPeople { get; set; }
+
+    /// <summary>Called when the Todos button is clicked (job 331).</summary>
+    [Parameter]
+    public EventCallback OnTodos { get; set; }
+
+    /// <summary>Called with a saved search's query (the Search button is in the top bar, job 218).</summary>
+    [Parameter]
+    public EventCallback<string> OnSearch { get; set; }
+
+    private ActionResult? removed;
+    private bool removing;
+
+    // Removes a saved search; its result line stays until the next removal.
+    private async Task RemoveSearch(string name)
+    {
+        if (removing)
+        {
+            return;
+        }
+
+        removing = true;
+        try
+        {
+            removed = await Actions.RemoveSavedSearch(name);
+        }
+        finally
+        {
+            removing = false;
+        }
+    }
+
+    // One row of the pinned or recent list (jobs 240, 278): the name button (a subpage's parent in grey), the pin icon
+    // on a pinned row, and the visible "locked" of a sensitive note.
+    private RenderFragment NoteRow(NoteInfo note, bool locked, bool pinned) => __builder =>
+    {
+        string name = DesktopText.OneLine(note.Name);
+        string? parent = note.Parent is { } rawParent ? DesktopText.OneLine(rawParent) : null;
+        bool open = string.Equals(note.Name, OpenName, StringComparison.Ordinal);
+        <li class="note" @key="note.Name">
+            <button type="button" class="name cut" title="@name" aria-current="@(open ? "page" : null)"
+                    @onclick="() => OnOpen.InvokeAsync(note.Name)">@DesktopText.NoteName(note.Title)@if (parent is not null)
+                {<span class="note-parent">@parent</span>}</button>
+            @if (pinned)
+            {
+                <span class="pin-icon"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Pinned" focusable="false"><title>Pinned</title><path d="M12 17v5"/><path d="M9 10.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.2V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.8a2 2 0 0 0-1.1-1.7l-1.8-.9a2 2 0 0 1-1.1-1.8V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg></span>
+            }
+            @if (locked)
+            {
+                <span class="locked grey">locked</span>
+            }
+        </li>
+    };
+
+    // Every plain and sensitive note by its exact full name, with whether it is sensitive. Nothing is read from disk.
+    private static Dictionary<string, (NoteInfo Note, bool Locked)> KnownNotes(DesktopSnapshot snapshot)
+    {
+        Dictionary<string, (NoteInfo Note, bool Locked)> known = new(StringComparer.Ordinal);
+        foreach (NoteInfo note in snapshot.Notes)
+        {
+            known.TryAdd(note.Name, (note, false));
+        }
+
+        foreach (NoteInfo note in snapshot.Sensitive)
+        {
+            known.TryAdd(note.Name, (note, true));
+        }
+
+        return known;
+    }
+
+    // The stored pinned entries that name an existing plain or sensitive note (exact, ordinal), in pinned order (job 278).
+    private List<(NoteInfo Note, bool Locked)> PinnedRows(DesktopSnapshot snapshot)
+    {
+        Dictionary<string, (NoteInfo Note, bool Locked)> known = KnownNotes(snapshot);
+        return State.Pinned
+            .Where(known.ContainsKey)
+            .Distinct(StringComparer.Ordinal)
+            .Take(PinnedNotes.MaxCount)
+            .Select(name => known[name])
+            .ToList();
+    }
+
+    // The stored recent entries that name an existing plain or sensitive note (exact, ordinal) and are not pinned,
+    // newest first, each with whether it is sensitive (jobs 240, 278). Nothing is read from disk.
+    private List<(NoteInfo Note, bool Locked)> RecentRows(DesktopSnapshot snapshot)
+    {
+        Dictionary<string, (NoteInfo Note, bool Locked)> known = KnownNotes(snapshot);
+        HashSet<string> pinned = new(State.Pinned, StringComparer.Ordinal);
+        return State.Recent
+            .Where(name => known.ContainsKey(name) && !pinned.Contains(name))
+            .Distinct(StringComparer.Ordinal)
+            .Take(RecentNotes.MaxCount)
+            .Select(name => known[name])
+            .ToList();
+    }
+
+    private void OpenSetup()
+    {
+        restoring = false;
+        setupOpen = true;
+        sensitiveDone = string.Empty;
+    }
+
+    private void OpenRestore()
+    {
+        restoring = true;
+        setupOpen = true;
+        sensitiveDone = string.Empty;
+    }
+
+    private void CloseSetup() => setupOpen = false;
+
+    private void SetupDone(string text)
+    {
+        setupOpen = false;
+        sensitiveDone = DesktopText.OneLine(text);
+    }
+
+    private void TitleTyped(ChangeEventArgs e)
+    {
+        newTitle = e.Value?.ToString() ?? string.Empty;
+        created = null;
+    }
+
+    // Enter in the field or the New note button: creates the note, then opens it through OnOpen (Main asks first
+    // when the open note has unsaved changes).
+    private async Task Create(KeyboardEventArgs? key)
+    {
+        if ((key is not null && key.Key != "Enter") || creating)
+        {
+            return;
+        }
+
+        creating = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.CreateNote(newTitle);
+            created = result;
+        }
+        finally
+        {
+            creating = false;
+        }
+
+        if (result.Kind == ActionKind.Done)
+        {
+            newTitle = string.Empty;
+            await OnOpen.InvokeAsync(result.Text);
+        }
+    }
+
+    // The button, and the palette's /import (Main calls this from its own event handler): asks the OS for Markdown
+    // files and stores each as a note. A file that would replace a note is left for the question afterwards.
+    internal async Task Import()
+    {
+        if (importing || replaceQuestion is not null)
+        {
+            return;
+        }
+
+        IReadOnlyList<string> chosen = Dialog.OpenMarkdownFiles();
+        if (chosen.Count == 0)
+        {
+            return;
+        }
+
+        if (chosen.Count > MaxImportFiles)
+        {
+            importLines = [new ImportLine { Text = TooManyFilesText, Css = "red" }];
+            StateHasChanged();
+            return;
+        }
+
+        List<ImportLine> lines = chosen.Select(c => new ImportLine { Source = c }).ToList();
+        importLines = lines;
+        importing = true;
+        try
+        {
+            foreach (ImportLine line in lines)
+            {
+                ActionResult result = await Actions.ImportNote(line.Source, null);
+                if (result.Reason == ActionReason.NotConfirmed)
+                {
+                    line.Replaces = result.Text;
+                }
+                else
+                {
+                    line.Show(result);
+                }
+
+                StateHasChanged();
+            }
+        }
+        finally
+        {
+            importing = false;
+        }
+
+        List<string> names = lines
+            .Where(l => l.Replaces is not null)
+            .Select(l => l.Replaces!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (names.Count == 1)
+        {
+            replaceQuestion = $"Replace {names[0]}?";
+        }
+        else if (names.Count > 1)
+        {
+            replaceQuestion = $"Replace {names.Count} notes? {string.Join(", ", names)}";
+        }
+
+        StateHasChanged();
+    }
+
+    // Confirmed in the dialog: the waiting files replace their notes.
+    private async Task ReplaceConfirmed(Confirmation confirmed)
+    {
+        if (importing)
+        {
+            return;
+        }
+
+        importing = true;
+        try
+        {
+            foreach (ImportLine line in importLines.Where(l => l.Text is null))
+            {
+                line.Show(await Actions.ImportNote(line.Source, confirmed));
+            }
+        }
+        finally
+        {
+            importing = false;
+            replaceQuestion = null;
+        }
+    }
+
+    // Cancel or Esc in the dialog: the waiting files are dropped and their notes stay as they are.
+    private void ReplaceCancelled()
+    {
+        if (importing)
+        {
+            return;
+        }
+
+        foreach (ImportLine line in importLines.Where(l => l.Text is null))
+        {
+            line.Text = $"Not replaced: {DesktopText.OneLine(line.Replaces ?? string.Empty)}";
+            line.Css = "grey";
+        }
+
+        replaceQuestion = null;
+    }
+
+    // One chosen file: where it is, the note it would replace (while that waits for the question) and its result line.
+    private sealed class ImportLine
+    {
+        public string Source { get; init; } = string.Empty;
+
+        public string? Replaces { get; set; }
+
+        public string? Text { get; set; }
+
+        public string Css { get; set; } = string.Empty;
+
+        public void Show(ActionResult result)
+        {
+            Text = DesktopText.OneLine(result.Text);
+            Css = result.Kind == ActionKind.Done ? "accent" : "red";
+        }
+    }
+}

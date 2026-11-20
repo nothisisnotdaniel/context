@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Context app icon: a white "C" around an amber dot on a blue rounded square. Source of Context.icns, Context.ico and Context.png (see README.md). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3d74f2"/>
+      <stop offset="1" stop-color="#1d3a9c"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="200" ry="200" fill="url(#bg)" stroke="#16307f" stroke-width="8"/>
+  <path d="M 703.5 351.3 A 250 250 0 1 0 703.5 672.7" fill="none" stroke="#ffffff" stroke-width="140" stroke-linecap="round"/>
+  <circle cx="512" cy="512" r="88" fill="#ffb627"/>
+</svg>

@@ -1,0 +1,145 @@
+@inherits StateComponent
+
+@* The plain notes whose review date (a "review:yyyy-MM-dd" line, job 256) is today or earlier. Each row opens its note,
+   moves the date on by 3 months or 1 year, or removes the line after a confirmation. Main can hold an action back
+   (Guard: the note is open with unsaved changes) and hears which note was written (OnReviewed). *@
+@if (Snapshot is { } snapshot && (snapshot.Reviews.Count > 0 || snapshot.ReviewsUnreadable))
+{
+    bool busy = running || asking is not null;
+    <section class="to-review" aria-label="To review">
+        <h3>To review</h3>
+        @if (snapshot.ReviewsUnreadable)
+        {
+            <p class="red review-unreadable">Can't read the review dates.</p>
+        }
+        @if (snapshot.Reviews.Count > 0)
+        {
+            <ul class="review-list">
+                @foreach (NoteReview review in snapshot.Reviews)
+                {
+                    string name = DesktopText.OneLine(review.Note);
+                    <li class="review-item">
+                        <button type="button" class="review-note" title="@name" aria-label="@($"Open {name}")"
+                                @onclick="() => OnOpen.InvokeAsync(review.Note)">@name</button>
+                        @if (review.Due < snapshot.Today)
+                        {
+                            @(" ")<span class="grey review-since">since @review.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                        }
+                        <span class="review-buttons">
+                            <button type="button" class="review-3m" disabled="@busy"
+                                    aria-label="@($"Review {name} again in 3 months")"
+                                    @onclick="() => Reschedule(review, 3)">3 months</button>
+                            <button type="button" class="review-1y" disabled="@busy"
+                                    aria-label="@($"Review {name} again in 1 year")"
+                                    @onclick="() => Reschedule(review, 12)">1 year</button>
+                            <button type="button" class="review-remove" disabled="@busy"
+                                    aria-label="@($"Remove the review date from {name}")"
+                                    @onclick="() => Ask(review)">Remove</button>
+                        </span>
+                    </li>
+                }
+            </ul>
+        }
+        @if (failure is { } shown)
+        {
+            <p class="review-result red" role="status">@shown</p>
+        }
+        @if (asking is { } asked)
+        {
+            <ConfirmDialog Question="@($"Remove the review date from {DesktopText.OneLine(asked.Note)}?")" ConfirmLabel="Remove"
+                           Busy="running" OnConfirm="RemoveAsked" OnCancel="CloseDialog" />
+        }
+    </section>
+}
+
+@code {
+    /// <summary>
+    /// Asked with the note's full name before a write; a text (shown in red) holds the action back, <c>null</c> lets it
+    /// run.
+    /// </summary>
+    [Parameter]
+    public Func<string, Task<string?>>? Guard { get; set; }
+
+    /// <summary>Called with the note's full name after its review line was changed or removed.</summary>
+    [Parameter]
+    public EventCallback<string> OnReviewed { get; set; }
+
+    /// <summary>Called with the note's full name when its name is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    private bool running;
+    private NoteReview? asking;
+    private string? failure;
+
+    private void Ask(NoteReview review)
+    {
+        if (!running)
+        {
+            failure = null;
+            asking = review;
+        }
+    }
+
+    private void CloseDialog()
+    {
+        if (!running)
+        {
+            asking = null;
+        }
+    }
+
+    private Task Reschedule(NoteReview review, int months) =>
+        Write(review, () => Actions.RescheduleReview(review, months));
+
+    private async Task RemoveAsked(Confirmation confirmed)
+    {
+        if (asking is not { } review || running)
+        {
+            return;
+        }
+
+        try
+        {
+            await Write(review, () => Actions.RemoveReview(review, confirmed));
+        }
+        finally
+        {
+            asking = null;
+        }
+    }
+
+    // Runs one write unless the guard holds it back; a result that isn't Done shows its text in red.
+    private async Task Write(NoteReview review, Func<Task<ActionResult>> action)
+    {
+        if (running)
+        {
+            return;
+        }
+
+        running = true;
+        failure = null;
+        try
+        {
+            if (Guard is not null && await Guard(review.Note) is { } held)
+            {
+                failure = DesktopText.OneLine(held);
+                return;
+            }
+
+            ActionResult result = await action();
+            if (result.Kind == ActionKind.Done)
+            {
+                await OnReviewed.InvokeAsync(review.Note);
+            }
+            else
+            {
+                failure = DesktopText.OneLine(result.Text);
+            }
+        }
+        finally
+        {
+            running = false;
+        }
+    }
+}

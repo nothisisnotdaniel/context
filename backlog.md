@@ -1,7 +1,11 @@
 # Context backlog
 
-`/factory next --project Context` runs the first unchecked item, checks it off and records the job id.
-Write one feature per line, in plain language.
+`/factory next --project Context` runs the first open item, checks it off and records the job id.
+Each item is a user story in its own file under `backlog/`, numbered `NNN-slug.md`; the line links it as `#N`.
+The order of the lines is the priority. Add items with `python3 factory/tools/job.py add --project Context '<json>'`
+(or by hand: write the story file first, then the line), and keep a number once it is given.
+`- [?]` items are follow-ups the factory proposed: change `[?]` to `[ ]` to approve one, or delete the line and its file.
+`- [h]` items are tasks for you. `(after: #3)` waits until item 3 is done; `(after: Times#5)` names another project's item.
 
 - [x] App shell: Spectre.Console layout with an input box at the bottom for navigation → 007-app-shell
 - [x] Command popup: typing `/` in an empty input box opens a popup just above the input box that lists all registered commands with their short descriptions. Each further key filters the list to the commands that match what was typed, ranked so that typos still find the right command (Levenshtein distance, e.g. `/hepl` still shows `/help`). The popup closes on Enter, Esc, or when the line no longer starts with `/`. Same behaviour as the Times command popup (job 006-command-popup); describe how the popup is drawn in CLAUDE.md. → 010-command-popup
@@ -24,50 +28,364 @@ Write one feature per line, in plain language.
 - [x] Settle `CurrentView.Zone`: the property was added beyond the 034 spec so the renderer can show the stale cache time; keep and document it, or let the renderer get the time zone another way. → 046-settle-view-zone
 - [x] Note links: `[[Note name]]` in a note links to the note with that name (matched like `/open`: ignoring case, optional `.md`). Store these links in the database next to the tag links, and show them in `/links <note>` (both notes it links to and notes that link to it). A link to a note that doesn't exist yet is kept and shown as missing. Keep `#[tag]` for tags with spaces (job 024). → 048-note-links
 - [x] Desktop app (read-only): add `src/Context.Desktop` for macOS and Windows using Blazor in a native web view (Photino.Blazor: WebView2 on Windows, WKWebView on macOS), with a window showing `/current`, the todo sidebar and the notes list from the same data folder, refreshed when files change. All page text uses Blazor's default encoding (no `MarkupString` for outside text), a strict content security policy, and the calendar link never reaches the page. Component tests with bunit. New packages (Photino.Blazor, bunit) need a reason in the spec. → 053-desktop-app-readonly
-- [ ] Desktop editing: WYSIWYG Markdown editing of notes in the desktop app with a bundled JavaScript editor (no CDN; e.g. Milkdown or TipTap, spec to choose). `#tag`, `#[tag with spaces]` and `[[Note links]]` are editor nodes so they are never escaped or reformatted; raw HTML in notes is off. Load and save go through `NoteStore` (save checks the file wasn't changed since it was opened), and a round-trip test opens and saves notes and checks the `.md` files are unchanged. Also: add and complete todos with a date picker, clickable tags and links, and a Ctrl+K command palette that uses `CommandRegistry.Match`.
-- [ ] OS key store unlock: unlock encryption via macOS Keychain or Windows DPAPI as a second way besides the passphrase (the passphrase stays as recovery); spec to justify any new package.
-- [ ] Desktop secrets: set the Exchange calendar link in a masked settings field, shown only as `CalendarLink.Mask`; prepare the passphrase/Keychain dialog for the encryption item.
-- [ ] Signed desktop builds: publish scripts for a notarized macOS `.app` (arm64 + x64) and a signed Windows build (zip or Velopack), documented in CLAUDE.md; the console app keeps shipping as is.
-- [ ] Outlook as a source (classic Outlook, Windows only): read today's calendar entries and recent mail from the running classic Outlook through its COM interface, using the profile that is already signed in (no app registration, no tokens stored). Off by default; only offered on Windows when classic Outlook is installed, and a clear hint otherwise (new Outlook has no COM). Use Outlook's own expansion of recurring meetings. Appointments go into `/current` next to the `.ics` sources. Expect a possible Outlook security prompt. A new interop package needs a reason in the spec (the approver will escalate it). Microsoft Graph and Copilot are out of scope.
-- [ ] Email: pull in information from emails
-- [ ] Recurring appointments: `.ics` events with `RRULE` (plus `RDATE`/`EXDATE`) only show on their first occurrence in `/current`. Expand recurrences (at least daily/weekly/monthly/yearly with `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY`) so they show on every day they occur.
-- [ ] Todo dates with years: the sidebar shows due dates as `MM-dd` with no year. Show the year when a todo is due in a year other than the current one (e.g. `2027-01-15`), so todos far ahead or long overdue can't be mistaken for this year's.
-- [ ] Helpful empty todo sidebar: "No todos yet" doesn't say how to add one. Mention `/todo` in the empty sidebar, e.g. "No todos yet — add one with /todo".
-- [ ] Faster tag parser: `TagParser.SkipCodeSpan` rescans the rest of the line for every unmatched backtick run, so a line with many unmatched backticks takes O(n²) time. Make the scan linear before email or calendar text gets indexed.
-- [ ] Note size limit for tag sync: `TagIndex.Sync` reads each changed note whole with no size limit. Skip (or only partly read) notes above a sensible size and say so in `/tags`.
-- [ ] Shorter tag help: shorten the `/tags` help description (e.g. "List tags: /tags [tag]") and give the `/links` usage hint an example (`/links Meeting`).
-- [ ] Mention `#[...]` in tag help: the `/tags` help text and the empty-tags message only mention `#tag`. Also show the `#[tag with spaces]` form.
-- [ ] Merge duplicate whitespace code: the whitespace-collapsing loop exists twice, in `NormalizeBracket` and `CollapseWhitespace`. Keep one.
-- [ ] Check `/tags` input: `/tags <tag>` doesn't check what was typed against the tag rules, so bad input just shows "No notes tagged". Show a hint that says what a valid tag looks like instead.
-- [ ] Spacing in /current: add a blank line between the "Today, <date>" title, the Due table, and the Linked notes table (or its "No linked notes" / "Can't read context.db" line).
-- [ ] Limit /current rows: `/current` shows every due todo and runs one database query per distinct tag, with no limit. Cap the Due table (last row `… N more`, like the sidebar) and the number of tags looked up.
-- [ ] Simplify /current code: `CurrentCommands` builds the due list and the tag collection in two passes; do it in one loop.
-- [ ] Calendar reads only regular files: a pipe (FIFO) or other special file named `*.ics` in `calendar/` makes `/current` hang. `CalendarStore` should skip anything that isn't a regular file.
-- [ ] Cache calendar time zones: every unknown `TZID` throws and catches an exception, so a crafted file can slow `/current` by seconds. Cache zone lookups (found or not) for each parse.
-- [ ] Midnight end as `…`: an event that ends exactly at the next midnight shows `23:00-00:00`. Show `23:00-…` like other events that run past today.
-- [ ] Clearer calendar errors: `Can't read calendar/<file>` should say why (too big, can't be opened, not a calendar). Also review the `… N more` row wording in the Appointments table, and make a duplicate `STATUS` line first-wins like the other properties.
-- [ ] Harden the calendar feed: `CalendarFeed.Fetch` and `/current` only catch `FormatException` from `IcsParser`; catch any parser error so `Fetch` really never throws. Also delete leftover temp files of `calendar-link.txt` (from a crash between write and move) on start-up or the next save.
-- [ ] Better calendar-link failure line: add "see /calendar-link" to the red "Can't download the Exchange calendar" line, and show a "Downloading Exchange calendar…" hint while `/current` waits (up to 10 s).
-- [ ] Shorter /calendar-link popup text: shorten the command description so it fits in a narrow terminal's popup.
-- [ ] Masked link input: hide the link while it is typed after `/calendar-link` (e.g. show `•` per character), so it never lands on screen or in scrollback. Until then, mention the echo in `CLAUDE.md`.
-- [ ] Strong-name Core: `InternalsVisibleTo` in `Context.Core` matches by assembly name only; strong-name the assemblies or give Core a deliberate public API before it ships on its own.
-- [ ] Tidy CLAUDE.md tests line: merge the two adjacent parentheticals in the tests bullet of `Context/CLAUDE.md`.
-- [ ] Block writes without key file: when encrypted files exist but `encryption.json` is missing, refuse commands that write (not just warn) until the key file is restored, and keep the warning visible instead of only on the first frame.
-- [ ] Skip non-regular files: the start-up check for encrypted files without `encryption.json` and `/import` open files with `FileMode.Open`, so a FIFO or named pipe (e.g. `x.md`) hangs them; skip or refuse anything that is not a regular file.
-- [ ] Bind names, flag plain files: bind each encrypted note's and calendar file's name into its authentication data so encrypted contents can't be swapped between files, and warn about plain files found while encryption is on instead of reading them silently.
-- [ ] Measure encrypted start-up: time the in-memory tag index rebuild with encryption on for 100, 1,000 and 5,000 notes; only if it is slow, keep an encrypted copy of the index between sessions without ever writing plain data to disk.
-- [ ] Encryption UX polish: `/encrypt` re-asks after a passphrase shorter than 12 characters, the `/decrypt` success message mentions that the tag index is rebuilt, and the encryption warnings and hints fit narrow terminals.
-- [ ] Encryption cleanup: document `MinIterations` vs `MinUnlockIterations`, fix the `TempSuffix` comment ("prefix" → "suffix"), cap temp file names for very long note titles in `NoteStore.Save`, and compare paths case-sensitively in `NoteStore.Contains` on case-sensitive file systems.
-- [ ] Say why in Core dependency failures: `CoreDependencyTests` failure messages also state the rule, that Core must stay free of Spectre so other front ends (the desktop app) can use it.
-- [ ] Skip nested bin/obj: the source scan in `CoreDependencyTests` skips `bin/` and `obj/` only at the top of the project folder; skip them at any depth.
-- [ ] State the test namespace: say in `CLAUDE.md` that test files use `namespace Context.Tests;` (file-scoped), so specs and new tests get it right.
-- [ ] Safe ToString on all records: give the records inside the views (`Appointment`, `NoteLink`, `TagCount`) and the other Core records holding raw text (`TodoItem`, `NoteInfo`, `Note`, `CalendarDay`, `CalendarFeedResult`, `MigrationResult`) the same `ToString() => nameof(<Type>)` override as the views (job 042), with tests.
-- [ ] Wrap CLAUDE.md lines: rewrap the sentence added under "Data step in Core" (job 042) and the `/current` bullet (job 046, about 150 characters) in `CLAUDE.md` to the surrounding line width.
-- [ ] Fix flaky 5 MB feed test: `CalendarFeedTests.Fetch_ExactlyFiveMb_Accepted` streams 5 MB under a 100 ms test timeout and failed once on a cold run; make it reliable (e.g. a longer timeout for that test only) without weakening the 5 MB cap check.
-- [ ] Precise Reason doc: the `CurrentView.Reason` doc says it is always one of the fixed texts, but `HTTP <code>` is built from the status code; say "a fixed text or `HTTP <code>`" so front ends don't assume a closed list.
-- [ ] Easier-to-scan view docs: split the `CurrentView.Status` summary into a `<list>` with one entry per value, and add a test that pins what `CalendarFeedResult` holds for NotConfigured (no text, no time, no reason).
-- [ ] Zone in CalendarLinkView: `CalendarLinkCommands.Render(CalendarLinkView, TimeZoneInfo zone)` takes the time zone as a separate parameter; put it on `CalendarLinkView` (documented like `CurrentView.Zone`, job 046) so the renderer draws only from its view.
-- [ ] Code spans in link targets: `NoteLinkParser.ParseLine` caches the next `]` and `[` positions, which can point into a later backtick span, so a link target can run into code; respect code spans inside `[[...]]` while keeping the scan linear.
-- [ ] Query links per note: `TagIndex.Links` reads the whole `note_links` table on every `/links` call; query only the rows for that note and the rows whose target matches it.
-- [ ] Label shared-tag rows: when the `/links` table shows the Link column, rows linked only by shared tags have a blank cell; show e.g. `shared tag` instead.
-- [ ] Encrypt while another process writes: if the desktop app (or a second console) writes `context.db` while `/encrypt` runs, a plain `context.db` can be left behind. Make `Migrate` safe against another process writing at the same time (for example, delete `context.db*` again at the end and re-check `IsConfigured`). From the 053 security review.
+- [x] Desktop writes: lift the desktop app's read-only rule. All writes go through the same `Context.Core` stores and checks as the console (names, sizes, encryption), from Blazor event handlers only; destructive actions (delete, overwrite, turning encryption off) ask for confirmation in the window; the CSP and the no-`MarkupString` rule stay. Update the desktop rules in CLAUDE.md and `DesktopSourceTests` to match. Full path, high risk. First step of the desktop move: the desktop app becomes the only UI and the console becomes a scriptable CLI. → 080-desktop-writes
+- [x] Desktop editing: WYSIWYG Markdown editing of notes in the desktop app with a bundled JavaScript editor (no CDN; e.g. Milkdown or TipTap, spec to choose). `#tag`, `#[tag with spaces]` and `[[Note links]]` are editor nodes so they are never escaped or reformatted; raw HTML in notes is off. Load and save go through `NoteStore` (save checks the file wasn't changed since it was opened), and a round-trip test opens and saves notes and checks the `.md` files are unchanged. Also: add and complete todos with a date picker, clickable tags and links, and a Ctrl+K command palette that uses `CommandRegistry.Match`. → 094-desktop-editing
+- [x] Scriptable CLI: turn the console app into a non-interactive tool for automation from PowerShell or any shell. `context <command> [args]` runs one command and exits (0 on success; non-zero with a message on stderr on an error), with no layout, popup, line editor or prompts. Start with `capture`, `todo add`, `todo done`, `todos`, `notes`, `note show`, `tags`, `links`, `current`, `import`, `export` and `help`. Plain text output by default. With encryption on, the passphrase comes from the `CONTEXT_PASSPHRASE` environment variable or from stdin with `--passphrase-stdin`, never from an argument. Safe to run while the desktop app is open (SQLite busy timeout, atomic file writes). Full path, high risk. → 123-scriptable-cli
+- [x] Desktop todos: add a todo with a due date (date picker plus today and tomorrow shortcuts) and mark todos done in the desktop app. Builds on desktop writes. → done in 094-desktop-editing (entry row with date picker, Today/Tomorrow, checkbox done)
+- [x] [#1](backlog/001-github-actions-ci.md) GitHub Actions CI → 129-github-actions-ci
+- [x] [#16](backlog/016-release-workflow.md) Release workflow → 131-release-workflow
+- [x] [#2](backlog/002-flaky-feed-tests.md) Flaky feed tests → 130-flaky-feed-tests
+- [x] [#3](backlog/003-remove-folder-encryption.md) Remove folder encryption → 132-remove-folder-encryption
+- [x] [#116](backlog/116-unsigned-desktop-builds-in-the-release.md) Unsigned desktop builds and Windows auto-update → 133-desktop-builds-auto-update
+- [x] [#4](backlog/004-desktop-notes.md) Desktop notes → 134-desktop-notes
+- [x] [#123](backlog/123-publish-releases-only-after-all-desktop.md) Publish releases only after all desktop assets are uploaded → 135-release-draft-publish
+- [x] [#5](backlog/005-sensitive-notes-with-certificate-unlock.md) Sensitive notes with certificate unlock (after: #3; #4) → 136-sensitive-notes-cert
+- [x] [#6](backlog/006-desktop-tags-and-links.md) Desktop tags and links → 137-desktop-tags-links
+- [x] [#7](backlog/007-desktop-settings.md) Desktop settings → 138-desktop-settings
+- [x] [#8](backlog/008-desktop-import-and-export.md) Desktop import and export → 139-desktop-import-export
+- [x] [#9](backlog/009-quick-capture-in-the-desktop-app.md) Quick capture in the desktop app → 140-desktop-quick-capture
+- [x] [#10](backlog/010-editor-dirty-marker.md) Editor dirty marker → 141-editor-dirty-marker
+- [x] [#11](backlog/011-keyboard-focus-for-chips.md) Keyboard focus for chips → 142-chip-keyboard-focus
+- [x] [#12](backlog/012-clear-editor-mount-error.md) Clear editor mount error → 143-editor-mount-error
+- [x] [#13](backlog/013-console-todos-without-numbers.md) Console todos without numbers → 144-console-todo-picking
+- [x] [#14](backlog/014-remove-the-interactive-console.md) Remove the interactive console (after: #4; #7; #8; #6) → 145-remove-interactive-console
+- [x] [#15](backlog/015-signed-desktop-builds.md) Signed desktop builds (after: #116) → 146-signed-desktop-builds
+- [x] [#17](backlog/017-json-output-for-the-cli.md) JSON output for the CLI → 148-cli-json-output
+- [x] [#18](backlog/018-write-todo-ids-once.md) Write todo ids once → 149-write-todo-ids
+- [x] [#19](backlog/019-survive-a-bad-todo-id.md) Survive a bad todo id → 151-survive-bad-todo-id
+- [x] [#170](backlog/170-pages-in-a-hierarchy.md) Pages in a hierarchy → 152-pages-hierarchy
+- [x] [#178](backlog/178-stop-the-tagspanel-loading-test-timing.md) Stop the TagsPanel loading test timing out on CI → 154-tagspanel-test-flake
+- [x] [#112](backlog/112-locked-package-restore-for-release-builds.md) Locked package restore for release builds → 155-locked-package-restore
+- [x] [#51](backlog/051-people-pages.md) People pages → 156-people-pages
+- [x] [#181](backlog/181-page-types-and-attributes-searchable.md) Page types and attributes, searchable (after: #51) → 157-page-types-attributes
+- [x] [#168](backlog/168-aliases-for-people.md) Aliases for people (after: #51) → 158-person-aliases
+- [x] [#169](backlog/169-todos-linked-to-people.md) Todos linked to people (after: #51; #168) → 159-todo-person-links
+- [x] [#46](backlog/046-meeting-prep.md) Meeting prep → 160-meeting-prep-notes
+- [x] [#36](backlog/036-claude-md-tidy-ups.md) CLAUDE.md tidy-ups → 153-claude-md-tidy
+- [x] [#35](backlog/035-strong-name-core.md) Strong-name Core → 161-strong-name-core
+- [x] [#26](backlog/026-recurring-appointments.md) Recurring appointments → 162-recurring-appointments
+- [x] [#28](backlog/028-tag-and-link-parser-fixes.md) Tag and link parser fixes → 163-tag-link-parser-fixes
+- [x] [#43](backlog/043-daily-note.md) Daily note → 164-daily-note
+- [x] [#44](backlog/044-note-templates.md) Note templates → 165-note-templates
+- [x] [#45](backlog/045-meeting-notes-from-appointments.md) Meeting notes from appointments → 167-meeting-notes-appointments
+- [x] [#48](backlog/048-recurring-todos.md) Recurring todos → 168-recurring-todos
+- [x] [#49](backlog/049-weekly-review.md) Weekly review → 169-weekly-review
+- [x] [#47](backlog/047-full-text-search.md) Full-text search → 170-full-text-search
+- [x] [#70](backlog/070-day-s-end-in-the-daily.md) Day's end in the daily note → 171-days-end-daily-note
+- [x] [#71](backlog/071-morning-briefing.md) Morning briefing → 172-morning-briefing
+- [x] [#211](backlog/211-remove-cli-commands-that-only-mirror.md) Remove CLI commands that only mirror desktop views → 173-remove-mirror-cli-commands
+- [x] [#53](backlog/053-note-history.md) Note history → 174-note-history
+- [x] [#218](backlog/218-make-the-wait-guard-check-every.md) Make the wait guard check every desktop test file → 176-wait-guard-all-files
+- [x] [#54](backlog/054-attachments.md) Attachments → 177-note-attachments
+- [x] [#55](backlog/055-timed-reminders.md) Timed reminders → 178-timed-reminders
+- [x] [#57](backlog/057-inbox-triage.md) Inbox triage → 179-inbox-triage
+- [x] [#60](backlog/060-decision-log.md) Decision log → 180-decision-log
+- [x] [#250](backlog/250-top-bar-with-home-and-calendar.md) Top bar with Home and Calendar in place of the capture box → 198-top-bar-home-calendar
+- [x] [#253](backlog/253-capture-through-an-icon-in-the.md) Capture through an icon in the top bar → 199-capture-icon-top-bar
+- [x] [#251](backlog/251-page-actions-behind-a-menu-in.md) Page actions behind a … menu in the top bar (after: #250) → 200-page-actions-menu
+- [x] [#65](backlog/065-todos-inside-notes.md) Todos inside notes → 201-todos-inside-notes
+- [x] [#252](backlog/252-remove-the-sidebar-logo-and-the.md) Remove the sidebar logo and the Return hints → 197-no-logo-no-hints
+- [x] [#244](backlog/244-edit-a-note-in-place-no.md) Edit a note in place: no repeated title → 202-note-title-once
+- [x] [#245](backlog/245-auto-save-in-the-note-editor.md) Auto save in the note editor → 203-note-auto-save
+- [x] [#246](backlog/246-capture-bar-at-the-very-top.md) Capture bar at the very top, Enter instead of buttons next to inputs → 194-capture-bar-enter-submit
+- [x] [#247](backlog/247-small-logo-at-the-top-of.md) Small logo at the top of the sidebar → 195-sidebar-logo
+- [x] [#249](backlog/249-show-the-note-editor-without-its.md) Show the note editor without its own box → 196-editor-no-box
+- [x] [#62](backlog/062-links-to-headings.md) Links to headings → 205-heading-links
+- [x] [#66](backlog/066-rename-with-link-update.md) Rename with link update → 206-rename-link-update
+- [x] [#68](backlog/068-saved-searches.md) Saved searches → 207-saved-searches
+- [x] [#268](backlog/268-remove-the-save-button-from-the.md) Remove the Save button from the note editor → 209-remove-save-button
+- [x] [#269](backlog/269-outline-in-the-right-sidebar-no.md) Outline in the right sidebar, no reformat notice → 210-outline-right-sidebar
+- [x] [#258](backlog/258-no-accent-bar-left-of-the.md) No accent bar left of the editor while editing → 211-no-editor-accent-bar
+- [x] [#270](backlog/270-editor-works-on-a-day-opened.md) Editor works on a day opened from the calendar → 212-calendar-day-editor
+- [x] [#254](backlog/254-month-calendar-in-the-day-picker.md) Month calendar in the day picker → 213-month-calendar-picker
+- [x] [#279](backlog/279-today-s-appointments-in-the-right.md) Today's appointments in the right sidebar → 214-sidebar-today-appointments
+- [x] [#278](backlog/278-today-and-home-open-today-s.md) Today and Home open today's note in the editor → 216-today-home-open-note
+- [x] [#25](backlog/025-outlook-as-a-source.md) Outlook as a source → 217-outlook-com-source
+- [x] [#271](backlog/271-search-icon-in-the-top-bar.md) Search icon in the top bar, opens like Capture → 218-topbar-search-popover
+- [x] [#282](backlog/282-bigger-level-1-and-2-headings.md) Bigger level 1 and 2 headings in the note editor → 215-bigger-editor-headings
+- [x] [#289](backlog/289-appointment-page-close-button-and-a.md) Appointment page: × close button and a Notes heading → 219-appointment-close-notes-heading
+- [x] [#290](backlog/290-meeting-notes-go-under-meetings-appointment.md) Meeting notes go under Meetings/<appointment>/<date> → 220-meeting-notes-hierarchy
+- [x] [#272](backlog/272-steady-maintests-windowclose-closedafterlastrender.md) Steady MainTests.WindowClose_ClosedAfterLastRender_IsStillSeen → 221-steady-windowclose-test
+- [x] [#303](backlog/303-steady-reviewpaneltests-render-filled-rowsandbutto.md) Steady ReviewPanelTests.Render_Filled_RowsAndButtons → 222-steady-reviewpanel-test
+- [x] [#291](backlog/291-remove-the-mail-panel-from-the.md) Remove the Mail panel from the right sidebar → 223-remove-mail-panel
+- [x] [#292](backlog/292-no-browser-context-menu-on-right.md) No browser context menu on right click in the desktop app → 224-no-context-menu
+- [x] [#293](backlog/293-narrower-pick-a-day-calendar-popover.md) Narrower Pick a day calendar popover → 226-narrow-day-pick
+- [x] [#294](backlog/294-hide-private-appointments.md) Hide private appointments → 227-hide-private-appointments
+- [x] [#295](backlog/295-typing-name-makes-a-person-mention.md) Typing @[Name] makes a person mention chip right away → 232-typed-mention-chip
+- [x] [#296](backlog/296-clicking-a-link-to-a-missing.md) Clicking a link to a missing note creates the note → 233-link-creates-missing-note
+- [x] [#297](backlog/297-note-title-shows-only-the-page.md) Note title shows only the page's own name → 235-title-shows-page-name
+- [x] [#298](backlog/298-attributes-in-a-collapsed-box-below.md) Attributes in a collapsed box below the note title → 236-attributes-collapsed-box
+- [x] [#299](backlog/299-crash-log-and-a-hint-on.md) Crash log and a hint on the next start → 237-crash-log-hint
+- [x] [#300](backlog/300-parent-notes-show-links-to-their.md) Parent notes show links to their subpages → 238-subpage-links
+- [x] [#305](backlog/305-people-page-opened-from-a-person.md) People page opened from a person icon in the left sidebar → 239-people-page
+- [x] [#306](backlog/306-left-sidebar-shows-the-10-most.md) Left sidebar shows the 10 most recently opened notes instead of the hierarchy (after: #305) → 240-recent-notes-sidebar
+- [x] [#307](backlog/307-top-bar-icons-in-the-order.md) Top bar icons in the order Home, Search, Capture, Calendar, More → 241-topbar-icon-order
+- [x] [#69](backlog/069-board-view-for-a-tag.md) Board view for a tag → 242-tag-board-view
+- [x] [#74](backlog/074-waiting-for-list.md) Waiting-for list → 243-waiting-for-list
+- [x] [#78](backlog/078-smart-paste.md) Smart paste → 244-smart-paste
+- [x] [#80](backlog/080-agenda-carry-over.md) Agenda carry-over → 245-agenda-carry-over
+- [x] [#79](backlog/079-share-a-note.md) Share a note → 250-share-a-note
+- [x] [#81](backlog/081-topics-for-the-next-1-1.md) Topics for the next 1:1 → 253-next-one-on-one-topics
+- [x] [#82](backlog/082-review-dates.md) Review dates → 256-review-dates
+- [x] [#341](backlog/341-fix-flaky-toreviewpaneltests-main-dirtyopennote-sa.md) Fix flaky ToReviewPanelTests.Main_DirtyOpenNote_SaveFirst → 258-flaky-review-panel-test
+- [x] [#84](backlog/084-screenshot-to-inbox.md) Screenshot to inbox → 260-screenshot-to-inbox
+- [x] [#86](backlog/086-mermaid-diagrams.md) Mermaid diagrams → 263-mermaid-diagrams
+- [x] [#87](backlog/087-standup-notes.md) Standup notes → 265-standup-notes
+- [x] [#352](backlog/352-fix-flaky-snapshot-tests-that-catch.md) Fix flaky snapshot tests that catch the recent.json temp file → 267-flaky-snapshot-tests
+- [x] [#85](backlog/085-similar-notes.md) Similar notes → 268-similar-notes
+- [x] [#90](backlog/090-keep-mixed-line-endings.md) Keep mixed line endings → 271-mixed-line-endings
+- [x] [#372](backlog/372-code-blocks-and-inline-code-in.md) Code blocks and inline code in notes → 283-code-blocks-inline
+- [x] [#373](backlog/373-app-icon-for-the-window-and.md) App icon for the window and the taskbar → 284-app-icon
+- [x] [#374](backlog/374-search-results-on-their-own-full.md) Search results on their own full-size page → 285-search-results-page
+- [x] [#388](backlog/388-sidebar-day-picker-back-to-today.md) Sidebar day picker: back to today, a month calendar and a short month name → 289-sidebar-day-picker
+- [x] [#384](backlog/384-type-backticks-for-inline-code-and.md) Type backticks for inline code and code blocks, never auto-escape input → 290-backtick-code-input
+- [x] [#385](backlog/385-filter-the-people-panel-by-affiliation.md) Filter the People panel by affiliation and role → 291-people-affiliation-filter
+- [x] [#395](backlog/395-fix-flaky-recent-json-test-that.md) Fix flaky recent.json test that failed CI after job 295 → 297-flaky-recent-test
+- [x] [#400](backlog/400-no-crash-report-when-a-second.md) No crash report when a second copy starts → 315-second-copy-no-crash
+- [x] [#407](backlog/407-global-todos-as-note-local-checkboxes.md) Global todos as - { }, note-local checkboxes as - [ ] → 329-global-todo-braces
+- [x] [#406](backlog/406-carry-a-line-to-the-next.md) Carry a line to the next meeting with - [>] (after: #407) → 330-carry-over-marker
+- [x] [#404](backlog/404-todos-page-opened-from-an-exclamation.md) Todos page opened from an exclamation-mark icon in the left sidebar → 331-todos-page-icon
+- [x] [#405](backlog/405-affiliation-as-a-comma-separated-list.md) Affiliation as a comma-separated list → 332-affiliation-list
+- [x] [#401](backlog/401-say-why-the-app-ended-in.md) Say why the app ended in the crash log → 334-exit-reason-log
+- [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4)
+- [x] [#234](backlog/234-release-and-ci-workflow-hardening.md) Release and CI workflow hardening → 272-release-ci-hardening
+- [x] [#113](backlog/113-refuse-removed-secret-options-after-a.md) Refuse removed secret options after a command → 273-refuse-removed-secret-options
+- [x] [#114](backlog/114-owner-only-file-mode-for-all.md) Owner-only file mode for all data files → 274-owner-only-file-mode
+- [x] [#231](backlog/231-bounded-reads-of-regular-files-only.md) Bounded reads of regular files only → 275-bounded-regular-file-reads
+- [x] [#50](backlog/050-times-bookings-in-current.md) Times bookings in /current → 277-times-bookings-current
+- [x] [#52](backlog/052-recent-and-pinned-notes.md) Recent and pinned notes → 278-recent-pinned-notes
+- [x] [#63](backlog/063-project-page-per-work-item.md) Project page per work item → 280-project-page-work-item
+- [x] [#72](backlog/072-command-bar.md) Command bar (after: Times#4) → 282-command-bar
+- [x] [#73](backlog/073-mail-digest.md) Mail digest → 286-mail-digest
+- [x] [#75](backlog/075-todos-tied-to-meetings.md) Todos tied to meetings → 287-todos-tied-to-meetings
+- [x] [#76](backlog/076-done-log.md) Done log → 293-done-log
+- [ ] [#23](backlog/023-voice-capture-spike.md) Voice capture spike
+- [ ] [#24](backlog/024-voice-notes.md) Voice notes (after: #23)
+- [x] [#27](backlog/027-todo-dates-with-years.md) Todo dates with years → already done (job 294 closed it, no build)
+- [x] [#232](backlog/232-search-index-limits-and-accessibility.md) Search index limits and accessibility → 295-search-index-limits
+- [x] [#37](backlog/037-note-store-cleanup.md) Note store cleanup → 298-note-store-cleanup
+- [?] [#92](backlog/092-times-inside-the-context-desktop-app.md) Times inside the Context desktop app
+- [?] [#93](backlog/093-phone-companion-app.md) Phone companion app
+- [?] [#94](backlog/094-browser-extension.md) Browser extension
+- [?] [#95](backlog/095-local-ai-for-ask-context.md) Local AI for Ask Context
+- [?] [#96](backlog/096-excalidraw-drawings.md) Excalidraw drawings
+- [?] [#97](backlog/097-azure-devops-status.md) Azure DevOps status
+- [?] [#98](backlog/098-sharing-notes-with-key-exchange.md) Sharing notes with key exchange spike
+- [ ] [#236](backlog/236-import-refusals-and-safe-save.md) Import refusals and safe save
+- [ ] [#100](backlog/100-revisit-ac-8-texts-with-json.md) Revisit AC-8 texts with --json
+- [x] [#117](backlog/117-make-the-github-repo-public.md) Make the GitHub repo public
+- [ ] [#233](backlog/233-sensitive-notes-recovery-rules.md) Sensitive-notes recovery rules
+- [ ] [#129](backlog/129-pin-the-windows-certificate-by-thumbprint.md) Pin the Windows certificate by thumbprint
+- [ ] [#131](backlog/131-check-the-sensitive-setup-dialog-input.md) Check the sensitive-setup dialog input widths by eye
+- [h] [#133](backlog/133-run-the-sensitive-notes-manual-checks.md) Run the sensitive-notes manual checks on macOS and Windows
+- [ ] [#228](backlog/228-tags-and-links-panel-fixes.md) Tags and links panel fixes
+- [h] [#138](backlog/138-look-at-the-tags-and-links.md) Look at the tags and links panels in a running window
+- [ ] [#225](backlog/225-settings-calendar-link-field.md) Settings calendar link field
+- [h] [#145](backlog/145-look-at-the-notes-bar-buttons.md) Look at the notes bar buttons in a narrow sidebar
+- [h] [#146](backlog/146-check-desktop-settings-key-details-on.md) Check desktop settings key details on Windows and macOS
+- [ ] [#151](backlog/151-clear-the-capture-status-line-on.md) Clear the capture status line on new input
+- [h] [#152](backlog/152-check-the-capture-row-at-the.md) Check the capture row at the minimum window size
+- [h] [#153](backlog/153-check-the-unsaved-changes-dot-in.md) Check the unsaved-changes dot in both themes
+- [ ] [#154](backlog/154-ignore-held-enter-repeats-on-a.md) Ignore held Enter repeats on a focused chip
+- [h] [#155](backlog/155-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view
+- [ ] [#156](backlog/156-hide-the-empty-editor-box-when.md) Hide the empty editor box when the editor fails to start
+- [ ] [#226](backlog/226-cli-and-console-todo-hints.md) CLI and console todo hints
+- [ ] [#160](backlog/160-replace-the-console-text-parity-rule.md) Replace the console text-parity rule in CLAUDE.md
+- [ ] [#235](backlog/235-signing-hardening-and-windows-signing.md) Signing hardening and Windows signing
+- [h] [#164](backlog/164-set-up-apple-signing-and-check.md) Set up Apple signing and check the first signed build
+- [h] [#167](backlog/167-check-the-first-todos-json-id.md) Check the first todos.json id migration
+- [ ] [#121](backlog/121-open-empty-notes-in-the-default.md) Open empty notes in the default editor on macOS and Linux
+- [ ] [#101](backlog/101-work-item-references.md) Work item references
+- [ ] [#91](backlog/091-windows-device-check-at-open.md) Windows device check at open
+- [ ] [#89](backlog/089-call-to-meeting-note.md) Call to meeting note
+- [ ] [#88](backlog/088-vacation-handover.md) Vacation handover
+- [ ] [#83](backlog/083-glossary.md) Glossary
+- [ ] [#67](backlog/067-email-to-note.md) Email to note
+- [ ] [#64](backlog/064-search-across-context-and-times.md) Search across Context and Times
+- [ ] [#59](backlog/059-ask-context.md) Ask Context
+- [ ] [#58](backlog/058-flagged-mail-to-the-inbox.md) Flagged mail to the inbox
+- [ ] [#56](backlog/056-one-project-list.md) One project list
+- [ ] [#42](backlog/042-label-shared-tag-rows.md) Label shared-tag rows
+- [ ] [#41](backlog/041-zone-in-calendarlinkview.md) Zone in CalendarLinkView
+- [ ] [#40](backlog/040-view-doc-tidy-ups.md) View doc tidy-ups
+- [ ] [#39](backlog/039-safe-tostring-on-all-records.md) Safe ToString on all records
+- [ ] [#34](backlog/034-clearer-calendar-display.md) Clearer calendar display
+- [ ] [#20](backlog/020-complete-checks-the-whole-todo.md) Complete checks the whole todo
+- [ ] [#21](backlog/021-test-for-a-todo-removed-elsewhere.md) Test for a todo removed elsewhere
+- [ ] [#22](backlog/022-concurrent-todo-writes.md) Concurrent todo writes
+- [ ] [#30](backlog/030-tag-help-and-input.md) Tag help and input
+- [ ] [#31](backlog/031-limit-current-rows.md) Limit /current rows
+- [ ] [#33](backlog/033-sturdier-calendar-parsing.md) Sturdier calendar parsing
+- [ ] [#38](backlog/038-core-dependency-test-tidy-ups.md) Core dependency test tidy-ups
+- [ ] [#61](backlog/061-resurfacing.md) Resurfacing
+- [ ] [#77](backlog/077-quick-switcher.md) Quick switcher
+- [ ] [#106](backlog/106-claude-code-mcp-server.md) Claude Code MCP server (after: #101; #17; Times#37)
+- [ ] [#107](backlog/107-own-cloud-sync-spike.md) Own-cloud sync spike
+- [ ] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39)
+- [ ] [#109](backlog/109-install-guide-for-the-unsigned-desktop.md) Install guide for the unsigned desktop app
+- [ ] [#229](backlog/229-note-tree-operation-fixes.md) Note tree operation fixes
+- [ ] [#238](backlog/238-stable-tests-and-locked-restore-on.md) Stable tests and locked restore on CI
+- [ ] [#230](backlog/230-clean-invisible-and-control-characters-in.md) Clean invisible and control characters in text
+- [x] [#183](backlog/183-turn-a-typed-name-into-a.md) Turn a typed @[Name] into a mention chip right away (merged into #295)
+- [ ] [#237](backlog/237-code-spans-and-fences-in-tags.md) Code spans and fences in tags, links and mentions
+- [ ] [#189](backlog/189-resolve-person-aliases-without-an-allocation.md) Resolve person aliases without an allocation per mention row
+- [ ] [#190](backlog/190-show-the-unreadable-todos-line-at.md) Show the unreadable-todos line at the top of the person page
+- [ ] [#191](backlog/191-archive-done-todos-a-month-after.md) Archive done todos a month after they are done
+- [ ] [#192](backlog/192-keep-match-words-visible-next-to.md) Keep match words visible next to long related-note titles
+- [?] [#193](backlog/193-give-the-related-notes-row-a.md) Give the related-notes row a proper row header
+- [?] [#194](backlog/194-show-confirmed-overrides-of-a-cancelled.md) Show confirmed overrides of a cancelled recurring series
+- [ ] [#227](backlog/227-template-and-daily-note-messages.md) Template and daily note messages
+- [?] [#205](backlog/205-say-why-done-did-nothing-while.md) Say why /done did nothing while a dialog is open
+- [?] [#212](backlog/212-add-a-line-to-a-daily.md) Add a line to a daily note from the CLI
+- [?] [#214](backlog/214-say-which-versions-the-history-diff.md) Say which versions the history diff compares
+- [?] [#215](backlog/215-cap-the-total-size-of-note.md) Cap the total size of note history
+- [?] [#220](backlog/220-open-a-pdf-attachment-from-the.md) Open a PDF attachment from the keyboard
+- [?] [#221](backlog/221-stop-a-hung-reminder-notification-process.md) Stop a hung reminder notification process
+- [?] [#222](backlog/222-give-the-todo-time-field-a.md) Give the todo time field a visible label
+- [?] [#223](backlog/223-open-the-palette-with-ctrl-k.md) Open the palette with Ctrl+K from a triage text field
+- [?] [#239](backlog/239-wider-text-column-in-the-decisions.md) Wider text column in the Decisions panel
+- [?] [#240](backlog/240-cap-the-rows-read-for-the.md) Cap the rows read for the decision log
+- [?] [#241](backlog/241-see-decisions-past-the-first-100.md) See decisions past the first 100
+- [x] [#242](backlog/242-tidy-the-desktop-layout-icon-buttons.md) Tidy the desktop layout: icon buttons, no dates, set-apart capture bar → 192-tidy-desktop-layout
+- [x] [#243](backlog/243-open-triage-tags-and-settings-as.md) Open Triage, Tags and Settings as their own pages with an × close → 193-page-views-close-x
+- [ ] [#255](backlog/255-decisions-longer-than-one-line-a.md) Numbered #!d decisions: a marked paragraph, referenced as #!d1234
+- [x] [#256](backlog/256-no-prerelease-for-backlog-only-pushes.md) No prerelease for backlog-only pushes → 231-no-prerelease-backlog-pushes
+- [ ] [#257](backlog/257-web-links-work-in-the-note.md) Web links work in the note editor
+- [h] [#259](backlog/259-check-the-capture-popover-in-a.md) Check the Capture popover in a narrow window
+- [?] [#260](backlog/260-return-focus-to-the-button-after.md) Return focus to the … button after a menu item or outside click
+- [?] [#261](backlog/261-check-context-db-in-the-todo.md) Check context.db in the todo done tests for note todos
+- [ ] [#262](backlog/262-rename-a-note-update-its-title.md) Rename a note: update its # title line too
+- [ ] [#263](backlog/263-show-the-error-when-saving-on.md) Show the error when saving on window close fails
+- [h] [#264](backlog/264-check-auto-save-by-hand-in.md) Check auto save by hand in the desktop app
+- [?] [#265](backlog/265-rename-ask-again-when-the-link.md) Rename: ask again when the link count changed before Confirm
+- [?] [#266](backlog/266-tag-filters-decide-on-number-tags.md) Tag filters: decide on number tags like #1234
+- [?] [#267](backlog/267-saved-searches-icon-for-the-remove.md) Saved searches: icon for the × remove button
+- [h] [#273](backlog/273-check-outline-link-contrast-in-the.md) Check outline link contrast in the right sidebar
+- [?] [#274](backlog/274-visible-heading-for-the-sidebar-outline.md) Visible heading for the sidebar outline
+- [?] [#275](backlog/275-one-helper-for-opening-a-daily.md) One helper for opening a daily note in Main.razor
+- [?] [#276](backlog/276-feedback-when-a-day-pick-is.md) Feedback when a day pick is ignored while busy
+- [?] [#277](backlog/277-arrow-and-page-keys-in-the.md) Arrow and Page keys in the Pick a day calendar do not scroll the page
+- [?] [#280](backlog/280-keep-the-old-appointment-rows-dimmed.md) Keep the old appointment rows dimmed while stepping days
+- [?] [#281](backlog/281-one-reset-helper-for-the-pending.md) One reset helper for the pending state in Main.razor
+- [?] [#283](backlog/283-spacing-for-the-no-note-placeholder.md) Spacing for the no-note placeholder in the note area
+- [?] [#284](backlog/284-cap-the-length-of-each-text.md) Cap the length of each text field read from Outlook
+- [?] [#285](backlog/285-don-t-start-a-new-outlook.md) Don't start a new Outlook read while an earlier one hangs
+- [?] [#286](backlog/286-culture-safe-dates-in-the-outlook.md) Culture-safe dates in the Outlook Restrict filter
+- [?] [#287](backlog/287-show-loading-in-the-mail-panel.md) Show Loading in the mail panel during the first read
+- [?] [#288](backlog/288-don-t-let-a-blocked-outlook.md) Don't let a blocked Outlook delay every refresh
+- [?] [#301](backlog/301-meeting-note-title-shows-the-meeting.md) Meeting note title shows the meeting name, not only the date
+- [?] [#302](backlog/302-one-path-to-endreload-in-statecomponent.md) One path to EndReload in StateComponent
+- [?] [#304](backlog/304-same-selector-for-the-re-found.md) Same selector for the re-found note button in ReviewPanelTests
+- [h] [#308](backlog/308-check-right-click-in-a-release.md) Check right click in a Release build on macOS and Windows
+- [h] [#309](backlog/309-check-the-narrower-pick-a-day.md) Check the narrower Pick a day popover in light and dark mode
+- [ ] [#310](backlog/310-choose-light-dark-or-system-theme.md) Choose light, dark or system theme in Settings
+- [?] [#311](backlog/311-skip-one-outlook-item-when-its.md) Skip one Outlook item when its Sensitivity can't be read
+- [?] [#312](backlog/312-ask-before-a-link-with-creates.md) Ask before a link with # creates a note
+- [ ] [#313](backlog/313-slim-claude-md-into-docs.md) Slim CLAUDE.md into docs
+- [?] [#314](backlog/314-enter-adds-the-attribute-row-in.md) Enter adds the attribute row in the Attributes box
+- [?] [#315](backlog/315-keep-keyboard-focus-after-adding-or.md) Keep keyboard focus after adding or removing an attribute
+- [?] [#316](backlog/316-add-attributes-to-a-note-that.md) Add attributes to a note that has none
+- [?] [#317](backlog/317-attribute-value-with-a-control-character.md) Attribute value with a control character isn't counted as changed
+- [?] [#318](backlog/318-attribute-values-show-bidi-controls-as.md) Attribute values show bidi controls as placeholders
+- [?] [#319](backlog/319-crash-hint-bar-doesn-t-cover.md) Crash hint bar doesn't cover the header
+- [?] [#320](backlog/320-crash-log-link-checks-close-the.md) Crash log link checks: close the check-then-act window
+- [x] [#321](backlog/321-fix-flaky-palettemeeting-privateappointment-notnum.md) Fix flaky PaletteMeeting_PrivateAppointment_NotNumbered test → 246-flaky-palette-tests
+- [?] [#322](backlog/322-recent-notes-sidebar-keep-the-parent.md) Recent notes sidebar: keep the parent name visible on long titles
+- [?] [#323](backlog/323-tag-board-cache-note-reads-by.md) Tag board: cache note reads by note version
+- [?] [#324](backlog/324-tag-board-show-the-target-column.md) Tag board: show the target column name on the move buttons
+- [?] [#325](backlog/325-tag-board-hint-when-a-card.md) Tag board: hint when a card is dropped on No status
+- [?] [#326](backlog/326-tag-board-highlight-a-column-while.md) Tag board: highlight a column while a card is dragged over it
+- [?] [#327](backlog/327-person-page-mark-overdue-waiting-for.md) Person page: mark overdue waiting-for follow-ups
+- [?] [#328](backlog/328-smart-paste-don-t-fetch-page.md) Smart paste: don't fetch page titles from local or private addresses
+- [?] [#329](backlog/329-smart-paste-limit-concurrent-page-title.md) Smart paste: limit concurrent page-title fetches
+- [?] [#330](backlog/330-smart-paste-say-why-a-page.md) Smart paste: say why a page title wasn't used
+- [h] [#331](backlog/331-check-cmd-shift-v-plain-paste.md) Check Cmd+Shift+V plain paste in the macOS app
+- [?] [#332](backlog/332-carry-over-and-k-more-line.md) Carry-over: "… and k more" line is not an open point
+- [x] [#333](backlog/333-fix-flaky-editingflowtests-palettecurrent-isnocomm.md) Fix flaky EditingFlowTests.PaletteCurrent_IsNoCommand test → 246-flaky-palette-tests
+- [?] [#334](backlog/334-fix-flaky-sensitiveflowtests-markandmakeplain-dirt.md) Fix flaky SensitiveFlowTests.MarkAndMakePlain_Dirty_AskToSaveFirst test
+- [?] [#335](backlog/335-fix-flaky-open-anyroute-putsitfirst-once.md) Fix flaky Open_AnyRoute_PutsItFirst_Once test
+- [?] [#336](backlog/336-cap-the-total-size-of-embedded.md) Cap the total size of embedded images in a shared note
+- [?] [#337](backlog/337-split-notehtml-cs-into-block-and.md) Split NoteHtml.cs into block and inline renderers
+- [?] [#338](backlog/338-fix-the-stale-comment-above-sharenotenow.md) Fix the stale comment above ShareNoteNow
+- [?] [#339](backlog/339-share-a-note-as-pdf.md) Share a note as PDF
+- [?] [#340](backlog/340-briefing-links-for-note-names-with.md) Briefing links for note names with brackets
+- [?] [#342](backlog/342-cap-the-screenshot-folder-watcher-s.md) Cap the screenshot folder watcher's seen set
+- [h] [#343](backlog/343-check-the-screenshot-hotkey-and-watched.md) Check the screenshot hotkey and watched folder on macOS
+- [?] [#344](backlog/344-harden-the-mermaid-svg-blob-url.md) Harden the mermaid SVG blob: URL
+- [h] [#345](backlog/345-check-the-spacing-of-the-drawing.md) Check the spacing of the Drawing diagram hint
+- [?] [#346](backlog/346-redraw-diagrams-when-the-system-theme.md) Redraw diagrams when the system theme changes
+- [?] [#347](backlog/347-keep-the-old-diagram-while-it.md) Keep the old diagram while it redraws
+- [?] [#348](backlog/348-descriptive-alt-text-for-diagrams.md) Descriptive alt text for diagrams
+- [h] [#349](backlog/349-check-that-mermaid-diagrams-draw-on.md) Check that mermaid diagrams draw on macOS and Windows
+- [?] [#350](backlog/350-standup-catch-feed-and-calendar-errors.md) Standup: catch feed and calendar errors while composing
+- [?] [#351](backlog/351-standup-opens-today-s-note-before.md) /standup opens today's note before writing
+- [?] [#353](backlog/353-fix-flaky-record-whileanotheractionisbusy-stilllis.md) Fix flaky Record_WhileAnotherActionIsBusy_StillListed test
+- [?] [#354](backlog/354-merge-notes-refuse-the-delete-when.md) Merge notes: refuse the delete when the second history save fails
+- [?] [#355](backlog/355-merge-notes-clearer-message-when-a.md) Merge notes: clearer message when a step after the save fails
+- [?] [#356](backlog/356-merge-notes-re-check-subpages-right.md) Merge notes: re-check subpages right before the delete
+- [?] [#357](backlog/357-similar-notes-limit-pairs-when-many.md) Similar notes: limit pairs when many notes share a title
+- [?] [#358](backlog/358-release-check-target-is-a-commit.md) Release: check TARGET is a commit sha in the version checks
+- [?] [#359](backlog/359-refuse-lookalike-spellings-of-the-removed.md) Refuse lookalike spellings of the removed secret options
+- [?] [#360](backlog/360-test-the-full-removed-option-sentence.md) Test the full removed-option sentence in CLAUDE.md
+- [?] [#361](backlog/361-tag-index-explicit-handling-of-a.md) Tag index: explicit handling of a symlinked context.db
+- [?] [#362](backlog/362-notes-refuse-a-note-swapped-for.md) Notes: refuse a note swapped for a symlink between listing and reading
+- [?] [#363](backlog/363-calendar-skip-symlinked-ics-files.md) Calendar: skip symlinked .ics files
+- [?] [#364](backlog/364-times-panel-narrow-the-catch-in.md) Times panel: narrow the catch in DesktopState.TimesNow
+- [?] [#365](backlog/365-pin-icon-contrast-on-the-open.md) Pin icon contrast on the open note row
+- [?] [#366](backlog/366-pinned-list-roll-back-the-in.md) Pinned list: roll back the in-memory change when the file write fails
+- [?] [#367](backlog/367-commit-log-turn-off-signature-checks.md) Commit log: turn off signature checks in git log
+- [?] [#368](backlog/368-desktop-request-folder-tighten-an-existing.md) Desktop request folder: tighten an existing .desktop folder and refuse a symlinked lock
+- [?] [#369](backlog/369-work-item-read-the-linked-repos.md) Work item: read the linked repos in parallel
+- [?] [#370](backlog/370-command-bar-show-a-running-line.md) Command bar: show a running line while a command runs
+- [?] [#371](backlog/371-command-bar-fit-the-window-to.md) Command bar: fit the window to its content and check the rounded corners
+- [?] [#375](backlog/375-code-block-copy-announce-the-result.md) Code block Copy: announce the result to screen readers
+- [?] [#376](backlog/376-code-blocks-track-changed-blocks-by.md) Code blocks: track changed blocks by identity, not index
+- [ ] [#377](backlog/377-dependency-list-with-licence-links.md) Dependency list with licence links
+- [?] [#378](backlog/378-app-icon-full-bleed-variant-for.md) App icon: full-bleed variant for Windows and Linux
+- [?] [#379](backlog/379-search-page-arrow-keys-move-between.md) Search page: arrow keys move between results without scrolling the page
+- [?] [#380](backlog/380-mail-digest-hint-under-the-settings.md) Mail digest: hint under the Settings checkbox
+- [?] [#381](backlog/381-mail-digest-keep-mail-text-inert.md) Mail digest: keep mail text inert in meeting notes
+- [?] [#382](backlog/382-mail-digest-strip-unicode-format-characters.md) Mail digest: strip Unicode format characters from suggestions
+- [?] [#383](backlog/383-mail-digest-keep-read-mail-disabled.md) Mail digest: keep Read mail disabled while a timed-out read still runs
+- [?] [#386](backlog/386-meeting-todos-cap-and-clean-a.md) Meeting todos: cap and clean a stored meeting title on read
+- [?] [#387](backlog/387-meeting-todos-move-focus-to-the.md) Meeting todos: move focus to the meeting picker when Push finds no next meeting
+- [?] [#389](backlog/389-appointmentpaneltests-read-both-elements-of-an.md) AppointmentPanelTests: read both elements of an order check at the same moment
+- [?] [#390](backlog/390-sidebar-day-picker-fit-the-calendar.md) Sidebar day picker: fit the calendar in a narrow sidebar
+- [?] [#391](backlog/391-editor-type-an-inline-code-span.md) Editor: type an inline code span that holds a backtick
+- [?] [#392](backlog/392-notes-clean-up-escapes-saved-by.md) Notes: clean up escapes saved by the old editor
+- [?] [#393](backlog/393-tests-find-the-rare-unnamed-debug.md) Tests: find the rare unnamed Debug failure in Context.Desktop.Tests
+- [?] [#394](backlog/394-search-index-skip-the-full-note.md) Search index: skip the full note_text repair pass when nothing needs it
+- [?] [#396](backlog/396-reproduce-the-recent-json-test-race.md) Reproduce the recent.json test race on a slow runner
+- [?] [#397](backlog/397-notestore-contains-match-unicode-normalised-paths.md) NoteStore.Contains: match Unicode-normalised paths
+- [?] [#398](backlog/398-people-should-never-show-up-in.md) People should never show up in the recent notes list
+- [?] [#399](backlog/399-payment-provider-spike.md) Payment provider spike
+- [ ] [#402](backlog/402-throttle-repeated-show-requests.md) Throttle repeated show requests
+- [h] [#403](backlog/403-check-the-second-start-on-windows.md) Check the second start on Windows
+- [?] [#408](backlog/408-tooltip-on-the-global-todo-marker.md) Tooltip on the global todo marker
+- [?] [#409](backlog/409-build-notehistory-after-the-todo-braces.md) Build NoteHistory after the todo-braces record check
+- [?] [#410](backlog/410-check-the-carry-over-arrow-box.md) Check the carry-over arrow box width in both themes
+- [?] [#411](backlog/411-loading-state-and-group-counts-on.md) Loading state and group counts on the Todos page
+- [?] [#412](backlog/412-check-the-contrast-of-grey-source.md) Check the contrast of grey source buttons in dark mode
+
+## Dropped with the terminal UI
+
+These were about the interactive console, which the desktop move removes. Kept for reference; not picked up by the factory.
+
+- Helpful empty todo sidebar: "No todos yet" doesn't say how to add one. Mention `/todo` in the empty sidebar, e.g. "No todos yet — add one with /todo".
+- Spacing in /current: add a blank line between the "Today, <date>" title, the Due table, and the Linked notes table (or its "No linked notes" / "Can't read context.db" line).
+- Better calendar-link failure line: add "see /calendar-link" to the red "Can't download the Exchange calendar" line, and show a "Downloading Exchange calendar…" hint while `/current` waits (up to 10 s).
+- Shorter /calendar-link popup text: shorten the command description so it fits in a narrow terminal's popup.
+- Masked link input: hide the link while it is typed after `/calendar-link` (e.g. show `•` per character), so it never lands on screen or in scrollback. Until then, mention the echo in `CLAUDE.md`.
+- Encryption UX polish: `/encrypt` re-asks after a passphrase shorter than 12 characters, the `/decrypt` success message mentions that the tag index is rebuilt, and the encryption warnings and hints fit narrow terminals.
+
+## Dropped with folder encryption
+
+Whole-folder encryption is removed (see "Remove folder encryption"); only sensitive notes are encrypted. Kept for reference; not picked up by the factory.
+
+- OS key store unlock: unlock encryption via macOS Keychain or Windows DPAPI as a second way besides the passphrase (the passphrase stays as recovery); spec to justify any new package.
+- Block writes without key file: when encrypted files exist but `encryption.json` is missing, refuse commands that write (not just warn) until the key file is restored, and keep the warning visible instead of only on the first frame.
+- Bind names, flag plain files: bind each encrypted note's and calendar file's name into its authentication data so encrypted contents can't be swapped between files, and warn about plain files found while encryption is on instead of reading them silently.
+- Measure encrypted start-up: time the in-memory tag index rebuild with encryption on for 100, 1,000 and 5,000 notes; only if it is slow, keep an encrypted copy of the index between sessions without ever writing plain data to disk.
+- Encrypt while another process writes: if the desktop app (or a second console) writes `context.db` while `/encrypt` runs, a plain `context.db` can be left behind. Make `Migrate` safe against another process writing at the same time (for example, delete `context.db*` again at the end and re-check `IsConfigured`). From the 053 security review.
+- Unlock with a password manager: read the encryption passphrase from 1Password (its `op` CLI) or KeePassXC (`keepassxc-cli`) instead of typing it, chosen in the settings (the item's name is stored, never the passphrase); the CLI already takes `--passphrase-stdin`, so document piping `op read` into it. The setup and docs recommend keeping the passphrase in the password manager as recovery, since a lost passphrase loses the data. Decide next to OS key store unlock.
+- no echo for --passphrase-stdin on a terminal (from 123-scriptable-cli)

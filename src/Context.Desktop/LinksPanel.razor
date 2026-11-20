@@ -1,0 +1,131 @@
+@inherits StateComponent
+@* The notes linked to the open note (DesktopState.Links): the ones it links to, the ones that link to it and the
+   ones that share a tag, in the index's order. It reads only, and reloads whenever the state changes. A sensitive
+   note is never looked up: its text is in no index. *@
+
+<section class="links-panel" aria-label="Linked notes">
+    <h2>Linked notes</h2>
+    @if (Sensitive)
+    {
+        <p class="grey" role="status">Sensitive notes have no links.</p>
+    }
+    else if (view is null)
+    {
+        <p class="grey" role="status">Loading…</p>
+    }
+    else if (view.Kind == LinksViewKind.IndexUnreadable)
+    {
+        <p class="red" role="status">Can't read the links.</p>
+    }
+    else if (view.Links.Count == 0)
+    {
+        <p class="grey" role="status">@DesktopText.OneLine(Name) has no linked notes.</p>
+    }
+    else
+    {
+        <ul class="link-rows">
+            @foreach (NoteLink link in view.Links)
+            {
+                string note = link.Note;
+                string shown = DesktopText.OneLine(note);
+                <li class="link-row">
+                    @if (link.Missing)
+                    {
+                        <span class="name missing grey cut" title="@shown">@shown</span>
+                    }
+                    else
+                    {
+                        <button type="button" class="name note-button cut" title="@shown" @onclick="() => OnOpen.InvokeAsync(note)">@shown</button>
+                    }
+                    <span class="link-kind grey">@LinkText(link)</span>
+                    <span class="link-tags">
+                        @foreach (string tag in link.SharedTags)
+                        {
+                            string label = DesktopText.OneLine(TagParser.Format(tag));
+                            <button type="button" class="tag-button cut" title="@label" @onclick="() => OnTag.InvokeAsync(TagParser.Format(tag))">@label</button>
+                        }
+                    </span>
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+@code {
+    private LinksView? view;
+    private string? loaded;
+    private bool loadedSensitive;
+    private int request;
+
+    /// <summary>The open note's name.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>True for a sensitive note (locked or open): nothing is looked up.</summary>
+    [Parameter]
+    public bool Sensitive { get; set; }
+
+    /// <summary>Called with a linked note's name when it is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    /// <summary>Called with a shared tag, formatted like TagParser.Format, when it is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnTag { get; set; }
+
+    protected override Task OnParametersSetAsync()
+    {
+        if (string.Equals(loaded, Name, StringComparison.Ordinal) && loadedSensitive == Sensitive)
+        {
+            return Task.CompletedTask;
+        }
+
+        // Another note: its rows are not known yet, so the old ones go.
+        loaded = Name;
+        loadedSensitive = Sensitive;
+        view = null;
+        return Load();
+    }
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    // The same fixed texts as the console's Link column.
+    private static string LinkText(NoteLink link)
+    {
+        if (link.Missing)
+        {
+            return "links to (missing)";
+        }
+
+        return link.Direction switch
+        {
+            NoteLinkDirection.To => "links to",
+            NoteLinkDirection.From => "linked from",
+            NoteLinkDirection.Both => "both ways",
+            _ => string.Empty,
+        };
+    }
+
+    // Keeps the shown rows while it reloads. A result for a note that is no longer the open one, or an older
+    // request's result, is dropped.
+    private async Task Load()
+    {
+        int mine = ++request;
+        if (Sensitive)
+        {
+            return;
+        }
+
+        string name = Name;
+        LinksView result = await State.Links(name);
+        if (mine == request && !Sensitive && string.Equals(name, Name, StringComparison.Ordinal))
+        {
+            view = result;
+        }
+    }
+}

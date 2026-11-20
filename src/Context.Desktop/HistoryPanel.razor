@@ -1,0 +1,211 @@
+@inherits StateComponent
+@using System.Globalization
+@* The kept versions of the open note (DesktopState.History), newest first, in local time. Choosing one reads it
+   (DesktopState.ReadVersion, one key-store call for a sealed version) and shows its line diff to the saved text
+   (TextDiff): removed lines red with "-", added lines accent with "+", unchanged lines grey. Restoring only asks the
+   parent (OnRestore); this panel reads only, and reloads its list whenever the state changes. *@
+
+<section class="history-panel" aria-label="History">
+    <div class="history-bar">
+        <h2>History</h2>
+        <button type="button" class="close-history" @onclick="OnClose">Close</button>
+    </div>
+    @if (view is null)
+    {
+        <p class="grey" role="status">Loading…</p>
+    }
+    else if (view.Kind == HistoryKind.Unreadable)
+    {
+        <p class="red history-unreadable" role="status">Can't read the history of @DesktopText.OneLine(Name).</p>
+    }
+    else if (view.Versions.Count == 0)
+    {
+        <p class="grey no-history" role="status">No earlier versions of @DesktopText.OneLine(Name).</p>
+    }
+    else
+    {
+        <ul class="history-rows">
+            @foreach (NoteVersion version in view.Versions)
+            {
+                NoteVersion row = version;
+                string time = TimeText(row.SavedUtc, State.Zone);
+                bool chosen = string.Equals(selected?.Id, row.Id, StringComparison.Ordinal);
+                <li class="history-row">
+                    <button type="button" class="@(chosen ? "version chosen" : "version")" aria-pressed="@(chosen ? "true" : "false")"
+                            title="@time" @onclick="() => Choose(row)">@time</button>
+                </li>
+            }
+        </ul>
+        @if (selected is { } shown)
+        {
+            @if (versionUnreadable)
+            {
+                <p class="red version-unreadable" role="status">Can't read this version.</p>
+            }
+            else if (diff is null)
+            {
+                <p class="grey" role="status">Loading…</p>
+            }
+            else
+            {
+                @if (diff.TooDifferent)
+                {
+                    <p class="grey too-different" role="status">Too many changes to show.</p>
+                }
+                else
+                {
+                    <ol class="diff-lines" tabindex="0" aria-label="Changes from @TimeText(shown.SavedUtc, State.Zone) to the saved text">
+                        @foreach (DiffLine line in diff.Lines)
+                        {
+                            string text = LineText(line);
+                            <li class="@LineClass(line)" title="@text">@text</li>
+                        }
+                    </ol>
+                }
+                <button type="button" class="restore-version" @onclick="() => OnRestore.InvokeAsync((shown.Id, shown.SavedUtc))">Restore this version</button>
+            }
+        }
+    }
+</section>
+
+@code {
+    private HistoryView? view;
+    private NoteVersion? selected;
+    private TextDiffResult? diff;
+    private string? selectedText;
+    private bool versionUnreadable;
+    private string? loaded;
+    private bool loadedSensitive;
+    private int request;
+    private int choice;
+
+    /// <summary>The open note's name.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>True for an open sensitive note: its versions are sealed.</summary>
+    [Parameter]
+    public bool Sensitive { get; set; }
+
+    /// <summary>Called with the shown version's id and time (UTC) when Restore this version is clicked.</summary>
+    [Parameter]
+    public EventCallback<(string Id, DateTime SavedUtc)> OnRestore { get; set; }
+
+    /// <summary>Called when Close is clicked.</summary>
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    /// <summary>A version's time as shown: local <c>yyyy-MM-dd HH:mm:ss</c> in <paramref name="zone"/>.</summary>
+    internal static string TimeText(DateTime savedUtc, TimeZoneInfo zone) =>
+        DesktopText.OneLine(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(savedUtc, DateTimeKind.Utc), zone)
+            .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+
+    protected override Task OnParametersSetAsync()
+    {
+        if (string.Equals(loaded, Name, StringComparison.Ordinal) && loadedSensitive == Sensitive)
+        {
+            return Task.CompletedTask;
+        }
+
+        // Another note: its versions are not known yet, so the old ones go.
+        loaded = Name;
+        loadedSensitive = Sensitive;
+        view = null;
+        ClearChoice();
+        return Load();
+    }
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    private static string LineText(DiffLine line)
+    {
+        string prefix = line.Kind switch
+        {
+            DiffKind.Removed => "- ",
+            DiffKind.Added => "+ ",
+            _ => "  ",
+        };
+        return prefix + DesktopText.OneLine(line.Text);
+    }
+
+    private static string LineClass(DiffLine line) => line.Kind switch
+    {
+        DiffKind.Removed => "diff-line removed red",
+        DiffKind.Added => "diff-line added accent",
+        _ => "diff-line same grey",
+    };
+
+    private void ClearChoice()
+    {
+        choice++;
+        selected = null;
+        selectedText = null;
+        diff = null;
+        versionUnreadable = false;
+    }
+
+    // Keeps the shown rows while it reloads; an older request's result, or one for another note, is dropped. When
+    // the chosen version or the saved text changed, the diff is made again.
+    private async Task Load()
+    {
+        int mine = ++request;
+        string name = Name;
+        HistoryView result = await State.History(name);
+        if (mine != request || !string.Equals(name, Name, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        bool currentChanged = view is null || !string.Equals(view.Current, result.Current, StringComparison.Ordinal);
+        view = result;
+        if (selected is { } chosen)
+        {
+            if (!result.Versions.Any(v => string.Equals(v.Id, chosen.Id, StringComparison.Ordinal)))
+            {
+                ClearChoice();
+            }
+            else if (currentChanged && selectedText is { } text)
+            {
+                await ShowDiff(++choice, text, result.Current);
+            }
+        }
+    }
+
+    private async Task Choose(NoteVersion version)
+    {
+        int mine = ++choice;
+        selected = version;
+        selectedText = null;
+        diff = null;
+        versionUnreadable = false;
+        string? text = await State.ReadVersion(Name, version.Id);
+        if (mine != choice)
+        {
+            return;
+        }
+
+        if (text is null)
+        {
+            versionUnreadable = true;
+            return;
+        }
+
+        selectedText = text;
+        await ShowDiff(mine, text, view?.Current ?? string.Empty);
+    }
+
+    // The version's text is read once; a new saved text only makes the diff again.
+    private async Task ShowDiff(int mine, string text, string current)
+    {
+        TextDiffResult result = await Task.Run(() => TextDiff.Lines(text, current));
+        if (mine == choice)
+        {
+            diff = result;
+        }
+    }
+}

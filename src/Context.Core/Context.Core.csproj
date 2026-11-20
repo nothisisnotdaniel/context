@@ -2,6 +2,8 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <!-- The RIDs release.yml publishes, so a locked restore has their runtime packages in packages.lock.json. -->
+    <RuntimeIdentifiers>osx-arm64;osx-x64;win-x64</RuntimeIdentifiers>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
@@ -11,10 +13,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Context" />
-    <InternalsVisibleTo Include="Context.Tests" />
-    <InternalsVisibleTo Include="Context.Desktop" />
-    <InternalsVisibleTo Include="Context.Desktop.Tests" />
+    <InternalsVisibleTo Include="Context" Key="$(ContextPublicKey)" />
+    <InternalsVisibleTo Include="Context.Tests" Key="$(ContextPublicKey)" />
+    <InternalsVisibleTo Include="Context.Desktop" Key="$(ContextPublicKey)" />
+    <InternalsVisibleTo Include="Context.Desktop.Tests" Key="$(ContextPublicKey)" />
   </ItemGroup>
 
 </Project>

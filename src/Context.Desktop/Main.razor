@@ -1,31 +1,2923 @@
 @inherits StateComponent
+@implements IAsyncDisposable
 
+<CrashHintBar />
 @if (Snapshot is { } snapshot)
 {
-    @if (snapshot.Locked)
-    {
-        <LockedPanel />
-    }
-    else if (snapshot.Failed)
+    @if (snapshot.Failed)
     {
         <p class="red failed" role="alert">Can't read the data folder.</p>
     }
     else
     {
-        <div class="layout">
+        <div class="layout" @onkeydown="OpenPalette">
             <aside class="notes-region">
-                <NotesPanel />
+                <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" OnTriage="ShowTriage" OnPeople="ShowPeople" OnTodos="ShowTodos" OnSearch="ShowSearch" />
             </aside>
             <main class="current-region">
-                <CurrentPanel />
+                <TopBar Today="@snapshot.Today" Selected="@SelectedDay()" OnToday="ShowToday" OnPick="PickDay" OnCapture="CaptureAsync" OnSearch="ShowSearch" PageActions="@PageActionsFor(snapshot)"
+                        PageActionsDisabled="@(running || renaming || subpaging || moving)" OnPageAction="RunPageAction" />
+                @if (page == Page.Triage)
+                {
+                    <TriagePanel Guard="TriageHeld" OnTriaged="Triaged" OnClose="CloseTriage" />
+                }
+                @if (page == Page.Done)
+                {
+                    <DonePanel OnClose="CloseDone" />
+                }
+                @if (page == Page.MailDigest)
+                {
+                    <MailDigestPanel OnClose="CloseMailDigest" />
+                }
+                @if (page == Page.Settings)
+                {
+                    <SettingsPanel OnClose="CloseSettings" />
+                }
+                @if (page == Page.Appointment && appointmentShown is { } shownAppointment)
+                {
+                    <AppointmentPanel Title="@shownAppointment.Title" Day="@shownAppointment.Day" OnOpen="RequestOpen" OnCreate="CreateAppointmentNote" OnClose="CloseAppointment" />
+                }
+                @if (reviewShown)
+                {
+                    <ReviewPanel OnOpen="RequestOpen" OnClose="CloseReview" />
+                }
+                @if (page == Page.Board && boardShown is { } boardTag)
+                {
+                    <BoardPanel Tag="@boardTag" OnOpen="RequestOpen" OnClose="CloseBoard" />
+                }
+                @if (page == Page.People)
+                {
+                    <PeoplePanel OnOpen="RequestOpen" OnClose="ClosePeople" />
+                }
+                @if (page == Page.Todos)
+                {
+                    <AllTodosPanel OnOpen="RequestOpen" OnMeeting="OpenAppointment" OnPerson="OpenMention" OnClose="CloseTodos" />
+                }
+                @if (page == Page.Tags)
+                {
+                    <TagsPanel Selected="@tagShown" OnTag="ShowTag" OnClose="CloseTags" />
+                }
+                @if (tagShown is { } tag)
+                {
+                    <TagPanel Tag="@tag" OnOpen="RequestOpen" OnBoard="ShowBoard" OnClose="CloseTag" />
+                }
+                @if (findShown is { } find)
+                {
+                    <FindPanel Key="@find.Key" Value="@find.Value" OnOpen="RequestOpen" OnClose="CloseFind" />
+                }
+                @if (page == Page.Search && searchShown is { } search)
+                {
+                    <SearchPanel Text="@search" Request="@searchRequest" Focus="@searchFocus" OnOpen="OpenFromSearch" OnClose="CloseSearch" />
+                }
+                @if (decisionsShown is { } decisionsTag)
+                {
+                    <DecisionsPanel Tag="@decisionsTag" OnOpen="RequestOpen" OnClose="CloseDecisions" />
+                }
+                @if (similarShown)
+                {
+                    <SimilarPanel OnOpen="RequestOpen" OnClose="CloseSimilar" Guard="MergeHeld" OnMerged="Merged" />
+                }
+                <p class="main-status cut @statusClass" role="status" title="@statusText">@statusText</p>
+                <div class="note-area" hidden="@(page != Page.None)">
+                    @if (openName is { } name)
+                    {
+                        @if (searchBack is { } back && string.Equals(back.Note, name, StringComparison.Ordinal))
+                        {
+                            <button type="button" class="search-back" @onclick="BackToSearch">Back to search</button>
+                        }
+                        @if (name.Contains('/'))
+                        {
+                            <nav class="breadcrumb" aria-label="Breadcrumb">
+                                <ol>
+                                    @foreach ((string ancestor, string segment) in Ancestors(name))
+                                    {
+                                        string ancestorShown = DesktopText.OneLine(ancestor);
+                                        string segmentShown = DesktopText.OneLine(segment);
+                                        <li>
+                                            <button type="button" class="crumb cut" title="@ancestorShown" @onclick="() => RequestOpen(ancestor)">@segmentShown</button>
+                                        </li>
+                                    }
+                                    @{
+                                        string currentShown = DesktopText.OneLine(name[(name.LastIndexOf('/') + 1)..]);
+                                        string fullShown = DesktopText.OneLine(name);
+                                    }
+                                    <li><span class="crumb-current cut" aria-current="page" title="@fullShown">@currentShown</span></li>
+                                </ol>
+                            </nav>
+                        }
+                        @if (renaming || subpaging || moving)
+                        {
+                            <div class="note-toolbar">
+                                @if (subpaging)
+                                {
+                                    <input type="text" class="subpage-title" value="@subpageText" maxlength="200" disabled="@running"
+                                           aria-label="Subpage title" placeholder="Subpage title" @ref="subpageField" @oninput="SubpageTyped" @onkeydown="e => CreateSubpage(e)" />
+                                    <button type="button" class="cancel-subpage" disabled="@running" @onclick="CancelSubpage">Cancel</button>
+                                }
+                                else if (moving)
+                                {
+                                    <input type="text" class="move-parent" value="@moveText" maxlength="500" disabled="@running"
+                                           aria-label="New parent" placeholder="Empty: top level" @ref="moveField" @oninput="MoveTyped" @onkeydown="e => MoveHere(e)" />
+                                    <button type="button" class="cancel-move" disabled="@running" @onclick="CancelMove">Cancel</button>
+                                }
+                                else if (renaming)
+                                {
+                                    <input type="text" class="rename-title" value="@renameText" maxlength="200" disabled="@running"
+                                           aria-label="New name" placeholder="New name" @ref="renameField" @oninput="RenameTyped" @onkeydown="e => SaveName(e)" />
+                                    <button type="button" class="cancel-rename" disabled="@running" @onclick="CancelRename">Cancel</button>
+                                }
+                            </div>
+                        }
+                        @if (DesktopState.MeetingNoteDay(name) is { } meetingDay)
+                        {
+                            @* A meeting note's tied todos (job 287); the panel shows nothing unless one of the day's
+                               appointments has this note. *@
+                            <MeetingTodosPanel @key="name" Day="meetingDay" NoteName="@name" />
+                        }
+                        int shownEditor = editorGeneration;
+                        <NoteEditor @key="(name, openSensitive)" @ref="editor" Name="@name" Sensitive="openSensitive"
+                                    OnTag="ShowTag" OnOpenNote="RequestOpen" OnOpenHeading="OpenHeading" OnCreateNote="CreateLinked" Heading="@openHeading" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked"
+                                    OnAttach="AttachDropped" OnOpenAttachment="OpenAttachment"
+                                    OnOutline="OutlineReport(shownEditor)" />
+                        @if (Children(Snapshot, name) is { Count: > 0 } children)
+                        {
+                            <nav class="subpages" aria-label="Subpages">
+                                <h2>Subpages</h2>
+                                <ul>
+                                    @foreach ((NoteInfo child, int below) in children)
+                                    {
+                                        string childName = child.Name;
+                                        <li>
+                                            <button type="button" class="subpage-link cut" title="@DesktopText.OneLine(childName)" @onclick="() => RequestOpen(childName)">@DesktopText.NoteName(child.Title)</button>
+                                            @if (below > 0)
+                                            {
+                                                <span class="subpage-count">@(below == 1 ? "1 subpage" : $"{below} subpages")</span>
+                                            }
+                                        </li>
+                                    }
+                                </ul>
+                            </nav>
+                        }
+                        @if (historyShown)
+                        {
+                            <HistoryPanel Name="@name" Sensitive="openSensitive" OnRestore="AskRestore" OnClose="CloseHistory" />
+                        }
+                        @if (People.PersonOf(name) is { } person)
+                        {
+                            <PersonPanel Person="@person" OnOpen="RequestOpen" />
+                        }
+                        @if (WorkItems.ItemOf(name) is { } item)
+                        {
+                            <ItemPanel Item="item" OnOpen="RequestOpen" OnPerson="OpenMention" />
+                        }
+                        <LinksPanel Name="@name" Sensitive="openSensitive" OnOpen="RequestOpen" OnTag="ShowTag" />
+                    }
+                    else
+                    {
+                        <p class="grey no-note">No note open. Click Today to open today's note.</p>
+                    }
+                </div>
             </main>
             <aside class="todos-region">
-                <TodoPanel />
+                <DayAppointmentsPanel OnOpen="OpenAppointment" />
+                <TimesTodayPanel />
+                @if (openName is not null && page == Page.None)
+                {
+                    <OutlinePanel Headings="outline" OnJump="JumpToOutline" />
+                }
+                <TodoPanel @ref="todoPanel" OnPerson="OpenMention" OnOpen="RequestOpen" />
+                <ToReviewPanel Guard="ReviewHeld" OnReviewed="Reviewed" OnOpen="RequestOpen" />
             </aside>
         </div>
+        @if (discarding)
+        {
+            <ConfirmDialog Question="@($"Discard changes to {DesktopText.OneLine(openName ?? string.Empty)}?")" ConfirmLabel="Discard"
+                           OnConfirm="Discard" OnCancel="KeepEditing" />
+        }
+        @if (deleting && openName is { } doomed)
+        {
+            <ConfirmDialog Question="@DeleteQuestion(doomed)" ConfirmLabel="Delete"
+                           Busy="running" OnConfirm="DeleteConfirmed" OnCancel="CancelDelete" />
+        }
+        @if (renameAsk is { } ask && openName is { } renamingName)
+        {
+            <ConfirmDialog Question="@DesktopActions.RenameQuestion(renamingName, ask.NewName, ask.Count)" ConfirmLabel="Rename"
+                           Busy="running" OnConfirm="RenameConfirmed" OnCancel="CancelRenameAsk" />
+        }
+        @if (marking && openName is { } sealing)
+        {
+            <ConfirmDialog Question="@($"Mark {DesktopText.OneLine(sealing)} sensitive? It will open only in this app, with this machine's key or the recovery file.")"
+                           ConfirmLabel="Mark sensitive" Busy="running" OnConfirm="MarkConfirmed" OnCancel="CancelSensitive" />
+        }
+        @if (unsealing && openName is { } plain)
+        {
+            <ConfirmDialog Question="@($"Make {DesktopText.OneLine(plain)} plain? It will be stored as readable text again. Its history will be removed.")"
+                           ConfirmLabel="Make plain" Busy="running" OnConfirm="MakePlainConfirmed" OnCancel="CancelSensitive" />
+        }
+        @if (sharing && openName is { } shared)
+        {
+            <ShareDialog Name="@shared" Busy="running" OnChoose="ShareChosen" OnCancel="CancelShare" />
+        }
+        @if (restoring is { } version && openName is { } restored)
+        {
+            <ConfirmDialog Question="@($"Restore {DesktopText.OneLine(restored)} to the version from {HistoryPanel.TimeText(version.SavedUtc, State.Zone)}? The current text is kept as a version.")"
+                           ConfirmLabel="Restore" Busy="running" OnConfirm="RestoreConfirmed" OnCancel="CancelRestore" />
+        }
+        @if (paletteOpen)
+        {
+            <CommandPalette OnRun="RunCommand" OnClose="ClosePalette" />
+        }
     }
 }
 else
 {
     <p class="grey loading" role="status">Loading…</p>
+}
+
+@code {
+    private string? openName;
+    private NoteEditor? editor;
+
+    // The open note's outline, as the current editor last reported it (shown in the right sidebar). Each editor is
+    // handed the generation it was rendered with; a report from an older editor (another note opened, the note closed
+    // or locked) carries an older one and is ignored. Bumped, and the list cleared, whenever the editor changes.
+    private IReadOnlyList<OutlineHeading> outline = [];
+    private int editorGeneration;
+
+    // The receiver of the editors' outline reports: not a component, so a report renders this page only when it
+    // changes what the sidebar shows (ShowOutline), not after every save.
+    private readonly object outlineReceiver = new();
+    private string? tagShown;
+    private Page page;
+    private bool reviewShown;
+    private (string Key, string Value)? findShown;
+    private string? searchShown;
+
+    // Bumped each time the search panel is asked for, so asking again for the same text starts it over.
+    private int searchRequest;
+
+    // The note whose row Back to search focuses on the shown Search page (null: its input).
+    private string? searchFocus;
+
+    // While set, the open note came from the Search page with this query: Back to search shows it again (job 285).
+    private (string Note, string Text)? searchBack;
+
+    // A search result whose opening waits for the unsaved-changes dialog.
+    private (string Note, string Text)? pendingSearchBack;
+    private string? decisionsShown;
+    private bool similarShown;
+    private enum Page { None, Triage, People, Tags, Settings, Appointment, Board, Search, MailDigest, Done, Todos }
+
+    // The board's tag (normalized) while Page.Board is shown (job 242).
+    private string? boardShown;
+
+    // The appointment page's title (raw) and day while Page.Appointment is shown.
+    private (string Title, DateOnly Day)? appointmentShown;
+
+    // An appointment page that opens once the unsaved-changes dialog is confirmed.
+    private (string Title, DateOnly Day)? pendingAppointment;
+    private bool discarding;
+    private bool pendingClose;
+    private string? pendingName;
+    private string? pendingHeading;
+    // The heading a [[Note#Heading]] link opened the note at; the new editor jumps there once, after its mount.
+    private string? openHeading;
+    private string? pendingPerson;
+    private string? pendingLink;
+    private bool pendingToday;
+    // A day picked in the top bar whose daily note opens once the unsaved-changes dialog is confirmed.
+    private DateOnly? pendingPickedDay;
+    private bool pendingBriefing;
+    private Appointment? pendingMeeting;
+    private bool paletteOpen;
+    private bool running;
+    private string statusText = string.Empty;
+    private string statusClass = string.Empty;
+    private bool renaming;
+    private string renameText = string.Empty;
+    private ElementReference renameField;
+    private bool focusRename;
+    // While set, the rename question is open: the new full name and how many notes' links change.
+    private (string NewName, int Count)? renameAsk;
+    private bool deleting;
+    private bool openSensitive;
+    private bool marking;
+    private bool unsealing;
+    private bool sharing;
+    private bool historyShown;
+    private (string Id, DateTime SavedUtc)? restoring;
+    private NotesPanel? notesPanel;
+    private TodoPanel? todoPanel;
+    private bool subpaging;
+    private string subpageText = string.Empty;
+    private ElementReference subpageField;
+    private bool moving;
+    private string moveText = string.Empty;
+    private ElementReference moveField;
+    private bool focusField;
+
+    /// <summary>The status line when the automatic briefing was written while a note had unsaved changes.</summary>
+    internal static string BriefingReadyText(string name) =>
+        $"Today's briefing is ready: {DesktopText.OneLine(name)}. Type /briefing to open it.";
+
+    /// <summary>The OS file dialogs.</summary>
+    [Inject]
+    internal IFileDialog Dialog { get; set; } = null!;
+
+    /// <summary>Asked by the window's closing handler; this page saves first and asks to discard when that failed.</summary>
+    [Inject]
+    internal CloseGuard Guard { get; set; } = null!;
+
+    /// <summary>The command bar's way in (job 282): this page runs its todo, note and capture lines.</summary>
+    [Inject]
+    internal CommandBarContext CommandBar { get; set; } = null!;
+
+    // The runner registered with CommandBar, kept so DisposeAsync clears exactly this one.
+    private Func<string, Task<CommandBarResult>>? barRunner;
+
+    public ValueTask DisposeAsync()
+    {
+        Guard.Detach();
+        if (barRunner is not null)
+        {
+            CommandBar.Unregister(barRunner);
+        }
+
+        Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        Guard.Attach(
+            () => editor?.HasUnsaved ?? false,
+            SaveFirstForCloseAsync,
+            () => InvokeAsync(AskDiscardForClose));
+        barRunner = RunFromBar;
+        CommandBar.Register(barRunner);
+        TakeStartNote();
+        if (State.TakeBriefing() is { } offered)
+        {
+            ShowNote(offered);
+        }
+
+        TakeConversion();
+
+        _ = TakeItemPage();
+    }
+
+    // A work item page asked for from the command line (job 280, DesktopActions.OpenRequestedItem) opens like a click
+    // on a note name: the open note's unsaved changes are saved first, and when that fails the discard dialog asks.
+    // While that dialog is already open, or before the first snapshot, the offer waits for the next state change.
+    // True when it was taken.
+    private async Task<bool> TakeItemPage()
+    {
+        if (Snapshot is null || discarding)
+        {
+            return false;
+        }
+
+        if (State.TakeItemPage() is not { } itemPage)
+        {
+            return false;
+        }
+
+        await RequestOpen(itemPage, null);
+        return true;
+    }
+
+    // The start-up todo marker conversion's result (job 329) shows in the status line like an action's: accent when
+    // lines changed, red when only notes were skipped. True when one was shown.
+    private bool TakeConversion()
+    {
+        if (State.TakeConversion() is not { } converted)
+        {
+            return false;
+        }
+
+        ShowStatus(converted.Text, converted.Kind == ActionKind.Done ? "accent" : "red");
+        return true;
+    }
+
+    // Today's note offered at start opens only while no note is open and no page, dialog or edit field is shown;
+    // otherwise the offer is dropped. Before the first snapshot the offer waits (a sensitive note must be known as
+    // one before its editor opens). True when the note was opened.
+    private bool TakeStartNote()
+    {
+        if (Snapshot is null || State.TakeStartNote() is not { } start)
+        {
+            return false;
+        }
+
+        bool shown = openName is not null || page != Page.None || reviewShown || tagShown is not null
+            || findShown is not null || searchShown is not null || decisionsShown is not null || similarShown || paletteOpen
+            || discarding || renaming || subpaging || moving || deleting || renameAsk is not null || marking
+            || unsealing || sharing || restoring is not null || running;
+        if (shown)
+        {
+            return false;
+        }
+
+        ShowNote(start);
+        return true;
+    }
+
+    // Today's note offered at start opens as in TakeStartNote. A briefing the automatic write offered opens when no
+    // note has unsaved changes and nothing is being asked or typed; otherwise the editor is left alone and the status
+    // line points to /briefing.
+    protected override async Task OnStateChangedAsync()
+    {
+        bool started = TakeConversion();
+        started |= TakeStartNote();
+        started |= await TakeItemPage();
+        if (State.TakeBriefing() is not { } offered || string.Equals(offered, openName, StringComparison.Ordinal))
+        {
+            if (started)
+            {
+                StateHasChanged();
+            }
+
+            return;
+        }
+
+        bool busy = discarding || renaming || subpaging || moving || deleting || marking || unsealing || sharing || running
+            || (editor is not null && openName is not null && await editor.IsDirtyAsync());
+        if (busy)
+        {
+            ShowStatus(BriefingReadyText(offered), "accent");
+        }
+        else
+        {
+            ShowNote(offered);
+        }
+
+        StateHasChanged();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusRename && renaming)
+        {
+            focusRename = false;
+            await renameField.FocusAsync();
+        }
+
+        if (focusField && (subpaging || moving))
+        {
+            focusField = false;
+            await (subpaging ? subpageField : moveField).FocusAsync();
+        }
+    }
+
+    private void OpenPalette(KeyboardEventArgs e)
+    {
+        if ((e.CtrlKey || e.MetaKey) && string.Equals(e.Key, "k", StringComparison.OrdinalIgnoreCase) && !discarding && !deleting
+            && !marking && !unsealing && !sharing)
+        {
+            paletteOpen = true;
+        }
+    }
+
+    private void ClosePalette() => paletteOpen = false;
+
+    private void ShowTag(string tag)
+    {
+        tagShown = TagIndex.NormalizeTag(tag);
+    }
+
+    private void CloseTag() => tagShown = null;
+
+    private void CloseFind() => findShown = null;
+
+    private void CloseSearch()
+    {
+        page = Page.None;
+        searchShown = null;
+        searchFocus = null;
+    }
+
+    // The Search page with <paramref name="text"/> (the text typed in the top bar's Search popover, possibly empty,
+    // a saved search's query, or the text after /search), in place of the note area; its input gets the focus.
+    private void ShowSearch(string text) => ShowSearchPage(text, null);
+
+    // The Search page for text; focus names the note whose row takes the focus (Back to search), null the input.
+    private void ShowSearchPage(string text, string? focus)
+    {
+        OpenPage(Page.Search);
+        searchShown = text;
+        searchFocus = focus;
+        searchRequest++;
+        ShowStatus(string.Empty, string.Empty);
+    }
+
+    // A result on the Search page: opens the note like a click on its name (saving first, or asking to discard);
+    // once it shows, Back to search above it returns to that query's results.
+    private async Task OpenFromSearch((string Note, string Text) hit)
+    {
+        if (string.Equals(hit.Note, openName, StringComparison.Ordinal))
+        {
+            await RequestOpen(hit.Note);
+            searchBack = hit;
+            return;
+        }
+
+        pendingSearchBack = hit;
+        await RequestOpen(hit.Note);
+        if (!discarding)
+        {
+            pendingSearchBack = null;
+        }
+    }
+
+    // Back to search: the Search page again for the query the open note was opened from, read again, with that
+    // note's row focused. The note stays open behind it, unsaved text included.
+    private void BackToSearch()
+    {
+        if (searchBack is not { } back)
+        {
+            return;
+        }
+
+        ShowSearchPage(back.Text, back.Note);
+    }
+
+    private void CloseDecisions() => decisionsShown = null;
+
+    private void CloseSimilar() => similarShown = false;
+
+    // The tags view: every tag with its note count; a click on one shows the tag panel below it.
+    private void ShowTags() => OpenPage(Page.Tags);
+
+    private void CloseTags()
+    {
+        page = Page.None;
+        tagShown = null;
+    }
+
+    // Triage, People, Tags, Settings and Search are pages: one at a time, in place of the note area. Any page, or
+    // going back to the note, ends Back to search.
+    private void OpenPage(Page next)
+    {
+        if (page == Page.Tags && next != Page.Tags)
+        {
+            tagShown = null;
+        }
+
+        if (page == Page.Search && next != Page.Search)
+        {
+            searchShown = null;
+            searchFocus = null;
+        }
+
+        searchBack = null;
+        page = next;
+    }
+
+    // The weekly review: shown at the top of the main region until closed or until a note opens.
+    private void ShowReview() => reviewShown = true;
+
+    private void CloseReview() => reviewShown = false;
+
+    // Inbox triage: shown under the capture box until closed or until a note opens.
+    private void ShowTriage() => OpenPage(Page.Triage);
+
+    private void CloseTriage() => page = Page.None;
+
+    // The done log (job 293): done.md grouped by week, a page in place of the note area.
+    private void ShowDone() => OpenPage(Page.Done);
+
+    private void CloseDone() => page = Page.None;
+
+    // The Mail digest (job 286): suggestions from recent Outlook mail, read only on its Read mail button.
+    private void ShowMailDigest() => OpenPage(Page.MailDigest);
+
+    private void CloseMailDigest() => page = Page.None;
+
+    // The people view (job 239): every person page by name; a click opens it through RequestOpen.
+    private void ShowPeople() => OpenPage(Page.People);
+
+    private void ClosePeople() => page = Page.None;
+
+    // The Todos page (job 331): every open global todo grouped by due date, in place of the note area.
+    private void ShowTodos() => OpenPage(Page.Todos);
+
+    private void CloseTodos() => page = Page.None;
+
+    // The settings: shown at the top of the main region until closed or until a note opens.
+    private void ShowSettings() => OpenPage(Page.Settings);
+
+    private void CloseSettings() => page = Page.None;
+
+    // A tag's board (job 242): a page in place of the note area; a text that is no tag shows the usage line instead.
+    private void ShowBoard(string tag)
+    {
+        if (!BoardView.TryNormalizeTag(tag, out string normalized))
+        {
+            ShowStatus("Type /board <tag>.", "red");
+            return;
+        }
+
+        boardShown = normalized;
+        OpenPage(Page.Board);
+        tagShown = null;
+        ShowStatus(string.Empty, string.Empty);
+    }
+
+    private void CloseBoard()
+    {
+        page = Page.None;
+        boardShown = null;
+    }
+
+    // A sidebar appointment: its page in the main region (job 214), saving the open note first or asking to discard it
+    // like RequestOpen. Another appointment with the same title and day keeps the shown page as it is.
+    private async Task OpenAppointment((string Title, DateOnly Day) appointment)
+    {
+        if (page == Page.Appointment && appointmentShown is { } shown
+            && string.Equals(shown.Title, appointment.Title, StringComparison.Ordinal) && shown.Day == appointment.Day)
+        {
+            return;
+        }
+
+        if (await KeptUnsaved())
+        {
+            pendingName = null;
+            pendingPerson = null;
+            pendingLink = null;
+            pendingToday = false;
+            pendingPickedDay = null;
+            pendingBriefing = false;
+            pendingMeeting = null;
+            pendingAppointment = appointment;
+            discarding = true;
+            return;
+        }
+
+        ShowAppointment(appointment);
+    }
+
+    private void ShowAppointment((string Title, DateOnly Day) appointment)
+    {
+        tagShown = null;
+        reviewShown = false;
+        findShown = null;
+        searchShown = null;
+        decisionsShown = null;
+        similarShown = false;
+        OpenPage(Page.Appointment);
+        appointmentShown = appointment;
+        ShowStatus(string.Empty, string.Empty);
+    }
+
+    // The appointment page's create link: the /meeting flow for the first appointment of the shown day with its title
+    // (read again from the calendar files and the cached feed, never downloaded).
+    private async Task CreateAppointmentNote()
+    {
+        if (appointmentShown is not { } shown)
+        {
+            return;
+        }
+
+        DayAppointmentsView day = await State.DayAppointments(shown.Day);
+        Appointment? first = day.Appointments.FirstOrDefault(a => string.Equals(a.Title, shown.Title, StringComparison.Ordinal));
+        if (first is null)
+        {
+            return;
+        }
+
+        // The same steps as /meeting: a dirty editor is saved first or asks, unless it shows this meeting's note.
+        if (editor is not null && openName is not null
+            && !MeetingNote.IsNoteOf(first, openName)
+            && await KeptUnsaved())
+        {
+            pendingName = null;
+            pendingPerson = null;
+            pendingLink = null;
+            pendingToday = false;
+            pendingPickedDay = null;
+            pendingBriefing = false;
+            pendingAppointment = null;
+            pendingMeeting = first;
+            discarding = true;
+            return;
+        }
+
+        if (running)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult meetingNote;
+        try
+        {
+            meetingNote = await Actions.OpenMeetingNote(first);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        ShowDaily(meetingNote);
+    }
+
+    private void CloseAppointment()
+    {
+        page = Page.None;
+        appointmentShown = null;
+    }
+
+    // The Today button and /today: today's daily note in the page editor (created when missing). Today's note itself
+    // stays as it is, unsaved text included; another dirty note is saved first, or the discard dialog asks.
+    private async Task ShowToday()
+    {
+        if (editor is not null && openName is not null
+            && !string.Equals(openName, Actions.DailyNoteName(), StringComparison.Ordinal)
+            && await KeptUnsaved())
+        {
+            pendingName = null;
+            pendingPerson = null;
+            pendingLink = null;
+            pendingToday = true;
+            pendingPickedDay = null;
+            pendingBriefing = false;
+            pendingMeeting = null;
+            pendingAppointment = null;
+            discarding = true;
+            return;
+        }
+
+        if (running)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult daily;
+        try
+        {
+            daily = await Actions.OpenDailyNote();
+        }
+        finally
+        {
+            running = false;
+        }
+
+        ShowDaily(daily);
+    }
+
+    // The day the top bar's calendar marks and opens on: the open note's day when its name is exactly yyyy-MM-dd, else
+    // none.
+    private DateOnly? SelectedDay() =>
+        openName is { } name
+            && DateOnly.TryParseExact(name, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly day)
+            ? day
+            : null;
+
+    // A day picked in the top bar: that day's daily note in the page editor, like /today for that day (job 212). The
+    // open note of that day stays as it is; another dirty note is saved first, or the discard dialog asks.
+    private async Task PickDay(DateOnly day)
+    {
+        if (editor is not null && openName is not null
+            && !string.Equals(openName, Actions.DailyNoteName(day), StringComparison.Ordinal)
+            && await KeptUnsaved())
+        {
+            pendingName = null;
+            pendingPerson = null;
+            pendingLink = null;
+            pendingToday = false;
+            pendingPickedDay = day;
+            pendingBriefing = false;
+            pendingMeeting = null;
+            pendingAppointment = null;
+            discarding = true;
+            return;
+        }
+
+        if (running)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult daily;
+        try
+        {
+            daily = await Actions.OpenDailyNote(day);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        ShowDaily(daily);
+    }
+
+    // Opens the note called name (null: no note), asking first when the open note has unsaved changes.
+    private Task RequestOpen(string? name) => RequestOpen(name, null);
+
+    // A [[Note#Heading]] link clicked in the editor: opens that note at the heading.
+    private Task OpenHeading((string Name, string Heading) link) => RequestOpen(link.Name, link.Heading);
+
+    // Opens the note called name (null: no note) at heading (null: at the top), asking first when the open
+    // note has unsaved changes. The open note itself only jumps to the heading, keeping what is typed.
+    private async Task RequestOpen(string? name, string? heading)
+    {
+        if (name is not null && string.Equals(name, openName, StringComparison.Ordinal))
+        {
+            if (page == Page.Search)
+            {
+                searchShown = null;
+                searchFocus = null;
+            }
+
+            page = Page.None;
+            reviewShown = false;
+            if (heading is not null && editor is not null)
+            {
+                await editor.JumpToHeadingAsync(heading);
+            }
+
+            return;
+        }
+
+        if (await KeptUnsaved())
+        {
+            pendingName = name;
+            pendingHeading = heading;
+            pendingPerson = null;
+            pendingLink = null;
+            pendingAppointment = null;
+            discarding = true;
+            return;
+        }
+
+        ShowNote(name, heading);
+    }
+
+    // Saves the open note first when it has unsaved changes (job 203). True when unsaved changes are left because that
+    // save failed; the editor then shows why in red, and the caller asks to discard or refuses as before.
+    private async Task<bool> KeptUnsaved() => editor is not null && openName is not null && !await editor.SaveFirstAsync();
+
+    // A mention was clicked in the editor or in the todo list: opens the person's page, making it (and people) on this click only.
+    // Asks first when the open note has unsaved changes, like RequestOpen.
+    private async Task OpenMention(string person)
+    {
+        if (await KeptUnsaved())
+        {
+            pendingName = null;
+            pendingPerson = person;
+            pendingLink = null;
+            pendingAppointment = null;
+            discarding = true;
+            return;
+        }
+
+        if (running)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult opened;
+        try
+        {
+            opened = await Actions.OpenPerson(person);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        ShowPerson(opened);
+    }
+
+    // A link to a missing note was clicked in the editor: saves first, then creates the note (and its missing parents)
+    // on this click only and opens it. Asks first when the open note's save failed, like OpenMention.
+    private async Task CreateLinked(string target)
+    {
+        if (await KeptUnsaved())
+        {
+            pendingName = null;
+            pendingPerson = null;
+            pendingLink = target;
+            pendingAppointment = null;
+            discarding = true;
+            return;
+        }
+
+        if (running)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult created;
+        try
+        {
+            created = await Actions.CreateLinkedNote(target);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        ShowDaily(created);
+    }
+
+    // The window is closing with unsaved changes: saves first on the renderer's thread. True when nothing is left.
+    private async Task<bool> SaveFirstForCloseAsync()
+    {
+        bool saved = true;
+        await InvokeAsync(async () => saved = editor is null || await editor.SaveFirstAsync());
+        return saved;
+    }
+
+    // The window close's save failed: the same question as when leaving the note; Discard closes the window.
+    private void AskDiscardForClose()
+    {
+        KeepEditing();
+        pendingClose = true;
+        discarding = true;
+        StateHasChanged();
+    }
+
+    private async Task Discard(Confirmation confirmed)
+    {
+        discarding = false;
+        if (pendingClose)
+        {
+            pendingClose = false;
+            Guard.Discard();
+            return;
+        }
+
+        if (pendingBriefing)
+        {
+            pendingBriefing = false;
+            if (running)
+            {
+                return;
+            }
+
+            running = true;
+            ActionResult briefing;
+            try
+            {
+                briefing = await Actions.OpenBriefing();
+            }
+            finally
+            {
+                running = false;
+            }
+
+            ShowDaily(briefing);
+            return;
+        }
+
+        if (pendingToday)
+        {
+            pendingToday = false;
+            if (running)
+            {
+                return;
+            }
+
+            running = true;
+            ActionResult daily;
+            try
+            {
+                daily = await Actions.OpenDailyNote();
+            }
+            finally
+            {
+                running = false;
+            }
+
+            ShowDaily(daily);
+            return;
+        }
+
+        if (pendingPickedDay is { } picked)
+        {
+            pendingPickedDay = null;
+            if (running)
+            {
+                return;
+            }
+
+            running = true;
+            ActionResult daily;
+            try
+            {
+                daily = await Actions.OpenDailyNote(picked);
+            }
+            finally
+            {
+                running = false;
+            }
+
+            ShowDaily(daily);
+            return;
+        }
+
+        if (pendingMeeting is { } meeting)
+        {
+            pendingMeeting = null;
+            pendingAppointment = null;
+            if (running)
+            {
+                return;
+            }
+
+            running = true;
+            ActionResult meetingNote;
+            try
+            {
+                meetingNote = await Actions.OpenMeetingNote(meeting);
+            }
+            finally
+            {
+                running = false;
+            }
+
+            ShowDaily(meetingNote);
+            return;
+        }
+
+        if (pendingAppointment is { } appointment)
+        {
+            // The unsaved changes go with the editor; the page shows with no note open.
+            ShowNote(null);
+            ShowAppointment(appointment);
+            return;
+        }
+
+        if (pendingLink is { } link)
+        {
+            pendingLink = null;
+            if (running)
+            {
+                return;
+            }
+
+            running = true;
+            ActionResult created;
+            try
+            {
+                created = await Actions.CreateLinkedNote(link);
+            }
+            finally
+            {
+                running = false;
+            }
+
+            ShowDaily(created);
+            return;
+        }
+
+        if (pendingPerson is not { } person)
+        {
+            ShowNote(pendingName, pendingHeading);
+            return;
+        }
+
+        pendingPerson = null;
+        pendingLink = null;
+        if (running)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult opened;
+        try
+        {
+            opened = await Actions.OpenPerson(person);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        ShowPerson(opened);
+    }
+
+    private void KeepEditing()
+    {
+        discarding = false;
+        pendingClose = false;
+        pendingPickedDay = null;
+        pendingName = null;
+        pendingHeading = null;
+        pendingPerson = null;
+        pendingLink = null;
+        pendingToday = false;
+        pendingBriefing = false;
+        pendingMeeting = null;
+        pendingAppointment = null;
+        pendingSearchBack = null;
+    }
+
+    // Opens the person page Actions gave, or shows why there is none.
+    private void ShowPerson(ActionResult opened)
+    {
+        if (opened.Kind != ActionKind.Done)
+        {
+            ShowStatus(DesktopText.OneLine(opened.Text), "red");
+            return;
+        }
+
+        if (!string.Equals(opened.Text, openName, StringComparison.Ordinal))
+        {
+            ShowNote(opened.Text);
+        }
+    }
+
+    // Opens the daily, meeting or linked note Actions gave (Created after a create), or shows why there is none.
+    private void ShowDaily(ActionResult daily)
+    {
+        if (daily.Kind != ActionKind.Done)
+        {
+            ShowStatus(DesktopText.OneLine(daily.Text), "red");
+            return;
+        }
+
+        if (string.Equals(daily.Text, openName, StringComparison.Ordinal))
+        {
+            // The editor stays, unsaved text included; a shown page (Triage, People, Tags, Settings, an appointment) closes.
+            OpenPage(Page.None);
+            appointmentShown = null;
+        }
+        else
+        {
+            ShowNote(daily.Text);
+        }
+
+        if (daily.Reason != ActionReason.Unchanged)
+        {
+            ShowStatus($"Created {DesktopText.OneLine(daily.Text)}", "accent");
+        }
+    }
+
+    // record false: the open note was just renamed or moved, and the action already changed its recent entry in place.
+    private void ShowNote(string? name, string? heading = null, bool record = true)
+    {
+        (string? Name, bool Sensitive) before = (openName, openSensitive);
+        if (record && name is not null && !string.Equals(name, openName, StringComparison.Ordinal))
+        {
+            // Never throws, never Busy; the sidebar lists the note first (job 240).
+            _ = Actions.RecordOpened(name);
+        }
+
+        openName = name;
+        openHeading = name is null ? null : heading;
+        pendingHeading = null;
+        openSensitive = name is not null
+            && Snapshot is { } snapshot
+            && snapshot.Sensitive.Any(n => string.Equals(n.Name, name, StringComparison.Ordinal));
+        if (name is null || before != (openName, openSensitive))
+        {
+            // A new editor (or none): the old one's outline goes, and its later reports are ignored.
+            editorGeneration++;
+            outline = [];
+        }
+        pendingName = null;
+        pendingPerson = null;
+        pendingLink = null;
+        pendingToday = false;
+        pendingPickedDay = null;
+        pendingBriefing = false;
+        pendingMeeting = null;
+        pendingAppointment = null;
+        appointmentShown = null;
+        tagShown = null;
+        page = Page.None;
+        reviewShown = false;
+        findShown = null;
+        searchShown = null;
+        searchFocus = null;
+        searchBack = pendingSearchBack is { } fromSearch && string.Equals(fromSearch.Note, name, StringComparison.Ordinal)
+            ? fromSearch
+            : null;
+        pendingSearchBack = null;
+        decisionsShown = null;
+        similarShown = false;
+        renaming = false;
+        subpaging = false;
+        moving = false;
+        deleting = false;
+        renameAsk = null;
+        marking = false;
+        unsealing = false;
+        sharing = false;
+        historyShown = false;
+        restoring = null;
+        if (name is null)
+        {
+            editor = null;
+        }
+
+        ShowStatus(string.Empty, string.Empty);
+    }
+
+    // Runs a palette command; the palette closes first.
+    private async Task RunCommand(string line)
+    {
+        paletteOpen = false;
+        string trimmed = line.Trim();
+        int space = trimmed.IndexOfAny([' ', '\t']);
+        string command = (space < 0 ? trimmed : trimmed[..space]).ToLowerInvariant();
+        string rest = space < 0 ? string.Empty : trimmed[(space + 1)..].Trim();
+        switch (command)
+        {
+            case "/capture":
+                if (rest.Length == 0)
+                {
+                    ShowStatus("Type /capture <text>.", "red");
+                }
+                else
+                {
+                    await CaptureAsync(rest);
+                }
+
+                break;
+            case "/open":
+                string? found = rest.Length == 0 ? null : State.ResolveNote(rest);
+                if (rest.Length == 0)
+                {
+                    ShowStatus("Type /open <note>.", "red");
+                }
+                else if (found is null)
+                {
+                    ShowStatus($"No note named {DesktopText.OneLine(rest)}.", "grey");
+                }
+                else
+                {
+                    await RequestOpen(found);
+                }
+
+                break;
+            case "/find":
+                // The attribute key, then the value: /find role Bereichsleiter. Read only.
+                int keyEnd = rest.IndexOfAny([' ', '\t']);
+                string? findKey = keyEnd < 0 ? null : AttributeParser.NormalizeKey(rest[..keyEnd]);
+                string findValue = keyEnd < 0 ? string.Empty : TagParser.CollapseWhitespace(rest[(keyEnd + 1)..]);
+                if (findKey is null || findValue.Length == 0)
+                {
+                    ShowStatus("Type /find <attribute> <value>.", "red");
+                }
+                else
+                {
+                    findShown = (findKey, findValue);
+                    ShowStatus(string.Empty, string.Empty);
+                }
+
+                break;
+            case "/search":
+                // The text to look for in every plain note: /search budget 2027. Read only; SearchPanel shows the
+                // hint for a blank text and the usage line for a bad one.
+                ShowSearch(rest);
+                break;
+            case "/board":
+                // A tag's board: /board launch. Read only until a card is moved.
+                ShowBoard(rest);
+                break;
+            case "/decisions":
+                // Every note's Decision: lines, or those of the notes with a tag: /decisions #work. Read only;
+                // DecisionsPanel shows the usage line for an invalid tag.
+                decisionsShown = rest;
+                ShowStatus(string.Empty, string.Empty);
+                break;
+            case "/similar":
+                // Pairs of notes that look like duplicates (job 268). Read only until a Keep button is confirmed.
+                similarShown = true;
+                ShowStatus(string.Empty, string.Empty);
+                break;
+            case "/share":
+                // As /export: the target comes from the OS save dialog only, after the share dialog.
+                await AskShare();
+                break;
+            case "/import":
+                // What was typed after the command is ignored: the files come from the OS dialog only.
+                if (notesPanel is not null)
+                {
+                    await notesPanel.Import();
+                }
+
+                break;
+            case "/export":
+                // As above: the target comes from the OS save dialog only.
+                if (await ExportTarget() is { } chosen)
+                {
+                    running = true;
+                    try
+                    {
+                        ShowExported(await Actions.ExportNote(chosen.Name, chosen.Target));
+                    }
+                    finally
+                    {
+                        running = false;
+                    }
+                }
+
+                break;
+            case "/new":
+                (string Title, string Template)? fromTemplate = SplitTemplate(rest);
+                if (rest.Length == 0)
+                {
+                    ShowStatus("Type /new <title>.", "red");
+                }
+                else if (fromTemplate is { } typed && (typed.Title.Length == 0 || typed.Template.Length == 0))
+                {
+                    ShowStatus("Type /new <title> --template <template>.", "red");
+                }
+                else if (!running)
+                {
+                    running = true;
+                    ActionResult made;
+                    try
+                    {
+                        made = fromTemplate is { } named
+                            ? await Actions.CreateNoteFromTemplate(named.Title, named.Template)
+                            : await Actions.CreateNote(rest);
+                    }
+                    finally
+                    {
+                        running = false;
+                    }
+
+                    if (made.Kind == ActionKind.Done)
+                    {
+                        await RequestOpen(made.Text);
+                        ShowStatus($"Created {DesktopText.OneLine(made.Text)}", "accent");
+                    }
+                    else
+                    {
+                        ShowStatus(DesktopText.OneLine(made.Text), "red");
+                    }
+                }
+
+                break;
+            case "/save":
+                if (editor is null || openName is null)
+                {
+                    ShowStatus("No note is open.", "grey");
+                }
+                else if (!running)
+                {
+                    running = true;
+                    try
+                    {
+                        await editor.SaveAsync(false);
+                    }
+                    finally
+                    {
+                        running = false;
+                    }
+                }
+
+                break;
+            case "/review":
+                // The argument is ignored.
+                ShowReview();
+                break;
+            case "/settings":
+                ShowSettings();
+                break;
+            case "/donelog":
+                // The argument is ignored.
+                ShowDone();
+                break;
+            case "/digest":
+                // The argument is ignored.
+                ShowMailDigest();
+                break;
+            case "/triage":
+                // The argument is ignored.
+                ShowTriage();
+                break;
+            case "/tags":
+                if (rest.Length == 0)
+                {
+                    ShowTags();
+                }
+                else
+                {
+                    ShowTag(rest);
+                }
+
+                break;
+            case "/briefing":
+                // The argument is ignored. A dirty editor asks first, unless it already shows today's briefing.
+                if (editor is not null && openName is not null
+                    && !string.Equals(openName, Actions.BriefingName(), StringComparison.Ordinal)
+                    && await KeptUnsaved())
+                {
+                    pendingName = null;
+                    pendingPerson = null;
+                    pendingLink = null;
+                    pendingToday = false;
+                    pendingPickedDay = null;
+                    pendingMeeting = null;
+                    pendingAppointment = null;
+                    pendingBriefing = true;
+                    discarding = true;
+                    break;
+                }
+
+                if (!running)
+                {
+                    running = true;
+                    ActionResult briefing;
+                    try
+                    {
+                        briefing = await Actions.OpenBriefing();
+                    }
+                    finally
+                    {
+                        running = false;
+                    }
+
+                    ShowDaily(briefing);
+                }
+
+                break;
+            case "/today":
+                // The argument is ignored; the same as the Today button.
+                await ShowToday();
+                break;
+            case "/standup":
+            {
+                // The argument is ignored. With today's note open it runs the Standup item (unsaved text saved first);
+                // otherwise the standup is written first (creating the note when missing) and today's note then opens
+                // like /today, so its new editor loads the written section instead of racing the write.
+                string todayName = Actions.DailyNoteName();
+                if (page == Page.None && string.Equals(openName, todayName, StringComparison.Ordinal)
+                    && Snapshot is { } shown && string.Equals(todayName, DailyNote.NameFor(shown.Today), StringComparison.Ordinal))
+                {
+                    await RunPageAction("standup");
+                    break;
+                }
+
+                if (string.Equals(openName, todayName, StringComparison.Ordinal))
+                {
+                    // Today's note is open behind a page: close the page, keep the editor, then run the item.
+                    await ShowToday();
+                    await RunPageAction("standup");
+                    break;
+                }
+
+                if (running || Snapshot is not { } current)
+                {
+                    break;
+                }
+
+                running = true;
+                ActionResult standup;
+                try
+                {
+                    standup = await Actions.WriteStandup(current.Today);
+                }
+                finally
+                {
+                    running = false;
+                }
+
+                await ShowToday();
+                ShowStandup(standup);
+                break;
+            }
+            case "/meeting":
+                // The number of today's appointment in the snapshot's current view, numbered as `context current`.
+                if (!MeetingNote.TryParseNumber(rest, out int meetingNumber))
+                {
+                    ShowStatus("Type /meeting <number>.", "red");
+                    break;
+                }
+
+                Appointment? appointment = MeetingNote.Pick(
+                    Snapshot?.Current?.Appointments ?? [], meetingNumber, out string? meetingError);
+                if (appointment is null)
+                {
+                    ShowStatus(DesktopText.OneLine(meetingError ?? MeetingNote.NoAppointmentsText), "red");
+                    break;
+                }
+
+                // A dirty editor asks first, unless it already shows this meeting's note.
+                if (editor is not null && openName is not null
+                    && !MeetingNote.IsNoteOf(appointment, openName)
+                    && await KeptUnsaved())
+                {
+                    pendingName = null;
+                    pendingPerson = null;
+                    pendingLink = null;
+                    pendingToday = false;
+                    pendingPickedDay = null;
+                    pendingBriefing = false;
+                    pendingAppointment = null;
+                    pendingMeeting = appointment;
+                    discarding = true;
+                    break;
+                }
+
+                if (!running)
+                {
+                    running = true;
+                    ActionResult meetingNote;
+                    try
+                    {
+                        meetingNote = await Actions.OpenMeetingNote(appointment);
+                    }
+                    finally
+                    {
+                        running = false;
+                    }
+
+                    ShowDaily(meetingNote);
+                }
+
+                break;
+            case "/done":
+                PickDone(rest);
+                break;
+            case "/todo":
+                if (!TodoCommand.TryParse(rest, Snapshot?.Today ?? default, out TodoCommand? todo, out string todoUsage) || todo is null)
+                {
+                    ShowStatus("Type /" + todoUsage + ".", "red");
+                    break;
+                }
+
+                if (!running)
+                {
+                    running = true;
+                    try
+                    {
+                        ActionResult added = await Actions.AddTodo(todo.Text, todo.Due, todo.Repeat, todo.Time);
+                        ShowStatus(
+                            added.Kind == ActionKind.Done ? $"Added: {DesktopText.OneLine(added.Text)}" : DesktopText.OneLine(added.Text),
+                            added.Kind == ActionKind.Done ? "accent" : "red");
+                    }
+                    finally
+                    {
+                        running = false;
+                    }
+                }
+
+                break;
+            default:
+                ShowStatus("Unknown command.", "red");
+                break;
+        }
+    }
+
+    // /done <text>: picks the open todo by its text like context todo done and asks the todo panel's dialog to
+    // confirm; nothing is written until the user confirms there.
+    private void PickDone(string query)
+    {
+        if (query.Length == 0)
+        {
+            ShowStatus("Type /done <text>.", "red");
+            return;
+        }
+
+        if (Snapshot is not { } snapshot || snapshot.TodosUnreadable)
+        {
+            ShowStatus(DesktopActions.TodosUnreadableText, "red");
+            return;
+        }
+
+        if (snapshot.Todos.Count == 0)
+        {
+            ShowStatus(TodoPicker.NoTodosText, "red");
+            return;
+        }
+
+        TodoPick pick = TodoPicker.Pick(snapshot.Todos, query);
+        if (pick.Todo is not { } todo)
+        {
+            ShowStatus(TodoPicker.NoPickText(pick, DesktopText.OneLine(query)), "red");
+            return;
+        }
+
+        ShowStatus(string.Empty, string.Empty);
+        todoPanel?.AskDone(todo);
+    }
+
+    // True when the note in the editor is the plain inbox note, the one a capture appends to.
+    private bool InboxOpen() =>
+        openName is { } name
+        && !openSensitive
+        && string.Equals(name, State.ResolveNote(Inbox.NoteName) ?? Inbox.NoteName, StringComparison.OrdinalIgnoreCase);
+
+    // Asked before a capture (the palette and the top bar): the open inbox has unsaved changes, which a capture would
+    // leave stuck behind "changed on disk". Null when the capture may run.
+    private async Task<string?> CaptureHeld()
+    {
+        if (InboxOpen() && openName is { } name && await KeptUnsaved())
+        {
+            return $"Save {name} first.";
+        }
+
+        return null;
+    }
+
+    // The one capture flow (the palette's /capture <text> and the top bar's Capture popover): the open-inbox guard,
+    // the action and its answer in the main status line, then the editor reload. True when the text was captured.
+    private async Task<bool> CaptureAsync(string text)
+    {
+        // The top bar calls this through a plain Func (it needs the result), which re-renders only the top bar, so
+        // every answer re-renders Main itself.
+        if (await CaptureHeld() is { } held)
+        {
+            ShowStatus(DesktopText.OneLine(held), "red");
+            StateHasChanged();
+            return false;
+        }
+
+        if (running)
+        {
+            return false;
+        }
+
+        running = true;
+        ActionResult captured;
+        try
+        {
+            captured = await Actions.CaptureText(text);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        ShowStatus(DesktopText.OneLine(captured.Text), captured.Kind == ActionKind.Done ? "accent" : "red");
+        StateHasChanged();
+        if (captured.Kind != ActionKind.Done)
+        {
+            return false;
+        }
+
+        await Captured();
+        return true;
+    }
+
+    // The command bar's Context lines (job 282), the bar window's Enter key: todo, capture and note with the palette's
+    // rules and guards, run on this page's dispatcher. todo is /todo's parsing and action, capture /capture's guard
+    // and action, note appends a timed line to today's note (saved first when it is open with unsaved changes, and
+    // reloaded after when it is clean). Called on the bar host's thread.
+    private async Task<CommandBarResult> RunFromBar(string line)
+    {
+        CommandBarResult result = CommandBarResult.Error(CommandBarContext.NotReadyText);
+        await InvokeAsync(async () =>
+        {
+            string trimmed = line.Trim();
+            int split = trimmed.IndexOfAny([' ', '\t']);
+            string word = split < 0 ? trimmed : trimmed[..split];
+            string rest = split < 0 ? string.Empty : trimmed[(split + 1)..].Trim();
+            if (Snapshot is null)
+            {
+                return;
+            }
+
+            if (running)
+            {
+                result = CommandBarResult.Error(DesktopActions.BusyText);
+                return;
+            }
+
+            if (string.Equals(word, "todo", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TodoCommand.TryParse(rest, Snapshot.Today, out TodoCommand? todo, out string usage) || todo is null)
+                {
+                    result = CommandBarResult.Error("Type " + usage + ".");
+                    return;
+                }
+
+                running = true;
+                try
+                {
+                    ActionResult added = await Actions.AddTodo(todo.Text, todo.Due, todo.Repeat, todo.Time);
+                    result = added.Kind == ActionKind.Done
+                        ? CommandBarResult.Done($"Added: {DesktopText.OneLine(added.Text)}")
+                        : CommandBarResult.Error(DesktopText.OneLine(added.Text));
+                }
+                finally
+                {
+                    running = false;
+                }
+            }
+            else if (string.Equals(word, "capture", StringComparison.OrdinalIgnoreCase))
+            {
+                if (await CaptureHeld() is { } held)
+                {
+                    result = CommandBarResult.Error(DesktopText.OneLine(held));
+                    return;
+                }
+
+                running = true;
+                ActionResult captured;
+                try
+                {
+                    captured = await Actions.CaptureText(rest);
+                }
+                finally
+                {
+                    running = false;
+                }
+
+                result = new CommandBarResult(captured.Kind == ActionKind.Done, DesktopText.OneLine(captured.Text));
+                if (captured.Kind == ActionKind.Done)
+                {
+                    await Captured();
+                }
+            }
+            else if (string.Equals(word, "note", StringComparison.OrdinalIgnoreCase))
+            {
+                string daily = Actions.DailyNoteName();
+                bool dailyOpen = openName is { } shown && string.Equals(shown, daily, StringComparison.OrdinalIgnoreCase);
+                if (dailyOpen && !openSensitive && await KeptUnsaved())
+                {
+                    result = CommandBarResult.Error($"Save {DesktopText.OneLine(openName ?? daily)} first.");
+                    return;
+                }
+
+                running = true;
+                ActionResult noted;
+                try
+                {
+                    noted = await Actions.NoteToday(rest);
+                }
+                finally
+                {
+                    running = false;
+                }
+
+                result = new CommandBarResult(noted.Kind == ActionKind.Done, DesktopText.OneLine(noted.Text));
+                if (noted.Kind == ActionKind.Done
+                    && openName is { } open && string.Equals(open, noted.Name, StringComparison.OrdinalIgnoreCase)
+                    && !openSensitive && editor is not null && !await editor.IsDirtyAsync())
+                {
+                    await editor.ReloadAsync();
+                }
+            }
+            else
+            {
+                result = CommandBarResult.Error("Unknown command.");
+            }
+
+            StateHasChanged();
+        });
+        return result;
+    }
+
+    // After a capture: an open inbox shows the new line, and its next save starts from the file as it is now. Text
+    // typed into the editor since the check is kept instead.
+    private async Task Captured()
+    {
+        if (InboxOpen() && editor is not null && !await editor.IsDirtyAsync())
+        {
+            await editor.ReloadAsync();
+        }
+    }
+
+    // Asked before a triage action (target: the existing note it adds to, or null): the open inbox or the open target
+    // has unsaved changes, which the write would leave stuck behind "changed on disk". Null when the action may run.
+    private async Task<string?> TriageHeld(string? target)
+    {
+        if (openName is not { } name || editor is null)
+        {
+            return null;
+        }
+
+        bool touched = InboxOpen() || (target is not null && string.Equals(name, target, StringComparison.Ordinal));
+        if (touched && await KeptUnsaved())
+        {
+            return $"Save {name} first.";
+        }
+
+        return null;
+    }
+
+    // Asked before a review date is moved or removed (job 256): the note is open with unsaved changes, which the write
+    // would leave stuck behind "changed on disk". Nothing is saved here; null when the action may run.
+    private async Task<string?> ReviewHeld(string note)
+    {
+        if (openName is { } name && editor is not null && string.Equals(name, note, StringComparison.Ordinal)
+            && await editor.IsDirtyAsync())
+        {
+            return $"Save {name} first.";
+        }
+
+        return null;
+    }
+
+    // Before a merge: either note open with unsaved changes holds it back.
+    private async Task<string?> MergeHeld(string target, string source)
+    {
+        if (openName is { } name && editor is not null
+            && (string.Equals(name, target, StringComparison.Ordinal) || string.Equals(name, source, StringComparison.Ordinal))
+            && await editor.IsDirtyAsync())
+        {
+            return $"Save {name} first.";
+        }
+
+        return null;
+    }
+
+    // After a merge: an open, clean target shows the merged text; an open source (now gone) gives way to the target,
+    // with the similar notes still shown.
+    private async Task Merged((string Target, string Source) merge)
+    {
+        if (openName is not { } name || editor is null || openSensitive)
+        {
+            return;
+        }
+
+        if (string.Equals(name, merge.Source, StringComparison.Ordinal))
+        {
+            ShowNote(merge.Target);
+            similarShown = true;
+        }
+        else if (string.Equals(name, merge.Target, StringComparison.Ordinal) && !await editor.IsDirtyAsync())
+        {
+            await editor.ReloadAsync();
+        }
+    }
+
+    // After a review date was moved or removed: the open, clean note shows what was written, as after a triage action.
+    private async Task Reviewed(string note)
+    {
+        if (openName is { } name && editor is not null && !openSensitive
+            && string.Equals(name, note, StringComparison.Ordinal) && !await editor.IsDirtyAsync())
+        {
+            await editor.ReloadAsync();
+        }
+    }
+
+    // After a triage action: an open inbox and an open target show what was written, unless text was typed into the
+    // editor since the check. A sensitive target shows the note as re-sealed (still held by the session).
+    private async Task Triaged(string target)
+    {
+        if (openName is not { } name || editor is null || await editor.IsDirtyAsync())
+        {
+            return;
+        }
+
+        if (target.Length > 0 && string.Equals(name, target, StringComparison.Ordinal))
+        {
+            if (openSensitive)
+            {
+                if (State.Session.Note is { } saved && string.Equals(saved.Name, name, StringComparison.Ordinal))
+                {
+                    await editor.ShowSavedAsync(saved);
+                }
+            }
+            else
+            {
+                await editor.ReloadAsync();
+            }
+        }
+        else if (InboxOpen())
+        {
+            await editor.ReloadAsync();
+        }
+    }
+
+    // Rename: refused while the editor has unsaved changes, otherwise swaps the toolbar for a name field.
+    private async Task StartRename()
+    {
+        if (openName is not { } name || running)
+        {
+            return;
+        }
+
+        if (await KeptUnsaved())
+        {
+            ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
+            return;
+        }
+
+        renameText = name[(name.LastIndexOf('/') + 1)..];
+        subpaging = false;
+        moving = false;
+        renaming = true;
+        focusRename = true;
+        ShowStatus(string.Empty, string.Empty);
+    }
+
+    private void RenameTyped(ChangeEventArgs e) => renameText = e.Value?.ToString() ?? string.Empty;
+
+    private void CancelRename()
+    {
+        if (!running)
+        {
+            renaming = false;
+        }
+    }
+
+    // Enter in the name field or Save name; Esc cancels. After a rename the editor opens the note under its new name.
+    private async Task SaveName(KeyboardEventArgs? key)
+    {
+        if (key is not null && key.Key == "Escape")
+        {
+            if (!running)
+            {
+                renaming = false;
+            }
+
+            return;
+        }
+
+        if ((key is not null && key.Key != "Enter") || running || openName is not { } name)
+        {
+            return;
+        }
+
+        if (await KeptUnsaved())
+        {
+            ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
+            return;
+        }
+
+        int count = await State.LinkUpdateCount(name, renameText);
+        if (count > 0)
+        {
+            string title = NoteStore.NormalizeTitle(renameText);
+            int slash = name.LastIndexOf('/');
+            renameAsk = (slash < 0 ? title : name[..(slash + 1)] + title, count);
+            return;
+        }
+
+        running = true;
+        ActionResult renamed;
+        try
+        {
+            renamed = await Actions.RenameNote(name, renameText, null);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        RenameEnded(renamed);
+    }
+
+    // Confirmed in the rename question: renames and updates the links.
+    private async Task RenameConfirmed(Confirmation confirmed)
+    {
+        if (openName is not { } name || running)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult renamed;
+        try
+        {
+            renamed = await Actions.RenameNote(name, renameText, confirmed);
+        }
+        finally
+        {
+            running = false;
+            renameAsk = null;
+        }
+
+        RenameEnded(renamed);
+    }
+
+    // Cancel or Esc in the rename question: nothing is written and the name field keeps its text.
+    private void CancelRenameAsk()
+    {
+        if (!running)
+        {
+            renameAsk = null;
+        }
+    }
+
+    // A refusal keeps the name field; Done opens the note under its new name, the text accent (red when links were left).
+    private void RenameEnded(ActionResult renamed)
+    {
+        if (renamed.Kind != ActionKind.Done)
+        {
+            ShowStatus(DesktopText.OneLine(renamed.Text), "red");
+            return;
+        }
+
+        renaming = false;
+        if (renamed.Reason == ActionReason.Unchanged)
+        {
+            ShowStatus(string.Empty, string.Empty);
+            return;
+        }
+
+        ShowNote(renamed.Name ?? renamed.Text, record: false);
+        ShowStatus(DesktopText.OneLine(renamed.Text), renamed.Reason == ActionReason.LinksLeft ? "red" : "accent");
+    }
+
+    private void AskDelete()
+    {
+        if (openName is not null && !running)
+        {
+            renaming = false;
+            subpaging = false;
+            moving = false;
+            deleting = true;
+        }
+    }
+
+    // 238: the open note's direct children from the in-memory snapshot (no disk access), ordered like NoteStore.List()
+    // siblings (Title ignoring case, then ordinal), each with the count of its own direct children.
+    private static IReadOnlyList<(NoteInfo Child, int Below)> Children(DesktopSnapshot? snapshot, string name)
+    {
+        if (snapshot is null)
+        {
+            return [];
+        }
+
+        return snapshot.Notes
+            .Where(n => string.Equals(n.Parent, name, StringComparison.Ordinal))
+            .OrderBy(n => n.Title, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(n => n.Title, StringComparer.Ordinal)
+            .Select(n => (n, snapshot.Notes.Count(g => string.Equals(g.Parent, n.Name, StringComparison.Ordinal))))
+            .ToList();
+    }
+
+    // Each ancestor of a subpage, from the top: its full name and its own title.
+    private static IEnumerable<(string Name, string Title)> Ancestors(string name)
+    {
+        int start = 0;
+        for (int slash = name.IndexOf('/'); slash > 0; slash = name.IndexOf('/', slash + 1))
+        {
+            yield return (name[..slash], name[start..slash]);
+            start = slash + 1;
+        }
+    }
+
+    // The delete question: a note with subpages names how many go with it.
+    private string DeleteQuestion(string name)
+    {
+        string prefix = name + "/";
+        int below = Snapshot?.Notes.Count(n => n.Name.StartsWith(prefix, StringComparison.Ordinal)) ?? 0;
+        string shown = DesktopText.OneLine(name);
+        return below switch
+        {
+            0 => $"Delete {shown}? This can't be undone.",
+            1 => $"Delete {shown} and its 1 subpage? This can't be undone.",
+            _ => $"Delete {shown} and its {below} subpages? This can't be undone.",
+        };
+    }
+
+    // New subpage and Move: like Rename, refused while the editor has unsaved changes, otherwise a field replaces
+    // the toolbar's buttons.
+    private async Task StartSubpage()
+    {
+        if (await CleanForField())
+        {
+            subpageText = string.Empty;
+            subpaging = true;
+            focusField = true;
+        }
+    }
+
+    private async Task StartMove()
+    {
+        if (await CleanForField() && openName is { } name)
+        {
+            int slash = name.LastIndexOf('/');
+            moveText = slash < 0 ? string.Empty : name[..slash];
+            moving = true;
+            focusField = true;
+        }
+    }
+
+    private async Task<bool> CleanForField()
+    {
+        if (openName is not { } name || running || openSensitive)
+        {
+            return false;
+        }
+
+        if (await KeptUnsaved())
+        {
+            ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
+            return false;
+        }
+
+        renaming = false;
+        subpaging = false;
+        moving = false;
+        ShowStatus(string.Empty, string.Empty);
+        return true;
+    }
+
+    private void SubpageTyped(ChangeEventArgs e) => subpageText = e.Value?.ToString() ?? string.Empty;
+
+    private void MoveTyped(ChangeEventArgs e) => moveText = e.Value?.ToString() ?? string.Empty;
+
+    private void CancelSubpage()
+    {
+        if (!running)
+        {
+            subpaging = false;
+        }
+    }
+
+    private void CancelMove()
+    {
+        if (!running)
+        {
+            moving = false;
+        }
+    }
+
+    // Enter in the title field or Create subpage; Esc cancels. The new page opens through RequestOpen, so a dirty
+    // editor asks first.
+    private async Task CreateSubpage(KeyboardEventArgs? key)
+    {
+        if (key is not null && key.Key == "Escape")
+        {
+            CancelSubpage();
+            return;
+        }
+
+        if ((key is not null && key.Key != "Enter") || running || openName is not { } name)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult made;
+        try
+        {
+            made = await Actions.CreateSubpage(name, subpageText);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        if (made.Kind != ActionKind.Done)
+        {
+            ShowStatus(DesktopText.OneLine(made.Text), "red");
+            return;
+        }
+
+        subpaging = false;
+        await RequestOpen(made.Text);
+        ShowStatus($"Created {DesktopText.OneLine(made.Text)}", "accent");
+    }
+
+    // Enter in the parent field or Move here; Esc cancels. The parent is matched against the note list only. After a
+    // move the editor opens the note under its new name.
+    private async Task MoveHere(KeyboardEventArgs? key)
+    {
+        if (key is not null && key.Key == "Escape")
+        {
+            CancelMove();
+            return;
+        }
+
+        if ((key is not null && key.Key != "Enter") || running || openName is not { } name)
+        {
+            return;
+        }
+
+        if (await KeptUnsaved())
+        {
+            ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
+            return;
+        }
+
+        running = true;
+        ActionResult moved;
+        try
+        {
+            moved = await Actions.MoveNote(name, moveText);
+        }
+        finally
+        {
+            running = false;
+        }
+
+        if (moved.Kind != ActionKind.Done)
+        {
+            ShowStatus(DesktopText.OneLine(moved.Text), "red");
+            return;
+        }
+
+        moving = false;
+        if (moved.Reason == ActionReason.Unchanged)
+        {
+            ShowStatus(string.Empty, string.Empty);
+            return;
+        }
+
+        ShowNote(moved.Text, record: false);
+        ShowStatus($"Moved to {DesktopText.OneLine(moved.Text)}", "accent");
+    }
+
+    private void CancelDelete()
+    {
+        if (!running)
+        {
+            deleting = false;
+        }
+    }
+
+    // Confirmed in the dialog: deletes the open note; no note is open afterwards.
+    private async Task DeleteConfirmed(Confirmation confirmed)
+    {
+        if (openName is not { } name || running)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult deleted;
+        try
+        {
+            deleted = await Actions.DeleteNote(name, confirmed);
+        }
+        finally
+        {
+            running = false;
+            deleting = false;
+        }
+
+        if (deleted.Kind == ActionKind.Done)
+        {
+            ShowNote(null);
+            ShowStatus($"Deleted {DesktopText.OneLine(deleted.Text)}", "accent");
+        }
+        else
+        {
+            ShowStatus(DesktopText.OneLine(deleted.Text), "red");
+        }
+    }
+
+    // The History button shows or hides the open note's kept versions.
+    private void ToggleHistory()
+    {
+        historyShown = !historyShown;
+        restoring = null;
+    }
+
+    private void CloseHistory()
+    {
+        historyShown = false;
+        restoring = null;
+    }
+
+    // Restore this version: refused while the editor has unsaved changes, otherwise asked in a dialog.
+    private async Task AskRestore((string Id, DateTime SavedUtc) version)
+    {
+        if (await CleanForSensitive())
+        {
+            restoring = version;
+        }
+    }
+
+    private void CancelRestore()
+    {
+        if (!running)
+        {
+            restoring = null;
+        }
+    }
+
+    // Confirmed in the dialog: saves the version's text over the open note (the current text becomes a version) and
+    // shows the saved text in the editor.
+    private async Task RestoreConfirmed(Confirmation confirmed)
+    {
+        if (openName is not { } name || restoring is not { } version || running || editor is null)
+        {
+            return;
+        }
+
+        if (await editor.PrepareSaveAsync() is not { } request)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult restored;
+        try
+        {
+            restored = await Actions.RestoreVersion(name, version.Id, request.Note, confirmed);
+        }
+        finally
+        {
+            running = false;
+            restoring = null;
+        }
+
+        if (restored.Kind == ActionKind.Done && restored.Note is { } saved)
+        {
+            await editor.ShowSavedAsync(saved);
+            ShowStatus($"Restored {DesktopText.OneLine(name)} to {HistoryPanel.TimeText(version.SavedUtc, State.Zone)}.", "accent");
+        }
+        else
+        {
+            ShowStatus(DesktopText.OneLine(restored.Text), "red");
+        }
+    }
+
+    // Mark sensitive and Make plain: refused while the editor has unsaved changes, otherwise asked in a dialog.
+    private async Task AskMark()
+    {
+        if (await CleanForSensitive())
+        {
+            marking = true;
+        }
+    }
+
+    private async Task AskMakePlain()
+    {
+        if (await CleanForSensitive())
+        {
+            unsealing = true;
+        }
+    }
+
+    private async Task<bool> CleanForSensitive()
+    {
+        if (openName is not { } name || running)
+        {
+            return false;
+        }
+
+        if (await KeptUnsaved())
+        {
+            ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
+            return false;
+        }
+
+        renaming = false;
+        ShowStatus(string.Empty, string.Empty);
+        return true;
+    }
+
+    private void CancelSensitive()
+    {
+        if (!running)
+        {
+            marking = false;
+            unsealing = false;
+        }
+    }
+
+    // Confirmed in the dialog: seals the open note and closes it; the note is then locked.
+    private async Task MarkConfirmed(Confirmation confirmed)
+    {
+        if (openName is not { } name || running)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult marked;
+        try
+        {
+            marked = await Actions.MarkSensitive(name, confirmed);
+        }
+        finally
+        {
+            running = false;
+            marking = false;
+        }
+
+        if (marked.Kind == ActionKind.Done && marked.Reason == ActionReason.PlainHistoryLeft)
+        {
+            ShowNote(null);
+            ShowStatus(DesktopText.OneLine(DesktopActions.PlainHistoryLeftText(marked.Text)), "red");
+        }
+        else if (marked.Kind == ActionKind.Done)
+        {
+            ShowNote(null);
+            ShowStatus($"Marked {DesktopText.OneLine(marked.Text)} sensitive.", "accent");
+        }
+        else
+        {
+            ShowStatus(DesktopText.OneLine(marked.Text), "red");
+        }
+    }
+
+    // Confirmed in the dialog: writes the open sensitive note as a plain note and opens that.
+    private async Task MakePlainConfirmed(Confirmation confirmed)
+    {
+        if (openName is not { } name || running)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult made;
+        try
+        {
+            made = await Actions.MakePlain(name, confirmed);
+        }
+        finally
+        {
+            running = false;
+            unsealing = false;
+        }
+
+        if (made.Kind == ActionKind.Done)
+        {
+            ShowNote(made.Text);
+            ShowStatus($"Made {DesktopText.OneLine(made.Text)} plain.", "accent");
+        }
+        else
+        {
+            ShowStatus(DesktopText.OneLine(made.Text), "red");
+        }
+    }
+
+    // The Lock button, and the editor's idle signal: unsaved changes are saved first; when that save is refused the
+    // note stays open and the editor shows why.
+    private async Task LockOpen()
+    {
+        if (openName is null || !openSensitive || running)
+        {
+            return;
+        }
+
+        if (editor is not null && await editor.IsDirtyAsync())
+        {
+            running = true;
+            ActionResult? saved;
+            try
+            {
+                saved = await editor.SaveAsync(false);
+            }
+            finally
+            {
+                running = false;
+            }
+
+            if (saved is null || saved.Kind != ActionKind.Done)
+            {
+                return;
+            }
+        }
+
+        State.Session.Lock();
+        Locked();
+    }
+
+    // The callback handed to the editor rendered with <paramref name="generation"/>.
+    private EventCallback<IReadOnlyList<OutlineHeading>> OutlineReport(int generation) =>
+        EventCallback.Factory.Create<IReadOnlyList<OutlineHeading>>(outlineReceiver, headings => ShowOutline(generation, headings));
+
+    // The current editor's headings for the sidebar outline; a report from an editor that is no longer shown is
+    // ignored, and an unchanged list renders nothing.
+    private void ShowOutline(int generation, IReadOnlyList<OutlineHeading> headings)
+    {
+        if (generation != editorGeneration || openName is null || outline.SequenceEqual(headings))
+        {
+            return;
+        }
+
+        outline = headings;
+        StateHasChanged();
+    }
+
+    // A sidebar outline button: the current editor jumps to that heading, by index only.
+    private Task JumpToOutline(int index) => editor?.JumpToIndexAsync(index) ?? Task.CompletedTask;
+
+    // The session locked (Lock, idle, the window closing): the editor is taken down, and with it the note's text.
+    private void Locked()
+    {
+        if (openName is not { } name || !openSensitive)
+        {
+            return;
+        }
+
+        // ShowNote(null) also drops openHeading and pendingHeading: no heading text of the locked note stays here.
+        ShowNote(null);
+        ShowStatus($"Locked {DesktopText.OneLine(name)}.", "grey");
+    }
+
+    // The editor's drop: stores the dropped files next to the open note, then the editor inserts the links (unsaved).
+    private async Task AttachDropped(DroppedFiles dropped)
+    {
+        if (openName is not { } name)
+        {
+            return;
+        }
+
+        ActionResult attached = await Actions.AttachFiles(name, dropped.Count, dropped.Files);
+        if (editor is not null && string.Equals(openName, name, StringComparison.Ordinal))
+        {
+            await editor.ShowAttachedAsync(attached);
+        }
+    }
+
+    // A click on an attachment PDF link in the editor: opens it in the system viewer (a dirty editor is fine).
+    private async Task OpenAttachment(string href)
+    {
+        if (openName is not { } name)
+        {
+            return;
+        }
+
+        ActionResult opened = await Actions.OpenAttachment(name, href);
+        if (!string.Equals(openName, name, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (opened.Kind == ActionKind.Done)
+        {
+            ShowStatus(string.Empty, string.Empty);
+        }
+        else
+        {
+            ShowStatus(DesktopText.OneLine(opened.Text), "red");
+        }
+    }
+
+    // The shown page's actions for the top bar's More actions menu: a plain or sensitive note's, with End the day
+    // and Standup first on today's daily note; none with no note open or on a page (Triage, People, Tags, Settings, an appointment).
+    private IReadOnlyList<PageAction> PageActionsFor(DesktopSnapshot snapshot)
+    {
+        if (page != Page.None || openName is not { } name)
+        {
+            return [];
+        }
+
+        IReadOnlyList<PageAction> actions = NoteActionsFor(snapshot);
+        return string.Equals(name, DailyNote.NameFor(snapshot.Today), StringComparison.Ordinal)
+            ? [new PageAction("end-day", "End the day"), new PageAction("standup", "Standup"), .. actions]
+            : actions;
+    }
+
+    // A plain or sensitive note's More actions.
+    private IReadOnlyList<PageAction> NoteActionsFor(DesktopSnapshot snapshot)
+    {
+        PageAction[] common =
+        [
+            new PageAction("rename", "Rename"),
+            new PageAction("delete", "Delete"),
+            new PageAction("history", "History", historyShown),
+            new PageAction("pin", "Pinned", openName is { } open && State.Pinned.Contains(open, StringComparer.Ordinal)),
+        ];
+        if (openSensitive)
+        {
+            return [.. common, new PageAction("make-plain", "Make plain"), new PageAction("lock", "Lock")];
+        }
+
+        PageAction[] plain =
+        [
+            .. common,
+            new PageAction("new-subpage", "New subpage"),
+            new PageAction("move", "Move"),
+            new PageAction("open-external", "Open in default editor"),
+            new PageAction("export", "Export"),
+            new PageAction("share", "Share"),
+        ];
+        return snapshot.SensitiveSupported ? [.. plain, new PageAction("mark-sensitive", "Mark sensitive")] : plain;
+    }
+
+    // A More actions item: the same handlers the toolbar buttons used to call. Open in default editor, Export and End
+    // the day call the actions here, so every Actions call stays in a bound handler.
+    private async Task RunPageAction(string id)
+    {
+        switch (id)
+        {
+            case "rename":
+                await StartRename();
+                break;
+            case "delete":
+                AskDelete();
+                break;
+            case "history":
+                ToggleHistory();
+                break;
+            case "new-subpage":
+                await StartSubpage();
+                break;
+            case "move":
+                await StartMove();
+                break;
+            case "mark-sensitive":
+                await AskMark();
+                break;
+            case "make-plain":
+                await AskMakePlain();
+                break;
+            case "lock":
+                await LockOpen();
+                break;
+            case "share":
+                await AskShare();
+                break;
+            case "pin":
+            {
+                if (openName is not { } name || running)
+                {
+                    return;
+                }
+
+                bool pin = !State.Pinned.Contains(name, StringComparer.Ordinal);
+                running = true;
+                ActionResult pinned;
+                try
+                {
+                    pinned = await Actions.SetPinned(name, pin);
+                }
+                finally
+                {
+                    running = false;
+                }
+
+                if (pinned.Kind == ActionKind.Done)
+                {
+                    ShowStatus(string.Empty, string.Empty);
+                }
+                else
+                {
+                    ShowStatus(DesktopText.OneLine(pinned.Text), "red");
+                }
+
+                break;
+            }
+            case "open-external":
+            {
+                if (openName is not { } name || running)
+                {
+                    return;
+                }
+
+                running = true;
+                ActionResult opened;
+                try
+                {
+                    opened = await Actions.OpenExternally(name);
+                }
+                finally
+                {
+                    running = false;
+                }
+
+                if (opened.Kind == ActionKind.Done)
+                {
+                    ShowStatus(string.Empty, string.Empty);
+                }
+                else
+                {
+                    ShowStatus(DesktopText.OneLine(opened.Text), "red");
+                }
+
+                break;
+            }
+            case "export":
+            {
+                if (await ExportTarget() is not { } chosen)
+                {
+                    return;
+                }
+
+                running = true;
+                try
+                {
+                    ShowExported(await Actions.ExportNote(chosen.Name, chosen.Target));
+                }
+                finally
+                {
+                    running = false;
+                }
+
+                break;
+            }
+            case "end-day":
+            {
+                // Today's daily note only. Unsaved text is saved first, so the day's end never meets a changed note on
+                // disk; afterwards the editor shows the new sections and a later save is not refused as changed.
+                if (running || page != Page.None || openName is not { } name || Snapshot is not { } snapshot
+                    || !string.Equals(name, DailyNote.NameFor(snapshot.Today), StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                if (await KeptUnsaved())
+                {
+                    ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
+                    return;
+                }
+
+                if (running || !string.Equals(openName, name, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                running = true;
+                ActionResult ended;
+                try
+                {
+                    ended = await Actions.EndDay(snapshot.Today);
+                }
+                finally
+                {
+                    running = false;
+                }
+
+                bool ok = ended.Kind == ActionKind.Done && ended.Reason is ActionReason.None or ActionReason.Unchanged;
+                ShowStatus(DesktopText.OneLine(ended.Text), ok ? "grey" : "red");
+                if (editor is not null && string.Equals(openName, name, StringComparison.Ordinal))
+                {
+                    await editor.ReloadAsync();
+                }
+
+                break;
+            }
+            case "standup":
+            {
+                // Today's daily note only, like end-day: unsaved text is saved first, then the section is written and
+                // the editor reloads to show it.
+                if (running || page != Page.None || openName is not { } name || Snapshot is not { } snapshot
+                    || !string.Equals(name, DailyNote.NameFor(snapshot.Today), StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                if (await KeptUnsaved())
+                {
+                    ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
+                    return;
+                }
+
+                if (running || !string.Equals(openName, name, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                running = true;
+                ActionResult written;
+                try
+                {
+                    written = await Actions.WriteStandup(snapshot.Today);
+                }
+                finally
+                {
+                    running = false;
+                }
+
+                ShowStandup(written);
+                if (editor is not null && string.Equals(openName, name, StringComparison.Ordinal))
+                {
+                    await editor.ReloadAsync();
+                }
+
+                break;
+            }
+        }
+    }
+
+    // The standup's answer in the main status line: grey when written, else red.
+    private void ShowStandup(ActionResult written)
+    {
+        bool ok = written.Kind == ActionKind.Done && (written.Reason is ActionReason.None or ActionReason.Unchanged);
+        ShowStatus(DesktopText.OneLine(written.Text), ok ? "grey" : "red");
+    }
+
+    // The open note and where to write it, or null (with the reason in the status line) when there is nothing to
+    // write: no note open, a sensitive note, unsaved changes, or the dialog was cancelled.
+    private async Task<(string Name, string Target)?> ExportTarget()
+    {
+        if (openName is not { } name)
+        {
+            ShowStatus("Open a note first.", "red");
+            return null;
+        }
+
+        if (running)
+        {
+            return null;
+        }
+
+        if (openSensitive)
+        {
+            ShowStatus(DesktopActions.ExportSensitiveText(DesktopText.OneLine(name)), "red");
+            return null;
+        }
+
+        if (await KeptUnsaved())
+        {
+            ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
+            return null;
+        }
+
+        string? target = Dialog.SaveExportFile(name[(name.LastIndexOf('/') + 1)..] + ".md");
+        return target is null ? null : (name, target);
+    }
+
+    // Share: refused with no note open, for a sensitive note (as Export) or with unsaved changes, otherwise asked in
+    // ShareDialog.
+    private async Task AskShare()
+    {
+        if (openName is not { } name)
+        {
+            ShowStatus("Open a note first.", "red");
+            return;
+        }
+
+        if (running)
+        {
+            return;
+        }
+
+        if (openSensitive)
+        {
+            ShowStatus(DesktopActions.ExportSensitiveText(DesktopText.OneLine(name)), "red");
+            return;
+        }
+
+        if (await KeptUnsaved())
+        {
+            ShowStatus($"Save {DesktopText.OneLine(name)} first.", "red");
+            return;
+        }
+
+        renaming = false;
+        ShowStatus(string.Empty, string.Empty);
+        sharing = true;
+    }
+
+    private void CancelShare()
+    {
+        if (!running)
+        {
+            sharing = false;
+        }
+    }
+
+    // Choose file in ShareDialog: asks where to write the page, then writes it. Cancelling the save dialog writes
+    // nothing and shows no status.
+    private async Task ShareChosen(bool leaveOutPrivate)
+    {
+        if (openName is not { } name || running || openSensitive)
+        {
+            return;
+        }
+
+        string? target = Dialog.SaveShareFile(name[(name.LastIndexOf('/') + 1)..] + ".html");
+        sharing = false;
+        if (target is null)
+        {
+            return;
+        }
+
+        running = true;
+        try
+        {
+            ShowExported(await Actions.ShareNote(name, target, leaveOutPrivate));
+        }
+        finally
+        {
+            running = false;
+        }
+    }
+
+    private void ShowExported(ActionResult exported) =>
+        ShowStatus(DesktopText.OneLine(exported.Text), exported.Kind == ActionKind.Done ? "accent" : "red");
+
+    // Splits "/new" text at its first "--template" token (a whitespace-separated word, ignoring case): the trimmed
+    // title before it and the trimmed template name after it, or null when there is no such token.
+    private static (string Title, string Template)? SplitTemplate(string text)
+    {
+        const string Flag = "--template";
+        int i = 0;
+        while (i < text.Length)
+        {
+            if (char.IsWhiteSpace(text[i]))
+            {
+                i++;
+                continue;
+            }
+
+            int end = i;
+            while (end < text.Length && !char.IsWhiteSpace(text[end]))
+            {
+                end++;
+            }
+
+            if (end - i == Flag.Length && string.Compare(text, i, Flag, 0, Flag.Length, StringComparison.OrdinalIgnoreCase) == 0)
+            {
+                return (text[..i].Trim(), text[end..].Trim());
+            }
+
+            i = end;
+        }
+
+        return null;
+    }
+
+    private void ShowStatus(string text, string cssClass)
+    {
+        statusText = text;
+        statusClass = cssClass;
+    }
 }

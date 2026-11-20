@@ -1,0 +1,90 @@
+@inherits StateComponent
+@* Every tag with its note count (DesktopState.Tags), in the index's order; clicking one shows its notes. It reads
+   only, and reloads whenever the state changes. *@
+
+<section class="page tags-panel" aria-label="Tags">
+    <div class="panel-bar">
+        <h2>Tags</h2>
+        <button type="button" class="close" aria-label="Close" title="Close" @onclick="() => OnClose.InvokeAsync()"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" /></svg></button>
+    </div>
+    @if (view is null)
+    {
+        <p class="grey" role="status">Loading…</p>
+    }
+    else if (view.Kind == TagsViewKind.IndexUnreadable)
+    {
+        <p class="red" role="status">Can't read the tags.</p>
+    }
+    else if (view.Tags.Count == 0)
+    {
+        <p class="grey" role="status">No tags yet. Add #tag to a note to link it.</p>
+    }
+    else
+    {
+        <ul class="tag-list">
+            @foreach (TagCount row in view.Tags)
+            {
+                string tag = row.Tag;
+                string shown = DesktopText.OneLine(TagParser.Format(tag));
+                bool pressed = string.Equals(tag, Selected, StringComparison.Ordinal);
+                <li class="tag-row">
+                    <button type="button" class="tag-button cut" title="@shown" aria-pressed="@(pressed ? "true" : "false")"
+                            @onclick="() => OnTag.InvokeAsync(TagParser.Format(tag))">@shown</button>
+                    <span class="count grey">@row.Count.ToString(CultureInfo.InvariantCulture)</span>
+                </li>
+            }
+        </ul>
+    }
+    @if (view is { Skipped.Count: > 0 } shownView)
+    {
+        <p class="grey tags-skipped">@SkippedText(shownView.Skipped)</p>
+    }
+</section>
+
+@code {
+    /// <summary>At most this many skipped note names are named; the rest are counted as <c>… k more</c>.</summary>
+    internal const int MaxSkippedNames = 10;
+
+    private TagsView? view;
+    private int request;
+
+    /// <summary>The tag whose notes are shown below the list (as TagParser finds it, no <c>#</c>), or <c>null</c>.</summary>
+    [Parameter]
+    public string? Selected { get; set; }
+
+    /// <summary>Called with a tag, formatted like TagParser.Format, when its button is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnTag { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    protected override Task OnInitializedAsync() => Load();
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    // The grey line naming the notes the index left out because they are over 5 MB (NoteStore.MaxNoteBytes).
+    internal static string SkippedText(IReadOnlyList<string> skipped)
+    {
+        string names = string.Join(", ", skipped.Take(MaxSkippedNames).Select(DesktopText.OneLine));
+        string rest = skipped.Count > MaxSkippedNames
+            ? $", {CurrentView.Outside} {(skipped.Count - MaxSkippedNames).ToString(CultureInfo.InvariantCulture)} more"
+            : string.Empty;
+        return $"Not indexed (over 5 MB): {names}{rest}.";
+    }
+
+    // Keeps the shown tags while it reloads; only the newest request's result is used.
+    private async Task Load()
+    {
+        int mine = ++request;
+        TagsView result = await State.Tags();
+        if (mine == request)
+        {
+            view = result;
+        }
+    }
+}

@@ -1,0 +1,53 @@
+@* The one-line hint after a crash (job 237): shown at the top of Main when the previous run ended unexpectedly, with
+   the crash log's path (cut by CSS, the full path in title), Open folder (the fixed crash folder through the launcher)
+   and Dismiss. Without a hint nothing is rendered. *@
+@using Microsoft.Extensions.DependencyInjection
+@inherits StateComponent
+
+@if (hint is { } shown && !dismissed)
+{
+    string path = DesktopText.OneLine(shown.LogPath);
+    string text = HintText(shown.LogPath);
+    <div class="crash-hint" role="status">
+        <span class="crash-hint-text cut" title="@path">@text</span>
+        @if (openFailed)
+        {
+            <span class="red">@OpenFailedText</span>
+        }
+        <button type="button" class="crash-hint-open" @onclick="OpenFolder">Open folder</button>
+        <button type="button" class="crash-hint-dismiss" @onclick="Dismiss">Dismiss</button>
+    </div>
+}
+
+@code {
+    /// <summary>The red line when the crash folder can't be opened.</summary>
+    internal const string OpenFailedText = "Can't open the folder.";
+
+    private CrashHint? hint;
+    private bool dismissed;
+    private bool openFailed;
+
+    /// <summary>Gives the registered <see cref="CrashHint"/>, if any; none is registered after a clean exit.</summary>
+    [Inject]
+    internal IServiceProvider Services { get; set; } = null!;
+
+    /// <summary>The hint's text for the log at <paramref name="path"/>.</summary>
+    internal static string HintText(string path) =>
+        $"Context closed unexpectedly last time. Crash log: {DesktopText.OneLine(path)}";
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        hint = Services.GetService<CrashHint>();
+    }
+
+    private void OpenFolder()
+    {
+        if (hint is { } shown)
+        {
+            openFailed = !Actions.OpenCrashFolder(shown);
+        }
+    }
+
+    private void Dismiss() => dismissed = true;
+}

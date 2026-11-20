@@ -4,30 +4,357 @@
     <h2>Todos</h2>
     @if (Snapshot is { } snapshot)
     {
+        IReadOnlyList<TodoEntry> entries = NoteTodos.Merge(snapshot.Todos, snapshot.NoteTodos);
+        bool busy = asking is not null || askingNote is not null || running || adding;
         @if (snapshot.TodosUnreadable)
         {
             <p class="red">Can't read todos.json</p>
         }
-        else if (snapshot.Todos.Count == 0)
+        @if (snapshot.NoteTodosUnreadable)
         {
-            <p class="grey">No todos yet</p>
+            <p class="red note-todos-unreadable">Can't read the note todos.</p>
+        }
+        List<TodoEntry> plain = entries.Where(e => !IsWaiting(e)).ToList();
+        List<TodoEntry> waiting = entries.Where(IsWaiting).ToList();
+        @if (plain.Count == 0)
+        {
+            @if (waiting.Count == 0 && !snapshot.TodosUnreadable && !snapshot.NoteTodosUnreadable)
+            {
+                <p class="grey">No todos yet</p>
+            }
         }
         else
         {
-            <ol class="todo-list">
-                @for (int i = 0; i < snapshot.Todos.Count; i++)
+            <ul class="todo-list">
+                @foreach (TodoEntry entry in plain)
                 {
-                    TodoItem todo = snapshot.Todos[i];
-                    string number = (i + 1).ToString(CultureInfo.InvariantCulture);
-                    string text = DesktopText.OneLine(todo.Text);
-                    string when = todo.Due < snapshot.Today ? "overdue" : todo.Due == snapshot.Today ? "today" : "later";
-                    <li class="todo">
-                        <span class="number">@number</span>
-                        <span class="date @when">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
-                        <span class="text cut" title="@text">@text</span>
-                    </li>
+                    @Row(entry, snapshot.Today, busy)
                 }
-            </ol>
+            </ul>
+        }
+        @if (waiting.Count > 0)
+        {
+            @* Waiting-for todos (waiting: @[Name] text) are their own group, so delegated work stays in view. *@
+            <section class="waiting-for" aria-label="Waiting for">
+                <h3>Waiting for</h3>
+                <ul class="waiting-list">
+                    @foreach (TodoEntry entry in waiting)
+                    {
+                        @Row(entry, snapshot.Today, busy)
+                    }
+                </ul>
+            </section>
         }
     }
+    @if (result is { } shown)
+    {
+        @if (shown.Kind == ActionKind.Done && shown.Reason == ActionReason.DoneLogLeft)
+        {
+            <p class="result red" role="status">@DesktopActions.DoneLogLeftText</p>
+        }
+        else if (shown.Kind == ActionKind.Done)
+        {
+            @if (shown.NextDue is { } nextDue)
+            {
+                <p class="result accent" role="status">Done: @(DesktopText.OneLine(shown.Text)). Next due @(nextDue.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)).</p>
+            }
+            else
+            {
+                <p class="result accent" role="status">Done: @DesktopText.OneLine(shown.Text)</p>
+            }
+        }
+        else
+        {
+            <p class="result red" role="status">@shown.Text</p>
+        }
+    }
+    else
+    {
+        <p class="result" role="status"></p>
+    }
+    @if (Snapshot is { } open)
+    {
+        DateOnly shownDue = due ?? open.Today;
+        bool entryOff = adding || running;
+        <div class="todo-entry">
+            <input type="text" class="todo-text" value="@newText" maxlength="@DesktopActions.MaxTodoLength"
+                   disabled="@entryOff" aria-label="New todo" placeholder="New todo" @ref="textField" @oninput="TextTyped" @onkeydown="e => Add(e)" />
+            <input type="date" class="todo-due" value="@shownDue.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)"
+                   disabled="@entryOff" aria-label="Due date" @onchange="DueChosen" @onkeydown="e => Add(e)" />
+            <input type="time" class="todo-time" value="@(dueTime?.ToString(TodoStore.StoredTimeFormat, CultureInfo.InvariantCulture) ?? string.Empty)"
+                   disabled="@entryOff" aria-label="Due time" @onchange="TimeChosen" @onkeydown="e => Add(e)" />
+            <button type="button" class="due-today" disabled="@entryOff" @onclick="() => due = open.Today">Today</button>
+            <button type="button" class="due-tomorrow" disabled="@entryOff" @onclick="() => due = open.Today.AddDays(1)">Tomorrow</button>
+        </div>
+        @if (added is { } addShown)
+        {
+            @if (addShown.Kind == ActionKind.Done)
+            {
+                <p class="add-result accent" role="status">Added: @DesktopText.OneLine(addShown.Text)</p>
+            }
+            else
+            {
+                <p class="add-result red" role="status">@addShown.Text</p>
+            }
+        }
+    }
+    @if (asking is { } todoAsked)
+    {
+        <ConfirmDialog Question="@($"Mark this todo done? {todoAsked.Text}")" ConfirmLabel="Mark done"
+                       Busy="running" OnConfirm="CompleteAsked" OnCancel="CloseDialog" />
+    }
+    else if (askingNote is { } noteAsked)
+    {
+        <ConfirmDialog Question="@($"Mark this todo done? {noteAsked.Text}")" ConfirmLabel="Mark done"
+                       Busy="running" OnConfirm="CompleteNoteAsked" OnCancel="CloseDialog" />
+    }
 </section>
+
+@code {
+    private TodoItem? asking;
+
+    /// <summary>Called with the normalized name of a person mention clicked in a todo's text.</summary>
+    [Parameter]
+    public EventCallback<string> OnPerson { get; set; }
+
+    /// <summary>Called with the full name of the note whose name was clicked on a todo inside a note.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    private NoteTodo? askingNote;
+
+    private bool running;
+    private ActionResult? result;
+    private string newText = string.Empty;
+    private DateOnly? due;
+    private TimeOnly? dueTime;
+    private bool adding;
+    private ActionResult? added;
+    private ElementReference textField;
+    private bool refocus;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // An add started with Enter disables the field while it runs; give the focus back once it is enabled again.
+        if (refocus && !adding && !running)
+        {
+            refocus = false;
+            await textField.FocusAsync();
+        }
+    }
+
+    private void TextTyped(ChangeEventArgs e) => newText = e.Value?.ToString() ?? string.Empty;
+
+    private void DueChosen(ChangeEventArgs e)
+    {
+        if (DateOnly.TryParseExact(
+            e.Value?.ToString(), DesktopText.DateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly chosen))
+        {
+            due = chosen;
+        }
+    }
+
+    // An empty or unreadable value means no time; a browser's HH:mm:ss (with a seconds step) keeps HH:mm.
+    private void TimeChosen(ChangeEventArgs e)
+    {
+        string value = e.Value?.ToString() ?? string.Empty;
+        if (value.Length == 8 && value[5] == ':')
+        {
+            value = value[..5];
+        }
+
+        dueTime = TodoInput.TryParseTime(value, out TimeOnly chosen) ? chosen : null;
+    }
+
+    private async Task Add(KeyboardEventArgs? key)
+    {
+        if ((key is not null && key.Key != "Enter") || adding || running || Snapshot is not { } snapshot)
+        {
+            return;
+        }
+
+        adding = true;
+        try
+        {
+            added = await Actions.AddTodo(newText, due ?? snapshot.Today, null, dueTime);
+            if (added.Kind == ActionKind.Done)
+            {
+                newText = string.Empty;
+                due = null;
+                dueTime = null;
+            }
+        }
+        finally
+        {
+            adding = false;
+            refocus = key is not null;
+        }
+    }
+
+    private void Ask(TodoItem todo)
+    {
+        if (!running)
+        {
+            asking = todo;
+        }
+    }
+
+    /// <summary>
+    /// Opens the same <c>Mark this todo done?</c> dialog a ticked checkbox opens, for the todo the palette's
+    /// <c>/done</c> picked. Nothing is written until the user confirms.
+    /// </summary>
+    internal void AskDone(TodoItem todo)
+    {
+        if (!running && asking is null && askingNote is null)
+        {
+            asking = todo;
+            StateHasChanged();
+        }
+    }
+
+    private void AskNote(NoteTodo todo)
+    {
+        if (!running)
+        {
+            askingNote = todo;
+        }
+    }
+
+    private void CloseDialog()
+    {
+        if (!running)
+        {
+            asking = null;
+            askingNote = null;
+        }
+    }
+
+    private async Task CompleteNoteAsked(Confirmation confirmed)
+    {
+        if (askingNote is not { } todoAsked || running)
+        {
+            return;
+        }
+
+        running = true;
+        try
+        {
+            result = await Actions.CompleteNoteTodo(todoAsked, confirmed);
+        }
+        finally
+        {
+            running = false;
+            askingNote = null;
+        }
+    }
+
+    private static bool IsWaiting(TodoEntry entry) =>
+        WaitingFor.TryParse(entry.Stored?.Text ?? entry.Note?.Text) is not null;
+
+    // One todo row (a stored todo or a todo inside a note), the same in the todo list and the waiting-for group.
+    private RenderFragment Row(TodoEntry entry, DateOnly today, bool busy) => __builder =>
+    {
+        @if (entry.Stored is { } todo)
+        {
+            string text = DesktopText.OneLine(todo.Text);
+            string when = DateClass(todo.Due, today);
+            <li class="todo">
+                <label class="todo-line">
+                    <input type="checkbox" class="done" checked="@(asking?.Id == todo.Id)"
+                           disabled="@busy" @onchange="() => Ask(todo)" />
+                    <span class="date @when">@todo.Due.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                    @if (todo.Time is { } time)
+                    {
+                        @(" ")<span class="time">@time.ToString(TodoStore.StoredTimeFormat, CultureInfo.InvariantCulture)</span>
+                    }
+                    @* A code block drops the whitespace around it, so the space before the text is written out. *@
+                    @(" ")
+                    @TodoText(text)
+                    @if (todo.Repeat is { } repeat)
+                    {
+                        <span class="repeat" title="@repeat.Label">@repeat.Label</span>
+                    }
+                    @if (todo.Meeting is { } meeting)
+                    {
+                        string meetingTitle = DesktopText.OneLine(meeting.Title);
+                        <span class="todo-meeting grey cut" title="@meetingTitle">@meetingTitle</span>
+                        @if (Snapshot?.MeetingHints.Contains(todo.Id) == true)
+                        {
+                            <span class="meeting-hint grey">Meeting cancelled or moved</span>
+                        }
+                    }
+                </label>
+            </li>
+        }
+        else if (entry.Note is { } noteTodo)
+        {
+            string text = DesktopText.OneLine(noteTodo.Text);
+            string noteName = DesktopText.OneLine(noteTodo.Note);
+            <li class="todo note-todo">
+                <label class="todo-line">
+                    <input type="checkbox" class="done" checked="@(askingNote == noteTodo)"
+                           disabled="@busy" @onchange="() => AskNote(noteTodo)" />
+                    @if (noteTodo.Due is { } noteDue)
+                    {
+                        <span class="date @DateClass(noteDue, today)">@noteDue.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)</span>
+                        @(" ")
+                    }
+                    @TodoText(text)
+                    @(" ")
+                    @* The note's name opens it (with the editor's discard check); its click never ticks the checkbox. *@
+                    <button type="button" class="todo-note" title="@noteName"
+                            @onclick="() => OnOpen.InvokeAsync(noteTodo.Note)"
+                            @onclick:preventDefault="true" @onclick:stopPropagation="true">@noteName</button>
+                </label>
+            </li>
+        }
+    };
+
+    private static string DateClass(DateOnly day, DateOnly today) =>
+        day < today ? "overdue" : day == today ? "today" : "later";
+
+    // A todo's one-line text; a mention opens the person's page and its click stops there, so the checkbox never ticks.
+    private RenderFragment TodoText(string text) => __builder =>
+    {
+        IReadOnlyList<PersonSegment> segments = PersonParser.Segments(text);
+        <span class="text cut" title="@text">@if (segments.Any(s => s.IsMention))
+            {
+                @foreach (PersonSegment segment in segments)
+                {
+                    @if (segment.Name is { } mentioned)
+                    {
+                        <button type="button" class="mention" title="@segment.Text"
+                                @onclick="() => OnPerson.InvokeAsync(mentioned)"
+                                @onclick:preventDefault="true" @onclick:stopPropagation="true">@segment.Text</button>
+                    }
+                    else
+                    {
+                        <span class="plain">@segment.Text</span>
+                    }
+                }
+            }
+            else
+            {
+                @text
+            }</span>
+    };
+
+    private async Task CompleteAsked(Confirmation confirmed)
+    {
+        if (asking is not { } todoAsked || running)
+        {
+            return;
+        }
+
+        running = true;
+        try
+        {
+            result = await Actions.CompleteTodo(todoAsked, confirmed);
+        }
+        finally
+        {
+            running = false;
+            asking = null;
+        }
+    }
+}

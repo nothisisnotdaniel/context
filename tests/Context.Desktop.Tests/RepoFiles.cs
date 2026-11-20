@@ -1,6 +1,7 @@
 namespace Context.Tests;
 
-/// <summary>Finds the repository root and the source files of a project, skipping <c>bin/</c> and <c>obj/</c>.</summary>
+/// <summary>Finds the repository root and the source files of a project, skipping <c>bin/</c>, <c>obj/</c> and
+/// <c>editor/node_modules/</c>.</summary>
 internal static class RepoFiles
 {
     public const string DesktopFolder = "src/Context.Desktop";
@@ -34,6 +35,12 @@ internal static class RepoFiles
             string[] segments = Path.GetRelativePath(projectDirectory, file).Split(
                 Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             if (segments.Length > 1 && (segments[0] == "bin" || segments[0] == "obj"))
+            {
+                continue;
+            }
+
+            // The editor's npm packages are third-party code, not the project's sources.
+            if (segments.Length > 2 && segments[0] == "editor" && segments[1] == "node_modules")
             {
                 continue;
             }
