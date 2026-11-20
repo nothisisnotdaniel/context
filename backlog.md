@@ -147,6 +147,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#404](backlog/404-todos-page-opened-from-an-exclamation.md) Todos page opened from an exclamation-mark icon in the left sidebar → 331-todos-page-icon
 - [x] [#405](backlog/405-affiliation-as-a-comma-separated-list.md) Affiliation as a comma-separated list → 332-affiliation-list
 - [x] [#401](backlog/401-say-why-the-app-ended-in.md) Say why the app ended in the crash log → 334-exit-reason-log
+- [ ] [#398](backlog/398-people-should-never-show-up-in.md) People should never show up in the recent notes list
 - [ ] [#377](backlog/377-dependency-list-with-licence-links.md) Dependency list with licence links
 - [ ] [#310](backlog/310-choose-light-dark-or-system-theme.md) Choose light, dark or system theme in Settings
 - [ ] [#255](backlog/255-decisions-longer-than-one-line-a.md) Numbered #!d decisions: a marked paragraph, referenced as #!d1234
@@ -357,7 +358,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#394](backlog/394-search-index-skip-the-full-note.md) Search index: skip the full note_text repair pass when nothing needs it
 - [?] [#396](backlog/396-reproduce-the-recent-json-test-race.md) Reproduce the recent.json test race on a slow runner
 - [?] [#397](backlog/397-notestore-contains-match-unicode-normalised-paths.md) NoteStore.Contains: match Unicode-normalised paths
-- [?] [#398](backlog/398-people-should-never-show-up-in.md) People should never show up in the recent notes list
 - [?] [#399](backlog/399-payment-provider-spike.md) Payment provider spike
 - [ ] [#402](backlog/402-throttle-repeated-show-requests.md) Throttle repeated show requests
 - [h] [#403](backlog/403-check-the-second-start-on-windows.md) Check the second start on Windows
