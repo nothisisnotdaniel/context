@@ -143,7 +143,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#395](backlog/395-fix-flaky-recent-json-test-that.md) Fix flaky recent.json test that failed CI after job 295 → 297-flaky-recent-test
 - [x] [#400](backlog/400-no-crash-report-when-a-second.md) No crash report when a second copy starts → 315-second-copy-no-crash
 - [x] [#407](backlog/407-global-todos-as-note-local-checkboxes.md) Global todos as - { }, note-local checkboxes as - [ ] → 329-global-todo-braces
-- [ ] [#406](backlog/406-carry-a-line-to-the-next.md) Carry a line to the next meeting with - [>] (after: #407)
+- [x] [#406](backlog/406-carry-a-line-to-the-next.md) Carry a line to the next meeting with - [>] (after: #407) → 330-carry-over-marker
 - [ ] [#404](backlog/404-todos-page-opened-from-an-exclamation.md) Todos page opened from an exclamation-mark icon in the left sidebar
 - [ ] [#405](backlog/405-affiliation-as-a-comma-separated-list.md) Affiliation as a comma-separated list
 - [ ] [#401](backlog/401-say-why-the-app-ended-in.md) Say why the app ended in the crash log
