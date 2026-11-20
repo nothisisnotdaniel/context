@@ -174,8 +174,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#24](backlog/024-voice-notes.md) Voice notes (after: #23)
 - [x] [#27](backlog/027-todo-dates-with-years.md) Todo dates with years → already done (job 294 closed it, no build)
 - [x] [#232](backlog/232-search-index-limits-and-accessibility.md) Search index limits and accessibility → 295-search-index-limits
-- [x] [#37](backlog/037-note-store-cleanup.md) Note store cleanup → 298-note-store-cleanup
 - [ ] [#92](backlog/092-times-inside-the-context-desktop-app.md) Times inside the Context desktop app
+- [x] [#37](backlog/037-note-store-cleanup.md) Note store cleanup → 298-note-store-cleanup
 - [?] [#93](backlog/093-phone-companion-app.md) Phone companion app
 - [?] [#94](backlog/094-browser-extension.md) Browser extension
 - [?] [#95](backlog/095-local-ai-for-ask-context.md) Local AI for Ask Context
