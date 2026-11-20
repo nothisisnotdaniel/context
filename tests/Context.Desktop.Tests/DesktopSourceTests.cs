@@ -1764,6 +1764,24 @@ public sealed class DesktopSourceTests
         Assert.Contains("        app.Run();\n        crashLog.End();\n", program, StringComparison.Ordinal);
     }
 
+    // 315 AC-9: Program.cs takes the running lock through DesktopStartup before the window is built, never calls
+    // crashLog.Begin() or PrivateFile.OpenLock itself, and brings the window to the front on a show request.
+    [Fact]
+    public void Program_StartsThroughDesktopStartup()
+    {
+        string root = RepoFiles.Root();
+        string program = File.ReadAllText(Path.Combine(root, ProgramFile)).ReplaceLineEndings("\n");
+
+        int begin = program.IndexOf("DesktopStartup.Begin(", StringComparison.Ordinal);
+        int builder = program.IndexOf("PhotinoBlazorAppBuilder", StringComparison.Ordinal);
+        Assert.True(begin >= 0, "Program.cs doesn't call DesktopStartup.Begin");
+        Assert.True(builder > begin, "DesktopStartup.Begin comes after PhotinoBlazorAppBuilder");
+        Assert.DoesNotContain("crashLog.Begin()", program, StringComparison.Ordinal);
+        Assert.DoesNotContain("PrivateFile.OpenLock", program, StringComparison.Ordinal);
+        Assert.Contains("openRequests.ShowRequested +=", program, StringComparison.Ordinal);
+        Assert.Matches(@"if \(start\.HandOver\)\n\s*\{\n\s*return;\n\s*\}", program);
+    }
+
     // 178 AC-11: the real notifier is named only by itself and Program.cs, which hands it to the actions.
     [Fact]
     public void Sources_NameTheNotifierOnlyInItselfAndProgram()

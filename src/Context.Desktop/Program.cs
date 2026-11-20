@@ -35,7 +35,18 @@ internal static class Program
             crashLog.Write("unobserved-task", e.Exception);
             e.SetObserved();
         };
-        CrashHint? crashHint = crashLog.Begin();
+
+        // A second copy (job 315): the running lock is taken before anything else, and only the copy that holds it
+        // reads and writes the crash session, so a second start files no false unclean-exit log. On Windows a second
+        // start leaves a show request for the open window and exits at once.
+        DesktopStart start = DesktopStartup.Begin(NoteStore.DefaultFolder(), crashLog, OperatingSystem.IsWindows());
+        if (start.HandOver)
+        {
+            return;
+        }
+
+        using FileStream? runningLock = start.Lock;
+        CrashHint? crashHint = start.Hint;
 
         static DateOnly Today() => DateOnly.FromDateTime(DateTime.Now);
 
@@ -88,26 +99,32 @@ internal static class Program
             return null;
         }
 
+        // Brings the window to the front (job 315): restored when minimized, then raised above the others for a moment.
+        // Runs on the window's thread; a Photino failure leaves the window where it is.
+        static void BringToFront(PhotinoWindow shown)
+        {
+            try
+            {
+                if (shown.Minimized)
+                {
+                    shown.SetMinimized(false);
+                }
+
+                shown.SetTopMost(true);
+                shown.SetTopMost(false);
+            }
+            catch (Exception)
+            {
+                // The window stays where it is.
+            }
+        }
+
         // The installed Times command (job 282): the .NET tool's `tm` in ~/.dotnet/tools, else on PATH.
         static string? TimesCommand() => TimesExecutable.Find(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             Environment.GetEnvironmentVariable("PATH"),
             OperatingSystem.IsWindows(),
             File.Exists);
-
-        // The lock of a running desktop app (job 280), or null when another holder has it or it can't be made.
-        static FileStream? RunningLock(string root)
-        {
-            try
-            {
-                PrivateFile.CreateFolder(DesktopRequest.Folder(root));
-                return PrivateFile.OpenLock(DesktopRequest.LockPath(root));
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                return null;
-            }
-        }
 
         string folder = NoteStore.DefaultFolder();
         NoteStore notes = new NoteStore(folder);
@@ -237,13 +254,14 @@ internal static class Program
         using DataWatcher watcher = new DataWatcher(folder, state);
         watcher.Start();
 
-        // Work item pages from the command line (job 280): while the app runs it holds <root>/.desktop/running.lock open,
-        // so `context item <n> --open` knows not to start a second copy and only leaves its request, which this watcher
-        // reads, deletes and hands to the actions (Main then opens the page). When the lock can't be taken the app runs
-        // without it; the command line then starts the app again, which only brings it to the front on macOS.
-        using FileStream? runningLock = RunningLock(folder);
+        // Work item pages from the command line (job 280): while the app runs it holds <root>/.desktop/running.lock open
+        // (taken at start, see DesktopStartup), so `context item <n> --open` knows not to start a second copy and only
+        // leaves its request, which this watcher reads, deletes and hands to the actions (Main then opens the page). When
+        // the lock can't be taken the app runs without it; the command line then starts the app again, which only brings
+        // it to the front on macOS. A show request from a second copy on Windows (job 315) brings this window to the front.
         using OpenRequestWatcher openRequests = new OpenRequestWatcher(folder);
         openRequests.ItemRequested += item => _ = actions.OpenRequestedItem(item);
+        openRequests.ShowRequested += () => app.MainWindow.Invoke(() => BringToFront(app.MainWindow));
         openRequests.Start();
 
         // Screenshots into the inbox (job 260): the watched folder from the settings page follows every state change, and

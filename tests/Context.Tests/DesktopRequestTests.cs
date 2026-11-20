@@ -96,4 +96,61 @@ public sealed class DesktopRequestTests : IDisposable
             Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(DesktopRequest.LockPath(root)));
         }
     }
+
+    // 315 AC-8: show is no item, and only exactly show (optional final \n or \r\n) is a show request.
+    [Theory]
+    [InlineData("show", true)]
+    [InlineData("show\n", true)]
+    [InlineData("show\r\n", true)]
+    [InlineData("show\n\n", false)]
+    [InlineData("SHOW\n", false)]
+    [InlineData("show me\n", false)]
+    [InlineData(" show\n", false)]
+    [InlineData("item 3\n", false)]
+    [InlineData("item 3", false)]
+    [InlineData("", false)]
+    public void IsShow_OnlyExactlyShow(string text, bool expected)
+    {
+        Assert.Equal(expected, DesktopRequest.IsShow(Encoding.ASCII.GetBytes(text)));
+    }
+
+    [Fact]
+    public void ShowRequest_IsNoItem_AndItemIsNoShow()
+    {
+        Assert.Equal("show\n"u8.ToArray(), DesktopRequest.ShowRequest());
+        Assert.Null(DesktopRequest.ParseItem(DesktopRequest.ShowRequest()));
+        Assert.False(DesktopRequest.IsShow(DesktopRequest.ItemRequest(3)));
+        Assert.False(DesktopRequest.IsShow(Encoding.ASCII.GetBytes("show" + new string(' ', DesktopRequest.MaxBytes))));
+    }
+
+    // 315: WriteShow uses the same temp + move as WriteItem, and TryTake tells it apart.
+    [Fact]
+    public void WriteShow_ThenTryTake_IsShow()
+    {
+        DesktopRequest.WriteShow(root);
+        Assert.Equal(DesktopRequest.ShowRequest(), File.ReadAllBytes(DesktopRequest.RequestPath(root)));
+        Assert.Equal([DesktopRequest.RequestFileName], Directory.GetFiles(DesktopRequest.Folder(root)).Select(Path.GetFileName));
+
+        Assert.True(DesktopRequest.TryTake(root, out int? item, out bool show));
+
+        Assert.Null(item);
+        Assert.True(show);
+        Assert.False(File.Exists(DesktopRequest.RequestPath(root)));
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+                File.GetUnixFileMode(DesktopRequest.Folder(root)));
+        }
+    }
+
+    [Fact]
+    public void TryTake_Item_IsNoShow()
+    {
+        DesktopRequest.WriteItem(root, 3);
+
+        Assert.True(DesktopRequest.TryTake(root, out int? item, out bool show));
+
+        Assert.Equal(3, item);
+        Assert.False(show);
+    }
 }
