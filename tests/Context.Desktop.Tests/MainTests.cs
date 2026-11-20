@@ -1593,6 +1593,69 @@ public sealed class MainTests : IDisposable
         Assert.Equal("Projects", cut.Find(".note-title").TextContent);
     }
 
+    // 338: people, a person page with a child of its own, and that child with a child.
+    private void WritePeopleTree()
+    {
+        data.WriteNote("people", "# people\n");
+        data.WriteFile(Path.Combine("people", "Anna.md"), "# Anna\n");
+        data.WriteFile(Path.Combine("people", "Anna", "Notes.md"), "# Notes\n");
+        data.WriteFile(Path.Combine("people", "Anna", "Notes", "Deep.md"), "# Deep\n");
+        data.WriteNote("Plan", "# Plan\n");
+    }
+
+    // 338: opens a note through /open and waits until its title, links and (on a person page) person panel are in.
+    private static async Task OpenAndSettle(IRenderedComponent<Main> cut, EditorJs js, string name)
+    {
+        await OpenFull(cut, js, name);
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal(name, cut.Find("h2.note-title").GetAttribute("title"));
+            Assert.All(cut.FindAll(".person-panel"), p => Assert.DoesNotContain("Loading…", p.TextContent, StringComparison.Ordinal));
+        }, Wait);
+    }
+
+    // 338 AC-7: a person page with a child shows no Subpages section; people and people/Anna/Notes still do.
+    [Fact]
+    public async Task Subpages_PersonPage_None_PeopleAndDeeperKeepThem()
+    {
+        WritePeopleTree();
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await OpenAndSettle(cut, js, "people/Anna");
+        Assert.Empty(cut.FindAll("nav.subpages"));
+
+        await OpenAndSettle(cut, js, "people");
+        Assert.Equal(["Anna"], cut.FindAll("nav.subpages button.subpage-link").Select(b => b.TextContent).ToArray());
+
+        await OpenAndSettle(cut, js, "people/Anna/Notes");
+        Assert.Equal(["Deep"], cut.FindAll("nav.subpages button.subpage-link").Select(b => b.TextContent).ToArray());
+    }
+
+    // 338 AC-8: a person page's More actions have no New subpage and no Move; people and plain notes keep both.
+    [Fact]
+    public async Task Menu_PersonPage_NoNewSubpageNoMove_OthersKeepThem()
+    {
+        WritePeopleTree();
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await OpenAndSettle(cut, js, "people/Anna");
+        Assert.Equal(
+            ["rename", "delete", "history", "pin", "open-external", "export", "share", "mark-sensitive"],
+            await MenuIdsAsync(cut));
+
+        string[] full = ["rename", "delete", "history", "pin", "new-subpage", "move", "open-external", "export", "share", "mark-sensitive"];
+        await OpenAndSettle(cut, js, "people");
+        Assert.Equal(full, await MenuIdsAsync(cut));
+
+        await OpenAndSettle(cut, js, "people/Anna/Notes");
+        Assert.Equal(full, await MenuIdsAsync(cut));
+
+        await OpenAndSettle(cut, js, "Plan");
+        Assert.Equal(full, await MenuIdsAsync(cut));
+    }
+
     // 238 AC-8: a bidi control in a child's title shows as U+FFFD in the link text; the tooltip is OneLine of the name.
     [Fact]
     public async Task Subpages_BidiControlInTitle_Replaced()

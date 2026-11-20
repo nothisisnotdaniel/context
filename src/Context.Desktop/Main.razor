@@ -139,7 +139,8 @@
                                     OnTag="ShowTag" OnOpenNote="RequestOpen" OnOpenHeading="OpenHeading" OnCreateNote="CreateLinked" Heading="@openHeading" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked"
                                     OnAttach="AttachDropped" OnOpenAttachment="OpenAttachment"
                                     OnOutline="OutlineReport(shownEditor)" />
-                        @if (Children(Snapshot, name) is { Count: > 0 } children)
+                        @* 338: a person page is a flat page, so it shows no Subpages section. *@
+                        @if (People.PersonOf(name) is null && Children(Snapshot, name) is { Count: > 0 } children)
                         {
                             <nav class="subpages" aria-label="Subpages">
                                 <h2>Subpages</h2>
@@ -2569,11 +2570,12 @@ else
             return [.. common, new PageAction("make-plain", "Make plain"), new PageAction("lock", "Lock")];
         }
 
+        // 338: a person page is a flat page, so it has no New subpage and no Move.
+        bool person = openName is { } shown && People.PersonOf(shown) is not null;
         PageAction[] plain =
         [
             .. common,
-            new PageAction("new-subpage", "New subpage"),
-            new PageAction("move", "Move"),
+            .. person ? Array.Empty<PageAction>() : [new PageAction("new-subpage", "New subpage"), new PageAction("move", "Move")],
             new PageAction("open-external", "Open in default editor"),
             new PageAction("export", "Export"),
             new PageAction("share", "Share"),

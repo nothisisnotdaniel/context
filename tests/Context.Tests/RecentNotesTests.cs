@@ -85,6 +85,36 @@ public sealed class RecentNotesTests : IDisposable
         Assert.Equal(["A"], RecentNotes.Removed(["A", "A/Sub"], "A/Sub"));
     }
 
+    // 338 AC-1: a person page is never added; a listed one is dropped. people and deeper pages are added as before.
+    [Fact]
+    public void Touch_PersonPage_NotAdded()
+    {
+        Assert.Equal(["A", "B"], RecentNotes.Touch(["A", "people/Anna", "B"], "people/Anna"));
+        Assert.Equal(["A"], RecentNotes.Touch(["A"], "people/Anna"));
+        Assert.Equal(["A"], RecentNotes.Touch(["A"], "People/Anna"));
+        Assert.Empty(RecentNotes.Touch(["People/Anna"], "People/Anna"));
+        Assert.Equal(["people", "A"], RecentNotes.Touch(["A"], "people"));
+        Assert.Equal(["people/Anna/Notes", "A"], RecentNotes.Touch(["A"], "people/Anna/Notes"));
+    }
+
+    // 338 AC-1: only the person pages go, the rest keep their order.
+    [Fact]
+    public void WithoutPeople_DropsPersonPages_KeepsOrder()
+    {
+        Assert.Equal(
+            ["A", "people", "B", "people/Bob/Notes", "Other/Anna"],
+            RecentNotes.WithoutPeople(["people/Anna", "A", "people", "PEOPLE/Cleo", "B", "people/Bob/Notes", "people/Bob", "Other/Anna"]));
+        Assert.Empty(RecentNotes.WithoutPeople([]));
+    }
+
+    // 338 AC-1: a rename onto a person page drops the entry; its subpages stay.
+    [Fact]
+    public void Renamed_ToPersonPage_Dropped()
+    {
+        Assert.Equal(["X"], RecentNotes.Renamed(["Anna", "X"], "Anna", "people/Anna"));
+        Assert.Equal(["people/Anna/Notes", "X"], RecentNotes.Renamed(["Anna", "Anna/Notes", "X"], "Anna", "people/Anna"));
+    }
+
     [Theory]
     [InlineData("Plan", true)]
     [InlineData("Meetings/Meeting 1/Notes", true)]

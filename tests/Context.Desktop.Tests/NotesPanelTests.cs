@@ -777,6 +777,69 @@ public sealed class NotesPanelTests : IDisposable
         Assert.Empty(cut.FindAll("p.recent-empty"));
     }
 
+    // 338 AC-3: stored person pages are left out of the sidebar and of State.Recent; building the state writes nothing.
+    [Fact]
+    public async Task Recent_StoredPersonPages_LeftOut_FileUnchanged()
+    {
+        data.WriteNote("A", "a");
+        data.WriteNote("B", "b");
+        data.WriteNote("people", "# people\n");
+        data.WriteFile(Path.Combine("people", "Anna.md"), "# Anna\n");
+        data.WriteFile(Path.Combine("people", "Bob.md"), "# Bob\n");
+        data.WriteRecent("people/Anna", "A", "people/Bob", "B");
+        string path = Path.Combine(data.Root, RecentNotesStore.FileName);
+        byte[] before = File.ReadAllBytes(path);
+
+        data.CreateState();
+        Assert.Equal(before, File.ReadAllBytes(path));
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        Assert.Equal(["A", "B"], cut.FindAll("ul.recent-notes button.name").Select(b => b.GetAttribute("title")!).ToArray());
+        Assert.Equal(["A", "B"], data.State!.Recent);
+        Assert.Equal(before, File.ReadAllBytes(path));
+    }
+
+    // 338 AC-4: with 10 stored names, 2 of them person pages, all 8 plain notes are listed in stored order.
+    [Fact]
+    public async Task Recent_TenStored_TwoPersonPages_EightListed()
+    {
+        string[] plain = Enumerable.Range(1, 8).Select(i => $"N{i}").ToArray();
+        foreach (string name in plain)
+        {
+            data.WriteNote(name, "x");
+        }
+
+        data.WriteNote("people", "# people\n");
+        data.WriteFile(Path.Combine("people", "Anna.md"), "# Anna\n");
+        data.WriteFile(Path.Combine("people", "Bob.md"), "# Bob\n");
+        data.WriteRecent(["N1", "people/Anna", "N2", "N3", "N4", "N5", "people/Bob", "N6", "N7", "N8"]);
+
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        Assert.Equal(plain, cut.FindAll("ul.recent-notes button.name").Select(b => b.GetAttribute("title")!).ToArray());
+    }
+
+    // 338 AC-5: a pinned person page shows only the person's name, with no grey parent; a plain subpage keeps it.
+    [Fact]
+    public async Task Pinned_PersonPage_NoParent_SubpageKeepsIt()
+    {
+        data.WriteNote("people", "# people\n");
+        data.WriteFile(Path.Combine("people", "Anna.md"), "# Anna\n");
+        data.WriteNote("X", "# X\n");
+        data.WriteFile(Path.Combine("X", "Y.md"), "# Y\n");
+        data.WritePinned("people/Anna", "X/Y");
+
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        IReadOnlyList<IElement> rows = cut.FindAll("ul.pinned-notes button.name");
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("Anna", rows[0].TextContent);
+        Assert.Equal("people/Anna", rows[0].GetAttribute("title"));
+        Assert.Null(rows[0].QuerySelector("span.note-parent"));
+        Assert.Equal("X/Y", rows[1].GetAttribute("title"));
+        Assert.Equal("X", rows[1].QuerySelector("span.note-parent")!.TextContent);
+    }
+
     // 278 AC-5: the pinned list sits above the recent list, in pinned order; an entry naming no note is left out.
     [Fact]
     public async Task Pinned_AboveRecent_PinnedOrder_MissingLeftOut()

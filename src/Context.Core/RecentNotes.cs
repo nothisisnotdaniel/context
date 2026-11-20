@@ -14,21 +14,32 @@ internal static class RecentNotes
     /// <summary>The most names the list holds.</summary>
     public const int MaxCount = 10;
 
-    /// <summary><paramref name="name"/> first, followed by the other entries in their order, cut to <see cref="MaxCount"/>.</summary>
+    /// <summary>
+    /// <paramref name="name"/> first, followed by the other entries in their order, cut to <see cref="MaxCount"/>. A
+    /// person page (<see cref="People.PersonOf"/>, job 338) is never added: the list comes back without that name.
+    /// </summary>
     public static IReadOnlyList<string> Touch(IReadOnlyList<string> list, string name) =>
-        new[] { name }
-            .Concat(list.Where(n => !string.Equals(n, name, StringComparison.Ordinal)))
-            .Take(MaxCount)
-            .ToList();
+        People.PersonOf(name) is not null
+            ? list.Where(n => !string.Equals(n, name, StringComparison.Ordinal)).ToList()
+            : new[] { name }
+                .Concat(list.Where(n => !string.Equals(n, name, StringComparison.Ordinal)))
+                .Take(MaxCount)
+                .ToList();
+
+    /// <summary>The list without its person pages (<see cref="People.PersonOf"/>, job 338), in the same order.</summary>
+    public static IReadOnlyList<string> WithoutPeople(IReadOnlyList<string> list) =>
+        list.Where(n => People.PersonOf(n) is null).ToList();
 
     /// <summary>
     /// <paramref name="oldName"/> and every <c>oldName/…</c> entry renamed to the <paramref name="newName"/> prefix,
-    /// each keeping its place; later duplicates are dropped so the first one stays.
+    /// each keeping its place; later duplicates are dropped so the first one stays. An entry that becomes a person
+    /// page (<see cref="People.PersonOf"/>, job 338) is dropped.
     /// </summary>
     public static IReadOnlyList<string> Renamed(IReadOnlyList<string> list, string oldName, string newName) =>
         list.Select(n => string.Equals(n, oldName, StringComparison.Ordinal)
                 ? newName
                 : IsBelow(n, oldName) ? newName + n[oldName.Length..] : n)
+            .Where(n => People.PersonOf(n) is null)
             .Distinct(StringComparer.Ordinal)
             .Take(MaxCount)
             .ToList();

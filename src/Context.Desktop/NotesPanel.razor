@@ -203,12 +203,14 @@
         }
     }
 
-    // One row of the pinned or recent list (jobs 240, 278): the name button (a subpage's parent in grey), the pin icon
+    // One row of the pinned or recent list (jobs 240, 278): the name button (a subpage's parent in grey, not for a
+    // person page, job 338), the pin icon
     // on a pinned row, and the visible "locked" of a sensitive note.
     private RenderFragment NoteRow(NoteInfo note, bool locked, bool pinned) => __builder =>
     {
         string name = DesktopText.OneLine(note.Name);
-        string? parent = note.Parent is { } rawParent ? DesktopText.OneLine(rawParent) : null;
+        // 338: a person page is shown flat, without its storage parent people.
+        string? parent = note.Parent is { } rawParent && People.PersonOf(note.Name) is null ? DesktopText.OneLine(rawParent) : null;
         bool open = string.Equals(note.Name, OpenName, StringComparison.Ordinal);
         <li class="note" @key="note.Name">
             <button type="button" class="name cut" title="@name" aria-current="@(open ? "page" : null)"
