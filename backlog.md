@@ -148,7 +148,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#405](backlog/405-affiliation-as-a-comma-separated-list.md) Affiliation as a comma-separated list → 332-affiliation-list
 - [x] [#401](backlog/401-say-why-the-app-ended-in.md) Say why the app ended in the crash log → 334-exit-reason-log
 - [x] [#398](backlog/398-people-should-never-show-up-in.md) People should never show up in the recent notes list → 338-person-pages-flat
-- [ ] [#377](backlog/377-dependency-list-with-licence-links.md) Dependency list with licence links
+- [x] [#377](backlog/377-dependency-list-with-licence-links.md) Dependency list with licence links → 339-dependency-licence-list
 - [ ] [#310](backlog/310-choose-light-dark-or-system-theme.md) Choose light, dark or system theme in Settings
 - [ ] [#255](backlog/255-decisions-longer-than-one-line-a.md) Numbered #!d decisions: a marked paragraph, referenced as #!d1234
 - [ ] [#262](backlog/262-rename-a-note-update-its-title.md) Rename a note: update its # title line too
