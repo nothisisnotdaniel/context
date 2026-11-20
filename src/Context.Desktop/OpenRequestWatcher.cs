@@ -5,7 +5,8 @@ namespace Context;
 /// <see cref="DesktopRequest"/>) with one non-recursive <see cref="FileSystemWatcher"/>, and handles a request that is
 /// already there at <see cref="Start"/>. Each request is read through <see cref="BoundedFile"/> (at most
 /// <see cref="DesktopRequest.MaxBytes"/> bytes), deleted, and raises <see cref="ItemRequested"/> only when it is exactly
-/// <c>item &lt;n&gt;</c> with a valid number (<see cref="DesktopRequest.ParseItem"/>). Anything else is deleted and
+/// <c>item &lt;n&gt;</c> with a valid number (<see cref="DesktopRequest.ParseItem"/>), or <see cref="ShowRequested"/>
+/// only when it is exactly <c>show</c> (<see cref="DesktopRequest.IsShow"/>, job 315). Anything else is deleted and
 /// ignored; the content never becomes a path. Requests are handled one at a time.
 /// </summary>
 internal sealed class OpenRequestWatcher : IDisposable
@@ -23,6 +24,9 @@ internal sealed class OpenRequestWatcher : IDisposable
 
     /// <summary>Raised with the work item number of each valid request, on a pool thread.</summary>
     public event Action<int>? ItemRequested;
+
+    /// <summary>Raised for each show request of a second desktop copy (job 315), on a pool thread.</summary>
+    public event Action? ShowRequested;
 
     /// <summary>How many request files were read, deleted and handed on so far, valid or not (tests wait on it).</summary>
     public int Processed => Volatile.Read(ref processed);
@@ -87,10 +91,11 @@ internal sealed class OpenRequestWatcher : IDisposable
         }
     }
 
-    // Reads, deletes and parses the request when there is one; raises ItemRequested outside the lock.
+    // Reads, deletes and parses the request when there is one; raises ItemRequested or ShowRequested outside the lock.
     private void Drain()
     {
         int? item;
+        bool show;
         lock (gate)
         {
             if (disposed)
@@ -98,7 +103,7 @@ internal sealed class OpenRequestWatcher : IDisposable
                 return;
             }
 
-            if (!DesktopRequest.TryTake(root, out item))
+            if (!DesktopRequest.TryTake(root, out item, out show))
             {
                 return;
             }
@@ -109,6 +114,10 @@ internal sealed class OpenRequestWatcher : IDisposable
             if (item is { } requested)
             {
                 ItemRequested?.Invoke(requested);
+            }
+            else if (show)
+            {
+                ShowRequested?.Invoke();
             }
         }
         finally

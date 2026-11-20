@@ -11,6 +11,7 @@ public sealed class OpenRequestWatcherTests : IDisposable
 
     private readonly string root = Path.Combine(Path.GetTempPath(), "context-watch-" + Guid.NewGuid().ToString("N"));
     private readonly ConcurrentQueue<int> requested = new ConcurrentQueue<int>();
+    private int shown;
 
     public OpenRequestWatcherTests()
     {
@@ -29,6 +30,7 @@ public sealed class OpenRequestWatcherTests : IDisposable
     {
         OpenRequestWatcher watcher = new OpenRequestWatcher(root);
         watcher.ItemRequested += requested.Enqueue;
+        watcher.ShowRequested += () => Interlocked.Increment(ref shown);
         watcher.Start();
         return watcher;
     }
@@ -121,5 +123,85 @@ public sealed class OpenRequestWatcherTests : IDisposable
 
         Assert.Equal(0, watcher.Processed);
         Assert.True(File.Exists(DesktopRequest.RequestPath(root)));
+    }
+
+    // 315 AC-7: a show request (with or without \r\n) raises ShowRequested once, no item, and is deleted and counted.
+    [Theory]
+    [InlineData("show")]
+    [InlineData("show\n")]
+    [InlineData("show\r\n")]
+    public void ShowRequest_RaisesShowOnce(string content)
+    {
+        using OpenRequestWatcher watcher = Start();
+
+        WriteRaw(Encoding.ASCII.GetBytes(content));
+        WaitProcessed(watcher, 1);
+
+        Assert.Equal(1, Volatile.Read(ref shown));
+        Assert.Empty(requested);
+        Assert.True(SpinWait.SpinUntil(() => !File.Exists(DesktopRequest.RequestPath(root)), Wait));
+    }
+
+    // 315 AC-7: the request DesktopRequest.WriteShow leaves at start is handled like any other.
+    [Fact]
+    public void Start_ExistingShowRequest_Handled()
+    {
+        DesktopRequest.WriteShow(root);
+
+        using OpenRequestWatcher watcher = Start();
+
+        WaitProcessed(watcher, 1);
+        Assert.Equal(1, Volatile.Read(ref shown));
+        Assert.Empty(requested);
+        Assert.False(File.Exists(DesktopRequest.RequestPath(root)));
+    }
+
+    // 315 AC-7: anything close to show raises nothing and is deleted; an item request still works after it.
+    [Theory]
+    [InlineData("show me")]
+    [InlineData("SHOW")]
+    [InlineData("show\n\n")]
+    [InlineData("show                                                            \n")]
+    public void NearShow_DeletedAndIgnored(string content)
+    {
+        using OpenRequestWatcher watcher = Start();
+
+        WriteRaw(Encoding.ASCII.GetBytes(content));
+        WaitProcessed(watcher, 1);
+        Assert.True(SpinWait.SpinUntil(() => !File.Exists(DesktopRequest.RequestPath(root)), Wait));
+        DesktopRequest.WriteItem(root, 5);
+        WaitProcessed(watcher, 2);
+
+        Assert.Equal(0, Volatile.Read(ref shown));
+        Assert.Equal([5], requested.ToArray());
+    }
+
+    // 315 AC-7: a 65-byte request that starts with show is deleted and raises nothing.
+    [Fact]
+    public void OversizeShow_DeletedAndIgnored()
+    {
+        byte[] bytes = Encoding.ASCII.GetBytes("show\n" + new string(' ', DesktopRequest.MaxBytes - 4));
+        Assert.Equal(DesktopRequest.MaxBytes + 1, bytes.Length);
+        WriteRaw(bytes);
+
+        using OpenRequestWatcher watcher = Start();
+
+        WaitProcessed(watcher, 1);
+        Assert.Equal(0, Volatile.Read(ref shown));
+        Assert.Empty(requested);
+        Assert.False(File.Exists(DesktopRequest.RequestPath(root)));
+    }
+
+    // 315 AC-7: an item request raises no show.
+    [Fact]
+    public void ItemRequest_RaisesNoShow()
+    {
+        using OpenRequestWatcher watcher = Start();
+
+        DesktopRequest.WriteItem(root, 3);
+        WaitProcessed(watcher, 1);
+
+        Assert.Equal([3], requested.ToArray());
+        Assert.Equal(0, Volatile.Read(ref shown));
     }
 }

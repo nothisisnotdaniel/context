@@ -141,7 +141,16 @@ Every factory agent reads this file before working on Context. Keep it short and
     start) takes each request through `DesktopRequest.TryTake` (at most 64 bytes through `BoundedFile`, deleted, only
     exactly `item <n>` raises `ItemRequested`), then `DesktopActions.OpenRequestedItem` offers the page
     (`DesktopState.OfferItemPage`/`TakeItemPage`) and `Main` opens it through `RequestOpen` (unsaved text saved first,
-    else the discard dialog). Tests wait on the watcher's `Processed` count with a bounded `SpinWait`.
+    else the discard dialog). **Second copy** (job 315): `DesktopStartup.Begin(root, crashLog, isWindows)` (called by
+    `Program.cs` right after the crash log is built, before anything else) takes the lock first and returns
+    `DesktopStart(Lock, Hint, HandOver)`: taken, it calls `CrashLog.Begin()`; held by another holder (`IOException`), it
+    never touches the session (no hint, no `unclean-exit` log), and on Windows writes the show request
+    (`DesktopRequest.WriteShow`: `show\n`, same temp + move) and hands over, so `Main` returns at once (no window, no
+    `End()`); elsewhere the copy runs as before; can't be made (folder or access), no lock and `Begin()` as before;
+    never throws. The lock is held until `Main` exits. `DesktopRequest.IsShow` accepts exactly `show` (optional final
+    `\n`/`\r\n`), `TryTake(root, out item, out show)` tells it apart, and the watcher raises `ShowRequested`, which
+    `Program.cs` turns into restore-and-raise of the main window on its thread (`SetMinimized(false)`, `SetTopMost`
+    on and off). Tests wait on the watcher's `Processed` count with a bounded `SpinWait`.
   - **Attributes and page types:** (job 157) `AttributeParser.Parse` finds `key:: value` lines outside fences (key at
     column 0: a letter, then letters, digits, `-`, `_`, at most 50, lower-cased invariant, directly followed by `::`;
     value trimmed, whitespace runs one space, 1 to 400 chars, so `role::` is no attribute); a key may repeat, pairs
@@ -1828,7 +1837,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     folder (`CrashLog.IsPlainFolder`), or `session` is a link, a folder or a reparse point, the write is skipped.
     `Program.cs` builds it right after `VelopackApp.Build().Run()` (`NoteStore.DefaultFolder()`, OS description +
     architecture, `StartupUpdate.CurrentVersion`, the user profile), hooks `AppDomain.UnhandledException` (`unhandled`)
-    and `TaskScheduler.UnobservedTaskException` (`unobserved-task`, then `SetObserved()`), calls `Begin()`, registers the
+    and `TaskScheduler.UnobservedTaskException` (`unobserved-task`, then `SetObserved()`), calls `Begin()` only through
+    `DesktopStartup.Begin` once it holds `<root>/.desktop/running.lock` (job 315: a second copy never reads or writes
+    `session`), registers the
     log and the hint (when there is one) as singletons, and calls `End()` after `app.Run()`. `App.razor` wraps `<Main />`
     in `CrashBoundary` (`ErrorBoundaryBase`; `OnErrorAsync` writes source `component`; shows red `p.crash-boundary`
     `Something went wrong. Crash log: <path>. Close and reopen Context.`). `Main` renders `CrashHintBar` first: with a
