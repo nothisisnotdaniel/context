@@ -230,6 +230,29 @@ public sealed class PeoplePanelTests : IDisposable
         Assert.Empty(cut.FindAll("button.people-clear"));
     }
 
+    // 332 AC-6: a comma-separated affiliation shows its parts in the details, gives one option per part, and either
+    // option keeps the person in the list.
+    [Fact]
+    public async Task AffiliationList_DetailsAndOneOptionPerPart()
+    {
+        data.WriteNote("people", "# people\n");
+        data.WriteFile(Path.Combine("people", "Anna.md"), "# Anna\naffiliation:: [[ACME]], Beta GmbH\n");
+        data.WriteFile(Path.Combine("people", "Bob.md"), "# Bob\naffiliation:: Gamma\n");
+        await data.RefreshAsync();
+        IRenderedComponent<PeoplePanel> cut = data.Bunit.Render<PeoplePanel>();
+        cut.WaitForAssertion(() => Assert.NotNull(cut.Find("select.people-affiliation")), Wait);
+
+        Assert.Equal("ACME, Beta GmbH", Details(cut, "Anna"));
+        Assert.Equal(
+            [("", "All"), ("acme", "ACME"), ("beta gmbh", "Beta GmbH"), ("gamma", "Gamma")],
+            Options(cut.Find("select.people-affiliation")));
+
+        await cut.Find("select.people-affiliation").ChangeAsync(new ChangeEventArgs { Value = "acme" });
+        Assert.Equal(["Anna"], RowNames(cut));
+        await cut.Find("select.people-affiliation").ChangeAsync(new ChangeEventArgs { Value = "beta gmbh" });
+        Assert.Equal(["Anna"], RowNames(cut));
+    }
+
     // 291 AC-6: filters that match no one show the grey line in place of the list and stay visible.
     [Fact]
     public async Task Filters_NoMatch_GreyLine_FiltersStay()

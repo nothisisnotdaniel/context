@@ -55,6 +55,9 @@ start at the beginning (no indent, not in code). A line with no value, such as `
 nothing. A value that is one `[[link]]` is also a note link, so `ACME` lists Anna under `linked from`.
 `context find role Bereichsleiter` prints the names of the notes with that attribute, one per line (none: no output);
 values match ignoring case, and `[[ACME]]`, `ACME` and `acme` are the same value.
+An `affiliation::` value is a comma-separated list, so `affiliation:: [[ACME]], Beta GmbH` gives Anna two affiliations,
+and `context find affiliation Beta GmbH`, `/find` and the People filter match her on either one. A comma always splits
+it, so write a name that contains a comma as a link (`[[Smith, Jones & Co]]`); other keys are never split.
 
 A page's types are its `type::` lines (`type:: organization`); a page under `people` without one is a `person`.
 `context find type person` lists them. Each type has attributes (`person` comes with

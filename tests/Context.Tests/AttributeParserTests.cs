@@ -101,4 +101,44 @@ public sealed class AttributeParserTests
     {
         Assert.Equal(nameof(PageAttribute), new PageAttribute("k", "secret").ToString());
     }
+
+    // 332 AC-1: a list value splits at commas outside [[...]], each part collapsed and trimmed, empty parts dropped,
+    // order kept, not deduped.
+    [Theory]
+    [InlineData("ACME, [[Beta GmbH]] ,, , Gamma", "ACME|[[Beta GmbH]]|Gamma")]
+    [InlineData("[[ACME, Inc.]], Beta", "[[ACME, Inc.]]|Beta")]
+    [InlineData(" , ", "")]
+    [InlineData("", "")]
+    [InlineData("ACME", "ACME")]
+    [InlineData("  Head   of\tSales ,x", "Head of Sales|x")]
+    [InlineData("a, a", "a|a")]
+    [InlineData("[[open, x", "[[open|x")]
+    [InlineData("[[A]], [[B, C]],D", "[[A]]|[[B, C]]|D")]
+    public void ListParts_SplitsOutsideLinks(string value, string expected)
+    {
+        Assert.Equal(expected, string.Join("|", AttributeParser.ListParts(value)));
+    }
+
+    // 332 AC-8: Parse never splits a value; other keys stay one value.
+    [Fact]
+    public void Parse_KeepsCommaValueWhole()
+    {
+        Assert.Equal("role=Lead, Sales", Describe(AttributeParser.Parse("role:: Lead, Sales")));
+    }
+
+    // 332 AC-10: the README attributes section explains comma-separated affiliation values.
+    [Fact]
+    public void Readme_MentionsAffiliationList()
+    {
+        DirectoryInfo? dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Context.slnx")))
+        {
+            dir = dir.Parent;
+        }
+
+        Assert.NotNull(dir);
+        string text = File.ReadAllText(Path.Combine(dir.FullName, "README.md"));
+        Assert.Contains("comma-separated", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("affiliation:: [[ACME]], Beta GmbH", text, StringComparison.Ordinal);
+    }
 }

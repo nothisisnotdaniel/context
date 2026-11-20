@@ -80,7 +80,7 @@ public sealed class WorkItemIndexTests : IDisposable
         Assert.Equal(["Alpha", "beta", "items", "items/99"], index.NotesWithItem(1234));
         Assert.Equal(["Alpha"], index.NotesWithItem(99));
         Assert.Empty(index.NotesWithItem(5));
-        Assert.Equal(15, TagIndex.ParserVersion);
+        Assert.Equal(16, TagIndex.ParserVersion);
     }
 
     // 280 AC-2: an edit adds and removes the row; a deleted note goes too.
@@ -115,7 +115,7 @@ public sealed class WorkItemIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(["Plan"], index.NotesWithItem(1234));
-        Assert.Equal(15, Scalar("PRAGMA user_version"));
+        Assert.Equal(16, Scalar("PRAGMA user_version"));
 
         // Once re-parsed, an unchanged note is not read again: a row removed by hand stays removed.
         Execute("DELETE FROM note_items;");

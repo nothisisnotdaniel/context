@@ -266,8 +266,9 @@ internal sealed class TagIndex
     /// (<c>note_items</c>). 14: <c>note_text_rows</c> (note -> <c>note_text</c> rowid), <c>note_skipped</c> (notes over
     /// <see cref="NoteStore.MaxNoteBytes"/>) and the link keys <c>note_links.whole_key</c>/<c>part_key</c>. 15: note
     /// todos are <c>- { }</c> lines (job 329); a <c>- [ ]</c> line is a note-local checkbox and no longer in <c>note_todos</c>.
+    /// 16: an <c>affiliation::</c> value is a comma-separated list (job 332), one <c>note_attributes</c> row per part.
     /// </summary>
-    public const int ParserVersion = 15;
+    public const int ParserVersion = 16;
 
     /// <summary>
     /// How long opening <c>context.db</c> and starting <see cref="Sync"/>'s write transaction wait while another
@@ -449,16 +450,26 @@ internal sealed class TagIndex
                 }
 
                 Execute(connection, transaction, "DELETE FROM note_attributes WHERE note = $note", ("$note", note.Name));
+                HashSet<string> affiliations = new(StringComparer.Ordinal);
                 foreach (PageAttribute attribute in attributes)
                 {
-                    Execute(
-                        connection,
-                        transaction,
-                        "INSERT INTO note_attributes(note, key, value_key, value) VALUES($note, $key, $valueKey, $value)",
-                        ("$note", note.Name),
-                        ("$key", attribute.Key),
-                        ("$valueKey", AttributeParser.ValueKey(attribute.Value)),
-                        ("$value", attribute.Value));
+                    if (attribute.Key == PeopleAttributes.AffiliationKey)
+                    {
+                        // An affiliation is a list: one row per part, each value_key once per note (first spelling).
+                        foreach (string part in AttributeParser.ListParts(attribute.Value))
+                        {
+                            string partKey = AttributeParser.ValueKey(part);
+                            if (affiliations.Add(partKey))
+                            {
+                                InsertAttribute(connection, transaction, note.Name, attribute.Key, partKey, part);
+                            }
+                        }
+
+                        continue;
+                    }
+
+                    InsertAttribute(
+                        connection, transaction, note.Name, attribute.Key, AttributeParser.ValueKey(attribute.Value), attribute.Value);
                 }
 
                 Execute(connection, transaction, "DELETE FROM note_decisions WHERE note = $note", ("$note", note.Name));
@@ -1568,6 +1579,17 @@ internal sealed class TagIndex
         command.CommandText = sql;
         return command;
     }
+
+    private static void InsertAttribute(
+        SqliteConnection connection, SqliteTransaction transaction, string note, string key, string valueKey, string value) =>
+        Execute(
+            connection,
+            transaction,
+            "INSERT INTO note_attributes(note, key, value_key, value) VALUES($note, $key, $valueKey, $value)",
+            ("$note", note),
+            ("$key", key),
+            ("$valueKey", valueKey),
+            ("$value", value));
 
     private static void Execute(
         SqliteConnection connection,
