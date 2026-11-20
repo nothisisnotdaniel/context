@@ -285,4 +285,17 @@ public sealed class TodoMarkerConversionTests : IDisposable
         Assert.Equal(["Can't convert the todos in bad?name."], TodoMarkerConversion.Report(result, n => n.Replace('\u0007', '?')));
         Assert.Equal(nameof(TodoMarkerConversionResult), result.ToString());
     }
+
+    // 330 AC-4: the conversion leaves a "[>]" line byte for byte, also next to a converted line.
+    [Theory]
+    [InlineData("- [>] text")]
+    [InlineData("  * [>] text\r\n")]
+    [InlineData("+ [>] a\n- [ ] b\n")]
+    public void Convert_CarryLine_Unchanged(string text)
+    {
+        string converted = TodoMarkerConversion.Convert(text, out int changed);
+
+        Assert.Equal(text.Replace("- [ ] b", "- { } b", StringComparison.Ordinal), converted);
+        Assert.Equal(text.Contains("[ ]", StringComparison.Ordinal) ? 1 : 0, changed);
+    }
 }

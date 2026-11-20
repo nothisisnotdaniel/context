@@ -99,8 +99,10 @@ function splitItem(state, dispatch) {
   for (let depth = $from.depth; depth > 0; depth--) {
     const node = $from.node(depth);
     if (node.type === schema.nodes.list_item) {
-      // A task item's new item is an unchecked task of the same kind (a todo stays a todo, a checkbox a checkbox).
-      const attrs = node.attrs.checked === null ? null : { checked: false, kind: node.attrs.kind };
+      // A task item's new item is an unchecked task of the same kind (a todo stays a todo, a checkbox a checkbox); a
+      // carried item's new item is a plain checkbox (job 330).
+      const kind = node.attrs.kind === "carry" ? "local" : node.attrs.kind;
+      const attrs = node.attrs.checked === null ? null : { checked: false, kind };
       return splitListItem(schema.nodes.list_item, attrs)(state, dispatch);
     }
   }
@@ -210,16 +212,19 @@ function rules() {
 }
 
 // The kind and checked state a typed task box stands for: "[ ]" / "[x]" / "[X]" a local checkbox, "{ }" / "{x}" a
-// global todo (job 329).
+// global todo (job 329), "[>]" an open checkbox carried to the next meeting (job 330).
 function taskAttrs(box) {
+  if (box === "[>]") {
+    return { checked: false, kind: "carry" };
+  }
   return { checked: box[1] !== " ", kind: box[0] === "{" ? "global" : "local" };
 }
 
-// Job 329: "- [ ] ", "- [x] ", "- { } " or "- {x} " (also with * or +) at a paragraph start, or the box and a space at
+// Job 329: "- [ ] ", "- [x] ", "- { } " or "- {x} " (job 330: also "- [>] ") (also with * or +) at a paragraph start, or the box and a space at
 // the start of an empty plain list item (what "- " leaves), turns the block into a task item of that kind at once. The
 // typed text goes and the caret stays where it was put: right after the box, at the item's text start.
 function taskRules() {
-  const paragraphRule = new InputRule(/^\s*[-*+]\s(\[[ xX]\]|\{[ x]\})\s$/, (state, match, start, end) => {
+  const paragraphRule = new InputRule(/^\s*[-*+]\s(\[[ xX>]\]|\{[ x]\})\s$/, (state, match, start, end) => {
     const $start = state.doc.resolve(start);
     if ($start.parent.type !== schema.nodes.paragraph) {
       return null;
@@ -232,7 +237,7 @@ function taskRules() {
     }
     return tr.wrap(range, wrapping);
   });
-  const itemRule = new InputRule(/^(\[[ xX]\]|\{[ x]\})\s$/, (state, match, start, end) => {
+  const itemRule = new InputRule(/^(\[[ xX>]\]|\{[ x]\})\s$/, (state, match, start, end) => {
     const $start = state.doc.resolve(start);
     const depth = $start.depth - 1;
     if ($start.parent.type !== schema.nodes.paragraph || depth < 1) {
@@ -247,11 +252,60 @@ function taskRules() {
   return [paragraphRule, itemRule];
 }
 
-/** The transaction that ticks or unticks the task item at pos in state; it keeps the item's kind. */
+/**
+ * The transaction that ticks or unticks the task item at pos in state; it keeps the item's kind, except that a ticked
+ * carried item (- [>]) becomes a ticked checkbox (- [x], job 330).
+ */
 export function toggleTask(state, pos) {
   const node = state.doc.nodeAt(pos);
-  return state.tr.setNodeMarkup(pos, null, { ...node.attrs, checked: !node.attrs.checked });
+  const kind = node.attrs.kind === "carry" ? "local" : node.attrs.kind;
+  return state.tr.setNodeMarkup(pos, null, { ...node.attrs, checked: !node.attrs.checked, kind });
 }
+
+// True for an open local task item: an unticked checkbox (- [ ]) or a carried one (- [>]).
+function carriable(node) {
+  return node.type === schema.nodes.list_item && node.attrs.checked === false
+    && (node.attrs.kind === "local" || node.attrs.kind === "carry");
+}
+
+/**
+ * Job 330: the transaction that marks the open checkbox at pos for the next meeting (- [ ] to - [>]) or takes the
+ * mark off again (- [>] to - [ ]); null for any other item (ticked, global or plain).
+ */
+export function toggleCarry(state, pos) {
+  const node = state.doc.nodeAt(pos);
+  if (!node || !carriable(node)) {
+    return null;
+  }
+  return state.tr.setNodeMarkup(pos, null, { ...node.attrs, kind: node.attrs.kind === "carry" ? "local" : "carry" });
+}
+
+// Mod-Alt-n (job 330): toggleCarry on the innermost task item around the selection's start. Outside a task item, or
+// in a ticked or global one, nothing changes and the key is not handled (so AltGr+N, which is Ctrl+Alt+N on Windows,
+// still types its letter there).
+function carryCommand(state, dispatch) {
+  const { $from } = state.selection;
+  for (let depth = $from.depth; depth > 0; depth--) {
+    const node = $from.node(depth);
+    if (node.type === schema.nodes.list_item && node.attrs.checked !== null) {
+      const tr = toggleCarry(state, $from.before(depth));
+      if (!tr) {
+        return false;
+      }
+      if (dispatch) {
+        dispatch(tr);
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+// The carry key as the platform names it, for the box's title and aria-keyshortcuts (prosemirror-keymap's Mod is
+// Cmd on a Mac, Ctrl elsewhere).
+const onMac = typeof navigator !== "undefined" && /Mac|iP(hone|[oa]d)/.test(navigator.platform || "");
+const carryKeyTitle = onMac ? "Cmd+Option+N" : "Ctrl+Alt+N";
+const carryKeyAria = onMac ? "Meta+Alt+N" : "Control+Alt+N";
 
 // `text` becomes inline code when the closing backtick is typed (job 290): a span of at least one character with no
 // backtick, chip or line break, whose opening backtick follows neither a backtick nor a backslash. Never in a code
@@ -647,6 +701,7 @@ function editorKeys() {
     "Mod-e": toggleInlineCode,
     "Mod-`": toggleInlineCode,
     "Mod-Alt-c": toggleCodeBlock,
+    "Mod-Alt-n": carryCommand,
     "Enter": chainCommands(newlineInCode, enterFence, splitItem),
     "Tab": sinkListItem(schema.nodes.list_item),
     "Shift-Tab": liftListItem(schema.nodes.list_item),
@@ -667,6 +722,15 @@ function listItemView(node, view, getPos) {
     dom.className = node.attrs.checked === null ? "" : taskClass(node);
     if (box) {
       box.setAttribute("aria-checked", node.attrs.checked ? "true" : "false");
+      // Job 330: an open local box names how to carry it to the next meeting (or take that back).
+      if (carriable(node)) {
+        const action = node.attrs.kind === "carry" ? "keep it in this meeting" : "carry it to the next meeting";
+        box.setAttribute("aria-keyshortcuts", carryKeyAria);
+        box.title = "Right-click or " + carryKeyTitle + ": " + action;
+      } else {
+        box.removeAttribute("aria-keyshortcuts");
+        box.removeAttribute("title");
+      }
     }
   };
   if (node.attrs.checked !== null) {
@@ -674,14 +738,28 @@ function listItemView(node, view, getPos) {
     box = document.createElement("span");
     box.className = "task-box";
     box.setAttribute("role", "checkbox");
-    // Job 329: the kind is named, not only coloured: a global todo also shows its marker.
-    box.setAttribute("aria-label", global ? "Todo" : "Checkbox");
+    // Job 329: the kind is named, not only coloured: a global todo also shows its marker. Job 330: a carried box is
+    // named too, not only shown by its arrow.
+    box.setAttribute("aria-label", global ? "Todo" : node.attrs.kind === "carry" ? "Next meeting" : "Checkbox");
     box.contentEditable = "false";
     box.addEventListener("mousedown", event => {
       event.preventDefault();
       const pos = getPos();
       if (typeof pos === "number") {
         view.dispatch(toggleTask(view.state, pos));
+      }
+    });
+    // Job 330: a right click on an open local box carries it to the next meeting (or back) and shows no text menu;
+    // on any other box, and anywhere else in the editor, the platform menu stays.
+    box.addEventListener("contextmenu", event => {
+      const pos = getPos();
+      if (typeof pos !== "number" || !carriable(node)) {
+        return;
+      }
+      event.preventDefault();
+      const tr = toggleCarry(view.state, pos);
+      if (tr) {
+        view.dispatch(tr);
       }
     });
     dom.appendChild(box);
@@ -892,6 +970,30 @@ export function toggledMarkdown(markdown, index) {
     throw new Error("No task item " + index + ".");
   }
   return serialize(state.apply(toggleTask(state, found)).doc);
+}
+
+/**
+ * Test hook (job 330): the markdown after toggleCarry on the index-th task item (0-based, document order) of markdown;
+ * an item toggleCarry leaves alone gives markdown as it is. DOM-free.
+ */
+export function carriedMarkdown(markdown, index) {
+  const state = EditorState.create({ doc: parse(String(markdown)) });
+  let found = -1;
+  let seen = 0;
+  state.doc.descendants((node, pos) => {
+    if (found === -1 && node.type === schema.nodes.list_item && node.attrs.checked !== null) {
+      if (seen === index) {
+        found = pos;
+      }
+      seen++;
+    }
+    return found === -1;
+  });
+  if (found === -1) {
+    throw new Error("No task item " + index + ".");
+  }
+  const tr = toggleCarry(state, found);
+  return serialize(tr ? state.apply(tr).doc : state.doc);
 }
 
 /** Test hook: changedCodeBlocks before and after typing text at the ⟦ caret of markdown, as JSON. DOM-free. */

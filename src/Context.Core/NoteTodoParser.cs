@@ -46,6 +46,12 @@ internal static class NoteTodoParser
     /// </summary>
     public const string OpenBox = "[ ]";
 
+    /// <summary>
+    /// The box of a note-local checkbox carried to the next meeting (job 330): <see cref="MeetingCarryOver"/> copies it
+    /// as an open checkbox; never a note todo.
+    /// </summary>
+    public const string CarryBox = "[>]";
+
     /// <summary>The open box of a note todo; <see cref="NoteTodos.Complete"/> turns its first one into <see cref="DoneTodoBox"/>.</summary>
     public const string TodoBox = "{ }";
 
@@ -72,6 +78,13 @@ internal static class NoteTodoParser
     /// is none). Only the meeting carry-over reads them; they are never note todos.
     /// </summary>
     public static IReadOnlyList<ParsedNoteTodo> ParseCheckboxes(string markdown) => Parse(markdown, OpenBox);
+
+    /// <summary>
+    /// The checkboxes marked for the next meeting (<c>- [&gt;] text</c>, job 330) in <paramref name="markdown"/>, in
+    /// line order, by the same rules as <see cref="ParseCheckboxes(string)"/> with <see cref="CarryBox"/> in place of
+    /// <see cref="OpenBox"/>. Only the meeting carry-over reads them; they are never note todos.
+    /// </summary>
+    public static IReadOnlyList<ParsedNoteTodo> ParseCarried(string markdown) => Parse(markdown, CarryBox);
 
     /// <summary>The todo on the one <paramref name="line"/> (numbered <paramref name="number"/>), or <c>null</c>.</summary>
     internal static ParsedNoteTodo? ParseLine(int number, string line) => ParseLine(number, line, TodoBox);

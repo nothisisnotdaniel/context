@@ -1306,6 +1306,107 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
         Assert.Equal(JsonValueKind.Null, mixedDoc.RootElement.GetProperty("markdown").ValueKind);
     }
 
+    // 330 AC-5: a "[>]" item is an unchecked task of kind "carry"; it round-trips byte for byte; in code it is text.
+    [Theory]
+    [InlineData("- [>] a\n")]
+    [InlineData("- a\n  - [>] nested\n")]
+    [InlineData("- [>] a\n- [ ] b\n- { } c\n")]
+    [InlineData("```\n- [>] a\n```\n")]
+    public void CarryItem_RoundTripsByteForByte(string markdown)
+    {
+        Assert.Equal(markdown, bundle.Call("roundTrip", markdown));
+        Assert.Equal("true", bundle.Call("isLossless", markdown));
+    }
+
+    // 330 AC-5: a "*" list keeps its "[>]" box; the editor writes every bullet as "-" (house style, as for "* [ ]").
+    [Fact]
+    public void CarryItem_StarBullet_KeepsTheBox()
+    {
+        Assert.Equal("- [>] a\n", bundle.Call("roundTrip", "* [>] a\n"));
+        Assert.Equal(bundle.Call("roundTrip", "* [ ] a\n").Replace("[ ]", "[>]", StringComparison.Ordinal), bundle.Call("roundTrip", "* [>] a\n"));
+    }
+
+    [Fact]
+    public void CarryItem_DocJson_UncheckedCarry_TextInCode()
+    {
+        using JsonDocument doc = JsonDocument.Parse(bundle.Call("docJson", "- [>] a\n"));
+        JsonElement item = Nodes(doc.RootElement).Single(n => Type(n) == "list_item");
+        Assert.Equal(("False", "carry"), (Attr(item, "checked"), Attr(item, "kind")));
+        Assert.Equal("a", Nodes(item).Where(n => Type(n) == "text").Select(Text).Single());
+
+        using JsonDocument code = JsonDocument.Parse(bundle.Call("docJson", "```\n- [>] a\n```\n"));
+        Assert.DoesNotContain(Nodes(code.RootElement), n => Type(n) == "list_item");
+        Assert.Equal("- [>] a", Nodes(code.RootElement).Where(n => Type(n) == "text").Select(Text).Single());
+    }
+
+    // 330 AC-6: carriedMarkdown turns "[ ]" into "[>]" and back; other boxes stay as they are.
+    [Theory]
+    [InlineData("- [ ] a\n", 0, "- [>] a\n")]
+    [InlineData("- [>] a\n", 0, "- [ ] a\n")]
+    [InlineData("- [x] a\n", 0, "- [x] a\n")]
+    [InlineData("- { } a\n", 0, "- { } a\n")]
+    [InlineData("- {x} a\n", 0, "- {x} a\n")]
+    [InlineData("- { } a\n- [ ] b\n", 1, "- { } a\n- [>] b\n")]
+    [InlineData("1. [ ] a\n", 0, "1. [>] a\n")]
+    public void Carried_TogglesOnlyOpenCheckboxes(string markdown, int index, string expected)
+    {
+        string json = bundle.Json($"ContextEditor.carriedMarkdown({Js(markdown)}, {index})");
+
+        Assert.Equal(expected, JsonSerializer.Deserialize<string>(json));
+    }
+
+    // 330 AC-7: ticking a "[>]" item gives "[x]" (and unticking that "[ ]"); Enter in it makes a "[ ]" item.
+    [Fact]
+    public void CarryItem_TickAndEnter()
+    {
+        string ticked = JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.toggledMarkdown({Js("- [>] a\n")}, 0)"))!;
+        Assert.Equal("- [x] a\n", ticked);
+        Assert.Equal("- [ ] a\n", JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.toggledMarkdown({Js(ticked)}, 0)")));
+
+        string json = bundle.Json($"ContextEditor.commandMarkdown({Js("- [>] a\u27e6")}, \"Enter\", \"b\")");
+        Assert.Equal("- [>] a\n- [ ] b", JsonSerializer.Deserialize<string>(json));
+    }
+
+    // 330 AC-8: typing "- [>] " at a paragraph start, or "[>] " in an empty plain item, makes a carry item at once.
+    [Theory]
+    [InlineData("\u27e6", "- [>] abc", "- [>] abc")]
+    [InlineData("\u27e6", "* [>] abc", "- [>] abc")]
+    [InlineData("\u27e6rest", "+ [>] ", "- [>] rest")]
+    [InlineData("- \u27e6", "[>] abc", "- [>] abc")]
+    public void Typing_CarryBox_MakesCarryItem(string markdown, string typed, string expected)
+    {
+        Assert.Equal(expected, TypedAt(markdown, typed));
+        using JsonDocument doc = JsonDocument.Parse(bundle.Call("docJson", TypedAt(markdown, typed)));
+        JsonElement item = Nodes(doc.RootElement).Single(n => Type(n) == "list_item");
+        Assert.Equal(("False", "carry"), (Attr(item, "checked"), Attr(item, "kind")));
+    }
+
+    [Fact]
+    public void Typing_CarryBox_CommandMarkdown_GivesCarryItem()
+    {
+        string json = bundle.Json($"ContextEditor.commandMarkdown({Js("- \u27e6")}, \"Mod-Alt-n\", \"[>] abc\")");
+
+        Assert.Equal("- [>] abc", JsonSerializer.Deserialize<string>(json));
+    }
+
+    // 330 AC-9: Mod-Alt-n toggles the innermost task item around the caret; elsewhere the document stays the same.
+    [Theory]
+    [InlineData("- [ ] a\u27e6b", "- [>] ab")]
+    [InlineData("- [>] \u27e6ab", "- [ ] ab")]
+    [InlineData("- [ ] outer\n  - [ ] in\u27e6ner", "- [ ] outer\n  - [>] inner")]
+    [InlineData("- [ ] outer\n  - { } in\u27e6ner", "- [ ] outer\n  - { } inner")]
+    [InlineData("- [x] a\u27e6b", "- [x] ab")]
+    [InlineData("- { } a\u27e6b", "- { } ab")]
+    [InlineData("- {x} a\u27e6b", "- {x} ab")]
+    [InlineData("- a\u27e6b", "- ab")]
+    [InlineData("a\u27e6b", "ab")]
+    public void CarryKey_TogglesInnermostOpenCheckbox(string markdown, string expected)
+    {
+        string json = bundle.Json($"ContextEditor.commandMarkdown({Js(markdown)}, \"Mod-Alt-n\")");
+
+        Assert.Equal(expected, JsonSerializer.Deserialize<string>(json));
+    }
+
     private string TypedAt(string markdown, string typed) =>
         JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.typedAtMarkdown({Js(markdown)}, {Js(typed)})"))!;
 

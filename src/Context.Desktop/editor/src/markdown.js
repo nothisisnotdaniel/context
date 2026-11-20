@@ -230,8 +230,9 @@ md.inline.ruler.before("link", "attachment_link", attachmentLinkRule);
 md.inline.ruler.before("link", "tag", tagRule);
 md.inline.ruler.before("link", "mention", mentionRule);
 
-// "[ ]" / "[x]" / "[X]": a local checkbox; "{ }" / "{x}": a global note todo.
-const TaskRe = /^(?:\[([ xX])\]|\{([ x])\})(?: |$)/;
+// "[ ]" / "[x]" / "[X]": a local checkbox; "[>]": a local checkbox carried to the next meeting (job 330); "{ }" /
+// "{x}": a global note todo.
+const TaskRe = /^(?:\[([ xX>])\]|\{([ x])\})(?: |$)/;
 
 // Soft line breaks stay line breaks (the text keeps its wrapping), and "[ ] " / "[x] " / "{ } " / "{x} " at the
 // start of a list item's first paragraph becomes the item's checked and kind attributes.
@@ -254,7 +255,10 @@ function tidy(tokens) {
       const match = first && first.type === "text" ? TaskRe.exec(first.content) : null;
       if (match) {
         const local = match[1] !== undefined;
-        token.meta = { checked: (local ? match[1] : match[2]) !== " ", kind: local ? "local" : "global" };
+        const carry = match[1] === ">";
+        token.meta = carry
+          ? { checked: false, kind: "carry" }
+          : { checked: (local ? match[1] : match[2]) !== " ", kind: local ? "local" : "global" };
         first.content = first.content.slice(match[0].length);
       }
     }
@@ -328,6 +332,9 @@ function taskPrefix(item) {
   }
   if (item.attrs.kind === "global") {
     return item.attrs.checked ? "{x} " : "{ } ";
+  }
+  if (item.attrs.kind === "carry" && !item.attrs.checked) {
+    return "[>] ";
   }
   return item.attrs.checked ? "[x] " : "[ ] ";
 }

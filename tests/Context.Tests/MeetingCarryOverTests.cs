@@ -194,4 +194,26 @@ public sealed class MeetingCarryOverTests : IDisposable
 
         Assert.DoesNotContain("more in the previous note", MeetingCarryOver.Section("P", points), StringComparison.Ordinal);
     }
+
+    // 330 AC-2: "[>]" lines come over as "- [ ] " plus the text after the marker as written, in line order with the
+    // open todos, checkboxes and open points; done lines do not.
+    [Fact]
+    public void Extract_CarriedLines_AsOpenCheckboxes_InLineOrder()
+    {
+        string markdown = "# N\n- { } todo\n  * [>] carried  `code`  due:2026-01-01\n- [x] done box\n- {x} done todo\n"
+            + "- [ ] box\n+ [>] second\n```\n- [>] fenced\n```\n## Open points\n- open point\n## Next\n- [>] last\n";
+
+        Assert.Equal(
+            ["- { } todo", "- [ ] carried  `code`  due:2026-01-01", "- [ ] box", "- [ ] second", "- open point", "- [ ] last"],
+            MeetingCarryOver.Extract(markdown));
+    }
+
+    // 330 AC-3: a "[>]" line inside an Open points section appears once, as an open checkbox.
+    [Fact]
+    public void Extract_CarriedLineInOpenPoints_Once()
+    {
+        string markdown = "## Open points\n- plain\n- [>] carried\r\n- [ ] box\n";
+
+        Assert.Equal(["- plain", "- [ ] carried", "- [ ] box"], MeetingCarryOver.Extract(markdown));
+    }
 }

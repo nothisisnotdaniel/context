@@ -3179,13 +3179,75 @@ public sealed class DesktopSourceTests
         Assert.Matches(@"\.note-editor-body \.task-marker \{[^}]*background: var\(--accent-strong\)", editorCss);
         Assert.Contains(editorCss, builtCss, StringComparison.Ordinal);
         Assert.Contains("\"task \" + kind + (node.attrs.checked ? \" done\" : \"\")", schema, StringComparison.Ordinal);
-        Assert.Contains("box.setAttribute(\"aria-label\", global ? \"Todo\" : \"Checkbox\");", view, StringComparison.Ordinal);
+        Assert.Contains("box.setAttribute(\"aria-label\", global ? \"Todo\" : node.attrs.kind === \"carry\" ? \"Next meeting\" : \"Checkbox\");", view, StringComparison.Ordinal);
         Assert.Matches(
             @"if \(global\) \{\s*const marker = document\.createElement\(""span""\);\s*marker\.className = ""task-marker"";\s*marker\.setAttribute\(""aria-hidden"", ""true""\);",
             view);
         foreach (string needle in new[] { "task-marker", "\"Todo\"", "\"Checkbox\"", "toggledMarkdown" })
         {
             Assert.Contains(needle, bundle, StringComparison.Ordinal);
+        }
+    }
+
+    // ---- 330: carry a line to the next meeting ----
+
+    // 330 AC-10: the box handles contextmenu (preventDefault and toggleCarry only for an open local item), a carried
+    // box is named "Next meeting", every open local box names the right click and the key, editor.css draws the arrow,
+    // and the committed bundle and stylesheet have it all.
+    [Fact]
+    public void CarryBox_ContextMenuLabelsKeyAndArrow()
+    {
+        string desktop = Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder);
+        string editorCss = File.ReadAllText(Path.Combine(desktop, "editor", "src", "editor.css"));
+        string view = File.ReadAllText(Path.Combine(desktop, "editor", "src", "view.js"));
+        string bundle = File.ReadAllText(Path.Combine(desktop, "wwwroot", "editor", "editor.js"));
+        string builtCss = File.ReadAllText(Path.Combine(desktop, "wwwroot", "editor", "editor.css"));
+
+        Assert.Matches(
+            @"box\.addEventListener\(""contextmenu"", event => \{\s*const pos = getPos\(\);\s*if \(typeof pos !== ""number"" \|\| !carriable\(node\)\) \{\s*return;\s*\}\s*event\.preventDefault\(\);\s*const tr = toggleCarry\(view\.state, pos\);",
+            view);
+        Assert.Matches(
+            @"function carriable\(node\) \{\s*return node\.type === schema\.nodes\.list_item && node\.attrs\.checked === false\s*&& \(node\.attrs\.kind === ""local"" \|\| node\.attrs\.kind === ""carry""\);",
+            view);
+        Assert.Contains("node.attrs.kind === \"carry\" ? \"Next meeting\" : \"Checkbox\"", view, StringComparison.Ordinal);
+        Assert.Matches(
+            @"if \(carriable\(node\)\) \{[^}]*box\.setAttribute\(""aria-keyshortcuts"", carryKeyAria\);\s*box\.title = ""Right-click or "" \+ carryKeyTitle",
+            view);
+        Assert.Contains("const carryKeyTitle = onMac ? \"Cmd+Option+N\" : \"Ctrl+Alt+N\";", view, StringComparison.Ordinal);
+        Assert.Contains("const carryKeyAria = onMac ? \"Meta+Alt+N\" : \"Control+Alt+N\";", view, StringComparison.Ordinal);
+        Assert.Contains("\"Mod-Alt-n\": carryCommand,", view, StringComparison.Ordinal);
+        Assert.Matches(@"\.note-editor-body li\.task\.carry > \.task-box::before \{[^}]*content: ", editorCss);
+        Assert.Contains(editorCss, builtCss, StringComparison.Ordinal);
+        foreach (string needle in new[] { "Next meeting", "carriedMarkdown", "aria-keyshortcuts", "contextmenu" })
+        {
+            Assert.Contains(needle, bundle, StringComparison.Ordinal);
+        }
+    }
+
+    // 330 AC-11: the /todo help text and the README's Meeting notes and in-note todos sections name "- [>]", the right
+    // click and the key.
+    [Fact]
+    public void CarryMarker_PaletteAndReadme_NameMarkerClickAndKey()
+    {
+        string root = RepoFiles.Root();
+        string palette = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "CommandPalette.razor"));
+        string todo = palette.Split('\n').Single(l => l.Contains("new PaletteCommand(\"/todo\"", StringComparison.Ordinal));
+        foreach (string needle in new[] { "- [>]", "right-click", "Ctrl/Cmd+Alt+N" })
+        {
+            Assert.Contains(needle, todo, StringComparison.Ordinal);
+        }
+
+        string readme = File.ReadAllText(Path.Combine(root, "README.md")).Replace("\r", string.Empty, StringComparison.Ordinal);
+        foreach (string heading in new[] { "### Meeting notes\n", "### Todos inside notes\n" })
+        {
+            int start = readme.IndexOf(heading, StringComparison.Ordinal);
+            Assert.True(start >= 0, heading);
+            int end = readme.IndexOf("\n#", start + heading.Length, StringComparison.Ordinal);
+            string section = readme[start..(end < 0 ? readme.Length : end)];
+            foreach (string needle in new[] { "- [>]", "right-click", "Ctrl+Alt+N", "Cmd+Option+N" })
+            {
+                Assert.Contains(needle, section, StringComparison.Ordinal);
+            }
         }
     }
 
