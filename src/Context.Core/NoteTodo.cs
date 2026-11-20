@@ -69,7 +69,7 @@ internal sealed record TodoEntry
 /// <summary>How <see cref="NoteTodos.Complete"/> ended.</summary>
 internal enum NoteTodoResult
 {
-    /// <summary>The line's <c>[ ]</c> became <c>[x]</c>.</summary>
+    /// <summary>The line's <c>{ }</c> became <c>{x}</c>.</summary>
     Done,
 
     /// <summary>The line is no longer the todo's line as indexed, or the file changed meanwhile; nothing was written.</summary>
@@ -149,7 +149,7 @@ internal static class NoteTodos
     /// <summary>
     /// Ticks <paramref name="todo"/> in its note: reads the note (<see cref="NoteStore.ReadForEdit"/>) and, only when
     /// line <see cref="NoteTodo.Line"/> is still exactly <see cref="NoteTodo.Raw"/> (ordinal) and still an open todo
-    /// outside a fence, turns the first <c>[ ]</c> on it into <c>[x]</c> and saves through
+    /// outside a fence, turns the first <c>{ }</c> on it into <c>{x}</c> and saves through
     /// <see cref="NoteStore.SaveIfUnchanged(EditableNote, string, out EditableNote?, NoteHistory?)"/> (every other byte,
     /// CRLF and BOM kept; the version is checked again before the move, a change in between is
     /// <see cref="NoteTodoResult.Changed"/>). With <paramref name="history"/> the previous bytes are kept as a version.
@@ -214,7 +214,7 @@ internal static class NoteTodos
             start = text.IndexOf('\n', start) + 1;
         }
 
-        int box = text.IndexOf(NoteTodoParser.OpenBox, start, StringComparison.Ordinal);
-        return string.Concat(text.AsSpan(0, box), "[x]", text.AsSpan(box + NoteTodoParser.OpenBox.Length));
+        int box = text.IndexOf(NoteTodoParser.TodoBox, start, StringComparison.Ordinal);
+        return string.Concat(text.AsSpan(0, box), NoteTodoParser.DoneTodoBox, text.AsSpan(box + NoteTodoParser.TodoBox.Length));
     }
 }

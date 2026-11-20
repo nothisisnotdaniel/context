@@ -31,7 +31,7 @@ public sealed class BoardPanelTests : IDisposable
     [Fact]
     public async Task Render_ShowsColumnsCardsAndMoveButtons()
     {
-        data.WriteNote("Plan", "#launch #status/doing\n- [ ] ship it #launch\n");
+        data.WriteNote("Plan", "#launch #status/doing\n- { } ship it #launch\n");
         data.WriteNote("Idea", "#launch\n");
         await data.RefreshAsync();
         List<string> opened = [];
@@ -148,12 +148,12 @@ public sealed class BoardPanelTests : IDisposable
     [Fact]
     public async Task MoveButton_MovesTheTodoCard()
     {
-        data.WriteNote("Plan", "#launch #status/done\n- [ ] ship it #launch\n");
+        data.WriteNote("Plan", "#launch #status/done\n- { } ship it #launch\n");
         IRenderedComponent<BoardPanel> cut = await RenderBoard();
 
         await MoveButton(cut, BoardPanel.NoStatus, 0, "Move to todo").ClickAsync(new MouseEventArgs());
 
-        Assert.Equal("#launch #status/done\n- [ ] ship it #launch #status/todo\n", File.ReadAllText(PlanPath));
+        Assert.Equal("#launch #status/done\n- { } ship it #launch #status/todo\n", File.ReadAllText(PlanPath));
         cut.WaitForAssertion(() => Assert.Equal(["Plan"], CardNames(cut, "todo")), Wait);
         Assert.Empty(cut.FindAll("section.board-column.no-status"));
         Assert.Equal(["Plan"], CardNames(cut, "done"));

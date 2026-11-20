@@ -1,7 +1,7 @@
 // The bundle's entry: everything the page and the tests use hangs off globalThis.ContextEditor.
 import { roundTrip, isLossless, inlineNodes, docJson, splitTitle, outline, attributeRows, editAttributes, attributeSplit } from "./markdown.js";
 import { chipDom, headingDom } from "./schema.js";
-import { opensChip, typedBlock, typedMarkdown, commandMarkdown, typedAtMarkdown, changedCodeBlocksJson, copyText, toggleInlineCodeIn, toggleCodeBlockIn, mount, getMarkdown, isDirty, markClean, markCleanIf, destroy, focus, insertAttachment, headings, scrollToHeading, attributes, setAttributes, setLinkTitle } from "./view.js";
+import { opensChip, typedBlock, typedMarkdown, commandMarkdown, typedAtMarkdown, toggledMarkdown, changedCodeBlocksJson, copyText, toggleInlineCodeIn, toggleCodeBlockIn, mount, getMarkdown, isDirty, markClean, markCleanIf, destroy, focus, insertAttachment, headings, scrollToHeading, attributes, setAttributes, setLinkTitle } from "./view.js";
 import { pastedMarkdown, titledMarkdown } from "./paste.js";
 import { isMermaidFence, mermaidResultJson, shouldRender } from "./mermaid.js";
 import { tokensJson, languageOptionsJson, withLanguage } from "./highlight.js";
@@ -51,6 +51,8 @@ globalThis.ContextEditor = Object.freeze({
   // picker's options and params rule, and the copy fallback chain (given its clipboard functions).
   commandMarkdown,
   typedAtMarkdown,
+  // Job 329: ticking a task item keeps its kind.
+  toggledMarkdown,
   changedCodeBlocksJson,
   tokensJson,
   languageOptionsJson,

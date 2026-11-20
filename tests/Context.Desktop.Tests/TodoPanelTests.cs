@@ -313,10 +313,10 @@ public sealed class TodoPanelTests : IDisposable
     public async Task Render_NoteTodos_MergedWithNoteButtons()
     {
         data.AddTodo("Stored today", DesktopFixture.Today);
-        WriteNoteInPast("Meeting", "- [ ] call @[Anna] due:2026-10-29\n- [ ] undated\n- [ ] late due:2026-10-01\n");
+        WriteNoteInPast("Meeting", "- { } call @[Anna] due:2026-10-29\n- { } undated\n- { } late due:2026-10-01\n");
         WriteNoteInPast("Projects", "# Projects\n");
         Directory.CreateDirectory(Path.Combine(data.Root, "Projects"));
-        WriteNoteInPast(Path.Combine("Projects", "Big plan"), "- [ ] later due:2026-12-01\n");
+        WriteNoteInPast(Path.Combine("Projects", "Big plan"), "- { } later due:2026-12-01\n");
 
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
 
@@ -341,7 +341,7 @@ public sealed class TodoPanelTests : IDisposable
     [Fact]
     public async Task Render_OnlyNoteTodos_NoEmptyLine()
     {
-        WriteNoteInPast("Meeting", "- [ ] call Anna\n");
+        WriteNoteInPast("Meeting", "- { } call Anna\n");
 
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
 
@@ -349,11 +349,23 @@ public sealed class TodoPanelTests : IDisposable
         Assert.DoesNotContain("No todos yet", cut.Markup, StringComparison.Ordinal);
     }
 
+    // 329 AC-2: a note's "- [ ]" checkbox is no row; its "- { }" todo is the only one.
+    [Fact]
+    public async Task Render_CheckboxAndTodo_OnlyTheTodoRow()
+    {
+        WriteNoteInPast("Meeting", "- [ ] a checkbox\n- { } b todo\n");
+
+        IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
+
+        Assert.Contains("b todo", Assert.Single(cut.FindAll("li.todo")).TextContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("a checkbox", cut.Markup, StringComparison.Ordinal);
+    }
+
     // 201 AC-5: the note button calls OnOpen with the full name; no tick, no dialog, nothing written.
     [Fact]
     public async Task NoteButton_Click_CallsOnOpen_NoTick()
     {
-        WriteNoteInPast("Meeting", "- [ ] call Anna\n");
+        WriteNoteInPast("Meeting", "- { } call Anna\n");
         await data.RefreshAsync();
         List<string> opened = [];
         IRenderedComponent<TodoPanel> cut = data.Bunit.Render<TodoPanel>(p => p
@@ -374,7 +386,7 @@ public sealed class TodoPanelTests : IDisposable
     {
         string path = Path.Combine(data.Root, "Meeting.md");
         Directory.CreateDirectory(data.Root);
-        File.WriteAllBytes(path, [0xEF, 0xBB, 0xBF, .. System.Text.Encoding.UTF8.GetBytes("a\r\n- [ ] call Anna\r\nb\r\n")]);
+        File.WriteAllBytes(path, [0xEF, 0xBB, 0xBF, .. System.Text.Encoding.UTF8.GetBytes("a\r\n- { } call Anna\r\nb\r\n")]);
         File.SetLastWriteTimeUtc(path, new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc));
         data.AddTodo("Stored", DesktopFixture.Today);
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
@@ -392,7 +404,7 @@ public sealed class TodoPanelTests : IDisposable
             Assert.Equal(["Stored"], cut.FindAll("li.todo .text").Select(t => t.TextContent).ToArray());
         }, Wait);
         Assert.Equal(
-            [0xEF, 0xBB, 0xBF, .. System.Text.Encoding.UTF8.GetBytes("a\r\n- [x] call Anna\r\nb\r\n")],
+            [0xEF, 0xBB, 0xBF, .. System.Text.Encoding.UTF8.GetBytes("a\r\n- {x} call Anna\r\nb\r\n")],
             File.ReadAllBytes(path));
         Assert.Equal(["Stored"], data.Todos!.List().Select(t => t.Text).ToArray());
     }
@@ -401,7 +413,7 @@ public sealed class TodoPanelTests : IDisposable
     [Fact]
     public async Task TickNoteTodo_Cancel_WritesNothing()
     {
-        WriteNoteInPast("Meeting", "- [ ] call Anna\n");
+        WriteNoteInPast("Meeting", "- { } call Anna\n");
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
         SortedDictionary<string, string> files = Files();
 
@@ -419,7 +431,7 @@ public sealed class TodoPanelTests : IDisposable
     [InlineData("gone", "Meeting no longer exists. Nothing was done.")]
     public async Task TickNoteTodo_ChangedOrGone_RedText(string how, string text)
     {
-        WriteNoteInPast("Meeting", "- [ ] call Anna\n");
+        WriteNoteInPast("Meeting", "- { } call Anna\n");
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
         string path = Path.Combine(data.Root, "Meeting.md");
         if (how == "gone")
@@ -428,7 +440,7 @@ public sealed class TodoPanelTests : IDisposable
         }
         else
         {
-            File.WriteAllText(path, "- [ ] call Anna today\n");
+            File.WriteAllText(path, "- { } call Anna today\n");
         }
 
         SortedDictionary<string, string> files = Files();
@@ -450,7 +462,7 @@ public sealed class TodoPanelTests : IDisposable
     [Fact]
     public async Task Render_BadDb_RedLine_StoredTodosStay()
     {
-        WriteNoteInPast("Meeting", "- [ ] call Anna\n");
+        WriteNoteInPast("Meeting", "- { } call Anna\n");
         data.AddTodo("Stored", DesktopFixture.Today);
         data.WriteFile(TagIndex.FileName, "not a database at all, not at all, really not");
 
@@ -466,7 +478,7 @@ public sealed class TodoPanelTests : IDisposable
     [Fact]
     public async Task Render_BadTodosJson_NoteTodosStay()
     {
-        WriteNoteInPast("Meeting", "- [ ] call Anna\n");
+        WriteNoteInPast("Meeting", "- { } call Anna\n");
         data.WriteFile(TodoStore.FileName, "[ {");
 
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
@@ -481,8 +493,8 @@ public sealed class TodoPanelTests : IDisposable
     public async Task SensitiveSetUp_TickPlainNoteTodo_NoKeyStoreCall()
     {
         data.Keys = FakeKeyStore.Ready();
-        data.WriteSensitive("Secret", "- [ ] secret todo\n");
-        WriteNoteInPast("Meeting", "- [ ] call Anna\n");
+        data.WriteSensitive("Secret", "- { } secret todo\n");
+        WriteNoteInPast("Meeting", "- { } call Anna\n");
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
         Assert.Equal(["call Anna"], cut.FindAll("li.todo .text").Select(t => t.TextContent).ToArray());
 
@@ -494,7 +506,7 @@ public sealed class TodoPanelTests : IDisposable
             Assert.Equal("Done: call Anna", cut.Find("p.result").TextContent);
             Assert.Empty(cut.FindAll("li.todo"));
         }, Wait);
-        Assert.Equal("- [x] call Anna\n", File.ReadAllText(Path.Combine(data.Root, "Meeting.md")));
+        Assert.Equal("- {x} call Anna\n", File.ReadAllText(Path.Combine(data.Root, "Meeting.md")));
         Assert.Equal(0, data.Keys.Agrees);
     }
 
@@ -502,7 +514,7 @@ public sealed class TodoPanelTests : IDisposable
     [Fact]
     public async Task Render_NoteTodo_HostileTextEncoded()
     {
-        WriteNoteInPast("R&D", "- [ ] <img src=x onerror=alert(1)> \u0001\n");
+        WriteNoteInPast("R&D", "- { } <img src=x onerror=alert(1)> \u0001\n");
 
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
 
@@ -521,7 +533,7 @@ public sealed class TodoPanelTests : IDisposable
         data.AddTodo("Plain", DesktopFixture.Today);
         data.AddTodo("waiting: @[Anna] slides", DesktopFixture.Today.AddDays(-1));
         data.AddTodo("Waiting:@[Bob] contract", DesktopFixture.Today.AddDays(2), time: new TimeOnly(9, 30));
-        WriteNoteInPast("Meeting", "- [ ] waiting: @[Cleo] notes due:2026-10-30\n- [ ] plain note todo\n");
+        WriteNoteInPast("Meeting", "- { } waiting: @[Cleo] notes due:2026-10-30\n- { } plain note todo\n");
 
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
 
@@ -606,11 +618,11 @@ public sealed class TodoPanelTests : IDisposable
         Assert.Equal(["waiting: @[Anna] slides"], data.Todos.ListDone().Select(t => t.Text).ToArray());
     }
 
-    // 243 AC-3: ticking a note's waiting-for row turns its [ ] into [x].
+    // 243 AC-3: ticking a note's waiting-for row turns its { } into {x}.
     [Fact]
     public async Task TickWaiting_NoteTodo_WritesX()
     {
-        WriteNoteInPast("Meeting", "- [ ] waiting: @[Cleo] notes\n");
+        WriteNoteInPast("Meeting", "- { } waiting: @[Cleo] notes\n");
         IRenderedComponent<TodoPanel> cut = await data.RenderAsync<TodoPanel>();
 
         cut.Find("ul.waiting-list input.done").Change(true);
@@ -622,7 +634,7 @@ public sealed class TodoPanelTests : IDisposable
             Assert.Equal("Done: waiting: @[Cleo] notes", cut.Find("p.result").TextContent);
             Assert.Empty(cut.FindAll("section.waiting-for"));
         }, Wait);
-        Assert.Equal("- [x] waiting: @[Cleo] notes\n", File.ReadAllText(Path.Combine(data.Root, "Meeting.md")));
+        Assert.Equal("- {x} waiting: @[Cleo] notes\n", File.ReadAllText(Path.Combine(data.Root, "Meeting.md")));
     }
 
     // 287 AC-13: a tied todo shows its meeting's title in grey span.todo-meeting (full title in title) and keeps its due

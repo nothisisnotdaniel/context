@@ -10,7 +10,7 @@ import { history, undo, redo, closeHistory } from "prosemirror-history";
 import { baseKeymap, toggleMark, setBlockType, chainCommands, newlineInCode } from "prosemirror-commands";
 import { splitListItem, liftListItem, sinkListItem } from "prosemirror-schema-list";
 import { inputRules, wrappingInputRule, textblockTypeInputRule, InputRule } from "prosemirror-inputrules";
-import { schema } from "./schema.js";
+import { schema, taskClass } from "./schema.js";
 import { smartPaste, linkMeta, linkTitleTransaction } from "./paste.js";
 import { codeBlockView, mermaidEditing, isMermaidFence } from "./mermaid.js";
 import { tokens, firstWord, languageOptions, withLanguage } from "./highlight.js";
@@ -99,7 +99,8 @@ function splitItem(state, dispatch) {
   for (let depth = $from.depth; depth > 0; depth--) {
     const node = $from.node(depth);
     if (node.type === schema.nodes.list_item) {
-      const attrs = node.attrs.checked === null ? null : { checked: false };
+      // A task item's new item is an unchecked task of the same kind (a todo stays a todo, a checkbox a checkbox).
+      const attrs = node.attrs.checked === null ? null : { checked: false, kind: node.attrs.kind };
       return splitListItem(schema.nodes.list_item, attrs)(state, dispatch);
     }
   }
@@ -191,6 +192,7 @@ function rules() {
     textblockTypeInputRule(/^(#{1,6})\s$/, schema.nodes.heading, m => ({ level: Math.max(m[1].length, 2) })),
     // ``` and an optional language (no whitespace, no backtick) at the start of the line, then Space (job 290).
     textblockTypeInputRule(/^```([^\s`]*) $/, schema.nodes.code_block, m => ({ params: m[1] })),
+    ...taskRules(),
   ];
   for (const rule of blockRules) {
     rule.inCodeMark = false;
@@ -205,6 +207,50 @@ function rules() {
       mentionParenRule,
     ],
   });
+}
+
+// The kind and checked state a typed task box stands for: "[ ]" / "[x]" / "[X]" a local checkbox, "{ }" / "{x}" a
+// global todo (job 329).
+function taskAttrs(box) {
+  return { checked: box[1] !== " ", kind: box[0] === "{" ? "global" : "local" };
+}
+
+// Job 329: "- [ ] ", "- [x] ", "- { } " or "- {x} " (also with * or +) at a paragraph start, or the box and a space at
+// the start of an empty plain list item (what "- " leaves), turns the block into a task item of that kind at once. The
+// typed text goes and the caret stays where it was put: right after the box, at the item's text start.
+function taskRules() {
+  const paragraphRule = new InputRule(/^\s*[-*+]\s(\[[ xX]\]|\{[ x]\})\s$/, (state, match, start, end) => {
+    const $start = state.doc.resolve(start);
+    if ($start.parent.type !== schema.nodes.paragraph) {
+      return null;
+    }
+    const tr = state.tr.delete(start, end);
+    const range = tr.doc.resolve(start).blockRange();
+    const wrapping = [{ type: schema.nodes.bullet_list }, { type: schema.nodes.list_item, attrs: taskAttrs(match[1]) }];
+    if (!range || !range.parent.canReplaceWith(range.startIndex, range.endIndex, schema.nodes.bullet_list)) {
+      return null;
+    }
+    return tr.wrap(range, wrapping);
+  });
+  const itemRule = new InputRule(/^(\[[ xX]\]|\{[ x]\})\s$/, (state, match, start, end) => {
+    const $start = state.doc.resolve(start);
+    const depth = $start.depth - 1;
+    if ($start.parent.type !== schema.nodes.paragraph || depth < 1) {
+      return null;
+    }
+    const item = $start.node(depth);
+    if (item.type !== schema.nodes.list_item || item.attrs.checked !== null || $start.index(depth) !== 0) {
+      return null;
+    }
+    return state.tr.delete(start, end).setNodeMarkup($start.before(depth), null, taskAttrs(match[1]));
+  });
+  return [paragraphRule, itemRule];
+}
+
+/** The transaction that ticks or unticks the task item at pos in state; it keeps the item's kind. */
+export function toggleTask(state, pos) {
+  const node = state.doc.nodeAt(pos);
+  return state.tr.setNodeMarkup(pos, null, { ...node.attrs, checked: !node.attrs.checked });
 }
 
 // `text` becomes inline code when the closing backtick is typed (job 290): a span of at least one character with no
@@ -618,24 +664,34 @@ function listItemView(node, view, getPos) {
   const content = document.createElement("div");
   let box = null;
   const paint = () => {
-    dom.className = node.attrs.checked === null ? "" : node.attrs.checked ? "task done" : "task";
+    dom.className = node.attrs.checked === null ? "" : taskClass(node);
     if (box) {
       box.setAttribute("aria-checked", node.attrs.checked ? "true" : "false");
     }
   };
   if (node.attrs.checked !== null) {
+    const global = node.attrs.kind === "global";
     box = document.createElement("span");
     box.className = "task-box";
     box.setAttribute("role", "checkbox");
+    // Job 329: the kind is named, not only coloured: a global todo also shows its marker.
+    box.setAttribute("aria-label", global ? "Todo" : "Checkbox");
     box.contentEditable = "false";
     box.addEventListener("mousedown", event => {
       event.preventDefault();
       const pos = getPos();
       if (typeof pos === "number") {
-        view.dispatch(view.state.tr.setNodeMarkup(pos, null, { checked: !node.attrs.checked }));
+        view.dispatch(toggleTask(view.state, pos));
       }
     });
     dom.appendChild(box);
+    if (global) {
+      const marker = document.createElement("span");
+      marker.className = "task-marker";
+      marker.setAttribute("aria-hidden", "true");
+      marker.contentEditable = "false";
+      dom.appendChild(marker);
+    }
     content.className = "task-body";
   }
   dom.appendChild(content);
@@ -644,7 +700,9 @@ function listItemView(node, view, getPos) {
     dom,
     contentDOM: content,
     update(next) {
-      if (next.type !== node.type || (next.attrs.checked === null) !== (node.attrs.checked === null)) {
+      if (next.type !== node.type
+        || (next.attrs.checked === null) !== (node.attrs.checked === null)
+        || next.attrs.kind !== node.attrs.kind) {
         return false;
       }
       node = next;
@@ -814,6 +872,26 @@ export function commandMarkdown(markdown, key, typed, before) {
 export function typedAtMarkdown(markdown, text) {
   const marked = markedState(markdown);
   return serialize(typeText(marked.state, marked.plugin, text).doc);
+}
+
+/** Test hook: the markdown after ticking or unticking the index-th task item (0-based, document order) of markdown. DOM-free. */
+export function toggledMarkdown(markdown, index) {
+  const state = EditorState.create({ doc: parse(String(markdown)) });
+  let found = -1;
+  let seen = 0;
+  state.doc.descendants((node, pos) => {
+    if (found === -1 && node.type === schema.nodes.list_item && node.attrs.checked !== null) {
+      if (seen === index) {
+        found = pos;
+      }
+      seen++;
+    }
+    return found === -1;
+  });
+  if (found === -1) {
+    throw new Error("No task item " + index + ".");
+  }
+  return serialize(state.apply(toggleTask(state, found)).doc);
 }
 
 /** Test hook: changedCodeBlocks before and after typing text at the ⟦ caret of markdown, as JSON. DOM-free. */

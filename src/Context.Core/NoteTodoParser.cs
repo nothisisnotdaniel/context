@@ -2,7 +2,7 @@ using System.Globalization;
 
 namespace Context;
 
-/// <summary>An open <c>- [ ] ...</c> line found by <see cref="NoteTodoParser.Parse"/>.</summary>
+/// <summary>An open <c>- { } ...</c> line found by <see cref="NoteTodoParser.Parse"/>.</summary>
 internal sealed record ParsedNoteTodo
 {
     public ParsedNoteTodo(int line, string text, DateOnly? due, string raw)
@@ -31,14 +31,26 @@ internal sealed record ParsedNoteTodo
     public string Raw { get; }
 }
 
-/// <summary>Finds open Markdown task lines (<c>- [ ] text</c>) in a note's text.</summary>
+/// <summary>
+/// Finds open note todos (<c>- { } text</c>) in a note's text. A <c>- [ ] text</c> line is a checkbox that stays in its
+/// note (job 329): it is no note todo.
+/// </summary>
 internal static class NoteTodoParser
 {
     /// <summary>The most characters a note todo's text keeps; a longer one is cut (never inside a surrogate pair).</summary>
     public const int MaxTextLength = 1000;
 
-    /// <summary>The open box after the list marker; <see cref="NoteTodos.Complete"/> turns its first one into <c>[x]</c>.</summary>
+    /// <summary>
+    /// The open box of a note-local checkbox (and of a <see cref="TopicParser"/> topic line, which uses it); never a
+    /// note todo.
+    /// </summary>
     public const string OpenBox = "[ ]";
+
+    /// <summary>The open box of a note todo; <see cref="NoteTodos.Complete"/> turns its first one into <see cref="DoneTodoBox"/>.</summary>
+    public const string TodoBox = "{ }";
+
+    /// <summary>The done box of a note todo.</summary>
+    public const string DoneTodoBox = "{x}";
 
     private const string DuePrefix = "due:";
     private const string DayFormat = "yyyy-MM-dd";
@@ -46,18 +58,33 @@ internal static class NoteTodoParser
     /// <summary>
     /// The open todos in <paramref name="markdown"/>, in line order. A line outside fenced code blocks
     /// (<see cref="TagParser.NumberedLinesOutsideFences"/>) is one when it is optional spaces or tabs, <c>-</c>,
-    /// <c>*</c> or <c>+</c>, one space, <c>[ ]</c>, one space, then text. The first whitespace-delimited token
+    /// <c>*</c> or <c>+</c>, one space, <c>{ }</c> (<see cref="TodoBox"/>), one space, then text. The first whitespace-delimited token
     /// <c>due:yyyy-MM-dd</c> (ASCII digits, a real date, not inside a code span) sets <see cref="ParsedNoteTodo.Due"/>
     /// and is removed from the text; the text is then trimmed and collapsed (<see cref="TagParser.Collapse"/>) and cut
     /// to <see cref="MaxTextLength"/>. An empty text is no todo, and a line <see cref="TopicParser"/> reads as a
     /// topic is no todo.
     /// </summary>
-    public static IReadOnlyList<ParsedNoteTodo> Parse(string markdown)
+    public static IReadOnlyList<ParsedNoteTodo> Parse(string markdown) => Parse(markdown, TodoBox);
+
+    /// <summary>
+    /// The open note-local checkboxes (<c>- [ ] text</c>) in <paramref name="markdown"/>, in line order, by the same
+    /// rules as <see cref="Parse(string)"/> with <see cref="OpenBox"/> in place of <see cref="TodoBox"/> (a topic line
+    /// is none). Only the meeting carry-over reads them; they are never note todos.
+    /// </summary>
+    public static IReadOnlyList<ParsedNoteTodo> ParseCheckboxes(string markdown) => Parse(markdown, OpenBox);
+
+    /// <summary>The todo on the one <paramref name="line"/> (numbered <paramref name="number"/>), or <c>null</c>.</summary>
+    internal static ParsedNoteTodo? ParseLine(int number, string line) => ParseLine(number, line, TodoBox);
+
+    /// <summary>The open checkbox (<c>- [ ] text</c>) on the one <paramref name="line"/>, or <c>null</c>.</summary>
+    internal static ParsedNoteTodo? ParseCheckboxLine(int number, string line) => ParseLine(number, line, OpenBox);
+
+    private static List<ParsedNoteTodo> Parse(string markdown, string box)
     {
         List<ParsedNoteTodo> found = [];
         foreach ((int number, string line) in TagParser.NumberedLinesOutsideFences(markdown))
         {
-            ParsedNoteTodo? todo = ParseLine(number, line);
+            ParsedNoteTodo? todo = ParseLine(number, line, box);
             if (todo is not null)
             {
                 found.Add(todo);
@@ -67,8 +94,8 @@ internal static class NoteTodoParser
         return found;
     }
 
-    /// <summary>The todo on the one <paramref name="line"/> (numbered <paramref name="number"/>), or <c>null</c>.</summary>
-    internal static ParsedNoteTodo? ParseLine(int number, string line)
+    // The open line with "box" after the list marker on the one line, or null.
+    private static ParsedNoteTodo? ParseLine(int number, string line, string box)
     {
         int i = 0;
         while (i < line.Length && (line[i] == ' ' || line[i] == '\t'))
@@ -76,11 +103,11 @@ internal static class NoteTodoParser
             i++;
         }
 
-        // "- [ ] " and at least one more character.
+        // "- { } " and at least one more character.
         if (line.Length - i < 7
             || line[i] is not ('-' or '*' or '+')
             || line[i + 1] != ' '
-            || string.CompareOrdinal(line, i + 2, OpenBox, 0, OpenBox.Length) != 0
+            || string.CompareOrdinal(line, i + 2, box, 0, box.Length) != 0
             || line[i + 5] != ' ')
         {
             return null;

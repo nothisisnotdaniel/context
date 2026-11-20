@@ -103,7 +103,7 @@ is and never changed. In the desktop app, `/today` in the command palette opens 
 named after its date and title (for example `2026-10-29 Review Q4 plan`). When it doesn't exist yet it is created first,
 tagged `#meeting`, with the appointment's title, time, location and attendees; an existing note is printed as it is and
 never changed. A new note also gets the still-open points of the same meeting's previous note (its open
-`- [ ]` todos and the lines under an `Open points` heading) under `## From last time`, with a link to that note; the
+`- { }` todos and `- [ ]` checkboxes, and the lines under an `Open points` heading) under `## From last time`, with a link to that note; the
 previous note is only read, never changed. In the desktop app, `/meeting 2` in the command palette opens the same note (numbered as
 `context current` numbers them).
 
@@ -201,15 +201,24 @@ sensitive note can't be shared, just as it can't be exported: it is never writte
 
 ### Todos inside notes
 
-Write an action item as a Markdown task line anywhere in a note: `- [ ] call Anna due:2026-11-20` (`*` or `+`
+Write an action item as a todo line anywhere in a note: `- { } call Anna due:2026-11-20` (`*` or `+`
 instead of `-` and indenting work too; the `due:yyyy-MM-dd` word is optional and can stand anywhere in the line).
+A `- [ ] text` line is a plain checkbox that stays in its note: no todo view lists it. In the editor a todo's line
+has a blue tint and a small dot after its box, a checkbox's line a grey one; typing `- { } ` or `- [ ] ` (or
+`{x}` / `[x]`) at the start of a line makes that kind of item at once.
 The todo sidebar and `context todos` list it with the todos from `todos.json`, sorted by its due date (on the same
 date the `todos.json` todos first; todos without a date last), with the note's name; in the app the name opens the
 note. `context todos` prints such a todo as `2026-11-20\tcall Anna\tMeeting` (`-` as the date when it has none).
-Ticking it in the sidebar (after `Mark this todo done?`) or `context todo done call Anna` writes `- [x]` into that
+Ticking it in the sidebar (after `Mark this todo done?`) or `context todo done call Anna` writes `- {x}` into that
 line of the note, and only when the line is still exactly as it was listed; otherwise nothing is written and you see
-`The todo's line in <note> changed. Open the note and tick it there.` Ticking `[x]` in the note itself removes it
-from the list. Lines in code blocks, sensitive notes and numbered lists (`1. [ ]`) are not listed.
+`The todo's line in <note> changed. Open the note and tick it there.` Ticking `{x}` in the note itself removes it
+from the list. Lines in code blocks, sensitive notes and numbered lists (`1. { }`) are not listed.
+
+Before this version note todos were written `- [ ] text`. The first start of the app or the first todo command of
+the command-line tool rewrites every such line once (`- [ ]` to `- { }`, `- [x]` to `- {x}`; only those three
+characters change, and the old note stays in its history) and reports `Changed <n> todo line(s) in <m> note(s) to
+- { }.`. A note it can't convert keeps its text and is named: `Can't convert the todos in <note>.` The file
+`.migrations/todo-braces` in the Context folder records the run, so a `- [ ]` written later stays a checkbox.
 
 ### Timed reminders
 

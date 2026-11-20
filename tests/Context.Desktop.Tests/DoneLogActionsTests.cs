@@ -32,7 +32,7 @@ public sealed class DoneLogActionsTests : IDisposable
     [Fact]
     public async Task CompleteNoteTodo_AppendsLineWithoutDue()
     {
-        data.WriteNote("Meeting", "# Meeting\n- [ ] call Anna\n");
+        data.WriteNote("Meeting", "# Meeting\n- { } call Anna\n");
         data.WriteNote("done", "# done\n- 2026-10-01 earlier\n");
         NoteTodo todo = Assert.Single((await data.RefreshAsync()).NoteTodos);
 
@@ -129,9 +129,9 @@ public sealed class DoneLogActionsTests : IDisposable
     [Fact]
     public async Task CompleteNoteTodo_Changed_AppendsNothing()
     {
-        data.WriteNote("Meeting", "# Meeting\n- [ ] call Anna\n");
+        data.WriteNote("Meeting", "# Meeting\n- { } call Anna\n");
         NoteTodo todo = Assert.Single((await data.RefreshAsync()).NoteTodos);
-        data.WriteNote("Meeting", "# Meeting\n- [ ] call Bob\n");
+        data.WriteNote("Meeting", "# Meeting\n- { } call Bob\n");
 
         ActionResult result = await data.Actions!.CompleteNoteTodo(todo, new Confirmation());
 

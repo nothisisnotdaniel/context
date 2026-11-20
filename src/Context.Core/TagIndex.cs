@@ -264,9 +264,10 @@ internal sealed class TagIndex
     /// <c>[[Note#Heading]]</c> link (<c>note_links.heading</c>). 11: <c>next: @[Name]</c> topics (<c>note_topics</c>),
     /// which are no longer note todos. 12: <c>review:yyyy-MM-dd</c> lines (<c>note_reviews</c>). 13: <c>#&lt;n&gt;</c> work item references
     /// (<c>note_items</c>). 14: <c>note_text_rows</c> (note -> <c>note_text</c> rowid), <c>note_skipped</c> (notes over
-    /// <see cref="NoteStore.MaxNoteBytes"/>) and the link keys <c>note_links.whole_key</c>/<c>part_key</c>.
+    /// <see cref="NoteStore.MaxNoteBytes"/>) and the link keys <c>note_links.whole_key</c>/<c>part_key</c>. 15: note
+    /// todos are <c>- { }</c> lines (job 329); a <c>- [ ]</c> line is a note-local checkbox and no longer in <c>note_todos</c>.
     /// </summary>
-    public const int ParserVersion = 14;
+    public const int ParserVersion = 15;
 
     /// <summary>
     /// How long opening <c>context.db</c> and starting <see cref="Sync"/>'s write transaction wait while another

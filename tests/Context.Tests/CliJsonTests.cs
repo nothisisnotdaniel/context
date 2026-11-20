@@ -789,7 +789,8 @@ public sealed class CliJsonTests : IDisposable
         Result result = Run("review", "--json");
 
         JsonElement doc = AssertDocument(result, Cli.ExitError);
-        Assert.Equal(["Can't read the done log."], result.ErrLines);
+        // 329 AC-10: the over-cap done log is also a note the todo marker conversion could not read.
+        Assert.Equal(["Can't convert the todos in done.", "Can't read the done log."], result.ErrLines);
         Assert.Equal(JsonValueKind.Null, doc.GetProperty("doneTodos").ValueKind);
         Assert.Equal(JsonValueKind.Array, doc.GetProperty("overdue").ValueKind);
     }

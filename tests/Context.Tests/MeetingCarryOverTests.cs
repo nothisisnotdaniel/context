@@ -135,6 +135,20 @@ public sealed class MeetingCarryOverTests : IDisposable
         Assert.Empty(MeetingCarryOver.Extract("# N\n- [x] done\ntext\n## Open points\n\n## Next\n"));
     }
 
+    // 329 AC-4: open "[ ]" checkboxes and open "{ }" todos are both carried, in line order, each once; done ones of
+    // either kind are not; an open-points todo stays once.
+    [Fact]
+    public void Extract_CheckboxesAndTodos_InLineOrder()
+    {
+        string markdown = "# N\n  - { } todo one\n- [ ] box one\n- {x} done todo\n- [x] done box\n"
+            + "* [ ] box two\n```\n- { } fenced\n```\n## Open points\n- { } inside\n- [ ] also\n";
+
+        Assert.Equal(
+            ["- { } todo one", "- [ ] box one", "* [ ] box two", "- { } inside", "- [ ] also"],
+            MeetingCarryOver.Extract(markdown));
+        Assert.Empty(MeetingCarryOver.Extract("- {x} a\n- [x] b\n- [ ] \n- { }x c\n"));
+    }
+
     // AC-1: the section text with a link to the previous note.
     [Fact]
     public void Section_LinksPreviousNote()

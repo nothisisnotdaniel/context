@@ -1182,4 +1182,147 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
 
     private static bool HasMark(JsonElement node, string mark) =>
         node.TryGetProperty("marks", out JsonElement marks) && marks.EnumerateArray().Any(m => m.GetProperty("type").GetString() == mark);
+
+    // 329 AC-5: both task kinds round-trip byte for byte, also nested, numbered and next to plain items.
+    [Theory]
+    [InlineData("- { } a\n")]
+    [InlineData("- {x} a\n")]
+    [InlineData("- [ ] a\n")]
+    [InlineData("- [x] a\n")]
+    [InlineData("- { } a\n- [ ] b\n- {x} c\n- [x] d\n- e\n")]
+    [InlineData("- { } a\n  - [ ] nested\n")]
+    [InlineData("1. { } a\n2. [ ] b\n")]
+    public void TaskKinds_RoundTripByteForByte(string markdown)
+    {
+        Assert.Equal(markdown, bundle.Call("roundTrip", markdown));
+        Assert.Equal("true", bundle.Call("isLossless", markdown));
+    }
+
+    // 329 AC-5: docJson gives each list item's checked and kind: "global" for braces, "local" for brackets, null for
+    // a plain item.
+    [Fact]
+    public void DocJson_TaskItems_HaveCheckedAndKind()
+    {
+        using JsonDocument doc = JsonDocument.Parse(bundle.Call("docJson", "- { } a\n- {x} b\n- [ ] c\n- [X] d\n- e\n"));
+
+        string[] items = Nodes(doc.RootElement)
+            .Where(n => Type(n) == "list_item")
+            .Select(n => $"{Attr(n, "checked")}|{Attr(n, "kind")}")
+            .ToArray();
+
+        Assert.Equal(["False|global", "True|global", "False|local", "True|local", "null|null"], items);
+    }
+
+    // 329 AC-5: ticking a task item writes the box of its own kind, and unticking it back.
+    [Theory]
+    [InlineData("- { } a\n", 0, "- {x} a\n")]
+    [InlineData("- {x} a\n", 0, "- { } a\n")]
+    [InlineData("- [ ] a\n", 0, "- [x] a\n")]
+    [InlineData("- [x] a\n", 0, "- [ ] a\n")]
+    [InlineData("- [ ] a\n- { } b\n", 1, "- [ ] a\n- {x} b\n")]
+    public void Toggle_KeepsTheKind(string markdown, int index, string expected)
+    {
+        string json = bundle.Json($"ContextEditor.toggledMarkdown({Js(markdown)}, {index})");
+
+        Assert.Equal(expected, JsonSerializer.Deserialize<string>(json));
+    }
+
+    // 329 AC-5: Enter in a task item makes an unchecked item of the same kind.
+    [Theory]
+    [InlineData("- { } a\u27e6", "- { } a\n- { } b")]
+    [InlineData("- {x} a\u27e6", "- {x} a\n- { } b")]
+    [InlineData("- [ ] a\u27e6", "- [ ] a\n- [ ] b")]
+    [InlineData("- [x] a\u27e6", "- [x] a\n- [ ] b")]
+    [InlineData("- a\u27e6", "- a\n- b")]
+    public void Enter_InTaskItem_SameKindUnchecked(string markdown, string expected)
+    {
+        string json = bundle.Json($"ContextEditor.commandMarkdown({Js(markdown)}, \"Enter\", \"b\")");
+
+        Assert.Equal(expected, JsonSerializer.Deserialize<string>(json));
+    }
+
+    // 329 AC-6: typing a box after -, * or + at a paragraph start, or a box in an empty list item, makes that kind of
+    // task item at once, and the next typed text lands right after the box (the caret did not move).
+    [Theory]
+    [InlineData("\u27e6", "- [ ] abc", "- [ ] abc")]
+    [InlineData("\u27e6", "- [x] abc", "- [x] abc")]
+    [InlineData("\u27e6", "- { } abc", "- { } abc")]
+    [InlineData("\u27e6", "- {x} abc", "- {x} abc")]
+    [InlineData("\u27e6", "* { } abc", "- { } abc")]
+    [InlineData("\u27e6", "+ [ ] abc", "- [ ] abc")]
+    [InlineData("\u27e6rest", "* {x} ", "- {x} rest")]
+    [InlineData("\u27e6rest", "+ [ ] ", "- [ ] rest")]
+    [InlineData("- \u27e6", "{ } abc", "- { } abc")]
+    [InlineData("- \u27e6", "[x] abc", "- [x] abc")]
+    [InlineData("1. \u27e6", "{ } abc", "1. { } abc")]
+    public void Typing_Box_MakesTaskItem_CaretAfterBox(string markdown, string typed, string expected)
+    {
+        Assert.Equal(expected, TypedAt(markdown, typed));
+    }
+
+    // 329 AC-6: the item made by typing has the typed kind and checked state in the doc, not text.
+    [Fact]
+    public void Typing_Box_GivesTaskNodeNotText()
+    {
+        using JsonDocument doc = JsonDocument.Parse(bundle.Call("docJson", TypedAt("\u27e6", "* { } abc")));
+
+        JsonElement item = Nodes(doc.RootElement).Single(n => Type(n) == "list_item");
+        Assert.Equal(("False", "global"), (Attr(item, "checked"), Attr(item, "kind")));
+        Assert.Equal("abc", Nodes(item).Where(n => Type(n) == "text").Select(Text).Single());
+    }
+
+    // 329 AC-6: the input rules never fire in a code block, inline code, mid-line, in a task item or for {X}.
+    [Theory]
+    [InlineData("```\n\u27e6\n```", "- { } x", "```\n- { } x\n```")]
+    [InlineData("`\u27e6x`", "- { } ", "`- { } x`")]
+    [InlineData("a \u27e6", "- { } x", "a - { } x")]
+    [InlineData("- [ ] \u27e6", "{ } x", "- [ ] { } x")]
+    [InlineData("\u27e6", "* {X} x", "* {X} x")]
+    public void Typing_Box_NotInCodeOrMidLine(string markdown, string typed, string expected)
+    {
+        Assert.Equal(expected, TypedAt(markdown, typed));
+    }
+
+    // 329 AC-6: pasted lines of both kinds become task items of their kind.
+    [Fact]
+    public void Paste_BothKinds_GivesTaskItems()
+    {
+        string json = bundle.Json($"ContextEditor.pastedMarkdown({Js("- { } a\n- [ ] b\n- {x} c\n")}, false, \"\")");
+        using JsonDocument pasted = JsonDocument.Parse(JsonSerializer.Deserialize<string>(json)!);
+        string markdown = pasted.RootElement.GetProperty("markdown").GetString()!;
+
+        using JsonDocument doc = JsonDocument.Parse(bundle.Call("docJson", markdown));
+        Assert.Equal(
+            ["False|global", "False|local", "True|global"],
+            Nodes(doc.RootElement).Where(n => Type(n) == "list_item").Select(n => $"{Attr(n, "checked")}|{Attr(n, "kind")}"));
+        Assert.Equal("- { } a\n- [ ] b\n- {x} c", markdown.TrimEnd('\n'));
+
+        // After text in a paragraph: the item follows that text's paragraph; other pasted text stays the default paste.
+        string after = bundle.Json($"ContextEditor.pastedMarkdown({Js("- { } x\r\n")}, false, {Js("intro")})");
+        using JsonDocument afterDoc = JsonDocument.Parse(JsonSerializer.Deserialize<string>(after)!);
+        Assert.Equal("intro\n\n- { } x", afterDoc.RootElement.GetProperty("markdown").GetString()!.TrimEnd('\n'));
+        string mixed = bundle.Json($"ContextEditor.pastedMarkdown({Js("- { } x\nplain")}, false, \"\")");
+        using JsonDocument mixedDoc = JsonDocument.Parse(JsonSerializer.Deserialize<string>(mixed)!);
+        Assert.Equal(JsonValueKind.Null, mixedDoc.RootElement.GetProperty("markdown").ValueKind);
+    }
+
+    private string TypedAt(string markdown, string typed) =>
+        JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.typedAtMarkdown({Js(markdown)}, {Js(typed)})"))!;
+
+    // An attribute of a node as text: "True"/"False" for a boolean, "null" for null or missing, else the string.
+    private static string Attr(JsonElement node, string name)
+    {
+        if (!node.TryGetProperty("attrs", out JsonElement attrs) || !attrs.TryGetProperty(name, out JsonElement value))
+        {
+            return "null";
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => "True",
+            JsonValueKind.False => "False",
+            JsonValueKind.Null => "null",
+            _ => value.GetString()!,
+        };
+    }
 }

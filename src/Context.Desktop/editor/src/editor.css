@@ -82,6 +82,29 @@
   text-decoration: line-through;
 }
 
+/* 329: the whole line of a task item is tinted by its kind: a global todo (- { }) that the todo views list, or a
+   checkbox that stays in its note (- [ ]). Colour is not the only cue: a todo also shows its marker and the box names
+   its kind (aria-label). */
+.note-editor-body li.task.local {
+  background: var(--task-local-bg);
+  border-radius: 4px;
+}
+
+.note-editor-body li.task.global {
+  background: var(--task-global-bg);
+  border-radius: 4px;
+}
+
+.note-editor-body .task-marker {
+  align-self: center;
+  background: var(--accent-strong);
+  border-radius: 50%;
+  flex: none;
+  height: 6px;
+  user-select: none;
+  width: 6px;
+}
+
 .note-editor-body blockquote {
   border-left: 3px solid var(--line);
   color: var(--grey);

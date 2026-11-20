@@ -1207,6 +1207,18 @@ internal sealed class DesktopActions
     public Task<ActionResult> AutoReminders() => Run(AutoRemindersNow, refresh: false);
 
     /// <summary>
+    /// The one-off todo marker conversion (job 329), called only by <c>Program.cs</c>, once at start before the todo
+    /// migrate, the watcher and the first refresh: <see cref="TodoMarkerConversion.Run(NoteStore, NoteHistory, Func{DateTime})"/>
+    /// with <see cref="DesktopState.HistoryStore"/>, so every converted note keeps its old bytes as a version. Nothing
+    /// changed and nothing skipped (or the record already there): Done/<see cref="ActionReason.Unchanged"/> with no
+    /// text and nothing offered. Otherwise the text is the report (<see cref="TodoMarkerConversion.Report"/>, note names
+    /// through <see cref="DesktopText.OneLine"/>, lines joined by a space): Done when a line changed, else
+    /// Failed/<see cref="ActionReason.WriteFailed"/> (only skipped notes), and the result is offered to <c>Main</c>
+    /// (<see cref="DesktopState.OfferConversion"/>), which shows it in its status line. Never refreshes or throws.
+    /// </summary>
+    public Task<ActionResult> ConvertTodoMarkers() => Run(ConvertTodoMarkersNow, refresh: false);
+
+    /// <summary>
     /// Moves the note <paramref name="name"/> and its subpages under the note <paramref name="newParent"/> (matched
     /// through <see cref="NoteStore.TryFind"/> only, never a path; blank = the top level) through
     /// <see cref="NoteStore.Move"/>. Already there gives <see cref="ActionReason.Unchanged"/> (done, nothing written,
@@ -2833,6 +2845,24 @@ internal sealed class DesktopActions
         {
             return Failed(ActionReason.WriteFailed, BriefingFailedText(Briefing.NameFor(day)));
         }
+    }
+
+    private ActionResult ConvertTodoMarkersNow()
+    {
+        TodoMarkerConversionResult converted =
+            TodoMarkerConversion.Run(notes, state.HistoryStore, () => localNow().ToUniversalTime());
+        IReadOnlyList<string> report = TodoMarkerConversion.Report(converted, DesktopText.OneLine);
+        if (report.Count == 0)
+        {
+            return new ActionResult(ActionKind.Done, ActionReason.Unchanged, string.Empty);
+        }
+
+        string text = string.Join(' ', report);
+        ActionResult result = converted.Lines > 0
+            ? new ActionResult(ActionKind.Done, ActionReason.None, text)
+            : new ActionResult(ActionKind.Failed, ActionReason.WriteFailed, text);
+        state.OfferConversion(result);
+        return result;
     }
 
     private ActionResult AutoRemindersNow()

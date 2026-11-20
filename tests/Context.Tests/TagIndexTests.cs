@@ -389,7 +389,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(14, TagIndex.ParserVersion);
+        Assert.Equal(15, TagIndex.ParserVersion);
     }
 
     // 024 AC-6
@@ -438,13 +438,13 @@ public sealed class TagIndexTests : IDisposable
         using (SqliteConnection connection = Open())
         {
             using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 14";
+            command.CommandText = "PRAGMA user_version = 16";
             command.ExecuteNonQuery();
         }
 
         index.Sync(store);
 
-        Assert.Equal(14, UserVersion());
+        Assert.Equal(16, UserVersion());
     }
 
     // 048 AC-4: the old constructor means a tag link only.
@@ -847,7 +847,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(14, TagIndex.ParserVersion);
+        Assert.Equal(15, TagIndex.ParserVersion);
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
         Assert.Equal(["A", "Beta"], NoteRows());
         Assert.Equal([("A", "work"), ("Beta", "home")], Rows());
@@ -1216,7 +1216,7 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal(["Anna|1", "AS|1"], index.People().Select(Describe));
         Assert.Empty(index.NotesMentioning("Anna Schmidt"));
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(14, TagIndex.ParserVersion);
+        Assert.Equal(15, TagIndex.ParserVersion);
     }
 
     // 170 ----------------------------------------------------------------------------------------
@@ -1509,13 +1509,13 @@ public sealed class TagIndexTests : IDisposable
     [Fact]
     public void Sync_StoresNoteTodos()
     {
-        WriteNote("Meeting", "# Notes\r\n- [ ] call Anna due:2026-11-20\r\n- [x] done already\r\n  * [ ] send deck\r\n");
+        WriteNote("Meeting", "# Notes\r\n- { } call Anna due:2026-11-20\r\n- {x} done already\r\n  * { } send deck\r\n");
         WriteNote("Other", "nothing here");
 
         index.Sync(store);
 
         Assert.Equal(
-            ["Meeting|2|2026-11-20|call Anna|- [ ] call Anna due:2026-11-20", "Meeting|4|-|send deck|  * [ ] send deck"],
+            ["Meeting|2|2026-11-20|call Anna|- { } call Anna due:2026-11-20", "Meeting|4|-|send deck|  * { } send deck"],
             index.NoteTodos().Select(Describe));
     }
 
@@ -1523,26 +1523,26 @@ public sealed class TagIndexTests : IDisposable
     [Fact]
     public void Sync_NoteTodos_FollowEditDeleteAndRename()
     {
-        WriteNote("Meeting", "- [ ] one\n- [ ] two\n");
-        WriteNote("Gone", "- [ ] three\n");
+        WriteNote("Meeting", "- { } one\n- { } two\n");
+        WriteNote("Gone", "- { } three\n");
         index.Sync(store);
         Assert.Equal(3, index.NoteTodos().Count);
 
-        EditNote("Meeting", "- [x] one\n- [ ] two\n");
+        EditNote("Meeting", "- {x} one\n- { } two\n");
         File.Delete(Path.Combine(root, "Gone.md"));
         index.Sync(store);
-        Assert.Equal(["Meeting|2|-|two|- [ ] two"], index.NoteTodos().Select(Describe));
+        Assert.Equal(["Meeting|2|-|two|- { } two"], index.NoteTodos().Select(Describe));
 
         store.Rename("Meeting", "Call");
         index.Sync(store);
-        Assert.Equal(["Call|2|-|two|- [ ] two"], index.NoteTodos().Select(Describe));
+        Assert.Equal(["Call|2|-|two|- { } two"], index.NoteTodos().Select(Describe));
     }
 
     // 201 AC-3: a database at user_version 8 is re-parsed once (todos appear for unchanged notes) and ends at 9.
     [Fact]
     public void Sync_Version8Database_ReparsedForNoteTodos()
     {
-        WriteNote("Plan", "- [ ] ship it");
+        WriteNote("Plan", "- { } ship it");
         File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc));
         index.Sync(store);
         using (SqliteConnection connection = Open())
@@ -1554,7 +1554,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(["Plan|1|-|ship it|- [ ] ship it"], index.NoteTodos().Select(Describe));
+        Assert.Equal(["Plan|1|-|ship it|- { } ship it"], index.NoteTodos().Select(Describe));
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
     }
 
@@ -1562,12 +1562,12 @@ public sealed class TagIndexTests : IDisposable
     [Fact]
     public void Sync_SensitiveNote_HasNoNoteTodos()
     {
-        WriteNote("Other", "- [ ] kept");
-        File.WriteAllText(Path.Combine(root, "Plan.ctxs"), "- [ ] secret");
+        WriteNote("Other", "- { } kept");
+        File.WriteAllText(Path.Combine(root, "Plan.ctxs"), "- { } secret");
 
         index.Sync(store);
 
-        Assert.Equal(["Other|1|-|kept|- [ ] kept"], index.NoteTodos().Select(Describe));
+        Assert.Equal(["Other|1|-|kept|- { } kept"], index.NoteTodos().Select(Describe));
         using SqliteConnection connection = Open();
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM note_todos WHERE note = 'Plan'";
@@ -1649,6 +1649,29 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
     }
 
+    // 329 AC-2: a database written by version 14 (where "- [ ] a" was a note todo) is re-parsed once: the stale row
+    // goes, the "- { }" todo stays, and the index ends at version 15.
+    [Fact]
+    public void Sync_Version14Database_ReparsedForBraceTodos()
+    {
+        WriteNote("Plan", "- [ ] a\n- { } b\n");
+        File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc));
+        index.Sync(store);
+        using (SqliteConnection connection = Open())
+        {
+            // As the version 14 parser left it: the checkbox line was a note todo.
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "PRAGMA user_version = 14; DELETE FROM note_todos; "
+                + "INSERT INTO note_todos(note, line, due, text, raw) VALUES('Plan', 1, NULL, 'a', '- [ ] a');";
+            command.ExecuteNonQuery();
+        }
+
+        index.Sync(store);
+
+        Assert.Equal(["Plan|2|-|b|- { } b"], index.NoteTodos().Select(Describe));
+        Assert.Equal(15, UserVersion());
+    }
+
     // 253 AC-3: a sensitive .ctxs note never has topic rows.
     [Fact]
     public void Sync_SensitiveNote_HasNoTopics()
@@ -1721,7 +1744,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(["Plan|1|2026-12-01|review:2026-12-01"], ReviewRows(index));
-        Assert.Equal(14, UserVersion());
+        Assert.Equal(15, UserVersion());
     }
 
     // 256 AC-2, AC-9: a sensitive .ctxs note never has a review row.
@@ -2216,7 +2239,7 @@ public sealed class TagIndexTests : IDisposable
     }
 
     // 295 AC-8: a database at user_version 13 (old note_links, no note_text_rows or note_skipped) is upgraded by the
-    // next Sync: note_text emptied and rewritten once, the new tables and columns filled, user_version 14.
+    // next Sync: note_text emptied and rewritten once, the new tables and columns filled, user_version 15.
     [Fact]
     public void Sync_Version13Database_Upgraded()
     {
@@ -2248,7 +2271,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(14, UserVersion());
+        Assert.Equal(15, UserVersion());
         (List<(long Row, string Note)> text, List<(long Row, string Note)> map) = TextRowIds();
         Assert.Equal(["A", "B"], text.Select(r => r.Note).Order(StringComparer.Ordinal));
         Assert.Equal(text, map);

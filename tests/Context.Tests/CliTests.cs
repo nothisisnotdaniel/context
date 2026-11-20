@@ -54,7 +54,8 @@ public sealed class CliTests : IDisposable
 
     private string Read(string name) => File.ReadAllText(Path.Combine(root, name));
 
-    // Every file under the root with its bytes, to prove nothing was written.
+    // Every file under the root with its bytes, to prove nothing was written. The record of the one-off todo marker
+    // conversion (job 329; its own tests check it) is left out: the first todo command of a data folder writes it.
     private Dictionary<string, string> Snapshot()
     {
         if (!Directory.Exists(root))
@@ -62,7 +63,9 @@ public sealed class CliTests : IDisposable
             return [];
         }
 
+        string record = TodoMarkerConversion.RecordPath(root);
         return Directory.GetFiles(root, "*", SearchOption.AllDirectories)
+            .Where(f => !string.Equals(f, record, StringComparison.Ordinal))
             .ToDictionary(f => Path.GetRelativePath(root, f), f => Convert.ToBase64String(File.ReadAllBytes(f)));
     }
 
@@ -660,7 +663,7 @@ public sealed class CliTests : IDisposable
     [Fact]
     public void TodoDone_NoteTodo_AppendsDoneLogLineWithoutDue()
     {
-        WriteNote("Meeting", "# Meeting\n- [ ] call Anna\n");
+        WriteNote("Meeting", "# Meeting\n- { } call Anna\n");
         WriteNote("done", "# done\n- 2026-10-01 earlier");
 
         Result result = Run("todo", "done", "call anna");
@@ -2252,7 +2255,8 @@ public sealed class CliTests : IDisposable
         Result result = Run("review");
 
         Assert.Equal(1, result.Code);
-        Assert.Equal(["Can't read the done log."], result.ErrLines);
+        // 329 AC-10: the over-cap done log is also a note the todo marker conversion could not read.
+        Assert.Equal(["Can't convert the todos in done.", "Can't read the done log."], result.ErrLines);
         Assert.Equal(
             "Review, 2026-10-23 to 2026-10-29\nChanged notes\n2026-10-28 14:05\tPlan\n"
             + "Overdue\n2026-10-25\tCall Bob\nNext week\n",
@@ -2406,8 +2410,8 @@ public sealed class CliTests : IDisposable
     {
         Run("todo", "add", "2026-11-01", "stored one");
         Run("todo", "add", "2026-11-20", "14:00", "stored two");
-        WriteNote("Meeting", "# Meeting\n- [ ] call Anna due:2026-11-20\n- [ ] no date\n- [x] ticked due:2026-11-01\n");
-        WriteNote("alpha", "```\n- [ ] fenced\n```\n- [ ] first due:2026-11-01\n");
+        WriteNote("Meeting", "# Meeting\n- { } call Anna due:2026-11-20\n- { } no date\n- {x} ticked due:2026-11-01\n");
+        WriteNote("alpha", "```\n- { } fenced\n```\n- { } first due:2026-11-01\n");
     }
 
     // AC-10, AC-4: the merged list; note todos carry their note, "-" when undated.
@@ -2423,6 +2427,57 @@ public sealed class CliTests : IDisposable
             "2026-11-01\tstored one\n2026-11-01\tfirst\talpha\n2026-11-20 14:00\tstored two\n"
                 + "2026-11-20\tcall Anna\tMeeting\n-\tno date\tMeeting\n",
             result.Out);
+    }
+
+    // 329: marks the data folder as converted, so a "- [ ]" line a test writes stays a checkbox.
+    private void MarkConverted()
+    {
+        string record = TodoMarkerConversion.RecordPath(root);
+        Directory.CreateDirectory(Path.GetDirectoryName(record)!);
+        File.WriteAllText(record, "todo-braces\n");
+    }
+
+    // 329 AC-2: todos, --json and todo done see only the "{ }" todo of a note that also has a "[ ]" checkbox.
+    [Fact]
+    public void Todos_CheckboxAndTodo_OnlyTheBraceTodo()
+    {
+        WriteNote("Meeting", "- [ ] a\n- { } b\n");
+        MarkConverted();
+
+        Result list = Run("todos");
+
+        Assert.Equal((0, "-\tb\tMeeting\n", string.Empty), (list.Code, list.Out, list.Err));
+        Assert.Equal(
+            "{\"todos\":[{\"due\":null,\"time\":null,\"text\":\"b\",\"note\":\"Meeting\"}]}\n",
+            Run("todos", "--json").Out);
+        AssertError(Run("todo", "done", "a"), 1, "No todo matches \"a\".");
+
+        Result done = Run("todo", "done", "b");
+
+        Assert.Equal(0, done.Code);
+        Assert.Equal("- [ ] a\n- {x} b\n", Read("Meeting.md"));
+    }
+
+    // 329 AC-9, AC-10: the first todo command converts the old todo lines and reports it on stderr only (stdout and
+    // exit code as usual); the record stops every later run, so a later "- [ ]" stays a checkbox.
+    [Fact]
+    public void Todos_OldTodoLines_ConvertedOnce_ReportedOnStderr()
+    {
+        WriteNote("Meeting", "- [ ] call Anna\n- [x] old\n");
+        WriteNote("Plan", "- [ ] two\n");
+
+        Result first = Run("todos");
+
+        Assert.Equal((0, "-\tcall Anna\tMeeting\n-\ttwo\tPlan\n"), (first.Code, first.Out));
+        Assert.Equal(["Changed 3 todo line(s) in 2 note(s) to - { }."], first.ErrLines);
+        Assert.Equal("- { } call Anna\n- {x} old\n", Read("Meeting.md"));
+        Assert.True(File.Exists(TodoMarkerConversion.RecordPath(root)));
+
+        WriteNote("Plan", "- [ ] later\n");
+        Result second = Run("todos");
+
+        Assert.Equal((0, "-\tcall Anna\tMeeting\n", string.Empty), (second.Code, second.Out, second.Err));
+        Assert.Equal("- [ ] later\n", Read("Plan.md"));
     }
 
     // AC-10: --json adds note to every todo; a note todo has time null and due null when undated.
@@ -2448,7 +2503,7 @@ public sealed class CliTests : IDisposable
     public void Todos_NoteTodoText_IsOneSafeLine()
     {
         Directory.CreateDirectory(root);
-        WriteNote("Plan", "- [ ] ring\u0007bell\n");
+        WriteNote("Plan", "- { } ring\u0007bell\n");
 
         Assert.Equal("-\tring\uFFFDbell\tPlan\n", Run("todos").Out);
     }
@@ -2491,14 +2546,14 @@ public sealed class CliTests : IDisposable
         Directory.CreateDirectory(root);
         string path = Path.Combine(root, "Meeting.md");
         byte[] bom = [0xEF, 0xBB, 0xBF];
-        File.WriteAllBytes(path, [.. bom, .. Encoding.UTF8.GetBytes("# Meeting\r\n- [ ] call Anna due:2026-11-20\r\n- [ ] other\r\n")]);
+        File.WriteAllBytes(path, [.. bom, .. Encoding.UTF8.GetBytes("# Meeting\r\n- { } call Anna due:2026-11-20\r\n- { } other\r\n")]);
         Run("todo", "add", "2026-11-01", "Buy milk");
 
         Result result = Run("todo", "done", "CALL anna");
 
         Assert.Equal((0, "Done: call Anna\n", string.Empty), (result.Code, result.Out, result.Err));
         Assert.Equal(
-            [.. bom, .. Encoding.UTF8.GetBytes("# Meeting\r\n- [x] call Anna due:2026-11-20\r\n- [ ] other\r\n")],
+            [.. bom, .. Encoding.UTF8.GetBytes("# Meeting\r\n- {x} call Anna due:2026-11-20\r\n- { } other\r\n")],
             File.ReadAllBytes(path));
         Assert.Equal("2026-11-01\tBuy milk\n-\tother\tMeeting\n", Run("todos").Out);
     }
@@ -2507,12 +2562,12 @@ public sealed class CliTests : IDisposable
     [Fact]
     public void TodoDone_NoteTodo_ChangedLine_WritesNothing()
     {
-        WriteNote("Meeting", "- [ ] call Anna\n");
+        WriteNote("Meeting", "- { } call Anna\n");
         string path = Path.Combine(root, "Meeting.md");
         Assert.Equal("-\tcall Anna\tMeeting\n", Run("todos").Out);
         // Same length and the same last-write time, so the index keeps the old line.
         DateTime modified = File.GetLastWriteTimeUtc(path);
-        File.WriteAllText(path, "- [ ] call Bnna\n");
+        File.WriteAllText(path, "- { } call Bnna\n");
         File.SetLastWriteTimeUtc(path, modified);
         Dictionary<string, string> before = Snapshot();
 
@@ -2525,10 +2580,10 @@ public sealed class CliTests : IDisposable
     [Fact]
     public void TodoDone_NoOpenTodoAnywhere_IsNoTodos()
     {
-        WriteNote("Meeting", "- [x] call Anna\n");
+        WriteNote("Meeting", "- {x} call Anna\n");
 
         AssertError(Run("todo", "done", "call"), 1, "There are no todos to mark done.");
-        Assert.Equal("- [x] call Anna\n", Read("Meeting.md"));
+        Assert.Equal("- {x} call Anna\n", Read("Meeting.md"));
     }
 
     // AC-11: a bad context.db is the error and nothing is written.
@@ -2549,7 +2604,7 @@ public sealed class CliTests : IDisposable
     public void TodoDone_MatchesInBothLists_IsSeveral()
     {
         Run("todo", "add", "2026-11-01", "call Ben");
-        WriteNote("Meeting", "- [ ] call Anna\n");
+        WriteNote("Meeting", "- { } call Anna\n");
         Dictionary<string, string> before = SnapshotWithoutDb();
 
         AssertError(Run("todo", "done", "call"), 1, "2 todos match \"call\". Type more of the todo's text.");

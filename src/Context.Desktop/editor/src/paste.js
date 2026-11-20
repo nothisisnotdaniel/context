@@ -1,7 +1,8 @@
 // Smart paste (job 244): tab-separated cells become a Markdown table in its own paragraph, and a lone web link goes in
 // as plain text that .NET may later turn into [page title](url). Everything here is DOM-free, so the tests run it in
-// Jint; view.js wires it to the page's paste event.
-import { Fragment } from "prosemirror-model";
+// Jint; view.js wires it to the page's paste event. Job 329: lines that are all task items (- { } / - [ ]) go in as
+// task items of their kind.
+import { Fragment, Slice } from "prosemirror-model";
 import { EditorState, Selection, TextSelection } from "prosemirror-state";
 import { closeHistory } from "prosemirror-history";
 import { schema } from "./schema.js";
@@ -74,11 +75,29 @@ function inCode(state, pos) {
   return $pos.parent.type.spec.code || $pos.marks().some(m => m.type.spec.code);
 }
 
+// A pasted task line (job 329): optional spaces or tabs, -, * or +, one space, a box ([ ], [x], [X], { } or {x}), one
+// space, then text.
+const taskLine = /^[ \t]*[-*+] (?:\[[ xX]\]|\{[ x]\}) \S/;
+const maxTaskLines = 500;
+
+/**
+ * The Markdown of pasted text when every line is a task line (taskLine), after CRLF/CR become "\n" and trailing line
+ * ends are dropped; 1 to 500 lines. Otherwise null.
+ */
+export function taskText(text) {
+  const lines = String(text).replace(/\r\n?/g, "\n").replace(/\n+$/, "").split("\n");
+  if (lines.length > maxTaskLines || !lines.every(line => taskLine.test(line))) {
+    return null;
+  }
+  return lines.join("\n") + "\n";
+}
+
 /**
  * The transaction a paste of text makes, or null for the default paste: always null for a plain paste
  * (Ctrl/Cmd+Shift+V) and outside a paragraph or inside inline code. A table (tableText) replaces the selection and goes
  * in as its own paragraph between the text before and after the cursor; a lone link (loneLink) replaces the selection
- * as unmarked text and carries linkMeta.
+ * as unmarked text and carries linkMeta; task lines (taskText) replace the selection as task items of their kind (an
+ * empty paragraph is replaced whole).
  */
 export function smartPaste(state, text, plain) {
   if (plain) {
@@ -97,7 +116,21 @@ export function smartPaste(state, text, plain) {
     const tr = state.tr.replaceSelectionWith(schema.text(url), false);
     return tr.setMeta(linkMeta, url).scrollIntoView();
   }
+  const tasks = taskText(text);
+  if (tasks !== null) {
+    return taskTransaction(state, tasks);
+  }
   return null;
+}
+
+function taskTransaction(state, markdown) {
+  const content = parse(markdown).content;
+  const { $from, empty } = state.selection;
+  if (empty && $from.parent.content.size === 0) {
+    const tr = state.tr.replaceWith($from.before(), $from.after(), content);
+    return tr.setSelection(Selection.near(tr.doc.resolve($from.before() + content.size), -1)).scrollIntoView();
+  }
+  return state.tr.replaceSelection(new Slice(content, 0, 0)).scrollIntoView();
 }
 
 function tableTransaction(state, table) {

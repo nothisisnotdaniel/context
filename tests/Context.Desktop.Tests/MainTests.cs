@@ -35,6 +35,24 @@ public sealed class MainTests : IDisposable
             cut.Find(".layout").Children.Select(c => c.ClassName ?? string.Empty).ToArray());
     }
 
+    // 329 AC-10: the start-up conversion's report is shown in the status line: accent when lines changed, and the
+    // converted note's todo is listed.
+    [Fact]
+    public async Task Render_ConversionReport_AccentStatus()
+    {
+        data.WriteNote("Meeting", "- [ ] call Anna\n");
+        data.CreateState();
+        await data.Actions!.ConvertTodoMarkers();
+
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        cut.WaitForAssertion(
+            () => Assert.Equal("Changed 1 todo line(s) in 1 note(s) to - { }.", cut.Find(".main-status").TextContent),
+            Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
+        Assert.Null(data.State!.TakeConversion());
+    }
+
     // AC-10: a refresh that throws shows the fixed red line, never the exception message.
     [Fact]
     public async Task Render_RefreshThrows_FixedRedLine()
@@ -219,7 +237,7 @@ public sealed class MainTests : IDisposable
     public async Task TodoNoteButton_DirtyEditor_AsksThenOpensTheNote()
     {
         data.WriteNote("Plan", "# Plan\n");
-        data.WriteNote("Meeting", "# Meeting\n- [ ] call Anna\n");
+        data.WriteNote("Meeting", "# Meeting\n- { } call Anna\n");
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await Open(cut, js, "Plan");
@@ -231,7 +249,7 @@ public sealed class MainTests : IDisposable
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal("Meeting", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".links-panel").TextContent, StringComparison.Ordinal), Wait);
-        Assert.Equal("# Meeting\n- [ ] call Anna\n", File.ReadAllText(Path.Combine(data.Root, "Meeting.md")));
+        Assert.Equal("# Meeting\n- { } call Anna\n", File.ReadAllText(Path.Combine(data.Root, "Meeting.md")));
     }
 
     // 134 AC-7: creating from the entry row while the open note has unsaved changes asks to discard first.

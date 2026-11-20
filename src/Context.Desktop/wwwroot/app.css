@@ -21,6 +21,9 @@
     --code-built-in: #953800;
     --code-literal: #0550ae;
     --code-attr: #116329;
+    /* 329: the line backgrounds of a note checkbox (- [ ]) and a global todo (- { }) in the editor (editor.css). */
+    --task-local-bg: #f2f2f4;
+    --task-global-bg: #e8f3ff;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -43,6 +46,8 @@
         --code-built-in: #ffa657;
         --code-literal: #79c0ff;
         --code-attr: #7ee787;
+        --task-local-bg: #262628;
+        --task-global-bg: #1a2a3c;
     }
 }
 

@@ -230,10 +230,11 @@ md.inline.ruler.before("link", "attachment_link", attachmentLinkRule);
 md.inline.ruler.before("link", "tag", tagRule);
 md.inline.ruler.before("link", "mention", mentionRule);
 
-const TaskRe = /^\[([ xX])\](?: |$)/;
+// "[ ]" / "[x]" / "[X]": a local checkbox; "{ }" / "{x}": a global note todo.
+const TaskRe = /^(?:\[([ xX])\]|\{([ x])\})(?: |$)/;
 
-// Soft line breaks stay line breaks (the text keeps its wrapping), and "[ ] " / "[x] " at the start of a list
-// item's first paragraph becomes the item's checked attribute.
+// Soft line breaks stay line breaks (the text keeps its wrapping), and "[ ] " / "[x] " / "{ } " / "{x} " at the
+// start of a list item's first paragraph becomes the item's checked and kind attributes.
 function tidy(tokens) {
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
@@ -252,7 +253,8 @@ function tidy(tokens) {
       const first = children[0];
       const match = first && first.type === "text" ? TaskRe.exec(first.content) : null;
       if (match) {
-        token.meta = { checked: match[1] !== " " };
+        const local = match[1] !== undefined;
+        token.meta = { checked: (local ? match[1] : match[2]) !== " ", kind: local ? "local" : "global" };
         first.content = first.content.slice(match[0].length);
       }
     }
@@ -292,7 +294,9 @@ function listIsTight(tokens, i) {
 const parser = new MarkdownParser(schema, tokenizer, {
   blockquote: { block: "blockquote" },
   paragraph: { block: "paragraph" },
-  list_item: { block: "list_item", getAttrs: tok => ({ checked: tok.meta && typeof tok.meta.checked === "boolean" ? tok.meta.checked : null }) },
+  list_item: { block: "list_item", getAttrs: tok => tok.meta && typeof tok.meta.checked === "boolean"
+    ? { checked: tok.meta.checked, kind: tok.meta.kind }
+    : { checked: null, kind: null } },
   bullet_list: { block: "bullet_list", getAttrs: (_, tokens, i) => ({ tight: listIsTight(tokens, i) }) },
   ordered_list: { block: "ordered_list", getAttrs: (tok, tokens, i) => ({ order: +tok.attrGet("start") || 1, tight: listIsTight(tokens, i) }) },
   heading: { block: "heading", getAttrs: tok => ({ level: +tok.tag.slice(1) }) },
@@ -319,7 +323,13 @@ const parser = new MarkdownParser(schema, tokenizer, {
 });
 
 function taskPrefix(item) {
-  return item.attrs.checked === null ? "" : item.attrs.checked ? "[x] " : "[ ] ";
+  if (item.attrs.checked === null) {
+    return "";
+  }
+  if (item.attrs.kind === "global") {
+    return item.attrs.checked ? "{x} " : "{ } ";
+  }
+  return item.attrs.checked ? "[x] " : "[ ] ";
 }
 
 const base = defaultMarkdownSerializer.nodes;
