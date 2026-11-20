@@ -147,6 +147,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#404](backlog/404-todos-page-opened-from-an-exclamation.md) Todos page opened from an exclamation-mark icon in the left sidebar → 331-todos-page-icon
 - [x] [#405](backlog/405-affiliation-as-a-comma-separated-list.md) Affiliation as a comma-separated list → 332-affiliation-list
 - [x] [#401](backlog/401-say-why-the-app-ended-in.md) Say why the app ended in the crash log → 334-exit-reason-log
+- [ ] [#77](backlog/077-quick-switcher.md) Quick switcher
 - [ ] [#59](backlog/059-ask-context.md) Ask Context
 - [ ] [#64](backlog/064-search-across-context-and-times.md) Search across Context and Times
 - [ ] [#83](backlog/083-glossary.md) Glossary
@@ -218,7 +219,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#33](backlog/033-sturdier-calendar-parsing.md) Sturdier calendar parsing
 - [ ] [#38](backlog/038-core-dependency-test-tidy-ups.md) Core dependency test tidy-ups
 - [ ] [#61](backlog/061-resurfacing.md) Resurfacing
-- [ ] [#77](backlog/077-quick-switcher.md) Quick switcher
 - [ ] [#106](backlog/106-claude-code-mcp-server.md) Claude Code MCP server (after: #101; #17; Times#37)
 - [ ] [#107](backlog/107-own-cloud-sync-spike.md) Own-cloud sync spike
 - [ ] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39)
