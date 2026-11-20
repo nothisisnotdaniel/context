@@ -359,6 +359,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [h] [#403](backlog/403-check-the-second-start-on-windows.md) Check the second start on Windows
 - [ ] [#404](backlog/404-todos-page-opened-from-an-exclamation.md) Todos page opened from an exclamation-mark icon in the left sidebar
 - [ ] [#405](backlog/405-affiliation-as-a-comma-separated-list.md) Affiliation as a comma-separated list
+- [ ] [#406](backlog/406-carry-a-line-to-the-next.md) Carry a line to the next meeting with - [>]
 
 ## Dropped with the terminal UI
 
