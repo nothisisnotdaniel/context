@@ -1814,8 +1814,12 @@ public sealed class DesktopSourceTests
         }
 
         Assert.True(found.Count == 0, "Tests load the session end watcher: " + string.Join(", ", found));
+        // Every desktop package is one CLAUDE.md's stack names, so the watcher brought no interop package with it.
         string project = File.ReadAllText(Path.Combine(root, "src/Context.Desktop/Context.Desktop.csproj"));
-        Assert.Equal(2, Regex.Matches(project, "<PackageReference ").Count);
+        string conventions = File.ReadAllText(Path.Combine(root, "CLAUDE.md"));
+        MatchCollection packages = Regex.Matches(project, @"<PackageReference Include=""([^""]+)""");
+        Assert.NotEmpty(packages);
+        Assert.All(packages, m => Assert.Contains("`" + m.Groups[1].Value + "`", conventions, StringComparison.Ordinal));
     }
 
     // 315 AC-9: Program.cs takes the running lock through DesktopStartup before the window is built, never calls
