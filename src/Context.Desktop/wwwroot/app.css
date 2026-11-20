@@ -1388,6 +1388,24 @@ input[type="password"]:disabled {
     display: none;
 }
 
+/* 341: the theme buttons in one row; the saved one is filled with the accent, like the pressed tag buttons. */
+.settings-panel .theme-choice {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.settings-panel .theme-choice button[aria-pressed="true"] {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: var(--on-accent);
+}
+
+.settings-panel .theme-result:empty {
+    display: none;
+}
+
 .key-details th {
     width: 110px;
 }

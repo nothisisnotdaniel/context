@@ -1252,7 +1252,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     a page in place of the note area; the × (job 193), opening a note or `Today` hides it) has these sections (the *Repository folders* one is job 280's, see Work items), all
     reloaded after every `State.Changed`. **Appearance** (job 341, the first section): `h3#appearance-heading` `Appearance`, then
     `div.theme-choice` (`role="group"`, `aria-labelledby` the heading) with `button.theme-system`/`-light`/`-dark`
-    (`System`, `Light`, `Dark`; exactly the saved one `aria-pressed="true"`; all disabled while busy; grey `Loading…` in
+    (`System`, `Light`, `Dark`, in a flex row; exactly the saved one `aria-pressed="true"`, filled with `--accent-strong` and `--on-accent`; all disabled while busy; grey `Loading…` in
     `p.theme-state` until `DesktopState.ThemeSetting()` (never throws, `System` on error) has loaded) and
     `p.theme-result` (`role="status"`). Clicking a button that isn't pressed runs `DesktopActions.SetTheme(AppTheme)`
     (Core `SettingsStore.ReadTheme`/`SaveTheme`, exactly `"appearance":{"theme":"system"|"light"|"dark"}`, anything else

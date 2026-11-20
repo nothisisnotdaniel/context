@@ -3384,6 +3384,29 @@ public sealed class DesktopSourceTests
         Assert.Equal(["wwwroot/app.css"], querying);
     }
 
+    // 341 (review round 1): the theme buttons sit in a row with a gap, the pressed one is filled with --accent-strong
+    // and --on-accent text (4.5:1 in every theme block), and the empty result line takes no room.
+    [Fact]
+    public void Css_ThemeChoice_RowAndVisiblePressedState()
+    {
+        string app = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+
+        Assert.Matches(@"\.settings-panel \.theme-choice \{[^}]*display: flex;[^}]*gap: 6px;", app);
+        string pressed = ThemeBlock(app, ".settings-panel .theme-choice button[aria-pressed=\"true\"] {");
+        Assert.Contains("background: var(--accent-strong);", pressed, StringComparison.Ordinal);
+        Assert.Contains("border-color: var(--accent-strong);", pressed, StringComparison.Ordinal);
+        Assert.Contains("color: var(--on-accent);", pressed, StringComparison.Ordinal);
+        Assert.Matches(@"\.settings-panel \.theme-result:empty \{\s*display: none;\s*\}", app);
+
+        string light = ThemeBlock(app, ":root {");
+        foreach (string theme in new[] { light, ThemeBlock(app, "@media (prefers-color-scheme: dark) {"), ThemeBlock(app, ":root[data-theme=\"dark\"] {") })
+        {
+            // Every block sets both --accent-strong and --on-accent.
+            double ratio = Contrast(Colour(theme, "--on-accent"), Colour(theme, "--accent-strong"));
+            Assert.True(ratio >= 4.5, $"--on-accent on --accent-strong: {ratio:F2}");
+        }
+    }
+
     // 341: text fields take the root's colour scheme, so a chosen theme reaches their native parts too.
     [Fact]
     public void Css_TextFields_InheritColourScheme()
