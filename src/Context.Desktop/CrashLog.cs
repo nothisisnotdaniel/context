@@ -24,8 +24,9 @@ internal sealed class CrashHint
 /// The desktop crash log (job 237). <see cref="Write"/> puts one <c>crash-yyyyMMdd-HHmmss-fff.log</c> (UTC) into
 /// <c>&lt;root&gt;/.logs</c> with the time, the version, the OS, the source and each exception's type, message and
 /// stack trace (cleaned, cut and with the home folder shown as <c>~</c>); nothing else. Only the newest
-/// <see cref="MaxLogs"/> logs are kept. The session file <c>.logs/session</c> (<c>running &lt;start&gt;</c> or
-/// <c>clean &lt;start&gt;</c>) lets <see cref="Begin"/> notice an exit that left no managed exception. No member ever
+/// <see cref="MaxLogs"/> logs are kept. The session file <c>.logs/session</c> (<c>running &lt;start&gt;</c>,
+/// <c>running &lt;start&gt; &lt;exit code&gt;</c> after <see cref="RecordExit"/>, or <c>clean &lt;start&gt;</c>) lets
+/// <see cref="Begin"/> notice an exit that left no managed exception and say how it ended (job 334). No member ever
 /// throws.
 /// </summary>
 internal sealed class CrashLog
@@ -66,6 +67,8 @@ internal sealed class CrashLog
     private readonly string? home;
     private readonly object gate = new();
     private DateTime? started;
+    private bool ended;
+    private bool exitRecorded;
 
     public CrashLog(string root, Func<DateTime> utcNow, string version, string os, string? home)
     {
@@ -81,9 +84,13 @@ internal sealed class CrashLog
 
     private string SessionPath => Path.Combine(Folder, SessionFileName);
 
-    /// <summary>The text of the log <see cref="Begin"/> writes when the previous session started at <paramref name="start"/> never ended.</summary>
-    public static string UncleanText(string start) =>
-        $"No exception was caught; the app was killed or the web view stopped. Previous start: {start}.";
+    /// <summary>
+    /// The text of the log <see cref="Begin"/> writes when the previous session started at <paramref name="start"/>
+    /// never ended: the fixed text of the recorded <paramref name="reason"/>, or that none was recorded.
+    /// </summary>
+    public static string UncleanText(string start, ExitReason? reason) => reason is { } recorded
+        ? $"No exception was caught. The app recorded how it ended: {ExitReasons.Text(recorded)}. Previous start: {start}."
+        : $"No exception was caught and no exit reason was recorded; the process was killed or ended without warning. Previous start: {start}.";
 
     /// <summary>
     /// Writes one crash log for <paramref name="e"/> from <paramref name="source"/> and prunes old logs. Returns the
@@ -111,13 +118,14 @@ internal sealed class CrashLog
         try
         {
             CrashHint? hint = null;
-            if (ReadSession() is (bool running, DateTime start))
+            if (ReadSession() is { } session)
             {
+                (bool running, DateTime start, ExitReason? reason) = session;
                 string? newest = NewestLogSince(start);
                 if (newest is null && running)
                 {
                     string startText = Stamp(start);
-                    newest = WriteLog(UncleanSource, body => body.Append(UncleanText(startText)).Append('\n'));
+                    newest = WriteLog(UncleanSource, body => body.Append(UncleanText(startText, reason)).Append('\n'));
                 }
 
                 if (newest is not null)
@@ -137,9 +145,9 @@ internal sealed class CrashLog
             lock (gate)
             {
                 started = now;
+                WriteSession(Running + " " + Stamp(now));
             }
 
-            WriteSession(Running, now);
             return hint;
         }
         catch (Exception)
@@ -153,20 +161,45 @@ internal sealed class CrashLog
     {
         try
         {
-            DateTime? start;
             lock (gate)
             {
-                start = started;
-            }
-
-            if (start is { } value)
-            {
-                WriteSession(Clean, value);
+                if (started is { } start)
+                {
+                    ended = true;
+                    WriteSession(Clean + " " + Stamp(start));
+                }
             }
         }
         catch (Exception)
         {
             // Nothing to report: the next start counts it as an unclean exit.
+        }
+    }
+
+    /// <summary>
+    /// Records how the app is ending (job 334): rewrites the session as <c>running &lt;start&gt; &lt;code&gt;</c>, so the
+    /// next start's <see cref="UncleanSource"/> log names the reason. Only the first reason counts; nothing is written
+    /// before <see cref="Begin"/> (a second copy) or after <see cref="End"/> (a normal exit raises
+    /// <c>ProcessExit</c> after it). Never throws.
+    /// </summary>
+    public void RecordExit(ExitReason reason)
+    {
+        try
+        {
+            lock (gate)
+            {
+                if (started is not { } start || ended || exitRecorded)
+                {
+                    return;
+                }
+
+                exitRecorded = true;
+                WriteSession(Running + " " + Stamp(start) + " " + ExitReasons.Code(reason));
+            }
+        }
+        catch (Exception)
+        {
+            // Nothing to report: the next start says no reason was recorded.
         }
     }
 
@@ -179,7 +212,7 @@ internal sealed class CrashLog
 
     private static string Stamp(DateTime utc) => utc.ToString("O", CultureInfo.InvariantCulture);
 
-    private void WriteSession(string kind, DateTime start)
+    private void WriteSession(string text)
     {
         try
         {
@@ -198,7 +231,7 @@ internal sealed class CrashLog
             }
 
             // Rewritten in place as an owner-only file (0600 off Windows), also when it was readable by others.
-            PrivateFile.Rewrite(SessionPath, Encoding.UTF8.GetBytes(kind + " " + Stamp(start)));
+            PrivateFile.Rewrite(SessionPath, Encoding.UTF8.GetBytes(text));
         }
         catch (Exception)
         {
@@ -206,8 +239,9 @@ internal sealed class CrashLog
         }
     }
 
-    // (running, start) of the previous session, or null when the file is missing, unreadable or malformed.
-    private (bool Running, DateTime Start)? ReadSession()
+    // (running, start, reason) of the previous session, or null when the file is missing, unreadable or malformed. A
+    // third word is allowed only after running; one that is none of the fixed codes counts as no reason.
+    private (bool Running, DateTime Start, ExitReason? Reason)? ReadSession()
     {
         string text;
         try
@@ -226,7 +260,8 @@ internal sealed class CrashLog
         }
 
         string[] parts = text.Split(' ');
-        if (parts.Length != 2 || (parts[0] != Running && parts[0] != Clean))
+        if (parts.Length is < 2 or > 3 || (parts[0] != Running && parts[0] != Clean)
+            || (parts.Length == 3 && parts[0] != Running))
         {
             return null;
         }
@@ -237,7 +272,8 @@ internal sealed class CrashLog
             return null;
         }
 
-        return (parts[0] == Running, start);
+        ExitReason? reason = parts.Length == 3 ? ExitReasons.FromCode(parts[2]) : null;
+        return (parts[0] == Running, start, reason);
     }
 
     private string? WriteLog(string source, Action<StringBuilder> fill)

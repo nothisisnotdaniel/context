@@ -305,10 +305,204 @@ public sealed class CrashLogTests : IDisposable
         string text = File.ReadAllText(hint.LogPath);
         Assert.Contains("Source: unclean-exit", text, StringComparison.Ordinal);
         Assert.Contains(
-            "No exception was caught; the app was killed or the web view stopped. Previous start: " + Stamp(start) + ".",
+            "No exception was caught and no exit reason was recorded; the process was killed or ended without warning. "
+                + "Previous start: " + Stamp(start) + ".",
             text,
             StringComparison.Ordinal);
         Assert.Single(LogFiles());
+    }
+
+    // Job 334 AC-1: after Begin, RecordExit rewrites the session as running <same start> <code>.
+    [Theory]
+    [InlineData(nameof(ExitReason.ProcessExit), "process-exit")]
+    [InlineData(nameof(ExitReason.Logoff), "logoff")]
+    [InlineData(nameof(ExitReason.Shutdown), "shutdown")]
+    [InlineData(nameof(ExitReason.CloseApp), "close-app")]
+    public void RecordExit_AfterBegin_WritesTheCode(string name, string code)
+    {
+        ExitReason reason = Enum.Parse<ExitReason>(name);
+        CrashLog log = Create();
+        DateTime start = now;
+        log.Begin();
+        now = now.AddMinutes(5);
+
+        log.RecordExit(reason);
+
+        Assert.Equal("running " + Stamp(start) + " " + code, File.ReadAllText(SessionPath));
+    }
+
+    // Job 334 AC-2: the first recorded reason wins.
+    [Fact]
+    public void RecordExit_Twice_KeepsTheFirst()
+    {
+        CrashLog log = Create();
+        DateTime start = now;
+        log.Begin();
+
+        log.RecordExit(ExitReason.Logoff);
+        log.RecordExit(ExitReason.ProcessExit);
+
+        Assert.Equal("running " + Stamp(start) + " logoff", File.ReadAllText(SessionPath));
+    }
+
+    // Job 334 AC-2: a normal exit raises ProcessExit after End, which then leaves clean <start>.
+    [Fact]
+    public void RecordExit_AfterEnd_LeavesClean()
+    {
+        CrashLog log = Create();
+        DateTime start = now;
+        log.Begin();
+        log.End();
+
+        log.RecordExit(ExitReason.ProcessExit);
+
+        Assert.Equal("clean " + Stamp(start), File.ReadAllText(SessionPath));
+    }
+
+    // Job 334 AC-2: without Begin (a second copy) RecordExit writes nothing, not even the folder.
+    [Fact]
+    public void RecordExit_WithoutBegin_WritesNothing()
+    {
+        Create().RecordExit(ExitReason.Shutdown);
+
+        Assert.False(Directory.Exists(Logs));
+    }
+
+    // Job 334 AC-2: End after RecordExit still writes clean <start>.
+    [Fact]
+    public void End_AfterRecordExit_WritesClean()
+    {
+        CrashLog log = Create();
+        DateTime start = now;
+        log.Begin();
+        log.RecordExit(ExitReason.Shutdown);
+
+        log.End();
+
+        Assert.Equal("clean " + Stamp(start), File.ReadAllText(SessionPath));
+    }
+
+    // Job 334 AC-3, AC-4: the next start's unclean-exit log names the recorded reason, or says none was recorded.
+    [Theory]
+    [InlineData(nameof(ExitReason.ProcessExit), "the .NET runtime shut down (Environment.Exit or a normal process exit)")]
+    [InlineData(nameof(ExitReason.Logoff), "Windows was logging off")]
+    [InlineData(nameof(ExitReason.Shutdown), "Windows was shutting down or restarting (also for updates)")]
+    [InlineData(nameof(ExitReason.CloseApp), "Windows asked the app to close (an installer or update)")]
+    [InlineData(null, null)]
+    public void Begin_AfterRecordedExit_LogNamesTheReason(string? name, string? text)
+    {
+        ExitReason? reason = name is null ? null : Enum.Parse<ExitReason>(name);
+        DateTime start = now;
+        CrashLog first = Create();
+        first.Begin();
+        if (reason is { } recorded)
+        {
+            first.RecordExit(recorded);
+        }
+
+        now = now.AddHours(1);
+        CrashHint? hint = Create().Begin();
+
+        Assert.NotNull(hint);
+        string[] lines = File.ReadAllText(hint.LogPath).Split('\n');
+        Assert.Contains("Source: unclean-exit", lines);
+        string expected = text is null
+            ? "No exception was caught and no exit reason was recorded; the process was killed or ended without warning. "
+                + "Previous start: " + Stamp(start) + "."
+            : "No exception was caught. The app recorded how it ended: " + text + ". Previous start: " + Stamp(start) + ".";
+        Assert.Contains(expected, lines);
+        Assert.Equal(expected, CrashLog.UncleanText(Stamp(start), reason));
+    }
+
+    // Job 334 AC-5: an unknown third word counts as no reason, so the file's text never reaches the log.
+    [Fact]
+    public void Begin_UnknownExitCode_GivesTheNoReasonText()
+    {
+        DateTime start = now.AddHours(-1);
+        Directory.CreateDirectory(Logs);
+        File.WriteAllText(SessionPath, "running " + Stamp(start) + " evil-text");
+
+        CrashHint? hint = Create().Begin();
+
+        Assert.NotNull(hint);
+        string text = File.ReadAllText(hint.LogPath);
+        Assert.DoesNotContain("evil-text", text, StringComparison.Ordinal);
+        Assert.Contains(CrashLog.UncleanText(Stamp(start), null), text, StringComparison.Ordinal);
+    }
+
+    // Job 334 AC-5: clean with a code, and four or more words, are malformed: no session, no hint.
+    [Theory]
+    [InlineData("clean 2026-11-18T09:00:00.0000000Z logoff")]
+    [InlineData("running 2026-11-18T09:00:00.0000000Z logoff x")]
+    [InlineData("running 2026-11-18T09:00:00.0000000Z logoff x y")]
+    public void Begin_MalformedExitSession_CountsAsNone(string content)
+    {
+        Directory.CreateDirectory(Logs);
+        File.WriteAllText(SessionPath, content);
+
+        Assert.Null(Create().Begin());
+        Assert.Empty(LogFiles());
+    }
+
+    // Job 334 AC-5: a session file that is a link is never written through by RecordExit.
+    [Fact]
+    public void RecordExit_SessionIsASymlink_TargetUnchanged()
+    {
+        Directory.CreateDirectory(Logs);
+        string target = Path.Combine(root, "target.txt");
+        File.WriteAllText(target, "target");
+        try
+        {
+            File.CreateSymbolicLink(SessionPath, target);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            // This OS refuses symlinks here; there is nothing to check.
+            return;
+        }
+
+        CrashLog log = Create();
+        log.Begin();
+        log.RecordExit(ExitReason.Logoff);
+
+        Assert.Equal("target", File.ReadAllText(target));
+        Assert.NotNull(new FileInfo(SessionPath).LinkTarget);
+    }
+
+    // Job 334 AC-5: a linked .logs folder is never written through by RecordExit.
+    [Fact]
+    public void RecordExit_FolderIsASymlink_WritesNothingThere()
+    {
+        string target = Path.Combine(root, "elsewhere");
+        Directory.CreateDirectory(target);
+        try
+        {
+            Directory.CreateSymbolicLink(Logs, target);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            // This OS refuses symlinks here; there is nothing to check.
+            return;
+        }
+
+        CrashLog log = Create();
+        log.Begin();
+        log.RecordExit(ExitReason.Shutdown);
+
+        Assert.Empty(Directory.GetFileSystemEntries(target));
+    }
+
+    // Job 334 AC-6: RecordExit never throws, also when .logs is a file.
+    [Fact]
+    public void RecordExit_FolderIsAFile_DoesNotThrow()
+    {
+        File.WriteAllText(Logs, "not a folder");
+        CrashLog log = Create();
+        log.Begin();
+
+        log.RecordExit(ExitReason.ProcessExit);
+
+        Assert.Equal("not a folder", File.ReadAllText(Logs));
     }
 
     // AC-8: a malformed session file counts as no session.

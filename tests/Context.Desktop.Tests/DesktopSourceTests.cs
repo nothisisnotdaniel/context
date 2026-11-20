@@ -108,6 +108,10 @@ public sealed class DesktopSourceTests
     private const string RealOutlook = "Outlook" + "ComSource";
     private const string RealOutlookFile = "src/Context.Desktop/" + RealOutlook + ".cs";
 
+    // 334: the Windows session end watcher (user32), spelled in pieces: no test may construct it or call into it.
+    private const string RealSessionWatcher = "SessionEnd" + "Watcher";
+    private const string RealSessionWatcherFile = "src/Context.Desktop/" + RealSessionWatcher + ".cs";
+
     private const string RealLauncher = "Shell" + "NoteLauncher";
     private const string RealLauncherFile = "src/Context.Desktop/" + RealLauncher + ".cs";
 
@@ -1765,6 +1769,55 @@ public sealed class DesktopSourceTests
         Assert.Contains("        app.Run();\n        crashLog.End();\n", program, StringComparison.Ordinal);
     }
 
+    // 334 AC-8: Program.cs records ProcessExit through the crash log and starts the session end watcher only on
+    // Windows, after the hand-over return; the watcher is named only by itself and Program.cs.
+    [Fact]
+    public void Program_RecordsTheExitReason()
+    {
+        string root = RepoFiles.Root();
+        string program = File.ReadAllText(Path.Combine(root, ProgramFile)).ReplaceLineEndings("\n");
+
+        Assert.Contains(
+            "AppDomain.CurrentDomain.ProcessExit += (_, _) => crashLog.RecordExit(ExitReason.ProcessExit);",
+            program,
+            StringComparison.Ordinal);
+        int handOver = program.IndexOf("if (start.HandOver)", StringComparison.Ordinal);
+        Assert.True(handOver >= 0, "Program.cs has no hand-over return");
+        Match started = Regex.Match(
+            program,
+            @"if \(OperatingSystem\.IsWindows\(\)\)\n\s*\{\n\s*_ = new " + RealSessionWatcher + @"\(crashLog\)\.Start\(\);\n\s*\}");
+        Assert.True(started.Success, "Program.cs doesn't start the watcher inside an OperatingSystem.IsWindows() branch");
+        Assert.True(started.Index > handOver, "The watcher starts before the hand-over return");
+        Assert.Single(Regex.Matches(program, @"\bnew " + RealSessionWatcher + @"\b"));
+
+        List<string> found = RepoFiles.Sources(root, "src", ".cs", ".razor")
+            .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains(RealSessionWatcher, StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal(
+            new[] { ProgramFile, RealSessionWatcherFile }.Order(StringComparer.Ordinal),
+            found.Order(StringComparer.Ordinal));
+    }
+
+    // 334 AC-8: no test constructs the session end watcher or calls into it (it would make a user32 window), and the
+    // job adds no package.
+    [Fact]
+    public void Tests_NeverLoadTheSessionEndWatcher()
+    {
+        string root = RepoFiles.Root();
+        Regex use = new(@"\bnew\s+" + RealSessionWatcher + @"\b|\b" + RealSessionWatcher + @"\s*\.|typeof\s*\(\s*"
+            + RealSessionWatcher + @"\b|<\s*" + RealSessionWatcher + @"\s*>", RegexOptions.CultureInvariant);
+        List<string> found = [];
+        foreach (string folder in new[] { "tests/Context.Tests", "tests/Context.Desktop.Tests" })
+        {
+            found.AddRange(RepoFiles.Sources(root, folder, ".cs", ".csproj")
+                .Where(f => use.IsMatch(File.ReadAllText(Path.Combine(root, f)))));
+        }
+
+        Assert.True(found.Count == 0, "Tests load the session end watcher: " + string.Join(", ", found));
+        string project = File.ReadAllText(Path.Combine(root, "src/Context.Desktop/Context.Desktop.csproj"));
+        Assert.Equal(2, Regex.Matches(project, "<PackageReference ").Count);
+    }
+
     // 315 AC-9: Program.cs takes the running lock through DesktopStartup before the window is built, never calls
     // crashLog.Begin() or PrivateFile.OpenLock itself, and brings the window to the front on a show request.
     [Fact]
@@ -1962,7 +2015,8 @@ public sealed class DesktopSourceTests
             RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs"));
     }
 
-    // 136 AC-10, 217 AC-8: native calls live only in the macOS key store and the Outlook COM source.
+    // 136 AC-10, 217 AC-8: native calls live only in the macOS key store and the Outlook COM source (334: and the
+    // Windows session end watcher).
     [Fact]
     public void Sources_HaveNativeCallsOnlyInTheMacStore()
     {
@@ -1973,7 +2027,7 @@ public sealed class DesktopSourceTests
             .ToList();
 
         Assert.Equal(
-            new[] { RealHotkeyFile, RealMacStoreFile, RealOutlookFile }.Order(StringComparer.Ordinal),
+            new[] { RealHotkeyFile, RealMacStoreFile, RealOutlookFile, RealSessionWatcherFile }.Order(StringComparer.Ordinal),
             found.Order(StringComparer.Ordinal));
     }
 
