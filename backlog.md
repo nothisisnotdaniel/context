@@ -147,6 +147,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#404](backlog/404-todos-page-opened-from-an-exclamation.md) Todos page opened from an exclamation-mark icon in the left sidebar → 331-todos-page-icon
 - [x] [#405](backlog/405-affiliation-as-a-comma-separated-list.md) Affiliation as a comma-separated list → 332-affiliation-list
 - [x] [#401](backlog/401-say-why-the-app-ended-in.md) Say why the app ended in the crash log → 334-exit-reason-log
+- [ ] [#310](backlog/310-choose-light-dark-or-system-theme.md) Choose light, dark or system theme in Settings
 - [ ] [#255](backlog/255-decisions-longer-than-one-line-a.md) Numbered #!d decisions: a marked paragraph, referenced as #!d1234
 - [ ] [#262](backlog/262-rename-a-note-update-its-title.md) Rename a note: update its # title line too
 - [ ] [#257](backlog/257-web-links-work-in-the-note.md) Web links work in the note editor
@@ -278,7 +279,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#304](backlog/304-same-selector-for-the-re-found.md) Same selector for the re-found note button in ReviewPanelTests
 - [h] [#308](backlog/308-check-right-click-in-a-release.md) Check right click in a Release build on macOS and Windows
 - [h] [#309](backlog/309-check-the-narrower-pick-a-day.md) Check the narrower Pick a day popover in light and dark mode
-- [ ] [#310](backlog/310-choose-light-dark-or-system-theme.md) Choose light, dark or system theme in Settings
 - [?] [#311](backlog/311-skip-one-outlook-item-when-its.md) Skip one Outlook item when its Sensitivity can't be read
 - [?] [#312](backlog/312-ask-before-a-link-with-creates.md) Ask before a link with # creates a note
 - [ ] [#313](backlog/313-slim-claude-md-into-docs.md) Slim CLAUDE.md into docs
