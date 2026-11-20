@@ -281,7 +281,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [h] [#308](backlog/308-check-right-click-in-a-release.md) Check right click in a Release build on macOS and Windows
 - [h] [#309](backlog/309-check-the-narrower-pick-a-day.md) Check the narrower Pick a day popover in light and dark mode
 - [?] [#311](backlog/311-skip-one-outlook-item-when-its.md) Skip one Outlook item when its Sensitivity can't be read
-- [?] [#312](backlog/312-ask-before-a-link-with-creates.md) Ask before a link with # creates a note
+- [ ] [#312](backlog/312-ask-before-a-link-with-creates.md) Ask before a link with # creates a note
 - [ ] [#313](backlog/313-slim-claude-md-into-docs.md) Slim CLAUDE.md into docs
 - [?] [#314](backlog/314-enter-adds-the-attribute-row-in.md) Enter adds the attribute row in the Attributes box
 - [?] [#315](backlog/315-keep-keyboard-focus-after-adding-or.md) Keep keyboard focus after adding or removing an attribute
