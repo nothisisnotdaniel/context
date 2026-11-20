@@ -228,7 +228,7 @@ internal static class TodoMarkerConversion
                 return 0;
             }
 
-            if (!SameStrictUtf8(store, note, opened))
+            if (!SameStrictUtf8(note, opened))
             {
                 // Not strict UTF-8 (an invalid byte, a UTF-16/32 note) or changed since the read: a save would change
                 // more than the box characters.
@@ -256,7 +256,7 @@ internal static class TodoMarkerConversion
 
     // True when the note's bytes are still the ones opened was read from and are strict UTF-8 (an optional UTF-8 BOM,
     // then no invalid byte), so decoding and the save's UTF-8 encoding give back every byte but the changed ones.
-    private static bool SameStrictUtf8(NoteStore store, NoteInfo note, EditableNote opened)
+    private static bool SameStrictUtf8(NoteInfo note, EditableNote opened)
     {
         byte[] raw = BoundedFile.Read(note.Path, NoteStore.MaxEditBytes);
         if (EditableNote.Hash(raw) != opened.Version)
