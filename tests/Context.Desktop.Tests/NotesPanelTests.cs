@@ -98,8 +98,8 @@ public sealed class NotesPanelTests : IDisposable
     {
         IElement[] buttons = bar.QuerySelectorAll(".notes-bar-buttons button").ToArray();
         Assert.Equal(
-            ["triage-open", "people-open", "tags-open", "settings-open"], buttons.Select(b => b.ClassList.First()).ToArray());
-        Assert.Equal(["Triage", "People", "Tags", "Settings"], buttons.Select(b => b.GetAttribute("aria-label")!).ToArray());
+            ["triage-open", "people-open", "tags-open", "todos-open", "settings-open"], buttons.Select(b => b.ClassList.First()).ToArray());
+        Assert.Equal(["Triage", "People", "Tags", "Todos", "Settings"], buttons.Select(b => b.GetAttribute("aria-label")!).ToArray());
     }
 
     // 192 AC-1, AC-2: icon buttons with names, typed, svg child, no visible text, safe decorative svg.
@@ -107,6 +107,7 @@ public sealed class NotesPanelTests : IDisposable
     [InlineData("triage-open", "Triage")]
     [InlineData("people-open", "People")]
     [InlineData("tags-open", "Tags")]
+    [InlineData("todos-open", "Todos")]
     [InlineData("settings-open", "Settings")]
     public async Task BarButtons_AreIconOnly_WithSafeSvg(string cls, string label)
     {
@@ -126,6 +127,20 @@ public sealed class NotesPanelTests : IDisposable
         }
         Assert.Contains("currentColor", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("#", markup, StringComparison.Ordinal);
+    }
+
+    // 331 AC-1: the Todos button's icon is an exclamation mark (a line and a dot), decorative and unfocusable.
+    [Fact]
+    public async Task TodosButton_ExclamationMarkIcon()
+    {
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        IElement svg = cut.Find(".notes-bar-buttons button.todos-open svg");
+        Assert.Equal("false", svg.GetAttribute("focusable"));
+        Assert.Equal("currentColor", svg.GetAttribute("stroke"));
+        Assert.Equal("0 0 24 24", svg.GetAttribute("viewBox"));
+        Assert.Single(svg.QuerySelectorAll("line"));
+        Assert.Single(svg.QuerySelectorAll("circle"));
     }
 
     // 218 AC-2: Search moved to the top bar; the sidebar has no Search button.

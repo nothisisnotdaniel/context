@@ -796,6 +796,7 @@ public sealed class MainTests : IDisposable
     [InlineData("triage-open", ".triage-panel")]
     [InlineData("people-open", ".people-panel")]
     [InlineData("tags-open", ".tags-panel")]
+    [InlineData("todos-open", ".all-todos-panel")]
     [InlineData("settings-open", ".settings-panel")]
     public async Task Page_OpensInPlaceOfTheNoteArea_CloseShowsItAgain(string button, string page)
     {
@@ -819,6 +820,7 @@ public sealed class MainTests : IDisposable
         Assert.NotNull(close.QuerySelector("svg"));
         Assert.Equal("close", cut.Find(".page > .panel-bar").LastElementChild!.ClassName);
         Assert.Single(cut.FindAll(".page > .panel-bar button.close"));
+        Assert.Single(cut.FindAll(".todos-region .todos"));
 
         await close.ClickAsync(new MouseEventArgs());
 
@@ -826,6 +828,42 @@ public sealed class MainTests : IDisposable
         Assert.False(cut.Find(".note-area").HasAttribute("hidden"));
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         Assert.Single(cut.FindAll("button.page-menu-open"));
+    }
+
+    // 331 AC-5: a note todo's note button on the Todos page opens the note and closes the page.
+    [Fact]
+    public async Task TodosPage_NoteButton_OpensNoteClosesPage()
+    {
+        data.WriteNote("Plan", "# Plan\n- { } call Anna\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await cut.Find("button.todos-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".all-todos-panel button.todo-note")), Wait);
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".todos-region").TextContent, StringComparison.Ordinal), Wait);
+
+        await cut.Find(".all-todos-panel button.todo-note").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Plan", cut.Find(".note-title").TextContent), Wait);
+        Assert.Empty(cut.FindAll(".all-todos-panel"));
+        Assert.False(cut.Find(".note-area").HasAttribute("hidden"));
+    }
+
+    // 331 AC-5: a tied todo's meeting button on the Todos page opens the appointment page in its place.
+    [Fact]
+    public async Task TodosPage_MeetingButton_OpensAppointmentPage()
+    {
+        data.WriteCalendar("meetings.ics", DesktopFixture.Calendar(MeetingCalendar.Sync()));
+        MeetingCalendar.Store(data).Add("Bring budget", DesktopFixture.Today, null, null, MeetingCalendar.SyncLink());
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await cut.Find("button.todos-open").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".all-todos-panel button.todo-meeting")), Wait);
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Find(".todos-region").TextContent, StringComparison.Ordinal), Wait);
+
+        await cut.Find(".all-todos-panel button.todo-meeting").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".appointment-page")), Wait);
+        Assert.Empty(cut.FindAll(".all-todos-panel"));
+        Assert.Single(cut.FindAll(".page"));
     }
 
     // 200 AC-7: Triage has no … button; its choices and × stay on the page.
