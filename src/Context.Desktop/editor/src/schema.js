@@ -87,7 +87,8 @@ export const schema = new Schema({
       content: "paragraph block*",
       defining: true,
       // checked null: a plain item; true / false: a task item. kind "global": a note todo (- {x} / - { }) that the
-      // todo views list; "local": a checkbox that stays in its note (- [x] / - [ ]); null for a plain item.
+      // todo views list; "local": a checkbox that stays in its note (- [x] / - [ ]); "carry": a local checkbox carried
+      // to the next meeting (- [>], job 330, never checked); null for a plain item.
       attrs: { checked: { default: null }, kind: { default: null } },
       parseDOM: [{ tag: "li" }],
       toDOM(node) {
@@ -166,8 +167,11 @@ export const schema = new Schema({
   },
 });
 
-/** The class of a task item's li: "task global" or "task local", plus " done" when checked. */
+/**
+ * The class of a task item's li: "task global" or "task local" (a carried item "task local carry": it stays local),
+ * plus " done" when checked.
+ */
 export function taskClass(node) {
   const kind = node.attrs.kind === "global" ? "global" : "local";
-  return "task " + kind + (node.attrs.checked ? " done" : "");
+  return "task " + kind + (node.attrs.checked ? " done" : "") + (node.attrs.kind === "carry" ? " carry" : "");
 }

@@ -557,6 +557,25 @@ public sealed class MeetingNoteTests : IDisposable
         Assert.Equal(written, File.GetLastWriteTimeUtc(previous));
     }
 
+    // 330 AC-3: a "[>]" line of the previous note, also one inside Open points, comes over once as "- [ ]"; the
+    // previous note's bytes stay as they were.
+    [Fact]
+    public void Ensure_CarriedLines_CopiedAsOpenCheckboxes_PreviousUnchanged()
+    {
+        WriteWeekly("2026-11-12", "# 2026-11-12\n\n- [>] Ask about budget\n- [x] Done\n## Open points\n- [>] Hiring plan\n");
+        string previous = NotePath("Meetings/Weekly/2026-11-12");
+        byte[] bytes = File.ReadAllBytes(previous);
+
+        MeetingNoteResult result = MeetingNote.Ensure(new NoteStore(root), Weekly());
+
+        Assert.Equal(MeetingNoteKind.Created, result.Kind);
+        Assert.Equal(
+            MeetingNote.Format(Weekly())
+                + "\n## From last time\n\nFrom [[Meetings/Weekly/2026-11-12]]:\n\n- [ ] Ask about budget\n- [ ] Hiring plan\n",
+            Created());
+        Assert.Equal(bytes, File.ReadAllBytes(previous));
+    }
+
     // 245 AC-2: only the latest earlier occurrence is copied.
     [Fact]
     public void Ensure_SeveralOccurrences_LatestEarlierCopied()

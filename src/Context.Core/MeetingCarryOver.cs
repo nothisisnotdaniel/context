@@ -64,10 +64,11 @@ internal static class MeetingCarryOver
     /// <summary>
     /// The open points of <paramref name="markdown"/> in line order: every open todo <see cref="NoteTodoParser.Parse"/>
     /// finds and every open checkbox <see cref="NoteTodoParser.ParseCheckboxes"/> finds (job 329; its raw line with
-    /// leading spaces and tabs removed), and the lines of every section whose ATX heading
+    /// leading spaces and tabs removed), every line <see cref="NoteTodoParser.ParseCarried"/> finds (job 330), written
+    /// as <c>- [ ] </c> and the text after its marker as written, and the lines of every section whose ATX heading
     /// (outside fences) is <see cref="OpenPointsHeading"/> ignoring case, up to the next heading of the same or higher
     /// level outside fences, copied as written without the heading and without leading and trailing blank lines. A
-    /// todo inside such a section appears once, as written. <c>\r</c> is dropped from every line.
+    /// todo inside such a section appears once, as written (a <c>[&gt;]</c> line once, as <c>- [ ] </c> and its text). <c>\r</c> is dropped from every line.
     /// </summary>
     public static IReadOnlyList<string> Extract(string markdown)
     {
@@ -127,6 +128,18 @@ internal static class MeetingCarryOver
         if (sectionLevel > 0)
         {
             Keep(lines, section, kept);
+        }
+
+        // Job 330: a line marked for the next meeting comes over as an open checkbox, also inside an Open points
+        // section (so this runs after the section pass, which copies lines as written).
+        foreach (ParsedNoteTodo carried in NoteTodoParser.ParseCarried(markdown))
+        {
+            string line = lines[carried.Line - 1];
+            int indent = line.Length - line.TrimStart(' ', '\t').Length;
+
+            // The text starts after the list marker, its space, the box and the space after it ("- [>] ").
+            int text = indent + 2 + NoteTodoParser.CarryBox.Length + 1;
+            kept[carried.Line - 1] = "- " + NoteTodoParser.OpenBox + " " + line[text..];
         }
 
         return kept.Values.ToList();

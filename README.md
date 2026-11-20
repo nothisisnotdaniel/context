@@ -107,6 +107,11 @@ never changed. A new note also gets the still-open points of the same meeting's 
 previous note is only read, never changed. In the desktop app, `/meeting 2` in the command palette opens the same note (numbered as
 `context current` numbers them).
 
+To carry one point over without moving it under `Open points`, mark its checkbox `- [>]`: right-click the box in the
+editor, or press Ctrl+Alt+N (Cmd+Option+N on a Mac) with the caret in the line, and do the same again to take the mark
+off. The box shows an arrow, and the next note lists the point as an open `- [ ]` checkbox. A `- [>]` line stays in its
+note like any checkbox: no todo view lists it.
+
 ### Day's end
 
 `context dayend` writes the day's worked hours from the Times app into today's daily note (a `## Worked` section) and
@@ -205,7 +210,9 @@ Write an action item as a todo line anywhere in a note: `- { } call Anna due:202
 instead of `-` and indenting work too; the `due:yyyy-MM-dd` word is optional and can stand anywhere in the line).
 A `- [ ] text` line is a plain checkbox that stays in its note: no todo view lists it. In the editor a todo's line
 has a blue tint and a small dot after its box, a checkbox's line a grey one; typing `- { } ` or `- [ ] ` (or
-`{x}` / `[x]`) at the start of a line makes that kind of item at once.
+`{x}` / `[x]`) at the start of a line makes that kind of item at once. A `- [>]` checkbox is carried to the next
+meeting (see Meeting notes): right-click an open checkbox's box or press Ctrl+Alt+N (Cmd+Option+N on a Mac) to mark it,
+or type `- [>] `; ticking it makes it `- [x]`.
 The todo sidebar and `context todos` list it with the todos from `todos.json`, sorted by its due date (on the same
 date the `todos.json` todos first; todos without a date last), with the note's name; in the app the name opens the
 note. `context todos` prints such a todo as `2026-11-20\tcall Anna\tMeeting` (`-` as the date when it has none).

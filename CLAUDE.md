@@ -630,12 +630,21 @@ Every factory agent reads this file before working on Context. Keep it short and
     (`TagParser.Collapse`) and cut to `MaxTextLength` (1000, never inside a surrogate pair); an empty text is no todo;
     a topic line (`TopicParser.ParseLine` gives one, job 253) is no todo either. Job 329: `- [ ] text`
     (`NoteTodoParser.OpenBox`, which `TopicParser` keeps using) is a checkbox that stays in its note: no todo view
-    lists it; `ParseCheckboxes(markdown)` reads those lines by the same rules (used by the carry-over). The editor
-    (`schema.js` `list_item` attr `kind`: `"global"` for `{ }`/`{x}`, `"local"` for `[ ]`/`[x]`, null for a plain item;
+    lists it; `ParseCheckboxes(markdown)` reads those lines by the same rules (used by the carry-over). Job 330:
+    `- [>] text` (`NoteTodoParser.CarryBox`) is a checkbox carried to the next meeting, read only by
+    `ParseCarried(markdown)` (same rules), never by `Parse`/`ParseCheckboxes`, so no todo view lists it. The editor
+    (`schema.js` `list_item` attr `kind`: `"global"` for `{ }`/`{x}`, `"local"` for `[ ]`/`[x]`, `"carry"` for `[>]`
+    (always unchecked; li classes `task local carry`, box `aria-label` `Next meeting`, `editor.css` arrow
+    `li.task.carry > .task-box::before`), null for a plain item;
     `markdown.js` `TaskRe`/`taskPrefix`; `view.js` `taskRules`, `toggleTask`, `splitItem` keep the kind) gives the li the
     classes `task global`/`task local` (plus `done`), the box `aria-label` `Todo`/`Checkbox` and a global item a
     `span.task-marker` (`aria-hidden`); `editor.css` tints the line with `--task-global-bg`/`--task-local-bg` (`app.css`,
-    both themes, text and grey at least 4.5:1). Test hook `toggledMarkdown(markdown, index)`.
+    both themes, text and grey at least 4.5:1). Test hook `toggledMarkdown(markdown, index)`. Job 330: `toggleCarry`
+    (`view.js`) turns an open local item `[ ]` into `[>]` and back (null for any other item); a right click on the box
+    (`contextmenu`, `preventDefault` only for such an item) or `Mod-Alt-n` (innermost task item; not handled elsewhere,
+    so AltGr+N still types) runs it; every open local box has `aria-keyshortcuts` and a `title` naming both; ticking a
+    `[>]` gives `[x]`, Enter in it a `[ ]` item; typing `- [>] ` works as the other boxes. Test hook
+    `carriedMarkdown(markdown, index)`.
     **Todo marker conversion** (job 329, `TodoMarkerConversion.cs`): `Run(store, history, utcNow)` once per data
     folder rewrites, in every `NoteStore.List()` note (`.md` only; `.ctxs` is never opened), each line outside fences
     that is `IsOldTodo` (`-`/`*`/`+`, one space, `[ ]`/`[x]`/`[X]`, one space, text, its open form a
@@ -1122,7 +1131,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     `MeetingCarryOver.Section` for the previous occurrence: `Previous(notes, meetingPage, date)` is the latest direct
     subpage of the same `Meetings/<part>` page (any case) titled exactly `yyyy-MM-dd` (a real date) before the day;
     `Extract(markdown)` gives, in line order, every open `NoteTodoParser` todo and checkbox (`Parse` plus
-    `ParseCheckboxes`, job 329; `Raw`, leading spaces/tabs removed)
+    `ParseCheckboxes`, job 329; `Raw`, leading spaces/tabs removed), every `ParseCarried` line (job 330) as `- [ ] `
+    and the text after its marker as written (also inside an Open points section, once)
     and the lines of every ATX `Open points` section (ignoring case, outside fences, up to the next heading of the same
     or higher level outside fences; copied as written without its heading, outer blank lines dropped; a todo in it once),
     `\r` dropped; `Section(name, lines)` writes `\n## From last time\n\nFrom [[<name>]]:\n\n` (plain `From <name>:`

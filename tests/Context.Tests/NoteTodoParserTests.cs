@@ -167,4 +167,36 @@ public sealed class NoteTodoParserTests
         Assert.Equal((1, "a", "- [ ] a"), (box.Line, box.Text, box.Raw));
         Assert.Empty(NoteTodoParser.ParseCheckboxes("- [x] a\n- [ ]x a\n- [ ] \n- { } b\n"));
     }
+
+    // 330 AC-1: a "[>]" line (-, * or +, indented or not) is read by ParseCarried only; never in a fence, never a todo
+    // or a checkbox.
+    [Theory]
+    [InlineData("- [>] carry me", "carry me")]
+    [InlineData("* [>] carry me", "carry me")]
+    [InlineData("+ [>] carry me", "carry me")]
+    [InlineData("  \t- [>] carry me", "carry me")]
+    public void ParseCarried_CarryLine_OnlyThere(string line, string text)
+    {
+        string markdown = "# N\n" + line + "\n";
+
+        ParsedNoteTodo carried = Assert.Single(NoteTodoParser.ParseCarried(markdown));
+        Assert.Equal((2, text, line), (carried.Line, carried.Text, carried.Raw));
+        Assert.Empty(NoteTodoParser.Parse(markdown));
+        Assert.Empty(NoteTodoParser.ParseCheckboxes(markdown));
+        Assert.Equal("[>]", NoteTodoParser.CarryBox);
+    }
+
+    // 330 AC-1: no carried line inside a fence, without text, or with another box.
+    [Theory]
+    [InlineData("```\n- [>] fenced\n```\n")]
+    [InlineData("- [>] \n")]
+    [InlineData("- [>]\n")]
+    [InlineData("- [>]x a\n")]
+    [InlineData("-[>] a\n")]
+    [InlineData("- [ ] a\n- { } b\n- [x] c\n")]
+    [InlineData("1. [>] numbered\n")]
+    public void ParseCarried_NotACarryLine_None(string markdown)
+    {
+        Assert.Empty(NoteTodoParser.ParseCarried(markdown));
+    }
 }

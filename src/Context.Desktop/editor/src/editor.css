@@ -77,6 +77,11 @@
   content: "\2611";
 }
 
+/* 330: an open checkbox carried to the next meeting (- [>]) shows an arrow in its box; its line keeps the local tint. */
+.note-editor-body li.task.carry > .task-box::before {
+  content: "\21E5";
+}
+
 .note-editor-body li.task.done > .task-body {
   color: var(--grey);
   text-decoration: line-through;
