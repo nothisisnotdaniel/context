@@ -147,6 +147,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#404](backlog/404-todos-page-opened-from-an-exclamation.md) Todos page opened from an exclamation-mark icon in the left sidebar → 331-todos-page-icon
 - [x] [#405](backlog/405-affiliation-as-a-comma-separated-list.md) Affiliation as a comma-separated list → 332-affiliation-list
 - [x] [#401](backlog/401-say-why-the-app-ended-in.md) Say why the app ended in the crash log → 334-exit-reason-log
+- [ ] [#255](backlog/255-decisions-longer-than-one-line-a.md) Numbered #!d decisions: a marked paragraph, referenced as #!d1234
 - [ ] [#262](backlog/262-rename-a-note-update-its-title.md) Rename a note: update its # title line too
 - [ ] [#257](backlog/257-web-links-work-in-the-note.md) Web links work in the note editor
 - [ ] [#191](backlog/191-archive-done-todos-a-month-after.md) Archive done todos a month after they are done
@@ -250,7 +251,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#241](backlog/241-see-decisions-past-the-first-100.md) See decisions past the first 100
 - [x] [#242](backlog/242-tidy-the-desktop-layout-icon-buttons.md) Tidy the desktop layout: icon buttons, no dates, set-apart capture bar → 192-tidy-desktop-layout
 - [x] [#243](backlog/243-open-triage-tags-and-settings-as.md) Open Triage, Tags and Settings as their own pages with an × close → 193-page-views-close-x
-- [ ] [#255](backlog/255-decisions-longer-than-one-line-a.md) Numbered #!d decisions: a marked paragraph, referenced as #!d1234
 - [x] [#256](backlog/256-no-prerelease-for-backlog-only-pushes.md) No prerelease for backlog-only pushes → 231-no-prerelease-backlog-pushes
 - [h] [#259](backlog/259-check-the-capture-popover-in-a.md) Check the Capture popover in a narrow window
 - [?] [#260](backlog/260-return-focus-to-the-button-after.md) Return focus to the … button after a menu item or outside click
