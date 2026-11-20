@@ -366,6 +366,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#411](backlog/411-loading-state-and-group-counts-on.md) Loading state and group counts on the Todos page
 - [?] [#412](backlog/412-check-the-contrast-of-grey-source.md) Check the contrast of grey source buttons in dark mode
 - [?] [#413](backlog/413-tell-person-rows-apart-from-same.md) Tell person rows apart from same-named notes in search
+- [?] [#414](backlog/414-size-and-file-checks-in-the.md) Size and file checks in the dependency list test
 
 ## Dropped with the terminal UI
 
