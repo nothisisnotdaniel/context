@@ -296,7 +296,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#324](backlog/324-tag-board-show-the-target-column.md) Tag board: show the target column name on the move buttons
 - [?] [#325](backlog/325-tag-board-hint-when-a-card.md) Tag board: hint when a card is dropped on No status
 - [?] [#326](backlog/326-tag-board-highlight-a-column-while.md) Tag board: highlight a column while a card is dragged over it
-- [?] [#327](backlog/327-person-page-mark-overdue-waiting-for.md) Person page: mark overdue waiting-for follow-ups
+- [ ] [#327](backlog/327-person-page-mark-overdue-waiting-for.md) Person page: mark overdue waiting-for follow-ups
 - [?] [#328](backlog/328-smart-paste-don-t-fetch-page.md) Smart paste: don't fetch page titles from local or private addresses
 - [?] [#329](backlog/329-smart-paste-limit-concurrent-page-title.md) Smart paste: limit concurrent page-title fetches
 - [?] [#330](backlog/330-smart-paste-say-why-a-page.md) Smart paste: say why a page title wasn't used
