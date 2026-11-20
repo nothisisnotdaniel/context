@@ -25,7 +25,7 @@ internal sealed record TodoMarkerConversionResult
 
     /// <summary>
     /// The names (raw) of the notes that had todo lines but were not converted: too large, unreadable, failed to write
-    /// or changed in between. Each one keeps its bytes.
+    /// not strict UTF-8 or changed in between. Each one keeps its bytes.
     /// </summary>
     public IReadOnlyList<string> Skipped { get; }
 
@@ -49,6 +49,10 @@ internal static class TodoMarkerConversion
 
     /// <summary>The record's path in the data folder <paramref name="root"/>.</summary>
     public static string RecordPath(string root) => Path.Combine(root, FolderName, RecordName);
+
+    private static readonly byte[] Utf8Bom = [0xEF, 0xBB, 0xBF];
+
+    private static readonly UTF8Encoding StrictUtf8 = new UTF8Encoding(false, throwOnInvalidBytes: true);
 
     /// <summary>The report when lines were changed.</summary>
     public static string ChangedText(int lines, int notes) =>
@@ -84,7 +88,8 @@ internal static class TodoMarkerConversion
     /// <see cref="NoteStore.ReadForEdit"/> and saved through
     /// <see cref="NoteStore.SaveIfUnchanged(EditableNote, string, out EditableNote?, NoteHistory?)"/>, so a note that
     /// changed in between is not written and the old bytes become a version in <paramref name="history"/>. A note that
-    /// is too large, can't be read or written, or changed in between keeps its bytes and is listed as skipped. When the
+    /// is too large, can't be read or written, is not strict UTF-8 (an invalid byte, a UTF-16/32 note) or changed in
+    /// between keeps its bytes and is listed as skipped. When the
     /// notes are done the record is written through <see cref="PrivateFile"/> with the time from
     /// <paramref name="utcNow"/> (also when notes were skipped). Never throws for a read or write failure.
     /// </summary>
@@ -96,7 +101,7 @@ internal static class TodoMarkerConversion
         NoteStore store, NoteHistory history, Func<DateTime> utcNow, Action<string>? beforeSave)
     {
         string record = RecordPath(store.Root);
-        if (!Directory.Exists(store.Root) || File.Exists(record) || Directory.Exists(record))
+        if (!Directory.Exists(store.Root) || File.Exists(record) || Directory.Exists(record) || IsLink(record))
         {
             return new TodoMarkerConversionResult(false, 0, 0, []);
         }
@@ -131,6 +136,19 @@ internal static class TodoMarkerConversion
 
         WriteRecord(store.Root, record, utcNow(), lines, changedNotes, skipped.Count);
         return new TodoMarkerConversionResult(true, lines, changedNotes, skipped);
+    }
+
+    // A link at the record path (also a dangling one) counts as the record: PrivateFile would refuse to write through it.
+    private static bool IsLink(string record)
+    {
+        try
+        {
+            return new FileInfo(record).LinkTarget is not null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -210,6 +228,13 @@ internal static class TodoMarkerConversion
                 return 0;
             }
 
+            if (!SameStrictUtf8(store, note, opened))
+            {
+                // Not strict UTF-8 (an invalid byte, a UTF-16/32 note) or changed since the read: a save would change
+                // more than the box characters.
+                return -1;
+            }
+
             beforeSave?.Invoke(note.Name);
             return store.SaveIfUnchanged(opened, converted, out _, history) switch
             {
@@ -226,6 +251,33 @@ internal static class TodoMarkerConversion
         {
             // Too large (FileTooLargeException), unreadable, or the write or the history failed.
             return -1;
+        }
+    }
+
+    // True when the note's bytes are still the ones opened was read from and are strict UTF-8 (an optional UTF-8 BOM,
+    // then no invalid byte), so decoding and the save's UTF-8 encoding give back every byte but the changed ones.
+    private static bool SameStrictUtf8(NoteStore store, NoteInfo note, EditableNote opened)
+    {
+        byte[] raw = BoundedFile.Read(note.Path, NoteStore.MaxEditBytes);
+        if (EditableNote.Hash(raw) != opened.Version)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<byte> body = raw.AsSpan();
+        if (body.StartsWith(Utf8Bom))
+        {
+            body = body[Utf8Bom.Length..];
+        }
+
+        try
+        {
+            StrictUtf8.GetCharCount(body);
+            return true;
+        }
+        catch (DecoderFallbackException)
+        {
+            return false;
         }
     }
 

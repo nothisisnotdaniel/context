@@ -225,6 +225,57 @@ public sealed class TodoMarkerConversionTests : IDisposable
         Assert.Empty(history.Versions(Note("A")));
     }
 
+    // AC-8, AC-10: a note with an old todo line that is not strict UTF-8 (an invalid byte, UTF-16 LE, UTF-32 LE with
+    // BOM) would change beyond the box on save, so it is skipped, named and keeps its bytes. A note with no old todo
+    // line is not named.
+    [Fact]
+    public void Run_NotStrictUtf8_SkippedBytesUnchanged()
+    {
+        byte[] invalid = [.. Utf8("- [ ] one caf"), 0xE9, .. Utf8("\n")];
+        byte[] utf16 = [0xFF, 0xFE, .. Encoding.Unicode.GetBytes("- [ ] two\n")];
+        byte[] utf32 = [.. Encoding.UTF32.GetPreamble(), .. Encoding.UTF32.GetBytes("- [ ] three\n")];
+        byte[] quiet = [.. Utf8("no todo caf"), 0xE9, .. Utf8("\n")];
+        Write("Invalid", invalid);
+        Write("Wide", utf16);
+        Write("Wider", utf32);
+        Write("Quiet", quiet);
+        Write("Fine", Utf8("- [ ] four\n", bom: true));
+
+        TodoMarkerConversionResult result = Run();
+
+        Assert.Equal(["Invalid", "Wide", "Wider"], result.Skipped.Order(StringComparer.Ordinal));
+        Assert.Equal((1, 1), (result.Lines, result.Notes));
+        Assert.Equal(invalid, File.ReadAllBytes(PathOf("Invalid")));
+        Assert.Equal(utf16, File.ReadAllBytes(PathOf("Wide")));
+        Assert.Equal(utf32, File.ReadAllBytes(PathOf("Wider")));
+        Assert.Equal(quiet, File.ReadAllBytes(PathOf("Quiet")));
+        Assert.Equal(Utf8("- { } four\n", bom: true), File.ReadAllBytes(PathOf("Fine")));
+        Assert.Empty(history.Versions(Note("Invalid")));
+        Assert.Empty(history.Versions(Note("Wide")));
+    }
+
+    // AC-9: a link at the record path (a dangling one too) counts as the record, so nothing is converted.
+    [Fact]
+    public void Run_RecordIsDanglingLink_NothingConverted()
+    {
+        string record = TodoMarkerConversion.RecordPath(root);
+        Directory.CreateDirectory(Path.GetDirectoryName(record)!);
+        try
+        {
+            File.CreateSymbolicLink(record, Path.Combine(root, "nowhere"));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // No right to make links here (Windows without developer mode).
+            return;
+        }
+
+        Write("A", Utf8("- [ ] one\n"));
+
+        Assert.False(Run().Ran);
+        Assert.Equal(Utf8("- [ ] one\n"), File.ReadAllBytes(PathOf("A")));
+    }
+
     // AC-10: the report cleans each skipped name with the given function; the result never prints a name.
     [Fact]
     public void Report_CleansNames_ResultToStringIsTypeName()

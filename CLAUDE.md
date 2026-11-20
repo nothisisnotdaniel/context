@@ -640,9 +640,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     folder rewrites, in every `NoteStore.List()` note (`.md` only; `.ctxs` is never opened), each line outside fences
     that is `IsOldTodo` (`-`/`*`/`+`, one space, `[ ]`/`[x]`/`[X]`, one space, text, its open form a
     `ParseCheckboxLine`; no topic, no numbered list) to `{ }`/`{x}`: only those three characters change. Each note goes
-    `ReadForEdit` -> `Convert` -> `SaveIfUnchanged(..., history)`; a note too large, unreadable, failing to write or
-    changed in between keeps its bytes and is in `Skipped`. Then it writes `<root>/.migrations/todo-braces`
-    (`PrivateFile`, also when notes were skipped); while that record (file or folder) exists or the root is missing,
+    `ReadForEdit` -> `Convert` -> `SaveIfUnchanged(..., history)`; a note too large, unreadable, not strict UTF-8 (an
+    invalid byte, a UTF-16/32 note: the save would re-encode it), failing to write or changed in between keeps its bytes and is in `Skipped`. Then it writes `<root>/.migrations/todo-braces`
+    (`PrivateFile`, also when notes were skipped); while that record (file, folder or link) exists or the root is missing,
     `Run` reads and writes nothing (`Ran` false). `Report(result, clean)` gives `ChangedText` (`Changed <n> todo
     line(s) in <m> note(s) to - { }.`, only when a line changed) and one `SkippedText` (`Can't convert the todos in
     <note>.`) per skipped note. CLI: `Cli.MigrateTodos` runs it first and writes those lines to stderr (stdout and the
