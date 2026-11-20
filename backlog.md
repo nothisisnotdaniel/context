@@ -365,6 +365,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#410](backlog/410-check-the-carry-over-arrow-box.md) Check the carry-over arrow box width in both themes
 - [?] [#411](backlog/411-loading-state-and-group-counts-on.md) Loading state and group counts on the Todos page
 - [?] [#412](backlog/412-check-the-contrast-of-grey-source.md) Check the contrast of grey source buttons in dark mode
+- [?] [#413](backlog/413-tell-person-rows-apart-from-same.md) Tell person rows apart from same-named notes in search
 
 ## Dropped with the terminal UI
 
