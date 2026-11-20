@@ -250,7 +250,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#223](backlog/223-open-the-palette-with-ctrl-k.md) Open the palette with Ctrl+K from a triage text field
 - [?] [#239](backlog/239-wider-text-column-in-the-decisions.md) Wider text column in the Decisions panel
 - [?] [#240](backlog/240-cap-the-rows-read-for-the.md) Cap the rows read for the decision log
-- [?] [#241](backlog/241-see-decisions-past-the-first-100.md) See decisions past the first 100
+- [ ] [#241](backlog/241-see-decisions-past-the-first-100.md) See decisions past the first 100
 - [x] [#242](backlog/242-tidy-the-desktop-layout-icon-buttons.md) Tidy the desktop layout: icon buttons, no dates, set-apart capture bar → 192-tidy-desktop-layout
 - [x] [#243](backlog/243-open-triage-tags-and-settings-as.md) Open Triage, Tags and Settings as their own pages with an × close → 193-page-views-close-x
 - [x] [#256](backlog/256-no-prerelease-for-backlog-only-pushes.md) No prerelease for backlog-only pushes → 231-no-prerelease-backlog-pushes
