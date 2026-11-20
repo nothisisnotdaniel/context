@@ -285,7 +285,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#313](backlog/313-slim-claude-md-into-docs.md) Slim CLAUDE.md into docs
 - [?] [#314](backlog/314-enter-adds-the-attribute-row-in.md) Enter adds the attribute row in the Attributes box
 - [?] [#315](backlog/315-keep-keyboard-focus-after-adding-or.md) Keep keyboard focus after adding or removing an attribute
-- [?] [#316](backlog/316-add-attributes-to-a-note-that.md) Add attributes to a note that has none
+- [ ] [#316](backlog/316-add-attributes-to-a-note-that.md) Add attributes to a note that has none
 - [?] [#317](backlog/317-attribute-value-with-a-control-character.md) Attribute value with a control character isn't counted as changed
 - [?] [#318](backlog/318-attribute-values-show-bidi-controls-as.md) Attribute values show bidi controls as placeholders
 - [?] [#319](backlog/319-crash-hint-bar-doesn-t-cover.md) Crash hint bar doesn't cover the header
