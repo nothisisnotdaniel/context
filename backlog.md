@@ -147,6 +147,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#404](backlog/404-todos-page-opened-from-an-exclamation.md) Todos page opened from an exclamation-mark icon in the left sidebar → 331-todos-page-icon
 - [x] [#405](backlog/405-affiliation-as-a-comma-separated-list.md) Affiliation as a comma-separated list → 332-affiliation-list
 - [x] [#401](backlog/401-say-why-the-app-ended-in.md) Say why the app ended in the crash log → 334-exit-reason-log
+- [ ] [#262](backlog/262-rename-a-note-update-its-title.md) Rename a note: update its # title line too
 - [ ] [#257](backlog/257-web-links-work-in-the-note.md) Web links work in the note editor
 - [ ] [#191](backlog/191-archive-done-todos-a-month-after.md) Archive done todos a month after they are done
 - [ ] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39)
@@ -254,7 +255,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [h] [#259](backlog/259-check-the-capture-popover-in-a.md) Check the Capture popover in a narrow window
 - [?] [#260](backlog/260-return-focus-to-the-button-after.md) Return focus to the … button after a menu item or outside click
 - [?] [#261](backlog/261-check-context-db-in-the-todo.md) Check context.db in the todo done tests for note todos
-- [ ] [#262](backlog/262-rename-a-note-update-its-title.md) Rename a note: update its # title line too
 - [ ] [#263](backlog/263-show-the-error-when-saving-on.md) Show the error when saving on window close fails
 - [h] [#264](backlog/264-check-auto-save-by-hand-in.md) Check auto save by hand in the desktop app
 - [?] [#265](backlog/265-rename-ask-again-when-the-link.md) Rename: ask again when the link count changed before Confirm
