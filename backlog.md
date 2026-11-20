@@ -147,6 +147,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#404](backlog/404-todos-page-opened-from-an-exclamation.md) Todos page opened from an exclamation-mark icon in the left sidebar → 331-todos-page-icon
 - [x] [#405](backlog/405-affiliation-as-a-comma-separated-list.md) Affiliation as a comma-separated list → 332-affiliation-list
 - [x] [#401](backlog/401-say-why-the-app-ended-in.md) Say why the app ended in the crash log → 334-exit-reason-log
+- [ ] [#191](backlog/191-archive-done-todos-a-month-after.md) Archive done todos a month after they are done
 - [ ] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39)
 - [ ] [#77](backlog/077-quick-switcher.md) Quick switcher
 - [ ] [#59](backlog/059-ask-context.md) Ask Context
@@ -230,7 +231,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#237](backlog/237-code-spans-and-fences-in-tags.md) Code spans and fences in tags, links and mentions
 - [ ] [#189](backlog/189-resolve-person-aliases-without-an-allocation.md) Resolve person aliases without an allocation per mention row
 - [ ] [#190](backlog/190-show-the-unreadable-todos-line-at.md) Show the unreadable-todos line at the top of the person page
-- [ ] [#191](backlog/191-archive-done-todos-a-month-after.md) Archive done todos a month after they are done
 - [ ] [#192](backlog/192-keep-match-words-visible-next-to.md) Keep match words visible next to long related-note titles
 - [ ] [#193](backlog/193-give-the-related-notes-row-a.md) Give the related-notes row a proper row header
 - [?] [#194](backlog/194-show-confirmed-overrides-of-a-cancelled.md) Show confirmed overrides of a cancelled recurring series
