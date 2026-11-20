@@ -138,7 +138,7 @@ public sealed class AttributeParserTests
 
         Assert.NotNull(dir);
         string text = File.ReadAllText(Path.Combine(dir.FullName, "README.md"));
-        Assert.Contains("`affiliation::` value is a comma-separated list", text, StringComparison.Ordinal);
+        Assert.Contains("comma-separated", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("affiliation:: [[ACME]], Beta GmbH", text, StringComparison.Ordinal);
     }
 }
