@@ -245,7 +245,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#212](backlog/212-add-a-line-to-a-daily.md) Add a line to a daily note from the CLI
 - [ ] [#214](backlog/214-say-which-versions-the-history-diff.md) Say which versions the history diff compares
 - [?] [#215](backlog/215-cap-the-total-size-of-note.md) Cap the total size of note history
-- [?] [#221](backlog/221-stop-a-hung-reminder-notification-process.md) Stop a hung reminder notification process
+- [ ] [#221](backlog/221-stop-a-hung-reminder-notification-process.md) Stop a hung reminder notification process
 - [?] [#222](backlog/222-give-the-todo-time-field-a.md) Give the todo time field a visible label
 - [?] [#223](backlog/223-open-the-palette-with-ctrl-k.md) Open the palette with Ctrl+K from a triage text field
 - [?] [#239](backlog/239-wider-text-column-in-the-decisions.md) Wider text column in the Decisions panel
