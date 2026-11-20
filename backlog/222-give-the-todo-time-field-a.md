@@ -2,6 +2,8 @@
 
 As a Context user, I want to see what the time field next to a todo's date is for, so that I don't have to guess or rely on a screen reader label.
 
+Category: ux
+
 ## What
 
 Add a visible label (or a clear placeholder) for the todo time field and, for consistency, the date field, without breaking the row layout at the minimum window size. Update UI tests.

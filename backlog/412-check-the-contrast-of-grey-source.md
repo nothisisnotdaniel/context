@@ -2,6 +2,8 @@
 
 As a desktop user in dark mode, I want the grey note and meeting names under each todo to be easy to read, so that I can see where a todo comes from.
 
+Category: ui
+
 ## What
 
 Measure the contrast of the grey text on the note-name and meeting buttons (Todos page and todo sidebar) in dark mode. If it is below WCAG AA (4.5:1), raise it for both buttons.

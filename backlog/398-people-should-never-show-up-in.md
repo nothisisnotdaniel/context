@@ -2,6 +2,8 @@
 
 As a Context user, I want person pages kept out of the recent notes list and shown without a page hierarchy, so that the sidebar lists only the notes I work on, and a person stays a single flat page.
 
+Category: bug
+
 ## What
 
 - **Recent notes:** a person page (`people/<Name>`, `People.PersonOf`) is never listed in the sidebar's recent notes list, even right after I open it. The list still shows up to `RecentNotes.MaxCount` other notes. Opening a person page doesn't push another note out of the list.

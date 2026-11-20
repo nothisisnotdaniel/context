@@ -2,6 +2,8 @@
 
 As a desktop user, I want the placeholder shown when no note is open to sit with proper spacing below the top bar, so that the empty note area looks deliberate.
 
+Category: ui
+
 ## What
 
 The p.no-note placeholder in src/Context.Desktop/Main.razor has no CSS rule of its own in wwwroot/app.css; it relies on the default p and .grey styles and may sit tight to the top bar inside .note-area. Check it in the running app and give it its own spacing if needed, in light and dark mode.

@@ -2,6 +2,8 @@
 
 As a Context user, I want the unsaved-changes dot to be easy to see in light and dark themes, so that I notice unsaved edits.
 
+Category: ui
+
 ## What
 
 Open a note in the desktop app, type, and check that the dot appears next to the note name and clears on save, in both light and dark themes; report anything wrong as a backlog item.

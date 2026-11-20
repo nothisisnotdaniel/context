@@ -2,6 +2,8 @@
 
 As a desktop user moving through the Pick a day calendar with the keyboard, I want arrow and Page keys to move only the focused day, so that the page behind it does not scroll as well.
 
+Category: bug
+
 ## What
 
 Call preventDefault for ArrowLeft/Right/Up/Down, PageUp, PageDown, Home and End on the day buttons in TopBar.razor (a JS key filter or the existing interop), with a test.

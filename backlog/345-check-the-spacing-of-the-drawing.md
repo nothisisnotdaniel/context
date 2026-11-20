@@ -2,6 +2,8 @@
 
 As a desktop user, I want the "Drawing diagram…" hint to sit with even spacing under the code, so that the waiting state looks tidy in light and dark mode.
 
+Category: ui
+
 ## What
 
 Look at the "Drawing diagram…" waiting state of a mermaid block by eye on macOS and Windows and fix its margin or padding in the editor CSS if it is off.

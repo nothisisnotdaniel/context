@@ -2,6 +2,8 @@
 
 As a desktop user, I want the sensitive-setup dialog to look right, so that the password fields are usable.
 
+Category: ui
+
 ## What
 
 Open the SensitiveSetup dialog in the real app and check the input widths; adjust if needed.

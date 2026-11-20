@@ -2,6 +2,8 @@
 
 As a desktop user, I want a merge to refuse to delete a note that gained a subpage during the merge, so that a subpage is never removed with it.
 
+Category: bug
+
 ## What
 
 MergeNotesNow checks Descendants(merged.Name) > 0 well before Delete, which removes the whole subtree. Re-check just before Delete and refuse (keeping the merged target) if a subpage appeared, with a message and a test.

@@ -2,6 +2,8 @@
 
 As a Context user, I want a tooltip on the marker of a global todo, so that I can tell what the small marker means without knowing it already.
 
+Category: ux
+
 ## What
 
 Add a tooltip (title) to the marker that job 329 shows next to global `- { }` todos in the editor, for example "Global todo: shows in the Todos view". Keep the screen-reader label as it is.

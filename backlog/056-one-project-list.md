@@ -2,6 +2,8 @@
 
 As a Context and Times user, I want Context to offer Times' work items as tags, so that both apps use the same project numbers without keeping two lists.
 
+Category: feature
+
 ## What
 
 Context reads Times' `projects.json` (read-only, regular file, capped size, Times' data folder rules) and offers its work items as `#<number>` tags with their titles, for example in tag completion and on tag pages. Projects are still added in Times (or with `times addproject` once Times has one-shot commands). If Times isn't installed, nothing changes.

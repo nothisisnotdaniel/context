@@ -2,6 +2,8 @@
 
 As a desktop user, I want a merge that fails after the target was saved to tell me what was done and what wasn't, so that I don't think nothing was written.
 
+Category: ux
+
 ## What
 
 In DesktopActions.MergeNotesNow the outer catch turns an exception from notes.Delete or ChangeRecent, which run after the target is saved, into "Can't write …". Give that case its own message saying the target was merged but the source could not be removed, and add a test.

@@ -2,6 +2,8 @@
 
 As a Context user, I want the calendar link field in Settings to be clear, safe and easy to use, so that setting up my calendar works the first time.
 
+Category: feature
+
 ## What
 
 - Calendar link field: autocomplete new-password (was #140): Set autocomplete="new-password" instead of "off" on the link field in SettingsPanel.razor and update AC-3's test.

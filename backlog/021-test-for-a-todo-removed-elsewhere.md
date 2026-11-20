@@ -2,6 +2,8 @@
 
 As a maintainer, I want a test for `/done` on a todo that was removed elsewhere, so that the "There is no todo n" path stays covered.
 
+Category: test
+
 ## What
 
 Add a test for the `TodoCommands` branch where the numbered todo was removed elsewhere before `Complete(id)`, which shows "There is no todo n".

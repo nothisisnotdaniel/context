@@ -2,6 +2,8 @@
 
 As a desktop user, I want the crash hint after an unclean exit to sit where it doesn't cover the header, so that I can still reach the header's controls before I dismiss the hint.
 
+Category: ui
+
 ## What
 
 The crash hint (.crash-hint in src/Context.Desktop/wwwroot/app.css) is a fixed bar that can overlap the header until it is dismissed. Show it in the layout flow (for example as a strip above or below the header that pushes content down) so nothing is covered, in light and dark mode, keyboard and screen reader friendly.

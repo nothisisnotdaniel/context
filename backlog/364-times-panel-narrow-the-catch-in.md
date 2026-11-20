@@ -2,6 +2,8 @@
 
 As the Context developer, I want DesktopState.TimesNow to catch only the errors a Times read can really throw, so that a programming error in the Times panel shows up instead of being hidden as an unreadable file.
 
+Category: tidy-up
+
 ## What
 
 DesktopState.TimesNow (src/Context.Desktop/DesktopState.cs) wraps TimesNow.Read in a broad catch (Exception) and maps every failure to Unreadable, with no log line. TimesNow.Read already never throws for file problems, so narrow the catch (for example IOException and UnauthorizedAccessException), or log what is caught. Add a test that a non-IO exception is not silently turned into the grey line.

@@ -2,6 +2,8 @@
 
 As a Context user, I want the template and daily note messages to be clear, so that I understand what was created or why it was refused.
 
+Category: ux
+
 ## What
 
 - Narrow the daily-note error catch in the desktop app (was #197): In DesktopActions.OpenDailyNoteNow, catch only IOException and UnauthorizedAccessException (as the CLI `context today` does) instead of every Exception. Check whether the other DesktopActions catch-alls should follow, and keep the fixed error text.

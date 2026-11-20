@@ -2,6 +2,8 @@
 
 As the owner, I want the new tags view and links panel checked by eye in light and dark mode, so that layout problems tests cannot see are caught.
 
+Category: ui
+
 ## What
 
 Run the desktop app and check the 30vh tag list, long-name truncation, pressed state and both themes; note any problems as backlog items.

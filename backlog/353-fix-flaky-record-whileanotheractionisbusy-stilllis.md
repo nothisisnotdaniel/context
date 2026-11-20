@@ -2,6 +2,8 @@
 
 As a developer, I want RecentNotesActionsTests.Record_WhileAnotherActionIsBusy_StillListed to pass every time, so that a red CI run always means a real problem.
 
+Category: test
+
 ## What
 
 RecentNotesActionsTests.Record_WhileAnotherActionIsBusy_StillListed (Context.Desktop tests) failed once in 39 runs (3 Desktop test runs in parallel) during job 267; its error message was not captured. Reproduce it by running the test class repeatedly in parallel, capture the failure, find the race (timing, shared state, the busy gate or the pending recent write) and make the test deterministic without weakening what it checks.

@@ -2,6 +2,8 @@
 
 As the user, I want the command bar window to be only as tall as its content, with corners that match its look, so that it feels like a light one-line bar.
 
+Category: ui
+
 ## What
 
 The bar window is a fixed 640x300, so there is a large empty area below the input when there are no suggestions, and the 10px CSS border radius sits in a square chromeless window. Resize the window to the input plus the shown suggestion rows, and either make the window transparent so the rounded corners show or drop the radius.

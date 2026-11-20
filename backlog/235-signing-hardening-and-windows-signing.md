@@ -2,6 +2,8 @@
 
 As the Context developer, I want the signing secrets and tools locked down and a Windows signing path ready, so that signed builds are safe and Windows users are not warned off.
 
+Category: security
+
 ## What
 
 - Signed Windows builds (was #161): Add a signing path for the Windows desktop build (desktop-windows job in release.yml), switched off by default behind a repository variable like MACOS_SIGNING. Pick the signing service first (Azure Trusted Signing via vpk, or a certificate); confirm the vpk option exists before building. The unsigned path stays as it is.

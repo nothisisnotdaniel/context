@@ -2,6 +2,8 @@
 
 As a Context user, I want a short hint when a pasted link's title was skipped as unsafe, so that I know why the link stayed bare.
 
+Category: ux
+
 ## What
 
 When PageTitleFetcher discards a title (unsafe characters, too long after cleaning, non-HTML), show a brief, dismissable status hint near the editor (screen-reader announced, light and dark mode) instead of failing silently. No hint on timeouts or when network access is off.

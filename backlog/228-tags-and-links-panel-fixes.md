@@ -2,6 +2,8 @@
 
 As a Context user, I want the tags and links panels to be clear and accessible, so that I can find and follow my notes easily.
 
+Category: bug
+
 ## What
 
 - Desktop tags and links: call counter for load tests (was #134): Add a test-visible call counter (or a test seam) on DesktopState so tests for AC-7 (no queries for Sensitive notes) and AC-8 (stale results dropped) assert on query calls instead of side effects.

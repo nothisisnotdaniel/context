@@ -2,6 +2,8 @@
 
 As a Context user, I want the "Can't read the todos." warning near the top of a person page, so that I notice it even when the page is long.
 
+Category: ui
+
 ## What
 
 In PersonPanel.razor, move the red "Can't read the todos." line up next to the alias-clash lines, above the notes and appointments sections. Update AC-9 of job 159's layout tests (PersonPanelTests) to pin the new place.

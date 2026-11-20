@@ -1,5 +1,7 @@
 # 264 Check auto save by hand in the desktop app
 
+Category: test
+
 ## What
 
 Run the desktop app and check the parts job 203 could not test automatically: the 1 s pause save in the editor (view.js), the Saving…/Saved status in light and dark mode, and closing the window with unsaved text (it saves, then closes; a failed save asks Discard changes).

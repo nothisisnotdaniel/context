@@ -2,6 +2,8 @@
 
 As a Context user, I want the remove button of a saved search to be an icon like the other sidebar buttons, so that the sidebar looks consistent.
 
+Category: ui
+
 ## What
 
 In the desktop sidebar, the saved-search remove button shows a text × glyph. Replace it with the safe inline SVG icon used by the other icon buttons, keeping its aria-label and title, in light and dark mode.

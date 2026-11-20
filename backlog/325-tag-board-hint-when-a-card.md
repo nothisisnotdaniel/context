@@ -2,6 +2,8 @@
 
 As a desktop user, I want feedback when I drop a card on the No status column, so that I know why nothing changed.
 
+Category: ux
+
 ## What
 
 In src/Context.Desktop/BoardPanel.razor dropping a card on the "No status" column silently does nothing. Either show a short hint (for example in the column or a status line, announced to screen readers) or make the drop remove the card's #status/ tag; decide in the spec and keep it consistent with the move buttons.

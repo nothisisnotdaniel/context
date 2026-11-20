@@ -2,6 +2,8 @@
 
 As a Context user who works from the keyboard, I want focus to go back to the … button after I pick a More actions item or click outside the menu, so that I do not lose my place in the window.
 
+Category: ux
+
 ## What
 
 In TopBar.razor (the More actions menu from job 200): after a menu item runs or the backdrop is clicked, put focus back on the … button, except when the chosen action opens its own inline form (Rename, New subpage, Move) or a confirmation that takes focus itself; those keep their focus. Esc already returns focus to the button. Add tests for both cases.

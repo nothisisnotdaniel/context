@@ -2,6 +2,8 @@
 
 As the user, I want Context to make the .desktop folder owner-only even when it already exists, and to refuse a running.lock that is a symlink, so that the desktop hand-off files stay private.
 
+Category: security
+
 ## What
 
 PrivateFile.CreateFolder leaves an existing .desktop folder at its old mode, and PrivateFile.OpenLock follows a symlink at running.lock (src/Context.Core/DesktopRequest.cs, PrivateFile). Tighten an existing .desktop folder to 0700 and refuse a linked lock file with a clear message; add tests for both.

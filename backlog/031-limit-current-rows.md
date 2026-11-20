@@ -2,6 +2,8 @@
 
 As a Context user, I want `/current` to cap its due todos and tag lookups, so that it stays readable and fast with many todos.
 
+Category: tidy-up
+
 ## What
 
 `/current` shows every due todo and runs one database query per distinct tag, with no limit. Cap the Due table (last row `… N more`, like the sidebar) and the number of tags looked up, and build the due list and the tag collection in one loop instead of two.

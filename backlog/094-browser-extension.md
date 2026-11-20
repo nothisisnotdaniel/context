@@ -2,6 +2,8 @@
 
 As the user, I want to decide later on a browser extension that sends pages to the Context inbox and shows the Times status, so that capturing from the web is one click.
 
+Category: feature
+
 ## What
 
 A new extension (its own project) for Chrome and Edge that sends the current page or a selection to the Context inbox with its title and link, and shows the Times status (checked in, time left, open checkpoint) in the toolbar. Talks to the scriptable CLI or a small local endpoint; nothing goes over the network. Decide after the scriptable CLI.

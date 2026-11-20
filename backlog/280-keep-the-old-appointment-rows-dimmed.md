@@ -2,6 +2,8 @@
 
 As a desktop user stepping through days in the sidebar, I want the old appointments to stay visible but dimmed until the new day loads, so that the list does not flicker through Loading….
 
+Category: ui
+
 ## What
 
 In DayAppointmentsPanel.razor, keep the previous rows (dimmed, aria-busy) while the next day loads instead of swapping to Loading…; tests for the step.

@@ -2,6 +2,8 @@
 
 As a desktop user, I want a meeting note to show which meeting it belongs to when it is open or listed on its own, so that a note titled only '2026-11-15' is still recognisable.
 
+Category: feature
+
 ## What
 
 Since job 220, meeting notes are Meetings/<title>/yyyy-MM-dd and their '# ' heading is only the date; the meeting name lives on the parent page. Decide where the meeting name should still show (for example the note heading '# 2026-11-15 Budget', search results, the related-notes list, the snapshot) and make it so without changing the note's place in the hierarchy.

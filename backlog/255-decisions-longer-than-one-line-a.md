@@ -2,6 +2,8 @@
 
 As a Context user, I want to mark a paragraph as a decision with a short `#!d` marker that gets a number, so that the decision log shows why something was decided, where it was decided, and I can reference and jump to any decision by its number.
 
+Category: feature
+
 ## What
 
 Replace the decision syntax and extend the decision log (DecisionParser, TagIndex note_decisions, DecisionsView, DecisionsPanel.razor, NoteEditor/editor.js, the `context decisions` command):

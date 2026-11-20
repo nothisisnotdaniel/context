@@ -2,6 +2,8 @@
 
 As a Windows user, I want the sensitive-notes certificate pinned by thumbprint, so that a second certificate with the same name cannot be picked by mistake.
 
+Category: security
+
 ## What
 
 Pin the Windows machine certificate by thumbprint, or refuse when two certificates share the name.

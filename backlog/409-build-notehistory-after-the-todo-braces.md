@@ -2,6 +2,8 @@
 
 As the maintainer of Context, I want the todo-braces conversion to create its NoteHistory only after it has checked the run-once record, so that a start where the conversion already ran does no needless work.
 
+Category: tidy-up
+
 ## What
 
 In `TodoMarkerConversion.Run`, move the creation of the `NoteHistory` below the check for `<root>/.migrations/todo-braces`, so it is only built when the conversion actually runs. No behaviour change.

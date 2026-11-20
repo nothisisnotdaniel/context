@@ -2,6 +2,8 @@
 
 As a Context user, I want to dictate a note with a hotkey or a microphone button, so that I can capture thoughts faster than typing.
 
+Category: feature
+
 ## What
 
 A global hotkey and a microphone button in the desktop app open a small capture window that records until stopped, turns speech into text with the approach the voice spike picked (on the machine only, unless the user agrees otherwise), shows the text for a quick fix, and saves it through quick capture. Full path, high risk. Builds on the voice capture spike and quick capture.

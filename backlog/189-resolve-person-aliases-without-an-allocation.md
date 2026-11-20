@@ -2,6 +2,8 @@
 
 As a Context user with many notes, I want the people list and person page to stay fast, so that a large data folder never makes them slow.
 
+Category: tidy-up
+
 ## What
 
 In TagIndex.People() and MentionsOf, stop allocating a new AliasResolution for every note_people row via PersonAliases.PersonKey: resolve each distinct key once (or return a struct / cached result). Keep behaviour and tests unchanged; add a test that pins the output for a folder with many mentions.

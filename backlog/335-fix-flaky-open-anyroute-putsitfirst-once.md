@@ -2,6 +2,8 @@
 
 As a developer, I want Open_AnyRoute_PutsItFirst_Once to pass every time, so that a red test run always means a real problem and CI doesn't fail at random.
 
+Category: test
+
 ## What
 
 Under load this Desktop test clicked an element that a re-render had already replaced (stale element). Re-find the element right before the click (or wait for the render) so the test is independent of render timing, without weakening what it checks.

@@ -2,6 +2,8 @@
 
 As a Context user, I want completing a todo to check that it's still the one I saw, so that I never tick off a todo that was changed elsewhere.
 
+Category: bug
+
 ## What
 
 `TodoStore.Complete` removes only when the stored todo still matches the shown `TodoItem` (id, text, due), not only its id, and refuses with the usual changed text otherwise.

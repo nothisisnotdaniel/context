@@ -2,6 +2,8 @@
 
 As the owner, I want the Tags and Settings buttons checked by eye in a narrow sidebar, so that the Notes heading is not squeezed.
 
+Category: ui
+
 ## What
 
 Run the desktop app with a narrow sidebar and check the notes bar; fix the CSS if the heading is squeezed.

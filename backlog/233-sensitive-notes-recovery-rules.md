@@ -2,6 +2,8 @@
 
 As a Context user, I want restoring sensitive notes from a recovery file to check the key and the password properly and explain refusals, so that a restore never reports success for notes it cannot open.
 
+Category: security
+
 ## What
 
 - Refuse a recovery file whose key differs from the stored one (was #127): On restore, refuse a recovery file whose key differs from the stored recovery key; on a fresh machine store the key only when it actually opened a note.

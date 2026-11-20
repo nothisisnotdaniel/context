@@ -2,6 +2,8 @@
 
 As a Context user, I want todos that have been done for over a month moved to an archive file, so that todos.json stays small while nothing I finished is lost.
 
+Category: feature
+
 ## What
 
 - Add a todo archive file next to todos.json in the data folder (for example `todos-archive.json`, same format, done todos only).

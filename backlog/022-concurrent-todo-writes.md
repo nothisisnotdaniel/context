@@ -2,6 +2,8 @@
 
 As a Context user, I want two programs writing my todos at once to never lose an update, so that the desktop app and the CLI can be used side by side.
 
+Category: bug
+
 ## What
 
 Two processes writing `todos.json` at the same moment can lose one update (whole-file read-modify-write in Core). Add a file lock or a compare-on-write retry.

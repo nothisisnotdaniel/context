@@ -2,6 +2,8 @@
 
 As the user, I want Context to skip a calendar/*.ics file that is a symlink, so that calendar reads follow the same link rule as notes and never read a file outside my data folder.
 
+Category: security
+
 ## What
 
 CalendarStore (src/Context.Core/CalendarStore.cs) now reads calendar/*.ics through BoundedFile, size-capped and FIFO-safe, but a symlinked .ics pointing outside the root is still read. Apply the same IsLink filter NoteStore.Files uses when listing calendar files, and add a test with a linked .ics that is skipped.

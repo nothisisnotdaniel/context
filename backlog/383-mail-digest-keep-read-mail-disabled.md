@@ -2,6 +2,8 @@
 
 As the user, I want Read mail to stay disabled until the previous Outlook read has really ended, so that clicking again during Outlook's security prompt doesn't start a second read.
 
+Category: bug
+
 ## What
 
 After a TimedOut in DesktopState.cs (~l.521), the COM call keeps running on its LongRunning thread, but Read mail is enabled again. Track the running task and keep the button disabled (with a status line) until it ends, and add a test.

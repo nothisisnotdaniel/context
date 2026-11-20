@@ -2,6 +2,8 @@
 
 As a Context user, I want the morning briefing to link a note whose name contains [ or ] correctly, so that clicking it opens that note instead of a broken or wrong link.
 
+Category: bug
+
 ## What
 
 src/Context.Core/Briefing.cs (around line 211) writes note names as [[name]] links; a name containing [ or ] gives a misleading [[ ]] link. Escape or otherwise render such names so the link targets the right note, the same way in every briefing section that links notes (To review and the existing ones).

@@ -2,6 +2,8 @@
 
 As a keyboard user of the desktop editor, I want holding Enter on a focused chip to open it once, so that I do not trigger the tag or link action many times.
 
+Category: bug
+
 ## What
 
 In the editor chip keydown handler (src/Context.Desktop/editor/src/view.js), ignore keydown events with event.repeat set, so OnTag / OnLink is called once per press. Add a test if the editor tests can cover the handler.

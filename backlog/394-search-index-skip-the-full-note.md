@@ -2,6 +2,8 @@
 
 As the user, I want each index sync to stay cheap in a large data folder, so that the repair check for stale search text doesn't read every row every time.
 
+Category: tidy-up
+
 ## What
 
 TagIndex.RepairText (src/Context.Core/TagIndex.cs) reads every note_text row once per sync to find unmapped or stale rows, even when nothing changed. Run the full pass only when it can be needed (for example after the database was opened by an older build, detected by a marker or row-count check, or on upgrade), and keep the guarantee that a deleted or sensitive note's text never stays searchable. Add tests for both the skipped and the triggered pass.

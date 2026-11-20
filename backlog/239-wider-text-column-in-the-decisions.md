@@ -2,6 +2,8 @@
 
 As a Context user, I want long decisions to show more of their text in the Decisions panel, so that I can read them without hovering on a narrow window.
 
+Category: ui
+
 ## What
 
 In app.css, rebalance `.decision-rows .note-button` (30%) and `.people` (25%) so the decision text gets more of the row (for example cap the note and people columns with a max width or let them shrink first). Keep the full text in `title`. Check light and dark themes at the minimum window size.

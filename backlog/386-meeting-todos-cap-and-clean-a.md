@@ -2,6 +2,8 @@
 
 As the user, I want Context to cap and clean the meeting title stored on a tied todo when it reads todos.json, so that a hand-edited or damaged file can't put a huge or odd title on screen.
 
+Category: security
+
 ## What
 
 TodoStore.ReadMeeting (src/Context.Core/TodoStore.cs) reads a tied todo's stored meeting title as is: it is not length-checked and not passed through SafeText. Cap it (for example at the same limit used for todo text) and clean it with SafeText on read, and decide whether the cleaned title is written back on the next save. Add a test with a very long title and one with control characters.

@@ -2,6 +2,8 @@
 
 As the Context developer, I want the flaky desktop and calendar tests made deterministic and CI restore re-checked, so that CI only fails for real problems.
 
+Category: ci
+
 ## What
 
 - Wait for the page's own loads in MainTests.Open (was #217): Make MainTests.Open wait until the links panel (and any other Task.Run load the page starts) shows no Loading… before returning, like MainTests.OpenFull does since job 175, or merge the two helpers. Keep every test's checks as they are and run the desktop suite several times in parallel to confirm.

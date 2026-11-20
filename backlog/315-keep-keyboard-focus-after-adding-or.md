@@ -2,6 +2,8 @@
 
 As a keyboard user, I want focus to stay in the Attributes box after I add or remove an attribute, so that I don't lose my place.
 
+Category: ux
+
 ## What
 
 After Add, focus goes back to the new attribute's name field; after Remove, focus moves to the next row's value field (or the previous one, or the add row's name field when none is left). Uses JS interop focus in src/Context.Desktop/NoteEditor.razor.

@@ -2,6 +2,8 @@
 
 As a Context user, I want overdue waiting-for items on a person's page to stand out, so that I see at a glance whom I should chase now.
 
+Category: feature
+
 ## What
 
 The person page's Waiting for rows (added in job 243) show the follow-up date but no overdue styling. Mark rows whose follow-up date is before today the same way the todo panel marks overdue todos (same class or theme variables, not colour alone), in light and dark mode, and announce it to screen readers.

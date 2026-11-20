@@ -2,6 +2,8 @@
 
 As a screen reader user, I want each diagram's alt text to say what kind of diagram it is and what it shows, so that I'm told more than just "Diagram".
 
+Category: ux
+
 ## What
 
 Replace the fixed alt="Diagram" on rendered mermaid pictures with a descriptive text, for example the diagram type plus its title or accTitle/accDescr when the source has them.

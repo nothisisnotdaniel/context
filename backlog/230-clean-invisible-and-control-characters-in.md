@@ -2,6 +2,8 @@
 
 As a Context user, I want invisible, bidi and control characters kept out of names, titles and generated notes, so that nothing can look different from what it is or create tags and links I didn't write.
 
+Category: security
+
 ## What
 
 - Refuse invisible characters in person names and note titles (was #182): Make PersonParser.Normalize and NoteStore.ValidateTitle refuse Unicode Format characters (UnicodeCategory.Format, for example U+200B and U+202E), not only control characters. Check that OneLine and SafeText.Clean strip them wherever titles are shown. Bump the index ParserVersion if mention parsing changes.

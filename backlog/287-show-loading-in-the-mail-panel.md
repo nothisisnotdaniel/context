@@ -2,6 +2,8 @@
 
 As a desktop user, I want the recent mail panel to say it is loading while Outlook is slow, so that I know mail is on its way.
 
+Category: ux
+
 ## What
 
 RecentMailPanel.razor renders nothing while the first mail read runs (up to 10 s with a slow Outlook). Show a short grey `Loading…` line until the first result arrives, in light and dark mode.

@@ -2,6 +2,8 @@
 
 As a maintainer, I want acceptance criterion 8's current texts and sections looked at again once `--json` exists, so that plain and JSON output stay consistent.
 
+Category: tidy-up
+
 ## What
 
 Revisit with --json

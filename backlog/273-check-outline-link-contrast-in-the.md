@@ -2,6 +2,8 @@
 
 As a Context user, I want the outline links in the right sidebar to be easy to read in light and dark mode, so that I can scan a note's headings without strain.
 
+Category: ui
+
 ## What
 
 Check by hand, in light and dark mode, the contrast of the outline buttons (--accent-strong) on the right sidebar background (--panel), app.css around line 1559. If it is below WCAG AA (4.5:1 for text), pick a colour token that meets it in both themes.

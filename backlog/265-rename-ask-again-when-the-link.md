@@ -2,6 +2,8 @@
 
 As a Context user, I want the rename to stop and ask again when the number of notes whose links would change is different from what I confirmed, so that a rename never rewrites notes I did not agree to.
 
+Category: bug
+
 ## What
 
 In the desktop app, RenameNoteNow (src/Context.Desktop/DesktopActions.cs) rebuilds the link plan after the user confirms. If the rebuilt plan changes a different number of notes than the count shown in the rename question, do not rename: show the question again with the new count (new wording in DesktopText). Add tests for a note gaining or losing a link between the question and Confirm.

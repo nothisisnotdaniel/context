@@ -2,6 +2,8 @@
 
 As a desktop user, I want to add an attribute to a note that has no attribute lines yet, so that I don't have to type 'key:: value' lines by hand.
 
+Category: feature
+
 ## What
 
 A note without attributes shows no Attributes box today, and removing the last attribute removes the box with its add row. Offer a small way to add the first attribute (for example an 'Add attribute' link below the title), which writes the new 'key:: value' line at the top of the note body in the place the box reads them from. Keyboard and screen reader friendly, light and dark mode.

@@ -2,6 +2,8 @@
 
 As the user, I want the sidebar's month calendar to stay fully visible when the sidebar is narrow, so that I can always pick a day without the calendar being clipped.
 
+Category: ui
+
 ## What
 
 The sidebar DayPicker popover (.day-pick in src/Context.Desktop/wwwroot/app.css) is width: max-content with max-width: 100%; at the current 280px sidebar it fits, but a narrower sidebar would clip the grid. Shrink the grid cells or anchor the popover so it can overflow the sidebar, and add a test or source check for the narrow case.

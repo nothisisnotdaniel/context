@@ -2,6 +2,8 @@
 
 As a desktop user with many tagged notes, I want the tag board to open and refresh quickly, so that a large tag doesn't make the board slow.
 
+Category: tidy-up
+
 ## What
 
 BoardView.Build (src/Context.Core/BoardView.cs) reads every tagged note in full (ReadForEdit, bounded by MaxEditBytes) under indexGate on each board load and each State.Changed. Cache the parsed cards per note by note version (or file timestamp), so only changed notes are read again. Keep the result identical to a full re-read.

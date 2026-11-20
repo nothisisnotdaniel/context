@@ -2,6 +2,8 @@
 
 As a desktop user, I want Share to cap the total size of the images it embeds, so that sharing a note with many large images doesn't produce a huge HTML file or stall the app.
 
+Category: security
+
 ## What
 
 Share (src/Context.Core/NoteHtml.cs and the Share path in src/Context.Desktop) embeds up to 20 images of up to 10 MB each as base64 data. Add a total-bytes cap for embedded images (for example 25 MB); images past the cap are left out with the same placeholder used for a missing image, and the dialog or status line says how many were left out.

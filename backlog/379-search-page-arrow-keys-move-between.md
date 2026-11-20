@@ -2,6 +2,8 @@
 
 As a keyboard user, I want ArrowUp and ArrowDown on the search results page to move only between results, so that the page doesn't jump while I move through them.
 
+Category: ux
+
 ## What
 
 SearchPanel.razor (RowKey) handles ArrowUp/ArrowDown but doesn't preventDefault them, because Blazor's @onkeydown:preventDefault would block every key, Tab and Enter included. Add a small JS keydown listener on the results list that calls preventDefault for ArrowUp/ArrowDown only, keep Tab and Enter as they are, and add a test.

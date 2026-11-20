@@ -2,6 +2,8 @@
 
 As a Context user, I want the capture row to fit the smallest desktop window, so that the box and button stay usable.
 
+Category: ui
+
 ## What
 
 Open the desktop app, shrink the window to its minimum size, and check that the capture row wraps cleanly and nothing is cut off; report anything wrong as a backlog item.

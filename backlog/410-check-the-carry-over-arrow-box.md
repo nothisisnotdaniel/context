@@ -2,6 +2,8 @@
 
 As a Context user, I want the arrow box of a `- [>]` line to line up with the `[ ]` and `[x]` boxes, so that a list with mixed markers looks tidy.
 
+Category: ui
+
 ## What
 
 Look at a note with `- [ ]`, `- [>]` and `- [x]` lines in light and dark mode. If the arrow glyph (U+21E5) is wider or narrower than the ballot box (U+2610) and the text shifts, give the carry box the same width as the others without changing how the other boxes look.

@@ -2,6 +2,8 @@
 
 As a keyboard user, I want focus to move to the meeting picker when Push to next meeting finds no next occurrence, so that I can pick another appointment without tabbing to find it.
 
+Category: ux
+
 ## What
 
 In MeetingTodosPanel.razor, Push on a one-off meeting shows a picker of other appointments, announced with role="status", but focus stays on the Push button. Move focus to the picker's first choice (or its heading) when it opens, and return it to the todo's Push button when the picker closes with no choice. Add a bunit test for the focus calls.

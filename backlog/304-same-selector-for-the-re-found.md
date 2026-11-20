@@ -2,6 +2,8 @@
 
 As a maintainer of the desktop tests, I want Render_Filled_RowsAndButtons to find the note button the same way both times, so that a reader sees at once that it is the same button.
 
+Category: test
+
 ## What
 
 In tests/Context.Desktop.Tests/ReviewPanelTests.cs, Render_Filled_RowsAndButtons first takes the button with note.QuerySelector("button.note-button") and later finds it again with cut.Find(".review-note button.note-button"). Both pick the same button. Use one selector for both, or add a short comment saying why they differ.

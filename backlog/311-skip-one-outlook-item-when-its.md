@@ -2,6 +2,8 @@
 
 As a Windows user with Outlook, I want one unreadable appointment to be skipped instead of failing the whole calendar read, so that the rest of my day still shows.
 
+Category: bug
+
 ## What
 
 When reading `item.Sensitivity` on an Outlook appointment throws (for example a COMException), the whole Outlook read now fails as `Failed`. Skip that one item instead (treat it as hidden, so nothing private leaks) and keep reading the rest. Only checkable on Windows.

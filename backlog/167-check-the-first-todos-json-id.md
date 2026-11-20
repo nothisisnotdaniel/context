@@ -1,5 +1,7 @@
 # 167 Check the first todos.json id migration
 
+Category: test
+
 ## What
 
 Back up <root>/todos.json, start the new desktop build once, and check that every todo is still there with an id field added and nothing else lost.

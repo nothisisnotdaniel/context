@@ -2,6 +2,8 @@
 
 As a Context user, I want the CLI and console todo messages and hints to be clear and consistent, so that I know what happened and what to type next.
 
+Category: ux
+
 ## What
 
 - List the matching todos when /done is ambiguous (was #157): When `/done <text>` (console) or `context todo done <text>` (CLI) matches more than one todo, print the matching todos (one line each, as the sidebar shows them) under the "N todos match" line. Still remove nothing.

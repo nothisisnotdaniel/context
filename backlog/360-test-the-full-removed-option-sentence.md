@@ -2,6 +2,8 @@
 
 As the Context developer, I want the CLAUDE.md test to check the whole sentence about removed secret options, so that the doc can't drift from what the CLI does.
 
+Category: test
+
 ## What
 
 The ClaudeMd test checks only the phrase "the removed secret option is a usage error in any position". Extend it to also check "ignoring case", or reword the sentence so the checked phrase covers everything it states.

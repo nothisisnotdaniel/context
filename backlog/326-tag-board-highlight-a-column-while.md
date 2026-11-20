@@ -2,6 +2,8 @@
 
 As a desktop user, I want the board column under a dragged card to be highlighted, so that I can see where the card will land.
 
+Category: ui
+
 ## What
 
 Add a dragover highlight to .board-column (src/Context.Desktop/BoardPanel.razor, wwwroot/app.css): set a state on dragenter/dragover and clear it on dragleave/drop/dragend, with a visible outline or background in light and dark mode that doesn't rely on colour alone.

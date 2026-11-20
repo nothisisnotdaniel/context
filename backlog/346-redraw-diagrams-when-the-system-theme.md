@@ -2,6 +2,8 @@
 
 As a desktop user, I want mermaid diagrams to switch to light or dark as soon as the system theme changes, so that a diagram never stays in the wrong colours until I reopen the note.
 
+Category: bug
+
 ## What
 
 Listen for a prefers-color-scheme change and redraw every rendered mermaid diagram with the matching theme, without losing the note's scroll position.

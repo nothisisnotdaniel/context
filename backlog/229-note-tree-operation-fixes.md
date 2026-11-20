@@ -2,6 +2,8 @@
 
 As a Context user, I want moving, renaming and deleting notes in the tree to be safe and predictable, so that I never lose or misplace a note.
 
+Category: bug
+
 ## What
 
 - Return focus to the toolbar after Move or New subpage (was #172): In src/Context.Desktop/Main.razor, after the Move, Create subpage or Cancel action closes its fields, move focus back to the toolbar button that opened them (or to the new or moved note's row).

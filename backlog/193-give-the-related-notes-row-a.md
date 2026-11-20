@@ -2,6 +2,8 @@
 
 As a Context user who uses a screen reader, I want the related-notes row under each appointment to say what it is, so that the empty first cell does not read as missing data.
 
+Category: ui
+
 ## What
 
 In CurrentPanel.razor, give the .related row's first cell a visually hidden label (for example "Related notes") or mark it as a row header, keeping the time column visually empty. Extend the CurrentPanel tests.

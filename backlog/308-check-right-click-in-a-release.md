@@ -2,6 +2,8 @@
 
 As the maintainer, I want to right-click in a Release build on macOS and on Windows once, so that I know the browser menu and Inspect are really gone there and text fields still offer Cut, Copy and Paste.
 
+Category: test
+
 ## What
 
 Manual check, left by job 224: build Context.Desktop in Release on macOS and on Windows, right-click on empty space, a note link, an input and the note editor. Expected: no browser menu (Back, Reload, Inspect) anywhere outside text; inputs and the editor still show the platform text menu or at least keep keyboard copy and paste; no dev tools. If it fails, add a fix item.

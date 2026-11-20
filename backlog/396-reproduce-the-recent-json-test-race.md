@@ -2,6 +2,8 @@
 
 As the user, I want the cause of the flaky recent.json test confirmed by a reproduction, so that I know job 297's fix addresses the real cause and not a guess.
 
+Category: test
+
 ## What
 
 Job 297 made RecentNotesActionsTests wait for the pending recent.json write (WaitForRecentWrites) instead of polling the file inside WaitForAssertion, on the code-derived cause that bUnit re-checks an assertion only on a render, while the write finishes after the last render. Reproduce the old failure (for example by delaying the write with HoldRecentWrites, or under CPU load) against the pre-297 test code, and record the result in the test's comment or the story. No code change unless the reproduction shows another cause.

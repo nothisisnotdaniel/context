@@ -2,6 +2,8 @@
 
 As a sighted desktop user, I want the board's move buttons to show which column a card moves to, so that I don't have to hover to find out.
 
+Category: ux
+
 ## What
 
 In src/Context.Desktop/BoardPanel.razor the card move buttons show only ← and →; their aria-label and title already say "Move to <column>". Show the target column name visibly (for example "← Doing"), truncated if long, without breaking the card layout, in light and dark mode.

@@ -2,6 +2,8 @@
 
 As a Context user, I want the top bar Capture popover to fit inside a narrow window, so that I can always see and use the whole capture box.
 
+Category: ui
+
 ## What
 
 Open the desktop app in a narrow window (about 400px wide) and open the Capture popover from the top bar icon. The 320px input (anchored right: 8px, capped by max-width: calc(100vw - 48px)) must stay fully inside the window, in light and dark mode. Fix the popover position or width only if it overflows.

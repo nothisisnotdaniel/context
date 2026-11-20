@@ -2,6 +2,8 @@
 
 As a developer who uses Claude Code, I want Claude to read my notes, todos, calendar and hours through a local MCP server, so that I can ask things like 'what did I decide about AB#1234?' without copying text over.
 
+Category: feature
+
 ## What
 
 A `context mcp` command that runs a local MCP server over stdio (using the official C# MCP SDK) with read-only tools: search notes, read a note, list todos, today's calendar, the work item dossier and hours from Times. No network listener, no write tools in this item, and `#private` notes are never returned. The README shows how to add it to Claude Code. Full path, high risk (exposes local data to an AI client).

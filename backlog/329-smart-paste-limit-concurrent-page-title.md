@@ -2,6 +2,8 @@
 
 As a Context user, I want the app to fetch only a few page titles at once, so that pasting many links quickly can't flood the network or pile up requests.
 
+Category: security
+
 ## What
 
 Cap concurrent PageTitleFetcher requests (for example 2–4 with a SemaphoreSlim); a paste beyond the cap waits or keeps its plain link when the short timeout runs out. Keep the existing timeout and size limits.

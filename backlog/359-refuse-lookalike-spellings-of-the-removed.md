@@ -2,6 +2,8 @@
 
 As the user, I want the CLI to also refuse the old passphrase options when they are typed with lookalike characters, so that a pasted or autocorrected secret option never lands in my notes as text.
 
+Category: security
+
 ## What
 
 Cli.cs (src/Context/Cli.cs, around line 142) compares the removed option names with OrdinalIgnoreCase, which folds simple case only. Normalise the argument first (for example NFKC plus mapping Unicode dashes such as U+2010–U+2015 and U+2212 to '-') before the check, and add tests with an en dash and fullwidth letters.

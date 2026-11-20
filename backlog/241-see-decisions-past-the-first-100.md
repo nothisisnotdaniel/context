@@ -2,6 +2,8 @@
 
 As a Context user, I want a way to see decisions beyond the first 100 in the Decisions panel, so that older decisions aren't out of reach.
 
+Category: feature
+
 ## What
 
 In DecisionsPanel.razor, make the "… n more" line actionable (for example a Show more button that loads the next 100, or a hint pointing to the tag filter and the CLI). Update the spec text and tests.

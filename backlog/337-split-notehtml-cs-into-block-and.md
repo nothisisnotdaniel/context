@@ -2,6 +2,8 @@
 
 As a developer, I want the note-to-HTML renderer split into smaller files, so that it is easier to read and change safely.
 
+Category: tidy-up
+
 ## What
 
 src/Context.Core/NoteHtml.cs is 835 lines. Split it into a block renderer (headings, lists, tables, code blocks, quotes) and an inline renderer (links, emphasis, code spans, tags), with no change in output; the existing NoteHtmlTests must pass unchanged.

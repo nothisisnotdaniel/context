@@ -2,6 +2,8 @@
 
 As a Context user, I want Cmd+P to find and open notes by part of their name, so that I can jump to any note in a second.
 
+Category: feature
+
 ## What
 
 Cmd+P (Ctrl+P on Windows) in the desktop app opens a box that finds notes by part of their name (fuzzy, ignoring case), recently opened notes first; Enter opens the note, and a name that matches nothing offers to create it. Builds on recent and pinned notes.

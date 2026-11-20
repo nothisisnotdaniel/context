@@ -2,6 +2,8 @@
 
 As a Context user, I want tags, links and mentions inside code to be ignored the same way in the editor and the index, so that what looks linked really is linked.
 
+Category: bug
+
 ## What
 
 - Skip ~~~ code fences when reading tags and mentions (was #184): Make the shared TagParser (used for tags and @[person] mentions) skip ~~~ fenced blocks the way it already skips ``` fences. Bump the index ParserVersion and add tests for tags and mentions.

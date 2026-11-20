@@ -2,6 +2,8 @@
 
 As a Context user, I want the desktop app to give up on a notification helper that hangs, so that one stuck reminder can't pile up processes or block later reminders.
 
+Category: bug
+
 ## What
 
 In SystemNotifier, wait for the osascript (macOS) or powershell (Windows) process with a timeout and kill it if it doesn't exit, then log once and carry on. Make sure the todo is still marked as notified only as the spec says. Add tests with a fake process runner.

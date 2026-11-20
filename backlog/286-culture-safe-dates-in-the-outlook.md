@@ -2,6 +2,8 @@
 
 As a desktop user with an unusual date format, I want Outlook appointments to load reliably, so that my calendar shows regardless of my regional settings.
 
+Category: bug
+
 ## What
 
 OutlookComSource.cs Filter builds the Restrict text from current-culture `g` dates. Check what format Outlook's Restrict accepts across cultures and make the filter robust (for example a fixed format Outlook accepts), keeping today's behaviour where it works.

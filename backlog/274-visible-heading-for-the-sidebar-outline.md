@@ -2,6 +2,8 @@
 
 As a Context user, I want the outline in the right sidebar to have a small visible heading, so that I can tell at a glance what the list of links is.
 
+Category: ui
+
 ## What
 
 Add a small visible label (for example "Outline") above the outline in the right sidebar, styled like the other sidebar section headings, keeping aria-label or replacing it with aria-labelledby. Light and dark mode. Set it visually apart from the other widgets in the sidebar for example with a different background color.

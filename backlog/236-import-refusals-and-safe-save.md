@@ -2,6 +2,8 @@
 
 As a Context user, I want import to refuse odd files, never overwrite a note created meanwhile, and clear old result lines, so that import does only what I asked.
 
+Category: security
+
 ## What
 
 - Refuse odd files on import (was #99): Refusing zero-length or non-regular files on import changes /import behaviour

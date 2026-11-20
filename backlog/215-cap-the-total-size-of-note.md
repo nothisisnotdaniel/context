@@ -2,6 +2,8 @@
 
 As a Context user, I want all note history together to stay within a size limit, so that many notes with history can't fill my disk.
 
+Category: security
+
 ## What
 
 In NoteHistory, add a cap across all `.history/` folders (or per notes folder) on top of the per-note caps, removing the oldest versions first when it is passed. Decide whether it is fixed or a setting, and add tests.

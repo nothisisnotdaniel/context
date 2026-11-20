@@ -2,6 +2,8 @@
 
 As a developer, I want SensitiveFlowTests.MarkAndMakePlain_Dirty_AskToSaveFirst to pass every time, so that a red test run always means a real problem and CI doesn't fail at random.
 
+Category: test
+
 ## What
 
 Under load (two Desktop suite runs at once) this test's folder snapshot caught a temporary recent.json file. Wait for pending recent.json writes before snapshotting (DesktopFixture.WaitForRecentWrites from job 246), without weakening what it checks.

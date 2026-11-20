@@ -2,6 +2,8 @@
 
 As a maintainer, I want CLAUDE.md to say which texts the CLI and desktop app must share, so that builders keep wording consistent now the console is gone.
 
+Category: docs
+
 ## What
 
 Job 145 removed the rule "Texts match the console renderer's" from Context/CLAUDE.md without a replacement. Check how Cli and the desktop app share texts today and write a rule that matches.

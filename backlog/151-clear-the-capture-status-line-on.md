@@ -2,6 +2,8 @@
 
 As a Context user, I want the capture box status line to clear when I start typing again or do something else, so that an old Captured. or refusal is not mistaken for the latest result.
 
+Category: ux
+
 ## What
 
 In CaptureBox.razor, clear the status line (Captured. or the red refusal) when the text changes or another action runs, with tests.

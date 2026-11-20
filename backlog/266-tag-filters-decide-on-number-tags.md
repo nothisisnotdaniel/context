@@ -2,6 +2,8 @@
 
 As a Context user, I want a filter like `#1234 and not #done` to find the notes about work item 1234 that aren't tagged done, so that I can filter by ticket numbers the way the saved searches story shows it.
 
+Category: feature
+
 ## What
 
 - In a tag filter (`TagFilter.TryParse`), a term may be a work item reference `#<n>`, written as in notes (`WorkItemParser` rules: 1 to 9 ASCII digits, the first 1-9). It matches the notes that reference that item (`note_items`, as `TagIndex.NotesWithItem(n)`), and `not #<n>` excludes them. It can be combined with tag terms through `and`.

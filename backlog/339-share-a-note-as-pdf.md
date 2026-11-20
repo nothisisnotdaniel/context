@@ -2,6 +2,8 @@
 
 As a desktop user, I want to share a note as a PDF file, so that I can send it to people who expect a document rather than a web page.
 
+Category: feature
+
 ## What
 
 Add a PDF option to Share next to the HTML page, rendering the same content (same #private and sensitive-note rules, same image handling). Pick a rendering approach that adds no heavy dependency, or print the generated HTML to PDF through the platform.

@@ -2,6 +2,8 @@
 
 As the user, I want to type inline code that contains a backtick, so that I can write any code snippet from the keyboard.
 
+Category: feature
+
 ## What
 
 The inline code input rule in src/Context.Desktop/editor/src/view.js matches only `x` spans without a backtick inside, so a span like ``a`b`` cannot be typed. Support the double-backtick form (``…``) in the input rule and the serializer, with round-trip tests.

@@ -2,6 +2,8 @@
 
 As a Context user, I want the matching words beside a related note to stay readable, so that I can see why a note was suggested even when its title is long.
 
+Category: ui
+
 ## What
 
 In the current view's related-note rows (CurrentPanel.razor, app.css .related-note), give the grey match words a minimum width or let the title truncate first, so a long note title no longer squeezes the matches into a narrow ellipsis. Add a test for the CSS rule.
