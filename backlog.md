@@ -141,6 +141,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#384](backlog/384-type-backticks-for-inline-code-and.md) Type backticks for inline code and code blocks, never auto-escape input → 290-backtick-code-input
 - [x] [#385](backlog/385-filter-the-people-panel-by-affiliation.md) Filter the People panel by affiliation and role → 291-people-affiliation-filter
 - [x] [#395](backlog/395-fix-flaky-recent-json-test-that.md) Fix flaky recent.json test that failed CI after job 295 → 297-flaky-recent-test
+- [ ] [#400](backlog/400-no-crash-report-when-a-second.md) No crash report when a second copy starts
+- [ ] [#401](backlog/401-say-why-the-app-ended-in.md) Say why the app ended in the crash log
 - [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4)
 - [x] [#234](backlog/234-release-and-ci-workflow-hardening.md) Release and CI workflow hardening → 272-release-ci-hardening
 - [x] [#113](backlog/113-refuse-removed-secret-options-after-a.md) Refuse removed secret options after a command → 273-refuse-removed-secret-options
