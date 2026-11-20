@@ -13,3 +13,5 @@ Raised by the ux and code reviews of job 207: the backlog story for saved search
 ## Notes
 
 Proposed by job 207-saved-searches (`factory/jobs/207-saved-searches/`).
+
+- 2026-11-20: My thought on this: work items should look different so we know it’s a work item. Suggestion: #?1234
