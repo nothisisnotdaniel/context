@@ -341,7 +341,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#371](backlog/371-command-bar-fit-the-window-to.md) Command bar: fit the window to its content and check the rounded corners
 - [?] [#375](backlog/375-code-block-copy-announce-the-result.md) Code block Copy: announce the result to screen readers
 - [?] [#376](backlog/376-code-blocks-track-changed-blocks-by.md) Code blocks: track changed blocks by identity, not index
-- [?] [#378](backlog/378-app-icon-full-bleed-variant-for.md) App icon: full-bleed variant for Windows and Linux
+- [ ] [#378](backlog/378-app-icon-full-bleed-variant-for.md) App icon: full-bleed variant for Windows and Linux
 - [?] [#379](backlog/379-search-page-arrow-keys-move-between.md) Search page: arrow keys move between results without scrolling the page
 - [?] [#380](backlog/380-mail-digest-hint-under-the-settings.md) Mail digest: hint under the Settings checkbox
 - [?] [#381](backlog/381-mail-digest-keep-mail-text-inert.md) Mail digest: keep mail text inert in meeting notes
