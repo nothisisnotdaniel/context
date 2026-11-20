@@ -232,7 +232,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#190](backlog/190-show-the-unreadable-todos-line-at.md) Show the unreadable-todos line at the top of the person page
 - [ ] [#191](backlog/191-archive-done-todos-a-month-after.md) Archive done todos a month after they are done
 - [ ] [#192](backlog/192-keep-match-words-visible-next-to.md) Keep match words visible next to long related-note titles
-- [?] [#193](backlog/193-give-the-related-notes-row-a.md) Give the related-notes row a proper row header
+- [ ] [#193](backlog/193-give-the-related-notes-row-a.md) Give the related-notes row a proper row header
 - [?] [#194](backlog/194-show-confirmed-overrides-of-a-cancelled.md) Show confirmed overrides of a cancelled recurring series
 - [ ] [#227](backlog/227-template-and-daily-note-messages.md) Template and daily note messages
 - [?] [#205](backlog/205-say-why-done-did-nothing-while.md) Say why /done did nothing while a dialog is open
