@@ -178,8 +178,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#37](backlog/037-note-store-cleanup.md) Note store cleanup → 298-note-store-cleanup
 - [?] [#93](backlog/093-phone-companion-app.md) Phone companion app
 - [?] [#94](backlog/094-browser-extension.md) Browser extension
-- [?] [#95](backlog/095-local-ai-for-ask-context.md) Local AI for Ask Context
 - [ ] [#98](backlog/098-sharing-notes-with-key-exchange.md) Sharing notes with key exchange spike
+- [?] [#95](backlog/095-local-ai-for-ask-context.md) Local AI for Ask Context
 - [?] [#96](backlog/096-excalidraw-drawings.md) Excalidraw drawings
 - [?] [#97](backlog/097-azure-devops-status.md) Azure DevOps status
 - [ ] [#236](backlog/236-import-refusals-and-safe-save.md) Import refusals and safe save
