@@ -443,4 +443,41 @@ public sealed class PersonPanelTests : IDisposable
                 + "DTSTART:20261029T100000Z\r\nDTEND:20261029T110000Z\r\nEND:VEVENT\r\n",
             DesktopFixture.Event("Other", "20261029T120000Z", "20261029T130000Z")));
     }
+
+    // 361 AC-7: an archived done todo shows under Done todos like any other; a bad archive shows the red line
+    // `Can't read the todo archive.` and the todos.json done todos still show.
+    [Fact]
+    public async Task Render_ArchivedTodos_AndBadArchiveRedLine()
+    {
+        WriteAnna();
+        data.AddTodo("Thank @[Anna]", DesktopFixture.Today.AddDays(-4));
+        await data.RefreshAsync();
+        CompleteTodo("Thank @[Anna]", 22);
+        TodoArchiveFile.Archive(data.Root, Guid.NewGuid(), "Old lunch with @[Anna]", new DateTime(2026, 8, 10, 12, 0, 0, DateTimeKind.Utc));
+
+        IRenderedComponent<PersonPanel> cut = Render("Anna");
+
+        cut.WaitForAssertion(
+            () =>
+            {
+                Assert.DoesNotContain("Loading…", cut.Markup, StringComparison.Ordinal);
+                Assert.Equal(["2026-10-22|Thank @[Anna]", "2026-08-10|Old lunch with @[Anna]"], TodoRows(cut, "done-todos"));
+            },
+            Wait);
+        Assert.Empty(cut.FindAll("p.todo-archive-unreadable"));
+
+        data.WriteFile(TodoStore.ArchiveFileName, "not json");
+        IRenderedComponent<PersonPanel> bad = Render("Anna");
+
+        bad.WaitForAssertion(
+            () =>
+            {
+                Assert.DoesNotContain("Loading…", bad.Markup, StringComparison.Ordinal);
+                Assert.Equal(["2026-10-22|Thank @[Anna]"], TodoRows(bad, "done-todos"));
+            },
+            Wait);
+        IElement line = bad.Find("p.todo-archive-unreadable");
+        Assert.Equal("Can't read the todo archive.", line.TextContent);
+        Assert.True(line.ClassList.Contains("red"));
+    }
 }

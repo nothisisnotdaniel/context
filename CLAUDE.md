@@ -69,15 +69,15 @@ Every factory agent reads this file before working on Context. Keep it short and
     into `Appointment.Attendees`; the address is never read out. `PersonView.Build` lists the mentioning notes and the
     appointments (calendar files and the cached Exchange copy, no download) whose title or location mentions the
     person or whose attendee matches, latest first. **Todos** (job 159): `PersonView.Build(..., todos)` (optional
-    `TodoStore?`) adds `OpenTodos` (`List()` order) and `DoneTodos` (`ListDone()` order) whose text mentions the person
+    `TodoStore?`) adds `OpenTodos` (`List()` order) and `DoneTodos` (job 361: `ListAllDone` order, archived ones included) whose text mentions the person
     (`PersonParser.Parse` + `aliases.PersonKey` at query time, as for appointments; nothing stored in `context.db`, no
-    `ParserVersion` change), `TodosUnreadable` for a bad `todos.json` and `DoneDate(todo)` (the day in `Zone`); todo
+    `ParserVersion` change), `TodosUnreadable` for a bad `todos.json`, `ArchiveUnreadable` for a bad `todos-archive.json` (job 361) and `DoneDate(todo)` (the day in `Zone`); todo
     mentions count for `Kind`. `PersonParser.Segments(line)` splits one-line text into `PersonSegment(Text, Name)`
     (plain: `Name` null; every mention occurrence, same rules as `Parse`; joined texts give the input). The desktop
     `TodoPanel` draws each mention as `<button class="mention">` (raw text, full text in `title`) inside the todo's
     `<label>`, click stopped there; `OnPerson` (normalized name) goes to `Main.OpenMention`. `PersonPanel` adds
     `Open todos` (due, text) and `Done todos` (done date, text), each only when non-empty, no checkboxes; the red
-    `Can't read the todos.` line for a bad `todos.json`; empty line `No notes, appointments or todos mention <name>.`
+    `Can't read the todos.` line for a bad `todos.json`; the red `p.todo-archive-unreadable` `Can't read the todo archive.` for a bad archive; empty line `No notes, appointments or todos mention <name>.`
     The editor shows a mention as a `mention` chip; following it calls
     `DesktopActions.OpenPerson`, which creates `people` (`# people\n`) and the page (`CreateChild`) only on that click,
     and refuses when the top-level `people` is sensitive. The new page gets the `person` type's template
@@ -109,7 +109,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `ItemOf`: a direct subpage of the top-level `items`, ignoring case); `WorkItems.EnsurePage` creates `items`
     (`# items\n`) and the page (`# <n>\n`) when missing, refusing a sensitive top-level `items` with nothing written.
     `WorkItemView.Build(index, store, todos, calendar, feed, timesFolder, repositories, ICommitLog, n)` never throws:
-    `Notes`, `OpenTodos`/`DoneTodos` (`todos.json` texts), `People` (resolved through `Aliases()`, count desc, then
+    `Notes`, `OpenTodos`/`DoneTodos` (`todos.json` texts; job 361: `DoneTodos` through `ListAllDone`, plus `ArchiveUnreadable`), `People` (resolved through `Aliases()`, count desc, then
     name), `Meetings` (files plus cached feed, no download, latest first), `Hours` (Times day files, `WorkItem == n`
     groups per `ISOWeek` `yyyy-Www`, newest first, `Total`, `SkippedFiles`; the Times folder is never written),
     `Commits` (repo folder name, hash, date, subject; newest first) and the flags `IndexUnreadable`,
@@ -124,13 +124,13 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Notes` (`RequestOpen`), `Open todos`, `Done todos`, `People` (`OpenMention`), `Meetings`, `Hours` (week rows and
     `Total`) and `Commits` (date, repo, 7-char hash, subject), each only with rows; grey `Times isn't set up, so no
     hours.`, `Set repository folders in Settings to see commits.`, `No notes, todos or meetings mention #<n>.`; red
-    `Can't read the mentions.`, `Can't read the todos.`, `Skipped <k> unreadable Times day file(s).`, `Can't run git, so
+    `Can't read the mentions.`, `Can't read the todos.`, `Can't read the todo archive.`, `Skipped <k> unreadable Times day file(s).`, `Can't run git, so
     no commits.`, `Can't read commits in <repo>.`, plus `Can't read Times' folder.` (`Unlistable`) and `Can't read settings.json.`; the `PersonPanel` read-only, `indexGate`, reload and stale-result
     rules (`DesktopState.Item(n)`). `DesktopActions.OpenItem(n)` and `AddRepository`/`RemoveRepository` (the
     Settings *Repository folders* section: text field + Add, Remove per row) are the writers. **Open from the command
     line:** `context item <n>` prints `Item #<n>`, `Notes`, `Todos`, `People`, `Meetings`, `Hours`, `Commits` (every
     heading always; not set up `- Times isn't set up.` / `- No repository folders set.`; read errors on stderr, exit
-    1, the rest printed; a bad or second number is a usage error before the folder is read); `--json` writes
+    1, the rest printed, `Can't read todos-archive.json.` after `Can't read todos.json.`; archived done todos are `done` rows; a bad or second number is a usage error before the folder is read); `--json` writes
     `{item,notes,todos,people,meetings,hours,commits}` (see `CliJsonTests`). `--open` (not with `--json`) ensures the
     page (`Created items/<n>.`), writes `<root>/.desktop/open-request` (`item <n>\n`, `PrivateFile` temp + move,
     `0600`, folder `0700`; never a path) and, when `<root>/.desktop/running.lock` can be opened (no desktop holds it),
@@ -661,6 +661,18 @@ Every factory agent reads this file before working on Context. Keep it short and
     drops the ids gets the same ids written again on the next start. `Complete(Guid id)`
     sets `Done` from the clock on that open todo in one read and write and returns it, or returns `null` and writes
     nothing (unknown id or already done). Done todos are never shown, reopened or pruned anywhere but the person page.
+    **Archive** (job 361): every write (`Add`, `Complete`, `MarkNotified`, `MoveDue`, `Tie`, `Migrate` when it writes)
+    moves each todo with `Done < utcNow - ArchiveAfter` (30 days, strictly) into `<root>/todos-archive.json`
+    (`ArchiveFileName`, `ArchivePath`; same JSON format; an id already there is replaced in place, else appended; a
+    missing archive is created). The archive is written first (temp + move, `PrivateFile`), then `todos.json`; a failed
+    archive write keeps those todos in `todos.json` and the action succeeds; a failed `todos.json` write throws as
+    before (the todo is then in both files). A write with nothing to move never touches the archive. An archive that
+    can't be read, is over `MaxArchiveBytes` (20 MB, through `BoundedFile`), or has an entry without a valid `done` is
+    never written and nothing moves; neither is a merged archive that would be over the cap. `ListAllDone(out
+    archiveUnreadable)` gives both files' done todos in `ListDone` order (then `todos.json` before the archive), a
+    todo in both once as its `todos.json` copy; a bad archive gives only `todos.json`'s and sets the flag. `ListDone`
+    stays `todos.json` only, so `context todos`, current, review, standup, the done log and search never read the
+    archive. `BeforeWrite` (internal init, the target path) is the test hook. `DataWatcher.IsRelevant` includes it.
     **Recurring todos** (job 168): `TodoItem.Repeat` (`TodoRepeat?`, `TodoRepeat.cs`: `Daily`, `Weekly(DayOfWeek)`,
     `Monthly(1..31)`) is stored as the optional `repeat` string `day`, `monday`..`sunday` or `month-1`..`month-31`
     (written only when set, like `done`, so a list without recurring todos has the same bytes as before; not part of
@@ -1070,7 +1082,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Todos`, `Notes`, unreadable flags, `Folder`) off the UI thread with `Refresh()` (one at a time; requests during a run
     coalesce into one more run) and raises `Changed`; `Tick()` refreshes when the day changed or 5 min passed.
     `DataWatcher` (one `FileSystemWatcher` with subfolders, `IsRelevant` filter: the top-level files as before, plus
-    a `.md` at any depth except under a folder starting with `.` or under the top-level `calendar/`, and the top-level
+    a `.md` at any depth except under a folder starting with `.` or under the top-level `calendar/`, the top-level
+    `todos-archive.json` (job 361), and the top-level
     `settings.json` (job 207: saved searches edited outside the app; any case, not in a subfolder); 300 ms
     debounce, 30 s tick timer; never creates the folder) calls them. Components (`App`, `Main`, `TodoPanel`, `AllTodosPanel`, `NotesPanel`, `TagsPanel`, `PeoplePanel`, `LinksPanel`, `OutlinePanel`, `DayAppointmentsPanel`, `TimesTodayPanel`, `AppointmentPanel`, `PersonPanel`, `ItemPanel`, `ReviewPanel`, `TriagePanel`, `MailDigestPanel`, `ToReviewPanel`, `SimilarPanel`)
     inherit `StateComponent`, which injects the state and `DesktopActions` (internal types can't be

@@ -487,4 +487,52 @@ public sealed class PersonViewTests : IDisposable
         Assert.Equal(["Sync with @[Anna Schmidt]"], view.Appointments.Select(a => a.Title));
         Assert.Equal(0, http.Requests);
     }
+
+    // 361 AC-7: an archived done todo that mentions the person is in DoneTodos, in ListAllDone order; a bad archive
+    // sets ArchiveUnreadable and DoneTodos still lists the todos.json matches.
+    [Fact]
+    public void Build_ArchivedTodos_InDoneTodos_BadArchiveFlagged()
+    {
+        WriteNote("people", "# people");
+        WriteNote("people/Anna Schmidt", "# Anna Schmidt");
+        TodoItem open = AddTodo("Call @[Anna Schmidt]", 9);
+        TodoItem done = AddTodo("Lunch with @[Anna Schmidt]", 2, doneHours: 1);
+        Guid archivedId = Guid.NewGuid();
+        string archive = Path.Combine(root, TodoStore.ArchiveFileName);
+        TodoArchiveFile.Write(
+            archive,
+            TodoArchiveFile.Entry(
+                archivedId, "Old talk with @[Anna Schmidt]", new DateOnly(2026, 8, 1), Now.AddDays(-90), Now.AddDays(-60)),
+            TodoArchiveFile.Entry(Guid.NewGuid(), "Old talk with @[Bob]", new DateOnly(2026, 8, 1), Now.AddDays(-90), Now.AddDays(-60)));
+
+        PersonView view = BuildWithTodos("Anna Schmidt");
+
+        Assert.Equal(PersonViewKind.Mentions, view.Kind);
+        Assert.Equal([open.Id], view.OpenTodos.Select(t => t.Id));
+        Assert.Equal([done.Id, archivedId], view.DoneTodos.Select(t => t.Id));
+        Assert.Equal(new DateOnly(2026, 8, 30), view.DoneDate(view.DoneTodos[1]));
+        Assert.False(view.ArchiveUnreadable);
+        Assert.False(view.TodosUnreadable);
+
+        File.WriteAllText(archive, "not json");
+
+        PersonView bad = BuildWithTodos("Anna Schmidt");
+
+        Assert.True(bad.ArchiveUnreadable);
+        Assert.False(bad.TodosUnreadable);
+        Assert.Equal([open.Id], bad.OpenTodos.Select(t => t.Id));
+        Assert.Equal([done.Id], bad.DoneTodos.Select(t => t.Id));
+    }
+
+    // 361 AC-7: a person only an archived todo mentions still has a page with that todo.
+    [Fact]
+    public void Build_OnlyArchivedTodo_Mentions()
+    {
+        TodoArchiveFile.Archive(root, Guid.NewGuid(), "Ask @[Carl]", Now.AddDays(-45));
+
+        PersonView view = BuildWithTodos("Carl");
+
+        Assert.Equal(PersonViewKind.Mentions, view.Kind);
+        Assert.Equal(["Ask @[Carl]"], view.DoneTodos.Select(t => t.Text));
+    }
 }

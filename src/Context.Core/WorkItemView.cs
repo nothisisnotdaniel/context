@@ -130,7 +130,8 @@ internal sealed record WorkItemView
         WorkItemTimesKind timesKind,
         WorkItemCommitsKind commitsKind,
         IReadOnlyList<string> failedRepos,
-        TimeZoneInfo zone)
+        TimeZoneInfo zone,
+        bool archiveUnreadable = false)
     {
         Item = item;
         Notes = notes;
@@ -146,6 +147,7 @@ internal sealed record WorkItemView
         CommitsKind = commitsKind;
         FailedRepos = failedRepos;
         Zone = zone;
+        ArchiveUnreadable = archiveUnreadable;
     }
 
     public override string ToString() => nameof(WorkItemView);
@@ -159,8 +161,14 @@ internal sealed record WorkItemView
     /// <summary>The open <c>todos.json</c> todos whose text mentions the item, in <see cref="TodoStore.List"/> order.</summary>
     public IReadOnlyList<TodoItem> OpenTodos { get; }
 
-    /// <summary>The done todos whose text mentions the item, in <see cref="TodoStore.ListDone"/> order.</summary>
+    /// <summary>
+    /// The done todos of <c>todos.json</c> and <c>todos-archive.json</c> (job 361) whose text mentions the item, in
+    /// <see cref="TodoStore.ListAllDone"/> order.
+    /// </summary>
     public IReadOnlyList<TodoItem> DoneTodos { get; }
+
+    /// <summary>True when <c>todos-archive.json</c> can't be read; <see cref="DoneTodos"/> then holds only <c>todos.json</c> todos.</summary>
+    public bool ArchiveUnreadable { get; }
 
     /// <summary>
     /// The <c>@[...]</c> people of <see cref="Notes"/> and of both todo lists, resolved through the aliases, sorted by
@@ -249,16 +257,19 @@ internal sealed record WorkItemView
         List<TodoItem> openTodos = [];
         List<TodoItem> doneTodos = [];
         bool todosUnreadable = false;
+        bool archiveUnreadable = false;
         if (todos is not null)
         {
             try
             {
                 openTodos = todos.List().Where(t => WorkItemParser.Mentions(t.Text, item)).ToList();
-                doneTodos = todos.ListDone().Where(t => WorkItemParser.Mentions(t.Text, item)).ToList();
+                doneTodos = todos.ListAllDone(out archiveUnreadable)
+                    .Where(t => WorkItemParser.Mentions(t.Text, item)).ToList();
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 todosUnreadable = true;
+                archiveUnreadable = false;
                 openTodos = [];
                 doneTodos = [];
             }
@@ -271,7 +282,7 @@ internal sealed record WorkItemView
             CommitsOf(repositories, commitLog, item);
         return new WorkItemView(
             item, notes, openTodos, doneTodos, people, meetings, hours, commits, indexUnreadable, todosUnreadable,
-            timesKind, commitsKind, failed, calendar.Zone);
+            timesKind, commitsKind, failed, calendar.Zone, archiveUnreadable);
     }
 
     private static List<WorkItemPerson> PeopleOf(

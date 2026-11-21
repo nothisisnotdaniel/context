@@ -39,7 +39,7 @@ internal sealed class DataWatcher : IDisposable
 
     /// <summary>
     /// True for a path whose change the window shows: a top-level <c>*.md</c> note (any case),
-    /// <c>todos.json</c>, <c>settings.json</c> (saved searches edited outside the app), <c>calendar-link.ics</c> or a top-level <c>calendar/*.ics</c>
+    /// <c>todos.json</c>, <c>todos-archive.json</c>, <c>settings.json</c> (saved searches edited outside the app), <c>calendar-link.ics</c> or a top-level <c>calendar/*.ics</c>
     /// file, and a subpage: a <c>*.md</c> file at any depth below a folder. False for the index (<c>context.db*</c>),
     /// temp files, <c>calendar-link.txt</c>, a <c>.md</c> below a folder whose name starts with <c>.</c> or below the
     /// top-level <c>calendar/</c>, and anything outside <paramref name="root"/>. A successful <see cref="CalendarFeed.Fetch"/> rewrites
@@ -75,6 +75,7 @@ internal sealed class DataWatcher : IDisposable
             return HasExtension(name, ".md")
                 || HasExtension(name, NoteStore.SensitiveExtension)
                 || Same(name, TodoStore.FileName)
+                || Same(name, TodoStore.ArchiveFileName)
                 || Same(name, CalendarFeed.CacheFileName)
                 || Same(name, SettingsStore.FileName);
         }

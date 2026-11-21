@@ -43,7 +43,8 @@ internal sealed record PersonView
         IReadOnlyList<TodoItem>? doneTodos = null,
         bool todosUnreadable = false,
         IReadOnlyList<TodoItem>? waiting = null,
-        IReadOnlyList<NoteTopic>? topics = null)
+        IReadOnlyList<NoteTopic>? topics = null,
+        bool archiveUnreadable = false)
     {
         Kind = kind;
         Person = person;
@@ -59,6 +60,7 @@ internal sealed record PersonView
         TodosUnreadable = todosUnreadable;
         Waiting = waiting ?? [];
         Topics = topics ?? [];
+        ArchiveUnreadable = archiveUnreadable;
     }
 
     /// <summary>
@@ -134,8 +136,14 @@ internal sealed record PersonView
     /// </summary>
     public IReadOnlyList<NoteTopic> Topics { get; }
 
-    /// <summary>The matching done todos, in <see cref="TodoStore.ListDone"/> order (latest done first).</summary>
+    /// <summary>
+    /// The matching done todos of <c>todos.json</c> and <c>todos-archive.json</c> (job 361), in
+    /// <see cref="TodoStore.ListAllDone"/> order (latest done first).
+    /// </summary>
     public IReadOnlyList<TodoItem> DoneTodos { get; }
+
+    /// <summary>True when <c>todos-archive.json</c> can't be read; <see cref="DoneTodos"/> then holds only <c>todos.json</c> todos.</summary>
+    public bool ArchiveUnreadable { get; }
 
     /// <summary>True when <c>todos.json</c> can't be read; then both todo lists are empty.</summary>
     public bool TodosUnreadable { get; }
@@ -228,12 +236,13 @@ internal sealed record PersonView
         List<TodoItem> doneTodos = [];
         List<TodoItem> waiting = [];
         bool todosUnreadable = false;
+        bool archiveUnreadable = false;
         if (todos is not null)
         {
             try
             {
                 IReadOnlyList<TodoItem> open = todos.List();
-                IReadOnlyList<TodoItem> done = todos.ListDone();
+                IReadOnlyList<TodoItem> done = todos.ListAllDone(out archiveUnreadable);
                 waiting = open.Where(t => WaitsOn(t.Text, aliases, key)).ToList();
                 openTodos = open.Where(t => !waiting.Contains(t) && Holds(t.Text, aliases, key)).ToList();
                 doneTodos = done.Where(t => Holds(t.Text, aliases, key)).ToList();
@@ -241,6 +250,7 @@ internal sealed record PersonView
             catch (TodoStoreException)
             {
                 todosUnreadable = true;
+                archiveUnreadable = false;
                 openTodos = [];
                 doneTodos = [];
                 waiting = [];
@@ -253,7 +263,8 @@ internal sealed record PersonView
             : PersonViewKind.Mentions;
         return new PersonView(
             kind, person, notes, appointments, all.Unreadable, indexUnreadable, calendar.Zone, clashes, resolved.Titles,
-            openTodos, doneTodos, todosUnreadable, waiting, MeetingTopics.For(allTopics, aliases, [typed]));
+            openTodos, doneTodos, todosUnreadable, waiting, MeetingTopics.For(allTopics, aliases, [typed]),
+            archiveUnreadable);
     }
 
     private static bool Mentions(Appointment appointment, PersonAliases aliases, string key) =>

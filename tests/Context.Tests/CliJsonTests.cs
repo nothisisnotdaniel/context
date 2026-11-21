@@ -813,4 +813,45 @@ public sealed class CliJsonTests : IDisposable
         WriteNote(DoneLog.NoteName, text);
         File.SetLastWriteTimeUtc(Path.Combine(root, "done.md"), new DateTime(2026, 9, 1, 8, 0, 0, DateTimeKind.Utc));
     }
+
+    // 361 AC-8: `item --json` lists an archived done todo as a done todo; a bad archive adds the stderr line, exit 1.
+    [Fact]
+    public void Item_Json_ArchivedTodos()
+    {
+        Directory.CreateDirectory(root);
+        TodoArchiveFile.Write(
+            Path.Combine(root, TodoStore.FileName),
+            TodoArchiveFile.Entry(
+                Guid.NewGuid(), "recent #1234", new DateOnly(2026, 10, 20), new DateTime(2026, 10, 1, 8, 0, 0, DateTimeKind.Utc),
+                new DateTime(2026, 10, 27, 12, 0, 0, DateTimeKind.Utc)));
+        TodoArchiveFile.Write(
+            Path.Combine(root, TodoStore.ArchiveFileName),
+            TodoArchiveFile.Entry(
+                Guid.NewGuid(), "archived #1234", new DateOnly(2026, 8, 30), new DateTime(2026, 8, 1, 8, 0, 0, DateTimeKind.Utc),
+                new DateTime(2026, 9, 1, 12, 0, 0, DateTimeKind.Utc)),
+            TodoArchiveFile.Entry(
+                Guid.NewGuid(), "archived #99", new DateOnly(2026, 8, 30), new DateTime(2026, 8, 1, 8, 0, 0, DateTimeKind.Utc),
+                new DateTime(2026, 9, 1, 12, 0, 0, DateTimeKind.Utc)));
+
+        Result result = Run("item", "1234", "--json");
+
+        Assert.Equal((0, string.Empty), (result.Code, result.Err));
+        using (JsonDocument document = JsonDocument.Parse(result.Out))
+        {
+            Assert.Equal(
+                "[{\"due\":\"2026-10-20\",\"time\":null,\"text\":\"recent #1234\",\"done\":\"2026-10-27\"},"
+                + "{\"due\":\"2026-08-30\",\"time\":null,\"text\":\"archived #1234\",\"done\":\"2026-09-01\"}]",
+                document.RootElement.GetProperty("todos").GetRawText());
+        }
+
+        File.WriteAllText(Path.Combine(root, TodoStore.ArchiveFileName), "[{ broken");
+
+        Result bad = Run("--json", "item", "1234");
+
+        Assert.Equal((1, "Can't read todos-archive.json.\n"), (bad.Code, bad.Err));
+        using JsonDocument partial = JsonDocument.Parse(bad.Out);
+        Assert.Equal(
+            ["recent #1234"],
+            partial.RootElement.GetProperty("todos").EnumerateArray().Select(t => t.GetProperty("text").GetString()));
+    }
 }

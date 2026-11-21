@@ -203,4 +203,31 @@ public sealed class ItemPanelTests : IDisposable
         cut.WaitForAssertion(
             () => Assert.Equal(["Plan"], cut.FindAll(".item-notes button").Select(b => b.TextContent).ToArray()), Wait);
     }
+
+    // 361 AC-7: an archived done todo that mentions the item shows under Done todos; a bad archive shows the red line
+    // `Can't read the todo archive.` while the todos.json done todos still show.
+    [Fact]
+    public async Task Render_ArchivedTodos_AndBadArchiveRedLine()
+    {
+        data.AddTodo("done #1234", new DateOnly(2026, 10, 30));
+        TodoItem todo = new TodoStore(data.Root).List().Single();
+        new TodoStore(data.Root, () => new DateTime(2026, 10, 27, 12, 0, 0, DateTimeKind.Utc)).Complete(todo.Id);
+        TodoArchiveFile.Archive(data.Root, Guid.NewGuid(), "old #1234", new DateTime(2026, 8, 10, 12, 0, 0, DateTimeKind.Utc));
+        await data.RefreshAsync();
+
+        IRenderedComponent<ItemPanel> cut = Render(1234);
+
+        WaitLoaded(cut);
+        Assert.Equal(
+            ["2026-10-27|done #1234", "2026-08-10|old #1234"],
+            cut.FindAll(".item-done-todos li").Select(li => li.QuerySelector(".date")!.TextContent + "|" + li.QuerySelector(".text")!.TextContent).ToArray());
+        Assert.Empty(Lines(cut, "red"));
+
+        data.WriteFile(TodoStore.ArchiveFileName, "[{");
+        IRenderedComponent<ItemPanel> bad = Render(1234);
+
+        WaitLoaded(bad);
+        Assert.Equal(["Can't read the todo archive."], Lines(bad, "red"));
+        Assert.Equal(["done #1234"], bad.FindAll(".item-done-todos li .text").Select(e => e.TextContent).ToArray());
+    }
 }
