@@ -370,6 +370,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#413](backlog/413-tell-person-rows-apart-from-same.md) Tell person rows apart from same-named notes in search
 - [?] [#414](backlog/414-size-and-file-checks-in-the.md) Size and file checks in the dependency list test
 - [?] [#415](backlog/415-name-the-current-theme-when-a.md) Name the current theme when a theme save fails
+- [?] [#420](backlog/420-decision-picker-announces-the-selected-row.md) Decision picker announces the selected row to screen readers
+- [?] [#421](backlog/421-boundedfile-read-refuses-symlinks-and-fifos.md) BoundedFile.Read refuses symlinks and FIFOs
 
 ## Dropped with the terminal UI
 
