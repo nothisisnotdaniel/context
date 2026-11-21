@@ -1191,6 +1191,14 @@ Every factory agent reads this file before working on Context. Keep it short and
     in `app.css`; `editor.css` holds only `.note-editor-body` and ProseMirror's own classes. `TagPanel` lists `DesktopState.NotesWithTag`. `CommandPalette` (Ctrl/Cmd+K) ranks
     `/board`, `/briefing`, `/capture`, `/decisions`, `/done`, `/donelog`, `/export`, `/find`, `/import`, `/meeting`, `/new`, `/open`, `/review`, `/save`, `/search`, `/settings`, `/share`, `/similar`, `/standup`, `/tags`, `/today`, `/todo`, `/triage` (no `/current` since job 216) with `CommandMatcher` (in Core; ties
     in Levenshtein score are ordered by `SwapDistance`, which counts an adjacent swap as one edit, so `/opne` runs `/open`).
+    `QuickSwitcher` (Ctrl/Cmd+P, job 364; `div.dialog.switcher` like the palette, opened by `Main.OpenSwitcher` under
+    the palette's guards and never with the palette, which in turn doesn't open over it) lists `NoteSwitcher.Match`
+    (Core, pure: the trimmed query's non-whitespace characters in order, `OrdinalIgnoreCase` per char; recent, then
+    pinned, then the rest with a one-run match first, then by name; at most `MaxRows` 50) over `Snapshot.Notes` plus
+    `Snapshot.Sensitive` (a sensitive row shows `locked`); Enter or a click opens through `RequestOpen`, a query that
+    matches nothing offers `Create "<query>"` (`Actions.CreateNote`, as `/new`), Esc or a backdrop click closes and
+    focus returns to `.layout` (`tabindex="-1"`). The bundle swallows `Mod-p`/`Ctrl-p` and `index.js` prevents the
+    default of Ctrl/Cmd+P (no Alt/Shift) on `globalThis`, so the web view never prints.
     `/todo every <weekday|day|month> <text>` (job 168) adds a recurring todo (`TryParseRepeat`, then `AddTodo`), accent
     `Added: <text>`; a missing or bad unit or missing text is red `Type /todo every <weekday|day|month> <text>.`; a bad
     date stays red `Type /todo <yyyy-MM-dd|today|tomorrow> <text>.`. `/done <text>` picks among `Snapshot.Todos` with

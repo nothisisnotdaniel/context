@@ -1310,6 +1310,67 @@ p.decision-clash button {
     margin: 4px 10px;
 }
 
+/* The quick switcher (job 364): placed and styled like the palette, with a visible selected row. */
+.layout:focus {
+    outline: none;
+}
+
+.dialog-backdrop:has(.switcher) {
+    align-items: flex-start;
+    padding-top: 12vh;
+}
+
+.switcher {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    width: min(560px, 90vw);
+}
+
+.switcher .switcher-input {
+    font-size: 15px;
+    padding: 8px 10px;
+    width: 100%;
+}
+
+.switcher-list {
+    max-height: 50vh;
+    overflow-y: auto;
+}
+
+.switcher-row {
+    align-items: baseline;
+    border-left: 3px solid transparent;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    gap: 12px;
+    padding: 6px 10px;
+}
+
+.switcher-row:hover {
+    background: var(--panel);
+}
+
+.switcher-row.selected {
+    background: var(--panel);
+    border-left-color: var(--accent-strong);
+}
+
+.switcher-row .name {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.switcher-row .locked {
+    flex: none;
+}
+
+.switcher .none {
+    margin: 4px 10px;
+}
+
 /* Sensitive notes: the setup and restore buttons under the notes list, and their dialog. */
 .sensitive-entry {
     display: flex;

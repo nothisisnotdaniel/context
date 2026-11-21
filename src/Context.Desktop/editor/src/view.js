@@ -791,6 +791,8 @@ function editorKeys() {
     "Mod-s": swallow,
     "Mod-k": swallow,
     "Ctrl-k": swallow,
+    "Mod-p": swallow,
+    "Ctrl-p": swallow,
     "Shift-Enter": lineBreak,
   };
 }

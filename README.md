@@ -157,6 +157,13 @@ appointments and due todos, and `Blocked` with every open waiting-for todo and i
 In the desktop app, `Standup` (right after `End the day` in the More actions menu of today's note) and `/standup`
 write the same text into today's daily note as a `## Standup` section, replacing an earlier one.
 
+### Quick switcher
+
+In the desktop app, Ctrl+P (Cmd+P on macOS) opens a box that finds notes by part of their name: the letters you type
+must appear in that order, ignoring case (`mtg` finds `Meeting notes`). Recently opened notes come first, then pinned
+notes, then the rest. Up and Down pick a note, Enter opens it, Esc closes the box. A name that matches no note offers
+`Create "<name>"`, which creates the note and opens it.
+
 ### Saving
 
 The desktop app saves the open note by itself one second after you stop typing; the line under the note says

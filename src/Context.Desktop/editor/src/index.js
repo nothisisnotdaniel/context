@@ -17,6 +17,13 @@ if (typeof globalThis.addEventListener === "function") {
   globalThis.addEventListener("drop", block);
   // A right click shows no browser menu (Back, Reload, Inspect) on the app's own surface; text inputs and the note
   // editor keep the platform's text menu (Cut, Copy, Paste).
+  // Ctrl/Cmd+P opens the quick switcher (job 364) and must never reach the web view's print command.
+  globalThis.addEventListener("keydown", event => {
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && typeof event.key === "string"
+      && event.key.toLowerCase() === "p") {
+      event.preventDefault();
+    }
+  });
   globalThis.addEventListener("contextmenu", event => {
     const target = event.target;
     if (target && typeof target.closest === "function" && target.closest('input, [contenteditable="true"]') !== null) {

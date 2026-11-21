@@ -299,7 +299,8 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
     }
 
     // 177 AC-10, 224 AC-1/AC-4: at load the bundle registers dragover, drop and contextmenu on the window, one listener
-    // each, and dragover and drop are still blocked, so a dropped file never navigates.
+    // each (364: and keydown, see KeyDown_CtrlOrCmdP_NeverPrints), and dragover and drop are still blocked, so a dropped
+    // file never navigates.
     [Fact]
     public void Bundle_RegistersWindowListeners_AndBlocksDragAndDrop()
     {
@@ -307,12 +308,35 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
 
         string types = engine.Evaluate("JSON.stringify(added.map(function (a) { return a[0]; }))").AsString();
         string drag = engine.Evaluate(
-            "JSON.stringify(added.filter(function (a) { return a[0] !== 'contextmenu'; }).map(function (a) {"
+            "JSON.stringify(added.filter(function (a) { return a[0] === 'dragover' || a[0] === 'drop'; }).map(function (a) {"
             + " var e = { prevented: 0, preventDefault: function () { this.prevented++; } }; a[1](e); return [a[0], e.prevented]; }))")
             .AsString();
 
-        Assert.Equal("[\"dragover\",\"drop\",\"contextmenu\"]", types);
+        Assert.Equal("[\"dragover\",\"drop\",\"keydown\",\"contextmenu\"]", types);
         Assert.Equal("[[\"dragover\",1],[\"drop\",1]]", drag);
+    }
+
+    // 364 AC-10: the window keydown listener prevents the default of Ctrl/Cmd+P (no Alt or Shift) only, so the web
+    // view never prints; every other key keeps its default.
+    [Theory]
+    [InlineData("{ key: 'p', ctrlKey: true }", 1)]
+    [InlineData("{ key: 'p', metaKey: true }", 1)]
+    [InlineData("{ key: 'P', ctrlKey: true }", 1)]
+    [InlineData("{ key: 'p', ctrlKey: true, shiftKey: true }", 0)]
+    [InlineData("{ key: 'p', metaKey: true, altKey: true }", 0)]
+    [InlineData("{ key: 'p' }", 0)]
+    [InlineData("{ key: 'k', ctrlKey: true }", 0)]
+    [InlineData("{ ctrlKey: true }", 0)]
+    public void KeyDown_CtrlOrCmdP_NeverPrints(string fields, double expected)
+    {
+        Engine engine = LoadWithRecordedListeners();
+
+        double prevented = engine.Evaluate(
+            "(function () { var e = " + fields + "; e.prevented = 0; e.preventDefault = function () { this.prevented++; };"
+            + " added.filter(function (a) { return a[0] === 'keydown'; }).forEach(function (a) { a[1](e); }); return e.prevented; })()")
+            .AsNumber();
+
+        Assert.Equal(expected, prevented);
     }
 
     // 224 AC-2: a right click on a plain element, on a target without closest, or with no target shows no menu.
