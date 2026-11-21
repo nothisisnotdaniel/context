@@ -374,6 +374,12 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#421](backlog/421-boundedfile-read-refuses-symlinks-and-fifos.md) BoundedFile.Read refuses symlinks and FIFOs
 - [?] [#422](backlog/422-byte-exact-history-checks-in-endday.md) Byte-exact history checks in EndDay and Merge decision tests
 - [?] [#423](backlog/423-tell-the-user-when-a-rename.md) Tell the user when a rename cannot update the title line
+- [?] [#424](backlog/424-refuse-web-links-with-invisible-unicode.md) Refuse web links with invisible Unicode format characters
+- [?] [#425](backlog/425-drop-attach-and-other-risky-query.md) Drop attach and other risky query parts from mailto links
+- [?] [#426](backlog/426-show-the-punycode-host-in-a.md) Show the punycode host in a web link title
+- [?] [#427](backlog/427-hint-cmd-or-ctrl-click-in.md) Hint Cmd or Ctrl click in the web link title
+- [?] [#428](backlog/428-keep-unrelated-status-messages-when-a.md) Keep unrelated status messages when a web link opens
+- [?] [#429](backlog/429-keep-reference-style-links-byte-for.md) Keep reference-style links byte for byte on save
 
 ## Dropped with the terminal UI
 
