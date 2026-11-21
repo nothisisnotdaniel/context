@@ -76,6 +76,22 @@ internal static class Program
             return new UnsupportedKeyStore();
         }
 
+        // The shared Suite Pro licence item (job 367): the Keychain or the Credential Manager; other systems have none.
+        static ILicenceStore LicenceStore()
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                return new WindowsLicenceStore();
+            }
+
+            if (OperatingSystem.IsMacOS())
+            {
+                return new MacLicenceStore(Environment.ProcessPath);
+            }
+
+            return new UnsupportedLicenceStore();
+        }
+
         // Classic Outlook's COM interface, read-only; other systems have none.
         static IOutlookSource Outlook()
         {
@@ -174,7 +190,10 @@ internal static class Program
         string? timesFolder = TimesFolder.Resolve(Environment.GetEnvironmentVariable(TimesFolder.VariableName));
         DesktopState state = new DesktopState(
             notes, todos, index, calendar, feed, Today, () => DateTime.UtcNow, KeyStore(), session, calendarLink, Outlook(),
-            pageTitles: pageTitles, timesFolder: timesFolder, timesCommand: TimesCommand);
+            pageTitles: pageTitles, timesFolder: timesFolder, timesCommand: TimesCommand,
+            pro: Pro.ForBuild(LicenceStore()),
+            activationFile: new LicenceActivationFile(LicenceActivationFile.DefaultFolder(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData))));
         DesktopActions actions = new DesktopActions(
             notes, todos, state, new ShellNoteLauncher(), calendarLink, feed, () => DateTime.Now, calendar,
             timesFolder, new SystemNotifier(),

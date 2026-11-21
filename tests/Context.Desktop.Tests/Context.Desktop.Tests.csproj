@@ -24,6 +24,8 @@
     <Compile Include="..\Context.Tests\RemovedFeature.cs" Link="RemovedFeature.cs" />
     <Compile Include="..\Context.Tests\FakeCommitLog.cs" Link="FakeCommitLog.cs" />
     <Compile Include="..\Context.Tests\TodoArchiveFile.cs" Link="TodoArchiveFile.cs" />
+    <Compile Include="..\Context.Tests\TestLicences.cs" Link="TestLicences.cs" />
+    <Compile Include="..\Context.Tests\FakeLicenceStore.cs" Link="FakeLicenceStore.cs" />
   </ItemGroup>
 
   <ItemGroup>

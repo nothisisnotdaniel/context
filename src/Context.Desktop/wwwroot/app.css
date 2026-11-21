@@ -7,6 +7,8 @@
     --text: #1d1d1f;
     --grey: #6e6e73;
     --red: #d70015;
+    /* 367: a warning that is not an error (a Suite Pro licence that does not cover this build); 4.5:1 or more. */
+    --yellow: #8a6100;
     --background: #ffffff;
     --panel: #f5f5f7;
     --line: #d2d2d7;
@@ -33,6 +35,7 @@
         --text: #f5f5f7;
         --grey: #98989d;
         --red: #ff453a;
+        --yellow: #ffd60a;
         --background: #1c1c1e;
         --panel: #242426;
         --line: #3a3a3c;
@@ -63,6 +66,7 @@
     --text: #f5f5f7;
     --grey: #98989d;
     --red: #ff453a;
+    --yellow: #ffd60a;
     --background: #1c1c1e;
     --panel: #242426;
     --line: #3a3a3c;
@@ -248,6 +252,10 @@ ol {
 .accent,
 .today {
     color: var(--accent-strong);
+}
+
+.yellow {
+    color: var(--yellow);
 }
 
 .cut {
@@ -3021,4 +3029,34 @@ nav.saved-searches ul {
     flex: none;
     font-size: 12px;
     white-space: nowrap;
+}
+
+/* 367: the Suite Pro section of Settings and the locked hint of a Pro feature. */
+.pro-entry {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.pro-entry .pro-key {
+    flex: 1 1 240px;
+    min-width: 0;
+}
+
+.pro-entry .pro-activate {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: var(--on-accent);
+    flex: none;
+}
+
+.pro-entry .pro-remove {
+    flex: none;
+}
+
+.pro-locked-hint {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
 }

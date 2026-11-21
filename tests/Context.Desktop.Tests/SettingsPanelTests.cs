@@ -47,7 +47,7 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.Equal("Close", close.GetAttribute("aria-label"));
         Assert.Equal("Close", close.GetAttribute("title"));
         Assert.NotNull(close.QuerySelector("svg"));
-        Assert.Equal(["Appearance", "Exchange calendar", "Outlook", "Pasting", "Screenshots", "Command bar", "Repository folders", "Sensitive notes"], cut.FindAll("h3").Select(h => h.TextContent).ToArray());
+        Assert.Equal(["Appearance", "Exchange calendar", "Outlook", "Pasting", "Screenshots", "Command bar", "Repository folders", "Sensitive notes", "Suite Pro"], cut.FindAll("h3").Select(h => h.TextContent).ToArray());
         IElement line = cut.Find(".calendar-link-state");
         Assert.Equal("No calendar link set.", line.TextContent);
         Assert.True(line.ClassList.Contains("grey"));
@@ -65,7 +65,8 @@ public sealed class SettingsPanelTests : IDisposable
     public async Task Field_IsAMaskedInputWithoutAValue_SaveDisabledWhileEmpty()
     {
         // 217: without Outlook here the Outlook section has no checkbox, so (244: besides the Pasting checkbox) the link
-        // field is the only input (260: besides the screenshot folder field; 280: and the repository folder field).
+        // field is the only input (260: besides the screenshot folder field; 280: and the repository folder field; 367: and
+        // the licence key field).
         data.Outlook.Available = OutlookAvailability.Unsupported;
         IRenderedComponent<SettingsPanel> cut = await Show();
 
@@ -73,7 +74,7 @@ public sealed class SettingsPanelTests : IDisposable
         IElement field = Assert.Single(
             cut.FindAll("input"),
             i => i.GetAttribute("type") != "checkbox" && !i.ClassList.Contains("screenshot-folder-field")
-                && !i.ClassList.Contains("repository-field"));
+                && !i.ClassList.Contains("repository-field") && !i.ClassList.Contains("pro-key"));
         Assert.Equal("password", field.GetAttribute("type"));
         Assert.Equal("Calendar link", field.GetAttribute("aria-label"));
         Assert.Equal("off", field.GetAttribute("autocomplete"));
@@ -804,7 +805,7 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.Equal(string.Empty, result.TextContent);
         Assert.Empty(group.QuerySelectorAll("input"));
         Assert.Equal(
-            ["calendar-link-field", "fetch-titles", "screenshot-folder-field", "repository-field"],
+            ["calendar-link-field", "fetch-titles", "screenshot-folder-field", "repository-field", "pro-key"],
             cut.FindAll("input").Select(i => i.ClassName!.Split(' ')[0]).ToArray());
     }
 
