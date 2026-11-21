@@ -409,6 +409,9 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#456](backlog/456-check-the-times-panel-s-booking.md) Check the Times panel's booking fields in dark mode
 - [?] [#457](backlog/457-clear-a-stale-times-result-line.md) Clear a stale Times result line when the booking form is cancelled
 - [?] [#458](backlog/458-readable-excalidraw-drawings-in-dark-mode.md) Readable Excalidraw drawings in dark mode
+- [?] [#459](backlog/459-close-the-sensitive-note-race-in.md) Close the sensitive-note race in create-only import save
+- [?] [#460](backlog/460-refuse-case-only-clashes-on-case.md) Refuse case-only clashes on case-sensitive file systems in import save
+- [?] [#461](backlog/461-fixed-order-for-import-refusal-texts.md) Fixed order for import refusal texts
 
 ## Dropped with the terminal UI
 
