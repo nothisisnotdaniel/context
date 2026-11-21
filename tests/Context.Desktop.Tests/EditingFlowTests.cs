@@ -186,7 +186,7 @@ public sealed class EditingFlowTests : IDisposable
             cut.Find(".palette-input").GetAttribute("blazor:elementReference"),
             ((Microsoft.AspNetCore.Components.ElementReference)focus.Arguments[0]!).Id);
         Assert.Equal(
-            ["/board <tag>", "/briefing", "/capture <text>", "/decisions [tag]", "/digest", "/done <text>", "/donelog", "/export", "/find <attribute> <value>", "/glossary [filter]", "/import", "/meeting <number>", "/new <title> [--template <name>]", "/open <note>", "/review", "/save", "/search <text>", "/settings", "/share", "/similar", "/standup", "/tags [tag]", "/today", "/todo <<yyyy-MM-dd|today|tomorrow> [HH:mm]|every <weekday|day|month>> <text>", "/triage"],
+            ["/board <tag>", "/briefing", "/capture <text>", "/decisions [tag]", "/digest", "/done <text>", "/donelog", "/export", "/find <attribute> <value>", "/glossary [filter]", "/import", "/meeting [<number>|<H:mm>|<title>]", "/new <title> [--template <name>]", "/open <note>", "/review", "/save", "/search <text>", "/settings", "/share", "/similar", "/standup", "/tags [tag]", "/today", "/todo <<yyyy-MM-dd|today|tomorrow> [HH:mm]|every <weekday|day|month>> <text>", "/triage"],
             cut.FindAll(".palette-row .usage").Select(u => u.TextContent).ToArray());
 
         await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
@@ -212,9 +212,9 @@ public sealed class EditingFlowTests : IDisposable
         Assert.Equal("true", cut.FindAll(".palette-row")[0].GetAttribute("aria-selected"));
 
         await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/me" });
-        Assert.Equal("/meeting <number>", cut.FindAll(".palette-row .usage")[0].TextContent);
+        Assert.Equal("/meeting [<number>|<H:mm>|<title>]", cut.FindAll(".palette-row .usage")[0].TextContent);
         Assert.Equal(
-            "Open the note for today's appointment with that number",
+            "Open the note for today's current or next appointment, or the one with that number, time or title",
             cut.FindAll(".palette-row .description")[0].TextContent);
 
         await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/xyzzy" });

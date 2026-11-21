@@ -69,7 +69,30 @@ internal static class MeetingNote
     /// <summary>The error when there is no appointment today.</summary>
     public const string NoAppointmentsText = "There are no appointments today.";
 
+    /// <summary>The empty sections every new meeting note ends its <see cref="Format"/> text with (job 381).</summary>
+    public const string SectionsText = "\n## Notes\n\n## Decisions\n\n## Actions\n";
+
+    /// <summary>The error when nothing is running now and nothing timed starts later today (job 381).</summary>
+    public const string NoCurrentText = "There is no current or next appointment today.";
+
+    /// <summary>The longest name a Times booking gets (job 381).</summary>
+    public const int MaxBookingName = 200;
+
+    /// <summary>The longest Times output line shown after a refused booking (job 381).</summary>
+    public const int MaxRefusalText = 200;
+
+    /// <summary>The <c>--book</c> error for an all-day appointment (job 381); no run is started.</summary>
+    public const string AllDayBookingText = "All-day appointments can't be booked in Times.";
+
+    /// <summary>The booking error when no <c>tm</c> was found or started (job 381).</summary>
+    public const string TimesNotFoundText = "Times isn't installed, so nothing was booked.";
+
+    /// <summary>The booking error when <c>tm</c> was stopped after its timeout (job 381).</summary>
+    public const string TimesTimedOutText = "Times didn't answer in time.";
+
     private const string DateFormat = "yyyy-MM-dd";
+
+    private const string ClockFormat = "H:mm";
 
     private const string TimeFormat = "HH:mm";
 
@@ -120,6 +143,213 @@ internal static class MeetingNote
         error = null;
         return appointments[number - 1];
     }
+
+    /// <summary>The error when no appointment runs at <paramref name="time"/> today (job 381).</summary>
+    public static string NoAppointmentAtText(TimeOnly time) =>
+        $"There is no appointment at {time.ToString(ClockFormat, CultureInfo.InvariantCulture)} today.";
+
+    /// <summary>The error when no appointment today is called <paramref name="title"/> (job 381); one line.</summary>
+    public static string NoAppointmentCalledText(string title) => $"There is no appointment called {OneLine(title)} today.";
+
+    /// <summary>
+    /// Picks the appointment for <c>meeting</c> and <c>/meeting</c> (job 381) from today's <paramref name="appointments"/>
+    /// (<see cref="Today"/> order) by <paramref name="argument"/>. No appointments at all is <see cref="NoAppointmentsText"/>.
+    /// A blank argument picks the first timed (not all-day) appointment with start &lt;= <paramref name="localNow"/> &lt;
+    /// end, else the timed one with the earliest start after now (ties: list order), else
+    /// <see cref="NoCurrentText"/>. An argument of ASCII digits only (as given, no spaces) is the number of
+    /// <see cref="Pick"/>; one that isn't a number of at least 1 is <see cref="NoAppointmentText"/>-like
+    /// (<c>There is no appointment &lt;digits&gt; today.</c>). A trimmed <c>H:mm</c>/<c>HH:mm</c> (hour 0-23, minute
+    /// 0-59) picks the first timed appointment with start &lt;= that time today &lt; end, else
+    /// <see cref="NoAppointmentAtText"/>. Anything else, whitespace runs collapsed, is a title: the first appointment
+    /// whose one-line title equals it ignoring case, else the first whose title contains it ignoring case, else
+    /// <see cref="NoAppointmentCalledText"/>.
+    /// </summary>
+    public static Appointment? Select(
+        IReadOnlyList<Appointment> appointments, string? argument, DateTime localNow, out string? error)
+    {
+        if (appointments.Count == 0)
+        {
+            error = NoAppointmentsText;
+            return null;
+        }
+
+        string raw = argument ?? string.Empty;
+        if (raw.Length > 0 && raw.All(char.IsAsciiDigit))
+        {
+            if (TryParseNumber(raw, out int number))
+            {
+                return Pick(appointments, number, out error);
+            }
+
+            error = $"There is no appointment {raw} today.";
+            return null;
+        }
+
+        string text = TagParser.CollapseWhitespace(SafeText.Clean(raw).Replace('\n', ' '));
+        if (text.Length == 0)
+        {
+            return Current(appointments, localNow, out error);
+        }
+
+        if (TryParseTime(text, out TimeOnly time))
+        {
+            DateTime at = localNow.Date + time.ToTimeSpan();
+            Appointment? running = appointments.FirstOrDefault(a => !a.AllDay && a.Start <= at && at < a.End);
+            error = running is null ? NoAppointmentAtText(time) : null;
+            return running;
+        }
+
+        Appointment? exact = appointments.FirstOrDefault(
+            a => string.Equals(TitleText(a), text, StringComparison.OrdinalIgnoreCase));
+        Appointment? match = exact ?? appointments.FirstOrDefault(
+            a => TitleText(a).Contains(text, StringComparison.OrdinalIgnoreCase));
+        error = match is null ? NoAppointmentCalledText(text) : null;
+        return match;
+    }
+
+    /// <summary>
+    /// Reads <c>H:mm</c> or <c>HH:mm</c> (ASCII digits, hour 0-23, minute 0-59); anything else (<c>25:00</c>,
+    /// <c>9:5</c>, <c>9.30</c>) is <c>false</c>.
+    /// </summary>
+    public static bool TryParseTime(string text, out TimeOnly time)
+    {
+        time = default;
+        int colon = text.IndexOf(':', StringComparison.Ordinal);
+        if (colon is < 1 or > 2 || text.Length != colon + 3 || !text.Remove(colon, 1).All(char.IsAsciiDigit))
+        {
+            return false;
+        }
+
+        int hour = int.Parse(text.AsSpan(0, colon), NumberStyles.None, CultureInfo.InvariantCulture);
+        int minute = int.Parse(text.AsSpan(colon + 1), NumberStyles.None, CultureInfo.InvariantCulture);
+        if (hour > 23 || minute > 59)
+        {
+            return false;
+        }
+
+        time = new TimeOnly(hour, minute);
+        return true;
+    }
+
+    /// <summary>The start time as Times reads it: <c>H:mm</c> (invariant).</summary>
+    public static string BookingTime(Appointment appointment) =>
+        appointment.Start.ToString(ClockFormat, CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// The name a Times booking gets (job 381): the one-line title with every work item token
+    /// <see cref="WorkItemParser"/> finds (<c>#&lt;n&gt;</c>, <c>AB#&lt;n&gt;</c>) removed, whitespace runs collapsed to
+    /// one space, trimmed, cut to <see cref="MaxBookingName"/> characters (never inside a surrogate pair, trimmed again);
+    /// <see cref="FallbackTitle"/> when nothing is left.
+    /// </summary>
+    public static string BookingName(Appointment appointment)
+    {
+        string name = TagParser.CollapseWhitespace(WorkItemParser.RemoveReferences(OneLine(appointment.Title)));
+        name = Cut(name, MaxBookingName).TrimEnd();
+        return name.Length == 0 ? FallbackTitle : name;
+    }
+
+    /// <summary>
+    /// The <c>tm</c> arguments that book <paramref name="appointment"/> as a checkpoint (job 381): <c>checkpoint</c>,
+    /// <see cref="BookingTime"/>, then <c>#&lt;position&gt;</c> when the first work item of
+    /// <paramref name="noteText"/> (<see cref="WorkItemParser.Parse"/>) is on the quicklist <paramref name="projects"/>
+    /// (<see cref="TimesProjects.Read"/>, 1-based, first row with that item), then <see cref="BookingName"/>. Each is
+    /// one argument, never a shell word.
+    /// </summary>
+    public static IReadOnlyList<string> BookingArguments(
+        Appointment appointment, string noteText, IReadOnlyList<(int WorkItem, string Title)> projects)
+    {
+        List<string> arguments = ["checkpoint", BookingTime(appointment)];
+        IReadOnlyList<int> items = WorkItemParser.Parse(noteText);
+        if (items.Count > 0)
+        {
+            for (int i = 0; i < projects.Count; i++)
+            {
+                if (projects[i].WorkItem == items[0])
+                {
+                    arguments.Add("#" + (i + 1).ToString(CultureInfo.InvariantCulture));
+                    break;
+                }
+            }
+        }
+
+        arguments.Add(BookingName(appointment));
+        return arguments;
+    }
+
+    /// <summary>The line after a booking Times accepted (job 381).</summary>
+    public static string BookedText(Appointment appointment) =>
+        $"Booked {BookingTime(appointment)} {BookingName(appointment)} in Times.";
+
+    /// <summary>The question the desktop asks before it books (job 381).</summary>
+    public static string BookingQuestion(Appointment appointment) =>
+        $"Book {BookingName(appointment)} at {BookingTime(appointment)} in Times?";
+
+    /// <summary>
+    /// What a booking run gave (job 381): <c>true</c> with <see cref="BookedText"/> for exit code 0, else <c>false</c>
+    /// with <see cref="TimesNotFoundText"/>, <see cref="TimesTimedOutText"/> or <c>Times refused the booking: &lt;line&gt;</c>,
+    /// the line being the first non-empty line of stderr, else of stdout (cleaned, trimmed, cut to
+    /// <see cref="MaxRefusalText"/>), or <c>exit code &lt;n&gt;</c> when both are empty.
+    /// </summary>
+    public static bool BookingOutcome(Appointment appointment, TimesRunResult result, out string text)
+    {
+        switch (result.Kind)
+        {
+            case TimesRunKind.NotFound:
+                text = TimesNotFoundText;
+                return false;
+            case TimesRunKind.TimedOut:
+                text = TimesTimedOutText;
+                return false;
+        }
+
+        if (result.ExitCode == 0)
+        {
+            text = BookedText(appointment);
+            return true;
+        }
+
+        string? line = FirstLine(result.Stderr) ?? FirstLine(result.Stdout);
+        text = "Times refused the booking: "
+            + (line ?? "exit code " + result.ExitCode.ToString(CultureInfo.InvariantCulture));
+        return false;
+    }
+
+    // The first non-empty line of output, cleaned, trimmed and cut, or null.
+    private static string? FirstLine(string output)
+    {
+        foreach (string line in SafeText.Clean(output).Split('\n'))
+        {
+            string trimmed = TagParser.CollapseWhitespace(line);
+            if (trimmed.Length > 0)
+            {
+                return Cut(trimmed, MaxRefusalText).TrimEnd();
+            }
+        }
+
+        return null;
+    }
+
+    // The running timed appointment, else the next timed one today, else null with NoCurrentText.
+    private static Appointment? Current(IReadOnlyList<Appointment> appointments, DateTime localNow, out string? error)
+    {
+        Appointment? picked = appointments.FirstOrDefault(a => !a.AllDay && a.Start <= localNow && localNow < a.End);
+        if (picked is null)
+        {
+            foreach (Appointment a in appointments)
+            {
+                if (!a.AllDay && a.Start > localNow && (picked is null || a.Start < picked.Start))
+                {
+                    picked = a;
+                }
+            }
+        }
+
+        error = picked is null ? NoCurrentText : null;
+        return picked;
+    }
+
+    // The title as one line with whitespace runs collapsed, for matching.
+    private static string TitleText(Appointment appointment) => TagParser.CollapseWhitespace(OneLine(appointment.Title));
 
     /// <summary>
     /// Today's appointments in <see cref="CurrentView"/> order: the calendar files plus the feed (fetched once), the
@@ -181,7 +411,8 @@ internal static class MeetingNote
     /// <summary>
     /// The text of a new meeting note, with <c>\n</c> line ends and ending in <c>\n</c>: <c># yyyy-MM-dd</c>, a blank
     /// line, <c>#meeting</c>, a blank line, then <c>- Title:</c>, <c>- Time:</c>, <c>- Location:</c> (only when set)
-    /// and <c>- Attendees:</c> lines. Every inserted value is one line.
+    /// and <c>- Attendees:</c> lines, then (job 381) <see cref="SectionsText"/>: the empty <c>## Notes</c>,
+    /// <c>## Decisions</c> and <c>## Actions</c> sections. Every inserted value is one line.
     /// </summary>
     public static string Format(Appointment appointment)
     {
@@ -201,6 +432,7 @@ internal static class MeetingNote
         text.Append("- Attendees: ");
         text.Append(appointment.Attendees.Count == 0 ? "none" : string.Join(", ", appointment.Attendees.Select(Attendee)));
         text.Append('\n');
+        text.Append(SectionsText);
         return text.ToString();
     }
 

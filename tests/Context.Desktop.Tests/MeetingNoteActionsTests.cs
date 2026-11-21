@@ -53,7 +53,8 @@ public sealed class MeetingNoteActionsTests : IDisposable
         Assert.Equal(
             Encoding.UTF8.GetBytes(
                 "# 2026-10-29\n\n#meeting\n\n- Title: Review: Q4/plan\n- Time: 2026-10-29 11:00-12:00\n"
-                + "- Location: Room 1\n- Attendees: @[Anna Schmidt]\n"),
+                + "- Location: Room 1\n- Attendees: @[Anna Schmidt]\n"
+                + "\n## Notes\n\n## Decisions\n\n## Actions\n"),
             File.ReadAllBytes(PathOf(Review)));
         Assert.Contains(data.State!.Snapshot!.Notes, n => n.Name == Review);
         Assert.Equal("# Meetings\n", File.ReadAllText(PathOf("Meetings")));
@@ -198,14 +199,9 @@ public sealed class MeetingNoteActionsTests : IDisposable
         Assert.False(Directory.Exists(PathOf("Meetings/Early", string.Empty)));
     }
 
-    // A blank or invalid number: red usage line, nothing written.
+    // An invalid number: red usage line, nothing written (381: other words are a title, see below).
     [Theory]
-    [InlineData("/meeting")]
-    [InlineData("/meeting   ")]
-    [InlineData("/meeting x")]
     [InlineData("/meeting 0")]
-    [InlineData("/meeting -1")]
-    [InlineData("/meeting 1 2")]
     [InlineData("/meeting 99999999999")]
     public async Task PaletteMeeting_InvalidNumber_RedUsage(string line)
     {
@@ -215,9 +211,50 @@ public sealed class MeetingNoteActionsTests : IDisposable
 
         await RunPalette(cut, line);
 
-        Assert.Equal("Type /meeting <number>.", cut.Find(".main-status").TextContent);
+        Assert.Equal("Type /meeting [<number>|<H:mm>|<title>].", cut.Find(".main-status").TextContent);
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
         Assert.Equal(before, FileSnapshot.Take(data.Root));
+    }
+
+    // 381 AC-11: words that match no title, or a time with nothing running: the CLI's texts in red, nothing written.
+    [Theory]
+    [InlineData("/meeting x", "There is no appointment called x today.")]
+    [InlineData("/meeting -1", "There is no appointment called -1 today.")]
+    [InlineData("/meeting 1 2", "There is no appointment called 1 2 today.")]
+    [InlineData("/meeting 10:00", "There is no appointment at 10:00 today.")]
+    public async Task PaletteMeeting_NoMatch_RedText(string line, string text)
+    {
+        WriteDay();
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
+
+        await RunPalette(cut, line);
+
+        cut.WaitForAssertion(() => Assert.Equal(text, cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root));
+        Assert.Empty(data.TimesRunner.Calls);
+    }
+
+    // 381 AC-11: a blank argument picks the current or next appointment (10:05: Review at 11:00); a time or a title
+    // picks as in the CLI.
+    [Theory]
+    [InlineData("/meeting", Review)]
+    [InlineData("/meeting   ", Review)]
+    [InlineData("/meeting 9:10", "Meetings/Standup/2026-10-29")]
+    [InlineData("/meeting q4/PLAN", Review)]
+    [InlineData("/meeting stand", "Meetings/Standup/2026-10-29")]
+    public async Task PaletteMeeting_BlankTimeOrTitle_Opens(string line, string name)
+    {
+        WriteDay();
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, line);
+
+        cut.WaitForAssertion(() => Assert.Equal(name, cut.Find(".note-title").GetAttribute("title")), Wait);
+        Assert.Equal("Created " + name, cut.Find(".main-status").TextContent);
+        Assert.True(File.Exists(PathOf(name)));
     }
 
     // No appointments, or a number beyond the count: the CLI's texts in red, nothing written.
@@ -280,6 +317,9 @@ public sealed class MeetingNoteActionsTests : IDisposable
         Assert.True(File.Exists(PathOf(Review)));
         Assert.Equal("Created " + Review, cut.Find(".main-status").TextContent);
         Assert.Equal("# Plan\n", File.ReadAllText(PathOf("Plan")));
+        // 381 AC-11: once discarded, the new note still offers the booking.
+        WaitForBookQuestion(cut);
+        Assert.Empty(data.TimesRunner.Calls);
     }
 
     // 203 AC-7: with unsaved changes the open note is saved first; the meeting note opens with no question.
@@ -296,7 +336,10 @@ public sealed class MeetingNoteActionsTests : IDisposable
         await RunPalette(cut, "/meeting 2");
 
         cut.WaitForAssertion(() => Assert.Equal(Review, cut.Find(".note-title").GetAttribute("title")), Wait);
-        Assert.Empty(cut.FindAll("[role=dialog]"));
+        // 381: the only dialog is the booking offer for the new note, never a discard question.
+        Assert.Equal(
+            "Book Review: Q4/plan at 11:00 in Times?",
+            Assert.Single(cut.FindAll("[role=dialog]")).QuerySelector(".question")!.TextContent);
         Assert.True(File.Exists(PathOf(Review)));
         Assert.Equal("# Plan\n\nSaved first\n", File.ReadAllText(PathOf("Plan")));
     }
@@ -455,5 +498,163 @@ public sealed class MeetingNoteActionsTests : IDisposable
         Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
         Assert.Equal(before, data.SnapshotUnderIndexGate(syncFirst: false));
         Assert.False(Directory.Exists(PathOf("Meetings/Doctor", string.Empty)));
+    }
+
+    // 381 ------------------------------------------------------------------------------------------
+
+    private const string BookQuestion = "Book Review: Q4/plan at 11:00 in Times?";
+
+    // Runs /meeting line and waits until the note is open and every load the page started has rendered.
+    private async Task<IRenderedComponent<Main>> MeetingAsync(string line, string name)
+    {
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await RunPalette(cut, line);
+        cut.WaitForAssertion(() => Assert.Equal(name, cut.Find(".note-title").GetAttribute("title")), Wait);
+        cut.WaitForAssertion(() => Assert.True(cut.FindComponent<NoteEditor>().Instance.IsReady), Wait);
+        return cut;
+    }
+
+    private static void WaitForBookQuestion(IRenderedComponent<Main> cut) =>
+        cut.WaitForAssertion(
+            () => Assert.Equal(BookQuestion, Assert.Single(cut.FindAll(".dialog .question")).TextContent), Wait);
+
+    // 381 AC-11: a just-created note for a timed appointment offers the booking; Book runs the checkpoint once and
+    // shows the accent Booked line.
+    [Fact]
+    public async Task PaletteMeeting_NewNote_BookRunsCheckpoint()
+    {
+        WriteDay();
+        IRenderedComponent<Main> cut = await MeetingAsync("/meeting 2", Review);
+        WaitForBookQuestion(cut);
+        Assert.Equal("Book", cut.Find(".dialog button.confirm").TextContent);
+        Assert.Empty(data.TimesRunner.Calls);
+
+        await cut.Find(".dialog button.confirm").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(
+            () => Assert.Equal("Booked 11:00 Review: Q4/plan in Times.", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("accent"));
+        Assert.Empty(cut.FindAll(".dialog"));
+        Assert.Equal([["checkpoint", "11:00", "Review: Q4/plan"]], data.TimesRunner.Calls);
+    }
+
+    // 381 AC-11: Cancel or Escape closes the offer and runs nothing.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PaletteMeeting_CancelOrEscape_RunsNothing(bool escape)
+    {
+        WriteDay();
+        IRenderedComponent<Main> cut = await MeetingAsync("/meeting 2", Review);
+        WaitForBookQuestion(cut);
+
+        if (escape)
+        {
+            await cut.Find(".dialog").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        }
+        else
+        {
+            await cut.Find(".dialog button.cancel").ClickAsync(new MouseEventArgs());
+        }
+
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".dialog")), Wait);
+        Assert.Equal("Created " + Review, cut.Find(".main-status").TextContent);
+        Assert.Empty(data.TimesRunner.Calls);
+    }
+
+    // 381 AC-11: a failed booking shows the AC-10 text in red.
+    [Theory]
+    [InlineData("notfound", "Times isn't installed, so nothing was booked.")]
+    [InlineData("timedout", "Times didn't answer in time.")]
+    [InlineData("refused", "Times refused the booking: no project")]
+    public async Task PaletteMeeting_BookFails_RedText(string kind, string text)
+    {
+        WriteDay();
+        data.TimesRunner.Result = kind switch
+        {
+            "notfound" => TimesRunResult.NotFound(),
+            "timedout" => TimesRunResult.TimedOut(),
+            _ => new TimesRunResult(TimesRunKind.Done, 1, string.Empty, "no project\n"),
+        };
+        IRenderedComponent<Main> cut = await MeetingAsync("/meeting 2", Review);
+        WaitForBookQuestion(cut);
+
+        await cut.Find(".dialog button.confirm").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal(text, cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Single(data.TimesRunner.Calls);
+    }
+
+    // 381 AC-11: an existing note, an all-day appointment or a missing tm shows no booking offer.
+    [Theory]
+    [InlineData("existing")]
+    [InlineData("allday")]
+    [InlineData("notm")]
+    public async Task PaletteMeeting_NoOffer(string kind)
+    {
+        WriteDay();
+        string name = Review;
+        string line = "/meeting 2";
+        if (kind == "existing")
+        {
+            data.WriteNote("Meetings", "# Meetings\n");
+            Directory.CreateDirectory(PathOf("Meetings/Review Q4 plan", string.Empty));
+            data.WriteNote("Meetings/Review Q4 plan", "# Review Q4 plan\n");
+            data.WriteNote(Review, "# Review\n");
+        }
+        else if (kind == "allday")
+        {
+            data.WriteCalendar("holiday.ics", DesktopFixture.Calendar(
+                "BEGIN:VEVENT\r\nSUMMARY:Holiday\r\nDTSTART;VALUE=DATE:20261029\r\nEND:VEVENT\r\n"));
+            name = "Meetings/Holiday/2026-10-29";
+            line = "/meeting Holiday";
+        }
+        else
+        {
+            data.TimesCommand = null;
+        }
+
+        IRenderedComponent<Main> cut = await MeetingAsync(line, name);
+
+        if (kind != "existing")
+        {
+            cut.WaitForAssertion(() => Assert.Equal("Created " + name, cut.Find(".main-status").TextContent), Wait);
+        }
+
+        Assert.Empty(cut.FindAll(".dialog"));
+        Assert.Empty(data.TimesRunner.Calls);
+    }
+
+    // 381 AC-11: BookMeeting needs the dialog's confirmation, never books an all-day appointment, and passes the
+    // quicklist position of the note's first work item.
+    [Fact]
+    public async Task BookMeeting_ConfirmationAllDayAndQuicklist()
+    {
+        data.WriteCalendar("work.ics", DesktopFixture.Calendar(
+            "BEGIN:VEVENT\r\nSUMMARY:Holiday\r\nDTSTART;VALUE=DATE:20261029\r\nEND:VEVENT\r\n",
+            DesktopFixture.Event("Sprint AB#1234", "20261029T110000", "20261029T120000")));
+        Directory.CreateDirectory(data.TimesFolder);
+        File.WriteAllText(
+            Path.Combine(data.TimesFolder, TimesProjects.FileName),
+            "{\"projects\":[{\"workItem\":77,\"title\":\"x\"},{\"workItem\":1234,\"title\":\"Sprint\"}]}");
+        DesktopSnapshot snapshot = await data.RefreshAsync();
+        Appointment holiday = snapshot.Current!.Appointments.Single(a => a.AllDay);
+        Appointment sprint = snapshot.Current!.Appointments.Single(a => !a.AllDay);
+        ActionResult made = await data.Actions!.OpenMeetingNote(sprint);
+
+        ActionResult unconfirmed = await data.Actions.BookMeeting(sprint, made.Text, null);
+        ActionResult allDay = await data.Actions.BookMeeting(holiday, made.Text, new Confirmation());
+        Assert.Equal((ActionKind.Refused, ActionReason.NotConfirmed), (unconfirmed.Kind, unconfirmed.Reason));
+        Assert.Equal(
+            (ActionKind.Refused, ActionReason.Invalid, "All-day appointments can't be booked in Times."),
+            (allDay.Kind, allDay.Reason, allDay.Text));
+        Assert.Empty(data.TimesRunner.Calls);
+
+        ActionResult booked = await data.Actions.BookMeeting(sprint, made.Text, new Confirmation());
+
+        Assert.Equal((ActionKind.Done, "Booked 11:00 Sprint in Times."), (booked.Kind, booked.Text));
+        Assert.Equal([["checkpoint", "11:00", "#2", "Sprint"]], data.TimesRunner.Calls);
     }
 }

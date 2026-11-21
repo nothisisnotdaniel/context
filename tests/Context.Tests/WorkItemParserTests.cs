@@ -160,4 +160,64 @@ public sealed class WorkItemParserTests : IDisposable
         Assert.Equal(before, FileSnapshot.Take(root));
         Assert.Equal(nameof(WorkItemPage), result.ToString());
     }
+
+    // 381 AC-7: AB#<n> (AB in any case) at line start or after whitespace, with the #<n> digit and end rules.
+    [Theory]
+    [InlineData("AB#1234")]
+    [InlineData("ab#1234")]
+    [InlineData("Ab#1234")]
+    [InlineData("aB#1234")]
+    [InlineData("see AB#1234")]
+    [InlineData("tab\tAB#1234")]
+    [InlineData("done AB#1234.")]
+    [InlineData("for AB#1234, then")]
+    [InlineData("first\nAB#1234 second")]
+    public void Parse_FindsAzureReference(string text)
+    {
+        Assert.Equal([1234], WorkItemParser.Parse(text));
+        Assert.True(WorkItemParser.Mentions(text, 1234));
+    }
+
+    // 381 AC-7: nothing for these; AB#<n> is never a tag.
+    [Theory]
+    [InlineData("xAB#12")]
+    [InlineData("AB#0")]
+    [InlineData("AB#012")]
+    [InlineData("AB#12a")]
+    [InlineData("AB#12-3")]
+    [InlineData("AB#12#")]
+    [InlineData("AB#1234567890")]
+    [InlineData("AB #12x")]
+    [InlineData("A#12x")]
+    [InlineData("ABC#12")]
+    [InlineData("`AB#12`")]
+    [InlineData("```\nAB#12\n```")]
+    public void Parse_AzureNonReferences_GiveNothing(string text)
+    {
+        Assert.Empty(WorkItemParser.Parse(text));
+    }
+
+    [Fact]
+    public void Parse_AzureReference_AddsNoTag_KeepsOrder()
+    {
+        Assert.Empty(TagParser.Parse("Sprint AB#1234"));
+        Assert.Equal([12, 1234, 5], WorkItemParser.Parse("#12 then AB#1234 and ab#12 and AB#5"));
+    }
+
+    // 381: FirstLineWith gives the index of the # also for AB#<n>, as the doc says.
+    [Fact]
+    public void FirstLineWith_AzureReference_IndexOfHash()
+    {
+        Assert.Equal((2, "see AB#1234", 6), WorkItemParser.FirstLineWith("x\nsee AB#1234", 1234));
+    }
+
+    // 381: RemoveReferences drops whole tokens only.
+    [Theory]
+    [InlineData("Sprint AB#1234 review", "Sprint  review")]
+    [InlineData("#1 a #2", " a ")]
+    [InlineData("xAB#12 #0 `#3`", "xAB#12 #0 `#3`")]
+    public void RemoveReferences_DropsTokens(string line, string expected)
+    {
+        Assert.Equal(expected, WorkItemParser.RemoveReferences(line));
+    }
 }

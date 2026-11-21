@@ -318,8 +318,9 @@ internal sealed class TagIndex
     /// <c>note_decisions.prefix</c> is the key prefix (an alias for a clashing foreign folder, <c>decision_folders</c>),
     /// and <c>decision_owners</c> is keyed by <c>(prefix, number)</c>.
     /// 19: <c>Term:: meaning</c> glossary lines (job 380, <c>note_glossary</c>).
+    /// 20: work item references also as <c>AB#&lt;n&gt;</c> (job 381, <c>note_items</c>).
     /// </summary>
-    public const int ParserVersion = 19;
+    public const int ParserVersion = 20;
 
     /// <summary>
     /// How long opening <c>context.db</c> and starting <see cref="Sync"/>'s write transaction wait while another

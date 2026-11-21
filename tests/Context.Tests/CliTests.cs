@@ -17,6 +17,10 @@ public sealed class CliTests : IDisposable
     private readonly string times;
     private FakeHttpHandler http = FakeHttpHandler.Ok(CalendarFeedTests.Ics);
 
+    // 381: the local time the Cli sees, and the Times runner meeting --book uses (null: no runner given).
+    private DateTime clock = Now;
+    private FakeTimesRunner? runner = new FakeTimesRunner();
+
     public CliTests()
     {
         parent = Path.Combine(Path.GetTempPath(), "context-cli-" + Guid.NewGuid().ToString("N"));
@@ -45,7 +49,7 @@ public sealed class CliTests : IDisposable
         StringWriter stderr = new StringWriter();
         // 349: a new decision-folder.json gets the prefix ab12 and DecisionFolderGuid, never a random one.
         Queue<int> prefix = new([10, 11, 1, 2]);
-        Cli cli = new Cli(stdout, stderr, root, () => Today, () => Now, http, TimeZoneInfo.Utc, times)
+        Cli cli = new Cli(stdout, stderr, root, () => Today, () => clock, http, TimeZoneInfo.Utc, times, timesRunner: runner)
         {
             DecisionRandom = _ => prefix.Count > 0 ? prefix.Dequeue() : 0,
             DecisionGuid = () => DecisionFolderGuid,
@@ -779,11 +783,11 @@ public sealed class CliTests : IDisposable
     [Fact]
     public void TodoTexts_NameNoNumber()
     {
-        // Every help line except meeting's (167 AC-7 lists "meeting <n>"), item's (280 lists "item <n>") and the
+        // Every help line except meeting's (167 AC-7, 381 list "meeting [<n>|...]"), item's (280 lists "item <n>") and the
         // decision reference's (349 lists "decisions <reference>").
         string help = string.Join(
             '\n',
-            Run("help").Out.Split('\n').Where(l => !l.StartsWith("context meeting <n>", StringComparison.Ordinal)
+            Run("help").Out.Split('\n').Where(l => !l.StartsWith("context meeting [<n>|<H:mm>|<title...>] [--book] ", StringComparison.Ordinal)
                 && !l.StartsWith("context item <n>", StringComparison.Ordinal)
                 && !l.StartsWith("context decisions <reference>", StringComparison.Ordinal)));
         string text = help + Run("todo").Err + Run("todo", "done").Err;
@@ -2298,7 +2302,8 @@ public sealed class CliTests : IDisposable
 
         const string Expected =
             "# 2026-10-29\n\n#meeting\n\n- Title: Review: Q4/plan\n- Time: 2026-10-29 10:00-11:00\n"
-            + "- Location: Room 1\n- Attendees: @[Anna Schmidt], @[Bob]\n";
+            + "- Location: Room 1\n- Attendees: @[Anna Schmidt], @[Bob]\n"
+            + "\n## Notes\n\n## Decisions\n\n## Actions\n";
         string file = Path.Combine("Meetings", "Review Q4 plan", "2026-10-29.md");
         Assert.Equal((0, Expected, string.Empty), (first.Code, first.Out, first.Err));
         Assert.Equal(Expected, Read(file));
@@ -2403,17 +2408,17 @@ public sealed class CliTests : IDisposable
         Assert.Equal(before, Snapshot());
     }
 
-    // 167 AC-5/AC-7: a missing, extra, non-digit, zero or overflowing number, or --json, is a usage error before the
-    // folder is read; help lists meeting <n>.
+    // 167 AC-5/AC-7, 381 AC-2/AC-10: a zero or overflowing number, --json, --book twice or --book with --json is a
+    // usage error before the folder is read (the other rows of 167 now pick by AC-1/AC-4); help lists meeting.
     [Theory]
-    [InlineData("meeting")]
-    [InlineData("meeting", "")]
-    [InlineData("meeting", "1", "2")]
-    [InlineData("meeting", "x")]
-    [InlineData("meeting", "-1")]
-    [InlineData("meeting", "+1")]
-    [InlineData("meeting", "1.5")]
     [InlineData("meeting", "0")]
+    [InlineData("meeting", "00")]
+    [InlineData("meeting", "0", "--book")]
+    [InlineData("meeting", "--book", "--book")]
+    [InlineData("meeting", "--BOOK", "Review", "--book")]
+    [InlineData("meeting", "--book", "--json")]
+    [InlineData("--json", "meeting", "Review", "--book")]
+    [InlineData("meeting", "--json")]
     [InlineData("meeting", "2147483648")]
     [InlineData("meeting", "99999999999999999999999")]
     [InlineData("meeting", "1", "--json")]
@@ -2427,7 +2432,276 @@ public sealed class CliTests : IDisposable
     [Fact]
     public void Meeting_HelpListsIt()
     {
-        Assert.Contains(Run("help").Out.Split('\n'), l => l.StartsWith("context meeting <n> ", StringComparison.Ordinal));
+        Assert.Contains(
+            Run("help").Out.Split('\n'),
+            l => l.StartsWith("context meeting [<n>|<H:mm>|<title...>] [--book] ", StringComparison.Ordinal));
+    }
+
+    // 381 ----------------------------------------------------------------------------------------
+
+    // An all-day Holiday, Standup 08:00-08:15, Review 10:00-11:00, Plan 10:30-11:30 and Retro 14:00-15:00 today.
+    private void WriteDayCalendar()
+    {
+        WriteIcs(
+            "day.ics",
+            "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Holiday\r\nDTSTART;VALUE=DATE:20261029\r\nEND:VEVENT\r\n"
+            + Event("Standup", "20261029T080000Z", "20261029T081500Z")
+            + Event("Review", "20261029T100000Z", "20261029T110000Z")
+            + Event("Plan", "20261029T103000Z", "20261029T113000Z")
+            + Event("Retro", "20261029T140000Z", "20261029T150000Z")
+            + "END:VCALENDAR\r\n");
+    }
+
+    private static string TitleLine(Result result) =>
+        result.Out.Split('\n').Single(l => l.StartsWith("- Title: ", StringComparison.Ordinal))["- Title: ".Length..];
+
+    private void WriteQuicklist() =>
+        WriteFile(
+            Path.Combine(times, TimesProjects.FileName),
+            "{\"projects\":[{\"workItem\":77,\"title\":\"x\"},{\"workItem\":1234,\"title\":\"Sprint\"}]}");
+
+    private static void WriteFile(string path, string text)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, text);
+    }
+
+    // 381 AC-1: no argument (or a blank one) picks the running timed appointment, else the next one; never all-day.
+    [Theory]
+    [InlineData(7, 0, "Standup")]
+    [InlineData(8, 5, "Standup")]
+    [InlineData(8, 15, "Review")]
+    [InlineData(9, 0, "Review")]
+    [InlineData(10, 45, "Review")]
+    [InlineData(11, 15, "Plan")]
+    [InlineData(11, 30, "Retro")]
+    public void Meeting_NoArgument_PicksCurrentOrNext(int hour, int minute, string title)
+    {
+        WriteDayCalendar();
+        clock = new DateTime(2026, 10, 29, hour, minute, 0, DateTimeKind.Utc);
+
+        foreach (string[] args in new[] { new[] { "meeting" }, new[] { "meeting", "" }, new[] { "meeting", " " } })
+        {
+            Result result = Run(args);
+            Assert.Equal((0, string.Empty), (result.Code, result.Err));
+            Assert.Equal(title, TitleLine(result));
+        }
+
+        Assert.Empty(runner!.Calls);
+    }
+
+    // 381 AC-1: after the last timed appointment (an all-day one is still on), one stderr line, nothing written.
+    [Fact]
+    public void Meeting_NoArgument_AfterLast_ErrorNothingWritten()
+    {
+        WriteDayCalendar();
+        clock = new DateTime(2026, 10, 29, 15, 0, 0, DateTimeKind.Utc);
+        Dictionary<string, string> before = Snapshot();
+
+        AssertError(Run("meeting"), 1, "There is no current or next appointment today.");
+        AssertError(Run("meeting", "--book"), 1, "There is no current or next appointment today.");
+        Assert.Equal(before, Snapshot());
+        Assert.Empty(runner!.Calls);
+    }
+
+    // 381 AC-2: a number still picks as current lists it (the all-day one included).
+    [Fact]
+    public void Meeting_Number_PicksAsBefore()
+    {
+        WriteDayCalendar();
+
+        Assert.Equal("Holiday", TitleLine(Run("meeting", "1")));
+        Assert.Equal("Review", TitleLine(Run("meeting", "3")));
+        AssertError(Run("meeting", "6"), 1, "There is no appointment 6 today.");
+    }
+
+    // 381 AC-3: H:mm or HH:mm picks the first timed appointment running then; none gives one stderr line.
+    [Fact]
+    public void Meeting_Time_PicksTheOneRunningThen()
+    {
+        WriteDayCalendar();
+
+        Assert.Equal("Standup", TitleLine(Run("meeting", "8:00")));
+        Assert.Equal("Review", TitleLine(Run("meeting", "10:30")));
+        Assert.Equal("Plan", TitleLine(Run("meeting", "11:00")));
+        Dictionary<string, string> before = Snapshot();
+        AssertError(Run("meeting", "08:15"), 1, "There is no appointment at 8:15 today.");
+        AssertError(Run("meeting", "23:59"), 1, "There is no appointment at 23:59 today.");
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 381 AC-4: other words are a title (joined by one space): exact match ignoring case first, else contains.
+    [Fact]
+    public void Meeting_Title_ExactThenContains()
+    {
+        WriteDayCalendar();
+
+        Assert.Equal("Plan", TitleLine(Run("meeting", "PLAN")));
+        Assert.Equal("Retro", TitleLine(Run("meeting", "etr")));
+        Assert.Equal("Standup", TitleLine(Run("meeting", "stand", "--book")));
+    }
+
+    // 381 AC-4: words that were usage errors in 167 are now a title that matches nothing: one line, nothing written.
+    [Theory]
+    [InlineData("1 2", "1", "2")]
+    [InlineData("x", "x")]
+    [InlineData("-1", "-1")]
+    [InlineData("+1", "+1")]
+    [InlineData("1.5", "1.5")]
+    [InlineData("25:00", "25:00")]
+    [InlineData("Re view", "Re", " view ")]
+    public void Meeting_UnknownTitle_ErrorNothingWritten(string shown, params string[] words)
+    {
+        WriteDayCalendar();
+        Dictionary<string, string> before = Snapshot();
+
+        AssertError(Run(["meeting", .. words]), 1, $"There is no appointment called {shown} today.");
+        Assert.Equal(before, Snapshot());
+    }
+
+    // 381 AC-6: a todo written under Actions is listed by todos like any other note todo.
+    [Fact]
+    public void Meeting_TodoUnderActions_ListedByTodos()
+    {
+        WriteDayCalendar();
+        MarkConverted();
+        Assert.Equal(0, Run("meeting", "Review").Code);
+        string file = Path.Combine(root, "Meetings", "Review", "2026-10-29.md");
+        File.AppendAllText(file, "- { } Send minutes\n");
+
+        Result result = Run("todos");
+
+        Assert.Equal((0, string.Empty), (result.Code, result.Err));
+        Assert.Equal("-\tSend minutes\tMeetings/Review/2026-10-29\n", result.Out);
+    }
+
+    // 381 AC-7: a meeting note whose title holds AB#1234 is listed under Notes by item 1234.
+    [Fact]
+    public void Meeting_AzureReferenceInTitle_ListedByItem()
+    {
+        WriteIcs("sprint.ics", "BEGIN:VCALENDAR\r\n" + Event("Sprint AB#1234", "20261029T100000Z", "20261029T110000Z") + "END:VCALENDAR\r\n");
+        Assert.Equal(0, Run("meeting").Code);
+
+        Result result = Run("item", "1234");
+
+        Assert.Equal((0, string.Empty), (result.Code, result.Err));
+        string[] lines = result.Out.Split('\n');
+        int notes = Array.IndexOf(lines, "Notes");
+        Assert.True(notes >= 0);
+        Assert.Contains("Sprint AB#1234", lines[notes + 1], StringComparison.Ordinal);
+    }
+
+    // 381 AC-8: without --book nothing runs Times and stdout is the note, as in 167.
+    [Fact]
+    public void Meeting_WithoutBook_NeverRunsTimes()
+    {
+        WriteMeetingCalendar();
+        WriteQuicklist();
+
+        Result first = Run("meeting", "2");
+        Result second = Run("meeting", "Review");
+
+        Assert.Equal((0, string.Empty), (first.Code, first.Err));
+        Assert.Equal(Run("note", "show", "Meetings/Review Q4 plan/2026-10-29").Out, first.Out);
+        Assert.Equal(first.Out, second.Out);
+        Assert.Empty(runner!.Calls);
+    }
+
+    // 381 AC-9: --book in any position and case prints the note, runs checkpoint once, then the Booked line.
+    [Theory]
+    [InlineData("meeting", "Sprint", "--book")]
+    [InlineData("meeting", "--book", "Sprint")]
+    [InlineData("meeting", "--BOOK")]
+    [InlineData("MEETING", "10:00", "--Book")]
+    [InlineData("meeting", "1", "--book")]
+    public void Meeting_Book_RunsCheckpointOnQuicklist(params string[] args)
+    {
+        WriteIcs("sprint.ics", "BEGIN:VCALENDAR\r\n" + Event("Sprint  AB#1234 #5", "20261029T100000Z", "20261029T110000Z") + "END:VCALENDAR\r\n");
+        WriteQuicklist();
+
+        Result result = Run(args);
+
+        string note = Run("meeting", "Sprint").Out;
+        Assert.Equal((0, note + "Booked 10:00 Sprint in Times.\n", string.Empty), (result.Code, result.Out, result.Err));
+        Assert.Equal([["checkpoint", "10:00", "#2", "Sprint"]], runner!.Calls);
+    }
+
+    // 381 AC-9: a work item not on the quicklist (or none at all) books without a position; an empty name is Meeting.
+    [Theory]
+    [InlineData("Planning #99", "Planning")]
+    [InlineData("Planning", "Planning")]
+    [InlineData("AB#1234", "Meeting")]
+    public void Meeting_Book_NoQuicklistHit_NoPosition(string title, string name)
+    {
+        WriteIcs("one.ics", "BEGIN:VCALENDAR\r\n" + Event(title, "20261029T091500Z", "20261029T100000Z") + "END:VCALENDAR\r\n");
+        WriteQuicklist();
+
+        Result result = Run("meeting", "--book");
+
+        Assert.Equal((0, string.Empty), (result.Code, result.Err));
+        Assert.EndsWith($"\nBooked 9:15 {name} in Times.\n", result.Out, StringComparison.Ordinal);
+        Assert.Equal(
+            title == "AB#1234" ? [["checkpoint", "9:15", "#2", name]] : [["checkpoint", "9:15", name]],
+            runner!.Calls);
+    }
+
+    // 381 AC-10: a failed run still prints the note, then one stderr line and exit 1.
+    [Theory]
+    [InlineData("notfound", "Times isn't installed, so nothing was booked.")]
+    [InlineData("timedout", "Times didn't answer in time.")]
+    [InlineData("refused", "Times refused the booking: no project Sprint")]
+    [InlineData("quiet", "Times refused the booking: exit code 3")]
+    [InlineData("norunner", "Times isn't installed, so nothing was booked.")]
+    public void Meeting_Book_Failure_NotePrintedErrorLine(string kind, string line)
+    {
+        WriteMeetingCalendar();
+        runner = kind == "norunner" ? null : new FakeTimesRunner
+        {
+            Result = kind switch
+            {
+                "notfound" => TimesRunResult.NotFound(),
+                "timedout" => TimesRunResult.TimedOut(),
+                "refused" => new TimesRunResult(TimesRunKind.Done, 2, "ignored\n", "\n  no project\tSprint \nmore"),
+                _ => new TimesRunResult(TimesRunKind.Done, 3, string.Empty, string.Empty),
+            },
+        };
+
+        Result result = Run("meeting", "Review", "--book");
+
+        Assert.Equal(1, result.Code);
+        Assert.Equal(Run("note", "show", "Meetings/Review Q4 plan/2026-10-29").Out, result.Out);
+        Assert.Equal([line], result.ErrLines);
+    }
+
+    // 381 AC-10: an all-day appointment prints its note and the all-day line, and starts no run.
+    [Fact]
+    public void Meeting_Book_AllDay_NoRun()
+    {
+        WriteDayCalendar();
+
+        Result result = Run("meeting", "Holiday", "--book");
+
+        Assert.Equal(1, result.Code);
+        Assert.StartsWith("# 2026-10-29\n\n#meeting\n\n- Title: Holiday\n", result.Out, StringComparison.Ordinal);
+        Assert.Equal(["All-day appointments can't be booked in Times."], result.ErrLines);
+        Assert.Empty(runner!.Calls);
+    }
+
+    // 381 AC-10: when the note can't be made (sensitive, failed write) --book gives the same error and runs nothing.
+    [Fact]
+    public void Meeting_Book_NoteNotMade_NoRun()
+    {
+        WriteIcs("work.ics", MeetingIcs);
+        WriteSealed("2026-10-29 Review Q4 plan");
+        AssertError(Run("meeting", "1", "--book"), 1, Cli.SensitiveText("2026-10-29 Review Q4 plan"));
+
+        File.Delete(Directory.GetFiles(root, "2026-10-29 Review Q4 plan*").Single());
+        WriteNested("Meetings", "# Meetings\n");
+        WriteNested("Meetings/Review Q4 plan", "# Review Q4 plan\n");
+        Directory.CreateDirectory(Path.Combine(root, "Meetings", "Review Q4 plan", "2026-10-29.md"));
+        AssertError(Run("meeting", "--book", "1"), 1, "Can't write Meetings/Review Q4 plan/2026-10-29.");
+
+        Assert.Empty(runner!.Calls);
     }
 
     // 167 AC-5: current's text and JSON output stay byte for byte as before (no numbers).

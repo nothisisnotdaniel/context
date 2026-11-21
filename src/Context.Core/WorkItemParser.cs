@@ -2,7 +2,7 @@ namespace Context;
 
 /// <summary>
 /// Finds work item references <c>#&lt;n&gt;</c> (the Times work item numbers) in Markdown text. A reference is <c>#</c>
-/// at the start of a line or after whitespace, then 1 to <see cref="MaxDigits"/> ASCII digits with a first digit
+/// (or, job 381, Azure DevOps' <c>AB#</c> with <c>AB</c> in any case) at the start of a line or after whitespace, then 1 to <see cref="MaxDigits"/> ASCII digits with a first digit
 /// 1-9, not directly followed by a letter, a digit, <c>-</c>, <c>_</c> or <c>#</c>. Lines inside fenced code blocks
 /// and text inside inline backtick spans are skipped, as in <see cref="TagParser"/>. A reference is never a tag (a tag
 /// starts with a letter).
@@ -102,7 +102,12 @@ internal static class WorkItemParser
         });
 
     // Calls found with the index of each reference's # and its number, in order.
-    private static void Scan(string line, Action<int, int> found)
+    private static void Scan(string line, Action<int, int> found) =>
+        ScanTokens(line, (_, hash, _, item) => found(hash, item));
+
+    // Calls found with each reference's token start (the A of AB#<n>, else the #), the index of its #, the index just
+    // after its last digit and its number, in order.
+    private static void ScanTokens(string line, Action<int, int, int, int> found)
     {
         CodeSpans? spans = CodeSpans.For(line);
         int i = 0;
@@ -115,13 +120,24 @@ internal static class WorkItemParser
                 continue;
             }
 
-            if (c != '#' || (i > 0 && !char.IsWhiteSpace(line[i - 1])))
+            bool boundary = i == 0 || char.IsWhiteSpace(line[i - 1]);
+            int hash;
+            if (c == '#' && boundary)
+            {
+                hash = i;
+            }
+            else if (c is 'A' or 'a' && boundary && i + 2 < line.Length && (line[i + 1] is 'B' or 'b') && line[i + 2] == '#')
+            {
+                // Job 381: Azure DevOps' AB#<n>, AB in any case.
+                hash = i + 2;
+            }
+            else
             {
                 i++;
                 continue;
             }
 
-            int start = i + 1;
+            int start = hash + 1;
             int end = start;
             while (end < line.Length && char.IsAsciiDigit(line[end]))
             {
@@ -134,11 +150,28 @@ internal static class WorkItemParser
                 && (end >= line.Length || !(char.IsLetterOrDigit(line[end]) || line[end] is '-' or '_' or '#'));
             if (valid && TryParseNumber(line[start..end], out int item))
             {
-                found(i, item);
+                found(i, hash, end, item);
             }
 
-            i = Math.Max(end, i + 1);
+            i = Math.Max(end, hash + 1);
         }
+    }
+
+    /// <summary>
+    /// <paramref name="line"/> (one line) with every reference token <see cref="Parse"/> finds (<c>#&lt;n&gt;</c> or
+    /// <c>AB#&lt;n&gt;</c>) removed; everything else as it was.
+    /// </summary>
+    public static string RemoveReferences(string line)
+    {
+        System.Text.StringBuilder kept = new System.Text.StringBuilder(line.Length);
+        int next = 0;
+        ScanTokens(line, (token, _, end, _) =>
+        {
+            kept.Append(line, next, token - next);
+            next = end;
+        });
+        kept.Append(line, next, line.Length - next);
+        return kept.ToString();
     }
 }
 
