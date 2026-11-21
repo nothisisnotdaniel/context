@@ -2160,6 +2160,48 @@ nav.saved-searches ul {
     width: 100%;
 }
 
+/* 379: the From and To date boxes after the input, and the Times bookings below the note hits. */
+.search-panel .search-dates {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 8px;
+}
+
+.search-panel .search-times {
+    margin-top: 12px;
+}
+
+.search-panel .search-times ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.search-panel .search-times li {
+    align-items: baseline;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    gap: 10px;
+    min-width: 0;
+    padding: 6px 0;
+}
+
+.search-panel .search-times .date,
+.search-panel .search-times .item,
+.search-panel .search-times .total {
+    flex: none;
+    unicode-bidi: isolate;
+    white-space: nowrap;
+}
+
+.search-panel .search-times .names {
+    flex: 0 1 auto;
+    min-width: 0;
+    unicode-bidi: isolate;
+}
+
 .search-save-bar {
     margin-top: 8px;
 }

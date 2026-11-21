@@ -66,7 +66,43 @@ internal static class WorkItemParser
         return true;
     }
 
-    private static void ScanLine(string line, List<int> items, HashSet<int> seen)
+    /// <summary>
+    /// The 1-based number, the text and the index of the <c>#</c> of the first line of <paramref name="markdown"/>
+    /// (outside fenced code blocks, a trailing <c>\r</c> dropped) that holds the reference <c>#&lt;item&gt;</c>, by the
+    /// same rules as <see cref="Parse"/>; <c>null</c> when none does.
+    /// </summary>
+    public static (int Number, string Line, int Start)? FirstLineWith(string markdown, int item)
+    {
+        foreach ((int number, string line) in TagParser.NumberedLinesOutsideFences(markdown))
+        {
+            int found = -1;
+            Scan(line, (start, value) =>
+            {
+                if (found < 0 && value == item)
+                {
+                    found = start;
+                }
+            });
+            if (found >= 0)
+            {
+                return (number, line, found);
+            }
+        }
+
+        return null;
+    }
+
+    private static void ScanLine(string line, List<int> items, HashSet<int> seen) =>
+        Scan(line, (_, item) =>
+        {
+            if (seen.Add(item))
+            {
+                items.Add(item);
+            }
+        });
+
+    // Calls found with the index of each reference's # and its number, in order.
+    private static void Scan(string line, Action<int, int> found)
     {
         CodeSpans? spans = CodeSpans.For(line);
         int i = 0;
@@ -96,9 +132,9 @@ internal static class WorkItemParser
             bool valid = digits is >= 1 and <= MaxDigits
                 && line[start] != '0'
                 && (end >= line.Length || !(char.IsLetterOrDigit(line[end]) || line[end] is '-' or '_' or '#'));
-            if (valid && TryParseNumber(line[start..end], out int item) && seen.Add(item))
+            if (valid && TryParseNumber(line[start..end], out int item))
             {
-                items.Add(item);
+                found(i, item);
             }
 
             i = Math.Max(end, i + 1);

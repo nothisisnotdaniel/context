@@ -4,7 +4,9 @@
    (DesktopState.Search), each with its type, date and first matching line with the match marked, or the notes that
    match a tag filter (DesktopState.TagFilter); clicking a note, or Return on it, opens it. Arrow keys move between the
    input and the result buttons (one roving tab stop). The input runs another search on Return; the shown search can
-   be saved under a name (DesktopActions.SaveSearch). It reloads whenever the state changes. *@
+   be saved under a name (DesktopActions.SaveSearch). Job 379: #<n> searches work item n; the From and To date boxes
+   limit the notes and the Times bookings (section.search-times, below the note hits) to a range. It reloads whenever
+   the state changes. *@
 
 <section class="page search-panel" aria-label="Notes containing this text">
     <div class="panel-bar">
@@ -13,6 +15,10 @@
     </div>
     <input type="text" class="search-input" value="@typed" maxlength="200" aria-label="Search"
            placeholder="Search notes" @ref="input" @oninput="SearchTyped" @onkeydown="SearchKey" />
+    <div class="search-dates">
+        <input type="date" class="search-from" aria-label="From" value="@DateValue(from)" @onchange="FromChanged" />
+        <input type="date" class="search-to" aria-label="To" value="@DateValue(to)" @onchange="ToChanged" />
+    </div>
     @if (current.Trim().Length == 0)
     {
         <p class="grey" role="status">Type text or a tag filter like #project and not #done.</p>
@@ -64,7 +70,11 @@
     }
     else if (view is { } textView)
     {
-        @if (textView.Kind is SearchViewKind.TooShort)
+        @if (textView.Kind is SearchViewKind.InvalidRange)
+        {
+            <p class="red" role="status">The start date is after the end date.</p>
+        }
+        else if (textView.Kind is SearchViewKind.TooShort)
         {
             <p class="red" role="status">Type at least @(SearchView.MinQueryLength.ToString(CultureInfo.InvariantCulture)) characters to search.</p>
         }
@@ -72,47 +82,89 @@
         {
             <p class="red" role="status">Search text can be at most @(SearchView.MaxQueryLength.ToString(CultureInfo.InvariantCulture)) characters.</p>
         }
-        else if (textView.Kind is SearchViewKind.IndexUnreadable)
-        {
-            <p class="red" role="status">Can't read the search index.</p>
-        }
-        else if (textView.Hits.Count == 0)
-        {
-            <p class="grey" role="status">No notes contain @DesktopText.OneLine(current.Trim()).</p>
-        }
         else
         {
-            <p class="grey search-count" role="status">@CountText(textView.Hits.Count)</p>
-            <ul class="search-hits" aria-label="Search results">
-                @foreach ((SearchHit hit, int i) in textView.Hits.Take(MaxRows).Select((h, i) => (h, i)))
-                {
-                    string name = hit.Note;
-                    int index = i;
-                    string shown = DesktopText.NoteName(name);
-                    string label = RowText(name);
-                    string line = DesktopText.OneLine(hit.Line);
-                    Snippet snippet = SnippetOf(hit, current.Trim().Length);
-                    <li>
-                        <div class="hit-head">
-                            <button type="button" class="note-button cut" title="@shown" tabindex="@(index == Active ? "0" : "-1")"
-                                    @ref="rowButtons[index]" @onfocus="() => active = index" @onkeydown="e => RowKey(e, index, name)"
-                                    @onkeyup="RowKeyUp" @onclick="() => RowClick(index, name)">@label</button>
-                            @if (hit.Types.Count > 0)
-                            {
-                                <span class="type grey cut" title="@DesktopText.OneLine(string.Join(", ", hit.Types))">@DesktopText.OneLine(string.Join(", ", hit.Types))</span>
-                            }
-                            @if (hit.Modified is { } modified)
-                            {
-                                <span class="date grey">@DateText(modified)</span>
-                            }
-                        </div>
-                        <span class="line grey cut" title="@line">@snippet.Before<mark>@snippet.Match</mark>@snippet.After</span>
-                    </li>
-                }
-            </ul>
-            @if (textView.Hits.Count > MaxRows)
+            @if (textView.Kind is SearchViewKind.IndexUnreadable)
             {
-                <p class="grey more">@More(textView.Hits.Count)</p>
+                <p class="red" role="status">Can't read the search index.</p>
+            }
+            else if (textView.Hits.Count == 0 && textView.Times.Count == 0)
+            {
+                <p class="grey" role="status">No notes contain @DesktopText.OneLine(current.Trim()).</p>
+            }
+            else
+            {
+                <p class="grey search-count" role="status">@CountText(textView)</p>
+                @if (textView.Hits.Count > 0)
+                {
+                    <ul class="search-hits" aria-label="Search results">
+                        @foreach ((SearchHit hit, int i) in textView.Hits.Take(MaxRows).Select((h, i) => (h, i)))
+                        {
+                            string name = hit.Note;
+                            int index = i;
+                            string shown = DesktopText.NoteName(name);
+                            string label = RowText(name);
+                            string line = DesktopText.OneLine(hit.Line);
+                            Snippet snippet = SnippetOf(hit, current.Trim().Length);
+                            <li>
+                                <div class="hit-head">
+                                    <button type="button" class="note-button cut" title="@shown" tabindex="@(index == Active ? "0" : "-1")"
+                                            @ref="rowButtons[index]" @onfocus="() => active = index" @onkeydown="e => RowKey(e, index, name)"
+                                            @onkeyup="RowKeyUp" @onclick="() => RowClick(index, name)">@label</button>
+                                    @if (hit.Types.Count > 0)
+                                    {
+                                        <span class="type grey cut" title="@DesktopText.OneLine(string.Join(", ", hit.Types))">@DesktopText.OneLine(string.Join(", ", hit.Types))</span>
+                                    }
+                                    @if (hit.Modified is { } modified)
+                                    {
+                                        <span class="date grey">@DateText(modified)</span>
+                                    }
+                                </div>
+                                <span class="line grey cut" title="@line">@snippet.Before<mark>@snippet.Match</mark>@snippet.After</span>
+                            </li>
+                        }
+                    </ul>
+                    @if (textView.Hits.Count > MaxRows)
+                    {
+                        <p class="grey more">@More(textView.Hits.Count)</p>
+                    }
+                }
+            }
+            @if (textView.TimesKind == WorkItemTimesKind.Unlistable)
+            {
+                <p class="red" role="status">Can't read Times' folder.</p>
+            }
+            @if (textView.TimesSkipped > 0)
+            {
+                <p class="red" role="status">Skipped @(textView.TimesSkipped.ToString(CultureInfo.InvariantCulture)) unreadable Times day file(s).</p>
+            }
+            @if (textView.Times.Count > 0)
+            {
+                <section class="search-times" aria-label="Times bookings">
+                    <ul>
+                        @foreach (TimesSearchHit booking in textView.Times.Take(MaxRows))
+                        {
+                            string names = DesktopText.OneLine(string.Join(", ", booking.Names));
+                            <li>
+                                <span class="date grey">@DesktopText.OneLine(booking.Date.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture))</span>
+                                @if (booking.WorkItem is { } item)
+                                {
+                                    <span class="item">@DesktopText.OneLine("#" + item.ToString(CultureInfo.InvariantCulture))</span>
+                                }
+                                <span class="names cut" title="@names">@names</span>
+                                <span class="total">@DesktopText.OneLine(DayEnd.FormatDuration(booking.Total))</span>
+                                @if (booking.Open)
+                                {
+                                    <span class="open grey"> (open)</span>
+                                }
+                            </li>
+                        }
+                    </ul>
+                    @if (textView.Times.Count > MaxRows)
+                    {
+                        <p class="grey more">@More(textView.Times.Count)</p>
+                    }
+                </section>
             }
         }
     }
@@ -155,6 +207,10 @@
     private int? enterOpened;
 
     private SearchView? view;
+
+    // The date range of the shown search (job 379): either bound may be missing. It is not saved with a search.
+    private DateOnly? from;
+    private DateOnly? to;
     private TagFilterView? filter;
     private string? loaded;
     private int? loadedRequest;
@@ -206,6 +262,57 @@
     internal static string CountText(int count) =>
         count == 1 ? "1 note found" : $"{count.ToString(CultureInfo.InvariantCulture)} notes found";
 
+    // 379: the count line of a text search; the bookings part only when Times' folder was read.
+    internal static string CountText(SearchView view)
+    {
+        string notes = CountText(view.Hits.Count);
+        if (view.TimesKind != WorkItemTimesKind.Read)
+        {
+            return notes;
+        }
+
+        int count = view.Times.Count;
+        return count == 1
+            ? $"{notes}, 1 booking found"
+            : $"{notes}, {count.ToString(CultureInfo.InvariantCulture)} bookings found";
+    }
+
+    /// <summary>
+    /// True when the trimmed text is a work item query, <c>#&lt;n&gt;</c> (<see cref="WorkItemParser.TryParseNumber"/>
+    /// after the <c>#</c>): it is searched as text (notes and Times bookings), never as a tag filter.
+    /// </summary>
+    internal static bool IsWorkItemQuery(string text) => SearchView.IsWorkItemQuery(text, out _);
+
+    private static string DateValue(DateOnly? day) =>
+        day?.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture) ?? string.Empty;
+
+    private static DateOnly? ParseDate(object? value) =>
+        DateOnly.TryParseExact(
+            value?.ToString(), DesktopText.DateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly day)
+            ? day
+            : null;
+
+    // A change to either date box searches the shown text again; a cleared box removes that bound.
+    private Task FromChanged(ChangeEventArgs e)
+    {
+        from = ParseDate(e.Value);
+        return Restart();
+    }
+
+    private Task ToChanged(ChangeEventArgs e)
+    {
+        to = ParseDate(e.Value);
+        return Restart();
+    }
+
+    private Task Restart()
+    {
+        saveOpen = false;
+        saveName = string.Empty;
+        saved = null;
+        return Start();
+    }
+
     private static string More(int count) =>
         $"{CurrentView.Outside} {(count - MaxRows).ToString(CultureInfo.InvariantCulture)} more";
 
@@ -215,8 +322,9 @@
 
     private string Heading => current.Trim().Length == 0 ? "Search" : $"Search: {DesktopText.OneLine(current.Trim())}";
 
-    // Results are shown: found or none found, for either kind of search.
-    private bool Saveable => current.Trim().Length > 0
+    // Results are shown: found or none found, for either kind of search. A work item query (job 379) can't be saved:
+    // SavedSearches.IsValidQuery refuses it, so Save search is not offered for it.
+    private bool Saveable => current.Trim().Length > 0 && !IsWorkItemQuery(current)
         && ((filter is { } f && f.Kind is TagFilterViewKind.Found or TagFilterViewKind.NoMatches)
             || (filter is null && view is { } v && v.Kind is SearchViewKind.Found or SearchViewKind.NoMatches));
 
@@ -232,6 +340,8 @@
         loadedRequest = Request;
         current = Text;
         typed = Text;
+        from = null;
+        to = null;
         saveOpen = false;
         saveName = string.Empty;
         saved = null;
@@ -497,7 +607,7 @@
             return;
         }
 
-        if (TagFilter.IsTagFilter(text))
+        if (!IsWorkItemQuery(text) && TagFilter.IsTagFilter(text))
         {
             TagFilterView result = await State.TagFilter(text);
             if (mine == request && string.Equals(text, current, StringComparison.Ordinal))
@@ -509,7 +619,7 @@
         }
         else
         {
-            SearchView result = await State.Search(text);
+            SearchView result = await State.Search(text, from, to);
             if (mine == request && string.Equals(text, current, StringComparison.Ordinal))
             {
                 view = result;

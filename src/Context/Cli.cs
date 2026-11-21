@@ -31,6 +31,8 @@ internal sealed class Cli
     private const string IndexUnreadable = "Can't read context.db.";
     private const string FindForm = "Type: context find <attribute> <value>.";
     private const string SearchForm = "Type: context search <text>.";
+
+    private const string SearchDateForm = "Type: context search [--from yyyy-MM-dd] [--to yyyy-MM-dd] [--times] <text>.";
     private const string DecisionsForm = "Type: context decisions [--full] [tag] or context decisions <reference>.";
     private const string ItemForm = "Type: context item <n> [--json] [--open] with the work item's number.";
     private const string OpenFlag = "--open";
@@ -56,7 +58,7 @@ internal sealed class Cli
         ("note show <name...>", "Print a note."),
         ("tags [tag...]", "List tags with counts, or the notes with a tag."),
         ("find <attribute> <value...>", "List the notes with an attribute line, e.g. find role Bereichsleiter."),
-        ("search <text...>", "List the notes whose text contains the text, with the first matching line."),
+        ("search [--from yyyy-MM-dd] [--to yyyy-MM-dd] [--times] <text...>", "List the notes whose text contains the text (or #n), with the first matching line; --times adds the Times bookings."),
         ("decisions [--full] [tag...]", "List the !d decisions of all notes, or of the notes with a tag, newest first; --full prints the whole text."),
         ("decisions <reference>", "Show decision #!d1234 or #!dab12-1234 with its note, date, people, copies and whole text."),
         ("current", "Today's Times bookings, appointments, due todos and linked notes."),
@@ -270,14 +272,7 @@ internal sealed class Cli
 
                 return s => Find(s, findKey, findValue);
             case "search":
-                string query = string.Join(' ', args);
-                if (query.Trim().Length == 0)
-                {
-                    usage = SearchForm;
-                    return null;
-                }
-
-                return s => Search(s, query);
+                return ParseSearch(args, out usage);
             case "decisions":
                 return ParseDecisions(args, out usage);
             case "current":
@@ -322,6 +317,66 @@ internal sealed class Cli
             default:
                 return null;
         }
+    }
+
+    // search takes --from, --to (each once, a yyyy-MM-dd date) and --times (any case) before the text, which is the
+    // rest joined with one space. A start after the end is a usage error; all before the folder is read.
+    private Func<Session, int>? ParseSearch(string[] args, out string? usage)
+    {
+        usage = null;
+        DateOnly? from = null;
+        DateOnly? to = null;
+        bool times = false;
+        int i = 0;
+        while (i < args.Length)
+        {
+            string option = args[i];
+            if (option.Equals("--times", StringComparison.OrdinalIgnoreCase))
+            {
+                times = true;
+                i++;
+                continue;
+            }
+
+            bool isFrom = option.Equals("--from", StringComparison.OrdinalIgnoreCase);
+            if (!isFrom && !option.Equals("--to", StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+
+            if ((isFrom ? from : to) is not null || i + 1 >= args.Length || !DateOnly.TryParseExact(
+                args[i + 1], DateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly day))
+            {
+                usage = SearchDateForm;
+                return null;
+            }
+
+            if (isFrom)
+            {
+                from = day;
+            }
+            else
+            {
+                to = day;
+            }
+
+            i += 2;
+        }
+
+        string query = string.Join(' ', args[i..]);
+        if (query.Trim().Length == 0)
+        {
+            usage = SearchForm;
+            return null;
+        }
+
+        if (from is { } start && to is { } stop && start > stop)
+        {
+            usage = "The start date is after the end date.";
+            return null;
+        }
+
+        return s => Search(s, query, from, to, times);
     }
 
     // dayend takes nothing, "today" (any case) or one yyyy-MM-dd date.
@@ -1081,11 +1136,16 @@ internal sealed class Cli
         }
     }
 
-    private int Search(Session session, string text)
+    private int Search(Session session, string text, DateOnly? from, DateOnly? to, bool times)
     {
-        SearchView view = SearchView.Build(session.Index, session.Notes, text);
+        // Times' folder is read only when its bookings are printed: plain output stays the notes only.
+        bool withTimes = times || session.Json;
+        SearchView view = SearchView.Build(
+            session.Index, session.Notes, withTimes ? timesFolder : null, text, from, to, zone);
         switch (view.Kind)
         {
+            case SearchViewKind.InvalidRange:
+                return Usage("The start date is after the end date.");
             case SearchViewKind.TooShort:
                 return Error($"Type at least {SearchView.MinQueryLength} characters to search.");
             case SearchViewKind.TooLong:
@@ -1093,7 +1153,7 @@ internal sealed class Cli
             case SearchViewKind.IndexUnreadable:
                 return Error(IndexUnreadable);
             case SearchViewKind.Found or SearchViewKind.NoMatches when session.Json:
-                return Json(w =>
+                Json(w =>
                 {
                     w.WriteString("query", OneLine(view.Query));
                     w.WriteStartArray("results");
@@ -1107,7 +1167,35 @@ internal sealed class Cli
                     }
 
                     w.WriteEndArray();
+                    w.WriteStartArray("times");
+                    foreach (TimesSearchHit booking in view.Times)
+                    {
+                        w.WriteStartObject();
+                        w.WriteString("date", booking.Date.ToString(DateFormat, CultureInfo.InvariantCulture));
+                        if (booking.WorkItem is { } item)
+                        {
+                            w.WriteNumber("workItem", item);
+                        }
+                        else
+                        {
+                            w.WriteNull("workItem");
+                        }
+
+                        w.WriteStartArray("names");
+                        foreach (string name in booking.Names)
+                        {
+                            w.WriteStringValue(OneLine(name));
+                        }
+
+                        w.WriteEndArray();
+                        w.WriteNumber("minutes", (long)Math.Floor(booking.Total.TotalMinutes));
+                        w.WriteBoolean("open", booking.Open);
+                        w.WriteEndObject();
+                    }
+
+                    w.WriteEndArray();
                 });
+                return SearchTimesErrors(view);
             default:
                 // NoMatches lists nothing, like find.
                 foreach (SearchHit hit in view.Hits)
@@ -1115,8 +1203,34 @@ internal sealed class Cli
                     Out($"{OneLine(hit.Note)}\t{hit.LineNumber.ToString(CultureInfo.InvariantCulture)}\t{OneLine(hit.Line)}");
                 }
 
-                return ExitOk;
+                foreach (TimesSearchHit booking in view.Times)
+                {
+                    string item = booking.WorkItem is { } n ? "#" + n.ToString(CultureInfo.InvariantCulture) : string.Empty;
+                    Out($"times\t{booking.Date.ToString(DateFormat, CultureInfo.InvariantCulture)}\t{item}\t"
+                        + $"{OneLine(string.Join(", ", booking.Names))}\t{DayEnd.FormatDuration(booking.Total)}");
+                }
+
+                return SearchTimesErrors(view);
         }
+    }
+
+    // After the output: Times' folder that can't be listed and the day files that couldn't be read, exit 1.
+    private int SearchTimesErrors(SearchView view)
+    {
+        int exit = ExitOk;
+        if (view.TimesKind == WorkItemTimesKind.Unlistable)
+        {
+            Err("Can't read Times' folder.");
+            exit = ExitError;
+        }
+
+        if (view.TimesSkipped > 0)
+        {
+            Err($"Skipped {view.TimesSkipped.ToString(CultureInfo.InvariantCulture)} unreadable Times day file(s).");
+            exit = ExitError;
+        }
+
+        return exit;
     }
 
     // One appointment as a JSON object: start, end, allDay, title, location (null when missing).

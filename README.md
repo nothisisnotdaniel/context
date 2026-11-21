@@ -76,6 +76,12 @@ one line per note: its name, the number of the first line that contains the text
 text needs at least 3 and at most 200 characters. Sensitive notes are never searched. In the desktop app,
 `/search budget 2027` in the command palette lists the same notes; click one to open it.
 
+`context search '#1234'` lists the notes that mention work item 1234 (not `#12345`), with the first line that does;
+`#7` works too. `--from 2026-10-01` and `--to 2026-10-31` (both inclusive, each at most once) keep only the notes
+last changed in that range, and `--times` adds the matching Times bookings as `times<TAB>2026-10-05<TAB>#1234<TAB>Work<TAB>1:30`
+rows (for text, every booking whose checkpoint name contains it). The desktop Search page shows the bookings below the
+notes and has From and To date boxes. Times' day files are only read.
+
 ### Decision log
 
 Start a paragraph with `#!d` to mark it as a decision:
@@ -428,7 +434,7 @@ plain ASCII; any JSON parser, `ConvertFrom-Json` included, reads them back.
 | `tags` | `{"tags":[{"tag":"work","count":2}]}` |
 | `tags <tag>` | `{"tag":"work","notes":["A"]}` |
 | `find <key> <value>` | `{"key":"role","value":"Bereichsleiter","notes":["people/Anna Schmidt"]}` |
-| `search <text>` | `{"query":"budget","results":[{"note":"A","line":3,"text":"Budget 2027"}]}` |
+| `search <text>` | `{"query":"budget","results":[{"note":"A","line":3,"text":"Budget 2027"}],"times":[{"date":"2026-10-05","workItem":null,"names":["Budget"],"minutes":30,"open":false}]}` |
 | `current` | `{"today":"...","appointments":[{"start":"...","end":"...","allDay":false,"title":"ACME kickoff","location":null,"related":[{"name":"projects/ACME Rollout","tags":["acme"],"words":["acme"]}]}],"calendar":{...},"due":[...],"linkedNotes":[...],"times":{"arrival":"08:00","leaving":null,"leftMinutes":330,"checkpoint":{"workItem":1234,"name":"Review"}}}` (`times` is `null` without Times bookings today) |
 | `review` | `{"from":"...","to":"...","changedNotes":[{"name":"A","modified":"..."}],"doneTodos":[{"due":"...","done":"...","text":"..."}],"overdue":[{"due":"...","text":"..."}],"appointments":[...],"calendar":{...}}` |
 

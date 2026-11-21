@@ -715,12 +715,39 @@ public sealed class CliJsonTests : IDisposable
         AssertDocument(result);
         Assert.Equal(
             "{\"query\":\"budget\",\"results\":[{\"note\":\"A\",\"line\":1,\"text\":\"budget\"},"
-                + "{\"note\":\"b\",\"line\":2,\"text\":\"the Budget 2027 \\u0026 more\"}]}\n",
+                + "{\"note\":\"b\",\"line\":2,\"text\":\"the Budget 2027 \\u0026 more\"}],\"times\":[]}\n",
             result.Out);
-        Assert.Equal("{\"query\":\"zzz top\",\"results\":[]}\n", Run("search", "zzz", "top", "--json").Out);
+        Assert.Equal("{\"query\":\"zzz top\",\"results\":[],\"times\":[]}\n", Run("search", "zzz", "top", "--json").Out);
 
         BreakIndex();
         AssertError(Run("search", "budget", "--json"), 1, "Can't read context.db.");
+    }
+
+    // 379 AC-10: --json always has times:[{date,workItem,names,minutes,open}], workItem null without one, from Times'
+    // folder passed into Cli; --times changes nothing there.
+    [Fact]
+    public void Search_Times_FieldsInOrder()
+    {
+        WriteNote("A", "fix #1234 and review");
+        string times = Path.Combine(parent, "Times");
+        Directory.CreateDirectory(times);
+        File.WriteAllText(Path.Combine(times, "2026-10-05.json"), "{\"entries\":["
+            + "{\"kind\":\"checkpoint\",\"time\":\"08:00\",\"name\":\"Work\",\"workItem\":1234},"
+            + "{\"kind\":\"checkpoint\",\"time\":\"09:30\",\"name\":\"Review\"},"
+            + "{\"kind\":\"checkpoint\",\"time\":\"10:00\",\"name\":\"Late review\",\"workItem\":7}]}");
+
+        StringWriter stdout = new StringWriter();
+        StringWriter stderr = new StringWriter();
+        int code = new Cli(stdout, stderr, root, () => Today, () => Now, http, Zone, times)
+            .Run(["search", "--json", "--times", "review"]);
+
+        Assert.Equal(0, code);
+        Assert.Equal(string.Empty, stderr.ToString());
+        Assert.Equal(
+            "{\"query\":\"review\",\"results\":[{\"note\":\"A\",\"line\":1,\"text\":\"fix #1234 and review\"}],"
+                + "\"times\":[{\"date\":\"2026-10-05\",\"workItem\":null,\"names\":[\"Review\"],\"minutes\":30,\"open\":false},"
+                + "{\"date\":\"2026-10-05\",\"workItem\":7,\"names\":[\"Late review\"],\"minutes\":0,\"open\":true}]}\n",
+            stdout.ToString());
     }
 
     // 169 AC-6: review pins its field names and order; a multi-day event once per day it touches.

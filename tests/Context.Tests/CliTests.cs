@@ -110,7 +110,7 @@ public sealed class CliTests : IDisposable
             "capture <text...>", "todos", "todo add <yyyy-MM-dd|today|tomorrow> [HH:mm] <text...>",
             "todo add every <weekday|day|month> <text...>", "todo done <text...>", "notes",
             "note show <name...>", "tags [tag...]", "find <attribute> <value...>",
-            "search <text...>", "current", "review", "new <title...> [--template <name>]", "import <path>",
+            "search [--from yyyy-MM-dd] [--to yyyy-MM-dd] [--times] <text...>", "current", "review", "new <title...> [--template <name>]", "import <path>",
             "export <note> <path>", "version", "dayend [today|yyyy-MM-dd]", "decisions [--full] [tag...]", "decisions <reference>",
         })
         {
@@ -1652,6 +1652,84 @@ public sealed class CliTests : IDisposable
         Assert.Equal(0, result.Code);
         Assert.Equal(string.Empty, result.Out);
         Assert.Equal(string.Empty, result.Err);
+    }
+
+    // 379: a day file in Times' entries format: "Work" on #1234 08:00-09:30, then "Code Review" (no item) 09:30-10:00.
+    private void WriteTimesDay(string day)
+    {
+        Directory.CreateDirectory(times);
+        File.WriteAllText(Path.Combine(times, day + ".json"), "{\"entries\":["
+            + "{\"kind\":\"checkpoint\",\"time\":\"08:00\",\"name\":\"Work\",\"workItem\":1234},"
+            + "{\"kind\":\"checkpoint\",\"time\":\"09:30\",\"name\":\"Code\\u0007 Review\"},"
+            + "{\"kind\":\"leaving\",\"time\":\"10:00\"}]}");
+    }
+
+    // 379 AC-10: plain lines stay as they are; --times adds one times row per booking, newest first; --from/--to limit
+    // both (the notes by their date in the zone, UTC here).
+    [Fact]
+    public void Search_Times_RowsAfterNotes_AndRange()
+    {
+        WriteNote("A", "# A\nfix #1234 today");
+        WriteNote("B", "#12345 only");
+        File.SetLastWriteTimeUtc(Path.Combine(root, "A.md"), new DateTime(2026, 10, 10, 12, 0, 0, DateTimeKind.Utc));
+        WriteTimesDay("2026-10-05");
+        WriteTimesDay("2026-10-20");
+
+        Result plain = Run("search", "#1234");
+        Assert.Equal(0, plain.Code);
+        Assert.Equal("A\t2\tfix #1234 today\n", plain.Out);
+
+        Result withTimes = Run("search", "--times", "#1234");
+        Assert.Equal(0, withTimes.Code);
+        Assert.Equal(string.Empty, withTimes.Err);
+        Assert.Equal(
+            "A\t2\tfix #1234 today\ntimes\t2026-10-20\t#1234\tWork\t1:30\ntimes\t2026-10-05\t#1234\tWork\t1:30\n",
+            withTimes.Out);
+
+        Assert.Equal(
+            "times\t2026-10-20\t\tCode� Review\t0:30\n",
+            Run("search", "--FROM", "2026-10-11", "--times", "--to", "2026-10-31", "review").Out);
+        Assert.Equal(
+            "A\t2\tfix #1234 today\ntimes\t2026-10-05\t#1234\tWork\t1:30\n",
+            Run("search", "--to", "2026-10-10", "--times", "#1234").Out);
+        Assert.Equal("A\t2\tfix #1234 today\n", Run("search", "--from", "2026-10-10", "--to", "2026-10-10", "#1234").Out);
+    }
+
+    // 379 AC-10, AC-6: unreadable day files and an unlistable folder are reported after the rows, exit 1.
+    [Fact]
+    public void Search_Times_SkippedFile_ReportedAfterRows()
+    {
+        WriteNote("A", "nothing");
+        WriteTimesDay("2026-10-05");
+        File.WriteAllText(Path.Combine(times, "2026-10-06.json"), "{ broken");
+
+        Result result = Run("search", "--times", "#1234");
+
+        Assert.Equal(1, result.Code);
+        Assert.Equal("times\t2026-10-05\t#1234\tWork\t1:30\n", result.Out);
+        Assert.Equal(["Skipped 1 unreadable Times day file(s)."], result.ErrLines);
+    }
+
+    // 379 AC-5, AC-10: a bad date, a missing date, a repeated --from/--to or a start after the end is a usage error
+    // before the folder is read.
+    [Theory]
+    [InlineData("Type: context search [--from yyyy-MM-dd] [--to yyyy-MM-dd] [--times] <text>. Run 'context help'.", "--from", "2026-13-01", "abc")]
+    [InlineData("Type: context search [--from yyyy-MM-dd] [--to yyyy-MM-dd] [--times] <text>. Run 'context help'.", "--to", "1.10.2026", "abc")]
+    [InlineData("Type: context search [--from yyyy-MM-dd] [--to yyyy-MM-dd] [--times] <text>. Run 'context help'.", "--from")]
+    [InlineData("Type: context search [--from yyyy-MM-dd] [--to yyyy-MM-dd] [--times] <text>. Run 'context help'.", "--from", "2026-10-01", "--from", "2026-10-02", "abc")]
+    [InlineData("Type: context search [--from yyyy-MM-dd] [--to yyyy-MM-dd] [--times] <text>. Run 'context help'.", "--to", "2026-10-01", "--TO", "2026-10-02", "abc")]
+    [InlineData("The start date is after the end date. Run 'context help'.", "--from", "2026-10-02", "--to", "2026-10-01", "abc")]
+    [InlineData("Type: context search <text>. Run 'context help'.", "--times", "--from", "2026-10-02")]
+    public void Search_BadRange_UsageError_FolderNotRead(string error, params string[] words)
+    {
+        Result result = Run(["search", .. words]);
+
+        AssertUsage(result);
+        Assert.Equal(error, result.Err.TrimEnd('\n'));
+        Assert.Equal(Cli.ExitUsage, result.Code);
+        Assert.Equal(2, Cli.ExitUsage);
+        Assert.False(Directory.Exists(root));
+        Assert.False(Directory.Exists(times));
     }
 
     [Theory]

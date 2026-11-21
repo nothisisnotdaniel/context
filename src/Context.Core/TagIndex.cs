@@ -722,6 +722,36 @@ internal sealed class TagIndex
     }
 
     /// <summary>
+    /// Runs <paramref name="select"/> on the <c>(note, body)</c> <c>note_text</c> row of each of
+    /// <paramref name="notes"/>, found by its rowid through <c>note_text_rows</c> (the note name is a bound parameter),
+    /// and keeps only its non-null results, in the order of <paramref name="notes"/>. A note with no row is skipped.
+    /// Used by <see cref="SearchView.Build(TagIndex, NoteStore, string?, string, DateOnly?, DateOnly?, TimeZoneInfo)"/>
+    /// for a work item query.
+    /// </summary>
+    public IReadOnlyList<T> TextsOf<T>(IReadOnlyList<string> notes, Func<string, string, T?> select)
+        where T : class => Run(connection =>
+    {
+        List<T> rows = [];
+        using SqliteCommand command = Command(
+            connection,
+            null,
+            "SELECT t.note, t.body FROM note_text_rows r JOIN note_text t ON t.rowid = r.row AND t.note = r.note "
+                + "WHERE r.note = $note");
+        SqliteParameter parameter = command.Parameters.Add("$note", SqliteType.Text);
+        foreach (string note in notes)
+        {
+            parameter.Value = note;
+            using SqliteDataReader reader = command.ExecuteReader();
+            if (reader.Read() && select(reader.GetString(0), reader.GetString(1)) is { } row)
+            {
+                rows.Add(row);
+            }
+        }
+
+        return (IReadOnlyList<T>)rows;
+    });
+
+    /// <summary>
     /// The notes the last <see cref="Sync"/> left out because they are over <see cref="NoteStore.MaxNoteBytes"/> (the
     /// <c>note_skipped</c> rows), sorted by name ignoring case, then ordinal.
     /// </summary>
