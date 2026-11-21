@@ -504,6 +504,7 @@ public sealed class SensitiveActionsTests : IDisposable
         EditableNote open = (await data.State.ReadSensitive("Project"))!;
         Assert.Equal(open.Text.Count(c => c == '\n'), open.LineCrlf!.Count);
 
+        // The rename already rewrote the title line (job 353), so the save keeps "# Project"; this test checks endings only.
         ActionResult saved = await data.Actions.SaveNote(open, "# Project\none\nTWO\nthree\n");
 
         Assert.Equal(ActionKind.Done, saved.Kind);
