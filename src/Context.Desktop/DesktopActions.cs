@@ -1187,7 +1187,8 @@ internal sealed class DesktopActions
     /// Books <paramref name="action"/> in Times from the sidebar's Times panel (job 383) at the injected local clock's
     /// time (<c>H:mm</c>): <see cref="TimesBooking.Arguments"/> through the <see cref="ITimesRunner"/>, never a shell; a
     /// missing runner or one that throws counts as <see cref="TimesBooking.NotFoundText"/>. A checkpoint takes the
-    /// quicklist <paramref name="workItemPosition"/> (1-based) and <paramref name="name"/>; a name that is blank after
+    /// quicklist <paramref name="workItemPosition"/> (1-based; the caller keeps it within the quicklist it showed,
+    /// Times checks the number itself) and <paramref name="name"/>; a name that is blank after
     /// <see cref="TimesBooking.CleanName"/> is Refused/<see cref="ActionReason.Invalid"/> with
     /// <see cref="TimesBooking.NameBlankText"/> and nothing runs. Done with <see cref="TimesBooking.BookedText"/>, else
     /// Failed with <see cref="TimesBooking.Outcome"/>'s text. Nothing in the data folder or Times' folder is written

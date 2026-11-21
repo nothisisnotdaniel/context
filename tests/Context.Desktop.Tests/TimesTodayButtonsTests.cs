@@ -120,6 +120,17 @@ public sealed class TimesTodayButtonsTests : IDisposable
         Assert.Equal("button", cut.Find("button.times-arrive").GetAttribute("type"));
     }
 
+    // AC-2: an absence day counts as no arrival: only Arrive, no line.
+    [Fact]
+    public async Task AbsenceDay_ShowsOnlyArrive()
+    {
+        WriteDay("""{"absence":"vacation"}""");
+        IRenderedComponent<TimesTodayPanel> cut = await Render();
+
+        WaitForButtons(cut, "Arrive");
+        Assert.Empty(cut.FindAll("p.times-line"));
+    }
+
     // AC-3: each state's buttons after the unchanged job 277 line.
     [Theory]
     [InlineData("working", "Arrived 08:00 · Time left 5:30 · #1234 Review", new[] { "times-break", "times-checkpoint", "times-leave" }, new[] { "Break", "Checkpoint…", "Leave" })]
@@ -210,11 +221,12 @@ public sealed class TimesTodayButtonsTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(nameId, LastFocusId()), Wait);
     }
 
-    // AC-5: Esc in the name field and in the select, and Cancel, close the form, run nothing and focus Checkpoint….
+    // AC-5: Esc in the name field, the select or on Book, and Cancel, close the form, run nothing and focus Checkpoint….
     [Theory]
     [InlineData("name")]
     [InlineData("select")]
     [InlineData("cancel")]
+    [InlineData("book")]
     public async Task Cancel_RunsNothing_FocusBack(string how)
     {
         WriteDay(Working);
@@ -232,6 +244,9 @@ public sealed class TimesTodayButtonsTests : IDisposable
                 break;
             case "select":
                 await cut.Find("select.times-project").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+                break;
+            case "book":
+                await cut.Find("button.times-book").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
                 break;
             default:
                 await cut.Find("button.times-cancel").ClickAsync(new MouseEventArgs());
@@ -275,6 +290,23 @@ public sealed class TimesTodayButtonsTests : IDisposable
         string[] expected = position is null ? ["checkpoint", "10:05", name] : ["checkpoint", "10:05", position, name];
         Assert.Equal(expected, call);
         Assert.Equal(files, FileSnapshot.Take(data.TimesFolder));
+    }
+
+    // AC-6: Enter while an input method is composing books nothing and keeps the form.
+    [Fact]
+    public async Task Checkpoint_EnterWhileComposing_RunsNothing()
+    {
+        WriteDay(Working);
+        IRenderedComponent<TimesTodayPanel> cut = await Render();
+        WaitForButtons(cut, "Break", "Checkpoint…", "Leave");
+        await OpenForm(cut);
+
+        await cut.Find("input.times-name").InputAsync(new ChangeEventArgs { Value = "Docs" });
+        await cut.Find("input.times-name").KeyDownAsync(new KeyboardEventArgs { Key = "Enter", IsComposing = true });
+
+        Assert.Empty(data.TimesRunner.Calls);
+        Assert.Single(cut.FindAll("div.times-form"));
+        Assert.Empty(cut.FindAll("p.times-result"));
     }
 
     // AC-6: the Book button books too.

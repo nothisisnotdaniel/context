@@ -3,7 +3,7 @@
    one grey line "Arrived HH:mm[ · Left HH:mm] · Time left H:mm[ · #n name]" from DesktopState.TimesNow (read only),
    then the buttons of today's state: Arrive (no arrival yet, or left), Break, Checkpoint… and Leave (working), End
    break (on a break). Each runs one tm one-shot through DesktopActions.BookTimes, so Times stays the only writer of
-   its folder. Checkpoint… opens an inline form (project select, name field, Book, Cancel; Enter books, Esc cancels).
+   its folder. Checkpoint… opens an inline form (project select, name field, Book, Cancel; Enter in the name books, Esc anywhere in the form cancels).
    Nothing at all while Times' folder is not there; one grey line and no buttons when its day file can't be read.
    It reloads on every state change and every Tick (TimesChanged), keeping the shown line meanwhile, so no Loading…
    ever shows. *@
@@ -41,9 +41,9 @@ else if (present && view is { } times)
         </div>
         @if (formOpen && times.Kind == TimesNowKind.Booked && times.State == TimesNowState.Working)
         {
-            <div class="times-form">
+            <div class="times-form" @onkeydown="FormKey">
                 <select class="times-project" aria-label="Project" disabled="@running" value="@ProjectValue"
-                        @onchange="ProjectChosen" @onkeydown="FormKey">
+                        @onchange="ProjectChosen">
                     <option value="">No project</option>
                     @for (int i = 0; i < projects.Count; i++)
                     {
@@ -185,15 +185,12 @@ else if (present && view is { } times)
         position = int.TryParse(e.Value?.ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out int chosen)
             && chosen >= 1 && chosen <= projects.Count ? chosen : null;
 
+    // Enter books, except while an input method is still composing; Esc reaches the form's own handler.
     private async Task NameKey(KeyboardEventArgs key)
     {
-        if (key.Key == "Enter")
+        if (key.Key == "Enter" && !key.IsComposing)
         {
             await BookCheckpoint();
-        }
-        else
-        {
-            FormKey(key);
         }
     }
 
