@@ -175,7 +175,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#73](backlog/073-mail-digest.md) Mail digest → 286-mail-digest
 - [x] [#75](backlog/075-todos-tied-to-meetings.md) Todos tied to meetings → 287-todos-tied-to-meetings
 - [x] [#76](backlog/076-done-log.md) Done log → 293-done-log
-- [ ] [#92](backlog/092-times-inside-the-context-desktop-app.md) Times inside the Context desktop app
+- [x] [#92](backlog/092-times-inside-the-context-desktop-app.md) Times inside the Context desktop app → 383-times-desktop-panel
 - [ ] [#23](backlog/023-voice-capture-spike.md) Voice capture spike
 - [x] [#27](backlog/027-todo-dates-with-years.md) Todo dates with years → already done (job 294 closed it, no build)
 - [ ] [#24](backlog/024-voice-notes.md) Voice notes (after: #23)
