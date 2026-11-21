@@ -504,11 +504,29 @@ public sealed class SensitiveActionsTests : IDisposable
         EditableNote open = (await data.State.ReadSensitive("Project"))!;
         Assert.Equal(open.Text.Count(c => c == '\n'), open.LineCrlf!.Count);
 
-        ActionResult saved = await data.Actions.SaveNote(open, "# Plan\none\nTWO\nthree\n");
+        // The rename already rewrote the title line (job 353), so the save keeps "# Project"; this test checks endings only.
+        ActionResult saved = await data.Actions.SaveNote(open, "# Project\none\nTWO\nthree\n");
 
         Assert.Equal(ActionKind.Done, saved.Kind);
         byte[] file = File.ReadAllBytes(Path.Combine(data.Root, "Project.ctxs"));
-        Assert.Equal("\uFEFF# Plan\r\none\nTWO\r\nthree\r\n", SealedNote.Open("Project", file, data.Keys.MachinePublicKey()!, data.Keys.Agree));
+        Assert.Equal("\uFEFF# Project\r\none\nTWO\r\nthree\r\n", SealedNote.Open("Project", file, data.Keys.MachinePublicKey()!, data.Keys.Agree));
+    }
+
+    // 353 AC-10: an open sensitive note's title line follows the rename; reopened, the sealed text has the new title.
+    [Fact]
+    public async Task RenameNote_Sensitive_TitleLineRewritten()
+    {
+        await Sealed("Plan", "# Plan\nsecret\n");
+        await data.State!.ReadSensitive("Plan");
+
+        ActionResult result = await data.Actions!.RenameNote("Plan", "Project", null);
+
+        Assert.Equal((ActionKind.Done, "Renamed to Project."), (result.Kind, result.Text));
+        Assert.Equal("# Project\nsecret\n", data.Session!.Note!.Text);
+        data.Session.Lock();
+        EditableNote reopened = (await data.State.ReadSensitive("Project"))!;
+        Assert.Equal("# Project\nsecret\n", reopened.Text);
+        Assert.Equal(["Project.ctxs"], RootFiles());
     }
 
     // AC-7: rename seals the open text under the new name; only <new>.ctxs is left.
@@ -527,7 +545,7 @@ public sealed class SensitiveActionsTests : IDisposable
         Assert.Equal(1, data.Keys.Agrees);
         Assert.Equal("Project", data.Session!.Note!.Name);
         byte[] file = File.ReadAllBytes(Path.Combine(data.Root, "Project.ctxs"));
-        Assert.Equal("﻿# Plan\r\n" + Marker + "\r\n", SealedNote.Open("Project", file, data.Keys.MachinePublicKey()!, data.Keys.Agree));
+        Assert.Equal("﻿# Project\r\n" + Marker + "\r\n", SealedNote.Open("Project", file, data.Keys.MachinePublicKey()!, data.Keys.Agree));
         Assert.Throws<SealedNoteException>(() => SealedNote.Open("Plan", file, data.Keys.MachinePublicKey()!, data.Keys.Agree));
         Assert.Equal(["Project"], data.State.Snapshot!.Sensitive.Select(n => n.Name).ToArray());
         AssertPrivate(Path.Combine(data.Root, "Project.ctxs"));

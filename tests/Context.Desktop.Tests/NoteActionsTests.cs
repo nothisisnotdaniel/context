@@ -390,7 +390,7 @@ public sealed class NoteActionsTests : IDisposable
         Assert.Equal(ActionReason.None, result.Reason);
         Assert.Equal("Renamed to Project.", result.Text);
         Assert.Equal("Project", result.Name);
-        Assert.Equal("# Plan\n#work\n", File.ReadAllText(Path.Combine(data.Root, "Project.md")));
+        Assert.Equal("# Project\n#work\n", File.ReadAllText(Path.Combine(data.Root, "Project.md")));
         Assert.Equal(builds + 1, data.State.Builds);
         Assert.Equal(["Project"], data.State.Snapshot!.Notes.Select(n => n.Name).ToArray());
         Assert.Equal(["Project"], await data.State.NotesWithTag("work"));
@@ -730,6 +730,101 @@ public sealed class NoteActionsTests : IDisposable
         Assert.Equal(ActionKind.Done, result.Kind);
         Assert.Equal(["Other"], data.State!.Snapshot!.Notes.Select(n => n.Name).ToArray());
         Assert.Equal(["Meetings/keep.txt", "Other.md"], Files().Keys.Select(k => k.Replace('\\', '/')).ToArray());
+    }
+
+    // 353 AC-4: a matching title line follows the rename, with no confirmation, and the old bytes are one version.
+    [Fact]
+    public async Task RenameNote_TitleLine_RewrittenWithOneVersion()
+    {
+        data.WriteNote("Plan", "# Plan\n\nbody\n");
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.RenameNote("Plan", "Project", null);
+
+        Assert.Equal((ActionKind.Done, ActionReason.None, "Renamed to Project."), (result.Kind, result.Reason, result.Text));
+        Assert.Equal(Encoding.UTF8.GetBytes("# Project\n\nbody\n"), File.ReadAllBytes(Path.Combine(data.Root, "Project.md")));
+        Assert.False(File.Exists(Path.Combine(data.Root, "Plan.md")));
+        HistoryView history = await data.State!.History("Project");
+        NoteVersion version = Assert.Single(history.Versions);
+        Assert.Equal(
+            Encoding.UTF8.GetBytes("# Plan\n\nbody\n"),
+            File.ReadAllBytes(Path.Combine(data.Root, ".history", "Project", version.Id + ".md")));
+    }
+
+    // 353 AC-5: the BOM and the CRLF endings stay when the title line is rewritten.
+    [Fact]
+    public async Task RenameNote_TitleLine_KeepsBomAndCrlf()
+    {
+        Directory.CreateDirectory(data.Root);
+        File.WriteAllBytes(Path.Combine(data.Root, "Plan.md"), [.. Bom, .. Encoding.UTF8.GetBytes("# Plan\r\nbody\r\n")]);
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.RenameNote("Plan", "Project", null);
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Equal(
+            [.. Bom, .. Encoding.UTF8.GetBytes("# Project\r\nbody\r\n")],
+            File.ReadAllBytes(Path.Combine(data.Root, "Project.md")));
+    }
+
+    // 353 AC-6: a first line that is not the old title keeps every byte, and no history is written.
+    [Theory]
+    [InlineData("## Plan\n")]
+    [InlineData("# Other\n")]
+    public async Task RenameNote_OtherFirstLine_BytesUnchanged_NoHistory(string text)
+    {
+        data.WriteNote("Plan", text);
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult result = await data.Actions!.RenameNote("Plan", "Project", null);
+
+        Assert.Equal((ActionKind.Done, "Renamed to Project."), (result.Kind, result.Text));
+        Assert.Equal(Encoding.UTF8.GetBytes(text), File.ReadAllBytes(Path.Combine(data.Root, "Project.md")));
+        Assert.False(Directory.Exists(Path.Combine(data.Root, ".history")));
+        Assert.Equal(Moved(before, "Plan.md", "Project.md"), Files());
+    }
+
+    // 353 AC-8: a subpage's title line, its last segment, follows the rename.
+    [Fact]
+    public async Task RenameNote_Subpage_TitleLineRewritten()
+    {
+        data.WriteNote("Meetings", "# Meetings\n");
+        WriteChild("Meetings/Meeting 1", "# Meeting 1\n");
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.RenameNote("Meetings/Meeting 1", "Kickoff", null);
+
+        Assert.Equal((ActionKind.Done, "Meetings/Kickoff"), (result.Kind, result.Name));
+        Assert.Equal(
+            Encoding.UTF8.GetBytes("# Kickoff\n"),
+            File.ReadAllBytes(Path.Combine(data.Root, "Meetings", "Kickoff.md")));
+        Assert.Equal(Encoding.UTF8.GetBytes("# Meetings\n"), File.ReadAllBytes(Path.Combine(data.Root, "Meetings.md")));
+    }
+
+    // 353 AC-9: a case-only rename leaves the title line and writes no history.
+    [Fact]
+    public async Task RenameNote_CaseOnly_TitleLineUnchanged_NoHistory()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult result = await data.Actions!.RenameNote("Plan", "plan", null);
+
+        Assert.Equal((ActionKind.Done, "plan"), (result.Kind, result.Name));
+        Assert.Equal(Encoding.UTF8.GetBytes("# Plan\n"), File.ReadAllBytes(Path.Combine(data.Root, "plan.md")));
+        Assert.False(Directory.Exists(Path.Combine(data.Root, ".history")));
+        Assert.Equal(Moved(before, "Plan.md", "plan.md"), Files());
+    }
+
+    // A file snapshot with one entry under a new name (a moved file keeps its bytes and last-write time).
+    private static SortedDictionary<string, string> Moved(SortedDictionary<string, string> files, string from, string to)
+    {
+        SortedDictionary<string, string> moved = new(files, files.Comparer);
+        Assert.True(moved.Remove(from, out string? value));
+        moved.Add(to, value);
+        return moved;
     }
 
     private async Task<EditableNote> Open(string name, byte[] bytes)

@@ -340,7 +340,8 @@ public sealed class MainTests : IDisposable
             await cut.Find(".note-toolbar .rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
         }
 
-        Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Project.md")));
+        // 353: the matching title line is rewritten in the same action.
+        cut.WaitForAssertion(() => Assert.Equal("# Project\n", File.ReadAllText(Path.Combine(data.Root, "Project.md"))), Wait);
         Assert.False(File.Exists(Path.Combine(data.Root, "Plan.md")));
         cut.WaitForAssertion(() => Assert.Equal("Project", cut.Find(".note-title").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.mount").Count), Wait);

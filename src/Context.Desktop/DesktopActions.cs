@@ -995,6 +995,9 @@ internal sealed class DesktopActions
     /// previous bytes kept as a version), up to <see cref="LinkUpdateTries"/> tries when it changed on disk. Done
     /// texts: <see cref="RenamedText"/>, <see cref="RenamedLinksText"/>, or <see cref="ActionReason.LinksLeft"/> with
     /// <see cref="LinksLeftText"/>. The result's <see cref="ActionResult.Name"/> is the new full name when done.
+    /// Job 353: a first line <c># &lt;old name&gt;</c> (<see cref="NoteTitleLine.Rewrite"/>) is rewritten to the new
+    /// name, a plain note in the same history save as its own links (never counted as a link update), a sensitive one
+    /// in memory before it is sealed.
     /// </summary>
     public Task<ActionResult> RenameNote(string name, string newTitle, Confirmation? confirmed) =>
         Run(() => RenameNoteNow(name, newTitle, confirmed));
@@ -3268,7 +3271,7 @@ internal sealed class DesktopActions
                 state.MoveDecisionOwners(oldName, renamedName);
             }
 
-            return UpdateLinks(plan, renamedName);
+            return UpdateLinks(plan, renamedName, plain ? source.Name : null);
         }
         catch (NoteExistsException e)
         {
@@ -3287,15 +3290,26 @@ internal sealed class DesktopActions
     }
 
     // After the rename: rewrites the links in every planned note (each under its name after the rename). Never throws;
-    // a note that can't be updated is named in the LinksLeft text and the others are still updated.
-    private ActionResult UpdateLinks(LinkRenamePlan plan, string renamedName)
+    // a note that can't be updated is named in the LinksLeft text and the others are still updated. With titleFrom
+    // (the plain note's name before the rename, job 353), the renamed note's matching "# <old name>" line is rewritten
+    // in the same save as its own links, or in one save of its own when it links nowhere to itself; that save never
+    // counts as a link update, and a failed one leaves the old line (the rename stays done).
+    private ActionResult UpdateLinks(LinkRenamePlan plan, string renamedName, string? titleFrom)
     {
         int updated = 0;
         List<string> left = [];
+        if (titleFrom is not null
+            && !plan.Notes.Any(planned => string.Equals(
+                NoteLinkRewriter.Moved(planned, plan.OldName, plan.NewName) ?? planned, renamedName, StringComparison.Ordinal)))
+        {
+            _ = UpdateLinksIn(plan, renamedName, links: false, titleFrom, renamedName);
+        }
+
         foreach (string planned in plan.Notes)
         {
             string current = NoteLinkRewriter.Moved(planned, plan.OldName, plan.NewName) ?? planned;
-            switch (UpdateLinksIn(plan, current))
+            bool self = titleFrom is not null && string.Equals(current, renamedName, StringComparison.Ordinal);
+            switch (UpdateLinksIn(plan, current, links: true, self ? titleFrom : null, renamedName))
             {
                 case NoteSaveResult.Saved:
                     updated++;
@@ -3491,7 +3505,13 @@ internal sealed class DesktopActions
 
     // One note's link update: read, rewrite, save with the history; read again when it changed on disk in between.
     // Saved or Unchanged when done; any other value (a failed check counts as Missing) means the links are left.
-    private NoteSaveResult UpdateLinksIn(LinkRenamePlan plan, string current)
+    // With links false only the title line is rewritten (titleFrom to titleTo, NoteTitleLine) and BeforeLinkSave is
+    // not called; with titleFrom set the title line is rewritten after the links, in the same save.
+    private NoteSaveResult UpdateLinksIn(LinkRenamePlan plan, string current) =>
+        UpdateLinksIn(plan, current, links: true, null, null);
+
+    private NoteSaveResult UpdateLinksIn(
+        LinkRenamePlan plan, string current, bool links, string? titleFrom, string? titleTo)
     {
         try
         {
@@ -3503,10 +3523,16 @@ internal sealed class DesktopActions
                 }
 
                 EditableNote opened = notes.ReadForEdit(found);
-                if (!NoteLinkRewriter.TryRewrite(
-                    opened.Text, plan.Before, plan.After, plan.OldName, plan.NewName, out string rewritten))
+                string rewritten = opened.Text;
+                if (links && !NoteLinkRewriter.TryRewrite(
+                    opened.Text, plan.Before, plan.After, plan.OldName, plan.NewName, out rewritten))
                 {
                     return NoteSaveResult.Missing;
+                }
+
+                if (titleFrom is not null && titleTo is not null)
+                {
+                    rewritten = NoteTitleLine.Rewrite(rewritten, titleFrom, titleTo);
                 }
 
                 if (ReferenceEquals(rewritten, opened.Text))
@@ -3514,7 +3540,11 @@ internal sealed class DesktopActions
                     return NoteSaveResult.Unchanged;
                 }
 
-                BeforeLinkSave?.Invoke(current);
+                if (links)
+                {
+                    BeforeLinkSave?.Invoke(current);
+                }
+
                 NoteSaveResult result = notes.SaveIfUnchanged(
                     opened, Numbered(found.Name, rewritten), out _, state.HistoryStore);
                 if (result != NoteSaveResult.ChangedOnDisk)
@@ -4654,7 +4684,9 @@ internal sealed class DesktopActions
             return Refused(ActionReason.ChangedOnDisk, ChangedText(source.Name));
         }
 
-        byte[] file = SealedNote.Seal(title, SensitiveSession.ToSealedText(open, open.Text), recipients);
+        // Job 353: a matching "# <old name>" first line is rewritten in memory only, before sealing.
+        string text = NoteTitleLine.Rewrite(open.Text, source.Name, title);
+        byte[] file = SealedNote.Seal(title, SensitiveSession.ToSealedText(open, text), recipients);
         string target = Path.Combine(notes.Root, title + NoteStore.SensitiveExtension);
         try
         {
@@ -4685,7 +4717,7 @@ internal sealed class DesktopActions
         }
 
         notes.DeleteSensitive(source.Name);
-        state.Session.Open(new EditableNote(title, target, open.Text, EditableNote.Hash(file), open.HadCrlf, open.HadBom, open.LineCrlf));
+        state.Session.Open(new EditableNote(title, target, text, EditableNote.Hash(file), open.HadCrlf, open.HadBom, open.LineCrlf));
         return new ActionResult(ActionKind.Done, ActionReason.None, title);
     }
 

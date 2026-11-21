@@ -567,7 +567,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Rename(name, newTitle)` finds `name` through `TryFind` (never a path), normalizes and validates `newTitle` like
     `Create` (`ArgumentException` with the `ValidateTitle` text), throws `NoteExistsException` when another note has
     that title ignoring case (a case-only rename of the same note is allowed), moves the file with
-    `File.Move(..., overwrite: false)` (bytes and `# Title` line unchanged; `[[links]]` elsewhere are not rewritten here; the desktop `RenameNote` does that) and
+    `File.Move(..., overwrite: false)` (bytes and `# Title` line unchanged; `[[links]]` elsewhere and the title line are not rewritten here; the desktop `RenameNote` does that, job 353) and
     returns the new `NoteInfo`, the note itself when the title is exactly its name (nothing written), or `null` when no
     note matches. `Delete(name)` deletes the file `TryFind(name)` found and returns true, else false (nothing deleted,
     never anything outside `List()`). There is no trash; only the desktop uses them (no command-line command).
@@ -1044,7 +1044,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     assembly is public-signed with the committed `Context.snk`, see **Strong name**). `Context` grants only
     `Context.Tests` and `Context.Desktop` only `Context.Desktop.Tests`, the same way; no `InternalsVisibleTo` is name-only.
     It holds the note files in `NoteStore.cs`, the todo list in `TodoStore.cs`, picking a todo by its text in `TodoPicker.cs`, todos inside notes in `NoteTodoParser.cs` and `NoteTodo.cs`, topics for the next 1:1 in `TopicParser.cs` and `MeetingTopics.cs`, review dates in `ReviewDateParser.cs` and `NoteReviews.cs`, work items in `WorkItemParser.cs`, `WorkItemView.cs` and `GitCommitLog.cs`, the desktop open request in `DesktopRequest.cs`, tag parsing in `TagParser.cs`, the shared HTML page of a note in `NoteHtml.cs`,
-    `[[note link]]` parsing in `NoteLinkParser.cs`, link rewriting on rename in `NoteLinkRewriter.cs`, `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the desktop's recently opened notes (`recent.json`) in `RecentNotes.cs`, its pinned notes (`pinned.json`) in `PinnedNotes.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
+    `[[note link]]` parsing in `NoteLinkParser.cs`, link rewriting on rename in `NoteLinkRewriter.cs`, the title line rewrite on rename in `NoteTitleLine.cs` (job 353), `@[person]` parsing and the `people` page names in `PersonParser.cs`, person aliases in `PersonAliases.cs`, `key:: value` parsing in `AttributeParser.cs`, the page types in `PageTypes.cs`, the SQLite tag and link index (with `NoteLink`, `NameLookup`) in `TagIndex.cs`, the desktop's recently opened notes (`recent.json`) in `RecentNotes.cs`, its pinned notes (`pinned.json`) in `PinnedNotes.cs`, the `.ics` parser and `Appointment` in `IcsParser.cs`, recurrence rules in `Recurrence.cs`, the calendar
     folder reader and `CalendarDay` in `CalendarStore.cs`, the secret link file in `CalendarLink.cs`, the
     download and cache in `CalendarFeed.cs`, the display sanitizer in `SafeText.cs`, bounded file reads (`BoundedFile.cs`, managed code only: a file that reports length 0 is returned empty without being opened, so a FIFO named `x.md` never blocks; an opened stream that can't seek is refused; over the cap it throws `FileTooLargeException : IOException` (`Too large.`); job 275: every full read of `.ics` files and the feed cache (`CalendarStore.ReadText`, `MaxFileBytes`), `todos.json` (`TodoStore.MaxFileBytes`, 5 MB; a directory named `todos.json` can't be read), `calendar-link.txt` (`CalendarLink.MaxFileBytes`, 4096) and notes (`NoteStore.Read`) goes through it; Core has no P/Invoke, checked by `CoreDependencyTests`) and the view data steps
     `CurrentView.cs` (the current view; meeting prep in `MeetingPrep.cs`), the daily note in `DailyNote.cs`, meeting notes in `MeetingNote.cs` (the agenda carry-over in `MeetingCarryOver.cs`), the Mail digest's rules in `MailDigest.cs`, note templates in `NoteTemplates.cs`, the done log in `DoneLog.cs` (job 293), the inbox capture in `Inbox.cs` (its triage queue, remove and snooze in `InboxTriage.cs`), the day's end in `DayEnd.cs` (Times' day file in `TimesDay.cs`, today's Times bookings in `TimesNow.cs`, `settings.json` in `SettingsStore.cs`), the morning briefing in `Briefing.cs` (Times' flexitime balance in `TimesBalance.cs`), the todo input rules (`TryParseDate`,
@@ -1098,7 +1098,13 @@ Every factory agent reads this file before working on Context. Keep it short and
     first finds the plain notes whose links `NoteLinkRewriter` would change, a failed round trip is Refused/`Invalid`
     `Links to <old> can't be written with the name <new>. Nothing was renamed.`, and with notes to change and no
     confirmation Refused/`NotConfirmed`, both writing nothing; then the note is renamed and each note is read, rewritten
-    and saved through `SaveIfUnchanged(..., HistoryStore)` (a version always kept), up to 3 tries on changed on disk; Done
+    and saved through `SaveIfUnchanged(..., HistoryStore)` (a version always kept), up to 3 tries on changed on disk; job 353:
+    a first line `# <old name>` of the renamed note (`NoteTitleLine.Rewrite(text, oldName, newName)`, Core, pure: the
+    editor's `titleSplit` rule, a leading U+FEFF skipped and kept, `\r` kept; the new full name when it matched the full
+    name, else the new last segment; same instance when nothing changes or case-only) becomes the new name in the same
+    save as its own link rewrite, else in one save of its own (never counted, no confirmation; a failed one leaves the
+    line, the rename stays Done); a sensitive note's open text is rewritten in memory before sealing; `MoveNote` and
+    case-only renames never touch it, and `NoteStore.Rename` (CLI) keeps the bytes unchanged; Done
     `Renamed to <new>.`, `Renamed to <new>. Updated links in <n> notes.` or Done/`LinksLeft` `Renamed to <new>, but links
     in <k> notes couldn't be updated: <up to 3 names>[ and <m> more].`; `ActionResult.Name` is the new full name; one
     refresh. `DesktopState.LinkUpdateCount(name, newTitle)` gives that count read-only (0 for same, case-only, invalid
@@ -1757,6 +1763,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     first line `# <name>` (ignoring case and surrounding spaces, or the name's last segment) and the blank lines after
     it as a hidden head that is never parsed and that `getMarkdown`/`roundTrip` put back byte for byte, and inside the
     editor a level-1 heading keeps `level` 1 (saved as `# `) but is drawn as `h2.heading-level-1` (`headingDom`; job 215: `editor.css` sizes it 2em, `h2` 1.6em, `h3` 1.3em, h4–h6 keep the browser defaults), while typing `# ` makes level 2 (`typedBlock` tests the input rules without a view).
+    Job 353: the desktop `RenameNote` rewrites such a title line (`NoteTitleLine.Rewrite`, the same rule) to the new
+    name, so it stays hidden after a rename; `NoteStore.Rename` (CLI) still leaves the bytes unchanged.
     **Attribute box** (job 236): `attributeSplit(body)` (internal; test hook `attributeSplitJson`) cuts the body after the
     head into `attrs` (the run of attribute-shaped lines from the first body line on: a column-0 key per `KeyEnd`, at most
     50 chars, directly followed by `::`, any value; plus the blank lines right after) and the rest; `mount` keeps `attrs`/
