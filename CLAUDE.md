@@ -626,7 +626,14 @@ Every factory agent reads this file before working on Context. Keep it short and
     (`MaxTempPrefixBytes`), so a long multi-byte title stays under the 255-byte file name limit. `context import <path>` reads a
     file outside the root (at most 5 MB, never changed) and stores it as the note
     `NormalizeTitle(file name)` via `NoteStore.Save` (create, or replace an existing note through temp + move);
-    the answer says to delete the source. The desktop does both through `DesktopActions` (see Import and export).
+    the answer says to delete the source. Job 385: both front ends first refuse a source whose file name doesn't end
+    in `.md` ignoring case (`NoteStore.IsImportSource`; `Can't import a file that isn't .md: <path>`), and
+    `ReadImport` throws `SpecialImportFileException` (not an `IOException`) for a file that reports length 0 (an empty
+    file, a FIFO, `/dev/null`; never opened, so a FIFO never blocks) or reads empty: `Can't import an empty or special
+    file: <path>`. `Save(title, content, createOnly: true)` never replaces: an existing plain note (ignoring case), also
+    one that appears before the move (`File.Move(overwrite: false)`), throws `NoteTakenException` (an `IOException`
+    with the note's `Name`) and changes nothing; the test hook `BeforeSaveMove` runs just before the move, after which
+    `Save` checks the sensitive names again (`NoteExistsException`). The CLI still replaces without asking. The desktop does both through `DesktopActions` (see Import and export).
     `Rename(name, newTitle)` finds `name` through `TryFind` (never a path), normalizes and validates `newTitle` like
     `Create` (`ArgumentException` with the `ValidateTitle` text), throws `NoteExistsException` when another note has
     that title ignoring case (a case-only rename of the same note is allowed), moves the file with
@@ -1611,9 +1618,11 @@ Every factory agent reads this file before working on Context. Keep it short and
     text, and both actions still re-check everything. `DesktopActions.ImportNote(path, Confirmation?)` (not fully
     qualified: `Can't read <path>.`; `NoteStore.Contains`: `That file is already in the Context folder. Nothing
     changed.`; `<ValidateTitle text> Rename the file and import it again.`; `<name> is sensitive. Nothing was
-    imported.`; `NoteStore.ReadImport`: `No such file: <path>`, `Can't import a file over 5 MB: <path>`, `Can't read
-    <path>.`; an existing plain note without a confirmation is Refused `NotConfirmed` with the note's name as text;
-    else `NoteStore.Save` and `Imported|Replaced <name>. The source is unchanged; delete it if you don't need the
+    imported.`; a name without `.md`: `Can't import a file that isn't .md: <path>` (Invalid, before any read);
+    `NoteStore.ReadImport`: `No such file: <path>`, `Can't import a file over 5 MB: <path>`, `Can't import an empty
+    or special file: <path>` (Invalid), `Can't read <path>.`; without a confirmation the save is create-only, so an
+    existing plain note, also one that appears after the checks (`NoteTakenException`), is Refused `NotConfirmed`
+    with the note's name as text; with one, `NoteStore.Save` replaces; then `Imported|Replaced <name>. The source is unchanged; delete it if you don't need the
     plain copy: <path>`) and `ExportNote(name, path)` (`Export to a path outside the Context folder. Nothing was
     written.`; `<name> no longer exists. Nothing was done.`; `<name> is sensitive. Make it plain to export it.`
     without any `Agree`; an existing file or directory: `That file already exists; choose a new name: <path>`;
@@ -1621,7 +1630,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     write <path>.`; no refresh). Only the replace question carries `NotConfirmed`, no answer holds an exception message, and
     every path and name shown goes through `DesktopText.OneLine`. `NotesPanel` has `Import` (or `/import`, which
     `Main` passes to `NotesPanel.Import()`; a typed argument is ignored): at most 100 files (`Choose at most 100
-    files.`), one line per file in the chosen order in a `role="status"` region that is always in the page (accent Done, red otherwise, cut by
+    files.`), one line per file in the chosen order in a `role="status"` region that is always in the page (a cancelled picker
+    clears the previous lines, job 385) (accent Done, red otherwise, cut by
     CSS with the full text in `title`); files that would replace a note are written only after one `ConfirmDialog`
     (`Replace <name>?` or `Replace <n> notes? <names>`, confirm label `Replace`), and Cancel or Esc leaves grey `Not
     replaced: <name>`. The More actions menu of a plain note has `Export` (or `/export`; argument ignored; no note open: red

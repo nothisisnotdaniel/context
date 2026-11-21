@@ -1345,14 +1345,17 @@ public sealed class CliTests : IDisposable
 
     // Round 2 ------------------------------------------------------------------------------------
 
+    // 385 AC-2 (was round 2): a FIFO reports length 0, so it is never opened and never hangs; it is refused and an
+    // existing note keeps its bytes.
     [Fact]
-    public async Task Import_Fifo_ReturnsWithoutBlocking()
+    public async Task Import_Fifo_IsRefusedWithoutBlocking()
     {
         if (OperatingSystem.IsWindows())
         {
             return;
         }
 
+        WriteNote("pipe", "keep\n");
         string fifo = Path.Combine(outside, "pipe.md");
         using (System.Diagnostics.Process mkfifo = System.Diagnostics.Process.Start("mkfifo", fifo))
         {
@@ -1361,8 +1364,48 @@ public sealed class CliTests : IDisposable
 
         Task<Result> run = Task.Run(() => Run("import", fifo));
         Assert.Same(run, await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(5))));
-        // A FIFO reports length 0, so it is never opened: it imports as an empty note and never hangs.
-        Assert.Equal(0, (await run).Code);
+        AssertError(await run, 1, "Can't import an empty or special file: " + fifo);
+        Assert.Equal("keep\n", Read("pipe.md"));
+    }
+
+    // 385 AC-2: an empty file is refused, so it can't wipe the note it names.
+    [Fact]
+    public void Import_EmptyFile_IsRefusedAndKeepsTheNote()
+    {
+        WriteNote("Plan", "keep\n");
+        string source = Path.Combine(outside, "Plan.md");
+        File.WriteAllBytes(source, []);
+
+        AssertError(Run("import", source), 1, "Can't import an empty or special file: " + source);
+        Assert.Equal("keep\n", Read("Plan.md"));
+        Assert.Equal(["Plan.md"], Directory.GetFiles(root, "*.md").Select(Path.GetFileName));
+    }
+
+    // 385 AC-3: a source that doesn't end in .md (ignoring case) is refused before it is read.
+    [Theory]
+    [InlineData("notes.txt")]
+    [InlineData("notes")]
+    [InlineData("notes.md.txt")]
+    public void Import_NotMarkdown_IsRefused(string name)
+    {
+        string source = Path.Combine(outside, name);
+        File.WriteAllText(source, "# Notes\n");
+
+        AssertError(Run("import", source), 1, "Can't import a file that isn't .md: " + source);
+        Assert.Empty(Directory.Exists(root) ? Directory.GetFiles(root, "*.md") : []);
+    }
+
+    // 385 AC-3: the .md ending is matched ignoring case.
+    [Fact]
+    public void Import_UpperCaseMd_IsAccepted()
+    {
+        string source = Path.Combine(outside, "a.MD");
+        File.WriteAllText(source, "# a\n");
+
+        Result result = Run("import", source);
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal("# a\n", Read("a.md"));
     }
 
     [Fact]

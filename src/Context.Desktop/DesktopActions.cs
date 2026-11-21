@@ -570,6 +570,12 @@ internal sealed class DesktopActions
     /// <summary>The red line when the file to import is missing (or is a folder).</summary>
     public static string NoSuchFileText(string path) => $"No such file: {path}";
 
+    /// <summary>The red line when the file to import is empty or not a regular file (a FIFO, a device).</summary>
+    public static string ImportSpecialText(string path) => $"Can't import an empty or special file: {path}";
+
+    /// <summary>The red line when the file to import doesn't end in <c>.md</c> (see <see cref="NoteStore.IsImportSource"/>).</summary>
+    public static string ImportNotMarkdownText(string path) => $"Can't import a file that isn't .md: {path}";
+
     /// <summary>The red line when the file to import is over <see cref="NoteStore.MaxImportBytes"/>.</summary>
     public static string ImportTooLargeText(string path) => $"Can't import a file over 5 MB: {path}";
 
@@ -4397,6 +4403,12 @@ internal sealed class DesktopActions
                 return Refused(ActionReason.Invalid, ImportInsideText);
             }
 
+            // The dialog filter is not trusted: only a .md file is read.
+            if (!NoteStore.IsImportSource(source))
+            {
+                return Refused(ActionReason.Invalid, ImportNotMarkdownText(shown));
+            }
+
             title = NoteStore.NormalizeTitle(Path.GetFileName(source));
         }
         catch (Exception)
@@ -4428,6 +4440,10 @@ internal sealed class DesktopActions
         {
             return Refused(ActionReason.Invalid, ImportTooLargeText(shown));
         }
+        catch (SpecialImportFileException)
+        {
+            return Refused(ActionReason.Invalid, ImportSpecialText(shown));
+        }
         catch (Exception)
         {
             return Failed(ActionReason.Unreadable, CantReadText(shown));
@@ -4435,15 +4451,16 @@ internal sealed class DesktopActions
 
         try
         {
-            // Replacing a note destroys its text: only with the user's confirmation. The text is the note's name.
-            if (confirmed is null && notes.TryFind(title, out NoteInfo? existing) && existing is not null)
-            {
-                return Refused(ActionReason.NotConfirmed, existing.Name);
-            }
-
-            (NoteInfo note, bool replaced) = notes.Save(title, content);
+            // Replacing a note destroys its text: only with the user's confirmation. Without one the save is
+            // create-only, so a note that appears after any check is never replaced either.
+            (NoteInfo note, bool replaced) = notes.Save(title, content, createOnly: confirmed is null);
             NumberWritten(note.Name);
             return new ActionResult(ActionKind.Done, ActionReason.None, ImportedText(note.Name, shown, replaced));
+        }
+        catch (NoteTakenException e)
+        {
+            // The text is the note's name, for the replace question.
+            return Refused(ActionReason.NotConfirmed, e.Name);
         }
         catch (NoteExistsException e)
         {

@@ -2202,6 +2202,11 @@ internal sealed class Cli
             return Error("That file is already in the Context folder. Nothing changed.");
         }
 
+        if (!NoteStore.IsImportSource(source))
+        {
+            return Error($"Can't import a file that isn't .md: {shownSource}");
+        }
+
         string title = NoteStore.NormalizeTitle(Path.GetFileName(source));
         string? invalid = NoteStore.ValidateTitle(title);
         if (invalid is not null)
@@ -2226,6 +2231,10 @@ internal sealed class Cli
         catch (InvalidDataException)
         {
             return Error($"Can't import a file over 5 MB: {shownSource}");
+        }
+        catch (SpecialImportFileException)
+        {
+            return Error($"Can't import an empty or special file: {shownSource}");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
