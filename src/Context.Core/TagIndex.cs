@@ -277,6 +277,13 @@ internal sealed class TagIndex
             note TEXT NOT NULL,
             item INTEGER NOT NULL,
             PRIMARY KEY(note, item));
+        CREATE TABLE IF NOT EXISTS note_glossary(
+            note TEXT NOT NULL,
+            line INTEGER NOT NULL,
+            term TEXT NOT NULL,
+            term_key TEXT NOT NULL,
+            meaning TEXT NOT NULL,
+            PRIMARY KEY(note, line));
         CREATE INDEX IF NOT EXISTS note_items_item ON note_items(item);
         CREATE VIRTUAL TABLE IF NOT EXISTS note_text USING fts5(note UNINDEXED, body, tokenize='trigram');
         CREATE TABLE IF NOT EXISTS note_text_rows(note TEXT PRIMARY KEY, row INTEGER NOT NULL);
@@ -310,8 +317,9 @@ internal sealed class TagIndex
     /// 18: decisions are <c>!d</c> paragraphs with an optional <c>&lt;prefix&gt;-&lt;n&gt;</c> token (job 349);
     /// <c>note_decisions.prefix</c> is the key prefix (an alias for a clashing foreign folder, <c>decision_folders</c>),
     /// and <c>decision_owners</c> is keyed by <c>(prefix, number)</c>.
+    /// 19: <c>Term:: meaning</c> glossary lines (job 380, <c>note_glossary</c>).
     /// </summary>
-    public const int ParserVersion = 18;
+    public const int ParserVersion = 19;
 
     /// <summary>
     /// How long opening <c>context.db</c> and starting <see cref="Sync"/>'s write transaction wait while another
@@ -432,6 +440,7 @@ internal sealed class TagIndex
                 IReadOnlyList<ParsedDecision> decisions;
                 IReadOnlyList<ParsedNoteTodo> noteTodos;
                 IReadOnlyList<ParsedTopic> topics;
+                IReadOnlyList<GlossaryLine> glossary;
                 ParsedReview? review;
                 IReadOnlyList<int> items;
                 string? body;
@@ -449,6 +458,7 @@ internal sealed class TagIndex
                     decisions = DecisionParser.Parse(text);
                     noteTodos = NoteTodoParser.Parse(text);
                     topics = TopicParser.Parse(text);
+                    glossary = GlossaryParser.Parse(text);
                     review = ReviewDateParser.Parse(text);
                     items = WorkItemParser.Parse(text);
                 }
@@ -462,6 +472,7 @@ internal sealed class TagIndex
                     decisions = [];
                     noteTodos = [];
                     topics = [];
+                    glossary = [];
                     review = null;
                     items = [];
                     body = null;
@@ -578,6 +589,20 @@ internal sealed class TagIndex
                         ("$raw", topic.Raw));
                 }
 
+                Execute(connection, transaction, "DELETE FROM note_glossary WHERE note = $note", ("$note", note.Name));
+                foreach (GlossaryLine entry in glossary)
+                {
+                    Execute(
+                        connection,
+                        transaction,
+                        "INSERT INTO note_glossary(note, line, term, term_key, meaning) VALUES($note, $line, $term, $key, $meaning)",
+                        ("$note", note.Name),
+                        ("$line", entry.Line),
+                        ("$term", entry.Term),
+                        ("$key", GlossaryParser.Key(entry.Term)),
+                        ("$meaning", entry.Meaning));
+                }
+
                 Execute(connection, transaction, "DELETE FROM note_reviews WHERE note = $note", ("$note", note.Name));
                 if (review is not null)
                 {
@@ -646,6 +671,7 @@ internal sealed class TagIndex
                 Execute(connection, transaction, "DELETE FROM note_decisions WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_todos WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_topics WHERE note = $note", ("$note", gone));
+                Execute(connection, transaction, "DELETE FROM note_glossary WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_reviews WHERE note = $note", ("$note", gone));
                 Execute(connection, transaction, "DELETE FROM note_items WHERE note = $note", ("$note", gone));
                 DeleteText(connection, transaction, gone);
@@ -661,6 +687,7 @@ internal sealed class TagIndex
             Execute(connection, transaction, "DELETE FROM note_decisions WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_todos WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_topics WHERE note NOT IN (SELECT name FROM notes)");
+            Execute(connection, transaction, "DELETE FROM note_glossary WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_reviews WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_items WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_skipped WHERE note NOT IN (SELECT name FROM notes)");
@@ -1129,6 +1156,34 @@ internal sealed class TagIndex
         }
 
         return (IReadOnlyList<NoteTopic>)rows;
+    });
+
+    /// <summary>
+    /// Every row of <c>note_glossary</c> of a note with a stored time, unsorted (<see cref="GlossaryView"/> groups and
+    /// orders them). A row edited by hand with a line out of range is skipped.
+    /// </summary>
+    public IReadOnlyList<IndexedGlossaryLine> Glossary() => Run(connection =>
+    {
+        List<IndexedGlossaryLine> rows = [];
+        using SqliteCommand command = Command(
+            connection,
+            null,
+            "SELECT g.note, g.line, g.term, g.term_key, g.meaning FROM note_glossary g "
+                + "JOIN notes n ON n.name = g.note WHERE n.modified IS NOT NULL");
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            long line = reader.GetInt64(1);
+            if (line < 0 || line > int.MaxValue)
+            {
+                continue;
+            }
+
+            rows.Add(new IndexedGlossaryLine(
+                reader.GetString(0), (int)line, reader.GetString(2), reader.GetString(3), reader.GetString(4)));
+        }
+
+        return (IReadOnlyList<IndexedGlossaryLine>)rows;
     });
 
     /// <summary>

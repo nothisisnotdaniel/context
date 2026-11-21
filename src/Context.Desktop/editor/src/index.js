@@ -1,7 +1,8 @@
 // The bundle's entry: everything the page and the tests use hangs off globalThis.ContextEditor.
 import { roundTrip, isLossless, inlineNodes, docJson, webHref, splitTitle, outline, attributeRows, editAttributes, attributeSplit } from "./markdown.js";
 import { chipDom, headingDom } from "./schema.js";
-import { opensChip, typedBlock, typedMarkdown, commandMarkdown, typedAtMarkdown, clickedLinkJson, linkDomJson, toggledMarkdown, carriedMarkdown, changedCodeBlocksJson, copyText, copyToClipboard, toggleInlineCodeIn, toggleCodeBlockIn, mount, getMarkdown, isDirty, markClean, markCleanIf, destroy, focus, insertAttachment, headings, scrollToHeading, attributes, setAttributes, setLinkTitle, applyDecisionEdits, decisionReferencesIn, setDecisionTitles, setDecisionPrefixes, scrollToDecision, decisionEditsMarkdown, decisionRefsJson } from "./view.js";
+import { opensChip, typedBlock, typedMarkdown, commandMarkdown, typedAtMarkdown, clickedLinkJson, linkDomJson, toggledMarkdown, carriedMarkdown, changedCodeBlocksJson, copyText, copyToClipboard, toggleInlineCodeIn, toggleCodeBlockIn, mount, getMarkdown, isDirty, markClean, markCleanIf, destroy, focus, insertAttachment, headings, scrollToHeading, attributes, setAttributes, setLinkTitle, applyDecisionEdits, decisionReferencesIn, setDecisionTitles, setDecisionPrefixes, scrollToDecision, decisionEditsMarkdown, decisionRefsJson, setGlossary, glossaryDecorationsJson, glossaryMetaJson } from "./view.js";
+import { glossaryMatches } from "./glossary.js";
 import { decisionsJson, decisionReferences, applyDecisionEditsText, withFolderLine, pickerQuery, pickerRows, pickerKey, pickerAttrs, copyButtonAttrs } from "./decisions.js";
 import { pastedMarkdown, pastedDocJson, titledMarkdown } from "./paste.js";
 import { isMermaidFence, mermaidResultJson, shouldRender } from "./mermaid.js";
@@ -86,6 +87,9 @@ globalThis.ContextEditor = Object.freeze({
   withFolderLine,
   decisionEditsMarkdown,
   decisionRefsJson,
+  glossaryMatches,
+  glossaryDecorationsJson,
+  glossaryMetaJson,
   pickerQuery,
   pickerRowsJson: (decisionsText, query) => JSON.stringify(pickerRows(JSON.parse(String(decisionsText)), query)),
   pickerKeyJson: (stateText, key) => JSON.stringify(pickerKey(JSON.parse(String(stateText)), key)),
@@ -112,6 +116,7 @@ globalThis.ContextEditor = Object.freeze({
   applyDecisionEdits,
   decisionReferencesIn,
   setDecisionTitles,
+  setGlossary,
   setDecisionPrefixes,
   scrollToDecision,
   toggleInlineCode: toggleInlineCodeIn,

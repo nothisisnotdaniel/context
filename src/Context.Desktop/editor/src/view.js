@@ -6,7 +6,7 @@ import { EditorState, Selection, TextSelection, Plugin, PluginKey } from "prosem
 import { EditorView, Decoration, DecorationSet } from "prosemirror-view";
 import { Fragment, Slice } from "prosemirror-model";
 import { keymap } from "prosemirror-keymap";
-import { history, undo, redo, closeHistory } from "prosemirror-history";
+import { history, undo, redo, closeHistory, undoDepth } from "prosemirror-history";
 import { baseKeymap, toggleMark, setBlockType, chainCommands, newlineInCode } from "prosemirror-commands";
 import { splitListItem, liftListItem, sinkListItem } from "prosemirror-schema-list";
 import { inputRules, wrappingInputRule, textblockTypeInputRule, InputRule } from "prosemirror-inputrules";
@@ -16,6 +16,7 @@ import { codeBlockView, mermaidEditing, isMermaidFence } from "./mermaid.js";
 import { tokens, firstWord, languageOptions, withLanguage } from "./highlight.js";
 import { parse, serialize, webHref, splitTitle, joinTitle, headingList, attributeSplit, attributeBlockRowsJson, editAttributes, normalizePerson, isNetWhite } from "./markdown.js";
 import { Token, readEdits, applySet, hasFolderLine, withFolderLine, decisionReferences as decisionReferencesText, leadingMarker, label, parseReference, referenceAt, referenceMayStart, pickerQuery, pickerRows, pickerKey, pickerAttrs, copyButtonAttrs, isPrefix } from "./decisions.js";
+import { readGlossary, bucketTerms, matchTerms } from "./glossary.js";
 
 const editors = new WeakMap();
 
@@ -1034,6 +1035,61 @@ function decisionPlugin(editor) {
   });
 }
 
+// Job 380: the glossary decorations of doc: every known term outside code blocks and code marks, as an inline
+// span.glossary-term with its meanings as the native title. Code-marked runs become U+FFFC before matching, so a term
+// never matches into or out of one.
+const glossaryKey = new PluginKey("glossary");
+
+function glossaryDecorations(doc, glossary) {
+  const decorations = [];
+  if (glossary === null || glossary.terms.length === 0) {
+    return decorations;
+  }
+  doc.descendants((node, pos) => {
+    if (node.type.spec.code) {
+      return false;
+    }
+    if (!node.isTextblock) {
+      return true;
+    }
+    const { text, code } = positionText(node);
+    let plain = text;
+    for (const [from, to] of code) {
+      plain = plain.slice(0, from) + "￼".repeat(to - from) + plain.slice(to);
+    }
+    for (const [from, to, index] of matchTerms(plain, glossary.buckets)) {
+      decorations.push(Decoration.inline(pos + 1 + from, pos + 1 + to,
+        { class: "glossary-term", title: glossary.terms[index].title }));
+    }
+    return false;
+  });
+  return decorations;
+}
+
+function glossaryState(terms) {
+  return terms === null ? null : { terms, buckets: bucketTerms(terms) };
+}
+
+// Draws the glossary terms .NET sent (setGlossary); a meta transaction only, so no text, dirty state or undo changes.
+function glossaryPlugin(editor) {
+  const build = doc => DecorationSet.create(doc, glossaryDecorations(doc, editor.glossary));
+  return new Plugin({
+    key: glossaryKey,
+    state: {
+      init(config, state) { return build(state.doc); },
+      apply(tr, value, oldState, newState) {
+        if (tr.getMeta(glossaryKey) !== undefined || tr.docChanged) {
+          return build(newState.doc);
+        }
+        return value;
+      },
+    },
+    props: {
+      decorations(state) { return glossaryKey.getState(state); },
+    },
+  });
+}
+
 // The picker (job 349): the #!d text the cursor ends, as { from, to, query } in document positions, or null (a
 // selection, code, or no #!d). The rules are decisions.js's pickerQuery on the text block before the cursor.
 function pickerRange(state) {
@@ -1444,7 +1500,7 @@ export function mount(element, markdown, dotnet, images, name) {
   const doc = parse(body);
   const editor = {
     view: null, head, attrs, cleanAttrs: attrs, clean: doc, dirty: false, dotnet, images: new Map(), dropPos: null, links: [], shift: false, lastKey: 0,
-    decisionTitles: new Map(), decisionPrefixes: null, name: typeof name === "string" ? name : "",
+    decisionTitles: new Map(), decisionPrefixes: null, name: typeof name === "string" ? name : "", glossary: null,
   };
   for (const image of images || []) {
     if (image && typeof image.src === "string" && !editor.images.has(image.src)) {
@@ -1462,6 +1518,7 @@ export function mount(element, markdown, dotnet, images, name) {
       keymap(baseKeymap),
       decisionPlugin(editor),
       decisionPicker(editor),
+      glossaryPlugin(editor),
     ],
   });
   const view = new EditorView(element, {
@@ -1981,6 +2038,57 @@ function readPrefixes(prefixesJson) {
     return null;
   }
   return { own: value.own, alias };
+}
+
+/**
+ * Job 380: sets the glossary terms from json ([[term, title], ...], at most 500) and redraws them as span.glossary-term
+ * with the title. A meta transaction only (out of the undo history): the text, the dirty state and undo stay. Returns
+ * false, changing nothing, without an editor or for malformed JSON.
+ */
+export function setGlossary(element, json) {
+  const editor = editors.get(element);
+  const terms = editor ? readGlossary(json) : null;
+  if (terms === null) {
+    return false;
+  }
+  editor.glossary = glossaryState(terms);
+  editor.view.dispatch(editor.view.state.tr.setMeta(glossaryKey, {}).setMeta("addToHistory", false));
+  return true;
+}
+
+/**
+ * Test hook, DOM-free: the glossary decorations of markdown given termsJson (as setGlossary takes it), as JSON
+ * [{ text, class, title }]; "[]" for malformed terms.
+ */
+export function glossaryDecorationsJson(markdown, termsJson) {
+  const doc = parse(String(markdown));
+  const found = glossaryDecorations(doc, glossaryState(readGlossary(termsJson)));
+  return JSON.stringify(found.map(d => ({
+    text: doc.textBetween(d.from, d.to),
+    class: d.type.attrs.class,
+    title: d.type.attrs.title,
+  })));
+}
+
+/**
+ * Test hook, DOM-free: applies setGlossary's transaction to a state of markdown with history and the glossary plugin
+ * (one edit made first, so there is an undo step), as JSON { spans, sameDoc, undoBefore, undoAfter, changed }.
+ */
+export function glossaryMetaJson(markdown, termsJson) {
+  const editor = { glossary: null };
+  let state = EditorState.create({ doc: parse(String(markdown)), plugins: [history(), glossaryPlugin(editor)] });
+  state = state.apply(state.tr.insertText(" x", state.doc.content.size - 1));
+  const before = state;
+  editor.glossary = glossaryState(readGlossary(termsJson));
+  const tr = state.tr.setMeta(glossaryKey, {}).setMeta("addToHistory", false);
+  state = state.apply(tr);
+  return JSON.stringify({
+    spans: glossaryKey.getState(state).find().length,
+    sameDoc: state.doc.eq(before.doc),
+    undoBefore: undoDepth(before),
+    undoAfter: undoDepth(state),
+    changed: tr.docChanged,
+  });
 }
 
 /**

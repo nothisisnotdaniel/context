@@ -88,6 +88,8 @@
     private ElementReference host;
     private EditableNote? opened;
     private bool mounted;
+    // True from the mount until what it loads (attributes, outline, decisions, glossary) is in and drawn.
+    private bool loadingAfterMount;
     private bool unreadable;
     private bool editorFailed;
     // The sensitive session locked: the editor is about to go, so the toolbar goes at once.
@@ -229,7 +231,7 @@
     internal bool HasUnsaved => mounted && !disposed && (dirty || saving || pause is not null);
 
     /// <summary>True when a note is open in the mounted editor and no save runs: a save can start at once.</summary>
-    internal bool IsReady => opened is not null && mounted && !saving;
+    internal bool IsReady => opened is not null && mounted && !saving && !loadingAfterMount;
 
     /// <summary>
     /// Before the parent leaves the note: waits for a running save, then saves what is still unsaved. True when
@@ -325,6 +327,7 @@
                 }
                 await LoadOutlineAsync();
                 await LoadDecisionTitlesAsync();
+                await LoadGlossaryAsync();
             }
             else
             {
@@ -428,6 +431,7 @@
             await LoadOutlineAsync();
             await LoadDecisionPrefixesAsync(note.Text);
             await LoadDecisionTitlesAsync();
+            await LoadGlossaryAsync();
         }
         catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
         {
@@ -460,6 +464,7 @@
             await LoadOutlineAsync();
             await LoadDecisionPrefixesAsync(saved.Text);
             await LoadDecisionTitlesAsync();
+            await LoadGlossaryAsync();
         }
         catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
         {
@@ -540,6 +545,7 @@
             await Interop.MountAsync(host, note.Text, images, Name);
             opened = note;
             mounted = true;
+            loadingAfterMount = true;
         }
         catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
         {
@@ -562,6 +568,7 @@
             await LoadOutlineAsync();
             await LoadDecisionPrefixesAsync(note.Text);
             await LoadDecisionTitlesAsync();
+            await LoadGlossaryAsync();
             if (Heading is { } heading)
             {
                 await JumpToHeadingAsync(heading);
@@ -572,6 +579,7 @@
             }
         }
 
+        loadingAfterMount = false;
         StateHasChanged();
     }
 
@@ -909,6 +917,31 @@
         catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
         {
             // The page is gone; the references stay as they are drawn.
+        }
+    }
+
+    // Job 380: the glossary terms and their meanings for the hover, from the index (synced first for a plain note; a
+    // sensitive note only reads it). A failure keeps the terms the editor already has.
+    private async Task LoadGlossaryAsync()
+    {
+        if (!mounted || disposed)
+        {
+            return;
+        }
+
+        try
+        {
+            IReadOnlyList<(string Term, string Title)>? terms = await State.GlossaryTitles(!Sensitive);
+            if (terms is null || disposed)
+            {
+                return;
+            }
+
+            await Interop.SetGlossaryAsync(host, terms);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            // The page is gone; the terms stay as they are drawn.
         }
     }
 
