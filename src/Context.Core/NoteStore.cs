@@ -61,6 +61,33 @@ internal sealed class NoteExistsException : IOException
 }
 
 /// <summary>
+/// Thrown by <see cref="NoteStore.Save"/> in create-only mode when a plain note with that name (ignoring case)
+/// exists, also one that appeared between the check and the move. <see cref="Name"/> is that note's name.
+/// </summary>
+internal sealed class NoteTakenException : IOException
+{
+    public NoteTakenException(string name)
+        : base($"Note {name} already exists.")
+    {
+        Name = name;
+    }
+
+    public string Name { get; }
+}
+
+/// <summary>
+/// Thrown by <see cref="NoteStore.ReadImport"/> when the source is empty or not a regular file (a FIFO, a device).
+/// Not an <see cref="IOException"/>, so it is never taken for an ordinary read error. The message is fixed.
+/// </summary>
+internal sealed class SpecialImportFileException : Exception
+{
+    public SpecialImportFileException()
+        : base("Empty or special file.")
+    {
+    }
+}
+
+/// <summary>
 /// Markdown notes kept as <c>*.md</c> files in one root folder. A note's title is its file name without
 /// <c>.md</c>. The subpages of <c>X.md</c> are the <c>*.md</c> files in the folder <c>X/</c> next to it, to any
 /// depth. The files are the source of truth; nothing else is stored.
@@ -684,9 +711,13 @@ internal sealed class NoteStore
     /// Stores <paramref name="content"/> as the note <paramref name="title"/> (normalized and validated like
     /// <see cref="Create"/>). An existing note with that name (ignoring case)
     /// is replaced through a temp file and a move, keeping its file name; otherwise a new file is created.
-    /// Returns the note and whether it replaced one. Throws <see cref="ArgumentException"/> for an invalid title.
+    /// Returns the note and whether it replaced one. Throws <see cref="ArgumentException"/> for an invalid title and
+    /// <see cref="NoteExistsException"/> when a sensitive note has that name, also one that appeared just before the
+    /// move. With <paramref name="createOnly"/> an existing plain note is never replaced: the move never overwrites
+    /// and <see cref="NoteTakenException"/> (with that note's name) is thrown, also when the note appeared between
+    /// the check and the move; nothing changes then.
     /// </summary>
-    public (NoteInfo Note, bool Replaced) Save(string title, byte[] content)
+    public (NoteInfo Note, bool Replaced) Save(string title, byte[] content, bool createOnly = false)
     {
         title = NormalizeTitle(title);
         string? error = ValidateTitle(title);
@@ -701,6 +732,11 @@ internal sealed class NoteStore
         }
 
         NoteInfo? existing = Find(List(), title);
+        if (createOnly && existing is not null)
+        {
+            throw new NoteTakenException(existing.Name);
+        }
+
         PrivateFile.CreateFolder(root);
         string name = existing?.Name ?? title;
         string path = existing?.Path ?? Path.Combine(root, title + Extension);
@@ -712,7 +748,28 @@ internal sealed class NoteStore
                 stream.Write(content);
             }
 
-            File.Move(temp, path, overwrite: existing is not null);
+            BeforeSaveMove?.Invoke();
+            if (IsSensitiveName(title))
+            {
+                // A sensitive note with that name appeared in between: the name is taken for plain notes.
+                throw new NoteExistsException(title);
+            }
+
+            try
+            {
+                File.Move(temp, path, overwrite: existing is not null);
+            }
+            // File.Move(overwrite: false) fails when the target exists: a note that appeared after the check. In
+            // create-only mode that is a taken name; otherwise the exception is rethrown as before.
+            catch (IOException) when (existing is null && File.Exists(path))
+            {
+                if (!createOnly)
+                {
+                    throw;
+                }
+
+                throw new NoteTakenException(Find(List(), title)?.Name ?? title);
+            }
         }
         finally
         {
@@ -948,11 +1005,19 @@ internal sealed class NoteStore
     }
 
     /// <summary>
+    /// True when <paramref name="path"/> may be imported by name: its file name ends in <c>.md</c>, ignoring case
+    /// (<c>a.MD</c> is accepted, <c>notes.md.txt</c> is not). Both front ends check it before reading the file.
+    /// </summary>
+    public static bool IsImportSource(string path) =>
+        Path.GetFileName(path).EndsWith(Extension, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Reads the file to import, at most <see cref="MaxImportBytes"/>, without changing it, through
-    /// <see cref="BoundedFile"/>: a file that reports length 0 is returned empty without being opened (so a FIFO
-    /// never blocks) and a stream that can't seek is refused. Throws <see cref="FileNotFoundException"/> when it is
-    /// missing, <see cref="InvalidDataException"/> when it is too large, and <see cref="IOException"/>
-    /// (also when it is not a regular file) or <see cref="UnauthorizedAccessException"/> when it can't be read.
+    /// <see cref="BoundedFile"/>. A file that reports length 0 (an empty file, a FIFO, a device such as
+    /// <c>/dev/null</c>) is never opened, so a FIFO never blocks: it throws <see cref="SpecialImportFileException"/>,
+    /// as does a file that turns out empty when read. Throws <see cref="FileNotFoundException"/> when it is missing or
+    /// a directory, <see cref="InvalidDataException"/> when it is too large, and <see cref="IOException"/> (also when
+    /// it can't seek) or <see cref="UnauthorizedAccessException"/> when it can't be read.
     /// </summary>
     public static byte[] ReadImport(string path)
     {
@@ -962,12 +1027,23 @@ internal sealed class NoteStore
             throw new FileNotFoundException("No such file.");
         }
 
+        if (info.Length == 0)
+        {
+            throw new SpecialImportFileException();
+        }
+
         if (info.Length > MaxImportBytes)
         {
             throw new InvalidDataException("Too large.");
         }
 
-        return BoundedFile.Read(path, MaxImportBytes);
+        byte[] content = BoundedFile.Read(path, MaxImportBytes);
+        if (content.Length == 0)
+        {
+            throw new SpecialImportFileException();
+        }
+
+        return content;
     }
 
     // Resolves symbolic links in the part of the path that exists, from the top down; the rest is kept as is.
@@ -1025,6 +1101,9 @@ internal sealed class NoteStore
 
     /// <summary>Test hook: runs just before a child folder is moved, so a test can make that move fail.</summary>
     internal Action? BeforeFolderMove { get; set; }
+
+    /// <summary>Test hook: runs in <see cref="Save"/> just before the temp file is moved, so a test can make a note appear.</summary>
+    internal Action? BeforeSaveMove { get; set; }
 
     // Every listed note with the folder holding its subpages (null when there is none).
     private List<Entry> ListEntries()

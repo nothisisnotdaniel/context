@@ -338,6 +338,13 @@
         IReadOnlyList<string> chosen = Dialog.OpenMarkdownFiles();
         if (chosen.Count == 0)
         {
+            // A cancelled picker: the previous import's lines no longer describe the screen.
+            if (importLines.Count > 0)
+            {
+                importLines = [];
+                StateHasChanged();
+            }
+
             return;
         }
 

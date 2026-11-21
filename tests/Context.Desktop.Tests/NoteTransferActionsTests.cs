@@ -156,6 +156,111 @@ public sealed class NoteTransferActionsTests : IDisposable
         Assert.Equal(0, data.Keys.Agrees);
     }
 
+    // 385 AC-2: an empty file is refused, so the note it names keeps its bytes.
+    [Fact]
+    public async Task ImportNote_EmptyFile_RefusedKeepsTheNote()
+    {
+        data.WriteNote("Plan", "keep\n");
+        string source = Source("Plan.md", []);
+
+        ActionResult result = await ImportRefused(source, "Can't import an empty or special file: " + source);
+        Assert.Equal(ActionReason.Invalid, result.Reason);
+        result = await ImportRefused(source, "Can't import an empty or special file: " + source, confirmed: new Confirmation());
+        Assert.Equal(ActionReason.Invalid, result.Reason);
+        Assert.Equal("keep\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+    }
+
+    // 385 AC-2: a FIFO reports length 0, so it is never opened (no hang) and is refused.
+    [Fact]
+    public async Task ImportNote_Fifo_RefusedWithoutBlocking()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        data.WriteNote("Plan", "keep\n");
+        string fifo = data.Outside("Plan.md");
+        using (System.Diagnostics.Process mkfifo = System.Diagnostics.Process.Start("mkfifo", fifo))
+        {
+            mkfifo.WaitForExit();
+        }
+
+        ActionResult result = await ImportRefused(fifo, "Can't import an empty or special file: " + fifo, confirmed: new Confirmation());
+
+        Assert.Equal(ActionReason.Invalid, result.Reason);
+        Assert.Equal("keep\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
+    }
+
+    // 385 AC-3: a source that doesn't end in .md is refused by the action itself, not only by the dialog filter.
+    [Theory]
+    [InlineData("notes.txt")]
+    [InlineData("notes")]
+    [InlineData("notes.md.txt")]
+    public async Task ImportNote_NotMarkdown_Refused(string name)
+    {
+        data.WriteNote("Plan", "text\n");
+        string source = Source(name, Encoding.UTF8.GetBytes("# Notes\n"));
+
+        ActionResult result = await ImportRefused(source, "Can't import a file that isn't .md: " + source);
+
+        Assert.Equal(ActionReason.Invalid, result.Reason);
+    }
+
+    // 385 AC-3: the .md ending is matched ignoring case.
+    [Fact]
+    public async Task ImportNote_UpperCaseMd_Imported()
+    {
+        string source = Source("a.MD", Encoding.UTF8.GetBytes("# a\n"));
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.ImportNote(source, null);
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Equal("# a\n", File.ReadAllText(Path.Combine(data.Root, "a.md")));
+    }
+
+    // 385 AC-5: a note that appears between the check and the save is not replaced without a confirmation.
+    [Fact]
+    public async Task ImportNote_NoteAppearsBeforeSave_NotConfirmedKeepsIt()
+    {
+        string source = Source("Plan.md", Encoding.UTF8.GetBytes("mine\n"));
+        await data.RefreshAsync();
+        string plan = Path.Combine(data.Root, "Plan.md");
+        data.Notes!.BeforeSaveMove = () => File.WriteAllText(plan, "theirs\n");
+
+        ActionResult result = await data.Actions!.ImportNote(source, null);
+
+        Assert.Equal(ActionKind.Refused, result.Kind);
+        Assert.Equal(ActionReason.NotConfirmed, result.Reason);
+        Assert.Equal("Plan", result.Text);
+        Assert.Equal("theirs\n", File.ReadAllText(plan));
+        Assert.Empty(Directory.GetFiles(data.Root, "*.tmp"));
+
+        data.Notes.BeforeSaveMove = null;
+        ActionResult replaced = await data.Actions.ImportNote(source, new Confirmation());
+
+        Assert.Equal(ActionKind.Done, replaced.Kind);
+        Assert.Equal("mine\n", File.ReadAllText(plan));
+    }
+
+    // 385 AC-5: a sensitive note that appears between the check and the save wins: nothing plain is written.
+    [Fact]
+    public async Task ImportNote_SensitiveNoteAppearsBeforeSave_RefusedExists()
+    {
+        string source = Source("Plan.md", Encoding.UTF8.GetBytes("mine\n"));
+        await data.RefreshAsync();
+        data.Notes!.BeforeSaveMove = () => data.WriteSensitive("Plan", "sealed\n");
+
+        ActionResult result = await data.Actions!.ImportNote(source, null);
+
+        Assert.Equal(ActionKind.Refused, result.Kind);
+        Assert.Equal(ActionReason.Exists, result.Reason);
+        Assert.Equal("Plan is sensitive. Nothing was imported.", result.Text);
+        Assert.False(File.Exists(Path.Combine(data.Root, "Plan.md")));
+        Assert.Empty(Directory.GetFiles(data.Root, "*.tmp"));
+    }
+
     // AC-3: a path that is not fully qualified is never resolved against the current directory.
     [Theory]
     [InlineData("Plan.md")]

@@ -485,6 +485,47 @@ public sealed class NotesPanelTests : IDisposable
         Assert.Equal(builds, data.State.Builds);
     }
 
+    // 385 AC-6: a cancelled picker after an import clears the previous result lines (Done, red or Not replaced),
+    // keeps the status region in the page, calls no action and changes no file.
+    [Theory]
+    [InlineData("done")]
+    [InlineData("red")]
+    [InlineData("notreplaced")]
+    public async Task Import_CancelledAfterAnImport_ClearsTheLines(string kind)
+    {
+        data.WriteNote("Plan", "old\n");
+        string source = kind switch
+        {
+            "done" => Source("Fresh.md", "fresh\n"),
+            "red" => data.Outside("Gone.md"),
+            _ => Source("Plan.md", "new\n"),
+        };
+        data.Dialog.ImportPaths = [source];
+        IRenderedComponent<NotesPanel> cut = await data.RenderAsync<NotesPanel>();
+
+        await cut.Find("button.import").ClickAsync(new MouseEventArgs());
+        if (kind == "notreplaced")
+        {
+            cut.WaitForAssertion(() => Assert.Single(cut.FindAll("[role=dialog]")), Wait);
+            await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        }
+
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".import-result p")), Wait);
+        Assert.Empty(cut.FindAll("[role=dialog]"));
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        SortedDictionary<string, string> before = Files();
+        int builds = data.State.Builds;
+        data.Dialog.ImportPaths = [];
+
+        await cut.Find("button.import").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".import-result p")), Wait);
+        Assert.Equal(2, data.Dialog.ImportOpens);
+        Assert.Equal("status", cut.Find(".import-result").GetAttribute("role"));
+        Assert.Equal(before, Files());
+        Assert.Equal(builds, data.State.Builds);
+    }
+
     // 139 AC-6: each chosen file gets one line in the chosen order (accent done, red refused); new notes are listed.
     [Fact]
     public async Task Import_SeveralFiles_OneLineEachInOrder()

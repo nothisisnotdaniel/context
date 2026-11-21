@@ -693,19 +693,30 @@ public sealed class NoteStoreTests : IDisposable
         Assert.Empty(Directory.GetFiles(root, "*.tmp"));
     }
 
-    // 123 round 2: a FIFO named like a Markdown file is never opened, so the import can't hang.
+    // 385 AC-1 (was 123 round 2): an empty file, a FIFO and /dev/null are refused; a FIFO is never opened, so the
+    // import can't hang. A directory and a missing path stay "not found", a big file stays "too large".
     [Fact]
-    public async Task ReadImport_FifoOrEmptyFile_ReturnsWithoutBlocking()
+    public async Task ReadImport_FifoEmptyFileOrDevice_IsRefusedWithoutBlocking()
     {
         Directory.CreateDirectory(parent);
         string empty = Path.Combine(parent, "empty.md");
         File.WriteAllBytes(empty, []);
-        Assert.Empty(NoteStore.ReadImport(empty));
+        string folder = Path.Combine(parent, "folder.md");
+        Directory.CreateDirectory(folder);
+        string big = Path.Combine(parent, "big.md");
+        File.WriteAllBytes(big, new byte[NoteStore.MaxImportBytes + 1]);
+
+        Assert.Throws<SpecialImportFileException>(() => NoteStore.ReadImport(empty));
+        Assert.Throws<FileNotFoundException>(() => NoteStore.ReadImport(folder));
+        Assert.Throws<FileNotFoundException>(() => NoteStore.ReadImport(Path.Combine(parent, "none.md")));
+        Assert.Throws<InvalidDataException>(() => NoteStore.ReadImport(big));
 
         if (OperatingSystem.IsWindows())
         {
             return;
         }
+
+        Assert.Throws<SpecialImportFileException>(() => NoteStore.ReadImport("/dev/null"));
 
         string fifo = Path.Combine(parent, "pipe.md");
         using (System.Diagnostics.Process mkfifo = System.Diagnostics.Process.Start("mkfifo", fifo))
@@ -715,7 +726,74 @@ public sealed class NoteStoreTests : IDisposable
 
         Task<byte[]> read = Task.Run(() => NoteStore.ReadImport(fifo));
         Assert.Same(read, await Task.WhenAny(read, Task.Delay(TimeSpan.FromSeconds(5))));
-        Assert.Empty(await read);
+        await Assert.ThrowsAsync<SpecialImportFileException>(() => read);
+    }
+
+    // 385 AC-3: the .md rule both front ends share, ignoring case.
+    [Theory]
+    [InlineData("notes.txt", false)]
+    [InlineData("notes", false)]
+    [InlineData("notes.md.txt", false)]
+    [InlineData("a.MD", true)]
+    [InlineData("notes.md", true)]
+    public void IsImportSource_NeedsMdEnding(string name, bool accepted)
+    {
+        Assert.Equal(accepted, NoteStore.IsImportSource(Path.Combine(parent, name)));
+    }
+
+    // 385 AC-4: create-only writes a free name, and refuses a plain note that exists (ignoring case).
+    [Fact]
+    public void Save_CreateOnly_WritesFreeName_RefusesExistingNote()
+    {
+        NoteStore store = new NoteStore(root);
+        store.Create("Plan");
+        string plan = Path.Combine(root, "Plan.md");
+        byte[] before = File.ReadAllBytes(plan);
+
+        (NoteInfo created, bool replaced) = store.Save("Fresh", "# Fresh\n"u8.ToArray(), createOnly: true);
+        NoteTakenException taken = Assert.Throws<NoteTakenException>(() => store.Save("plan", "new\n"u8.ToArray(), createOnly: true));
+
+        Assert.False(replaced);
+        Assert.Equal("# Fresh\n"u8.ToArray(), File.ReadAllBytes(created.Path));
+        Assert.Equal("Plan", taken.Name);
+        Assert.Equal(before, File.ReadAllBytes(plan));
+        Assert.Empty(Directory.GetFiles(root, "*.tmp"));
+    }
+
+    // 385 AC-4: a plain note that appears between the check and the move is never replaced.
+    [Fact]
+    public void Save_CreateOnly_NoteAppearsBeforeMove_ThrowsTakenAndKeepsIt()
+    {
+        NoteStore store = new NoteStore(root);
+        Directory.CreateDirectory(root);
+        string plan = Path.Combine(root, "Plan.md");
+        byte[] theirs = "# Theirs\n"u8.ToArray();
+        store.BeforeSaveMove = () => File.WriteAllBytes(plan, theirs);
+
+        NoteTakenException taken = Assert.Throws<NoteTakenException>(() => store.Save("Plan", "mine\n"u8.ToArray(), createOnly: true));
+
+        Assert.Equal("Plan", taken.Name);
+        Assert.Equal(theirs, File.ReadAllBytes(plan));
+        Assert.Empty(Directory.GetFiles(root, "*.tmp"));
+    }
+
+    // 385 AC-4: a sensitive note that appears between the check and the move, or exists before, still wins.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Save_SensitiveNoteAppearsBeforeMove_ThrowsExists(bool createOnly)
+    {
+        NoteStore store = new NoteStore(root);
+        Directory.CreateDirectory(root);
+        store.BeforeSaveMove = () => File.WriteAllText(Path.Combine(root, "Plan.ctxs"), "sealed");
+
+        NoteExistsException exists = Assert.Throws<NoteExistsException>(() => store.Save("Plan", "mine\n"u8.ToArray(), createOnly));
+
+        Assert.Equal("Plan", exists.Name);
+        Assert.False(File.Exists(Path.Combine(root, "Plan.md")));
+        Assert.Empty(Directory.GetFiles(root, "*.tmp"));
+        Assert.Throws<NoteExistsException>(() => new NoteStore(root).Save("Plan", "again\n"u8.ToArray(), createOnly: true));
+        Assert.Equal(["Plan.ctxs"], Directory.GetFiles(root).Select(Path.GetFileName));
     }
 
     // 134 AC-1: a rename moves the file, keeps its bytes and last-write time, strips .md and returns the new note.

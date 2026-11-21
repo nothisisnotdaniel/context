@@ -1242,6 +1242,29 @@ public sealed class MainTests : IDisposable
             "Replaced Plan.", Assert.Single(cut.FindAll(".import-result p")).TextContent, StringComparison.Ordinal), Wait);
     }
 
+    // 385 AC-6: /import with a cancelled picker after an import clears the previous result line.
+    [Fact]
+    public async Task PaletteImport_CancelledAfterAnImport_ClearsTheLines()
+    {
+        string source = data.Outside("Chosen.md");
+        File.WriteAllText(source, "chosen\n");
+        data.Dialog.ImportPaths = [source];
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, "/import");
+        cut.WaitForAssertion(() => Assert.StartsWith(
+            "Imported Chosen.", Assert.Single(cut.FindAll(".import-result p")).TextContent, StringComparison.Ordinal), Wait);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
+        data.Dialog.ImportPaths = [];
+
+        await RunPalette(cut, "/import");
+
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".import-result p")), Wait);
+        Assert.Equal(2, data.Dialog.ImportOpens);
+        Assert.Equal("status", cut.Find(".import-result").GetAttribute("role"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
+    }
+
     // 177 AC-6: one OnDrop stores the file, inserts its link once and shows the accent line.
     [Fact]
     public async Task Drop_AttachesInsertsAndShowsLine()
