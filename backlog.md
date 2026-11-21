@@ -372,6 +372,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#415](backlog/415-name-the-current-theme-when-a.md) Name the current theme when a theme save fails
 - [?] [#420](backlog/420-decision-picker-announces-the-selected-row.md) Decision picker announces the selected row to screen readers
 - [?] [#421](backlog/421-boundedfile-read-refuses-symlinks-and-fifos.md) BoundedFile.Read refuses symlinks and FIFOs
+- [?] [#422](backlog/422-byte-exact-history-checks-in-endday.md) Byte-exact history checks in EndDay and Merge decision tests
 
 ## Dropped with the terminal UI
 
