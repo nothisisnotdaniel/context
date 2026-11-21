@@ -87,11 +87,16 @@ The beta showed no blockers, and @[Anna] agreed.
 The paragraph runs to the next blank line, heading, code fence or list item, and the marker also works as a list item
 (`- #!d ...`), as the first line of a note, or after a blank line, a heading or a fence; a `#!d` in the middle of a
 paragraph or inside code is no decision. When the desktop app saves the note, every new marker gets a number that is
-unique across all notes and is written into the text (`#!d1234`); notes written by capture, import, the day's end, the
-briefing or the CLI stay unnumbered until their next save in the app, and sensitive notes are never numbered. Any note
+unique across all notes and is written into the text (`#!d1234`). Notes the app writes itself (capture, note today,
+triage, import, the day's end, the briefing and the link updates of a rename) are numbered the same way; notes written
+by the command line, a merge, a template or a meeting note stay unnumbered until their next save in the app, and
+sensitive notes are never numbered. A number is never given twice, and numbers you type yourself are stepped over.
+If no numbers are left (above 999999999), the app says so in red and new markers stay unnumbered. Any note
 can point at a decision with `#!d1234`: the editor shows it as a link with the decision's headline as its tooltip, and a
 click jumps to the decision. A pasted decision loses its number (the text stays), unless you cut it and paste it back
-in the same note, so a copy never takes over the number; renaming or moving a note in the app keeps its numbers.
+in the same note, so a copy never takes over the number. Only an exact copy loses it: when another note has the same
+number with a different text, the number stays and the app says so in red, so you can type `#!d` alone to give the
+decision a new number. Renaming or moving a note in the app keeps its numbers.
 
 `context decisions` prints every decision of every note, newest first, one line each: the date, the number (empty
 while unnumbered), the note, the people mentioned in the paragraph (`@[Anna]`, resolved through aliases) and the

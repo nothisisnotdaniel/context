@@ -3507,6 +3507,23 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".decisions-panel")), Wait);
     }
 
+    // 343 round 2 feedback 1: while no decision numbers are left, Main shows the red alert line (the flag clearing on
+    // the next numbered save is DecisionActionsTests.SaveNote_NoNumbersLeft_SavedAsTyped_Told).
+    [Fact]
+    public async Task Decisions_NumbersRanOut_AlertLine()
+    {
+        data.WriteNote("inbox", "# inbox\n\n#!d keep it\n");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        Assert.Empty(cut.FindAll("p.decision-notice"));
+        Assert.Equal(1, new TagIndex(data.Root).ReserveDecisionNumbers(DecisionParser.MaxNumber));
+
+        await data.Actions!.CaptureText("one");
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            DesktopActions.DecisionNumbersRanOutText, cut.Find("p.decision-notice[role=alert]").TextContent), Wait);
+        Assert.True(cut.Find("p.decision-notice").ClassList.Contains("red"));
+    }
+
     // 169 AC-7: the palette lists /review with its description.
     [Fact]
     public void Palette_ListsReview()

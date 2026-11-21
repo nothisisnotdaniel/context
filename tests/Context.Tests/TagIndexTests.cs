@@ -1574,33 +1574,51 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal(nameof(IndexedDecision), row.ToString());
     }
 
-    // 343 AC-4: reserved numbers come above the counter and every number in the index, are never reused after a
-    // decision is deleted, and respect the floor.
+    // 343 AC-4, round 2 feedback 1: reserved numbers come above the counter, step over every number in the index or
+    // in taken, are never reused after a decision is deleted, and a typed number never moves the counter.
     [Fact]
-    public void ReserveDecisionNumbers_AboveCounterAndIndex_NeverReused()
+    public void ReserveDecisionNumbers_AboveCounter_StepsOverUsed_NeverReused()
     {
-        WriteNoteAt("Plan", "#!d40 x", Day1);
+        WriteNoteAt("Plan", "#!d2 x\n\n#!d900000000 typed", Day1);
         index.Sync(store);
 
-        Assert.Equal(41, index.ReserveDecisionNumbers(3));
-        Assert.Equal(44, index.ReserveDecisionNumbers(1));
+        Assert.Equal(3, index.ReserveDecisionNumbers(3));
+        Assert.Equal(6, index.ReserveDecisionNumbers(1));
 
         File.Delete(Path.Combine(root, "Plan.md"));
         index.Sync(store);
         Assert.Empty(DecisionRows());
 
-        Assert.Equal(45, index.ReserveDecisionNumbers(1));
-        Assert.Equal(101, index.ReserveDecisionNumbers(2, floor: 100));
-        Assert.Equal(103, index.ReserveDecisionNumbers(1));
+        Assert.Equal(7, index.ReserveDecisionNumbers(1));
+        Assert.Equal(10, index.ReserveDecisionNumbers(2, [8, 9, 13]));
+        Assert.Equal(12, index.ReserveDecisionNumbers(1));
+        Assert.Equal(14, index.ReserveDecisionNumbers(1, [13]));
     }
 
-    // 343 AC-4: a fresh database starts at 1; past the highest number it refuses.
+    // 343 AC-4, round 2 feedback 1: a fresh database starts at 1; a huge typed number is stepped over, not a new floor;
+    // past the highest number it gives null and leaves the counter as it was.
     [Fact]
-    public void ReserveDecisionNumbers_FreshAndExhausted()
+    public void ReserveDecisionNumbers_FreshHugeTypedAndExhausted()
     {
+        WriteNoteAt("Typed", "#!d999999999 huge", Day1);
+        index.Sync(store);
+
         Assert.Equal(1, index.ReserveDecisionNumbers(1));
-        Assert.Throws<TagIndexException>(() => index.ReserveDecisionNumbers(2, floor: DecisionParser.MaxNumber - 1));
-        Assert.Equal(2, index.ReserveDecisionNumbers(1));
+        Assert.Equal(2, index.ReserveDecisionNumbers(DecisionParser.MaxNumber - 3));
+        Assert.Null(index.ReserveDecisionNumbers(2));
+        Assert.Equal(DecisionParser.MaxNumber - 1, index.ReserveDecisionNumbers(1));
+        Assert.Null(index.ReserveDecisionNumbers(1));
+    }
+
+    // Round 2 feedback 3: each owned number maps to the text of its owner's first row; an owner without a row has none.
+    [Fact]
+    public void OwnedDecisionTexts_OwnersFirstRow()
+    {
+        WriteNoteAt("Owner", "#!d4 first\n\n#!d4 second", Day1);
+        WriteNoteAt("Copy", "#!d4 other", Day1.AddDays(1));
+        index.Sync(store);
+
+        Assert.Equal(new Dictionary<int, string> { [4] = "first" }, index.OwnedDecisionTexts());
     }
 
     // 343 AC-5: an unowned number goes to the holder with the oldest last-write time; non-owners are left out of the

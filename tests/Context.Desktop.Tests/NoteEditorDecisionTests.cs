@@ -153,6 +153,37 @@ public sealed class NoteEditorDecisionTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(status, cut.Find(".status").TextContent), Wait);
     }
 
+    // 343 round 2 feedback 1 and 3: a save that kept another note's number (different text) or ran out of numbers says
+    // so in red after the saved text; the note is saved either way.
+    [Fact]
+    public async Task Save_KeptOrRanOut_RedNotice()
+    {
+        data.WriteNote("Owner", "#!d5 ship\n");
+        File.SetLastWriteTimeUtc(Path.Combine(data.Root, "Owner.md"), Old);
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<NoteEditor> cut = await Render("Plan");
+
+        await js.Change(cut, "# Plan\n\n#!d5 hold\n");
+        data.AutoSave.Elapse();
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            "Saved. Kept #!d5: another note has this number with a different text. Type #!d alone to give a decision a new number.",
+            cut.Find(".status").TextContent), Wait);
+        Assert.True(cut.Find(".status").ClassList.Contains("red"));
+        Assert.Equal("# Plan\n\n#!d5 hold\n", File.ReadAllText(PlanPath));
+
+        TagIndex index = new TagIndex(data.Root);
+        Assert.Equal(1, index.ReserveDecisionNumbers(4));
+        Assert.Equal(6, index.ReserveDecisionNumbers(DecisionParser.MaxNumber - 5));
+        await js.Change(cut, "# Plan\n\n#!d5 hold\n\n#!d new\n");
+        data.AutoSave.Elapse();
+
+        cut.WaitForAssertion(() => Assert.StartsWith(
+            "Saved. " + DesktopActions.DecisionNumbersRanOutText, cut.Find(".status").TextContent, StringComparison.Ordinal), Wait);
+        Assert.Equal("# Plan\n\n#!d5 hold\n\n#!d new\n", File.ReadAllText(PlanPath));
+    }
+
     private async Task<IRenderedComponent<NoteEditor>> Render(string name)
     {
         await data.RefreshAsync();

@@ -780,13 +780,39 @@ internal sealed class TagIndex
     });
 
     /// <summary>
-    /// Reserves <paramref name="count"/> consecutive new decision numbers in one <c>BEGIN IMMEDIATE</c> transaction and
-    /// returns the first. It is one above the highest of <c>decision_counter</c>, every number in <c>note_decisions</c>
-    /// and <c>decision_owners</c>, and <paramref name="floor"/>; the counter then holds the last one, so a number is
-    /// never handed out twice while the database lasts (a failed write only leaves a gap). Throws
-    /// <see cref="TagIndexException"/> when the numbers would pass <see cref="DecisionParser.MaxNumber"/>.
+    /// Every owned number whose owner holds it in a row: number -> the text of the owner's first row with it (the one
+    /// the log shows). An owner with no row (unreadable or oversized) has no entry. Raw note text.
     /// </summary>
-    public int ReserveDecisionNumbers(int count, int floor = 0)
+    public IReadOnlyDictionary<int, string> OwnedDecisionTexts() => Run(connection =>
+    {
+        Dictionary<int, string> texts = [];
+        using SqliteCommand command = Command(
+            connection,
+            null,
+            "SELECT o.number, (SELECT d.text FROM note_decisions d WHERE d.note = o.note AND d.number = o.number "
+                + "ORDER BY d.line LIMIT 1) FROM decision_owners o");
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            long number = reader.GetInt64(0);
+            if (number is >= 1 and <= DecisionParser.MaxNumber && !reader.IsDBNull(1))
+            {
+                texts[(int)number] = reader.GetString(1);
+            }
+        }
+
+        return (IReadOnlyDictionary<int, string>)texts;
+    });
+
+    /// <summary>
+    /// Reserves <paramref name="count"/> consecutive new decision numbers in one <c>BEGIN IMMEDIATE</c> transaction and
+    /// returns the first: the lowest run above <c>decision_counter</c> (the last number handed out) in which no number is
+    /// in <c>note_decisions</c>, <c>decision_owners</c> or <paramref name="taken"/>. The counter then holds the run's
+    /// last number, so a number is never handed out twice while the database lasts (a failed write only leaves a gap),
+    /// and a number typed by hand never moves the counter: a huge one is only stepped over. <c>null</c> when no such run
+    /// is left at or below <see cref="DecisionParser.MaxNumber"/> (the counter is then unchanged).
+    /// </summary>
+    public int? ReserveDecisionNumbers(int count, IReadOnlyCollection<int>? taken = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(count, 1);
         PrivateFile.CreateFolder(root);
@@ -797,24 +823,58 @@ internal sealed class TagIndex
             using (SqliteCommand select = Command(
                 connection,
                 transaction,
-                "SELECT MAX(COALESCE((SELECT MAX(high) FROM decision_counter), 0), "
-                    + "COALESCE((SELECT MAX(number) FROM note_decisions), 0), "
-                    + "COALESCE((SELECT MAX(number) FROM decision_owners), 0))"))
+                "SELECT COALESCE((SELECT MAX(high) FROM decision_counter), 0)"))
             {
                 high = Convert.ToInt64(select.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
             }
 
-            long first = Math.Max(high, floor) + 1;
-            long last = first + count - 1;
-            if (first < 1 || last > DecisionParser.MaxNumber)
+            SortedSet<long> used = [];
+            using (SqliteCommand select = Command(
+                connection,
+                transaction,
+                "SELECT number FROM note_decisions WHERE number > $high "
+                    + "UNION SELECT number FROM decision_owners WHERE number > $high"))
             {
-                throw new TagIndexException("No decision numbers are left.");
+                select.Parameters.AddWithValue("$high", high);
+                using SqliteDataReader reader = select.ExecuteReader();
+                while (reader.Read())
+                {
+                    used.Add(reader.GetInt64(0));
+                }
+            }
+
+            foreach (int number in taken ?? [])
+            {
+                if (number > high)
+                {
+                    used.Add(number);
+                }
+            }
+
+            long first = Math.Max(high, 0) + 1;
+            foreach (long number in used)
+            {
+                if (number >= first + count)
+                {
+                    break;
+                }
+
+                if (number >= first)
+                {
+                    first = number + 1;
+                }
+            }
+
+            long last = first + count - 1;
+            if (last > DecisionParser.MaxNumber)
+            {
+                return (int?)null;
             }
 
             Execute(connection, transaction, "DELETE FROM decision_counter");
             Execute(connection, transaction, "INSERT INTO decision_counter(high) VALUES($high)", ("$high", last));
             transaction.Commit();
-            return (int)first;
+            return (int?)first;
         });
     }
 

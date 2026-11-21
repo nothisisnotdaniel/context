@@ -25,7 +25,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     in one transaction and only re-parses files whose time changed. `PRAGMA user_version` holds the parser
     version (`TagIndex.ParserVersion`, now 17: decisions are `#!d` paragraphs with a `number` (job 343); 16 was an `affiliation::` value as a comma-separated list (job 332); 15 was note todos as `- { }` lines, `- [ ]` a note checkbox (job 329); 14 was `note_text_rows`, `note_skipped` and the `note_links` key columns; 13 was `#<n>` work item references in `note_items`; 12 was `review:yyyy-MM-dd` lines in `note_reviews`; 11 was `next: @[Name] topic` lines in `note_topics`, no longer note todos; 10 was the heading of a `[[Note#Heading]]` link in `note_links.heading`; 9 was open `- [ ]` lines in `note_todos`; 8 was `Decision:` lines in `note_decisions`; 7 was note text in `note_text`; 6 was a link target that runs into a code span is no link); when it is lower, `Sync` clears every stored time and empties `note_text` and `note_text_rows` in the same
     transaction (so all notes are re-parsed and their text written once) and then sets it. Bump it whenever parsing changes. Queries: `Tags()`, `Reviews()`, `NotesWithTag`,
-    `NoteTags()`, `FindNote`, `Links` (job 295: reads `note_links` only through `TagIndex.LinksSql`, `WHERE note = $note OR whole_key IN ($k, $kmd) OR part_key IN ($k, $kmd)` with `$k` the upper-invariant name and `$kmd` = `$k` + `.MD`, so no `SCAN note_links`; then `NameLookup.ResolveLink` as before), `Skipped()` (job 295: the `note_skipped` names, ignoring case, then ordinal), `People()`, `NotesMentioning`, `NotesWithAttribute(key, value)` (by `AttributeParser.ValueKey`), `NotesWithoutAttribute(key)`, `AttributeValues(key)` (job 291: the `(Note, Value)` rows of `note_attributes` for the key, value as stored, by note (ordinal), then `rowid`), `Search(text, select)` (job 295: calls `select(note, body)` per row of `note_text MATCH $q` and keeps the non-null results, so no body is held after its row; `$q` the text as one FTS5 phrase: `"` + text with `"` doubled + `"`, always a parameter, so FTS syntax is literal), `Decisions(tag?)` (job 343: `IndexedDecision(Note, Line, Number, Text, Modified)` rows of `note_decisions` joined to `notes` with a stored time, `Modified` UTC, leaving out a numbered row whose note is not the number's owner; a tag keeps the notes with that `note_tags` row), `DecisionByNumber(n)`, `DecisionHeadlines(numbers)` (owned only), `DecisionOwners()`, `ReserveDecisionNumbers(count, floor)` and `MoveDecisionOwners(old, new)` (job 343, see Decision log), `NoteTodos()` (`NoteTodo` rows of `note_todos` joined to `notes` with a stored time). A database that can't be opened or isn't valid throws `TagIndexException` (an
+    `NoteTags()`, `FindNote`, `Links` (job 295: reads `note_links` only through `TagIndex.LinksSql`, `WHERE note = $note OR whole_key IN ($k, $kmd) OR part_key IN ($k, $kmd)` with `$k` the upper-invariant name and `$kmd` = `$k` + `.MD`, so no `SCAN note_links`; then `NameLookup.ResolveLink` as before), `Skipped()` (job 295: the `note_skipped` names, ignoring case, then ordinal), `People()`, `NotesMentioning`, `NotesWithAttribute(key, value)` (by `AttributeParser.ValueKey`), `NotesWithoutAttribute(key)`, `AttributeValues(key)` (job 291: the `(Note, Value)` rows of `note_attributes` for the key, value as stored, by note (ordinal), then `rowid`), `Search(text, select)` (job 295: calls `select(note, body)` per row of `note_text MATCH $q` and keeps the non-null results, so no body is held after its row; `$q` the text as one FTS5 phrase: `"` + text with `"` doubled + `"`, always a parameter, so FTS syntax is literal), `Decisions(tag?)` (job 343: `IndexedDecision(Note, Line, Number, Text, Modified)` rows of `note_decisions` joined to `notes` with a stored time, `Modified` UTC, leaving out a numbered row whose note is not the number's owner; a tag keeps the notes with that `note_tags` row), `DecisionByNumber(n)`, `DecisionHeadlines(numbers)` (owned only), `DecisionOwners()`, `ReserveDecisionNumbers(count, taken?)`, `OwnedDecisionTexts()` and `MoveDecisionOwners(old, new)` (job 343, see Decision log), `NoteTodos()` (`NoteTodo` rows of `note_todos` joined to `notes` with a stored time). A database that can't be opened or isn't valid throws `TagIndexException` (an
     `IOException`) and is never deleted or overwritten. The file database waits up to `TagIndex.BusyTimeout` (5 s; an
     internal constructor argument shortens it for tests) for another process's lock, and `Sync` starts with
     `BEGIN IMMEDIATE`, so the desktop app and a command-line run can share it. `TagsView.Build`, `LinksView.Build`
@@ -199,18 +199,35 @@ Every factory agent reads this file before working on Context. Keep it short and
     `#!d<n>` at a line start or after whitespace (or after the BOM), outside fences and code spans (`CodeSpans`), not a
     decision's own marker (a lone `#!d12` paragraph is a reference), not followed by a letter, digit, `-`, `_` or `#`;
     distinct, in first-seen order. `StripMarkers` removes the numbered decisions' markers. `TryParseNumber` (`1234` or
-    `#!d1234`), `Format(n)`. `DecisionNumbers.Apply(text, isOwnedElsewhere, next)` (pure) numbers every bare decision in
-    document order with one `next(count)` call and strips each numbered one that repeats in the text or is owned
-    elsewhere; every other char stays; it returns `DecisionEdits(Text, Bare, Strip)`. Ownership: `Sync` ends with
+    `#!d1234`), `Format(n)`. `DecisionNumbers.Apply(text, holder, next)` (pure) numbers every bare decision in
+    document order with one `next(count)` call (null: no numbers left, the bare markers stay and `Unnumbered` counts
+    them) and strips each numbered one that repeats in the text; the first occurrence of a number another note owns
+    asks `holder(number, text)`: `Copy` (the owner's first logged paragraph has exactly this text) strips it, `Other`
+    keeps it and lists it in `Kept` (round 2 guard: a wrongly decided owner never silently costs the original marker),
+    `None` (no owner, or this note) keeps it; every other char stays; it returns `DecisionEdits(Text, Bare, Strip, Kept,
+    Unnumbered)` (`Changed` when something was numbered or stripped, `Noteworthy` also for kept or unnumbered).
+    Ownership: `Sync` ends with
     `AssignDecisionOwners` (drops owners whose note is gone or, readable, no longer holds the number; an unreadable or
     oversized owner keeps it; an unowned number goes to the holder with the oldest stored last-write time, then name
-    ignoring case, then ordinal). `ReserveDecisionNumbers(count, floor)` runs in one `BEGIN IMMEDIATE` transaction:
-    first = max(counter, every number in `note_decisions` and `decision_owners`, floor) + 1, the counter set to the last
-    (so a number is never reused while the database lasts); past `MaxNumber` (999999999) `TagIndexException`.
-    `DesktopState.NumberDecisions` (under `indexGate`: `Sync`, owners, `Apply`, null on any failure, so the note is saved
-    unnumbered) is called only by the plain path of `DesktopActions.SaveNote` (and so `RestoreVersion`), before the
-    write; the result's `ActionResult.Decisions` goes back to the editor. Capture, import, day's end, briefing, link
-    rewrites, the CLI and sensitive notes never number. Rename and Move call `MoveDecisionOwners` (the note and its
+    ignoring case, then ordinal). `OwnedDecisionTexts()` gives each owned number's text from the owner's first row (an
+    unreadable or oversized owner has none, so its numbers count as `Other`). `ReserveDecisionNumbers(count, taken?)`
+    (`int?`) runs in one `BEGIN IMMEDIATE` transaction: the first free run of `count` numbers above the counter, stepping
+    over every number in `note_decisions`, `decision_owners` and `taken` (the saved text's own markers and references);
+    the counter is set to its last, so a number is never reused while the database lasts and a hand-typed huge number
+    never uses up the counter; no run at or below `MaxNumber` (999999999): null, the counter unchanged.
+    `DesktopState.NumberDecisions` (under `indexGate`: `Sync`, owners and texts, `Apply`, null on any failure, so the
+    note is saved unnumbered) also keeps `DecisionNumbersRanOut` (set when a reservation gave null, cleared by the next
+    one that succeeds); `Main` shows the red `p.decision-notice` (`role="alert"`, `DesktopActions.DecisionNumbersRanOutText`)
+    while it is set, and `NoteEditor` shows `Saved[ <name>]. <DesktopActions.DecisionNoticeText>` in red after a save
+    with unnumbered, kept or stripped markers. It is called by the plain path of `DesktopActions.SaveNote` (and so
+    `RestoreVersion`), before the write; the result's `ActionResult.Decisions` goes back to the editor. The other app
+    write paths number too (round 2): `NoteToday`, `TriageAppend`, `TriageToNote`, the briefing and the link rewrites of
+    `RenameNote` number the text before their write (`Numbered`), capture, import and the day's end (`EndDay`,
+    `WriteStandup`, `AutoDayEnd`) number the written note right after (`NumberWritten`: `ReadForEdit`, then
+    `SaveIfUnchanged` without a version; a change on disk or any failure leaves it as written). The CLI (no desktop
+    state; a second writer of the counter is not wanted), merge (the merged text holds the source's markers while the
+    source still owns them, so they would be stripped as copies), templates, meeting notes and suggestions stay
+    unnumbered until the next save in the app; sensitive notes never number. Rename and Move call `MoveDecisionOwners` (the note and its
     subpages, by `substr`, no `LIKE`). `DecisionsView.TryNormalizeTag` (blank: no filter; else `NormalizeTag`, valid only
     when `NormalizeBracket` keeps it). `DecisionsView.Build(index, store, tag, zone)`: an invalid tag is `InvalidTag`
     without opening the index; else `Sync`, `TagIndex.Decisions`, each as `Decision(Note, Line, Number, Date, Text,

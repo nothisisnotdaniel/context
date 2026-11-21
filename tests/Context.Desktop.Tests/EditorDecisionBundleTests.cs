@@ -76,7 +76,7 @@ public sealed class EditorDecisionBundleTests : IClassFixture<EditorBundle>
     public void ApplyEdits_MatchCore(string markdown, string ownedElsewhere)
     {
         HashSet<int> owned = ownedElsewhere.Length == 0 ? [] : ownedElsewhere.Split(',').Select(int.Parse).ToHashSet();
-        DecisionEdits edits = DecisionNumbers.Apply(markdown, owned.Contains, _ => 40);
+        DecisionEdits edits = DecisionNumbers.Apply(markdown, (n, _) => owned.Contains(n) ? DecisionHolder.Copy : DecisionHolder.None, _ => 40);
         string json = JsonSerializer.Serialize(new { bare = edits.Bare, strip = edits.Strip });
 
         Assert.Equal(edits.Text, Edited(markdown, json));

@@ -17,6 +17,10 @@
             <main class="current-region">
                 <TopBar Today="@snapshot.Today" Selected="@SelectedDay()" OnToday="ShowToday" OnPick="PickDay" OnCapture="CaptureAsync" OnSearch="ShowSearch" PageActions="@PageActionsFor(snapshot)"
                         PageActionsDisabled="@(running || renaming || subpaging || moving)" OnPageAction="RunPageAction" />
+                @if (State.DecisionNumbersRanOut)
+                {
+                    <p class="red decision-notice" role="alert">@DesktopActions.DecisionNumbersRanOutText</p>
+                }
                 @if (page == Page.Triage)
                 {
                     <TriagePanel Guard="TriageHeld" OnTriaged="Triaged" OnClose="CloseTriage" />

@@ -407,6 +407,45 @@ internal sealed class DesktopActions
     /// <summary>The answer of <see cref="AutoDayEnd"/> when <c>settings.json</c> can't be read or written.</summary>
     public const string SettingsUnreadableText = "Can't read settings.json. The day was not closed automatically.";
 
+    /// <summary>Job 343: the red line while no decision numbers are left (<see cref="DesktopState.DecisionNumbersRanOut"/>).</summary>
+    public const string DecisionNumbersRanOutText =
+        "No decision numbers are left, so new #!d markers stay unnumbered.";
+
+    /// <summary>
+    /// Job 343: what a save did to the note's decision markers that the user should know, or <c>null</c>: bare markers
+    /// left unnumbered (<see cref="DecisionNumbersRanOutText"/>), numbers kept although another note owns them, and
+    /// removed markers. Numbers only, never note text.
+    /// </summary>
+    public static string? DecisionNoticeText(DecisionEdits? decisions)
+    {
+        if (decisions is null)
+        {
+            return null;
+        }
+
+        List<string> parts = [];
+        if (decisions.Unnumbered > 0)
+        {
+            parts.Add(DecisionNumbersRanOutText);
+        }
+
+        if (decisions.Kept.Count > 0)
+        {
+            parts.Add($"Kept {Numbers(decisions.Kept)}: another note has {(decisions.Kept.Count == 1 ? "this number" : "these numbers")}"
+                + " with a different text. Type #!d alone to give a decision a new number.");
+        }
+
+        if (decisions.Strip.Count > 0)
+        {
+            parts.Add($"Removed the marker {Numbers(decisions.Strip)}: that decision is already above or in another note.");
+        }
+
+        return parts.Count == 0 ? null : string.Join(" ", parts);
+
+        static string Numbers(IEnumerable<int> numbers) =>
+            string.Join(", ", numbers.Distinct().Select(DecisionParser.Format));
+    }
+
     /// <summary>The red line when the top-level <c>briefings</c> note is sensitive.</summary>
     public const string BriefingSensitiveText = Briefing.FolderName + " is sensitive, so no briefing can be written.";
 
@@ -2546,7 +2585,13 @@ internal sealed class DesktopActions
                 return Refused(ActionReason.Exists, CaptureSensitiveText);
             }
 
-            return Inbox.Capture(notes, cleaned, localNow(), BeforeCaptureSave) switch
+            CaptureResult captured = Inbox.Capture(notes, cleaned, localNow(), BeforeCaptureSave);
+            if (captured == CaptureResult.Captured)
+            {
+                NumberWritten(Inbox.NoteName);
+            }
+
+            return captured switch
             {
                 CaptureResult.Captured => new ActionResult(ActionKind.Done, ActionReason.None, CapturedText),
                 CaptureResult.TooLarge => Refused(ActionReason.Invalid, CaptureTooLargeText),
@@ -2594,7 +2639,8 @@ internal sealed class DesktopActions
 
                 EditableNote opened = notes.ReadForEdit(found);
                 BeforeNoteTodaySave?.Invoke(attempt);
-                NoteSaveResult result = notes.SaveIfUnchanged(opened, Appended(opened.Text, line), out _, state.HistoryStore);
+                NoteSaveResult result = notes.SaveIfUnchanged(
+                    opened, Numbered(found.Name, Appended(opened.Text, line)), out _, state.HistoryStore);
                 switch (result)
                 {
                     case NoteSaveResult.Saved:
@@ -2632,7 +2678,7 @@ internal sealed class DesktopActions
         NoteInfo created;
         try
         {
-            created = notes.CreateWithText(title, $"# {normalized}\n\n{item.Text}\n");
+            created = notes.CreateWithText(title, Numbered(normalized, $"# {normalized}\n\n{item.Text}\n"));
         }
         catch (NoteExistsException e)
         {
@@ -2728,7 +2774,8 @@ internal sealed class DesktopActions
                 }
 
                 EditableNote opened = notes.ReadForEdit(found);
-                NoteSaveResult result = notes.SaveIfUnchanged(opened, Appended(opened.Text, item.Text), out EditableNote? saved);
+                NoteSaveResult result = notes.SaveIfUnchanged(
+                    opened, Numbered(found.Name, Appended(opened.Text, item.Text)), out EditableNote? saved);
                 switch (result)
                 {
                     case NoteSaveResult.Saved:
@@ -2837,6 +2884,40 @@ internal sealed class DesktopActions
             : new ActionResult(ActionKind.Failed, ActionReason.LineKept, TriageKeptText(target), saved);
     }
 
+    // Job 343: the text an app write other than SaveNote puts into the plain note `name`: its bare #!d markers
+    // numbered and the copies of another note's decisions stripped (DesktopState.NumberDecisions). As given when nothing
+    // changes, the index can't be read or the numbered text would be too large.
+    private string Numbered(string name, string text) =>
+        state.NumberDecisions(name, text) is { Changed: true } edits
+            && System.Text.Encoding.UTF8.GetByteCount(edits.Text) <= MaxNoteBytes
+            ? edits.Text
+            : text;
+
+    // Job 343: after a write in Core (capture, import, the day's end) of the plain note `name`: numbers it in a second
+    // write that goes through only while the file is as it was read (else the next save numbers it). Never throws; a
+    // sealed note is never found here, so it is never numbered.
+    private void NumberWritten(string name)
+    {
+        try
+        {
+            if (!notes.TryFind(name, out NoteInfo? found) || found is null)
+            {
+                return;
+            }
+
+            EditableNote opened = notes.ReadForEdit(found);
+            string numbered = Numbered(found.Name, opened.Text);
+            if (!ReferenceEquals(numbered, opened.Text))
+            {
+                notes.SaveIfUnchanged(opened, numbered, out _);
+            }
+        }
+        catch (Exception)
+        {
+            // The write is done; the markers stay bare until the next save.
+        }
+    }
+
     // The note text with "- <text>\n" appended, after a missing final newline.
     private static string Appended(string text, string line) =>
         (text.Length == 0 || text.EndsWith('\n') ? text : text + "\n") + "- " + line + "\n";
@@ -2862,7 +2943,7 @@ internal sealed class DesktopActions
         DateOnly day = DateOnly.FromDateTime(localNow());
         try
         {
-            BriefingResult result = Briefing.Ensure(notes, day, () => ComposeBriefing(day));
+            BriefingResult result = Briefing.Ensure(notes, day, () => Numbered(Briefing.NameFor(day), ComposeBriefing(day)));
             return result.Kind switch
             {
                 BriefingKind.Created => new ActionResult(ActionKind.Done, ActionReason.None, result.Name),
@@ -2888,7 +2969,7 @@ internal sealed class DesktopActions
 
         try
         {
-            BriefingResult result = Briefing.Ensure(notes, day, () => ComposeBriefing(day));
+            BriefingResult result = Briefing.Ensure(notes, day, () => Numbered(Briefing.NameFor(day), ComposeBriefing(day)));
             switch (result.Kind)
             {
                 case BriefingKind.Created:
@@ -2987,12 +3068,14 @@ internal sealed class DesktopActions
     private ActionResult EndDayNow(DateOnly day)
     {
         DayEndResult result = dayEnd.CloseDay(day);
+        NumberDayEnd(result);
         return DayEndAnswer(result, DayClosedText(result.Moved.Count, result.To));
     }
 
     private ActionResult WriteStandupNow(DateOnly day)
     {
         DayEndResult result = dayEnd.RefreshStandup(day, calendar.Zone);
+        NumberDayEnd(result);
         return result.Kind switch
         {
             DayEndKind.Done => new ActionResult(
@@ -3010,6 +3093,7 @@ internal sealed class DesktopActions
     {
         DateTime now = localNow();
         DayEndResult result = dayEnd.AutoClose(DateOnly.FromDateTime(now), now);
+        NumberDayEnd(result);
         if (result.Kind == DayEndKind.SettingsUnreadable)
         {
             return new ActionResult(
@@ -3022,6 +3106,15 @@ internal sealed class DesktopActions
         }
 
         return DayEndAnswer(result, result.Name);
+    }
+
+    // A day's end that wrote its daily note numbers it (job 343).
+    private void NumberDayEnd(DayEndResult result)
+    {
+        if (result.Changed && result.Kind == DayEndKind.Done)
+        {
+            NumberWritten(result.Name);
+        }
     }
 
     // The answer for a day's end result; a partial write still counts as a change, so the state is refreshed.
@@ -3424,7 +3517,8 @@ internal sealed class DesktopActions
                 }
 
                 BeforeLinkSave?.Invoke(current);
-                NoteSaveResult result = notes.SaveIfUnchanged(opened, rewritten, out _, state.HistoryStore);
+                NoteSaveResult result = notes.SaveIfUnchanged(
+                    opened, Numbered(found.Name, rewritten), out _, state.HistoryStore);
                 if (result != NoteSaveResult.ChangedOnDisk)
                 {
                     return result;
@@ -4052,6 +4146,7 @@ internal sealed class DesktopActions
             }
 
             (NoteInfo note, bool replaced) = notes.Save(title, content);
+            NumberWritten(note.Name);
             return new ActionResult(ActionKind.Done, ActionReason.None, ImportedText(note.Name, shown, replaced));
         }
         catch (NoteExistsException e)

@@ -25,6 +25,7 @@ internal sealed class DesktopState
 
     // One user of the tag index at a time: the snapshot build, NotesWithTag, Tags and Links.
     private readonly object indexGate = new();
+
     private readonly NoteStore notes;
     private readonly TodoStore todos;
     private readonly TagIndex index;
@@ -69,6 +70,9 @@ internal sealed class DesktopState
     // Counts the Changed handlers' reloads that are still running (StateComponent), for tests to wait on.
     private readonly object reloadGate = new();
     private int reloads;
+
+    // 1 while the last numbering found no decision numbers left (job 343).
+    private int decisionNumbersRanOut;
     private TaskCompletionSource? reloadsSettled;
 
     public DesktopState(
@@ -1424,11 +1428,20 @@ internal sealed class DesktopState
     });
 
     /// <summary>
+    /// Whether the last numbering found no decision numbers left (job 343): its bare markers stayed as typed. Main shows
+    /// it until a later numbering gets numbers again.
+    /// </summary>
+    public bool DecisionNumbersRanOut => Volatile.Read(ref decisionNumbersRanOut) != 0;
+
+    /// <summary>
     /// Job 343: numbers the bare <c>#!d</c> markers of the plain note <paramref name="note"/>'s new
-    /// <paramref name="text"/> and removes the numbered markers another note owns (or that repeat in the text), under
-    /// the index lock: syncs the index, reads the owners, and reserves the new numbers in one <c>BEGIN IMMEDIATE</c>
-    /// transaction above the counter, the index and every number in the text (<see cref="DecisionNumbers.Apply"/>).
-    /// <c>null</c> when the text has no marker or anything fails (an unreadable index): the note is then saved as typed.
+    /// <paramref name="text"/> and removes the numbered markers that repeat in the text or copy a decision another note
+    /// owns with the same text, under the index lock: syncs the index, reads the owners and their texts, and reserves the
+    /// new numbers in one <c>BEGIN IMMEDIATE</c> transaction above the counter, stepping over every number in use or in
+    /// the text (<see cref="DecisionNumbers.Apply"/>). A marker another note owns with another text stays
+    /// (<see cref="DecisionEdits.Kept"/>). With no numbers left the bare markers stay too
+    /// (<see cref="DecisionEdits.Unnumbered"/>, <see cref="DecisionNumbersRanOut"/>). <c>null</c> when there is nothing
+    /// to tell or anything fails (an unreadable index): the note is then saved as typed.
     /// </summary>
     internal DecisionEdits? NumberDecisions(string note, string text)
     {
@@ -1443,18 +1456,42 @@ internal sealed class DesktopState
             {
                 index.Sync(notes);
                 IReadOnlyDictionary<int, string> owners = index.DecisionOwners();
-                int floor = DecisionParser.Parse(text).Select(d => d.Number ?? 0).DefaultIfEmpty(0).Max();
+                IReadOnlyDictionary<int, string> texts = index.OwnedDecisionTexts();
+                int[] typed = [.. DecisionParser.Markers(text).Select(d => d.Number ?? 0).Where(n => n > 0), .. DecisionParser.References(text)];
                 DecisionEdits edits = DecisionNumbers.Apply(
                     text,
-                    n => owners.TryGetValue(n, out string? owner) && !string.Equals(owner, note, StringComparison.Ordinal),
-                    count => index.ReserveDecisionNumbers(count, floor));
-                return edits.Changed ? edits : null;
+                    (number, decision) => Holder(note, number, decision, owners, texts),
+                    count =>
+                    {
+                        int? first = index.ReserveDecisionNumbers(count, typed);
+                        Volatile.Write(ref decisionNumbersRanOut, first is null ? 1 : 0);
+                        return first;
+                    });
+                return edits.Noteworthy ? edits : null;
             }
         }
         catch (Exception)
         {
             return null;
         }
+    }
+
+    // Another note's number is a copy only when its owner's logged decision has exactly this text.
+    private static DecisionHolder Holder(
+        string note,
+        int number,
+        string text,
+        IReadOnlyDictionary<int, string> owners,
+        IReadOnlyDictionary<int, string> texts)
+    {
+        if (!owners.TryGetValue(number, out string? owner) || string.Equals(owner, note, StringComparison.Ordinal))
+        {
+            return DecisionHolder.None;
+        }
+
+        return texts.TryGetValue(number, out string? logged) && string.Equals(logged, text, StringComparison.Ordinal)
+            ? DecisionHolder.Copy
+            : DecisionHolder.Other;
     }
 
     /// <summary>

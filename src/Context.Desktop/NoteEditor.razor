@@ -305,7 +305,16 @@
                 // Nothing was edited, so the page is already clean; it is not marked clean again, so text typed while
                 // this save ran stays unsaved and its own pause saves it.
 
-                ShowStatus(auto ? "Saved." : $"Saved {DesktopText.OneLine(result.Text)}.", auto ? "grey" : "accent");
+                string savedText = auto ? "Saved." : $"Saved {DesktopText.OneLine(result.Text)}.";
+                if (DesktopActions.DecisionNoticeText(result.Decisions) is { } notice)
+                {
+                    // Job 343: numbers that ran out, a clash kept or a marker removed is never silent.
+                    ShowStatus($"{savedText} {notice}", "red");
+                }
+                else
+                {
+                    ShowStatus(savedText, auto ? "grey" : "accent");
+                }
                 await LoadOutlineAsync();
                 await LoadDecisionTitlesAsync();
             }
