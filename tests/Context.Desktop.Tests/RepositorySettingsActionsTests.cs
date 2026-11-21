@@ -148,22 +148,24 @@ public sealed class RepositorySettingsActionsTests : IDisposable
         Assert.Equal([z, a], cut.FindAll(".repository-folder").Select(s => s.TextContent).ToArray());
         Assert.Equal("Repository folders", cut.Find(".repository-list").GetAttribute("aria-label"));
 
+        // A Load() or DesktopState reload renders the page again by itself and gives the handlers new IDs, so each
+        // event finds its element and dispatches in one dispatcher turn (382).
         string m = Repo("m");
-        await cut.Find("input.repository-field").InputAsync(new ChangeEventArgs { Value = m });
-        await cut.Find("input.repository-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await cut.InvokeAsync(() => cut.Find("input.repository-field").InputAsync(new ChangeEventArgs { Value = m }));
+        await cut.InvokeAsync(() => cut.Find("input.repository-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" }));
 
         cut.WaitForAssertion(() => Assert.Equal([z, a, m], cut.FindAll(".repository-folder").Select(s => s.TextContent).ToArray()), Wait);
         Assert.Equal("Added " + m + ".", cut.Find(".repository-result").TextContent);
         Assert.True(cut.Find(".repository-result").ClassList.Contains("accent"));
         Assert.Null(cut.Find("input.repository-field").GetAttribute("value"));
 
-        await cut.Find("input.repository-field").InputAsync(new ChangeEventArgs { Value = "relative" });
-        await cut.Find("button.repository-add").ClickAsync(new MouseEventArgs());
+        await cut.InvokeAsync(() => cut.Find("input.repository-field").InputAsync(new ChangeEventArgs { Value = "relative" }));
+        await cut.InvokeAsync(() => cut.Find("button.repository-add").ClickAsync(new MouseEventArgs()));
 
         cut.WaitForAssertion(() => Assert.Equal(DesktopActions.RepositoryRelativeText, cut.Find(".repository-result").TextContent), Wait);
         Assert.True(cut.Find(".repository-result").ClassList.Contains("red"));
 
-        await cut.FindAll("button.repository-remove")[0].ClickAsync(new MouseEventArgs());
+        await cut.InvokeAsync(() => cut.FindAll("button.repository-remove")[0].ClickAsync(new MouseEventArgs()));
 
         cut.WaitForAssertion(() => Assert.Equal([a, m], cut.FindAll(".repository-folder").Select(s => s.TextContent).ToArray()), Wait);
         Assert.Equal("Removed " + z + ".", cut.Find(".repository-result").TextContent);
