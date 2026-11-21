@@ -1417,17 +1417,19 @@ internal sealed class DesktopState
     });
 
     /// <summary>
-    /// The notes whose text contains <paramref name="text"/> (<see cref="SearchView.Build"/>) after syncing the index,
-    /// off the calling thread. Reads only and never throws: any failure gives the
-    /// <see cref="SearchViewKind.IndexUnreadable"/> view.
+    /// The notes whose text contains <paramref name="text"/> and the matching Times bookings (job 379), both limited to
+    /// the inclusive range <paramref name="from"/>..<paramref name="to"/> (either may be <c>null</c>), through
+    /// <see cref="SearchView.Build(TagIndex, NoteStore, string?, string, DateOnly?, DateOnly?, TimeZoneInfo)"/> with
+    /// Times' folder and <see cref="Zone"/>, after syncing the index, off the calling thread. Reads only and never
+    /// throws: any failure gives the <see cref="SearchViewKind.IndexUnreadable"/> view.
     /// </summary>
-    public Task<SearchView> Search(string text) => Task.Run(() =>
+    public Task<SearchView> Search(string text, DateOnly? from = null, DateOnly? to = null) => Task.Run(() =>
     {
         try
         {
             lock (indexGate)
             {
-                return SearchView.Build(index, notes, text);
+                return SearchView.Build(index, notes, timesFolder, text, from, to, calendar.Zone);
             }
         }
         catch (Exception)

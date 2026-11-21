@@ -787,6 +787,260 @@ public sealed class SearchPanelTests : IDisposable
         Assert.Equal("250 notes found", cut.Find("p.search-count").TextContent);
     }
 
+    // 379 ---------------------------------------------------------------------------------------------------------
+
+    // A day file in Times' entries format: "Work" on #1234 08:00-09:30, "Code Review" (no item) 09:30-10:00, then an
+    // open "Late" checkpoint on #1234 when asked.
+    private void WriteTimesDay(string day, bool open = false, string review = "Code Review")
+    {
+        Directory.CreateDirectory(data.TimesFolder);
+        File.WriteAllText(Path.Combine(data.TimesFolder, day + ".json"), "{\"entries\":["
+            + "{\"kind\":\"checkpoint\",\"time\":\"08:00\",\"name\":\"Work\",\"workItem\":1234},"
+            + $"{{\"kind\":\"checkpoint\",\"time\":\"09:30\",\"name\":\"{review}\"}},"
+            + (open
+                ? "{\"kind\":\"checkpoint\",\"time\":\"10:00\",\"name\":\"Late\",\"workItem\":1234}]}"
+                : "{\"kind\":\"leaving\",\"time\":\"10:00\"}]}"));
+    }
+
+    private void Touch(string note, DateTime utc) =>
+        File.SetLastWriteTimeUtc(Path.Combine(data.Root, note + ".md"), utc);
+
+    private static string[] TimesRows(IRenderedComponent<SearchPanel> cut) =>
+        cut.FindAll("section.search-times li")
+            .Select(li => string.Join(' ', li.Children.Select(c => c.TextContent)))
+            .ToArray();
+
+    // Waits until the panel no longer shows Loading…, then for the expected Times rows.
+    private static void WaitForRows(IRenderedComponent<SearchPanel> cut, string[] rows) =>
+        cut.WaitForAssertion(
+            () =>
+            {
+                Assert.DoesNotContain("Loading…", cut.Markup, StringComparison.Ordinal);
+                Assert.Equal(rows, TimesRows(cut));
+            },
+            Wait);
+
+    // AC-9, AC-8: #1234 shows the note hits and the Times bookings for 1234 (newest first), not the red tag filter
+    // error; each row has the date, #n, names joined ", ", H:mm and a grey " (open)" for an open group.
+    [Fact]
+    public async Task WorkItem_ShowsNotesAndBookings_NotTagFilter()
+    {
+        data.WriteNote("Plan", "# Plan\nfix #1234 today\n");
+        data.WriteNote("Other", "#12345 only\n");
+        WriteTimesDay("2026-10-05");
+        WriteTimesDay("2026-10-20", open: true);
+        await data.RefreshAsync();
+
+        IRenderedComponent<SearchPanel> cut = Render(" #1234 ");
+
+        WaitForRows(cut, ["2026-10-20 #1234 Work, Late 1:30  (open)", "2026-10-05 #1234 Work 1:30"]);
+        Assert.Equal(["Plan"], NoteNames(cut));
+        Assert.Equal("#1234", cut.Find(".search-hits mark").TextContent);
+        Assert.Equal("1 note found, 2 bookings found", cut.Find("p.search-count").TextContent);
+        Assert.Empty(cut.FindAll("p.red"));
+        AngleSharp.Dom.IElement section = cut.Find("section.search-times");
+        Assert.Equal("Times bookings", section.GetAttribute("aria-label"));
+        AngleSharp.Dom.IElement first = cut.FindAll("section.search-times li")[0];
+        Assert.Equal("2026-10-20", first.QuerySelector(".date")!.TextContent);
+        Assert.True(first.QuerySelector(".date")!.ClassList.Contains("grey"));
+        Assert.Equal("#1234", first.QuerySelector(".item")!.TextContent);
+        Assert.Equal("Work, Late", first.QuerySelector(".names")!.TextContent);
+        Assert.Equal("1:30", first.QuerySelector(".total")!.TextContent);
+        Assert.Equal(" (open)", first.QuerySelector(".open")!.TextContent);
+        Assert.True(first.QuerySelector(".open")!.ClassList.Contains("grey"));
+        Assert.Null(cut.FindAll("section.search-times li")[1].QuerySelector(".open"));
+        // The bookings come after the note hits.
+        Assert.True(cut.Markup.IndexOf("search-hits", StringComparison.Ordinal)
+            < cut.Markup.IndexOf("search-times", StringComparison.Ordinal));
+
+        await cut.Find(".search-input").InputAsync(new ChangeEventArgs { Value = "#plan" });
+        await cut.Find(".search-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        cut.WaitForAssertion(() => Assert.Equal("No notes match #plan.", cut.Find("p[role=status]").TextContent), Wait);
+        Assert.Empty(cut.FindAll("section.search-times"));
+        Assert.True(SearchPanel.IsWorkItemQuery(" #7 "));
+        Assert.False(SearchPanel.IsWorkItemQuery("#0"));
+        Assert.False(SearchPanel.IsWorkItemQuery("1234"));
+        Assert.False(SearchPanel.IsWorkItemQuery("#1234 and #a"));
+    }
+
+    // AC-8: bookings alone show the section and the count line, never "No notes contain"; a text query matches names;
+    // no notes and no bookings is the grey line; names go through OneLine.
+    [Fact]
+    public async Task Bookings_WithoutNoteHits_ShowSection_NoNoMatchLine()
+    {
+        data.WriteNote("Plan", "nothing\n");
+        WriteTimesDay("2026-10-05", review: "Code\\u0007 <b>Review</b>");
+        await data.RefreshAsync();
+
+        IRenderedComponent<SearchPanel> cut = Render("review");
+
+        WaitForRows(cut, ["2026-10-05 Code� <b>Review</b> 0:30"]);
+        Assert.Empty(cut.FindAll("section.search-times b"));
+        Assert.Empty(cut.FindAll("section.search-times .item"));
+        Assert.Equal("0 notes found, 1 booking found", cut.Find("p.search-count").TextContent);
+        Assert.Empty(cut.FindAll("ul.search-hits"));
+        Assert.DoesNotContain("No notes contain", cut.Markup, StringComparison.Ordinal);
+
+        IRenderedComponent<SearchPanel> none = Render("zzz top");
+        none.WaitForAssertion(() => Assert.Equal("No notes contain zzz top.", none.Find("p[role=status]").TextContent), Wait);
+        Assert.Empty(none.FindAll("section.search-times"));
+    }
+
+    // AC-8: at most MaxRows bookings, then "… n more" inside the section.
+    [Fact]
+    public async Task Bookings_Capped_WithMoreLine()
+    {
+        DateOnly day = new DateOnly(2026, 1, 1);
+        for (int i = 0; i < SearchPanel.MaxRows + 2; i++)
+        {
+            WriteTimesDay(day.AddDays(i).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        }
+
+        await data.RefreshAsync();
+
+        IRenderedComponent<SearchPanel> cut = Render("#1234");
+
+        cut.WaitForAssertion(() => Assert.Equal(SearchPanel.MaxRows, TimesRows(cut).Length), Wait);
+        Assert.Equal("… 2 more", cut.Find("section.search-times p.more").TextContent);
+        Assert.Equal("0 notes found, 102 bookings found", cut.Find("p.search-count").TextContent);
+    }
+
+    // AC-8, AC-7: under the red index error the bookings still show.
+    [Fact]
+    public async Task BadIndex_RedLine_BookingsStillShown()
+    {
+        data.WriteNote("Plan", "#1234\n");
+        data.WriteFile(TagIndex.FileName, NotADatabase);
+        WriteTimesDay("2026-10-05");
+        await data.RefreshAsync();
+
+        IRenderedComponent<SearchPanel> cut = Render("#1234");
+
+        WaitForRows(cut, ["2026-10-05 #1234 Work 1:30"]);
+        Assert.Equal("Can't read the search index.", cut.Find("p.red").TextContent);
+        Assert.Empty(cut.FindAll("p.search-count"));
+        Assert.DoesNotContain("No notes contain", cut.Markup, StringComparison.Ordinal);
+    }
+
+    // AC-6: an unreadable day file is the red skipped line and the other files still show; no Times folder shows no
+    // error and no bookings part; nothing is written into the Times folder.
+    [Fact]
+    public async Task Times_SkippedLine_NotSetUpSilent_NothingWritten()
+    {
+        data.WriteNote("Plan", "#1234\n");
+        await data.RefreshAsync();
+        IRenderedComponent<SearchPanel> plain = Render("#1234");
+        plain.WaitForAssertion(() => Assert.Equal("1 note found", plain.Find("p.search-count").TextContent), Wait);
+        Assert.Empty(plain.FindAll("p.red"));
+        Assert.Empty(plain.FindAll("section.search-times"));
+
+        WriteTimesDay("2026-10-05");
+        File.WriteAllText(Path.Combine(data.TimesFolder, "2026-10-06.json"), "{ broken");
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.TimesFolder);
+
+        IRenderedComponent<SearchPanel> cut = Render("#1234");
+
+        WaitForRows(cut, ["2026-10-05 #1234 Work 1:30"]);
+        Assert.Equal("Skipped 1 unreadable Times day file(s).", cut.Find("p.red").TextContent);
+        Assert.Equal(before, FileSnapshot.Take(data.TimesFolder));
+    }
+
+    // AC-6: a Times folder that can't be listed is the red line; the notes still show.
+    [Fact]
+    public async Task Times_UnlistableFolder_RedLine()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        data.WriteNote("Plan", "#1234\n");
+        WriteTimesDay("2026-10-05");
+        await data.RefreshAsync();
+        UnixFileMode mode = File.GetUnixFileMode(data.TimesFolder);
+        File.SetUnixFileMode(data.TimesFolder, UnixFileMode.None);
+        try
+        {
+            try
+            {
+                Directory.EnumerateFiles(data.TimesFolder).ToList();
+                return; // Listing still works (for example as root): nothing to check here.
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+
+            IRenderedComponent<SearchPanel> cut = Render("#1234");
+
+            cut.WaitForAssertion(() => Assert.Equal("Can't read Times' folder.", cut.Find("p.red").TextContent), Wait);
+            Assert.Equal(["Plan"], NoteNames(cut));
+            Assert.Empty(cut.FindAll("section.search-times"));
+        }
+        finally
+        {
+            File.SetUnixFileMode(data.TimesFolder, mode);
+        }
+    }
+
+    // AC-9, AC-5: the From and To boxes come after the input; a change searches the shown text again (not the typed
+    // one) with that bound, clearing removes it, a start after the end is the red line; Save keeps only the query.
+    [Fact]
+    public async Task DateBoxes_SearchAgain_ClearRemovesBound_InvalidRange()
+    {
+        data.WriteNote("Early", "#1234 early\n");
+        data.WriteNote("Late", "#1234 late\n");
+        Touch("Early", new DateTime(2026, 10, 2, 12, 0, 0, DateTimeKind.Utc));
+        Touch("Late", new DateTime(2026, 10, 25, 12, 0, 0, DateTimeKind.Utc));
+        WriteTimesDay("2026-10-02");
+        WriteTimesDay("2026-10-25");
+        await data.RefreshAsync();
+
+        IRenderedComponent<SearchPanel> cut = Render("#1234");
+        WaitForRows(cut, ["2026-10-25 #1234 Work 1:30", "2026-10-02 #1234 Work 1:30"]);
+        Assert.Equal(["Early", "Late"], NoteNames(cut));
+
+        AngleSharp.Dom.IElement from = cut.Find("input.search-from");
+        Assert.Equal("date", from.GetAttribute("type"));
+        Assert.Equal("From", from.GetAttribute("aria-label"));
+        Assert.Equal("date", cut.Find("input.search-to").GetAttribute("type"));
+        Assert.Equal("To", cut.Find("input.search-to").GetAttribute("aria-label"));
+        Assert.True(cut.Markup.IndexOf("search-input", StringComparison.Ordinal)
+            < cut.Markup.IndexOf("search-from", StringComparison.Ordinal));
+        Assert.True(cut.Markup.IndexOf("search-from", StringComparison.Ordinal)
+            < cut.Markup.IndexOf("search-to", StringComparison.Ordinal));
+
+        // Typed but not searched: the date change searches the shown text.
+        await cut.Find(".search-input").InputAsync(new ChangeEventArgs { Value = "typed only" });
+        await cut.Find("input.search-from").ChangeAsync(new ChangeEventArgs { Value = "2026-10-10" });
+        WaitForRows(cut, ["2026-10-25 #1234 Work 1:30"]);
+        Assert.Equal(["Late"], NoteNames(cut));
+        Assert.Equal("2026-10-10", cut.Find("input.search-from").GetAttribute("value"));
+
+        await cut.Find("input.search-to").ChangeAsync(new ChangeEventArgs { Value = "2026-10-01" });
+        cut.WaitForAssertion(
+            () => Assert.Equal("The start date is after the end date.", cut.Find("p[role=status]").TextContent), Wait);
+        Assert.True(cut.Find("p[role=status]").ClassList.Contains("red"));
+        Assert.Empty(cut.FindAll("section.search-times"));
+
+        await cut.Find("input.search-from").ChangeAsync(new ChangeEventArgs { Value = string.Empty });
+        await cut.Find("input.search-to").ChangeAsync(new ChangeEventArgs { Value = "2026-10-05" });
+        WaitForRows(cut, ["2026-10-02 #1234 Work 1:30"]);
+        Assert.Equal(["Early"], NoteNames(cut));
+
+        await cut.Find("input.search-to").ChangeAsync(new ChangeEventArgs { Value = string.Empty });
+        WaitForRows(cut, ["2026-10-25 #1234 Work 1:30", "2026-10-02 #1234 Work 1:30"]);
+
+        await cut.Find("input.search-to").ChangeAsync(new ChangeEventArgs { Value = "2026-10-05" });
+        WaitForRows(cut, ["2026-10-02 #1234 Work 1:30"]);
+        await cut.Find("button.search-save").ClickAsync(new MouseEventArgs());
+        await cut.Find("input.search-save-name").InputAsync(new ChangeEventArgs { Value = "Item" });
+        await cut.Find("input.search-save-name").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        cut.WaitForAssertion(() => Assert.Equal("Saved search Item.", cut.Find("p.search-save-result").TextContent), Wait);
+        SavedSearch saved = Assert.Single(new SettingsStore(data.Root).ReadSavedSearches());
+        Assert.Equal("#1234", saved.Query);
+        Assert.DoesNotContain("2026", File.ReadAllText(Path.Combine(data.Root, SettingsStore.FileName)), StringComparison.Ordinal);
+    }
+
     private IRenderedComponent<SearchPanel> Render(string text) =>
         data.Bunit.Render<SearchPanel>(p => p.Add(c => c.Text, text));
 

@@ -316,6 +316,9 @@ public sealed class SettingsStoreTests : IDisposable
     [InlineData("not #a and #b", true)]
     [InlineData("#a or #b", false)]
     [InlineData("not #a", false)]
+    [InlineData("#1234", true)] // 379: a work item query
+    [InlineData(" #7 ", true)]
+    [InlineData("#0", false)]
     public void IsValidQuery(string query, bool expected)
     {
         Assert.Equal(expected, SavedSearches.IsValidQuery(query));

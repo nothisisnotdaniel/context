@@ -10,11 +10,18 @@ public sealed class SearchViewTests : IDisposable
     private readonly string root;
     private readonly TagIndex index;
     private readonly NoteStore store;
+    private readonly string times;
+    private UnixFileMode? lockedTimesMode;
+
+    // 379: a fixed zone one hour east of UTC, so a note's date in the zone differs from its UTC date near midnight.
+    private static readonly TimeZoneInfo Zone =
+        TimeZoneInfo.CreateCustomTimeZone("Test+01", TimeSpan.FromHours(1), "Test+01", "Test+01");
 
     public SearchViewTests()
     {
         parent = Path.Combine(Path.GetTempPath(), "context-searchview-" + Guid.NewGuid().ToString("N"));
         root = Path.Combine(parent, "Context");
+        times = Path.Combine(parent, "Times");
         Directory.CreateDirectory(parent);
         index = new TagIndex(root);
         store = new NoteStore(root);
@@ -22,6 +29,11 @@ public sealed class SearchViewTests : IDisposable
 
     public void Dispose()
     {
+        if (lockedTimesMode is { } mode && !OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(times, mode);
+        }
+
         if (Directory.Exists(parent))
         {
             Directory.Delete(parent, recursive: true);
@@ -368,5 +380,259 @@ public sealed class SearchViewTests : IDisposable
         Assert.All(view.Hits, h => Assert.Equal(4, h.MatchStart));
         Assert.All(view.Hits, h => Assert.NotNull(h.Modified));
         Assert.Equal(["Kelvin"], index.Search("shared key", (note, _) => note).Where(n => n == "Kelvin"));
+    }
+
+    // 379 ---------------------------------------------------------------------------------------------------------
+
+    private SearchView BuildWith(string text, DateOnly? from = null, DateOnly? to = null, string? folder = "") =>
+        SearchView.Build(index, store, folder == string.Empty ? times : folder, text, from, to, Zone);
+
+    private void WriteDay(string day, string json)
+    {
+        Directory.CreateDirectory(times);
+        File.WriteAllText(Path.Combine(times, day + ".json"), json);
+    }
+
+    // A day in Times' entries format: "Work" on #1234 08:00-09:30, "Code Review" (no item) 09:30-10:00, "Other" on
+    // #99 10:00-10:15, then an open "Late" checkpoint on #1234 (no entry ends it).
+    private static string Day(bool open = false) =>
+        "{\"entries\":["
+        + "{\"kind\":\"arrival\",\"time\":\"08:00\"},"
+        + "{\"kind\":\"checkpoint\",\"time\":\"08:00\",\"name\":\"Work\",\"workItem\":1234},"
+        + "{\"kind\":\"checkpoint\",\"time\":\"09:30\",\"name\":\"Code Review\"},"
+        + "{\"kind\":\"checkpoint\",\"time\":\"10:00\",\"name\":\"Other\",\"workItem\":99},"
+        + (open
+            ? "{\"kind\":\"checkpoint\",\"time\":\"10:15\",\"name\":\"Late\",\"workItem\":1234}]}"
+            : "{\"kind\":\"leaving\",\"time\":\"10:15\"}]}");
+
+    private void Touch(string name, DateTime utc) =>
+        File.SetLastWriteTimeUtc(Path.Combine([root, .. name.Split('/')]) + ".md", utc);
+
+    // Every file of the Times folder with its bytes, to prove nothing was written.
+    private SortedDictionary<string, string> TimesSnapshot()
+    {
+        SortedDictionary<string, string> files = new(StringComparer.Ordinal);
+        foreach (string path in Directory.GetFiles(times, "*", SearchOption.AllDirectories))
+        {
+            files[Path.GetRelativePath(times, path)] = Convert.ToBase64String(File.ReadAllBytes(path));
+        }
+
+        return files;
+    }
+
+    // AC-1: #1234 finds the notes holding work item 1234 (not #12345), each with its first such line and the index of
+    // that #; #7 works although it is under MinQueryLength; the item's own page is not a hit.
+    [Fact]
+    public void WorkItem_FindsNotesWithItem_FirstLineAndMatchStart()
+    {
+        Write("Alpha", "# Alpha\nsee #12345 first\nthen #12345 and #1234 here\nagain #1234");
+        Write("beta", "```\n#1234 in code\n```\n- [ ] #1234 later");
+        Write("Gamma", "only #12345 and x#1234");
+        Write("Delta", "fix #7 now");
+        Write("items", "# items");
+        Write("items/1234", "# 1234\n#1234");
+
+        SearchView view = BuildWith(" #1234 ");
+
+        Assert.Equal(SearchViewKind.Found, view.Kind);
+        Assert.Equal("#1234", view.Query);
+        Assert.Equal(["Alpha", "beta"], view.Hits.Select(h => h.Note));
+        SearchHit alpha = view.Hits[0];
+        Assert.Equal(3, alpha.LineNumber);
+        Assert.Equal("then #12345 and #1234 here", alpha.Line);
+        Assert.Equal(alpha.Line.IndexOf("#1234 ", StringComparison.Ordinal), alpha.MatchStart);
+        Assert.NotNull(alpha.Modified);
+        SearchHit beta = view.Hits[1];
+        Assert.Equal(4, beta.LineNumber);
+        Assert.Equal(6, beta.MatchStart);
+
+        SearchView seven = BuildWith("#7");
+        Assert.Equal(SearchViewKind.Found, seven.Kind);
+        SearchHit delta = Assert.Single(seven.Hits);
+        Assert.Equal("Delta", delta.Note);
+        Assert.Equal(4, delta.MatchStart);
+        Assert.Equal(SearchViewKind.Found, SearchView.Build(index, store, "#7").Kind);
+    }
+
+    // AC-2: #1234 gives one Times hit per day and group on 1234, newest first, with names, total and open; other
+    // items' groups never.
+    [Fact]
+    public void WorkItem_TimesHits_PerDayAndGroup_NewestFirst()
+    {
+        WriteDay("2026-10-05", Day());
+        WriteDay("2026-10-20", Day(open: true));
+        WriteDay("2026-10-12", "{\"entries\":[{\"kind\":\"checkpoint\",\"time\":\"08:00\",\"name\":\"Other\",\"workItem\":99},"
+            + "{\"kind\":\"leaving\",\"time\":\"09:00\"}]}");
+
+        SearchView view = BuildWith("#1234");
+
+        Assert.Equal(WorkItemTimesKind.Read, view.TimesKind);
+        Assert.Equal(SearchViewKind.Found, view.Kind);
+        Assert.Empty(view.Hits);
+        Assert.Equal(2, view.Times.Count);
+        TimesSearchHit newest = view.Times[0];
+        Assert.Equal(new DateOnly(2026, 10, 20), newest.Date);
+        Assert.Equal(1234, newest.WorkItem);
+        Assert.Equal(["Work", "Late"], newest.Names);
+        Assert.Equal(TimeSpan.FromMinutes(90), newest.Total);
+        Assert.True(newest.Open);
+        TimesSearchHit older = view.Times[1];
+        Assert.Equal(new DateOnly(2026, 10, 5), older.Date);
+        Assert.Equal(["Work"], older.Names);
+        Assert.Equal(TimeSpan.FromMinutes(90), older.Total);
+        Assert.False(older.Open);
+        Assert.Equal(0, view.TimesSkipped);
+    }
+
+    // AC-3: a text query returns the groups where any name contains it, ignoring case, with the note hits as before.
+    [Fact]
+    public void Text_TimesHits_ByNameIgnoringCase_WithNotes()
+    {
+        Write("Plan", "# Plan\nreview the budget");
+        WriteDay("2026-10-05", Day());
+
+        SearchView view = BuildWith("REVIEW");
+
+        Assert.Equal(SearchViewKind.Found, view.Kind);
+        Assert.Equal(["Plan"], view.Hits.Select(h => h.Note));
+        TimesSearchHit hit = Assert.Single(view.Times);
+        Assert.Null(hit.WorkItem);
+        Assert.Equal(["Code Review"], hit.Names);
+        Assert.Equal(TimeSpan.FromMinutes(30), hit.Total);
+        Assert.Empty(BuildWith("nothing like it").Times);
+    }
+
+    // AC-4: with a range, notes outside it (by Modified in the zone) and day files outside it are left out, both bounds
+    // inclusive; an out-of-range day file is never opened (an unreadable one does not count as skipped).
+    [Fact]
+    public void Range_FiltersNotesByZoneDate_AndDayFiles_Inclusive()
+    {
+        Write("Before", "#1234 before");
+        Write("First", "#1234 first");
+        Write("Last", "#1234 last");
+        Write("After", "#1234 after");
+        Touch("Before", new DateTime(2026, 9, 30, 22, 30, 0, DateTimeKind.Utc)); // 23:30 on 09-30 in the zone
+        Touch("First", new DateTime(2026, 9, 30, 23, 30, 0, DateTimeKind.Utc)); // 00:30 on 10-01 in the zone
+        Touch("Last", new DateTime(2026, 10, 31, 22, 59, 0, DateTimeKind.Utc)); // 23:59 on 10-31 in the zone
+        Touch("After", new DateTime(2026, 10, 31, 23, 0, 0, DateTimeKind.Utc)); // 00:00 on 11-01 in the zone
+        WriteDay("2026-09-30", Day());
+        WriteDay("2026-10-01", Day());
+        WriteDay("2026-10-31", Day());
+        WriteDay("2026-11-01", "{ broken");
+
+        SearchView view = BuildWith("#1234", new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 31));
+
+        Assert.Equal(["First", "Last"], view.Hits.Select(h => h.Note));
+        Assert.Equal([new DateOnly(2026, 10, 31), new DateOnly(2026, 10, 1)], view.Times.Select(t => t.Date));
+        Assert.Equal(0, view.TimesSkipped);
+
+        SearchView fromOnly = BuildWith("#1234", from: new DateOnly(2026, 10, 31));
+        Assert.Equal(["After", "Last"], fromOnly.Hits.Select(h => h.Note));
+        Assert.Equal(1, fromOnly.TimesSkipped);
+        Assert.Equal([new DateOnly(2026, 10, 31)], fromOnly.Times.Select(t => t.Date));
+
+        SearchView toOnly = BuildWith("#1234", to: new DateOnly(2026, 9, 30));
+        Assert.Equal(["Before"], toOnly.Hits.Select(h => h.Note));
+        Assert.Equal([new DateOnly(2026, 9, 30)], toOnly.Times.Select(t => t.Date));
+        Assert.Equal(0, toOnly.TimesSkipped);
+    }
+
+    // AC-5: from > to is InvalidRange with nothing read: no context.db is made and the Times folder is not looked at.
+    [Fact]
+    public void Range_StartAfterEnd_InvalidRange_NothingRead()
+    {
+        Write("A", "#1234 abc");
+        WriteDay("2026-10-05", Day());
+
+        SearchView view = BuildWith("#1234", new DateOnly(2026, 10, 2), new DateOnly(2026, 10, 1));
+
+        Assert.Equal(SearchViewKind.InvalidRange, view.Kind);
+        Assert.Empty(view.Hits);
+        Assert.Empty(view.Times);
+        Assert.Equal(WorkItemTimesKind.NotSetUp, view.TimesKind);
+        Assert.False(File.Exists(DbPath));
+        Assert.Equal(SearchViewKind.InvalidRange, BuildWith("abc", new DateOnly(2026, 10, 2), new DateOnly(2026, 10, 1)).Kind);
+        Assert.False(File.Exists(DbPath));
+        Assert.Equal(SearchViewKind.Found, BuildWith("#1234", new DateOnly(2026, 10, 5), new DateOnly(2026, 10, 5)).Kind);
+    }
+
+    // AC-6: a null, missing or file Times folder is NotSetUp with no hits; unreadable day files are counted and the
+    // others still searched; nothing is written into the Times folder.
+    [Fact]
+    public void Times_NotSetUp_Skipped_NothingWritten()
+    {
+        Write("A", "#1234 abc");
+        Assert.Equal(WorkItemTimesKind.NotSetUp, BuildWith("#1234", folder: null).TimesKind);
+        Assert.Equal(WorkItemTimesKind.NotSetUp, BuildWith("#1234").TimesKind);
+        string file = Path.Combine(parent, "not-a-folder");
+        File.WriteAllText(file, "x");
+        SearchView onFile = BuildWith("#1234", folder: file);
+        Assert.Equal(WorkItemTimesKind.NotSetUp, onFile.TimesKind);
+        Assert.Empty(onFile.Times);
+        Assert.Equal(SearchViewKind.Found, onFile.Kind);
+
+        WriteDay("2026-10-05", Day());
+        WriteDay("2026-10-06", "{ broken");
+        WriteDay("2026-10-07", Day());
+        File.WriteAllText(Path.Combine(times, "settings.json"), "{}");
+        Directory.CreateDirectory(Path.Combine(times, "sub"));
+        File.WriteAllText(Path.Combine(times, "sub", "2026-10-08.json"), Day());
+        SortedDictionary<string, string> before = TimesSnapshot();
+
+        SearchView view = BuildWith("#1234");
+
+        Assert.Equal(WorkItemTimesKind.Read, view.TimesKind);
+        Assert.Equal(1, view.TimesSkipped);
+        Assert.Equal([new DateOnly(2026, 10, 7), new DateOnly(2026, 10, 5)], view.Times.Select(t => t.Date));
+        Assert.Equal(before, TimesSnapshot());
+    }
+
+    // AC-6: a Times folder that can't be listed is Unlistable, with no Times hits; the notes are still found.
+    [Fact]
+    public void Times_UnlistableFolder()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        Write("A", "#1234 abc");
+        WriteDay("2026-10-05", Day());
+        lockedTimesMode = File.GetUnixFileMode(times);
+        File.SetUnixFileMode(times, UnixFileMode.None);
+        try
+        {
+            Directory.EnumerateFiles(times).ToList();
+            return; // Listing still works (for example as root): nothing to check here.
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
+        SearchView view = BuildWith("#1234");
+
+        Assert.Equal(WorkItemTimesKind.Unlistable, view.TimesKind);
+        Assert.Empty(view.Times);
+        Assert.Equal(["A"], view.Hits.Select(h => h.Note));
+    }
+
+    // AC-7: Found with note or Times hits, NoMatches with neither; under IndexUnreadable the Times hits still come.
+    [Fact]
+    public void Kind_FoundNoMatches_IndexUnreadableKeepsTimes()
+    {
+        Write("A", "nothing here");
+        WriteDay("2026-10-05", Day());
+
+        Assert.Equal(SearchViewKind.Found, BuildWith("#1234").Kind);
+        Assert.Equal(SearchViewKind.Found, BuildWith("code review").Kind);
+        Assert.Equal(SearchViewKind.NoMatches, BuildWith("#4321").Kind);
+        Assert.Equal(SearchViewKind.NoMatches, BuildWith("zzz").Kind);
+
+        File.WriteAllText(DbPath, "this is not a database, just some text that fills the header....");
+        SearchView broken = BuildWith("#1234");
+        Assert.Equal(SearchViewKind.IndexUnreadable, broken.Kind);
+        Assert.Empty(broken.Hits);
+        Assert.Equal([new DateOnly(2026, 10, 5)], broken.Times.Select(t => t.Date));
+        Assert.Single(BuildWith("review").Times);
     }
 }

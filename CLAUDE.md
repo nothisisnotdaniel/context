@@ -176,6 +176,18 @@ Every factory agent reads this file before working on Context. Keep it short and
     `TagIndexException` gives `IndexUnreadable`; kinds `Found`, `NoMatches`. The command line has `context search
     <text...>`, the desktop `/search` (`SearchPanel`). Out of scope: sensitive notes, todos, calendar, ranking,
     highlighting, fuzzy/stemmed search, diacritic folding.
+    **Work items, Times and dates** (job 379): `SearchView.Build(index, store, timesFolder, text, from?, to?, zone)` (the
+    old overload passes no folder, no range, UTC). `from > to` is `InvalidRange` before anything is read. A trimmed text
+    that is exactly `#<n>` (`SearchView.IsWorkItemQuery`: `#` then `WorkItemParser.TryParseNumber`) skips the length rules:
+    the notes are `TagIndex.NotesWithItem(n)` (bodies through `TagIndex.TextsOf`, by rowid via `note_text_rows`, the
+    name a bound parameter), each hit the first line outside fences where `WorkItemParser.FirstLineWith` finds `#n`,
+    `MatchStart` at that `#`. With a range, notes whose `Modified` date in `zone` is outside it, or with no `Modified`,
+    are dropped. `Times` (`TimesSearchHit(Date, WorkItem, Names, Total, Open)`): the top-level files of the folder that
+    match `TimesBalance.TryParseDayFile`, filtered to the range before `TimesDay.Read`, one hit per `Groups` group with
+    `WorkItem == n` (work item query) or a name containing the text (`OrdinalIgnoreCase`), newest day first, then group
+    order; `TimesKind` (`WorkItemTimesKind`: `NotSetUp` for null/missing/a file, `Unlistable`, `Read`) and
+    `TimesSkipped` (unreadable day files). `Found` when there are note or Times hits; `IndexUnreadable` still carries the
+    Times hits. Never writes the Times folder. Tag filters get no Times hits. `SavedSearches.IsValidQuery` accepts `#<n>`.
     **Tag filters** (job 207, `TagFilter.cs`): `TagFilter.IsTagFilter(text)` is true when the trimmed text starts with
     `#` or with `not` + whitespace + `#` (ignoring case); `TagFilter.TryParse` reads `term (and term)*`, a term an
     optional `not` and one tag written as in notes (`#tag` or `#[tag with spaces]`, letter first, so `#1234` is not a
@@ -834,7 +846,14 @@ Every factory agent reads this file before working on Context. Keep it short and
   error before the folder is read), `today` (the daily note, see Daily
   note: prints it like `note show`, creating it first when it is missing; a sensitive one is `Cli.SensitiveText`,
   exit 1; a failed write is `Can't write <name>.`, exit 1; no arguments, `--json` is a usage error),
-  `search <text...>` (job 170, see Full-text search: arguments joined with one space; `<name>\t<line number>\t<line>`
+  `search [--from yyyy-MM-dd] [--to yyyy-MM-dd] [--times] <text...>` (job 379: the options, any case and order, come
+  before the text; a bad or missing date or a repeated `--from`/`--to` is the usage error `Type: context search [--from
+  yyyy-MM-dd] [--to yyyy-MM-dd] [--times] <text>.`, a start after the end the usage error `The start date is after the
+  end date.`, both before the folder is read; `#<n>` is a work item query; Times' folder is read only with `--times` or
+  `--json`; `--times` adds `times\t<yyyy-MM-dd>\t<#n or empty>\t<names joined ", ">\t<H:mm>` rows after the note
+  lines; `--json` always adds `times:[{date,workItem,names,minutes,open}]`, `workItem` null without one; after the
+  output `Can't read Times' folder.` and `Skipped <k> unreadable Times day file(s).` on stderr, exit 1. Job 170:
+  `search <text...>` (see Full-text search: arguments joined with one space; `<name>\t<line number>\t<line>`
   per hit, both through `OneLine`, exit 0, no hits no output; blank is the usage error `Type: context search <text>.`
   before the folder is read; too short `Type at least 3 characters to search.`, too long `Search text can be at most
   200 characters.`, bad db `Can't read context.db.`, all exit 1),
@@ -881,7 +900,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   `version`, `todos`, `notes`, `note show`, `tags`, `find`, `search`, `current`, `review` and `item` write one compact object + `\n`
   (`CliJson.cs`, `Utf8JsonWriter` with the default encoder, so `+ & ' <` and non-ASCII are `\uXXXX`): `{version}`,
   `{todos:[{due,time,text}]}` (`time` `HH:mm` or `null`), `{notes:[{name,locked}]}`, `{name,text}`, `{tags:[{tag,count}]}` or `{tag,notes:[]}`,
-  `{key,value,notes:[]}` (`find`), `{query,results:[{note,line,text}]}` (`search`; `line` an int), `{today,appointments:[{start,end,allDay,
+  `{key,value,notes:[]}` (`find`), `{query,results:[{note,line,text}],times:[{date,workItem,names,minutes,open}]}` (`search`; `line` an int; job 379 `times`), `{today,appointments:[{start,end,allDay,
   title,location,related:[{name,tags,words}]}],calendar:{status,cachedAt,unreadableFiles},due:[{due,text,overdue}],linkedNotes:[{name,tags}],
   times:{arrival,leaving,leftMinutes,checkpoint:{workItem,name}}}` (job 277: `times` `null` for None and Unreadable, which
   has plain's stderr line and exit code; `leaving` `null` until left, `leftMinutes` an int, can be negative; absent = `null`, tags raw without `#`, times `yyyy-MM-ddTHH:mm:sszzz` in the zone; `due`/`linkedNotes` `null` when
@@ -1484,6 +1503,17 @@ Every factory agent reads this file before working on Context. Keep it short and
     name`, maxlength 50, focused): Return calls `Actions.SaveSearch(name, trimmed query)` (its only action), Esc hides
     it; the result is `p.search-save-result` (`role=status`, accent on Done, else red). Reload and stale-result rules as
     the other panels. Opening a note or `Today` closes it.
+    Job 379: a text whose trim is `#<n>` (`SearchPanel.IsWorkItemQuery`) goes to `State.Search(text, from, to)` before
+    the `TagFilter.IsTagFilter` check (`#project` stays a tag filter). After the input, `div.search-dates` holds
+    `input[type=date].search-from`/`.search-to` (`aria-label` `From`/`To`); a change searches the shown text again (not
+    the typed one), a cleared box removes that bound, a new request clears both; saved searches keep only the query. Red
+    `The start date is after the end date.` for `InvalidRange`. Below the note hits (also with none, or under the red
+    index error) `section.search-times` (`aria-label="Times bookings"`) lists at most `MaxRows` bookings (then `… <n>
+    more`): grey `span.date` `yyyy-MM-dd`, `span.item` `#<n>` when there is one, `span.names` joined `, `, `span.total`
+    `DayEnd.FormatDuration`, grey `span.open` ` (open)`, all through `OneLine`. The count line is `<n> notes found, <m>
+    bookings found` (singular for 1) when Times' folder was read, else as before; `No notes contain …` only with neither
+    kind of hit. Red `Can't read Times' folder.` (`Unlistable`) and `Skipped <k> unreadable Times day file(s).`; nothing
+    for `NotSetUp`. The roving tab stop covers only the note results.
     Keyboard (job 285): the result buttons are a roving tab stop (`tabindex` 0 on one, `-1` on the rest; ArrowDown in
     the input focuses the first, ArrowDown/ArrowUp move and stop at the last, ArrowUp on the first goes back to the
     input; Enter opens, and the click the browser sends after it is ignored until keyup). `OnOpen` carries `(Note,
