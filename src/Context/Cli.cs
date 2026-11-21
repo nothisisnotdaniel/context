@@ -30,7 +30,7 @@ internal sealed class Cli
     private const string IndexUnreadable = "Can't read context.db.";
     private const string FindForm = "Type: context find <attribute> <value>.";
     private const string SearchForm = "Type: context search <text>.";
-    private const string DecisionsForm = "Type: context decisions [tag].";
+    private const string DecisionsForm = "Type: context decisions [--full] [tag] or context decisions <number>.";
     private const string ItemForm = "Type: context item <n> [--json] [--open] with the work item's number.";
     private const string OpenFlag = "--open";
     private const string LaunchFailed = "Can't start the desktop app.";
@@ -56,7 +56,8 @@ internal sealed class Cli
         ("tags [tag...]", "List tags with counts, or the notes with a tag."),
         ("find <attribute> <value...>", "List the notes with an attribute line, e.g. find role Bereichsleiter."),
         ("search <text...>", "List the notes whose text contains the text, with the first matching line."),
-        ("decisions [tag...]", "List the Decision: lines of all notes, or of the notes with a tag, newest first."),
+        ("decisions [--full] [tag...]", "List the #!d decisions of all notes, or of the notes with a tag, newest first; --full prints the whole text."),
+        ("decisions <number>", "Show decision #!d<number> with its note, date, people and whole text."),
         ("current", "Today's Times bookings, appointments, due todos and linked notes."),
         ("review", "The last 7 days' changed notes and done todos, overdue todos and the next 7 days' appointments."),
         ("today", "Print today's note, creating it with the day's appointments and due todos."),
@@ -271,14 +272,7 @@ internal sealed class Cli
 
                 return s => Search(s, query);
             case "decisions":
-                string decisionsTag = string.Join(' ', args);
-                if (!DecisionsView.TryNormalizeTag(decisionsTag, out _))
-                {
-                    usage = DecisionsForm;
-                    return null;
-                }
-
-                return s => Decisions(s, decisionsTag);
+                return ParseDecisions(args, out usage);
             case "current":
                 return NoArguments("current", args, out usage, Current);
             case "review":
@@ -971,7 +965,58 @@ internal sealed class Cli
         }
     }
 
-    private int Decisions(Session session, string tag)
+    // decisions [--full] [tag...] | decisions <n> | decisions #!d<n>: a number never comes with anything else.
+    private Func<Session, int>? ParseDecisions(string[] args, out string? usage)
+    {
+        usage = null;
+        if (args.Any(a => DecisionParser.TryParseNumber(a, out _)))
+        {
+            if (args.Length != 1 || !DecisionParser.TryParseNumber(args[0], out int number))
+            {
+                usage = DecisionsForm;
+                return null;
+            }
+
+            return s => ShowDecision(s, number);
+        }
+
+        bool full = args.Any(a => string.Equals(a, "--full", StringComparison.OrdinalIgnoreCase));
+        string tag = string.Join(' ', args.Where(a => !string.Equals(a, "--full", StringComparison.OrdinalIgnoreCase)));
+        if (!DecisionsView.TryNormalizeTag(tag, out _))
+        {
+            usage = DecisionsForm;
+            return null;
+        }
+
+        return s => Decisions(s, tag, full);
+    }
+
+    private int ShowDecision(Session session, int number)
+    {
+        DecisionsView view = DecisionsView.Find(session.Index, session.Notes, number, zone);
+        switch (view.Kind)
+        {
+            case DecisionsViewKind.IndexUnreadable:
+                return Error(IndexUnreadable);
+            case DecisionsViewKind.Found:
+                Decision decision = view.Decisions[0];
+                Out(DecisionParser.Format(number));
+                Out($"Note: {OneLine(decision.Note)}");
+                Out($"Date: {Date(decision.Date)}");
+                Out($"People: {string.Join(", ", decision.People.Select(OneLine))}");
+                Out(string.Empty);
+                foreach (string line in decision.Text.Split('\n'))
+                {
+                    Out(OneLine(line));
+                }
+
+                return ExitOk;
+            default:
+                return Error($"No decision {DecisionParser.Format(number)}.");
+        }
+    }
+
+    private int Decisions(Session session, string tag, bool full)
     {
         DecisionsView view = DecisionsView.Build(session.Index, session.Notes, tag, zone);
         switch (view.Kind)
@@ -985,7 +1030,9 @@ internal sealed class Cli
                 foreach (Decision decision in view.Decisions)
                 {
                     string people = string.Join(", ", decision.People.Select(OneLine));
-                    Out($"{Date(decision.Date)}\t{OneLine(decision.Note)}\t{people}\t{OneLine(decision.Text)}");
+                    string number = decision.Number is int n ? DecisionParser.Format(n) : string.Empty;
+                    string text = OneLine(full ? decision.Text : decision.Headline);
+                    Out($"{Date(decision.Date)}\t{number}\t{OneLine(decision.Note)}\t{people}\t{text}");
                 }
 
                 return ExitOk;

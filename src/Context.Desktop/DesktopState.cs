@@ -25,6 +25,7 @@ internal sealed class DesktopState
 
     // One user of the tag index at a time: the snapshot build, NotesWithTag, Tags and Links.
     private readonly object indexGate = new();
+
     private readonly NoteStore notes;
     private readonly TodoStore todos;
     private readonly TagIndex index;
@@ -69,6 +70,9 @@ internal sealed class DesktopState
     // Counts the Changed handlers' reloads that are still running (StateComponent), for tests to wait on.
     private readonly object reloadGate = new();
     private int reloads;
+
+    // 1 while the last numbering found no decision numbers left (job 343).
+    private int decisionNumbersRanOut;
     private TaskCompletionSource? reloadsSettled;
 
     public DesktopState(
@@ -1424,7 +1428,142 @@ internal sealed class DesktopState
     });
 
     /// <summary>
-    /// The <c>Decision:</c> lines of every plain note, or of the notes with <paramref name="tag"/>
+    /// Whether the last numbering found no decision numbers left (job 343): its bare markers stayed as typed. Main shows
+    /// it until a later numbering gets numbers again.
+    /// </summary>
+    public bool DecisionNumbersRanOut => Volatile.Read(ref decisionNumbersRanOut) != 0;
+
+    /// <summary>
+    /// Job 343: numbers the bare <c>#!d</c> markers of the plain note <paramref name="note"/>'s new
+    /// <paramref name="text"/> and removes the numbered markers that repeat in the text or copy a decision another note
+    /// owns with the same text, under the index lock: syncs the index, reads the owners and their texts, and reserves the
+    /// new numbers in one <c>BEGIN IMMEDIATE</c> transaction above the counter, stepping over every number in use or in
+    /// the text (<see cref="DecisionNumbers.Apply"/>). A marker another note owns with another text stays
+    /// (<see cref="DecisionEdits.Kept"/>). With no numbers left the bare markers stay too
+    /// (<see cref="DecisionEdits.Unnumbered"/>, <see cref="DecisionNumbersRanOut"/>). <c>null</c> when there is nothing
+    /// to tell or anything fails (an unreadable index): the note is then saved as typed.
+    /// </summary>
+    internal DecisionEdits? NumberDecisions(string note, string text)
+    {
+        if (!text.Contains(DecisionParser.Token, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        try
+        {
+            lock (indexGate)
+            {
+                index.Sync(notes);
+                IReadOnlyDictionary<int, string> owners = index.DecisionOwners();
+                IReadOnlyDictionary<int, string> texts = index.OwnedDecisionTexts();
+                int[] typed = [.. DecisionParser.Markers(text).Select(d => d.Number ?? 0).Where(n => n > 0), .. DecisionParser.References(text)];
+                DecisionEdits edits = DecisionNumbers.Apply(
+                    text,
+                    (number, decision) => Holder(note, number, decision, owners, texts),
+                    count =>
+                    {
+                        int? first = index.ReserveDecisionNumbers(count, typed);
+                        Volatile.Write(ref decisionNumbersRanOut, first is null ? 1 : 0);
+                        return first;
+                    });
+                return edits.Noteworthy ? edits : null;
+            }
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    // Another note's number is a copy only when its owner's logged decision has exactly this text.
+    private static DecisionHolder Holder(
+        string note,
+        int number,
+        string text,
+        IReadOnlyDictionary<int, string> owners,
+        IReadOnlyDictionary<int, string> texts)
+    {
+        if (!owners.TryGetValue(number, out string? owner) || string.Equals(owner, note, StringComparison.Ordinal))
+        {
+            return DecisionHolder.None;
+        }
+
+        return texts.TryGetValue(number, out string? logged) && string.Equals(logged, text, StringComparison.Ordinal)
+            ? DecisionHolder.Copy
+            : DecisionHolder.Other;
+    }
+
+    /// <summary>
+    /// Job 343: after the app renamed or moved <paramref name="oldName"/> to <paramref name="newName"/>, its decision
+    /// numbers (and its subpages') stay with it. Never throws; on a failure the next sync gives the numbers to the
+    /// renamed note anyway, as no other note holds them.
+    /// </summary>
+    internal void MoveDecisionOwners(string oldName, string newName)
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                index.MoveDecisionOwners(oldName, newName);
+            }
+        }
+        catch (Exception)
+        {
+            // Left to the next sync.
+        }
+    }
+
+    /// <summary>
+    /// Job 343: the headline (raw) of each of <paramref name="numbers"/> (at most <see cref="MaxDecisionReferences"/>)
+    /// that a readable owner holds, off the calling thread under the index lock; unknown numbers are not in the result.
+    /// With <paramref name="sync"/> the index is synced first (a plain note); a sensitive note's lookups only read the
+    /// index. <c>null</c> on any failure.
+    /// </summary>
+    public Task<IReadOnlyDictionary<int, string>?> DecisionTitles(IReadOnlyList<int> numbers, bool sync) => Task.Run(() =>
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                if (sync)
+                {
+                    index.Sync(notes);
+                }
+
+                return (IReadOnlyDictionary<int, string>?)index.DecisionHeadlines(numbers.Take(MaxDecisionReferences));
+            }
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    });
+
+    /// <summary>
+    /// Job 343: the full name of the note that owns decision <paramref name="number"/> (read from the index only, off
+    /// the calling thread under the index lock), or <c>null</c> when none does or the index can't be read.
+    /// </summary>
+    public Task<string?> DecisionNote(int number) => Task.Run(() =>
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                return index.DecisionByNumber(number)?.Note;
+            }
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    });
+
+    /// <summary>The most distinct references a note's lookup asks for (job 343).</summary>
+    public const int MaxDecisionReferences = 500;
+
+    /// <summary>
+    /// The <c>#!d</c> decisions of every plain note, or of the notes with <paramref name="tag"/>
     /// (<see cref="DecisionsView.Build"/>, dated in the calendar's zone) after syncing the index, off the calling
     /// thread. Reads only and never throws: any failure gives the <see cref="DecisionsViewKind.IndexUnreadable"/> view.
     /// </summary>

@@ -103,7 +103,7 @@ public sealed class CliTests : IDisposable
             "todo add every <weekday|day|month> <text...>", "todo done <text...>", "notes",
             "note show <name...>", "tags [tag...]", "find <attribute> <value...>",
             "search <text...>", "current", "review", "new <title...> [--template <name>]", "import <path>",
-            "export <note> <path>", "version", "dayend [today|yyyy-MM-dd]", "decisions [tag...]",
+            "export <note> <path>", "version", "dayend [today|yyyy-MM-dd]", "decisions [--full] [tag...]", "decisions <number>",
         })
         {
             Assert.Contains($"context {usage} ", result.Out, StringComparison.Ordinal);
@@ -771,11 +771,13 @@ public sealed class CliTests : IDisposable
     [Fact]
     public void TodoTexts_NameNoNumber()
     {
-        // Every help line except meeting's (167 AC-7 lists "meeting <n>") and item's (280 lists "item <n>").
+        // Every help line except meeting's (167 AC-7 lists "meeting <n>"), item's (280 lists "item <n>") and the
+        // decision number's (343 lists "decisions <number>").
         string help = string.Join(
             '\n',
             Run("help").Out.Split('\n').Where(l => !l.StartsWith("context meeting <n>", StringComparison.Ordinal)
-                && !l.StartsWith("context item <n>", StringComparison.Ordinal)));
+                && !l.StartsWith("context item <n>", StringComparison.Ordinal)
+                && !l.StartsWith("context decisions <number>", StringComparison.Ordinal)));
         string text = help + Run("todo").Err + Run("todo", "done").Err;
 
         Assert.Contains("todo done <text...>", text, StringComparison.Ordinal);
@@ -1683,15 +1685,20 @@ public sealed class CliTests : IDisposable
         Assert.Equal(before, Snapshot());
     }
 
-    // 180 ------------------------------------------------------------------------------------------
+    // 180, 343 -------------------------------------------------------------------------------------
 
-    // 180 AC-7: one line per decision, date, note, people and text, newest first, each field one clean line.
+    private const string DecisionsUsage = "Type: context decisions [--full] [tag] or context decisions <number>. Run 'context help'.";
+
+    // 343 AC-11: one line per decision: date, number or empty, note name, people and headline, newest first, each field
+    // one clean line; Decision: lines are gone.
     [Fact]
     public void Decisions_PrintsOneLinePerDecision()
     {
-        WriteNote("2026-11-10 Weekly sync", "# x\nDecision: ship it with @[Anna] and @[Bo]\n");
-        WriteNote("2026-11-12", "- decision: a\u0007b\tc\n");
-        WriteNote("Plans", "Decision: later");
+        WriteNote("meetings", "# meetings\n");
+        Directory.CreateDirectory(Path.Combine(root, "meetings"));
+        WriteNote("meetings/2026-11-10 Weekly sync", "# x\n#!d12 ship it with @[Anna]\nand @[Bo]\n");
+        WriteNote("2026-11-12", "- #!d a\u0007b\tc\n");
+        WriteNote("Plans", "#!d later\n\nDecision: old");
         File.SetLastWriteTimeUtc(Path.Combine(root, "Plans.md"), new DateTime(2026, 11, 1, 8, 0, 0, DateTimeKind.Utc));
 
         Result result = Run("decisions");
@@ -1699,17 +1706,71 @@ public sealed class CliTests : IDisposable
         Assert.Equal(0, result.Code);
         Assert.Equal(string.Empty, result.Err);
         Assert.Equal(
-            "2026-11-12\t2026-11-12\t\ta\uFFFDb c\n"
-                + "2026-11-10\t2026-11-10 Weekly sync\tAnna, Bo\tship it with @[Anna] and @[Bo]\n"
-                + "2026-11-01\tPlans\t\tlater\n",
+            "2026-11-12\t\t2026-11-12\t\ta\uFFFDb c\n"
+                + "2026-11-10\t#!d12\tmeetings/2026-11-10 Weekly sync\tAnna, Bo\tship it with @[Anna]\n"
+                + "2026-11-01\t\tPlans\t\tlater\n",
             result.Out);
+    }
+
+    // 343 AC-11: --full (any case) prints the whole text through OneLine instead of the headline.
+    [Theory]
+    [InlineData("--full")]
+    [InlineData("--FULL")]
+    public void Decisions_Full_PrintsWholeText(string flag)
+    {
+        WriteNote("Plan", "#!d3 one\ntwo\n");
+        File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), new DateTime(2026, 11, 1, 8, 0, 0, DateTimeKind.Utc));
+
+        Result result = Run("decisions", flag);
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal("2026-11-01\t#!d3\tPlan\t\tone two\n", result.Out);
+    }
+
+    // 343 AC-11: decisions <n> or #!d<n> prints one decision with its note, date, people, a blank line and the text.
+    [Theory]
+    [InlineData("3")]
+    [InlineData("#!d3")]
+    public void Decisions_Number_PrintsOne(string number)
+    {
+        WriteNote("Plan", "#!d3 one @[Anna]\ntwo\u0007\n");
+        File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), new DateTime(2026, 11, 1, 8, 0, 0, DateTimeKind.Utc));
+
+        Result result = Run("decisions", number);
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(string.Empty, result.Err);
+        Assert.Equal("#!d3\nNote: Plan\nDate: 2026-11-01\nPeople: Anna\n\none @[Anna]\ntwo\uFFFD\n", result.Out);
+    }
+
+    // 343 AC-11: an unknown number is an error with exit 1.
+    [Fact]
+    public void Decisions_UnknownNumber_IsError()
+    {
+        WriteNote("Plan", "#!d3 one");
+
+        AssertError(Run("decisions", "4"), 1, "No decision #!d4.");
+    }
+
+    // 343 AC-11: a number mixed with a tag or --full is the usage error, before the folder is read.
+    [Theory]
+    [InlineData("3", "work")]
+    [InlineData("work", "#!d3")]
+    [InlineData("--full", "3")]
+    public void Decisions_NumberWithOthers_UsageError(params string[] args)
+    {
+        Result result = Run(["decisions", .. args]);
+
+        AssertUsage(result);
+        Assert.Equal(DecisionsUsage, result.ErrLines[0]);
+        Assert.False(Directory.Exists(root));
     }
 
     // 180 AC-7: no decisions prints nothing and exits 0.
     [Fact]
     public void Decisions_None_NoOutput_ExitZero()
     {
-        WriteNote("A", "nothing");
+        WriteNote("A", "nothing\n\nDecision: old");
 
         Result result = Run("decisions");
 
@@ -1726,18 +1787,18 @@ public sealed class CliTests : IDisposable
     [InlineData("decisions", "#[project", "alpha]")]
     public void Decisions_Tag_Filters(params string[] args)
     {
-        WriteNote("Plan", "#work #[project alpha]\nDecision: go");
-        WriteNote("Home", "#home\nDecision: paint");
+        WriteNote("Plan", "#work #[project alpha]\n\n#!d go");
+        WriteNote("Home", "#home\n\n#!d paint");
         File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), new DateTime(2026, 11, 1, 8, 0, 0, DateTimeKind.Utc));
         string[] full = args[0].Equals("decisions", StringComparison.OrdinalIgnoreCase) ? args : ["decisions", .. args];
 
         Result result = Run(full);
 
         Assert.Equal(0, result.Code);
-        Assert.Equal("2026-11-01\tPlan\t\tgo\n", result.Out);
+        Assert.Equal("2026-11-01\t\tPlan\t\tgo\n", result.Out);
     }
 
-    // 180 AC-7: an invalid tag is a usage error and the folder is not read.
+    // 343 AC-11: an invalid tag is the usage error and the folder is not read.
     [Theory]
     [InlineData("#1x")]
     [InlineData("#")]
@@ -1746,7 +1807,7 @@ public sealed class CliTests : IDisposable
         Result result = Run("decisions", tag);
 
         AssertUsage(result);
-        Assert.Equal("Type: context decisions [tag]. Run 'context help'.", result.ErrLines[0]);
+        Assert.Equal(DecisionsUsage, result.ErrLines[0]);
         Assert.False(Directory.Exists(root));
     }
 
@@ -1764,7 +1825,7 @@ public sealed class CliTests : IDisposable
     [Fact]
     public void Decisions_BadContextDb_IsError()
     {
-        WriteNote("A", "Decision: x");
+        WriteNote("A", "#!d x");
         File.WriteAllText(Path.Combine(root, TagIndex.FileName), "not a database at all, not at all, really not");
         Dictionary<string, string> before = Snapshot();
 

@@ -1,7 +1,9 @@
 @using System.Globalization
 @inherits StateComponent
-@* The Decision: lines of every note, or of the notes with a tag (DesktopState.Decisions), newest first, each with its
-   date, note and people; clicking a note opens it. It reads only, and reloads whenever the state changes. *@
+@* The #!d decisions of every note, or of the notes with a tag (DesktopState.Decisions, job 343), newest first, each
+   with its date, number, note, people and headline; the full paragraph unfolds below. Clicking the number or the
+   headline opens the note at the decision, the note button at the top. It reads only, and reloads whenever the state
+   changes. *@
 
 <section class="decisions-panel" aria-label="Decisions">
     <div class="panel-bar">
@@ -34,17 +36,35 @@
             @foreach (Decision decision in view.Decisions.Take(MaxRows))
             {
                 string name = decision.Note;
-                string shown = DesktopText.OneLine(name);
+                string full = DesktopText.OneLine(name);
+                string title = DesktopText.NoteName(decision.Title);
                 string people = DesktopText.OneLine(string.Join(", ", decision.People));
-                string text = DesktopText.OneLine(decision.Text);
+                string headline = DesktopText.OneLine(decision.Headline);
+                (string Note, int Line) key = (decision.Note, decision.Line);
+                bool open = expanded.Contains(key);
+                int? number = decision.Number;
                 <li>
                     <span class="date grey">@decision.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</span>
-                    <button type="button" class="note-button cut" title="@shown" @onclick="() => OnOpen.InvokeAsync(name)">@shown</button>
+                    @if (number is int n)
+                    {
+                        string marker = DecisionParser.Format(n);
+                        <span class="decision-number"><button type="button" title="Open @marker" @onclick="() => Jump(name, number)">@marker</button></span>
+                    }
+                    else
+                    {
+                        <span class="decision-number grey">unnumbered</span>
+                    }
+                    <button type="button" class="note-button cut" title="@full" @onclick="() => OnOpen.InvokeAsync(name)">@title</button>
                     @if (people.Length > 0)
                     {
                         <span class="people grey cut" title="@people">@people</span>
                     }
-                    <span class="text cut" title="@text">@text</span>
+                    <span class="text cut" title="@headline"><button type="button" class="cut" @onclick="() => Jump(name, number)">@headline</button></span>
+                    <button type="button" class="decision-expand" aria-expanded="@(open ? "true" : "false")" @onclick="() => Toggle(key)">@(open ? "Hide full text" : "Show full text")</button>
+                    @if (open)
+                    {
+                        <p class="decision-full">@FullText(decision.Text)</p>
+                    }
                 </li>
             }
         </ul>
@@ -60,6 +80,9 @@
     internal const int MaxRows = 100;
 
     private DecisionsView? view;
+
+    // The rows whose full text is shown, by note and line.
+    private HashSet<(string Note, int Line)> expanded = [];
     private string? loaded;
     private int request;
 
@@ -71,8 +94,28 @@
     [Parameter]
     public EventCallback<string> OnOpen { get; set; }
 
+    /// <summary>Called with a note's name and a decision number when the number or headline is clicked (job 343).</summary>
+    [Parameter]
+    public EventCallback<(string Name, int Decision)> OnOpenDecision { get; set; }
+
     [Parameter]
     public EventCallback OnClose { get; set; }
+
+    // A numbered decision opens its note at it; an unnumbered one (or without a delegate) opens the note at the top.
+    private Task Jump(string name, int? number) =>
+        number is int n && OnOpenDecision.HasDelegate ? OnOpenDecision.InvokeAsync((name, n)) : OnOpen.InvokeAsync(name);
+
+    private void Toggle((string Note, int Line) key)
+    {
+        // Shown state only (no data is written): a new set with the row added, or the row removed.
+        if (!expanded.Remove(key))
+        {
+            expanded = [.. expanded, key];
+        }
+    }
+
+    // The paragraph's lines, each through OneLine, joined with line breaks (shown with white-space: pre-wrap).
+    private static string FullText(string text) => string.Join('\n', text.Split('\n').Select(DesktopText.OneLine));
 
     private bool Valid => DecisionsView.TryNormalizeTag(Tag, out _);
 

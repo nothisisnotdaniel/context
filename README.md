@@ -77,13 +77,36 @@ text needs at least 3 and at most 200 characters. Sensitive notes are never sear
 
 ### Decision log
 
-Write a decision as its own line, `Decision: we ship in March` (any case, also as a list item `- Decision: ...`;
-not inside a code block or after `1. `). `context decisions` prints every decision of every note, newest first, one
-line each: the date, the note, the people mentioned on the line (`@[Anna]`, resolved through aliases) and the text,
-separated by tabs (none: no output). The date is the note title's leading date (`2026-11-10 Weekly sync`), else the
-day the note was last changed. `context decisions work` (or `#work`, `[project alpha]`) lists only the decisions of
-notes with that tag. Sensitive notes are never listed, and a text is cut at 1000 characters. In the desktop app,
-`/decisions` or `/decisions #work` in the command palette lists the same decisions; click a note to open it.
+Start a paragraph with `#!d` to mark it as a decision:
+
+```
+#!d We ship in March.
+The beta showed no blockers, and @[Anna] agreed.
+```
+
+The paragraph runs to the next blank line, heading, code fence or list item, and the marker also works as a list item
+(`- #!d ...`), as the first line of a note, or after a blank line, a heading or a fence; a `#!d` in the middle of a
+paragraph or inside code is no decision. When the desktop app saves the note, every new marker gets a number that is
+unique across all notes and is written into the text (`#!d1234`). Notes the app writes itself (capture, note today,
+triage, import, the day's end, the briefing and the link updates of a rename) are numbered the same way; notes written
+by the command line, a merge, a template or a meeting note stay unnumbered until their next save in the app, and
+sensitive notes are never numbered. A number is never given twice, and numbers you type yourself are stepped over.
+If no numbers are left (above 999999999), the app says so in red and new markers stay unnumbered. Any note
+can point at a decision with `#!d1234`: the editor shows it as a link with the decision's headline as its tooltip, and a
+click jumps to the decision. A pasted decision loses its number (the text stays), unless you cut it and paste it back
+in the same note, so a copy never takes over the number. Only an exact copy loses it: when another note has the same
+number with a different text, the number stays and the app says so in red, so you can type `#!d` alone to give the
+decision a new number. Renaming or moving a note in the app keeps its numbers.
+
+`context decisions` prints every decision of every note, newest first, one line each: the date, the number (empty
+while unnumbered), the note, the people mentioned in the paragraph (`@[Anna]`, resolved through aliases) and the
+headline (the first line), separated by tabs (none: no output). `--full` prints the whole paragraph instead.
+`context decisions 1234` (or `#!d1234`) prints one decision with its note, date, people and full text. The date is the
+note title's leading date (`2026-11-10 Weekly sync`), else the day the note was last changed. `context decisions work`
+(or `#work`, `[project alpha]`) lists only the decisions of notes with that tag. Sensitive notes are never listed, and a
+text is cut at 1000 characters. In the desktop app, `/decisions` or `/decisions #work` in the command palette lists the
+same decisions with their number, note, headline and a button that shows the full text; click the number or headline
+to jump to the decision. The old `Decision:` lines are no longer read.
 
 ### Similar notes
 
