@@ -73,6 +73,11 @@ internal sealed class DesktopState
 
     // 1 while the last numbering found no decision numbers left (job 343).
     private int decisionNumbersRanOut;
+
+    // Job 349: the folder's decision id, loaded once; 1 while it can't be read.
+    private readonly object decisionFolderGate = new();
+    private DecisionFolder? decisionFolder;
+    private int decisionFolderUnreadable;
     private TaskCompletionSource? reloadsSettled;
 
     public DesktopState(
@@ -1428,47 +1433,70 @@ internal sealed class DesktopState
     });
 
     /// <summary>
-    /// Whether the last numbering found no decision numbers left (job 343): its bare markers stayed as typed. Main shows
-    /// it until a later numbering gets numbers again.
+    /// Whether the last numbering found no decision numbers left (job 343): its markers stayed as typed. Main shows it
+    /// until a later numbering gets numbers again.
     /// </summary>
     public bool DecisionNumbersRanOut => Volatile.Read(ref decisionNumbersRanOut) != 0;
 
     /// <summary>
-    /// Job 343: numbers the bare <c>#!d</c> markers of the plain note <paramref name="note"/>'s new
-    /// <paramref name="text"/> and removes the numbered markers that repeat in the text or copy a decision another note
-    /// owns with the same text, under the index lock: syncs the index, reads the owners and their texts, and reserves the
-    /// new numbers in one <c>BEGIN IMMEDIATE</c> transaction above the counter, stepping over every number in use or in
-    /// the text (<see cref="DecisionNumbers.Apply"/>). A marker another note owns with another text stays
-    /// (<see cref="DecisionEdits.Kept"/>). With no numbers left the bare markers stay too
-    /// (<see cref="DecisionEdits.Unnumbered"/>, <see cref="DecisionNumbersRanOut"/>). <c>null</c> when there is nothing
-    /// to tell or anything fails (an unreadable index): the note is then saved as typed.
+    /// Whether the last try to read or create <c>decision-folder.json</c> failed (job 349): nothing is numbered, and Main
+    /// shows the red <see cref="DecisionFolder.UnreadableText"/> line.
     /// </summary>
-    internal DecisionEdits? NumberDecisions(string note, string text)
+    public bool DecisionFolderUnreadable => Volatile.Read(ref decisionFolderUnreadable) != 0;
+
+    /// <summary>The random source of a new folder prefix (job 349); tests set it. Cryptographic by default.</summary>
+    internal Func<int, int>? DecisionRandom { get; init; }
+
+    /// <summary>The GUID source of a new folder id (job 349); tests set it. <see cref="Guid.NewGuid"/> by default.</summary>
+    internal Func<Guid>? DecisionGuid { get; init; }
+
+    /// <summary>
+    /// The data folder's decision id (job 349, <see cref="DecisionFolder.Load"/>): read, or created on the first
+    /// call. A loaded id is kept for the session; a failure is retried on the next call. <c>null</c> (and
+    /// <see cref="DecisionFolderUnreadable"/>) when the file can't be read or made.
+    /// </summary>
+    internal DecisionFolder? LoadDecisionFolder()
     {
-        if (!text.Contains(DecisionParser.Token, StringComparison.Ordinal))
+        lock (decisionFolderGate)
         {
-            return null;
+            if (decisionFolder is { } loaded)
+            {
+                return loaded;
+            }
+
+            DecisionFolder? folder = null;
+            try
+            {
+                folder = DecisionFolder.Load(notes.Root, DecisionRandom, DecisionGuid);
+            }
+            catch (Exception)
+            {
+                folder = null;
+            }
+
+            Volatile.Write(ref decisionFolderUnreadable, folder is null ? 1 : 0);
+            decisionFolder = folder;
+            return folder;
+        }
+    }
+
+    /// <summary>
+    /// The data folder's decision id for a read: the loaded one, else <see cref="DecisionFolder.Read"/> without creating
+    /// the file (opening a note writes nothing). <c>null</c> when there is none or it can't be read.
+    /// </summary>
+    private DecisionFolder? PeekDecisionFolder()
+    {
+        lock (decisionFolderGate)
+        {
+            if (decisionFolder is { } loaded)
+            {
+                return loaded;
+            }
         }
 
         try
         {
-            lock (indexGate)
-            {
-                index.Sync(notes);
-                IReadOnlyDictionary<int, string> owners = index.DecisionOwners();
-                IReadOnlyDictionary<int, string> texts = index.OwnedDecisionTexts();
-                int[] typed = [.. DecisionParser.Markers(text).Select(d => d.Number ?? 0).Where(n => n > 0), .. DecisionParser.References(text)];
-                DecisionEdits edits = DecisionNumbers.Apply(
-                    text,
-                    (number, decision) => Holder(note, number, decision, owners, texts),
-                    count =>
-                    {
-                        int? first = index.ReserveDecisionNumbers(count, typed);
-                        Volatile.Write(ref decisionNumbersRanOut, first is null ? 1 : 0);
-                        return first;
-                    });
-                return edits.Noteworthy ? edits : null;
-            }
+            return DecisionFolder.Read(notes.Root);
         }
         catch (Exception)
         {
@@ -1476,22 +1504,109 @@ internal sealed class DesktopState
         }
     }
 
-    // Another note's number is a copy only when its owner's logged decision has exactly this text.
-    private static DecisionHolder Holder(
-        string note,
-        int number,
-        string text,
-        IReadOnlyDictionary<int, string> owners,
-        IReadOnlyDictionary<int, string> texts)
+    /// <summary>Forgets the loaded folder id, so the next numbering reads the file again (after the migration marked it).</summary>
+    internal void ReloadDecisionFolder()
     {
-        if (!owners.TryGetValue(number, out string? owner) || string.Equals(owner, note, StringComparison.Ordinal))
+        lock (decisionFolderGate)
         {
-            return DecisionHolder.None;
+            decisionFolder = null;
+        }
+    }
+
+    /// <summary>
+    /// Job 349: numbers the <c>!d</c> markers of the plain note <paramref name="note"/>'s new <paramref name="text"/>
+    /// with the folder's prefix through <see cref="DecisionNumbering.Number"/>, under the index lock. With no numbers left
+    /// the markers stay as typed (<see cref="DecisionEdits.Unnumbered"/>, <see cref="DecisionNumbersRanOut"/>).
+    /// <c>null</c> when there is nothing to tell, the folder id can't be read, or anything fails: the note is then saved
+    /// as typed.
+    /// </summary>
+    internal DecisionEdits? NumberDecisions(string note, string text)
+    {
+        if (!text.Contains(DecisionParser.Marker, StringComparison.Ordinal) || LoadDecisionFolder() is not { } folder)
+        {
+            return null;
         }
 
-        return texts.TryGetValue(number, out string? logged) && string.Equals(logged, text, StringComparison.Ordinal)
-            ? DecisionHolder.Copy
-            : DecisionHolder.Other;
+        try
+        {
+            DecisionEdits? edits;
+            lock (indexGate)
+            {
+                edits = DecisionNumbering.Number(index, notes, folder, note, text);
+            }
+
+            NoteRanOut(edits);
+            return edits;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Job 349: after a write that was not a save, numbers the plain note <paramref name="name"/> in a second write
+    /// (<see cref="DecisionNumbering.NumberWritten(TagIndex, NoteStore, Func{DecisionFolder}, string, out DecisionEdits?)"/>;
+    /// the folder id is loaded only for a note with a marker)
+    /// under the index lock, keeping <see cref="DecisionNumbersRanOut"/> like a save. Never throws.
+    /// </summary>
+    internal void NumberWritten(string name)
+    {
+        try
+        {
+            DecisionEdits? edits;
+            lock (indexGate)
+            {
+                DecisionNumbering.NumberWritten(index, notes, LoadDecisionFolder, name, out edits);
+            }
+
+            NoteRanOut(edits);
+        }
+        catch (Exception)
+        {
+            // The write is done; the markers stay until the next save.
+        }
+    }
+
+    /// <summary>
+    /// Job 349: the one-time move of job 343's markers (<see cref="DecisionMigration.Run"/>) under the index lock, with
+    /// the history; <c>null</c> when the folder id can't be read. <paramref name="beforeSave"/> is the test hook.
+    /// </summary>
+    internal DecisionMigrationReport? MigrateDecisions(Action<string>? beforeSave = null)
+    {
+        if (LoadDecisionFolder() is not { } folder)
+        {
+            return null;
+        }
+
+        try
+        {
+            DecisionMigrationReport result;
+            lock (indexGate)
+            {
+                result = DecisionMigration.Run(index, notes, HistoryStore, folder, beforeSave);
+            }
+
+            ReloadDecisionFolder();
+            return result;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    // Set while a numbering found no numbers left, cleared once one gets numbers again.
+    private void NoteRanOut(DecisionEdits? edits)
+    {
+        if (edits is { Unnumbered: > 0 })
+        {
+            Volatile.Write(ref decisionNumbersRanOut, 1);
+        }
+        else if (edits is { Set.Count: > 0 })
+        {
+            Volatile.Write(ref decisionNumbersRanOut, 0);
+        }
     }
 
     /// <summary>
@@ -1515,12 +1630,13 @@ internal sealed class DesktopState
     }
 
     /// <summary>
-    /// Job 343: the headline (raw) of each of <paramref name="numbers"/> (at most <see cref="MaxDecisionReferences"/>)
-    /// that a readable owner holds, off the calling thread under the index lock; unknown numbers are not in the result.
+    /// Job 349: the headline (raw) of each of <paramref name="references"/> (at most <see cref="MaxDecisionReferences"/>)
+    /// that a readable owner holds, keyed by the reference as given (<see cref="DecisionRef.Text"/>: <c>1234</c> for the
+    /// own prefix, <c>ab12-1234</c>); unknown ones are not in the result. Off the calling thread under the index lock.
     /// With <paramref name="sync"/> the index is synced first (a plain note); a sensitive note's lookups only read the
     /// index. <c>null</c> on any failure.
     /// </summary>
-    public Task<IReadOnlyDictionary<int, string>?> DecisionTitles(IReadOnlyList<int> numbers, bool sync) => Task.Run(() =>
+    public Task<IReadOnlyDictionary<DecisionRef, string>?> DecisionTitles(IReadOnlyList<DecisionRef> references, bool sync) => Task.Run(() =>
     {
         try
         {
@@ -1531,7 +1647,20 @@ internal sealed class DesktopState
                     index.Sync(notes);
                 }
 
-                return (IReadOnlyDictionary<int, string>?)index.DecisionHeadlines(numbers.Take(MaxDecisionReferences));
+                string? own = index.OwnPrefix;
+                List<DecisionRef> wanted = [.. references.Distinct().Take(MaxDecisionReferences)];
+                IReadOnlyDictionary<(string Prefix, int Number), string> headlines = index.DecisionHeadlines(
+                    wanted.Where(r => (r.Prefix ?? own) is not null).Select(r => (r.Prefix ?? own!, r.Number)));
+                Dictionary<DecisionRef, string> titles = [];
+                foreach (DecisionRef reference in wanted)
+                {
+                    if ((reference.Prefix ?? own) is string prefix && headlines.TryGetValue((prefix, reference.Number), out string? headline))
+                    {
+                        titles[reference] = headline;
+                    }
+                }
+
+                return (IReadOnlyDictionary<DecisionRef, string>?)titles;
             }
         }
         catch (Exception)
@@ -1541,16 +1670,24 @@ internal sealed class DesktopState
     });
 
     /// <summary>
-    /// Job 343: the full name of the note that owns decision <paramref name="number"/> (read from the index only, off
-    /// the calling thread under the index lock), or <c>null</c> when none does or the index can't be read.
+    /// Job 349: the note that owns the decision <paramref name="reference"/> names, and the token its marker is written
+    /// with there (<c>ab12-1234</c>, the folder's prefix for a clash alias), read from the index only, off the calling
+    /// thread under the index lock; <c>null</c> when none does or the index can't be read.
     /// </summary>
-    public Task<string?> DecisionNote(int number) => Task.Run(() =>
+    public Task<(string Note, string Token)?> DecisionNote(DecisionRef reference) => Task.Run(() =>
     {
         try
         {
             lock (indexGate)
             {
-                return index.DecisionByNumber(number)?.Note;
+                if ((reference.Prefix ?? index.OwnPrefix) is not string prefix
+                    || index.DecisionByKey(prefix, reference.Number) is not { } decision)
+                {
+                    return ((string, string)?)null;
+                }
+
+                string written = index.DecisionFolderAliases().FirstOrDefault(a => a.Alias == prefix)?.Prefix ?? prefix;
+                return (decision.Note, DecisionParser.Label(written, reference.Number));
             }
         }
         catch (Exception)
@@ -1559,8 +1696,129 @@ internal sealed class DesktopState
         }
     });
 
+    /// <summary>
+    /// Job 349: the prefixes the editor draws a note's Copy reference buttons with: the folder's own prefix and, for a
+    /// note whose <c>decision-folder::</c> GUID is a clashing foreign folder's, the alias its own-prefix markers show as.
+    /// Off the calling thread; <c>null</c> when the folder id is missing or can't be read. Reads only: never creates it.
+    /// </summary>
+    public Task<(string Own, string? Alias)?> DecisionPrefixes(string text) => Task.Run(() =>
+    {
+        if (PeekDecisionFolder() is not { } folder)
+        {
+            return ((string, string?)?)null;
+        }
+
+        string? alias = null;
+        if (DecisionFolder.NoteGuid(text ?? string.Empty) is Guid guid && guid != folder.Guid)
+        {
+            try
+            {
+                lock (indexGate)
+                {
+                    string key = guid.ToString("D");
+                    alias = index.DecisionFolderAliases().FirstOrDefault(a => string.Equals(a.Guid, key, StringComparison.OrdinalIgnoreCase))?.Alias;
+                }
+            }
+            catch (Exception)
+            {
+                alias = null;
+            }
+        }
+
+        return (folder.Prefix, alias);
+    });
+
     /// <summary>The most distinct references a note's lookup asks for (job 343).</summary>
     public const int MaxDecisionReferences = 500;
+
+    /// <summary>The most rows the picker gets (job 349).</summary>
+    public const int MaxDecisionPicks = 20;
+
+    /// <summary>
+    /// Job 349: the picker's rows for <paramref name="query"/> (trimmed; blank: every decision): the log's decisions
+    /// (<see cref="DecisionsView.Build"/>, so only plain notes, never a sensitive one) whose headline contains it
+    /// (ignoring case) or whose label starts with it, newest first, at most <see cref="MaxDecisionPicks"/>, as
+    /// (label, reference, headline); raw headlines. Read only, off the calling thread; empty on any failure.
+    /// </summary>
+    public Task<IReadOnlyList<(string Label, string Reference, string Headline)>> DecisionPicks(string query) => Task.Run(() =>
+    {
+        try
+        {
+            string wanted = (query ?? string.Empty).Trim();
+            if (wanted.StartsWith(DecisionParser.Token, StringComparison.OrdinalIgnoreCase))
+            {
+                wanted = wanted[DecisionParser.Token.Length..];
+            }
+
+            DecisionsView view;
+            lock (indexGate)
+            {
+                view = DecisionsView.Build(index, notes, string.Empty, calendar.Zone);
+            }
+
+            return (IReadOnlyList<(string, string, string)>)[.. view.Decisions
+                .Where(d => d.Label is not null && (wanted.Length == 0
+                    || d.Headline.Contains(wanted, StringComparison.OrdinalIgnoreCase)
+                    || d.Label.StartsWith(wanted, StringComparison.OrdinalIgnoreCase)))
+                .Take(MaxDecisionPicks)
+                .Select(d => (d.Label!, d.Label!, d.Headline))];
+        }
+        catch (Exception)
+        {
+            return [];
+        }
+    });
+
+    /// <summary>
+    /// Job 349: whether <see cref="TakeDecisionClashes"/> may have a clash to show, as the index saw at its last sync or
+    /// clash read (<see cref="CheckDecisionClashes"/> at start). Reads no file and takes no lock, so <c>Main</c> asks it
+    /// at start and on every state change and starts the background read only when it is true.
+    /// </summary>
+    public bool DecisionClashesDue => index.HasUnwarnedDecisionFolders;
+
+    /// <summary>
+    /// Job 349: reads the stored clashes once at start (<c>Program</c>, right after the migration), so
+    /// <see cref="DecisionClashesDue"/> also tells a clash another process stored. Never throws.
+    /// </summary>
+    internal void CheckDecisionClashes()
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                _ = index.DecisionFolderAliases();
+            }
+        }
+        catch (Exception)
+        {
+            // An unreadable index shows no clash line; the next sync tries again.
+        }
+    }
+
+    /// <summary>
+    /// Job 349: the clash lines not shown yet: each foreign folder that uses the own prefix and has not been
+    /// <c>warned</c>, as (guid, prefix, alias), each then marked warned so it shows once. Empty on any failure.
+    /// </summary>
+    public Task<IReadOnlyList<DecisionFolderAlias>> TakeDecisionClashes() => Task.Run(() =>
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                List<DecisionFolderAlias> fresh = [.. index.DecisionFolderAliases().Where(a => !a.Warned)];
+                foreach (DecisionFolderAlias alias in fresh)
+                {
+                    index.MarkDecisionFolderWarned(alias.Guid);
+                }
+
+                return (IReadOnlyList<DecisionFolderAlias>)fresh;
+            }
+        }
+        catch (Exception)
+        {
+            return [];
+        }
+    });
 
     /// <summary>
     /// The <c>#!d</c> decisions of every plain note, or of the notes with <paramref name="tag"/>

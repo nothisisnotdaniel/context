@@ -118,10 +118,22 @@ internal sealed class EditorInterop
     public event Func<string, Task>? LinkPasted;
 
     /// <summary>
-    /// Raised with the number of a clicked decision reference (<c>#!d1234</c>, job 343), checked to be in range; the
-    /// component decides where to jump.
+    /// Raised with a clicked decision reference (<c>#!d1234</c> or <c>#!dab12-1234</c>, jobs 343 and 349), checked
+    /// through <see cref="DecisionParser.TryParseReference"/>; the component decides where to jump.
     /// </summary>
-    public event Func<int, Task>? DecisionClicked;
+    public event Func<DecisionRef, Task>? DecisionClicked;
+
+    /// <summary>
+    /// Raised with the reference a note's Copy reference button just copied (job 349), checked like
+    /// <see cref="DecisionClicked"/>; the component shows <c>Copied #!d&lt;ref&gt;.</c>
+    /// </summary>
+    public event Func<DecisionRef, Task>? DecisionCopied;
+
+    /// <summary>
+    /// Answers the picker's query (job 349): the matching decisions as (label, reference, headline). Set by the
+    /// component; without it the picker shows no rows.
+    /// </summary>
+    public Func<string, Task<IReadOnlyList<(string Label, string Reference, string Headline)>>>? DecisionPicksSource { get; set; }
 
     /// <summary>
     /// Opens <paramref name="markdown"/> in a new editor inside <paramref name="element"/>, showing the
@@ -196,7 +208,8 @@ internal sealed class EditorInterop
         js.InvokeAsync<bool>("ContextEditor.scrollToHeading", element, index);
 
     /// <summary>
-    /// Replays a save's decision edits (<paramref name="editsJson"/>, <c>{"bare":[n…],"strip":[n…]}</c>, integers only)
+    /// Replays a save's decision edits (<paramref name="editsJson"/>, <c>{"set":[[k, old or null, new]…],"folder":guid
+    /// or null}</c>, built by .NET from validated tokens)
     /// on the live document, out of the undo history, then marks the editor clean when its text equals
     /// <paramref name="saved"/> (the text the save wrote). <c>true</c> when it is clean; <c>false</c> when it was edited
     /// during the save and stays dirty.
@@ -204,23 +217,40 @@ internal sealed class EditorInterop
     public ValueTask<bool> ApplyDecisionEditsAsync(ElementReference element, string editsJson, string saved) =>
         js.InvokeAsync<bool>("ContextEditor.applyDecisionEdits", element, editsJson, saved);
 
-    /// <summary>The decision numbers the live document references, as a JSON array of integers (at most 500).</summary>
+    /// <summary>The references of the live document (<c>1234</c>, <c>ab12-1234</c>), as a JSON array of strings (at most 500).</summary>
     public ValueTask<string> DecisionReferencesAsync(ElementReference element) =>
         js.InvokeAsync<string>("ContextEditor.decisionReferencesIn", element);
 
     /// <summary>
-    /// Draws the references from <paramref name="titlesJson"/> (<c>[[n, headline or null], …]</c>, built by .NET; null
-    /// for a number with no decision); <c>false</c> when the editor refused it.
+    /// Draws the references from <paramref name="titlesJson"/> (<c>[[ref, headline or null], …]</c>, built by .NET; null
+    /// for a reference with no decision); <c>false</c> when the editor refused it.
     /// </summary>
     public ValueTask<bool> SetDecisionTitlesAsync(ElementReference element, string titlesJson) =>
         js.InvokeAsync<bool>("ContextEditor.setDecisionTitles", element, titlesJson);
 
     /// <summary>
-    /// Puts the cursor at the start of decision <paramref name="number"/>'s paragraph, scrolls to it and flashes it;
-    /// <c>false</c> when the note has no such decision.
+    /// Puts the cursor at the start of the paragraph whose marker has <paramref name="token"/> (lower case,
+    /// <c>ab12-1234</c>), scrolls to it and flashes it; <c>false</c> when the note has no such decision.
     /// </summary>
-    public ValueTask<bool> ScrollToDecisionAsync(ElementReference element, int number) =>
-        js.InvokeAsync<bool>("ContextEditor.scrollToDecision", element, number);
+    public ValueTask<bool> ScrollToDecisionAsync(ElementReference element, string token) =>
+        js.InvokeAsync<bool>("ContextEditor.scrollToDecision", element, token);
+
+    /// <summary>
+    /// Sets the prefixes the Copy reference buttons are drawn with (job 349): <paramref name="own"/> and, for a clashing
+    /// foreign folder's note, the <paramref name="alias"/> its own-prefix markers show as. Both checked prefixes.
+    /// </summary>
+    public ValueTask<bool> SetDecisionPrefixesAsync(ElementReference element, string own, string? alias) =>
+        js.InvokeAsync<bool>(
+            "ContextEditor.setDecisionPrefixes",
+            element,
+            System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string?> { ["own"] = own, ["alias"] = alias }));
+
+    /// <summary>
+    /// Copies <paramref name="text"/> (a reference built by .NET) through the editor's <c>copyText</c> (the clipboard,
+    /// else a hidden selection); <c>true</c> when it was copied. Needs no mounted editor.
+    /// </summary>
+    public async ValueTask<bool> CopyTextAsync(string text) =>
+        await js.InvokeAsync<string>("ContextEditor.copyToClipboard", text) == "Copied";
 
     /// <summary>
     /// Applies <paramref name="theme"/> to the page (job 341): <c>ContextEditor.setTheme</c> with one of the fixed
@@ -262,10 +292,79 @@ internal sealed class EditorInterop
     [JSInvokable]
     public Task OnPasteLink(string url) => LinkPasted?.Invoke(url) ?? Task.CompletedTask;
 
-    /// <summary>Called by the editor when a decision reference is clicked; a number out of range is ignored.</summary>
+    /// <summary>Called by the editor when a decision reference is clicked; anything but a reference is ignored.</summary>
     [JSInvokable]
-    public Task OnDecision(int number) =>
-        number is >= 1 and <= DecisionParser.MaxNumber ? DecisionClicked?.Invoke(number) ?? Task.CompletedTask : Task.CompletedTask;
+    public Task OnDecision(string reference) =>
+        reference is not null && reference.Length <= 30 && DecisionParser.TryParseReference(reference, out DecisionRef parsed)
+            ? DecisionClicked?.Invoke(parsed) ?? Task.CompletedTask
+            : Task.CompletedTask;
+
+    /// <summary>Called by the editor when a Copy reference button copied; anything but a reference is ignored.</summary>
+    [JSInvokable]
+    public Task OnCopiedDecision(string reference) =>
+        reference is not null && reference.Length <= 30 && DecisionParser.TryParseReference(reference, out DecisionRef parsed)
+            ? DecisionCopied?.Invoke(parsed) ?? Task.CompletedTask
+            : Task.CompletedTask;
+
+    /// <summary>
+    /// Called by the picker with the text typed after <c>#!d</c> (at most 30 chars, else no rows): the matching
+    /// decisions as a JSON array of <c>{label, ref, headline}</c>, each reference rebuilt by .NET from its parsed parts
+    /// and each headline one line, cut to 200 chars. <c>[]</c> without a source or on any failure.
+    /// </summary>
+    [JSInvokable]
+    public async Task<string> DecisionPicks(string query)
+    {
+        if (DecisionPicksSource is not { } source || query is null || query.Length > 30)
+        {
+            return "[]";
+        }
+
+        IReadOnlyList<(string Label, string Reference, string Headline)> picks;
+        try
+        {
+            picks = await source(query);
+        }
+        catch (Exception)
+        {
+            return "[]";
+        }
+
+        return PicksJson(picks);
+    }
+
+    /// <summary>The picker's rows as JSON (see <see cref="DecisionPicks"/>); a row whose reference doesn't parse is left out.</summary>
+    internal static string PicksJson(IReadOnlyList<(string Label, string Reference, string Headline)> picks)
+    {
+        using MemoryStream stream = new MemoryStream();
+        using (System.Text.Json.Utf8JsonWriter writer = new System.Text.Json.Utf8JsonWriter(stream))
+        {
+            writer.WriteStartArray();
+            foreach ((string label, string reference, string headline) in picks.Take(DesktopState.MaxDecisionPicks))
+            {
+                if (!DecisionParser.TryParseReference(reference, out DecisionRef parsed)
+                    || !DecisionParser.TryParseReference(label, out DecisionRef shown))
+                {
+                    continue;
+                }
+
+                string line = DesktopText.OneLine(headline);
+                if (line.Length > 200)
+                {
+                    line = line[..(char.IsHighSurrogate(line[199]) ? 199 : 200)];
+                }
+
+                writer.WriteStartObject();
+                writer.WriteString("label", shown.Text);
+                writer.WriteString("ref", parsed.Text);
+                writer.WriteString("headline", line);
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
 
     /// <summary>Removes the editor from the page and drops the reference the page holds.</summary>
     public async Task DestroyAsync()

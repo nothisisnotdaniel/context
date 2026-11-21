@@ -15,7 +15,7 @@ import { smartPaste, linkMeta, linkTitleTransaction } from "./paste.js";
 import { codeBlockView, mermaidEditing, isMermaidFence } from "./mermaid.js";
 import { tokens, firstWord, languageOptions, withLanguage } from "./highlight.js";
 import { parse, serialize, splitTitle, joinTitle, headingList, attributeSplit, attributeBlockRowsJson, editAttributes, normalizePerson, isNetWhite } from "./markdown.js";
-import { MaxNumber, applyDecisionEditsText, decisionReferences as decisionReferencesText, pastedDecisionMarkdown, leadingMarkerLength, referenceAt, referenceMayStart, startsWithMarker } from "./decisions.js";
+import { Token, readEdits, applySet, hasFolderLine, withFolderLine, decisionReferences as decisionReferencesText, leadingMarker, label, parseReference, referenceAt, referenceMayStart, pickerQuery, pickerRows, pickerKey, pickerAttrs, copyButtonAttrs, isPrefix } from "./decisions.js";
 
 const editors = new WeakMap();
 
@@ -570,6 +570,11 @@ export function copyText(text, options) {
   return written.then(() => "Copied", () => fallback());
 }
 
+/** Copies text (a reference .NET built) through copyText with the page's clipboard; resolves to "Copied" or "Can't copy". */
+export function copyToClipboard(text) {
+  return copyText(String(text), { writeText: clipboardWrite(), execCopy: copyThroughSelection });
+}
+
 // The page's clipboard: navigator.clipboard.writeText when there is one.
 function clipboardWrite() {
   const clipboard = globalThis.navigator && globalThis.navigator.clipboard;
@@ -794,7 +799,7 @@ function listItemView(node, view, getPos) {
   };
 }
 
-// Decisions (job 343). A transaction that replays a save's marker edits: kept out of the undo history, and no
+// Decisions (jobs 343 and 349). A transaction that replays a save's marker edits: kept out of the undo history, and no
 // OnChanged (the text was just saved).
 const decisionEditMeta = "decisionEdits";
 const decisionKey = new PluginKey("decisions");
@@ -812,24 +817,69 @@ function positionText(node) {
         code.push([start, text.length]);
       }
     } else {
-      text += "\ufffc";
+      text += "￼";
     }
   });
   return { text, code };
 }
 
-// Whether text (a paragraph's) starts with a numbered marker that is followed by more of the paragraph: a decision.
-function startsDecision(text) {
-  const length = leadingMarkerLength(text);
-  return length > 0 && text.slice(length).trim().length > 0;
+// The marker that starts a paragraph's text and is followed by more of the paragraph (a decision), or null.
+function paragraphMarker(node) {
+  if (node.type.name !== "paragraph") {
+    return null;
+  }
+  const { text, code } = positionText(node);
+  if (code.some(([from]) => from === 0)) {
+    return null;
+  }
+  const found = leadingMarker(text);
+  return found !== null && text.slice(found.end).trim().length > 0 ? found : null;
 }
 
-// The reference decorations of doc: every #!d<n> that titles knows (outside code, not a paragraph's own marker).
-function referenceDecorations(doc, titles) {
-  const decorations = [];
-  if (titles.size === 0) {
-    return decorations;
+// How a marker's decision is shown and referred to here, given .NET's prefixes ({ own, alias }): { label, ref }, or
+// null for a bare or plain-number marker or before .NET told the prefixes. A marker with the own prefix in a note of a
+// clashing folder shows as the alias; the own folder's decisions show as the plain number.
+function markerReference(found, prefixes) {
+  if (found.prefix === null || found.number === null || prefixes === null) {
+    return null;
   }
+  const key = found.prefix === prefixes.own && prefixes.alias !== null ? prefixes.alias : found.prefix;
+  const ref = key === prefixes.own ? String(found.number) : label(key, found.number);
+  return { label: ref, ref };
+}
+
+// The Copy reference button after a marker (copyButtonAttrs); a click copies the reference and changes no text.
+function copyWidget(editor, shown) {
+  return () => {
+    const attrs = copyButtonAttrs(shown.label, shown.ref);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = attrs.class;
+    button.setAttribute("aria-label", attrs["aria-label"]);
+    button.title = attrs.title;
+    button.contentEditable = "false";
+    button.textContent = attrs.text;
+    button.addEventListener("mousedown", event => event.preventDefault());
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      copyText(attrs.copy, { writeText: clipboardWrite(), execCopy: copyThroughSelection }).then(result => {
+        button.textContent = result;
+        if (result === "Copied") {
+          editor.dotnet.invokeMethodAsync("OnCopiedDecision", shown.ref).catch(() => {});
+        }
+      });
+    });
+    button.addEventListener("mouseleave", () => {
+      button.textContent = attrs.text;
+    });
+    return button;
+  };
+}
+
+// The reference decorations of doc (every #!d<ref> that titles knows, outside code) and, with prefixes, the Copy
+// reference widget after every prefixed marker (editor null: the widgets' specs only, for the tests).
+function referenceDecorations(doc, titles, prefixes, editor) {
+  const decorations = [];
   doc.descendants((node, pos) => {
     if (node.type.spec.code) {
       return false;
@@ -837,8 +887,17 @@ function referenceDecorations(doc, titles) {
     if (!node.isTextblock) {
       return true;
     }
+    const own = paragraphMarker(node);
+    const shown = own !== null ? markerReference(own, prefixes) : null;
+    if (shown !== null) {
+      const at = pos + 1 + own.end;
+      decorations.push(Decoration.widget(at, editor !== null ? copyWidget(editor, shown) : () => null,
+        { side: 1, ignoreSelection: true, stopEvent: () => true, key: "decision-copy-" + shown.ref, decisionCopy: shown }));
+    }
+    if (titles.size === 0) {
+      return false;
+    }
     const { text, code } = positionText(node);
-    const ownMarker = node.type.name === "paragraph" && startsDecision(text);
     let i = 0;
     while (i < text.length) {
       const run = code.find(([from, to]) => i >= from && i < to);
@@ -846,14 +905,14 @@ function referenceDecorations(doc, titles) {
         i = run[1];
         continue;
       }
-      if (text[i] === "#" && referenceMayStart(text, i) && !(i === 0 && ownMarker)) {
+      if (text[i] === "#" && referenceMayStart(text, i)) {
         const ref = referenceAt(text, i);
         if (ref !== null) {
-          if (titles.has(ref.number)) {
-            const title = titles.get(ref.number);
+          if (titles.has(ref.ref)) {
+            const title = titles.get(ref.ref);
             const attrs = typeof title === "string"
-              ? { class: "decision-ref", role: "link", title, "data-decision": String(ref.number) }
-              : { class: "decision-ref-unknown", title: "No decision #!d" + ref.number + "." };
+              ? { class: "decision-ref", role: "link", title, "data-decision": ref.ref }
+              : { class: "decision-ref-unknown", title: "No decision #!d" + ref.ref + "." };
             decorations.push(Decoration.inline(pos + 1 + i, pos + 1 + ref.end, attrs));
           }
           i = ref.end;
@@ -867,10 +926,11 @@ function referenceDecorations(doc, titles) {
   return decorations;
 }
 
-// References drawn from the titles .NET looked up (no text change), and the flash on the paragraph a jump landed on.
+// References drawn from the titles .NET looked up and the Copy reference widgets (no text change), and the flash on
+// the paragraph a jump landed on.
 function decisionPlugin(editor) {
   const build = (doc, flash) => {
-    const decorations = referenceDecorations(doc, editor.decisionTitles);
+    const decorations = referenceDecorations(doc, editor.decisionTitles, editor.decisionPrefixes, editor);
     if (flash !== null) {
       const node = doc.nodeAt(flash);
       if (node) {
@@ -897,43 +957,167 @@ function decisionPlugin(editor) {
   });
 }
 
-// A pasted slice without the numbered markers that start its paragraphs (the text and every reference stay).
-function strippedFragment(fragment) {
-  const nodes = [];
-  fragment.forEach(node => {
-    if (node.type.name === "paragraph") {
-      nodes.push(strippedParagraph(node));
-    } else if (node.isTextblock || node.type.spec.code || node.childCount === 0) {
-      nodes.push(node);
-    } else {
-      nodes.push(node.copy(strippedFragment(node.content)));
+// The picker (job 349): the #!d text the cursor ends, as { from, to, query } in document positions, or null (a
+// selection, code, or no #!d). The rules are decisions.js's pickerQuery on the text block before the cursor.
+function pickerRange(state) {
+  const { selection } = state;
+  if (!selection.empty) {
+    return null;
+  }
+  const $pos = selection.$from;
+  const parent = $pos.parent;
+  if (!parent.isTextblock || parent.type.spec.code) {
+    return null;
+  }
+  const { text, code } = positionText(parent);
+  const offset = $pos.parentOffset;
+  const before = text.slice(0, offset);
+  const query = pickerQuery(before, before.length);
+  if (query === null) {
+    return null;
+  }
+  const from = offset - query.length - Token.length;
+  if (code.some(([start, end]) => from < end && offset > start)) {
+    return null;
+  }
+  const blockStart = $pos.start();
+  return { from: blockStart + from, to: blockStart + offset, query };
+}
+
+// The picker popup: opens while the cursor ends a #!d text, asks .NET for the matching decisions (DecisionPicks), draws
+// pickerRows and handles keys through pickerKey; Esc closes it until the cursor leaves that #!d, a blur closes it.
+function decisionPicker(editor) {
+  let popup = null;
+  let open = null;
+  let closedAt = null;
+  let asked = 0;
+  const close = () => {
+    open = null;
+    if (popup !== null) {
+      popup.remove();
+      popup = null;
     }
+  };
+  const draw = view => {
+    if (open === null) {
+      return;
+    }
+    if (popup === null) {
+      const attrs = pickerAttrs();
+      popup = document.createElement("ul");
+      popup.className = attrs.class;
+      popup.setAttribute("role", attrs.role);
+      popup.setAttribute("aria-label", "Decisions");
+      popup.addEventListener("mousedown", event => event.preventDefault());
+      (view.dom.parentNode || document.body).appendChild(popup);
+    }
+    popup.textContent = "";
+    open.rows.forEach((row, i) => {
+      const item = document.createElement("li");
+      item.setAttribute("role", "option");
+      item.setAttribute("aria-selected", i === open.selected ? "true" : "false");
+      item.className = row.selectable ? (i === open.selected ? "selected" : "") : "decision-picker-none";
+      if (!row.selectable) {
+        item.setAttribute("aria-disabled", "true");
+      }
+      item.textContent = row.text;
+      item.addEventListener("click", () => {
+        if (open !== null) {
+          open.selected = i;
+          act(view, "Enter");
+        }
+      });
+      popup.appendChild(item);
+    });
+    const at = view.coordsAtPos(open.from);
+    const box = popup.offsetParent ? popup.offsetParent.getBoundingClientRect() : { left: 0, top: 0 };
+    popup.style.left = (at.left - box.left) + "px";
+    popup.style.top = (at.bottom - box.top + 4) + "px";
+  };
+  const act = (view, key) => {
+    const result = pickerKey(open, key);
+    switch (result.action) {
+      case "move":
+        open.selected = result.selected;
+        draw(view);
+        return true;
+      case "insert":
+        close();
+        view.dispatch(view.state.tr.insertText(result.insert, result.from, result.to).scrollIntoView());
+        return true;
+      case "none":
+        return true;
+      case "close":
+        closedAt = open.from;
+        close();
+        return key !== " " && key !== "Space";
+      default:
+        return false;
+    }
+  };
+  const refresh = view => {
+    const range = view.hasFocus() ? pickerRange(view.state) : null;
+    if (range === null || range.from === closedAt) {
+      if (range === null) {
+        closedAt = null;
+      }
+      close();
+      return;
+    }
+    const ask = ++asked;
+    const keep = open !== null && open.from === range.from ? open : null;
+    open = { rows: keep ? keep.rows : [], selected: keep ? keep.selected : 0, from: range.from, to: range.to };
+    editor.dotnet.invokeMethodAsync("DecisionPicks", range.query).then(json => {
+      if (ask !== asked || open === null) {
+        return;
+      }
+      let picks = [];
+      try {
+        picks = JSON.parse(String(json));
+      } catch {
+        picks = [];
+      }
+      open.rows = pickerRows(picks, range.query);
+      open.selected = Math.min(open.selected, open.rows.length - 1);
+      draw(view);
+    }).catch(() => {});
+  };
+  return new Plugin({
+    view(view) {
+      return {
+        update(view, prev) {
+          if (!prev || !view.state.doc.eq(prev.doc) || !view.state.selection.eq(prev.selection)) {
+            refresh(view);
+          }
+        },
+        destroy() {
+          close();
+        },
+      };
+    },
+    props: {
+      handleKeyDown(view, event) {
+        if (open === null || open.rows.length === 0) {
+          return false;
+        }
+        const key = event.key === "Esc" ? "Escape" : event.key;
+        if (event.ctrlKey || event.metaKey || event.altKey) {
+          return false;
+        }
+        const handled = act(view, key);
+        if (handled) {
+          event.preventDefault();
+        }
+        return handled;
+      },
+      handleDOMEvents: {
+        blur() {
+          close();
+          return false;
+        },
+      },
+    },
   });
-  return Fragment.fromArray(nodes);
-}
-
-function strippedParagraph(node) {
-  const first = node.firstChild;
-  if (!first || !first.isText || first.marks.some(mark => mark.type.name === "code") || !startsDecision(positionText(node).text)) {
-    return node;
-  }
-  const length = leadingMarkerLength(first.text);
-  if (length === 0) {
-    return node;
-  }
-  const rest = [];
-  if (length < first.text.length) {
-    rest.push(schema.text(first.text.slice(length), first.marks));
-  }
-  for (let i = 1; i < node.childCount; i++) {
-    rest.push(node.child(i));
-  }
-  return node.copy(Fragment.fromArray(rest));
-}
-
-/** A pasted slice with its numbered markers stripped, unless keep (the paste is this editor's last cut). */
-export function pastedSlice(slice, keep) {
-  return keep ? slice : new Slice(strippedFragment(slice.content), slice.openStart, slice.openEnd);
 }
 
 // True when the document or the attribute block changed since the editor was opened or last marked clean.
@@ -1161,7 +1345,7 @@ export function mount(element, markdown, dotnet, images, name) {
   const doc = parse(body);
   const editor = {
     view: null, head, attrs, cleanAttrs: attrs, clean: doc, dirty: false, dotnet, images: new Map(), dropPos: null, links: [], shift: false, lastKey: 0,
-    decisionTitles: new Map(), lastCut: null, cutting: false, pasteText: null,
+    decisionTitles: new Map(), decisionPrefixes: null, name: typeof name === "string" ? name : "",
   };
   for (const image of images || []) {
     if (image && typeof image.src === "string" && !editor.images.has(image.src)) {
@@ -1178,6 +1362,7 @@ export function mount(element, markdown, dotnet, images, name) {
       keymap(editorKeys()),
       keymap(baseKeymap),
       decisionPlugin(editor),
+      decisionPicker(editor),
     ],
   });
   const view = new EditorView(element, {
@@ -1209,9 +1394,9 @@ export function mount(element, markdown, dotnet, images, name) {
       const target = event && event.target;
       const ref = target && typeof target.closest === "function" ? target.closest(".decision-ref") : null;
       if (ref !== null) {
-        const number = Number(ref.getAttribute("data-decision"));
-        if (Number.isInteger(number) && number >= 1 && number <= MaxNumber) {
-          dotnet.invokeMethodAsync("OnDecision", number).catch(() => {});
+        const reference = parseReference(ref.getAttribute("data-decision"));
+        if (reference !== null) {
+          dotnet.invokeMethodAsync("OnDecision", reference).catch(() => {});
           return true;
         }
       }
@@ -1229,7 +1414,7 @@ export function mount(element, markdown, dotnet, images, name) {
       if (!data) {
         return false;
       }
-      const tr = smartPaste(view.state, pastedDecisionMarkdown(data.getData("text/plain"), editor.lastCut), editor.shift && editor.lastKey !== 45);
+      const tr = smartPaste(view.state, data.getData("text/plain"), editor.shift && editor.lastKey !== 45);
       if (tr === null) {
         return false;
       }
@@ -1244,21 +1429,6 @@ export function mount(element, markdown, dotnet, images, name) {
         dotnet.invokeMethodAsync("OnPasteLink", url).catch(() => {});
       }
       return true;
-    },
-    // Copy and cut put the slice's plain text on the clipboard (ProseMirror's own text); a cut's is remembered, so
-    // pasting it back in this editor keeps its decision markers (a move). Every other paste loses them (job 343).
-    clipboardTextSerializer(slice) {
-      const text = slice.content.textBetween(0, slice.content.size, "\n\n");
-      if (editor.cutting) {
-        editor.lastCut = text;
-        editor.cutting = false;
-      }
-      return text;
-    },
-    transformPasted(slice, view) {
-      const keep = view.dragging ? true : editor.pasteText !== null && editor.pasteText === editor.lastCut;
-      editor.pasteText = null;
-      return pastedSlice(slice, keep);
     },
     handleDOMEvents: {
       // Every keydown notes whether Shift is held (a paste then is a plain one, as ProseMirror tells it). A keydown on
@@ -1282,20 +1452,6 @@ export function mount(element, markdown, dotnet, images, name) {
         if (event.keyCode === 16) {
           editor.shift = false;
         }
-        return false;
-      },
-      // Paste, cut and copy (job 343): remember the pasted plain text and whether the last copy was a cut, so a paste
-      // of this editor's last cut keeps its numbered decision markers.
-      paste(view, event) {
-        editor.pasteText = event && event.clipboardData ? event.clipboardData.getData("text/plain") : null;
-        return false;
-      },
-      cut() {
-        editor.cutting = true;
-        return false;
-      },
-      copy() {
-        editor.cutting = false;
         return false;
       },
       // Dropped files: remember where they landed (the cursor when that can't be told) and hand them to .NET.
@@ -1510,19 +1666,14 @@ export function setAttributes(element, editsJson) {
   return true;
 }
 
-// The transaction that replays a save's decision edits on state (only the changed range is replaced, so the selection
-// maps), out of the undo history; null for malformed edits.
-function decisionEditTransaction(state, editsJson) {
-  const body = serialize(state.doc);
-  const edited = applyDecisionEditsText(body, editsJson);
-  if (edited === null) {
-    return null;
-  }
+// The transaction that turns state's document into the one parsed from body (a save's decision edits replayed; only
+// the changed range is replaced, so the selection maps), out of the undo history.
+function decisionEditTransaction(state, body) {
   const tr = state.tr.setMeta("addToHistory", false).setMeta(decisionEditMeta, true);
-  if (edited === body) {
+  if (body === serialize(state.doc)) {
     return tr;
   }
-  const next = parse(edited);
+  const next = parse(body);
   if (state.doc.content.findDiffStart(next.content) === null) {
     return tr;
   }
@@ -1577,55 +1728,84 @@ function diffRange(a, b) {
 }
 
 /**
- * Test hook, DOM-free: an "x" typed at document position cursor (its own history step), then the edits of editsJson
- * replayed through decisionEditTransaction, as JSON { markdown, paragraph, undo }: the text of the paragraph that holds
- * the cursor afterwards, and the markdown after one undo (the edits are not in the history, so the "x" is undone).
+ * The editor's parts after a save's edits (editsJson, see decisions.js applyDecisionEditsText) on its whole text
+ * (head, attrs, body): { head, attrs, body }, or null for malformed edits. The tokens are only ever in the body; an
+ * added decision-folder:: line goes in after the title, so the text is split again as mount splits it.
  */
-export function decisionEditsMarkdown(markdown, editsJson, cursor) {
-  const doc = parse(String(markdown));
-  let state = EditorState.create({ doc, plugins: [history()] });
+function editedParts(name, head, attrs, body, editsJson) {
+  const edits = readEdits(editsJson);
+  if (edits === null) {
+    return null;
+  }
+  const full = joinTitle(head, attrs + body);
+  const prefix = full.length - body.length;
+  const set = applySet(full, edits.set);
+  if (edits.folder === null || hasFolderLine(set)) {
+    return { head, attrs, body: set.slice(prefix) };
+  }
+  const split = JSON.parse(splitTitle(withFolderLine(set, edits.folder), name));
+  const rest = attributeSplit(split.body);
+  return { head: split.head, attrs: rest.attrs, body: rest.body };
+}
+
+/**
+ * Test hook, DOM-free: an "x" typed at document position cursor (its own history step), then the edits of editsJson
+ * replayed on markdown opened as a note called name (see mount), as JSON { markdown, paragraph, undo }: the whole text
+ * afterwards, the text of the paragraph that holds the cursor, and the whole text after one undo (the edits are not in
+ * the history, so the "x" is undone); null for malformed edits.
+ */
+export function decisionEditsMarkdown(markdown, editsJson, cursor, name) {
+  const { head, body: afterHead } = JSON.parse(splitTitle(String(markdown), name));
+  const { attrs, body } = attributeSplit(afterHead);
+  let state = EditorState.create({ doc: parse(body), plugins: [history()] });
   const at = Math.max(1, Math.min(Number(cursor) || 1, state.doc.content.size - 1));
   state = state.apply(state.tr.setSelection(Selection.near(state.doc.resolve(at))));
   state = state.apply(state.tr.insertText("x"));
   state = state.apply(closeHistory(state.tr));
-  const tr = decisionEditTransaction(state, editsJson);
-  if (tr === null) {
+  const parts = editedParts(name, head, attrs, serialize(state.doc), editsJson);
+  if (parts === null) {
     return JSON.stringify(null);
   }
-  state = state.apply(tr);
+  state = state.apply(decisionEditTransaction(state, parts.body));
   const paragraph = state.selection.$from.parent.textContent;
-  const edited = serialize(state.doc);
+  const edited = joinTitle(parts.head, parts.attrs + serialize(state.doc));
   let undone = edited;
-  undo(state, t => { undone = serialize(state.apply(t).doc); });
+  undo(state, t => { undone = joinTitle(parts.head, parts.attrs + serialize(state.apply(t).doc)); });
   return JSON.stringify({ markdown: edited, paragraph, undo: undone });
 }
 
 /**
- * Test hook, DOM-free: the reference decorations of markdown given titlesJson (as setDecisionTitles takes it), as
- * JSON [{ text, class, title, decision }].
+ * Test hook, DOM-free: the decorations of markdown given titlesJson (as setDecisionTitles takes it) and prefixesJson
+ * (as setDecisionPrefixes takes it, or null), as JSON [{ text, class, title, decision }] for the references and
+ * [{ pos, label, ref, offset }] for the Copy reference widgets (offset: the widget's index in the paragraph's text).
  */
-export function decisionRefsJson(markdown, titlesJson) {
+export function decisionRefsJson(markdown, titlesJson, prefixesJson) {
   const doc = parse(String(markdown));
-  const titles = new Map(JSON.parse(String(titlesJson)));
-  return JSON.stringify(referenceDecorations(doc, titles).map(d => ({
+  const titles = readTitles(titlesJson) || new Map();
+  const prefixes = prefixesJson === undefined || prefixesJson === null ? null : readPrefixes(prefixesJson);
+  const found = referenceDecorations(doc, titles, prefixes, null);
+  const refs = found.filter(d => d.from !== d.to).map(d => ({
     text: doc.textBetween(d.from, d.to),
     class: d.type.attrs.class,
     title: d.type.attrs.title,
     decision: d.type.attrs["data-decision"] || null,
-  })));
-}
-
-/** Test hook, DOM-free: markdown pasted as a whole slice through pastedSlice (keep: it was this editor's last cut). */
-export function pastedSliceMarkdown(markdown, keep) {
-  const doc = parse(String(markdown));
-  return serialize(doc.type.create(doc.attrs, pastedSlice(new Slice(doc.content, 0, 0), !!keep).content));
+  }));
+  const widgets = found.filter(d => d.from === d.to).map(d => ({
+    pos: d.from,
+    label: d.spec.decisionCopy.label,
+    ref: d.spec.decisionCopy.ref,
+    offset: d.from - doc.resolve(d.from).start(),
+    attrs: copyButtonAttrs(d.spec.decisionCopy.label, d.spec.decisionCopy.ref),
+  }));
+  return JSON.stringify(prefixes === null && (prefixesJson === undefined || prefixesJson === null) ? refs : { refs, widgets });
 }
 
 /**
- * Replays a save's decision edits (editsJson { bare, strip }, see applyDecisionEditsText) on the live document in one
- * transaction, out of the undo history and without OnChanged; the cursor is mapped and stays in its paragraph. Then
- * marks the editor clean when its text equals saved (the text the save wrote) and returns whether it did; an edit typed
- * during the save keeps it dirty. False, changing nothing, without an editor or for malformed edits.
+ * Replays a save's decision edits (editsJson { set, folder }, see decisions.js applyDecisionEditsText) on the live
+ * editor in one transaction, out of the undo history and without OnChanged; the cursor is mapped and stays in its
+ * paragraph, and an added decision-folder:: line joins the hidden attribute block. Then marks the editor clean when its
+ * text equals saved (the text the save wrote) and returns whether it did; an edit typed during the save keeps it
+ * dirty. False, changing nothing, without an editor or for malformed edits.
  */
 export function applyDecisionEdits(element, editsJson, saved) {
   const editor = editors.get(element);
@@ -1633,10 +1813,13 @@ export function applyDecisionEdits(element, editsJson, saved) {
     return false;
   }
   const view = editor.view;
-  const tr = decisionEditTransaction(view.state, editsJson);
-  if (tr === null) {
+  const parts = editedParts(editor.name, editor.head, editor.attrs, serialize(view.state.doc), editsJson);
+  if (parts === null) {
     return false;
   }
+  editor.head = parts.head;
+  editor.attrs = parts.attrs;
+  const tr = decisionEditTransaction(view.state, parts.body);
   if (tr.docChanged) {
     view.dispatch(tr);
   }
@@ -1647,40 +1830,65 @@ export function applyDecisionEdits(element, editsJson, saved) {
   return false;
 }
 
-/** The decision numbers the live document references, as a JSON array (at most 500); "[]" without an editor. */
+/** The references of the live document ("1234", "ab12-1234"), as a JSON array (at most 500); "[]" without an editor. */
 export function decisionReferencesIn(element) {
   const editor = editors.get(element);
   return editor ? decisionReferencesText(editorMarkdown(editor)) : "[]";
 }
 
-/**
- * Sets the titles of the referenced decisions from titlesJson ([[n, headline or null], ...]; null for a number with no
- * decision) and redraws the references. Returns false, changing nothing, without an editor or for malformed JSON.
- */
-export function setDecisionTitles(element, titlesJson) {
-  const editor = editors.get(element);
-  if (!editor) {
-    return false;
-  }
+// [[ref, headline or null], ...] as a Map, or null when malformed (a ref parseReference doesn't give back as is).
+function readTitles(titlesJson) {
   let rows;
   try {
     rows = JSON.parse(String(titlesJson));
   } catch {
-    return false;
+    return null;
   }
   if (!Array.isArray(rows) || rows.length > 500) {
-    return false;
+    return null;
   }
   const titles = new Map();
   for (const row of rows) {
-    if (!Array.isArray(row) || row.length !== 2 || !Number.isInteger(row[0]) || row[0] < 1 || row[0] > MaxNumber) {
-      return false;
+    if (!Array.isArray(row) || row.length !== 2 || typeof row[0] !== "string" || parseReference(row[0]) !== row[0]) {
+      return null;
     }
     const title = row[1];
     if (title !== null && (typeof title !== "string" || title.length > maxTitleLength)) {
-      return false;
+      return null;
     }
     titles.set(row[0], title);
+  }
+  return titles;
+}
+
+// { own, alias } (lower-case prefixes; alias null or the prefix this note's own-prefix markers show as), or null.
+function readPrefixes(prefixesJson) {
+  let value;
+  try {
+    value = JSON.parse(String(prefixesJson));
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || !isPrefix(value.own) || value.own !== value.own.toLowerCase()) {
+    return null;
+  }
+  const alias = value.alias === undefined ? null : value.alias;
+  if (alias !== null && (!isPrefix(alias) || alias !== alias.toLowerCase())) {
+    return null;
+  }
+  return { own: value.own, alias };
+}
+
+/**
+ * Sets the titles of the referenced decisions from titlesJson ([[ref, headline or null], ...]; null for a reference
+ * with no decision) and redraws the references. Returns false, changing nothing, without an editor or for malformed
+ * JSON.
+ */
+export function setDecisionTitles(element, titlesJson) {
+  const editor = editors.get(element);
+  const titles = editor ? readTitles(titlesJson) : null;
+  if (titles === null) {
+    return false;
   }
   editor.decisionTitles = titles;
   editor.view.dispatch(editor.view.state.tr.setMeta(decisionKey, {}));
@@ -1688,12 +1896,30 @@ export function setDecisionTitles(element, titlesJson) {
 }
 
 /**
- * Puts the cursor at the start of the paragraph that decision n starts (#!d<n>), scrolls it into view and flashes it
- * (decision-flash, a CSS animation). Returns false, changing nothing, for a number not in the note or without an editor.
+ * Sets the folder prefixes ({ own, alias }: the own folder's prefix, and the alias this note's own-prefix markers show
+ * as when it is a clashing folder's note) and draws a Copy reference button after every prefixed marker. Returns false,
+ * changing nothing, without an editor or for malformed JSON.
  */
-export function scrollToDecision(element, n) {
+export function setDecisionPrefixes(element, prefixesJson) {
   const editor = editors.get(element);
-  if (!editor || !Number.isInteger(n) || n < 1 || n > MaxNumber) {
+  const prefixes = editor ? readPrefixes(prefixesJson) : null;
+  if (prefixes === null) {
+    return false;
+  }
+  editor.decisionPrefixes = prefixes;
+  editor.view.dispatch(editor.view.state.tr.setMeta(decisionKey, {}));
+  return true;
+}
+
+/**
+ * Puts the cursor at the start of the paragraph whose marker has token (as written, lower case: "ab12-1234"), scrolls
+ * it into view and flashes it (decision-flash, a CSS animation). Returns false, changing nothing, for a token not in
+ * the note or without an editor.
+ */
+export function scrollToDecision(element, token) {
+  const editor = editors.get(element);
+  const wanted = typeof token === "string" ? parseReference(token) : null;
+  if (!editor || wanted === null || wanted !== token) {
     return false;
   }
   const view = editor.view;
@@ -1703,8 +1929,8 @@ export function scrollToDecision(element, n) {
       return false;
     }
     if (node.type.name === "paragraph") {
-      const text = positionText(node).text;
-      if (startsWithMarker(text, n) && startsDecision(text)) {
+      const marker = paragraphMarker(node);
+      if (marker !== null && marker.number !== null && label(marker.prefix, marker.number) === wanted) {
         found = pos;
       }
       return false;

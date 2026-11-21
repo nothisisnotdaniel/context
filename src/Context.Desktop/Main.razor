@@ -21,6 +21,14 @@
                 {
                     <p class="red decision-notice" role="alert">@DesktopActions.DecisionNumbersRanOutText</p>
                 }
+                @if (State.DecisionFolderUnreadable)
+                {
+                    <p class="red decision-folder-unreadable" role="alert">@DecisionFolder.UnreadableText</p>
+                }
+                @foreach (DecisionFolderAlias clash in decisionClashes)
+                {
+                    <p class="decision-clash" role="status" @key="clash.Guid">@ClashText(clash)<button type="button" @onclick="() => DismissClash(clash)">Dismiss</button></p>
+                }
                 @if (page == Page.Triage)
                 {
                     <TriagePanel Guard="TriageHeld" OnTriaged="Triaged" OnClose="CloseTriage" />
@@ -288,8 +296,8 @@ else
     // The heading a [[Note#Heading]] link opened the note at; the new editor jumps there once, after its mount.
     private string? openHeading;
     // Job 343: the decision a reference or the log opened the note at; the new editor jumps there once, after its mount.
-    private int? pendingDecision;
-    private int? openDecision;
+    private string? pendingDecision;
+    private string? openDecision;
     private string? pendingPerson;
     private string? pendingLink;
     private bool pendingToday;
@@ -377,6 +385,38 @@ else
         TakeConversion();
 
         _ = TakeItemPage();
+        if (State.DecisionClashesDue)
+        {
+            ShowDecisionClashesLater();
+        }
+    }
+
+    // Job 349: reads the clash lines off the dispatcher and redraws once one was added; nothing waits for it. It runs
+    // only while one is due (DesktopState.DecisionClashesDue), so a start or state change without a clash reads nothing.
+    private void ShowDecisionClashesLater() => _ = InvokeAsync(async () =>
+    {
+        if (await TakeDecisionClashesAsync())
+        {
+            StateHasChanged();
+        }
+    });
+
+    // Job 349: the clash lines shown (a foreign folder whose notes use the own decision prefix), each once: taking it
+    // marks it warned in the index; Dismiss hides it.
+    private List<DecisionFolderAlias> decisionClashes = [];
+
+    internal static string ClashText(DecisionFolderAlias clash) =>
+        $"Notes from another folder also use the decision prefix {clash.Prefix}. Here they show as {clash.Alias}.";
+
+    private void DismissClash(DecisionFolderAlias clash) => decisionClashes = [.. decisionClashes.Where(c => c.Guid != clash.Guid)];
+
+    // Adds the clashes not shown yet; true when one was added.
+    private async Task<bool> TakeDecisionClashesAsync()
+    {
+        IReadOnlyList<DecisionFolderAlias> fresh = await State.TakeDecisionClashes();
+        List<DecisionFolderAlias> added = [.. fresh.Where(clash => !decisionClashes.Any(c => c.Guid == clash.Guid))];
+        decisionClashes = [.. decisionClashes, .. added];
+        return added.Count > 0;
     }
 
     // A work item page asked for from the command line (job 280, DesktopActions.OpenRequestedItem) opens like a click
@@ -440,6 +480,13 @@ else
     // line points to /briefing.
     protected override async Task OnStateChangedAsync()
     {
+        // Job 349: a clash line is taken apart from the rest, only when the index saw one not yet shown, so a state
+        // change never waits on the index for it.
+        if (State.DecisionClashesDue)
+        {
+            ShowDecisionClashesLater();
+        }
+
         bool started = TakeConversion();
         started |= TakeStartNote();
         started |= await TakeItemPage();
@@ -841,15 +888,15 @@ else
     // A [[Note#Heading]] link clicked in the editor: opens that note at the heading.
     private Task OpenHeading((string Name, string Heading) link) => RequestOpen(link.Name, link.Heading);
 
-    // A decision reference clicked in the editor, or a decision in the log (job 343): opens its note at the decision.
-    private Task OpenDecision((string Name, int Decision) target) => RequestOpen(target.Name, null, target.Decision);
+    // A decision reference clicked in the editor, or a decision in the log (jobs 343 and 349; the token as written in the owner): opens its note at the decision.
+    private Task OpenDecision((string Name, string Decision) target) => RequestOpen(target.Name, null, target.Decision);
 
     // Opens the note called name (null: no note) at heading (null: at the top), asking first when the open
     // note has unsaved changes. The open note itself only jumps to the heading, keeping what is typed.
     private Task RequestOpen(string? name, string? heading) => RequestOpen(name, heading, null);
 
-    // As above, or at decision (#!d<n>, job 343) when heading is null.
-    private async Task RequestOpen(string? name, string? heading, int? decision)
+    // As above, or at decision (its marker token, jobs 343 and 349) when heading is null.
+    private async Task RequestOpen(string? name, string? heading, string? decision)
     {
         if (name is not null && string.Equals(name, openName, StringComparison.Ordinal))
         {
@@ -865,9 +912,9 @@ else
             {
                 await editor.JumpToHeadingAsync(heading);
             }
-            else if (decision is int number && editor is not null)
+            else if (decision is string token && editor is not null)
             {
-                await editor.JumpToDecisionAsync(number);
+                await editor.JumpToDecisionAsync(token);
             }
 
             return;
@@ -1195,7 +1242,7 @@ else
     }
 
     // record false: the open note was just renamed or moved, and the action already changed its recent entry in place.
-    private void ShowNote(string? name, string? heading = null, bool record = true, int? decision = null)
+    private void ShowNote(string? name, string? heading = null, bool record = true, string? decision = null)
     {
         (string? Name, bool Sensitive) before = (openName, openSensitive);
         if (record && name is not null && !string.Equals(name, openName, StringComparison.Ordinal))

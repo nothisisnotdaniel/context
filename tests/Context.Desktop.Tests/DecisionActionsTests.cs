@@ -2,160 +2,206 @@ using System.Text;
 
 namespace Context.Tests;
 
-// 343 AC-4, AC-5: DesktopActions.SaveNote numbers bare #!d markers and strips markers another note owns; rename and
-// move keep the owners; against real files and a real context.db.
+// 349 AC-3, AC-4, AC-5 (343 AC-4, AC-5): DesktopActions.SaveNote numbers !d markers with the folder's prefix and adds
+// the decision-folder line; copies keep their token; rename and move keep the owners; real files and a real context.db.
 public sealed class DecisionActionsTests : IDisposable
 {
     private static readonly DateTime Old = new(2026, 10, 1, 8, 0, 0, DateTimeKind.Utc);
 
     private static readonly DateTime Older = new(2026, 9, 1, 8, 0, 0, DateTimeKind.Utc);
 
+    private static readonly string Line = DesktopFixture.DecisionFolderLine;
+
     private readonly DesktopFixture data = new();
+
+    public DecisionActionsTests() => data.WriteDecisionFolder();
 
     public void Dispose() => data.Dispose();
 
-    // AC-4: bare markers that start a decision get consecutive numbers in document order; a lone marker (no text),
-    // CRLF and every other byte stay; the next note continues from the counter.
+    // AC-3, AC-4: bare markers that start a decision get consecutive own-prefix tokens in document order, the folder line
+    // goes after the title; a lone marker (no text), CRLF and every other byte stay; the next note continues.
     [Fact]
     public async Task SaveNote_BareMarkers_NumberedInOrder_KeepsBytes()
     {
         EditableNote opened = await Open("Plan", "# Plan\r\n\r\nText\r\n");
 
-        ActionResult result = await data.Actions!.SaveNote(opened, "# Plan\n\n#!d one\n\n- #!d two\n\n#!d\n\n#!d three\n");
+        ActionResult result = await data.Actions!.SaveNote(opened, "# Plan\n\n!d one\n\n- !d two\n\n!d\n\n!d three\n");
 
         Assert.Equal((ActionKind.Done, ActionReason.None), (result.Kind, result.Reason));
-        Assert.Equal("# Plan\r\n\r\n#!d1 one\r\n\r\n- #!d2 two\r\n\r\n#!d\r\n\r\n#!d3 three\r\n", File.ReadAllText(PathOf("Plan")));
-        Assert.Equal([1, 2, 3], result.Decisions!.Bare);
-        Assert.Empty(result.Decisions.Strip);
-        Assert.Equal("# Plan\n\n#!d1 one\n\n- #!d2 two\n\n#!d\n\n#!d3 three\n", result.Note!.Text);
+        Assert.Equal(
+            $"# Plan\r\n{Line}\r\n\r\n!d ab12-1 one\r\n\r\n- !d ab12-2 two\r\n\r\n!d\r\n\r\n!d ab12-3 three\r\n",
+            File.ReadAllText(PathOf("Plan")));
+        Assert.Equal(["ab12-1", "ab12-2", "ab12-3"], result.Decisions!.Set.Select(s => s.New));
+        Assert.Equal($"# Plan\n{Line}\n\n!d ab12-1 one\n\n- !d ab12-2 two\n\n!d\n\n!d ab12-3 three\n", result.Note!.Text);
 
         EditableNote other = await Open("Other", "# Other\n");
-        ActionResult next = await data.Actions.SaveNote(other, "#!d four\n");
+        ActionResult next = await data.Actions.SaveNote(other, "!d four\n");
 
-        Assert.Equal("#!d4 four\n", File.ReadAllText(PathOf("Other")));
-        Assert.Equal([4], next.Decisions!.Bare);
+        Assert.Equal($"{Line}\n!d ab12-4 four\n", File.ReadAllText(PathOf("Other")));
+        Assert.Equal(["ab12-4"], next.Decisions!.Set.Select(s => s.New));
     }
 
-    // AC-4, round 2 feedback 1: a deleted decision's number is never given again; the next number comes after the last
-    // one handed out and steps over every number in the index or in the saved text, so a huge typed number never moves
-    // the counter.
+    // AC-3: a plain number typed after !d is replaced by an own token; another prefix in an own note too.
+    [Fact]
+    public async Task SaveNote_PlainAndOtherPrefix_Replaced()
+    {
+        EditableNote opened = await Open("Plan", "# Plan\n");
+
+        await data.Actions!.SaveNote(opened, "# Plan\n!d 3 people hired\n\n!d zz99-4 other\n");
+
+        Assert.Equal($"# Plan\n{Line}\n!d ab12-1 people hired\n\n!d ab12-2 other\n", File.ReadAllText(PathOf("Plan")));
+    }
+
+    // AC-3 (343 round 2 feedback 1): a deleted decision's number is never given again; the next number steps over
+    // every own-prefix number in the index or in the saved text, so a huge typed number never moves the counter.
     [Fact]
     public async Task SaveNote_NeverReusesANumber_StepsOverTypedOnes()
     {
         EditableNote opened = await Open("Plan", "# Plan\n");
-        ActionResult first = await data.Actions!.SaveNote(opened, "#!d one\n");
-        ActionResult removed = await data.Actions.SaveNote(first.Note!, "gone\n");
+        ActionResult first = await data.Actions!.SaveNote(opened, "!d one\n");
+        ActionResult removed = await data.Actions.SaveNote(first.Note!, $"{Line}\ngone\n");
         Assert.Equal(ActionKind.Done, removed.Kind);
 
-        ActionResult again = await data.Actions.SaveNote(removed.Note!, "#!d again\n");
-        Assert.Equal("#!d2 again\n", File.ReadAllText(PathOf("Plan")));
+        ActionResult again = await data.Actions.SaveNote(removed.Note!, $"{Line}\n!d again\n");
+        Assert.Equal($"{Line}\n!d ab12-2 again\n", File.ReadAllText(PathOf("Plan")));
 
-        data.WriteNote("Far", "#!d3 far\n\n#!d999999999 huge\n");
+        data.WriteNote("Far", "!d ab12-3 far\n\n!d ab12-999999999 huge\n");
         File.SetLastWriteTimeUtc(PathOf("Far"), Old);
-        ActionResult above = await data.Actions.SaveNote(again.Note!, "#!d2 again\n\n#!d next\n");
-        Assert.Equal("#!d2 again\n\n#!d4 next\n", File.ReadAllText(PathOf("Plan")));
+        ActionResult above = await data.Actions.SaveNote(again.Note!, $"{Line}\n!d ab12-2 again\n\n!d next\n");
+        Assert.Equal($"{Line}\n!d ab12-2 again\n\n!d ab12-4 next\n", File.ReadAllText(PathOf("Plan")));
 
-        ActionResult own = await data.Actions.SaveNote(
-            above.Note!, "#!d2 again\n\n#!d4 next\n\n#!d5 typed\n\nsee #!d6\n\n#!d new\n");
-        Assert.Equal("#!d2 again\n\n#!d4 next\n\n#!d5 typed\n\nsee #!d6\n\n#!d7 new\n", File.ReadAllText(PathOf("Plan")));
-        Assert.Equal([7], own.Decisions!.Bare);
+        ActionResult own = await data.Actions.SaveNote(above.Note!, $"{Line}\n!d ab12-2 again\n\n!d ab12-4 next\n\nsee #!d5\n\n!d new\n");
+        Assert.Equal($"{Line}\n!d ab12-2 again\n\n!d ab12-4 next\n\nsee #!d5\n\n!d ab12-6 new\n", File.ReadAllText(PathOf("Plan")));
+        Assert.Equal(["ab12-6"], own.Decisions!.Set.Select(s => s.New));
         Assert.False(data.State!.DecisionNumbersRanOut);
     }
 
-    // Round 2 feedback 1: with no numbers left the save goes through with the bare markers as typed, the result says so
-    // (Unnumbered) and the state shows it until numbers are left again.
+    // AC-3: with no numbers left the save goes through with the markers as typed, the result says so (Unnumbered)
+    // and the state shows it until numbers are left again.
     [Fact]
     public async Task SaveNote_NoNumbersLeft_SavedAsTyped_Told()
     {
         EditableNote opened = await Open("Plan", "# Plan\n");
         TagIndex index = new TagIndex(data.Root);
-        Assert.Equal(1, index.ReserveDecisionNumbers(DecisionParser.MaxNumber - 1));
+        Assert.Equal(1, index.ReserveDecisionNumbers("ab12", DecisionParser.MaxNumber - 1));
 
-        ActionResult result = await data.Actions!.SaveNote(opened, "#!d one\n\n#!d two\n");
+        ActionResult result = await data.Actions!.SaveNote(opened, "!d one\n\n!d two\n");
 
         Assert.Equal((ActionKind.Done, ActionReason.None), (result.Kind, result.Reason));
-        Assert.Equal("#!d one\n\n#!d two\n", File.ReadAllText(PathOf("Plan")));
+        Assert.Equal("!d one\n\n!d two\n", File.ReadAllText(PathOf("Plan")));
         Assert.Equal(2, result.Decisions!.Unnumbered);
         Assert.False(result.Decisions.Changed);
         Assert.True(data.State!.DecisionNumbersRanOut);
-        Assert.StartsWith(DesktopActions.DecisionNumbersRanOutText, DesktopActions.DecisionNoticeText(result.Decisions));
+        Assert.Equal(DesktopActions.DecisionNumbersRanOutText, DesktopActions.DecisionNoticeText(result.Decisions));
 
-        ActionResult one = await data.Actions.SaveNote(result.Note!, "#!d one\n\ntwo\n");
-        Assert.Equal("#!d999999999 one\n\ntwo\n", File.ReadAllText(PathOf("Plan")));
-        Assert.Equal([DecisionParser.MaxNumber], one.Decisions!.Bare);
+        ActionResult one = await data.Actions.SaveNote(result.Note!, "!d one\n\ntwo\n");
+        Assert.Equal($"{Line}\n!d ab12-999999999 one\n\ntwo\n", File.ReadAllText(PathOf("Plan")));
         Assert.False(data.State.DecisionNumbersRanOut);
         Assert.Null(DesktopActions.DecisionNoticeText(one.Decisions));
     }
 
-    // AC-4: the numbers are reserved before the write, so a save refused as changed on disk only leaves a gap.
+    // AC-3: there is one counter, so a number reserved for any prefix is never handed out again.
+    [Fact]
+    public async Task SaveNote_OneCounter_NeverReusedAcrossPrefixes()
+    {
+        Assert.Equal(1, new TagIndex(data.Root).ReserveDecisionNumbers("zz99", 50));
+        EditableNote opened = await Open("Plan", "# Plan\n");
+
+        await data.Actions!.SaveNote(opened, "!d one\n");
+
+        Assert.Equal($"{Line}\n!d ab12-51 one\n", File.ReadAllText(PathOf("Plan")));
+    }
+
+    // AC-3: the numbers are reserved before the write, so a save refused as changed on disk only leaves a gap.
     [Fact]
     public async Task SaveNote_ChangedOnDisk_LeavesAGap()
     {
         EditableNote opened = await Open("Plan", "# Plan\n");
         data.WriteNote("Plan", "theirs\n");
 
-        ActionResult refused = await data.Actions!.SaveNote(opened, "#!d mine\n");
+        ActionResult refused = await data.Actions!.SaveNote(opened, "!d mine\n");
         Assert.Equal((ActionKind.Refused, ActionReason.ChangedOnDisk), (refused.Kind, refused.Reason));
         Assert.Equal("theirs\n", File.ReadAllText(PathOf("Plan")));
 
         EditableNote reopened = (await data.State!.ReadForEdit("Plan"))!;
-        await data.Actions.SaveNote(reopened, "#!d mine\n");
-        Assert.Equal("#!d2 mine\n", File.ReadAllText(PathOf("Plan")));
+        await data.Actions.SaveNote(reopened, "!d mine\n");
+        Assert.Equal($"{Line}\n!d ab12-2 mine\n", File.ReadAllText(PathOf("Plan")));
     }
 
-    // AC-5: a copy of a decision another note owns (the same text) loses its marker on save; the paragraph and every
-    // reference stay, and the result says which. A repeat in the same note loses to the first.
+    // AC-5: a copy of a decision another note owns (the same text) keeps its token and is listed as a place; a repeat
+    // in the same note with another text gets a new number; the owner is left alone.
     [Fact]
-    public async Task SaveNote_CopyOrRepeat_Stripped()
+    public async Task SaveNote_CopyKept_RepeatWithOtherTextRenumbered()
     {
-        data.WriteNote("Owner", "#!d1234 the first\n");
+        data.WriteNote("Owner", $"{Line}\n!d ab12-1234 the first\n");
         File.SetLastWriteTimeUtc(PathOf("Owner"), Old);
         EditableNote opened = await Open("Copy", "# Copy\n");
 
-        ActionResult result = await data.Actions!.SaveNote(opened, "#!d1234 the first\n\nsee #!d1234\n\n#!d7 a\n\n#!d7 b\n");
+        ActionResult result = await data.Actions!.SaveNote(opened, "!d ab12-1234 the first\n\nsee #!d1234\n\n!d ab12-1234 b\n");
 
-        Assert.Equal("the first\n\nsee #!d1234\n\n#!d7 a\n\nb\n", File.ReadAllText(PathOf("Copy")));
-        Assert.Equal([1234, 7], result.Decisions!.Strip);
-        Assert.Empty(result.Decisions.Bare);
-        Assert.Empty(result.Decisions.Kept);
-        Assert.Equal("#!d1234 the first\n", File.ReadAllText(PathOf("Owner")));
-        Assert.Equal("Owner", new TagIndex(data.Root).DecisionByNumber(1234)!.Note);
-        Assert.Equal(
-            "Removed the marker #!d1234, #!d7: that decision is already above or in another note.",
-            DesktopActions.DecisionNoticeText(result.Decisions));
+        Assert.Equal($"{Line}\n!d ab12-1234 the first\n\nsee #!d1234\n\n!d ab12-1 b\n", File.ReadAllText(PathOf("Copy")));
+        Assert.Equal(["ab12-1"], result.Decisions!.Set.Select(s => s.New));
+        Assert.Equal($"{Line}\n!d ab12-1234 the first\n", File.ReadAllText(PathOf("Owner")));
+        TagIndex index = new TagIndex(data.Root);
+        index.Sync(data.Notes!);
+        Assert.Equal("Owner", index.DecisionByKey("ab12", 1234)!.Note);
+        DecisionsView view = DecisionsView.Find(index, data.Notes!, new DecisionRef(null, 1234), TimeZoneInfo.Utc);
+        Assert.Equal(["Copy"], view.Decisions[0].Places.Select(p => p.Note));
     }
 
-    // Round 2 feedback 3: when the note decided to own a number has another text (say an older copy won by its time),
-    // the original keeps its marker on save, the result names the clash and the owner is left alone.
+    // AC-3: a token whose owner holds another text is replaced by a new number, so two notes never share a number for
+    // different decisions; an owner that can't be read (no text to compare) gives no copy either.
     [Fact]
-    public async Task SaveNote_OwnedElsewhereWithOtherText_KeepsMarker()
+    public async Task SaveNote_OwnedElsewhereWithOtherText_Renumbered()
     {
-        data.WriteNote("Stale", "#!d1234 old draft\n");
+        data.WriteNote("Stale", $"{Line}\n!d ab12-1234 old draft\n");
         File.SetLastWriteTimeUtc(PathOf("Stale"), Older);
-        EditableNote opened = await Open("Original", "#!d1234 the real decision\n");
+        EditableNote opened = await Open("Original", "# Original\n");
 
-        ActionResult result = await data.Actions!.SaveNote(opened, "#!d1234 the real decision\n\nmore\n");
+        ActionResult result = await data.Actions!.SaveNote(opened, "!d ab12-1234 the real decision\n");
 
         Assert.Equal((ActionKind.Done, ActionReason.None), (result.Kind, result.Reason));
-        Assert.Equal("#!d1234 the real decision\n\nmore\n", File.ReadAllText(PathOf("Original")));
-        Assert.Equal([1234], result.Decisions!.Kept);
-        Assert.Empty(result.Decisions.Strip);
-        Assert.False(result.Decisions.Changed);
-        Assert.Equal("#!d1234 old draft\n", File.ReadAllText(PathOf("Stale")));
-        Assert.Contains("Kept #!d1234: another note has this number", DesktopActions.DecisionNoticeText(result.Decisions));
+        Assert.Equal($"{Line}\n!d ab12-1 the real decision\n", File.ReadAllText(PathOf("Original")));
+        Assert.Equal($"{Line}\n!d ab12-1234 old draft\n", File.ReadAllText(PathOf("Stale")));
 
-        // An owner that can't be read (no text to compare) never makes a copy either.
-        data.WriteNote("Locked", "#!d55 mine\n");
+        data.WriteNote("Locked", $"{Line}\n!d ab12-55 mine\n");
         File.SetLastWriteTimeUtc(PathOf("Locked"), Older);
         EditableNote other = await Open("Later", "# Later\n");
         await data.RefreshAsync();
         File.WriteAllBytes(PathOf("Locked"), new byte[(int)NoteStore.MaxNoteBytes + 1]);
-        ActionResult kept = await data.Actions.SaveNote(other, "#!d55 mine\n");
-        Assert.Equal("#!d55 mine\n", File.ReadAllText(PathOf("Later")));
-        Assert.Equal([55], kept.Decisions!.Kept);
+        await data.Actions.SaveNote(other, "!d ab12-55 mine\n");
+        Assert.DoesNotContain("ab12-55", File.ReadAllText(PathOf("Later")), StringComparison.Ordinal);
     }
 
-    // AC-4: an unreadable context.db saves the text as typed (Done, Saved) and leaves the file alone.
+    // AC-4: a note of another folder is never numbered; the result tells the editor so.
+    [Fact]
+    public async Task SaveNote_ForeignNote_NotNumbered()
+    {
+        string foreign = "decision-folder:: 99999999-8888-7777-6666-555555555555\n!d bare\n";
+        EditableNote opened = await Open("Foreign", "# Foreign\n");
+
+        ActionResult result = await data.Actions!.SaveNote(opened, foreign);
+
+        Assert.Equal(foreign, File.ReadAllText(PathOf("Foreign")));
+        Assert.Equal(DesktopActions.DecisionForeignText, DesktopActions.DecisionNoticeText(result.Decisions));
+    }
+
+    // AC-2, AC-11: an unreadable decision-folder.json saves the text as typed and shows the red line; the file stays.
+    [Fact]
+    public async Task SaveNote_UnreadableFolderFile_SavedUnnumbered()
+    {
+        data.WriteFile(DecisionFolder.FileName, "{broken");
+        EditableNote opened = await Open("Plan", "# Plan\n");
+
+        ActionResult result = await data.Actions!.SaveNote(opened, "!d one\n");
+
+        Assert.Equal((ActionKind.Done, ActionReason.None), (result.Kind, result.Reason));
+        Assert.Equal("!d one\n", File.ReadAllText(PathOf("Plan")));
+        Assert.True(data.State!.DecisionFolderUnreadable);
+        Assert.Equal("{broken", File.ReadAllText(Path.Combine(data.Root, DecisionFolder.FileName)));
+    }
+
+    // AC-3: an unreadable context.db saves the text as typed (Done, Saved) and leaves the file alone.
     [Fact]
     public async Task SaveNote_UnreadableIndex_SavedUnnumbered()
     {
@@ -163,35 +209,37 @@ public sealed class DecisionActionsTests : IDisposable
         data.WriteFile(TagIndex.FileName, "this is not a database, just some text that fills the header....");
         byte[] db = File.ReadAllBytes(Path.Combine(data.Root, TagIndex.FileName));
 
-        ActionResult result = await data.Actions!.SaveNote(opened, "#!d one\n");
+        ActionResult result = await data.Actions!.SaveNote(opened, "!d one\n");
 
         Assert.Equal((ActionKind.Done, ActionReason.None), (result.Kind, result.Reason));
         Assert.Null(result.Decisions);
-        Assert.Equal("#!d one\n", File.ReadAllText(PathOf("Plan")));
+        Assert.Equal("!d one\n", File.ReadAllText(PathOf("Plan")));
         Assert.Equal(db, File.ReadAllBytes(Path.Combine(data.Root, TagIndex.FileName)));
     }
 
-    // AC-4: nothing to number gives no edits and the text as typed.
+    // AC-7: references only give no edits and the text as typed.
     [Fact]
     public async Task SaveNote_NoMarker_NoEdits()
     {
         EditableNote opened = await Open("Plan", "# Plan\n");
 
-        ActionResult result = await data.Actions!.SaveNote(opened, "# Plan\n\nsee #!d3 and #!d12\n");
+        ActionResult result = await data.Actions!.SaveNote(opened, "# Plan\n\nsee #!d3 and #!dab12-12\n");
 
         Assert.Null(result.Decisions);
-        Assert.Equal("# Plan\n\nsee #!d3 and #!d12\n", File.ReadAllText(PathOf("Plan")));
+        Assert.Equal("# Plan\n\nsee #!d3 and #!dab12-12\n", File.ReadAllText(PathOf("Plan")));
     }
 
-    // AC-5: renaming a note in the app keeps its numbers, even when an older note holds the same number.
+    // AC-5: renaming a note in the app keeps its numbers, even when an older note holds the same token.
     [Fact]
     public async Task RenameNote_KeepsOwnership()
     {
-        data.WriteNote("Plan", "#!d5 mine\n");
+        data.WriteNote("Plan", $"{Line}\n!d ab12-5 mine\n");
         File.SetLastWriteTimeUtc(PathOf("Plan"), Old);
         await data.RefreshAsync();
-        Assert.Equal("Plan", new TagIndex(data.Root).DecisionByNumber(5)!.Note);
-        data.WriteNote("Rival", "#!d5 copy\n");
+        TagIndex first = new TagIndex(data.Root);
+        first.Sync(data.Notes!);
+        Assert.Equal("Plan", first.DecisionByKey("ab12", 5)!.Note);
+        data.WriteNote("Rival", $"{Line}\n!d ab12-5 copy\n");
         File.SetLastWriteTimeUtc(PathOf("Rival"), Older);
         await data.RefreshAsync();
 
@@ -201,20 +249,21 @@ public sealed class DecisionActionsTests : IDisposable
 
         TagIndex index = new TagIndex(data.Root);
         index.Sync(data.Notes!);
-        Assert.Equal("Project", index.DecisionByNumber(5)!.Note);
+        Assert.Equal("Project", index.DecisionByKey("ab12", 5)!.Note);
     }
 
     // AC-5: moving a note in the app keeps its and its subpages' numbers.
     [Fact]
     public async Task MoveNote_KeepsOwnership_WithSubpages()
     {
-        data.WriteNote("Plan", "#!d5 mine\n");
-        data.WriteFile(Path.Combine("Plan", "Sub.md"), "#!d6 below\n");
+        data.WriteNote("Plan", $"{Line}\n!d ab12-5 mine\n");
+        data.WriteFile(Path.Combine("Plan", "Sub.md"), $"{Line}\n!d ab12-6 below\n");
         data.WriteNote("Archive", "# Archive\n");
         File.SetLastWriteTimeUtc(PathOf("Plan"), Old);
         File.SetLastWriteTimeUtc(Path.Combine(data.Root, "Plan", "Sub.md"), Old);
         await data.RefreshAsync();
-        data.WriteNote("Rival", "#!d5 copy\n\n#!d6 copy\n");
+        new TagIndex(data.Root).Sync(data.Notes!);
+        data.WriteNote("Rival", $"{Line}\n!d ab12-5 copy\n\n!d ab12-6 copy\n");
         File.SetLastWriteTimeUtc(PathOf("Rival"), Older);
         await data.RefreshAsync();
 
@@ -223,8 +272,8 @@ public sealed class DecisionActionsTests : IDisposable
 
         TagIndex index = new TagIndex(data.Root);
         index.Sync(data.Notes!);
-        Assert.Equal("Archive/Plan", index.DecisionByNumber(5)!.Note);
-        Assert.Equal("Archive/Plan/Sub", index.DecisionByNumber(6)!.Note);
+        Assert.Equal("Archive/Plan", index.DecisionByKey("ab12", 5)!.Note);
+        Assert.Equal("Archive/Plan/Sub", index.DecisionByKey("ab12", 6)!.Note);
     }
 
     // Round 2 feedback 2: every app write path goes through the two numbering helpers; SaveNote reads the edits itself.
@@ -234,9 +283,9 @@ public sealed class DecisionActionsTests : IDisposable
         string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), "src", "Context.Desktop", "DesktopActions.cs"));
 
         Assert.Equal(2, CountOf(source, "state.NumberDecisions("));
-        Assert.Equal(4, CountOf(source, "NumberWritten("));
+        Assert.Equal(6, CountOf(source, "NumberWritten("));
         Assert.Equal(4, CountOf(source, "NumberDayEnd("));
-        Assert.Equal(8, CountOf(source, "Numbered("));
+        Assert.Equal(7, CountOf(source, "Numbered("));
     }
 
     private static int CountOf(string text, string part)
@@ -251,6 +300,29 @@ public sealed class DecisionActionsTests : IDisposable
     }
 
     private string PathOf(string name) => Path.Combine(data.Root, name + ".md");
+
+    // AC-8: the picker's rows: the log's numbered decisions whose headline contains the query (any case) or whose label
+    // starts with it, own ones labelled by the number alone; a sensitive note never appears; at most 20.
+    [Fact]
+    public async Task DecisionPicks_Filter_SensitiveLeftOut_Capped()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteNote("Plan", $"{Line}\n!d ab12-5 Ship it\n\n!d ab12-12 hire Anna\n\n!d bare one\n");
+        data.WriteSensitive("Secret", $"{Line}\n!d ab12-7 ship secretly\n");
+        await data.RefreshAsync();
+
+        Assert.Equal([("5", "5", "Ship it")], await data.State!.DecisionPicks("SHIP"));
+        Assert.Equal([("12", "12", "hire Anna")], await data.State.DecisionPicks("#!d1"));
+        Assert.Equal(2, (await data.State.DecisionPicks("  ")).Count);
+        Assert.Empty(await data.State.DecisionPicks("secret"));
+
+        for (int n = 100; n < 125; n++)
+        {
+            data.WriteNote($"Many {n}", $"{Line}\n!d ab12-{n} many {n}\n");
+        }
+
+        Assert.Equal(DesktopState.MaxDecisionPicks, (await data.State.DecisionPicks("many")).Count);
+    }
 
     private async Task<EditableNote> Open(string name, string text)
     {

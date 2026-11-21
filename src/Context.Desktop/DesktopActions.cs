@@ -409,12 +409,15 @@ internal sealed class DesktopActions
 
     /// <summary>Job 343: the red line while no decision numbers are left (<see cref="DesktopState.DecisionNumbersRanOut"/>).</summary>
     public const string DecisionNumbersRanOutText =
-        "No decision numbers are left, so new #!d markers stay unnumbered.";
+        "No decision numbers are left, so new !d markers stay unnumbered.";
+
+    /// <summary>Job 349: the notice after saving a note whose <c>decision-folder::</c> line names another folder.</summary>
+    public const string DecisionForeignText = "Decisions in notes from another folder are not numbered.";
 
     /// <summary>
-    /// Job 343: what a save did to the note's decision markers that the user should know, or <c>null</c>: bare markers
-    /// left unnumbered (<see cref="DecisionNumbersRanOutText"/>), numbers kept although another note owns them, and
-    /// removed markers. Numbers only, never note text.
+    /// Job 349: what a save did to the note's decision markers that the user should know, or <c>null</c>: markers left
+    /// as typed because no numbers are left (<see cref="DecisionNumbersRanOutText"/>), or a note from another folder
+    /// that is never numbered (<see cref="DecisionForeignText"/>). Fixed texts only, never note text.
     /// </summary>
     public static string? DecisionNoticeText(DecisionEdits? decisions)
     {
@@ -423,27 +426,12 @@ internal sealed class DesktopActions
             return null;
         }
 
-        List<string> parts = [];
-        if (decisions.Unnumbered > 0)
+        if (decisions.Foreign)
         {
-            parts.Add(DecisionNumbersRanOutText);
+            return DecisionForeignText;
         }
 
-        if (decisions.Kept.Count > 0)
-        {
-            parts.Add($"Kept {Numbers(decisions.Kept)}: another note has {(decisions.Kept.Count == 1 ? "this number" : "these numbers")}"
-                + " with a different text. Type #!d alone to give a decision a new number.");
-        }
-
-        if (decisions.Strip.Count > 0)
-        {
-            parts.Add($"Removed the marker {Numbers(decisions.Strip)}: that decision is already above or in another note.");
-        }
-
-        return parts.Count == 0 ? null : string.Join(" ", parts);
-
-        static string Numbers(IEnumerable<int> numbers) =>
-            string.Join(", ", numbers.Distinct().Select(DecisionParser.Format));
+        return decisions.Unnumbered > 0 ? DecisionNumbersRanOutText : null;
     }
 
     /// <summary>The red line when the top-level <c>briefings</c> note is sensitive.</summary>
@@ -1267,6 +1255,31 @@ internal sealed class DesktopActions
     /// (<see cref="DesktopState.OfferConversion"/>), which shows it in its status line. Never refreshes or throws.
     /// </summary>
     public Task<ActionResult> ConvertTodoMarkers() => Run(ConvertTodoMarkersNow, refresh: false);
+
+    /// <summary>
+    /// The one-time move of job 343's <c>#!d</c> markers to <c>!d &lt;prefix&gt;-&lt;n&gt;</c> (job 349), called only by
+    /// <c>Program.cs</c> at start, after the todo marker conversion and before the watcher, the first refresh and the
+    /// first numbering: <see cref="DesktopState.MigrateDecisions"/> (with the history, so every rewritten note keeps its
+    /// old bytes as a version). Done/<see cref="ActionReason.Unchanged"/> when the folder was migrated already or no
+    /// note changed, Done when notes changed, Failed/<see cref="ActionReason.WriteFailed"/> when a note failed (the
+    /// next start runs again) or the folder id can't be read. No text. Never refreshes or throws.
+    /// </summary>
+    public Task<ActionResult> MigrateDecisions() => Run(MigrateDecisionsNow, refresh: false);
+
+    /// <summary>The test hook of <see cref="MigrateDecisions"/>: called with each note's name before its save.</summary>
+    internal Action<string>? BeforeDecisionMigrationSave { get; set; }
+
+    private ActionResult MigrateDecisionsNow()
+    {
+        if (state.MigrateDecisions(BeforeDecisionMigrationSave) is not { } result || result.Failed.Count > 0)
+        {
+            return new ActionResult(ActionKind.Failed, ActionReason.WriteFailed, string.Empty);
+        }
+
+        return result.Notes > 0
+            ? new ActionResult(ActionKind.Done, ActionReason.None, string.Empty)
+            : new ActionResult(ActionKind.Done, ActionReason.Unchanged, string.Empty);
+    }
 
     /// <summary>
     /// Moves the note <paramref name="name"/> and its subpages under the note <paramref name="newParent"/> (matched
@@ -2884,8 +2897,8 @@ internal sealed class DesktopActions
             : new ActionResult(ActionKind.Failed, ActionReason.LineKept, TriageKeptText(target), saved);
     }
 
-    // Job 343: the text an app write other than SaveNote puts into the plain note `name`: its bare #!d markers
-    // numbered and the copies of another note's decisions stripped (DesktopState.NumberDecisions). As given when nothing
+    // Job 343, 349: the text an app write other than SaveNote puts into the plain note `name`: its !d markers numbered
+    // with the folder's prefix (DesktopState.NumberDecisions). As given when nothing
     // changes, the index can't be read or the numbered text would be too large.
     private string Numbered(string name, string text) =>
         state.NumberDecisions(name, text) is { Changed: true } edits
@@ -2893,30 +2906,10 @@ internal sealed class DesktopActions
             ? edits.Text
             : text;
 
-    // Job 343: after a write in Core (capture, import, the day's end) of the plain note `name`: numbers it in a second
-    // write that goes through only while the file is as it was read (else the next save numbers it). Never throws; a
-    // sealed note is never found here, so it is never numbered.
-    private void NumberWritten(string name)
-    {
-        try
-        {
-            if (!notes.TryFind(name, out NoteInfo? found) || found is null)
-            {
-                return;
-            }
-
-            EditableNote opened = notes.ReadForEdit(found);
-            string numbered = Numbered(found.Name, opened.Text);
-            if (!ReferenceEquals(numbered, opened.Text))
-            {
-                notes.SaveIfUnchanged(opened, numbered, out _);
-            }
-        }
-        catch (Exception)
-        {
-            // The write is done; the markers stay bare until the next save.
-        }
-    }
+    // Job 343, 349: after a write in Core (capture, import, the day's end, a merge) of the plain note `name`: numbers it
+    // in a second write that goes through only while the file is as it was read (else the next save numbers it). Never
+    // throws; a sealed note is never found here, so it is never numbered.
+    private void NumberWritten(string name) => state.NumberWritten(name);
 
     // The note text with "- <text>\n" appended, after a missing final newline.
     private static string Appended(string text, string line) =>
@@ -3452,6 +3445,8 @@ internal sealed class DesktopActions
             string mergedName = merged.Name;
             ChangeRecent(list => RecentNotes.Removed(list, mergedName));
             ChangePinned(list => PinnedNotes.Removed(list, mergedName));
+            // Job 349: with the source gone its numbers pass to the kept note; new !d markers get numbers.
+            NumberWritten(kept.Name);
             return UpdateMergeLinks(plan, merged.Name, kept.Name);
         }
         catch (Exception)

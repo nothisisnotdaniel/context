@@ -98,7 +98,7 @@ public sealed class BoardViewTests : IDisposable
     public void TagParser_IsUnchanged()
     {
         Assert.Equal(["status"], TagParser.Parse("#status/doing"));
-        Assert.Equal(17, TagIndex.ParserVersion);
+        Assert.Equal(18, TagIndex.ParserVersion);
     }
 
     // AC-3: a note card's column is its first token outside fences, code spans and open todo lines.

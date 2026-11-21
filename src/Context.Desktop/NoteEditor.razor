@@ -160,16 +160,20 @@
     [Parameter]
     public string? Heading { get; set; }
 
-    /// <summary>The decision number (<c>#!d1234</c>, job 343) to jump to once the note is mounted; read on the first mount only.</summary>
+    /// <summary>
+    /// The decision to jump to once the note is mounted, as its marker's token is written in this note (lower case,
+    /// <c>ab12-1234</c>; jobs 343 and 349); read on the first mount only.
+    /// </summary>
     [Parameter]
-    public int? Decision { get; set; }
+    public string? Decision { get; set; }
 
     /// <summary>
-    /// Called with the owner's name and the number when a reference to a decision in another note is clicked (job 343);
+    /// Called with the owner's name and the marker's token there when a reference to a decision in another note is
+    /// clicked (jobs 343 and 349);
     /// the parent saves this note first. Without a delegate the owner is opened through <see cref="OnOpenNote"/>.
     /// </summary>
     [Parameter]
-    public EventCallback<(string Name, int Decision)> OnOpenDecision { get; set; }
+    public EventCallback<(string Name, string Decision)> OnOpenDecision { get; set; }
 
     /// <summary>Called with the person's name (as found by PersonParser) when a mention in the text is clicked.</summary>
     [Parameter]
@@ -418,6 +422,7 @@
             dirty = false;
             await LoadAttributesAsync();
             await LoadOutlineAsync();
+            await LoadDecisionPrefixesAsync(note.Text);
             await LoadDecisionTitlesAsync();
         }
         catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
@@ -449,6 +454,7 @@
             ShowStatus(string.Empty, string.Empty);
             await LoadAttributesAsync();
             await LoadOutlineAsync();
+            await LoadDecisionPrefixesAsync(saved.Text);
             await LoadDecisionTitlesAsync();
         }
         catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
@@ -482,6 +488,8 @@
         Interop.AttachmentClicked -= AttachmentClicked;
         Interop.LinkPasted -= LinkPasted;
         Interop.DecisionClicked -= DecisionClicked;
+        Interop.DecisionCopied -= DecisionCopied;
+        Interop.DecisionPicksSource = null;
         Interop.Changed -= EditorChanged;
         await Interop.DestroyAsync();
     }
@@ -517,6 +525,8 @@
             Interop.AttachmentClicked += AttachmentClicked;
             Interop.LinkPasted += LinkPasted;
             Interop.DecisionClicked += DecisionClicked;
+            Interop.DecisionCopied += DecisionCopied;
+            Interop.DecisionPicksSource = State.DecisionPicks;
             Interop.Changed += EditorChanged;
 
             // A sensitive note shows no images: nothing next to it is read.
@@ -544,12 +554,13 @@
 
             await LoadAttributesAsync();
             await LoadOutlineAsync();
+            await LoadDecisionPrefixesAsync(note.Text);
             await LoadDecisionTitlesAsync();
             if (Heading is { } heading)
             {
                 await JumpToHeadingAsync(heading);
             }
-            else if (Decision is int decision)
+            else if (Decision is string decision)
             {
                 await JumpToDecisionAsync(decision);
             }
@@ -758,10 +769,11 @@
     }
 
     /// <summary>
-    /// Job 343: puts the cursor at the start of decision <paramref name="number"/>'s paragraph in the open note, scrolls
-    /// to it and flashes it, keeping unsaved text; without such a decision, says so in grey and stays where it is.
+    /// Jobs 343 and 349: puts the cursor at the start of the paragraph whose marker has <paramref name="token"/> (lower
+    /// case, <c>ab12-1234</c>) in the open note, scrolls to it and flashes it, keeping unsaved text; without such a
+    /// decision, says so in grey and stays where it is.
     /// </summary>
-    internal async Task JumpToDecisionAsync(int number)
+    internal async Task JumpToDecisionAsync(string token)
     {
         if (!mounted || disposed)
         {
@@ -770,9 +782,14 @@
 
         try
         {
-            if (!await Interop.ScrollToDecisionAsync(host, number))
+            if (!DecisionParser.TryParseReference(token, out DecisionRef wanted) || wanted.Text != token)
             {
-                ShowStatus($"{DisplayName} has no decision {DecisionParser.Format(number)}.", "grey");
+                return;
+            }
+
+            if (!await Interop.ScrollToDecisionAsync(host, wanted.Text))
+            {
+                ShowStatus($"{DisplayName} has no decision {DecisionParser.Format(wanted.Prefix, wanted.Number)}.", "grey");
             }
         }
         catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
@@ -794,34 +811,70 @@
         }
     }
 
-    // {"bare":[n…],"strip":[n…]}: integers only.
-    private static string DecisionEditsJson(DecisionEdits decisions)
+    // {"set":[[k, old or null, new]…],"folder":guid or null} (job 349): every token rebuilt from its parsed parts.
+    internal static string DecisionEditsJson(DecisionEdits decisions)
     {
         using MemoryStream stream = new MemoryStream();
         using (Utf8JsonWriter writer = new Utf8JsonWriter(stream))
         {
             writer.WriteStartObject();
-            writer.WriteStartArray("bare");
-            foreach (int number in decisions.Bare)
+            writer.WriteStartArray("set");
+            foreach (DecisionSet set in decisions.Set)
             {
-                writer.WriteNumberValue(number);
+                writer.WriteStartArray();
+                writer.WriteNumberValue(set.Index);
+                if (set.Old is string old)
+                {
+                    writer.WriteStringValue(old.ToLowerInvariant());
+                }
+                else
+                {
+                    writer.WriteNullValue();
+                }
+
+                writer.WriteStringValue(set.New);
+                writer.WriteEndArray();
             }
 
             writer.WriteEndArray();
-            writer.WriteStartArray("strip");
-            foreach (int number in decisions.Strip)
+            if (decisions.Folder is Guid folder)
             {
-                writer.WriteNumberValue(number);
+                writer.WriteString("folder", folder.ToString("D"));
+            }
+            else
+            {
+                writer.WriteNull("folder");
             }
 
-            writer.WriteEndArray();
             writer.WriteEndObject();
         }
 
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());
     }
 
-    // Job 343: reads the decision numbers the mounted editor references, looks up their headlines (a plain note syncs
+    // Job 349: tells the page the folder's prefix (and the clash alias of this note's folder) for the Copy reference
+    // buttons. A sensitive note gets none: its decisions are never numbered or indexed.
+    private async Task LoadDecisionPrefixesAsync(string text)
+    {
+        if (!mounted || disposed || Sensitive)
+        {
+            return;
+        }
+
+        try
+        {
+            if (await State.DecisionPrefixes(text) is { } prefixes && !disposed)
+            {
+                await Interop.SetDecisionPrefixesAsync(host, prefixes.Own, prefixes.Alias);
+            }
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            // The page is gone; no Copy reference buttons.
+        }
+    }
+
+    // Jobs 343 and 349: reads the references the mounted editor holds, looks up their headlines (a plain note syncs
     // the index first; a sensitive note's lookups only read it) and draws the references. A failure draws none.
     private async Task LoadDecisionTitlesAsync()
     {
@@ -832,14 +885,14 @@
 
         try
         {
-            List<int> numbers = ParseNumbers(await Interop.DecisionReferencesAsync(host));
+            List<DecisionRef> numbers = ParseReferences(await Interop.DecisionReferencesAsync(host));
             if (numbers.Count == 0)
             {
                 await Interop.SetDecisionTitlesAsync(host, "[]");
                 return;
             }
 
-            IReadOnlyDictionary<int, string>? titles = await State.DecisionTitles(numbers, !Sensitive);
+            IReadOnlyDictionary<DecisionRef, string>? titles = await State.DecisionTitles(numbers, !Sensitive);
             if (titles is null || disposed)
             {
                 return;
@@ -853,8 +906,8 @@
         }
     }
 
-    // The page's JSON array of numbers, each checked; anything else gives none.
-    private static List<int> ParseNumbers(string json)
+    // The page's JSON array of references ("1234", "ab12-1234"), each checked; anything else gives none.
+    internal static List<DecisionRef> ParseReferences(string json)
     {
         try
         {
@@ -865,10 +918,23 @@
                 return [];
             }
 
-            List<int> numbers = [.. document.RootElement.EnumerateArray().Select(element =>
-                element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out int number)
-                    && number is >= 1 and <= DecisionParser.MaxNumber ? number : 0)];
-            return numbers.Contains(0) || numbers.Distinct().Count() != numbers.Count ? [] : numbers;
+            DecisionRef[] references = new DecisionRef[document.RootElement.GetArrayLength()];
+            int at = 0;
+            foreach (JsonElement element in document.RootElement.EnumerateArray())
+            {
+                if (element.ValueKind != JsonValueKind.String
+                    || element.GetString() is not string text
+                    || text.StartsWith(DecisionParser.Token, StringComparison.Ordinal)
+                    || !DecisionParser.TryParseReference(text, out DecisionRef reference)
+                    || reference.Text != text)
+                {
+                    return [];
+                }
+
+                references[at++] = reference;
+            }
+
+            return references.Distinct().Count() != references.Length ? [] : [.. references];
         }
         catch (JsonException)
         {
@@ -876,17 +942,17 @@
         }
     }
 
-    // [[n, headline or null], …]: each headline through OneLine and cut to 1000 chars (never inside a surrogate pair).
-    private static string DecisionTitlesJson(List<int> numbers, IReadOnlyDictionary<int, string> titles)
+    // [[ref, headline or null], …]: each headline through OneLine and cut to 1000 chars (never inside a surrogate pair).
+    private static string DecisionTitlesJson(List<DecisionRef> numbers, IReadOnlyDictionary<DecisionRef, string> titles)
     {
         using MemoryStream stream = new MemoryStream();
         using (Utf8JsonWriter writer = new Utf8JsonWriter(stream))
         {
             writer.WriteStartArray();
-            foreach (int number in numbers)
+            foreach (DecisionRef number in numbers)
             {
                 writer.WriteStartArray();
-                writer.WriteNumberValue(number);
+                writer.WriteStringValue(number.Text);
                 if (titles.TryGetValue(number, out string? headline))
                 {
                     string title = DesktopText.OneLine(headline);
@@ -914,9 +980,10 @@
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());
     }
 
-    // A clicked reference (job 343): a decision in this note is a jump in place; another note's opens that note at it
-    // (the parent saves this one first); a number no note owns says so in grey.
-    private Task DecisionClicked(int number) => InvokeAsync(async () =>
+    // A clicked reference (jobs 343 and 349): the owner from the index (a decision in this note is a jump in place,
+    // another note's opens that note at it, the parent saving this one first); a reference the index doesn't know is
+    // still found in this note when its marker is written so, else says so in grey.
+    private Task DecisionClicked(DecisionRef reference) => InvokeAsync(async () =>
     {
         if (!mounted || disposed)
         {
@@ -924,43 +991,55 @@
         }
 
         Used();
+        (string Note, string Token)? owner = Sensitive ? null : await State.DecisionNote(reference);
+        if (owner is { } found && !string.Equals(found.Note, Name, StringComparison.Ordinal))
+        {
+            if (OnOpenDecision.HasDelegate)
+            {
+                await OnOpenDecision.InvokeAsync((found.Note, found.Token));
+                return;
+            }
+
+            await OnOpenNote.InvokeAsync(found.Note);
+            return;
+        }
+
+        string? token = owner?.Token;
+        if (token is null)
+        {
+            string? own = reference.Prefix ?? (await State.DecisionPrefixes(string.Empty))?.Own;
+            token = own is null ? null : DecisionParser.Label(own, reference.Number);
+        }
+
         bool here = false;
         try
         {
-            here = await Interop.ScrollToDecisionAsync(host, number);
+            here = token is not null && await Interop.ScrollToDecisionAsync(host, token);
         }
         catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
         {
             return;
         }
 
-        if (here)
+        if (!here)
         {
-            return;
-        }
-
-        string? owner = await State.DecisionNote(number);
-        if (owner is null)
-        {
-            ShowStatus($"No decision {DecisionParser.Format(number)}.", "grey");
+            ShowStatus(owner is null
+                ? $"No decision {DecisionParser.Format(reference.Prefix, reference.Number)}."
+                : $"{DisplayName} has no decision {DecisionParser.Format(reference.Prefix, reference.Number)}.", "grey");
             StateHasChanged();
-            return;
         }
+    });
 
-        if (string.Equals(owner, Name, StringComparison.Ordinal))
+    // Job 349: a Copy reference button in the note copied; says so in grey.
+    private Task DecisionCopied(DecisionRef reference) => InvokeAsync(() =>
+    {
+        if (!mounted || disposed)
         {
-            await JumpToDecisionAsync(number);
-            StateHasChanged();
             return;
         }
 
-        if (OnOpenDecision.HasDelegate)
-        {
-            await OnOpenDecision.InvokeAsync((owner, number));
-            return;
-        }
-
-        await OnOpenNote.InvokeAsync(owner);
+        ShowStatus($"Copied {DecisionParser.Format(reference.Prefix, reference.Number)}.", "grey");
+        StateHasChanged();
     });
 
     /// <summary>

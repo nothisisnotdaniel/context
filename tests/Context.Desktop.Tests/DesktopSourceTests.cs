@@ -465,7 +465,7 @@ public sealed class DesktopSourceTests
     }
 
     // 211 AC-1, AC-5: no selector in app.css (inside @media blocks too) pairs the editor with a focus pseudo-class;
-    // editor.css has only the chip's focus ring.
+    // editor.css has only the chip's focus ring and (job 349) the Copy reference button's.
     [Fact]
     public void Css_HasNoEditorFocusSelector()
     {
@@ -475,7 +475,9 @@ public sealed class DesktopSourceTests
 
         Assert.DoesNotContain(".editor-host:focus", css, StringComparison.Ordinal);
         Assert.DoesNotContain(CssSelectors(css), IsEditorFocusSelector);
-        Assert.Equal([".note-editor-body .chip:focus-visible"], CssSelectors(editorCss).Where(IsEditorFocusSelector));
+        Assert.Equal(
+            [".note-editor-body .chip:focus-visible", ".note-editor-body button.decision-copy:focus-visible"],
+            CssSelectors(editorCss).Where(IsEditorFocusSelector));
 
         int media = css.IndexOf("@media (prefers-color-scheme: dark)", StringComparison.Ordinal);
         Assert.True(media >= 0);
@@ -533,17 +535,88 @@ public sealed class DesktopSourceTests
         const int RingsInAppCssBefore211 = 9;
         const int CalendarDayRing = 1;
         const int SidebarDayPickerRings = 2;
+        const int DecisionPickerAndCopyRings = 2; // Job 349: the picker and its rows; the Copy and clash buttons.
         string root = RepoFiles.Root();
         string css = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "app.css"));
         string editorCss = File.ReadAllText(Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot", "editor", "editor.css"));
 
         Assert.Equal(
-            RingsInAppCssBefore211 + CalendarDayRing + SidebarDayPickerRings,
+            RingsInAppCssBefore211 + CalendarDayRing + SidebarDayPickerRings + DecisionPickerAndCopyRings,
             System.Text.RegularExpressions.Regex.Matches(css, @"outline: 2px solid var\(--accent-strong\)").Count);
         Assert.Contains(
             "outline: 2px solid var(--accent-strong);",
             RuleBody(editorCss, ".note-editor-body .chip:focus-visible"),
             StringComparison.Ordinal);
+    }
+
+    // 349 AC-13: the picker, the Copy reference buttons, the copied line and the clash line take every colour from the
+    // theme variables (so light and dark both work) and the picker and the buttons have a visible focus ring.
+    [Fact]
+    public void Css_DecisionControls_ThemeColoursAndFocus()
+    {
+        string root = RepoFiles.Root();
+        string wwwroot = Path.Combine(root, RepoFiles.DesktopFolder, "wwwroot");
+        Regex mine = new(@"decision-(picker|copy|clash|copied)");
+        Regex colourProperty = new(@"(?m)(^|[\s;])(color|background|background-color|border|border-color|outline|box-shadow)\s*:\s*([^;]*)");
+        Regex fixedColour = new(@"#[0-9a-fA-F]{3,8}\b|\b(rgb|rgba|hsl|hsla)\(|\b(white|black|red|blue|green|gray|grey)\b");
+        List<string> selectors = [];
+
+        foreach (string file in new[] { Path.Combine(wwwroot, "app.css"), Path.Combine(wwwroot, "editor", "editor.css") })
+        {
+            foreach ((string selector, string body) in CssRules(File.ReadAllText(file)))
+            {
+                if (!mine.IsMatch(selector))
+                {
+                    continue;
+                }
+
+                selectors.AddRange(selector.Split(',').Select(sel => sel.Trim()));
+                foreach (System.Text.RegularExpressions.Match m in colourProperty.Matches(body))
+                {
+                    string value = m.Groups[3].Value.Trim();
+                    Assert.False(
+                        fixedColour.IsMatch(Regex.Replace(value, @"var\(--[\w-]+\)", "var()")),
+                        $"{selector}: {m.Groups[2].Value}: {value}");
+                    Assert.True(
+                        value.Contains("var(--", StringComparison.Ordinal) || value is "none" or "transparent" or "inherit",
+                        $"{selector}: {m.Groups[2].Value}: {value}");
+                }
+            }
+        }
+
+        Assert.Contains(".decision-picker:focus-visible", selectors);
+        Assert.Contains(".decision-picker li:focus-visible", selectors);
+        Assert.Contains("button.decision-copy:focus-visible", selectors);
+        Assert.Contains("p.decision-clash button:focus-visible", selectors);
+        Assert.Contains(".note-editor-body button.decision-copy:focus-visible", selectors);
+        Assert.Contains("p.decision-clash", selectors);
+    }
+
+    // 349: the names job 343's strip-on-copy design used are gone from the sources and the committed bundle.
+    [Theory]
+    [InlineData("StripMarkers")]
+    [InlineData("pastedDecisionMarkdown")]
+    [InlineData("DecisionHolder")]
+    [InlineData("StripLength")]
+    public void Decisions_RemovedNamesAreGone(string name)
+    {
+        string root = RepoFiles.Root();
+        List<string> found = [];
+        foreach (string folder in new[] { "src/Context.Core", "src/Context", RepoFiles.DesktopFolder })
+        {
+            found.AddRange(RepoFiles.Sources(root, folder, ".cs", ".razor")
+                .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains(name, StringComparison.Ordinal)));
+        }
+
+        foreach (string file in new[] { "editor/src/decisions.js", "editor/src/view.js", "wwwroot/editor/editor.js" })
+        {
+            if (EditorFile(file).Contains(name, StringComparison.Ordinal))
+            {
+                found.Add(file);
+            }
+        }
+
+        Assert.Empty(found);
     }
 
     private static bool IsEditorFocusSelector(string selector) =>
@@ -1270,13 +1343,22 @@ public sealed class DesktopSourceTests
         Assert.Equal(
             ["OnTag", "OnLink", "OnPerson", "OnDirty", "OnDrop", "OnAttachment", "OnChanged", "OnPasteLink"],
             invokable.Select(m => m.Groups[1].Value).ToArray());
-        Assert.Equal(9, Regex.Matches(text, @"\[JSInvokable").Count);
+        Assert.Equal(11, Regex.Matches(text, @"\[JSInvokable").Count);
 
-        // 343: OnDecision only raises DecisionClicked, and only for a number in range.
-        Assert.Contains(
-            "public Task OnDecision(int number) =>\n        number is >= 1 and <= DecisionParser.MaxNumber ? DecisionClicked?.Invoke(number) ?? Task.CompletedTask : Task.CompletedTask;",
-            text.Replace("\r\n", "\n", StringComparison.Ordinal),
-            StringComparison.Ordinal);
+        // 343, 349: OnDecision only raises DecisionClicked and OnCopiedDecision only DecisionCopied, each only for a
+        // reference that parses; DecisionPicks only reads through DecisionPicksSource (DesktopState.DecisionPicks).
+        string unix = text.Replace("\r\n", "\n", StringComparison.Ordinal);
+        foreach ((string method, string raised) in new[] { ("OnDecision", "DecisionClicked"), ("OnCopiedDecision", "DecisionCopied") })
+        {
+            Assert.Contains(
+                $"public Task {method}(string reference) =>\n        reference is not null && reference.Length <= 30 && DecisionParser.TryParseReference(reference, out DecisionRef parsed)\n"
+                + $"            ? {raised}?.Invoke(parsed) ?? Task.CompletedTask\n            : Task.CompletedTask;",
+                unix,
+                StringComparison.Ordinal);
+        }
+
+        Assert.Contains("public async Task<string> DecisionPicks(string query)", unix, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"\bActions\b|DesktopActions", unix);
         Assert.All(invokable, m => Assert.Matches(
             @"^\s*(TagClicked\?\.Invoke\(raw\)|LinkClicked\?\.Invoke\(raw\)|PersonClicked\?\.Invoke\(raw\)|DirtyChanged\?\.Invoke\(dirty\)"
             + @"|FilesDropped\?\.Invoke\(new DroppedFiles\(count, files\)\)|AttachmentClicked\?\.Invoke\(href\)|LinkPasted\?\.Invoke\(url\)|Changed\?\.Invoke\(\)) \?\? Task\.CompletedTask$",
@@ -1334,7 +1416,7 @@ public sealed class DesktopSourceTests
         Assert.Matches(@"handleDOMEvents:\s*\{\s*(?://[^\n]*\n\s*)*keydown\(", text);
         Assert.Contains("opensChip", text, StringComparison.Ordinal);
         Assert.Equal(
-            ["OnAttachment", "OnChanged", "OnDecision", "OnDirty", "OnDrop", "OnLink", "OnPasteLink", "OnPerson", "OnTag"],
+            ["DecisionPicks", "OnAttachment", "OnChanged", "OnCopiedDecision", "OnDecision", "OnDirty", "OnDrop", "OnLink", "OnPasteLink", "OnPerson", "OnTag"],
             Regex.Matches(text, @"invokeMethodAsync\(""(\w+)""").Select(m => m.Groups[1].Value).Distinct().Order(StringComparer.Ordinal));
     }
 
@@ -1665,8 +1747,8 @@ public sealed class DesktopSourceTests
             .Select(m => m.Groups[1].Value)
             .ToArray();
         Assert.Equal(
-            // 329: ConvertTodoMarkers runs once at start, before todos.Migrate().
-            ["ConvertTodoMarkers", "AutoDayEnd", "AutoBriefing", "AutoReminders", "AutoOpenToday", "AutoReminders", "OpenRequestedItem", "ImportScreenshot", "CaptureScreenshot"],
+            // 329: ConvertTodoMarkers runs once at start, before todos.Migrate(); 349: MigrateDecisions right after.
+            ["ConvertTodoMarkers", "MigrateDecisions", "AutoDayEnd", "AutoBriefing", "AutoReminders", "AutoOpenToday", "AutoReminders", "OpenRequestedItem", "ImportScreenshot", "CaptureScreenshot"],
             calls);
         Assert.Contains(
             "static Task AutoWrites(DesktopActions actions) =>\n            actions.AutoDayEnd().ContinueWith("
@@ -2598,6 +2680,18 @@ public sealed class DesktopSourceTests
         Assert.Contains("OnConfirm=\"MakePlainConfirmed\"", main, StringComparison.Ordinal);
         Assert.Contains("Actions.MarkSensitive(name, confirmed)", main, StringComparison.Ordinal);
         Assert.Contains("Actions.MakePlain(name, confirmed)", main, StringComparison.Ordinal);
+    }
+
+    // 349 AC-6: a state change never waits on the index for the clash lines; it starts the read only while one is due.
+    [Fact]
+    public void Main_StateChange_NeverAwaitsTheClashRead()
+    {
+        string main = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "Main.razor"));
+        string changed = Between(main, "protected override async Task OnStateChangedAsync()", "TakeConversion();");
+
+        Assert.Contains("if (State.DecisionClashesDue)", changed, StringComparison.Ordinal);
+        Assert.Contains("ShowDecisionClashesLater();", changed, StringComparison.Ordinal);
+        Assert.DoesNotContain("await TakeDecisionClashesAsync", changed, StringComparison.Ordinal);
     }
 
     private static bool MentionsJSRuntime(string source) => source.Contains("JSRuntime", StringComparison.Ordinal);

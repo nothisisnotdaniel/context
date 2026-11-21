@@ -9,6 +9,8 @@ public sealed class CliTests : IDisposable
     private static readonly DateOnly Today = new(2026, 10, 29);
     private static readonly DateTime Now = new(2026, 10, 29, 9, 0, 0, DateTimeKind.Utc);
 
+    private static readonly Guid DecisionFolderGuid = new("11111111-2222-3333-4444-555555555555");
+
     private readonly string parent;
     private readonly string root;
     private readonly string outside;
@@ -41,7 +43,13 @@ public sealed class CliTests : IDisposable
     {
         StringWriter stdout = new StringWriter();
         StringWriter stderr = new StringWriter();
-        Cli cli = new Cli(stdout, stderr, root, () => Today, () => Now, http, TimeZoneInfo.Utc, times);
+        // 349: a new decision-folder.json gets the prefix ab12 and DecisionFolderGuid, never a random one.
+        Queue<int> prefix = new([10, 11, 1, 2]);
+        Cli cli = new Cli(stdout, stderr, root, () => Today, () => Now, http, TimeZoneInfo.Utc, times)
+        {
+            DecisionRandom = _ => prefix.Count > 0 ? prefix.Dequeue() : 0,
+            DecisionGuid = () => DecisionFolderGuid,
+        };
         int code = cli.Run(args);
         return new Result(code, stdout.ToString(), stderr.ToString());
     }
@@ -103,7 +111,7 @@ public sealed class CliTests : IDisposable
             "todo add every <weekday|day|month> <text...>", "todo done <text...>", "notes",
             "note show <name...>", "tags [tag...]", "find <attribute> <value...>",
             "search <text...>", "current", "review", "new <title...> [--template <name>]", "import <path>",
-            "export <note> <path>", "version", "dayend [today|yyyy-MM-dd]", "decisions [--full] [tag...]", "decisions <number>",
+            "export <note> <path>", "version", "dayend [today|yyyy-MM-dd]", "decisions [--full] [tag...]", "decisions <reference>",
         })
         {
             Assert.Contains($"context {usage} ", result.Out, StringComparison.Ordinal);
@@ -772,12 +780,12 @@ public sealed class CliTests : IDisposable
     public void TodoTexts_NameNoNumber()
     {
         // Every help line except meeting's (167 AC-7 lists "meeting <n>"), item's (280 lists "item <n>") and the
-        // decision number's (343 lists "decisions <number>").
+        // decision reference's (349 lists "decisions <reference>").
         string help = string.Join(
             '\n',
             Run("help").Out.Split('\n').Where(l => !l.StartsWith("context meeting <n>", StringComparison.Ordinal)
                 && !l.StartsWith("context item <n>", StringComparison.Ordinal)
-                && !l.StartsWith("context decisions <number>", StringComparison.Ordinal)));
+                && !l.StartsWith("context decisions <reference>", StringComparison.Ordinal)));
         string text = help + Run("todo").Err + Run("todo", "done").Err;
 
         Assert.Contains("todo done <text...>", text, StringComparison.Ordinal);
@@ -1685,20 +1693,31 @@ public sealed class CliTests : IDisposable
         Assert.Equal(before, Snapshot());
     }
 
-    // 180, 343 -------------------------------------------------------------------------------------
+    // 180, 343, 349 --------------------------------------------------------------------------------
 
-    private const string DecisionsUsage = "Type: context decisions [--full] [tag] or context decisions <number>. Run 'context help'.";
+    private const string DecisionsUsage = "Type: context decisions [--full] [tag] or context decisions <reference>. Run 'context help'.";
 
-    // 343 AC-11: one line per decision: date, number or empty, note name, people and headline, newest first, each field
-    // one clean line; Decision: lines are gone.
+    private static readonly string FolderLine = "decision-folder:: " + DecisionFolderGuid.ToString("D");
+
+    private void WriteDecisionFolder(string prefix = "ab12")
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(
+            Path.Combine(root, DecisionFolder.FileName),
+            "{\"prefix\":\"" + prefix + "\",\"guid\":\"" + DecisionFolderGuid.ToString("D") + "\",\"migrated\":true}");
+    }
+
+    // 349 AC-12 (343 AC-11): one line per decision: date, reference (#!d<n> for the own prefix, #!d<prefix>-<n> for
+    // another, empty for a bare marker), note name, people and headline, newest first, each field one clean line.
     [Fact]
     public void Decisions_PrintsOneLinePerDecision()
     {
+        WriteDecisionFolder();
         WriteNote("meetings", "# meetings\n");
         Directory.CreateDirectory(Path.Combine(root, "meetings"));
-        WriteNote("meetings/2026-11-10 Weekly sync", "# x\n#!d12 ship it with @[Anna]\nand @[Bo]\n");
-        WriteNote("2026-11-12", "- #!d a\u0007b\tc\n");
-        WriteNote("Plans", "#!d later\n\nDecision: old");
+        WriteNote("meetings/2026-11-10 Weekly sync", "# x\n!d ab12-12 ship it with @[Anna]\nand @[Bo]\n");
+        WriteNote("2026-11-12", "- !d a\u0007b\tc\n");
+        WriteNote("Plans", "!d later\n\n!d zz99-4 theirs\n\nDecision: old");
         File.SetLastWriteTimeUtc(Path.Combine(root, "Plans.md"), new DateTime(2026, 11, 1, 8, 0, 0, DateTimeKind.Utc));
 
         Result result = Run("decisions");
@@ -1708,8 +1727,21 @@ public sealed class CliTests : IDisposable
         Assert.Equal(
             "2026-11-12\t\t2026-11-12\t\ta\uFFFDb c\n"
                 + "2026-11-10\t#!d12\tmeetings/2026-11-10 Weekly sync\tAnna, Bo\tship it with @[Anna]\n"
-                + "2026-11-01\t\tPlans\t\tlater\n",
+                + "2026-11-01\t\tPlans\t\tlater\n"
+                + "2026-11-01\t#!dzz99-4\tPlans\t\ttheirs\n",
             result.Out);
+    }
+
+    // 349 AC-2, AC-12: a folder without decision-folder.json gets one on the first decisions run, from the fakes.
+    [Fact]
+    public void Decisions_CreatesDecisionFolderFile()
+    {
+        WriteNote("Plan", "!d ab12-3 one\n");
+
+        Assert.Equal(0, Run("decisions").Code);
+
+        DecisionFolder? folder = DecisionFolder.Read(root);
+        Assert.Equal(new DecisionFolder("ab12", DecisionFolderGuid, false), folder);
     }
 
     // 343 AC-11: --full (any case) prints the whole text through OneLine instead of the headline.
@@ -1718,7 +1750,8 @@ public sealed class CliTests : IDisposable
     [InlineData("--FULL")]
     public void Decisions_Full_PrintsWholeText(string flag)
     {
-        WriteNote("Plan", "#!d3 one\ntwo\n");
+        WriteDecisionFolder();
+        WriteNote("Plan", "!d ab12-3 one\ntwo\n");
         File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), new DateTime(2026, 11, 1, 8, 0, 0, DateTimeKind.Utc));
 
         Result result = Run("decisions", flag);
@@ -1727,36 +1760,79 @@ public sealed class CliTests : IDisposable
         Assert.Equal("2026-11-01\t#!d3\tPlan\t\tone two\n", result.Out);
     }
 
-    // 343 AC-11: decisions <n> or #!d<n> prints one decision with its note, date, people, a blank line and the text.
+    // 349 AC-12: decisions <ref> in every form and case prints one decision with its note, date, people, a blank line
+    // and the text.
     [Theory]
     [InlineData("3")]
     [InlineData("#!d3")]
-    public void Decisions_Number_PrintsOne(string number)
+    [InlineData("ab12-3")]
+    [InlineData("AB12-3")]
+    [InlineData("#!dab12-3")]
+    [InlineData("#!DAB12-3")]
+    public void Decisions_Reference_PrintsOne(string reference)
     {
-        WriteNote("Plan", "#!d3 one @[Anna]\ntwo\u0007\n");
+        WriteDecisionFolder();
+        WriteNote("Plan", "!d ab12-3 one @[Anna]\ntwo\u0007\n");
         File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), new DateTime(2026, 11, 1, 8, 0, 0, DateTimeKind.Utc));
 
-        Result result = Run("decisions", number);
+        Result result = Run("decisions", reference);
 
         Assert.Equal(0, result.Code);
         Assert.Equal(string.Empty, result.Err);
         Assert.Equal("#!d3\nNote: Plan\nDate: 2026-11-01\nPeople: Anna\n\none @[Anna]\ntwo\uFFFD\n", result.Out);
     }
 
-    // 343 AC-11: an unknown number is an error with exit 1.
+    // 349 AC-12: another prefix's decision is shown with its prefix.
     [Fact]
-    public void Decisions_UnknownNumber_IsError()
+    public void Decisions_OtherPrefix_PrintsOne()
     {
-        WriteNote("Plan", "#!d3 one");
+        WriteDecisionFolder();
+        WriteNote("Plan", "!d zz99-7 theirs\n");
+        File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), new DateTime(2026, 11, 1, 8, 0, 0, DateTimeKind.Utc));
 
-        AssertError(Run("decisions", "4"), 1, "No decision #!d4.");
+        Result result = Run("decisions", "ZZ99-7");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal("#!dzz99-7\nNote: Plan\nDate: 2026-11-01\nPeople: \n\ntheirs\n", result.Out);
     }
 
-    // 343 AC-11: a number mixed with a tag or --full is the usage error, before the folder is read.
+    // 349 AC-5, AC-12: a decision with copies in other notes lists them in an Also in: line.
+    [Fact]
+    public void Decisions_Reference_WithCopies_PrintsAlsoIn()
+    {
+        WriteDecisionFolder();
+        WriteNote("Plan", $"{FolderLine}\n!d ab12-3 one\n");
+        WriteNote("Copy B", $"{FolderLine}\n!d ab12-3 one\n");
+        WriteNote("Copy A", $"{FolderLine}\n!d ab12-3 one\n");
+        File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), new DateTime(2026, 11, 1, 8, 0, 0, DateTimeKind.Utc));
+        File.SetLastWriteTimeUtc(Path.Combine(root, "Copy A.md"), new DateTime(2026, 11, 2, 8, 0, 0, DateTimeKind.Utc));
+        File.SetLastWriteTimeUtc(Path.Combine(root, "Copy B.md"), new DateTime(2026, 11, 3, 8, 0, 0, DateTimeKind.Utc));
+
+        Result result = Run("decisions", "3");
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal("#!d3\nNote: Plan\nDate: 2026-11-01\nPeople: \nAlso in: Copy A, Copy B\n\none\n", result.Out);
+    }
+
+    // 349 AC-12: an unknown reference is an error with exit 1, shown as the user would type it.
+    [Theory]
+    [InlineData("4", "No decision #!d4.")]
+    [InlineData("ab12-4", "No decision #!d4.")]
+    [InlineData("ZZ99-4", "No decision #!dzz99-4.")]
+    public void Decisions_UnknownReference_IsError(string reference, string error)
+    {
+        WriteDecisionFolder();
+        WriteNote("Plan", "!d ab12-3 one");
+
+        AssertError(Run("decisions", reference), 1, error);
+    }
+
+    // 343 AC-11: a reference mixed with a tag or --full is the usage error, before the folder is read.
     [Theory]
     [InlineData("3", "work")]
     [InlineData("work", "#!d3")]
     [InlineData("--full", "3")]
+    [InlineData("--full", "ab12-3")]
     public void Decisions_NumberWithOthers_UsageError(params string[] args)
     {
         Result result = Run(["decisions", .. args]);
@@ -1770,7 +1846,7 @@ public sealed class CliTests : IDisposable
     [Fact]
     public void Decisions_None_NoOutput_ExitZero()
     {
-        WriteNote("A", "nothing\n\nDecision: old");
+        WriteNote("A", "nothing\n\nDecision: old\n\n#!d old marker");
 
         Result result = Run("decisions");
 
@@ -1787,8 +1863,8 @@ public sealed class CliTests : IDisposable
     [InlineData("decisions", "#[project", "alpha]")]
     public void Decisions_Tag_Filters(params string[] args)
     {
-        WriteNote("Plan", "#work #[project alpha]\n\n#!d go");
-        WriteNote("Home", "#home\n\n#!d paint");
+        WriteNote("Plan", "#work #[project alpha]\n\n!d go");
+        WriteNote("Home", "#home\n\n!d paint");
         File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), new DateTime(2026, 11, 1, 8, 0, 0, DateTimeKind.Utc));
         string[] full = args[0].Equals("decisions", StringComparison.OrdinalIgnoreCase) ? args : ["decisions", .. args];
 
@@ -1825,12 +1901,70 @@ public sealed class CliTests : IDisposable
     [Fact]
     public void Decisions_BadContextDb_IsError()
     {
-        WriteNote("A", "#!d x");
+        WriteDecisionFolder();
+        WriteNote("A", "!d x");
         File.WriteAllText(Path.Combine(root, TagIndex.FileName), "not a database at all, not at all, really not");
         Dictionary<string, string> before = Snapshot();
 
         AssertError(Run("decisions"), 1, "Can't read context.db.");
         Assert.Equal(before, Snapshot());
+    }
+
+    // 349 AC-11: capture numbers the inbox's !d markers in a second write and adds the folder line (a captured line
+    // starts with its time, so it is no marker itself).
+    [Fact]
+    public void Capture_NumbersDecision()
+    {
+        WriteDecisionFolder();
+        WriteNote("inbox", "# inbox\n!d we ship\n\n");
+
+        Assert.Equal(0, Run("capture", "more").Code);
+
+        Assert.Equal($"# inbox\n{FolderLine}\n!d ab12-1 we ship\n\n- 2026-10-29 09:00 more\n", Read("inbox.md"));
+    }
+
+    // 349 AC-11: dayend numbers the day's note after its write.
+    [Fact]
+    public void Dayend_NumbersDecision()
+    {
+        WriteDecisionFolder();
+        WriteNote("2026-10-29", "# 2026-10-29\n!d we stop\n");
+
+        Assert.Equal(0, Run("dayend").Code);
+
+        string note = Read("2026-10-29.md");
+        Assert.StartsWith($"# 2026-10-29\n{FolderLine}\n!d ab12-1 we stop\n", note, StringComparison.Ordinal);
+    }
+
+    // 349 AC-11: import numbers the imported note's bare marker and keeps the source unchanged.
+    [Fact]
+    public void Import_NumbersDecision()
+    {
+        WriteDecisionFolder();
+        string source = Path.Combine(outside, "Plan.md");
+        File.WriteAllText(source, "# Plan\n!d go\n");
+
+        Assert.Equal(0, Run("import", source).Code);
+
+        Assert.Equal($"# Plan\n{FolderLine}\n!d ab12-1 go\n", Read("Plan.md"));
+        Assert.Equal("# Plan\n!d go\n", File.ReadAllText(source));
+    }
+
+    // 349 AC-11: new with a template numbers the template's markers; an unreadable decision-folder.json leaves them.
+    [Fact]
+    public void New_WithTemplate_NumbersDecision_UnlessFolderFileBad()
+    {
+        WriteDecisionFolder();
+        Directory.CreateDirectory(Path.Combine(root, "templates"));
+        File.WriteAllText(Path.Combine(root, "templates", "Dec.md"), "# {{title}}\n!d pick one\n");
+
+        Assert.Equal(0, Run("new", "Choice", "--template", "Dec").Code);
+        Assert.Equal($"# Choice\n{FolderLine}\n!d ab12-1 pick one\n", Read("Choice.md"));
+
+        File.WriteAllText(Path.Combine(root, DecisionFolder.FileName), "{broken");
+        Assert.Equal(0, Run("new", "Other", "--template", "Dec").Code);
+        Assert.Equal("# Other\n!d pick one\n", Read("Other.md"));
+        Assert.Equal("{broken", Read(DecisionFolder.FileName));
     }
 
     // 180 AC-7: context with no arguments still creates no folder.
