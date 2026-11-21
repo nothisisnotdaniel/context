@@ -396,6 +396,11 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#443](backlog/443-test-that-a-note-without-a.md) Test that a note without a modified date is left out of a date range
 - [?] [#444](backlog/444-let-the-gap-space-the-open.md) Let the gap space the (open) label in search results
 - [?] [#445](backlog/445-say-when-the-date-range-doesn.md) Say when the date range doesn't apply to a tag filter
+- [?] [#446](backlog/446-keyboard-readable-glossary-hover.md) Keyboard-readable glossary hover
+- [?] [#447](backlog/447-incremental-glossary-decorations.md) Incremental glossary decorations
+- [?] [#448](backlog/448-keep-good-glossary-entries-when-one.md) Keep good glossary entries when one is bad
+- [?] [#449](backlog/449-check-glossary-underline-contrast-in-dark.md) Check glossary underline contrast in dark mode
+- [?] [#450](backlog/450-remove-unreachable-glossary-toolong-message.md) Remove unreachable glossary TooLong message
 
 ## Dropped with the terminal UI
 
