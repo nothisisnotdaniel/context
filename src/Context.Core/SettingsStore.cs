@@ -138,20 +138,13 @@ internal static class SavedSearches
     }
 
     /// <summary>
-    /// True when the trimmed <paramref name="query"/> can be searched: a work item query <c>#&lt;n&gt;</c> (job 379,
-    /// <see cref="SearchView.IsWorkItemQuery"/>), a tag filter (<see cref="TagFilter.IsTagFilter"/>)
+    /// True when the trimmed <paramref name="query"/> can be searched: a tag filter (<see cref="TagFilter.IsTagFilter"/>)
     /// of at most <see cref="TagFilterView.MaxQueryLength"/> characters that parses, or else a full-text text of
     /// <see cref="SearchView.MinQueryLength"/> to <see cref="SearchView.MaxQueryLength"/> characters.
     /// </summary>
     public static bool IsValidQuery(string query)
     {
         string trimmed = query.Trim();
-        if (SearchView.IsWorkItemQuery(trimmed, out _))
-        {
-            // 379: #<n> is a work item search, not a tag filter.
-            return true;
-        }
-
         if (TagFilter.IsTagFilter(trimmed))
         {
             return trimmed.Length <= TagFilterView.MaxQueryLength && TagFilter.TryParse(trimmed, out _, out _);

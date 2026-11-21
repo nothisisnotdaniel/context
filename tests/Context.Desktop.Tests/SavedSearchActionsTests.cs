@@ -60,7 +60,7 @@ public sealed class SavedSearchActionsTests : IDisposable
     [InlineData("Mine", "long", "Can't save that search.")]
     [InlineData("Mine", "#a or #b", "Can't save that search.")]
     [InlineData("Mine", "not #done", "Can't save that search.")]
-    [InlineData("Mine", "#01234", "Can't save that search.")] // 379: #1234 is a work item search now; #0… is not
+    [InlineData("Mine", "#1234", "Can't save that search.")]
     [InlineData("work", "#home", "A saved search named work already exists.")]
     [InlineData("  WORK ", "#home", "A saved search named WORK already exists.")]
     public async Task Save_Refused_WritesNothing(string name, string query, string expected)

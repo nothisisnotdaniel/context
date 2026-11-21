@@ -322,8 +322,9 @@
 
     private string Heading => current.Trim().Length == 0 ? "Search" : $"Search: {DesktopText.OneLine(current.Trim())}";
 
-    // Results are shown: found or none found, for either kind of search.
-    private bool Saveable => current.Trim().Length > 0
+    // Results are shown: found or none found, for either kind of search. A work item query (job 379) can't be saved:
+    // SavedSearches.IsValidQuery refuses it, so Save search is not offered for it.
+    private bool Saveable => current.Trim().Length > 0 && !IsWorkItemQuery(current)
         && ((filter is { } f && f.Kind is TagFilterViewKind.Found or TagFilterViewKind.NoMatches)
             || (filter is null && view is { } v && v.Kind is SearchViewKind.Found or SearchViewKind.NoMatches));
 

@@ -187,7 +187,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `WorkItem == n` (work item query) or a name containing the text (`OrdinalIgnoreCase`), newest day first, then group
     order; `TimesKind` (`WorkItemTimesKind`: `NotSetUp` for null/missing/a file, `Unlistable`, `Read`) and
     `TimesSkipped` (unreadable day files). `Found` when there are note or Times hits; `IndexUnreadable` still carries the
-    Times hits. Never writes the Times folder. Tag filters get no Times hits. `SavedSearches.IsValidQuery` accepts `#<n>`.
+    Times hits. Never writes the Times folder. Tag filters get no Times hits. `SavedSearches.IsValidQuery` still refuses `#<n>`.
     **Tag filters** (job 207, `TagFilter.cs`): `TagFilter.IsTagFilter(text)` is true when the trimmed text starts with
     `#` or with `not` + whitespace + `#` (ignoring case); `TagFilter.TryParse` reads `term (and term)*`, a term an
     optional `not` and one tag written as in notes (`#tag` or `#[tag with spaces]`, letter first, so `#1234` is not a
@@ -1506,7 +1506,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     Job 379: a text whose trim is `#<n>` (`SearchPanel.IsWorkItemQuery`) goes to `State.Search(text, from, to)` before
     the `TagFilter.IsTagFilter` check (`#project` stays a tag filter). After the input, `div.search-dates` holds
     `input[type=date].search-from`/`.search-to` (`aria-label` `From`/`To`); a change searches the shown text again (not
-    the typed one), a cleared box removes that bound, a new request clears both; saved searches keep only the query. Red
+    the typed one), a cleared box removes that bound, a new request clears both; saved searches keep only the query, and `Save search` is not offered for `#<n>`. Red
     `The start date is after the end date.` for `InvalidRange`. Below the note hits (also with none, or under the red
     index error) `section.search-times` (`aria-label="Times bookings"`) lists at most `MaxRows` bookings (then `… <n>
     more`): grey `span.date` `yyyy-MM-dd`, `span.item` `#<n>` when there is one, `span.names` joined `, `, `span.total`

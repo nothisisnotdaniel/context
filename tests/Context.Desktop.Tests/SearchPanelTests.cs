@@ -1030,14 +1030,32 @@ public sealed class SearchPanelTests : IDisposable
         await cut.Find("input.search-to").ChangeAsync(new ChangeEventArgs { Value = string.Empty });
         WaitForRows(cut, ["2026-10-25 #1234 Work 1:30", "2026-10-02 #1234 Work 1:30"]);
 
+        // A work item query is not offered for saving (SavedSearches.IsValidQuery refuses it).
+        Assert.Empty(cut.FindAll("button.search-save"));
+    }
+
+    // AC-9: a text search with a date range saves only its query.
+    [Fact]
+    public async Task DateBoxes_SavedSearchKeepsOnlyQuery()
+    {
+        data.WriteNote("Plan", "budget review\n");
+        Touch("Plan", new DateTime(2026, 10, 2, 12, 0, 0, DateTimeKind.Utc));
+        WriteTimesDay("2026-10-02");
+        await data.RefreshAsync();
+
+        IRenderedComponent<SearchPanel> cut = Render("review");
+        WaitForRows(cut, ["2026-10-02 Code Review 0:30"]);
+        await cut.Find("input.search-from").ChangeAsync(new ChangeEventArgs { Value = "2026-10-01" });
         await cut.Find("input.search-to").ChangeAsync(new ChangeEventArgs { Value = "2026-10-05" });
-        WaitForRows(cut, ["2026-10-02 #1234 Work 1:30"]);
+        WaitForRows(cut, ["2026-10-02 Code Review 0:30"]);
+        Assert.Equal(["Plan"], NoteNames(cut));
+
         await cut.Find("button.search-save").ClickAsync(new MouseEventArgs());
-        await cut.Find("input.search-save-name").InputAsync(new ChangeEventArgs { Value = "Item" });
+        await cut.Find("input.search-save-name").InputAsync(new ChangeEventArgs { Value = "Reviews" });
         await cut.Find("input.search-save-name").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
-        cut.WaitForAssertion(() => Assert.Equal("Saved search Item.", cut.Find("p.search-save-result").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Saved search Reviews.", cut.Find("p.search-save-result").TextContent), Wait);
         SavedSearch saved = Assert.Single(new SettingsStore(data.Root).ReadSavedSearches());
-        Assert.Equal("#1234", saved.Query);
+        Assert.Equal("review", saved.Query);
         Assert.DoesNotContain("2026", File.ReadAllText(Path.Combine(data.Root, SettingsStore.FileName)), StringComparison.Ordinal);
     }
 
