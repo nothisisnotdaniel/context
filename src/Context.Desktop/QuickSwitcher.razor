@@ -5,11 +5,12 @@
 <div class="dialog-backdrop" @onclick="Backdrop">
     <div class="dialog switcher" role="dialog" aria-modal="true" aria-label="Open note" @onclick:stopPropagation="true">
         <input type="text" class="switcher-input" value="@typed" maxlength="400" spellcheck="false"
-               aria-label="Note name" placeholder="Type a note name" @ref="input" @oninput="Typed" @onkeydown="Key" />
+               aria-label="Note name" placeholder="Type a note name" aria-controls="@(ActiveRow() is null ? null : "switcher-list")"
+               aria-activedescendant="@ActiveRow()" @ref="input" @oninput="Typed" @onkeydown="Key" />
         @if (createName is { } create)
         {
-            <ul class="switcher-list" role="listbox" aria-label="Notes">
-                <li class="switcher-row create selected" role="option" aria-selected="true" @onclick="() => OnCreate.InvokeAsync(create)">
+            <ul class="switcher-list" id="switcher-list" role="listbox" aria-label="Notes">
+                <li class="switcher-row create selected" id="switcher-create" role="option" aria-selected="true" @onclick="() => OnCreate.InvokeAsync(create)">
                     <span class="name accent">Create "@DesktopText.OneLine(create)"</span>
                 </li>
             </ul>
@@ -20,12 +21,12 @@
         }
         else
         {
-            <ul class="switcher-list" role="listbox" aria-label="Notes">
+            <ul class="switcher-list" id="switcher-list" role="listbox" aria-label="Notes">
                 @for (int i = 0; i < rows.Count; i++)
                 {
                     string row = rows[i];
                     bool picked = i == selected;
-                    <li class="switcher-row @(picked ? "selected" : string.Empty)" role="option" aria-selected="@(picked ? "true" : "false")"
+                    <li class="switcher-row @(picked ? "selected" : string.Empty)" id="switcher-row-@i" role="option" aria-selected="@(picked ? "true" : "false")"
                         @key="row" @onclick="() => OnOpen.InvokeAsync(row)">
                         <span class="name cut" title="@DesktopText.OneLine(row)">@DesktopText.OneLine(row)</span>
                         @if (Locked.Contains(row))
@@ -41,6 +42,9 @@
 
 @code {
     private ElementReference input;
+
+    // The id of the selected row, so a screen reader announces it while focus stays in the input; null with no rows.
+    private string? ActiveRow() => createName is not null ? "switcher-create" : rows.Count == 0 ? null : $"switcher-row-{selected}";
     private string typed = string.Empty;
     private int selected;
     private IReadOnlyList<string> rows = [];

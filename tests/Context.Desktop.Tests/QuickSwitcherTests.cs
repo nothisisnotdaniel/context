@@ -147,6 +147,10 @@ public sealed class QuickSwitcherTests : IDisposable
         await Key(cut, "ArrowUp");
         await Key(cut, "ArrowUp");
         Assert.Equal(2, Selected(cut));
+        // The input names the selected row, so a screen reader announces it.
+        Assert.Equal("switcher-row-2", cut.Find(".switcher-input").GetAttribute("aria-activedescendant"));
+        Assert.Equal("true", cut.Find("#switcher-row-2").GetAttribute("aria-selected"));
+        Assert.Equal("switcher-list", cut.Find(".switcher-input").GetAttribute("aria-controls"));
         await Key(cut, "ArrowDown");
         Assert.Equal(0, Selected(cut));
         await Key(cut, "ArrowDown");
@@ -237,6 +241,8 @@ public sealed class QuickSwitcherTests : IDisposable
         IElement row = cut.Find(".switcher-row");
         Assert.Equal("Create \"Fresh idea\"", row.TextContent.Trim());
         Assert.Equal("true", row.GetAttribute("aria-selected"));
+        Assert.Equal("switcher-create", row.Id);
+        Assert.Equal("switcher-create", cut.Find(".switcher-input").GetAttribute("aria-activedescendant"));
 
         if (click)
         {
@@ -281,6 +287,8 @@ public sealed class QuickSwitcherTests : IDisposable
         IElement none = cut.Find(".switcher .none");
         Assert.Equal("No notes yet.", none.TextContent);
         Assert.Contains("grey", none.ClassList);
+        Assert.False(cut.Find(".switcher-input").HasAttribute("aria-activedescendant"));
+        Assert.False(cut.Find(".switcher-input").HasAttribute("aria-controls"));
         await Key(cut, "Enter");
 
         Assert.Single(cut.FindAll(".switcher"));
