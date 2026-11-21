@@ -309,31 +309,52 @@ public sealed class ProSettingsTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".settings-panel")), Wait);
         Assert.Single(cut.FindAll("h3#pro-heading"));
-        SettingsPanel panel = cut.FindComponent<SettingsPanel>().Instance;
-        string headingRef = ((ElementReference)typeof(SettingsPanel)
-            .GetField("proHeading", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-            .GetValue(panel)!).Id;
-        Assert.False(string.IsNullOrEmpty(headingRef));
-        cut.WaitForAssertion(() => Assert.Contains(
-            data.Bunit.JSInterop.Invocations.Where(i => i.Identifier == "Blazor._internal.domWrapper.focus"),
-            i => ((ElementReference)i.Arguments[0]!).Id == headingRef), Wait);
+        // The focus call runs in OnAfterRenderAsync, after the render bUnit re-checks on, so the waits below
+        // wait on the call count itself, and the heading reference is read only after the call was seen.
+        Assert.True(SpinWait.SpinUntil(() => FocusIds(cut).Contains(CurrentHeadingRef(cut)), Wait),
+            $"no focus call for the Pro heading after {Wait}");
+        Assert.Contains(CurrentHeadingRef(cut), FocusIds(cut));
 
         // Opening Settings the usual way moves no focus to the heading.
         await cut.Find(".settings-panel button.close").ClickAsync(new MouseEventArgs());
-        int focusCalls = data.Bunit.JSInterop.Invocations.Count(i => i.Identifier == "Blazor._internal.domWrapper.focus");
+        int focusCalls = FocusIds(cut).Count;
         await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Equal("No Pro licence activated.", cut.Find(".settings-panel p.pro-state").TextContent), Wait);
-        Assert.Equal(focusCalls, FocusCalls());
+        Assert.Equal(focusCalls, FocusIds(cut).Count);
 
-        // A second request while Settings is shown moves the focus again.
+        // A second request while Settings is shown moves the focus again, once per request.
         await cut.InvokeAsync(() => cut.Instance.OpenProSettings());
-        cut.WaitForAssertion(() => Assert.Equal(focusCalls + 1, FocusCalls()), Wait);
+        WaitForFocusCalls(cut, focusCalls + 1);
+        Assert.Equal(focusCalls + 1, FocusIds(cut).Count);
+        Assert.Equal(CurrentHeadingRef(cut), FocusIds(cut)[^1]);
         await cut.InvokeAsync(() => cut.Instance.OpenProSettings());
-        cut.WaitForAssertion(() => Assert.Equal(focusCalls + 2, FocusCalls()), Wait);
+        WaitForFocusCalls(cut, focusCalls + 2);
+        Assert.Equal(focusCalls + 2, FocusIds(cut).Count);
+        Assert.Equal(CurrentHeadingRef(cut), FocusIds(cut)[^1]);
     }
 
-    private int FocusCalls() =>
-        data.Bunit.JSInterop.Invocations.Count(i => i.Identifier == "Blazor._internal.domWrapper.focus");
+    // Waits on the focus call count, whatever renders follow (none may follow the call).
+    private void WaitForFocusCalls(IRenderedComponent<Main> cut, int count) =>
+        Assert.True(SpinWait.SpinUntil(() => FocusIds(cut).Count >= count, Wait),
+            $"focus calls stayed at {FocusIds(cut).Count}, expected {count}, after {Wait}");
+
+    // The element ids of every domWrapper.focus call, read on the renderer's dispatcher so the list is not
+    // read while the renderer adds to it.
+    private List<string> FocusIds(IRenderedComponent<Main> cut) =>
+        cut.InvokeAsync(() => data.Bunit.JSInterop.Invocations
+            .Where(i => i.Identifier == "Blazor._internal.domWrapper.focus")
+            .Select(i => ((ElementReference)i.Arguments[0]!).Id)
+            .ToList()).GetAwaiter().GetResult();
+
+    // The proHeading reference of the SettingsPanel shown now.
+    private static string CurrentHeadingRef(IRenderedComponent<Main> cut)
+    {
+        string id = cut.InvokeAsync(() => ((ElementReference)typeof(SettingsPanel)
+            .GetField("proHeading", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .GetValue(cut.FindComponent<SettingsPanel>().Instance)!).Id).GetAwaiter().GetResult();
+        Assert.False(string.IsNullOrEmpty(id));
+        return id;
+    }
 
     private (string Text, string Css, bool Removable) Arrange(string kind)
     {
