@@ -158,6 +158,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#191](backlog/191-archive-done-todos-a-month-after.md) Archive done todos a month after they are done → 361-archive-done-todos
 - [x] [#77](backlog/077-quick-switcher.md) Quick switcher → 364-quick-switcher
 - [x] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39) → 367-pro-licence-context
+- [h] [#438](backlog/438-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on macOS and Windows
 - [ ] [#59](backlog/059-ask-context.md) Ask Context
 - [stop] Auto stops here
 - [ ] [#64](backlog/064-search-across-context-and-times.md) Search across Context and Times
