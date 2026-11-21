@@ -368,6 +368,9 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#413](backlog/413-tell-person-rows-apart-from-same.md) Tell person rows apart from same-named notes in search
 - [?] [#414](backlog/414-size-and-file-checks-in-the.md) Size and file checks in the dependency list test
 - [?] [#415](backlog/415-name-the-current-theme-when-a.md) Name the current theme when a theme save fails
+- [?] [#416](backlog/416-keep-a-history-version-when-the.md) Keep a history version when the app numbers decisions
+- [?] [#417](backlog/417-reserve-hand-typed-decision-numbers-above.md) Reserve hand-typed decision numbers above the counter
+- [?] [#418](backlog/418-number-d-markers-written-by-the.md) Number #!d markers written by the CLI and by merges
 
 ## Dropped with the terminal UI
 
