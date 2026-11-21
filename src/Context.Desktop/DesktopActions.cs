@@ -1184,6 +1184,27 @@ internal sealed class DesktopActions
             : Run(() => BookMeetingNow(appointment, noteName), refresh: false);
 
     /// <summary>
+    /// Books <paramref name="action"/> in Times from the sidebar's Times panel (job 383) at the injected local clock's
+    /// time (<c>H:mm</c>): <see cref="TimesBooking.Arguments"/> through the <see cref="ITimesRunner"/>, never a shell; a
+    /// missing runner or one that throws counts as <see cref="TimesBooking.NotFoundText"/>. A checkpoint takes the
+    /// quicklist <paramref name="workItemPosition"/> (1-based; the caller keeps it within the quicklist it showed,
+    /// Times checks the number itself) and <paramref name="name"/>; a name that is blank after
+    /// <see cref="TimesBooking.CleanName"/> is Refused/<see cref="ActionReason.Invalid"/> with
+    /// <see cref="TimesBooking.NameBlankText"/> and nothing runs. Done with <see cref="TimesBooking.BookedText"/>, else
+    /// Failed with <see cref="TimesBooking.Outcome"/>'s text. Nothing in the data folder or Times' folder is written
+    /// here; Times writes its own folder.
+    /// </summary>
+    public Task<ActionResult> BookTimes(TimesAction action, int? workItemPosition = null, string? name = null)
+    {
+        if (action == TimesAction.Checkpoint && TimesBooking.CleanName(name).Length == 0)
+        {
+            return Task.FromResult(Refused(ActionReason.Invalid, TimesBooking.NameBlankText));
+        }
+
+        return Run(() => BookTimesNow(action, workItemPosition, name), refresh: false);
+    }
+
+    /// <summary>
     /// Makes sure today's daily note (<see cref="DailyNoteName"/>, the day from the injected local clock) exists
     /// through <see cref="DailyNote.Ensure"/>: a missing one is created with the day's appointments (calendar files
     /// and the feed) and the due todos, then the state is refreshed. An existing plain or sensitive note is left as
@@ -3211,6 +3232,27 @@ internal sealed class DesktopActions
             : timesRunner.Run(arguments).GetAwaiter().GetResult();
         return MeetingNote.BookingOutcome(appointment, result, out string shown)
             ? new ActionResult(ActionKind.Done, ActionReason.None, shown)
+            : Failed(ActionReason.None, shown);
+    }
+
+    private ActionResult BookTimesNow(TimesAction action, int? workItemPosition, string? name)
+    {
+        TimeOnly now = TimeOnly.FromDateTime(localNow());
+        IReadOnlyList<string> arguments = TimesBooking.Arguments(action, now, workItemPosition, name);
+        TimesRunResult result;
+        try
+        {
+            result = timesRunner is null
+                ? TimesRunResult.NotFound()
+                : timesRunner.Run(arguments).GetAwaiter().GetResult();
+        }
+        catch (Exception)
+        {
+            result = TimesRunResult.NotFound();
+        }
+
+        return TimesBooking.Outcome(result, out string shown)
+            ? new ActionResult(ActionKind.Done, ActionReason.None, TimesBooking.BookedText(action, now, name))
             : Failed(ActionReason.None, shown);
     }
 

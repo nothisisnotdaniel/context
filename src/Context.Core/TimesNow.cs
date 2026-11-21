@@ -15,6 +15,22 @@ internal enum TimesNowKind
     Booked,
 }
 
+/// <summary>Where today stands in Times (job 383), read from <see cref="TimesDay"/> only.</summary>
+internal enum TimesNowState
+{
+    /// <summary>No arrival today (also no Times folder, no day file, an absence day or an unreadable file).</summary>
+    Out,
+
+    /// <summary>Arrived (or back from a break) and not left.</summary>
+    Working,
+
+    /// <summary>Arrived, not left and not working: a break is open.</summary>
+    OnBreak,
+
+    /// <summary>Arrived and left.</summary>
+    Left,
+}
+
 /// <summary>The open checkpoint of today: its work item (or <c>null</c>) and its raw name.</summary>
 internal sealed record TimesCheckpoint
 {
@@ -39,9 +55,16 @@ internal sealed record TimesCheckpoint
 /// </summary>
 internal sealed record TimesNow
 {
-    public TimesNow(TimesNowKind kind, TimeOnly? arrival, TimeOnly? leaving, TimeSpan left, TimesCheckpoint? checkpoint)
+    public TimesNow(
+        TimesNowKind kind,
+        TimeOnly? arrival,
+        TimeOnly? leaving,
+        TimeSpan left,
+        TimesCheckpoint? checkpoint,
+        TimesNowState state = TimesNowState.Out)
     {
         Kind = kind;
+        State = state;
         Arrival = arrival;
         Leaving = leaving;
         Left = left;
@@ -49,6 +72,9 @@ internal sealed record TimesNow
     }
 
     public TimesNowKind Kind { get; }
+
+    /// <summary>Where today stands (job 383): <see cref="TimesNowState.Out"/> unless <see cref="TimesNowKind.Booked"/>.</summary>
+    public TimesNowState State { get; }
 
     /// <summary>The first arrival; set only for <see cref="TimesNowKind.Booked"/>.</summary>
     public TimeOnly? Arrival { get; }
@@ -86,7 +112,11 @@ internal sealed record TimesNow
 
             TimeSpan target = TimeSpan.FromMinutes(TimesBalance.ReadTarget(folder));
             TimeOnly? leaving = day.HasLeft ? day.Leaving : null;
-            return new TimesNow(TimesNowKind.Booked, arrival, leaving, target - day.WorkTimeAt(now), OpenCheckpoint(day));
+            TimesNowState state = day.HasLeft ? TimesNowState.Left
+                : day.IsWorking ? TimesNowState.Working
+                : TimesNowState.OnBreak;
+            return new TimesNow(
+                TimesNowKind.Booked, arrival, leaving, target - day.WorkTimeAt(now), OpenCheckpoint(day), state);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
             or NotSupportedException or System.Security.SecurityException or InvalidOperationException)

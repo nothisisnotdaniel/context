@@ -76,19 +76,19 @@ internal static class MeetingNote
     public const string NoCurrentText = "There is no current or next appointment today.";
 
     /// <summary>The longest name a Times booking gets (job 381).</summary>
-    public const int MaxBookingName = 200;
+    public const int MaxBookingName = TimesBooking.MaxName;
 
     /// <summary>The longest Times output line shown after a refused booking (job 381).</summary>
-    public const int MaxRefusalText = 200;
+    public const int MaxRefusalText = TimesBooking.MaxRefusalText;
 
     /// <summary>The <c>--book</c> error for an all-day appointment (job 381); no run is started.</summary>
     public const string AllDayBookingText = "All-day appointments can't be booked in Times.";
 
     /// <summary>The booking error when no <c>tm</c> was found or started (job 381).</summary>
-    public const string TimesNotFoundText = "Times isn't installed, so nothing was booked.";
+    public const string TimesNotFoundText = TimesBooking.NotFoundText;
 
     /// <summary>The booking error when <c>tm</c> was stopped after its timeout (job 381).</summary>
-    public const string TimesTimedOutText = "Times didn't answer in time.";
+    public const string TimesTimedOutText = TimesBooking.TimedOutText;
 
     private const string DateFormat = "yyyy-MM-dd";
 
@@ -245,9 +245,7 @@ internal static class MeetingNote
     /// </summary>
     public static string BookingName(Appointment appointment)
     {
-        string name = TagParser.CollapseWhitespace(WorkItemParser.RemoveReferences(OneLine(appointment.Title)));
-        name = name.TrimStart('#', '-', ' ');
-        name = Cut(name, MaxBookingName).TrimEnd();
+        string name = TimesBooking.CleanName(WorkItemParser.RemoveReferences(OneLine(appointment.Title)));
         return name.Length == 0 ? FallbackTitle : name;
     }
 
@@ -295,41 +293,13 @@ internal static class MeetingNote
     /// </summary>
     public static bool BookingOutcome(Appointment appointment, TimesRunResult result, out string text)
     {
-        switch (result.Kind)
-        {
-            case TimesRunKind.NotFound:
-                text = TimesNotFoundText;
-                return false;
-            case TimesRunKind.TimedOut:
-                text = TimesTimedOutText;
-                return false;
-        }
-
-        if (result.ExitCode == 0)
+        if (TimesBooking.Outcome(result, out text))
         {
             text = BookedText(appointment);
             return true;
         }
 
-        string? line = FirstLine(result.Stderr) ?? FirstLine(result.Stdout);
-        text = "Times refused the booking: "
-            + (line ?? "exit code " + result.ExitCode.ToString(CultureInfo.InvariantCulture));
         return false;
-    }
-
-    // The first non-empty line of output, cleaned, trimmed and cut, or null.
-    private static string? FirstLine(string output)
-    {
-        foreach (string line in SafeText.Clean(output).Split('\n'))
-        {
-            string trimmed = TagParser.CollapseWhitespace(line);
-            if (trimmed.Length > 0)
-            {
-                return Cut(trimmed, MaxRefusalText).TrimEnd();
-            }
-        }
-
-        return null;
     }
 
     // The running timed appointment, else the next timed one today, else null with NoCurrentText.

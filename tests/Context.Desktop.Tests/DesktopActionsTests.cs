@@ -284,4 +284,79 @@ public sealed class DesktopActionsTests : IDisposable
         Assert.Equal((ActionKind.Refused, "This appointment can't hold todos."), (noUid.Kind, noUid.Text));
         Assert.Equal(before, File.ReadAllBytes(path));
     }
+    // 383 AC-4, AC-7, AC-10: BookTimes runs one tm call at the actions' local clock, says what was booked and writes
+    // nothing into the data folder or Times' folder.
+    [Theory]
+    [InlineData("Arrive", "arrive", "Booked arrival at 7:04 in Times.")]
+    [InlineData("Break", "break", "Booked break at 7:04 in Times.")]
+    [InlineData("BreakEnd", "breakend", "Booked break end at 7:04 in Times.")]
+    [InlineData("Leave", "leave", "Booked leaving at 7:04 in Times.")]
+    public async Task BookTimes_RunsOneCall_WritesNothing(string actionName, string command, string text)
+    {
+        TimesAction action = Enum.Parse<TimesAction>(actionName);
+        data.LocalNow = new DateTime(2026, 10, 29, 7, 4, 59, DateTimeKind.Local);
+        Directory.CreateDirectory(data.TimesFolder);
+        File.WriteAllText(Path.Combine(data.TimesFolder, "2026-10-29.json"), """{"entries":[]}""");
+        await data.RefreshAsync();
+        SortedDictionary<string, string> times = FileSnapshot.Take(data.TimesFolder);
+        SortedDictionary<string, string> root = FileSnapshot.Take(data.Root);
+
+        ActionResult result = await data.Actions!.BookTimes(action);
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Equal(text, result.Text);
+        Assert.Equal([[command, "7:04"]], data.TimesRunner.Calls);
+        Assert.Equal(times, FileSnapshot.Take(data.TimesFolder));
+        Assert.Equal(root, FileSnapshot.Take(data.Root));
+    }
+
+    // 383 AC-6: a checkpoint with a quicklist position; a name like -x or #3 y stays one cleaned argument.
+    [Fact]
+    public async Task BookTimes_Checkpoint_PositionAndCleanName()
+    {
+        data.LocalNow = new DateTime(2026, 10, 29, 16, 0, 0, DateTimeKind.Local);
+        await data.RefreshAsync();
+
+        ActionResult first = await data.Actions!.BookTimes(TimesAction.Checkpoint, 2, " -x\nnext ");
+        ActionResult second = await data.Actions.BookTimes(TimesAction.Checkpoint, null, "#3 y");
+
+        Assert.Equal("Booked checkpoint x next at 16:00 in Times.", first.Text);
+        Assert.Equal("Booked checkpoint 3 y at 16:00 in Times.", second.Text);
+        Assert.Equal([["checkpoint", "16:00", "#2", "x next"], ["checkpoint", "16:00", "3 y"]], data.TimesRunner.Calls);
+    }
+
+    // 383 AC-6: a name that is blank after the clean-up is refused and runs nothing.
+    [Theory]
+    [InlineData("")]
+    [InlineData("  ")]
+    [InlineData(" # - ")]
+    public async Task BookTimes_BlankName_RefusedRunsNothing(string name)
+    {
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.BookTimes(TimesAction.Checkpoint, 1, name);
+
+        Assert.Equal(ActionKind.Refused, result.Kind);
+        Assert.Equal(ActionReason.Invalid, result.Reason);
+        Assert.Equal("Name the checkpoint.", result.Text);
+        Assert.Empty(data.TimesRunner.Calls);
+    }
+
+    // 383 AC-8: failures give job 381's texts; a runner that throws is the not-found text.
+    [Fact]
+    public async Task BookTimes_Failures()
+    {
+        await data.RefreshAsync();
+
+        data.TimesRunner.Result = TimesRunResult.TimedOut();
+        Assert.Equal(MeetingNote.TimesTimedOutText, (await data.Actions!.BookTimes(TimesAction.Arrive)).Text);
+        data.TimesRunner.Result = new TimesRunResult(TimesRunKind.Done, 1, string.Empty, "\u001b[1mAlready\u001b[0m arrived\nmore");
+        ActionResult refused = await data.Actions.BookTimes(TimesAction.Arrive);
+        Assert.Equal(ActionKind.Failed, refused.Kind);
+        Assert.Equal("Times refused the booking: \ufffd[1mAlready\ufffd[0m arrived", refused.Text);
+        data.TimesRunner.Throws = new InvalidOperationException("boom");
+        ActionResult thrown = await data.Actions.BookTimes(TimesAction.Leave);
+        Assert.Equal(ActionKind.Failed, thrown.Kind);
+        Assert.Equal(MeetingNote.TimesNotFoundText, thrown.Text);
+    }
 }
