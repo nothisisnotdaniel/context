@@ -159,6 +159,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#77](backlog/077-quick-switcher.md) Quick switcher → 364-quick-switcher
 - [x] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39) → 367-pro-licence-context
 - [ ] [#59](backlog/059-ask-context.md) Ask Context
+- [stop] Auto stops here
 - [ ] [#64](backlog/064-search-across-context-and-times.md) Search across Context and Times
 - [ ] [#83](backlog/083-glossary.md) Glossary
 - [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4)
