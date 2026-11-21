@@ -390,6 +390,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#435](backlog/435-clear-the-typed-licence-key-after.md) Clear the typed licence key after a refused or failed activation
 - [?] [#436](backlog/436-don-t-follow-a-suitepro-symlink.md) Don't follow a SuitePro symlink when tightening the activation folder
 - [?] [#437](backlog/437-strict-utf-8-decoding-of-the.md) Strict UTF-8 decoding of the Keychain licence entry
+- [?] [#439](backlog/439-shared-async-wait-helper-for-desktop.md) Shared async wait helper for desktop tests
 
 ## Dropped with the terminal UI
 
