@@ -160,7 +160,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39) → 367-pro-licence-context
 - [h] [#438](backlog/438-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on macOS and Windows
 - [?] [#59](backlog/059-ask-context.md) Ask Context
-- [ ] [#64](backlog/064-search-across-context-and-times.md) Search across Context and Times
+- [x] [#64](backlog/064-search-across-context-and-times.md) Search across Context and Times → 379-search-context-times
 - [ ] [#83](backlog/083-glossary.md) Glossary
 - [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4)
 - [x] [#234](backlog/234-release-and-ci-workflow-hardening.md) Release and CI workflow hardening → 272-release-ci-hardening
