@@ -80,7 +80,7 @@ public sealed class RenameLinkActionsTests : IDisposable
         Assert.Equal("Project", result.Name);
         Assert.Equal(builds + 1, data.State.Builds);
         Assert.False(File.Exists(Path.Combine(data.Root, "Plan.md")));
-        Assert.Equal("# Plan\nsee [[Project#Next steps]]\n", Read("Project.md"));
+        Assert.Equal("# Project\nsee [[Project#Next steps]]\n", Read("Project.md"));
         Assert.Equal("see [[Project]] and [[Other]]\n", Read("A.md"));
         Assert.Equal("\uFEFFsee [[ Project/Child | the child ]]\r\nand [[#Intro]]\r\n", Read("B.md"));
         Assert.Equal("see [[Plan]] and [[Other]]\n", Read(".history/A/" + Id + ".md"));
@@ -90,6 +90,24 @@ public sealed class RenameLinkActionsTests : IDisposable
         Assert.Equal(other, Files()["Other.md"]);
         Assert.False(Directory.Exists(Path.Combine(data.Root, ".history", "C")));
         Assert.Equal("child\n", Read("Project/Child.md"));
+    }
+
+    // 353 AC-7: the renamed note's title line and its self-link are rewritten in one save (one version); the title
+    // line is no link update, so the count stays 3.
+    [Fact]
+    public async Task RenameNote_SelfLinkAndTitle_OneSaveOneVersion()
+    {
+        WriteLinkedNotes();
+        await data.RefreshAsync();
+        Assert.Equal(3, await data.State!.LinkUpdateCount("Plan", "Project"));
+
+        ActionResult result = await data.Actions!.RenameNote("Plan", "Project", new Confirmation());
+
+        Assert.Equal("Renamed to Project. Updated links in 3 notes.", result.Text);
+        Assert.Equal(Encoding.UTF8.GetBytes("# Project\nsee [[Project#Next steps]]\n"), File.ReadAllBytes(Path.Combine(data.Root, "Project.md")));
+        HistoryView history = await data.State.History("Project");
+        NoteVersion version = Assert.Single(history.Versions);
+        Assert.Equal("# Plan\nsee [[Plan#Next steps]]\n", Read(".history/Project/" + version.Id + ".md"));
     }
 
     // AC-7: one note changed says "1 note"; no note to change renames right away without a confirmation.

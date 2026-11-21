@@ -119,7 +119,8 @@ public sealed class DecisionWritePathsTests : IDisposable
 
         Assert.Equal(ActionKind.Done, renamed.Kind);
         Assert.Equal($"{Line}\nSee [[Project]].\n\n!d ab12-1 linked decision\n", ReadNote("Notes"));
-        Assert.Equal($"# Plan\n{Line}\n\n!d ab12-5 kept\n", ReadNote("Project"));
+        // 353: the renamed note's title line follows the new name; its numbers stay.
+        Assert.Equal($"# Project\n{Line}\n\n!d ab12-5 kept\n", ReadNote("Project"));
     }
 
     // Merge: the source's numbers pass to the kept note (its tokens stay) and a bare marker gets a number.
