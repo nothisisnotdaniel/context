@@ -408,6 +408,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#455](backlog/455-strip-leading-unicode-dashes-and-non.md) Strip leading Unicode dashes and non-breaking spaces from Times booking names
 - [?] [#456](backlog/456-check-the-times-panel-s-booking.md) Check the Times panel's booking fields in dark mode
 - [?] [#457](backlog/457-clear-a-stale-times-result-line.md) Clear a stale Times result line when the booking form is cancelled
+- [?] [#458](backlog/458-readable-excalidraw-drawings-in-dark-mode.md) Readable Excalidraw drawings in dark mode
 
 ## Dropped with the terminal UI
 
