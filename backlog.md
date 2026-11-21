@@ -381,6 +381,9 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#428](backlog/428-keep-unrelated-status-messages-when-a.md) Keep unrelated status messages when a web link opens
 - [?] [#429](backlog/429-keep-reference-style-links-byte-for.md) Keep reference-style links byte for byte on save
 - [?] [#430](backlog/430-warn-when-the-todo-archive-nears.md) Warn when the todo archive nears its 20 MB cap
+- [?] [#431](backlog/431-scroll-the-selected-quick-switcher-row.md) Scroll the selected quick switcher row into view
+- [?] [#432](backlog/432-share-the-quick-switcher-and-palette.md) Share the quick switcher and palette CSS
+- [?] [#433](backlog/433-check-focus-after-a-quick-switcher.md) Check focus after a quick switcher pick
 
 ## Dropped with the terminal UI
 
