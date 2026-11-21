@@ -69,6 +69,8 @@ function imageView(editor) {
       button.type = "button";
       button.className = "drawing-open";
       button.textContent = "Open in Excalidraw";
+      // A name per drawing, so several drawings in one note can be told apart by a screen reader.
+      button.setAttribute("aria-label", alt ? "Open " + alt + " in Excalidraw" : "Open in Excalidraw");
       button.contentEditable = "false";
       button.addEventListener("click", event => {
         event.preventDefault();

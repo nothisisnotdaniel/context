@@ -1027,8 +1027,9 @@ internal sealed class NoteAttachments
             return reader.TokenType == System.Text.Json.JsonTokenType.EndObject && reader.CurrentDepth == 0
                 && !reader.Read() && found;
         }
-        catch (System.Text.Json.JsonException)
+        catch (Exception)
         {
+            // Not a drawing, whatever the reader refused (a JsonException, or an InvalidOperationException from Skip).
             return false;
         }
     }

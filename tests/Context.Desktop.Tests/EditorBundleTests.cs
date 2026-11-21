@@ -334,6 +334,7 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
                 tagName: tag.toUpperCase(), className: "", textContent: "", children: [], listeners: [],
                 appendChild(child) { this.children.push(child); return child; },
                 addEventListener(type, listener) { this.listeners.push({ type, listener }); },
+                setAttribute(name, value) { this.attrs = { ...(this.attrs || {}), [name]: String(value) }; },
               });
               globalThis.document = { createElement: element };
               const calls = [];
@@ -349,7 +350,8 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
                 const view = ContextEditor.imageViewTest(editor)({ attrs: { src: {{Js(src)}}, alt: "Sketch" } });
                 const dom = view.dom;
                 const describe = e => ({ tag: e.tagName, cls: e.className, text: e.textContent, alt: e.alt ?? null,
-                  src: e.src ?? null, type: e.type ?? null, listeners: e.listeners.map(l => l.type) });
+                  src: e.src ?? null, type: e.type ?? null, label: (e.attrs || {})["aria-label"] ?? null,
+                  listeners: e.listeners.map(l => l.type) });
                 const result = { dom: describe(dom), children: dom.children.map(describe) };
                 const button = dom.children.find(c => c.className === "drawing-open");
                 if (button) {
@@ -400,6 +402,7 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
         Assert.Equal(("BUTTON", "drawing-open", "Open in Excalidraw", "button"),
             (children[1].GetProperty("tag").GetString(), children[1].GetProperty("cls").GetString(),
                 children[1].GetProperty("text").GetString(), children[1].GetProperty("type").GetString()));
+        Assert.Equal("Open Sketch in Excalidraw", children[1].GetProperty("label").GetString());
         Assert.Equal(1, root.GetProperty("prevented").GetInt32());
         Assert.Equal(1, root.GetProperty("stopped").GetInt32());
         Assert.True(root.GetProperty("stopsButton").GetBoolean());

@@ -115,6 +115,15 @@ public class ExcalidrawSvgTests
         Assert.Equal(("135", "110"), ((string)root.Attribute("width")!, (string)root.Attribute("height")!));
     }
 
+    // AC-1: an arrowhead is part of the bounds, so its corners stay inside the margin.
+    [Fact]
+    public void Render_ViewBox_HoldsTheArrowhead()
+    {
+        XElement root = Parse(Render(Doc("{\"type\":\"arrow\",\"x\":0,\"y\":0,\"points\":[[0,0],[100,0]]}")));
+
+        Assert.Equal("-10 -15.207 120 30.413", (string)root.Attribute("viewBox")!);
+    }
+
     // AC-1: a rotated element is drawn with a rotate transform about its centre.
     [Fact]
     public void Render_Angle_RotatesAboutTheCentre()
@@ -298,6 +307,17 @@ public class ExcalidrawSvgTests
 
         Assert.Null(Render(Doc(Enumerable.Repeat(text, ExcalidrawSvg.MaxElements).ToArray())));
         Assert.NotNull(Render(Doc(Enumerable.Repeat(text, 100).ToArray())));
+    }
+
+    // AC-3: one text of many line breaks is refused once its own markup passes the cap.
+    [Fact]
+    public void Render_TextOfLineBreaks_OverCap_Null()
+    {
+        string lines = string.Concat(Enumerable.Repeat("\\r\\n", 200_000));
+
+        Assert.Null(Render(Doc("{\"type\":\"text\",\"text\":\"" + lines + "\"}")));
+        XElement root = Parse(Render(Doc("{\"type\":\"text\",\"text\":\"a\\r\\nb\\n\\nc\\r\"}")));
+        Assert.Equal(["a", "b", "", "c"], root.Descendants(Svg + "tspan").Select(t => t.Value));
     }
 
     // AC-3: random and truncated bytes never throw.

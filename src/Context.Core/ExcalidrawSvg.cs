@@ -214,8 +214,8 @@ internal static class ExcalidrawSvg
                     return;
                 }
 
-                box = Box.Around(points);
                 shape = Linear(type, points, stroke, strokeWidth);
+                box = Box.Around(type == "arrow" && points.Count >= 2 ? [.. points, .. ArrowHead(points)] : points);
                 break;
         }
 
@@ -284,18 +284,28 @@ internal static class ExcalidrawSvg
         if (type == "arrow" && points.Count >= 2)
         {
             (double ex, double ey) = points[^1];
-            (double sx, double sy) = points[^2];
-            double direction = Math.Atan2(ey - sy, ex - sx);
-            double leftX = ex - (ArrowHeadLength * Math.Cos(direction - ArrowHeadHalfAngle));
-            double leftY = ey - (ArrowHeadLength * Math.Sin(direction - ArrowHeadHalfAngle));
-            double rightX = ex - (ArrowHeadLength * Math.Cos(direction + ArrowHeadHalfAngle));
-            double rightY = ey - (ArrowHeadLength * Math.Sin(direction + ArrowHeadHalfAngle));
+            (double X, double Y)[] head = ArrowHead(points);
+            (double leftX, double leftY) = head[0];
+            (double rightX, double rightY) = head[1];
             line.Append("<polygon points=\"").Append(Pair(ex, ey)).Append(' ').Append(Pair(leftX, leftY)).Append(' ')
                 .Append(Pair(rightX, rightY)).Append("\" fill=\"").Append(stroke).Append("\" stroke=\"").Append(stroke)
                 .Append("\" stroke-width=\"").Append(Num(strokeWidth)).Append("\" stroke-linejoin=\"round\"/>");
         }
 
         return line.ToString();
+    }
+
+    // The two back corners of the arrowhead at the last point, pointing along the last segment.
+    private static (double X, double Y)[] ArrowHead(List<(double X, double Y)> points)
+    {
+        (double ex, double ey) = points[^1];
+        (double sx, double sy) = points[^2];
+        double direction = Math.Atan2(ey - sy, ex - sx);
+        return
+        [
+            (ex - (ArrowHeadLength * Math.Cos(direction - ArrowHeadHalfAngle)), ey - (ArrowHeadLength * Math.Sin(direction - ArrowHeadHalfAngle))),
+            (ex - (ArrowHeadLength * Math.Cos(direction + ArrowHeadHalfAngle)), ey - (ArrowHeadLength * Math.Sin(direction + ArrowHeadHalfAngle))),
+        ];
     }
 
     private static bool TryText(
@@ -331,17 +341,33 @@ internal static class ExcalidrawSvg
             return false;
         }
 
-        string[] lines = raw.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
         StringBuilder text = new StringBuilder();
         text.Append("<text x=\"").Append(Num(anchorX)).Append("\" y=\"").Append(Num(box.Y))
             .Append("\" font-family=\"sans-serif\" font-size=\"").Append(Num(fontSize)).Append("\" fill=\"").Append(stroke)
             .Append("\" text-anchor=\"").Append(anchor).Append("\">");
-        for (int i = 0; i < lines.Length; i++)
+        // One tspan per line (a \r before the \n dropped), walked in place so a text of millions of line breaks
+        // builds no line array, and stopped as soon as the output cap is passed.
+        int start = 0;
+        for (int i = 0; ; i++)
         {
+            int end = raw.IndexOf('\n', start);
+            int stop = end < 0 ? raw.Length : end;
+            int length = stop > start && raw[stop - 1] == '\r' ? stop - start - 1 : stop - start;
             double lineY = box.Y + fontSize + (i * fontSize * LineHeight);
             text.Append("<tspan x=\"").Append(Num(anchorX)).Append("\" y=\"").Append(Num(Clamp(lineY))).Append("\">");
-            AppendEscaped(text, lines[i]);
+            AppendEscaped(text, raw.AsSpan(start, length));
             text.Append("</tspan>");
+            if (text.Length > MaxSvgChars)
+            {
+                throw new OutputTooLargeException();
+            }
+
+            if (end < 0)
+            {
+                break;
+            }
+
+            start = end + 1;
         }
 
         text.Append("</text>");
@@ -410,7 +436,7 @@ internal static class ExcalidrawSvg
     }
 
     // XML-escapes text content and leaves out every character XML 1.0 can't hold (controls but tab, lone surrogates).
-    private static void AppendEscaped(StringBuilder text, string value)
+    private static void AppendEscaped(StringBuilder text, ReadOnlySpan<char> value)
     {
         for (int i = 0; i < value.Length; i++)
         {
@@ -437,7 +463,7 @@ internal static class ExcalidrawSvg
                     text.Append(c);
                     break;
                 default:
-                    if (c >= 0x20 && !char.IsSurrogate(c) && c is not ('￾' or '￿'))
+                    if (c >= 0x20 && !char.IsSurrogate(c) && c is not ('\uFFFE' or '\uFFFF'))
                     {
                         text.Append(c);
                     }
@@ -454,6 +480,11 @@ internal static class ExcalidrawSvg
     {
         double rounded = Math.Round(value, 3);
         return (rounded == 0 ? 0 : rounded).ToString("0.###", CultureInfo.InvariantCulture);
+    }
+
+    // Thrown while building an element whose markup alone passes MaxSvgChars; Render turns it into null.
+    private sealed class OutputTooLargeException : Exception
+    {
     }
 
     private readonly record struct Box(double X, double Y, double Width, double Height)
