@@ -1130,6 +1130,22 @@ internal sealed class DesktopActions
     /// </summary>
     public Task<ActionResult> RemoveRepository(string folder) => Run(() => RemoveRepositoryNow(folder));
 
+    /// <summary>
+    /// Activates Suite Pro (job 367): the key is trimmed, verified against this build's table and revocations, written
+    /// to the licence store and then to <c>activation.json</c>. Refused with nothing stored: empty
+    /// (<see cref="DesktopText.ProEmptyKeyText"/>), a key that does not verify (<see cref="DesktopText.ProKeyRefusedText"/>
+    /// with the fixed reason), an OS without a store and the store's own refusal (the shared <c>dotnet</c> host). A
+    /// failed file write removes the stored key again. The key never appears in a result. No refresh: Settings reloads
+    /// its own line.
+    /// </summary>
+    public Task<ActionResult> ActivatePro(string key) => Run(() => ActivateProNow(key), refresh: false);
+
+    /// <summary>
+    /// Removes the Suite Pro licence (job 367): the stored key, then <c>activation.json</c>. Needs a
+    /// <see cref="Confirmation"/>. No refresh.
+    /// </summary>
+    public Task<ActionResult> RemovePro(Confirmation? confirmation) => Run(() => RemoveProNow(confirmation), refresh: false);
+
     /// <summary>The name of today's daily note (<see cref="DailyNote.NameFor"/>), by the injected local clock.</summary>
     public string DailyNoteName() => DailyNoteName(DateOnly.FromDateTime(localNow()));
 
@@ -3771,6 +3787,112 @@ internal sealed class DesktopActions
         {
             return Failed(ActionReason.WriteFailed, SettingsNotSavedText);
         }
+    }
+
+    private ActionResult ActivateProNow(string key)
+    {
+        string trimmed = key.Trim();
+        if (trimmed.Length == 0)
+        {
+            return Refused(ActionReason.Invalid, DesktopText.ProEmptyKeyText);
+        }
+
+        Pro pro = state.Pro;
+        LicenceCheck check = pro.Check(trimmed);
+        if (check.Licence is not { } licence)
+        {
+            return Refused(ActionReason.Invalid, DesktopText.ProKeyRefusedText(check.Problem ?? LicenceKey.Malformed));
+        }
+
+        ILicenceStore store = pro.Store;
+        if (!store.IsSupported)
+        {
+            return Refused(ActionReason.NoKeys, DesktopText.ProUnsupportedText);
+        }
+
+        if (store.WriteRefusal is { } refusal)
+        {
+            return Refused(ActionReason.NoKeys, refusal);
+        }
+
+        try
+        {
+            store.Write(trimmed);
+        }
+        catch (Exception)
+        {
+            pro.Forget();
+            return Failed(ActionReason.WriteFailed, DesktopText.ProStoreFailedText);
+        }
+
+        pro.Forget();
+        try
+        {
+            state.ActivationFile?.Write(licence);
+        }
+        catch (Exception)
+        {
+            try
+            {
+                store.Delete();
+            }
+            catch (Exception)
+            {
+                return Failed(ActionReason.WriteFailed, DesktopText.ProFileFailedKeyLeftText);
+            }
+            finally
+            {
+                pro.Forget();
+            }
+
+            return Failed(ActionReason.WriteFailed, DesktopText.ProFileFailedText);
+        }
+
+        return new ActionResult(ActionKind.Done, ActionReason.None, DesktopText.ProActivatedText(licence.Name, licence.Until));
+    }
+
+    private ActionResult RemoveProNow(Confirmation? confirmation)
+    {
+        if (confirmation is null)
+        {
+            return Refused(ActionReason.NotConfirmed, NotConfirmedText);
+        }
+
+        Pro pro = state.Pro;
+        ILicenceStore store = pro.Store;
+        if (!store.IsSupported)
+        {
+            return Refused(ActionReason.NoKeys, DesktopText.ProUnsupportedText);
+        }
+
+        bool removed;
+        try
+        {
+            removed = store.Delete();
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, DesktopText.ProRemoveFailedText);
+        }
+        finally
+        {
+            pro.Forget();
+        }
+
+        try
+        {
+            state.ActivationFile?.Delete();
+        }
+        catch (Exception)
+        {
+            return removed
+                ? Failed(ActionReason.WriteFailed, DesktopText.ProFileLeftText)
+                : Failed(ActionReason.WriteFailed, DesktopText.ProRemoveFailedText);
+        }
+
+        return removed
+            ? new ActionResult(ActionKind.Done, ActionReason.None, DesktopText.ProRemovedText)
+            : new ActionResult(ActionKind.Done, ActionReason.Unchanged, DesktopText.ProNothingToRemoveText);
     }
 
     private ActionResult RemoveRepositoryNow(string folder)

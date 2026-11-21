@@ -6,7 +6,10 @@
    DesktopState.ScreenshotFolderSetting) and the key that opens sensitive notes. The link
    is a bearer secret: it is typed into a password field that has no value, kept in one field of this component
    until it is saved or the panel closes, handed only to DesktopActions and never rendered back; what is shown is
-   the masked link from DesktopState.CalendarLinkSetting. Every section reloads whenever the state changes. *@
+   the masked link from DesktopState.CalendarLinkSetting. Every section reloads whenever the state changes.
+   Suite Pro (job 367) comes last: DesktopState.ProStatus is loaded on its own (a Keychain prompt may hold it), the key
+   is typed into a password field with no value that is built anew after an activation, and ProFocusRequest moves the
+   focus to its heading (Main's OpenProSettings). *@
 
 <section class="page settings-panel" aria-label="Settings">
     <div class="panel-bar">
@@ -220,6 +223,31 @@
         <ConfirmDialog Question="@RemoveQuestion" ConfirmLabel="Remove" Busy="busy"
                        OnConfirm="RemoveConfirmed" OnCancel="CancelDialog" />
     }
+    <h3 id="pro-heading" tabindex="-1" @ref="proHeading">@DesktopText.ProHeading</h3>
+    @if (pro is null)
+    {
+        <p class="pro-state grey" role="status">Loading…</p>
+    }
+    else
+    {
+        <p class="pro-state @ProStateClass(pro)" role="status">@ProStateText(pro)</p>
+    }
+    <div class="pro-entry">
+        <input type="password" class="pro-key" @key="proFieldKey" maxlength="@LicenceKey.MaxLength"
+               autocomplete="off" spellcheck="false" disabled="@busy" aria-label="Licence key"
+               placeholder="CTX1-…" @oninput="ProKeyTyped" @onkeydown="e => ActivatePro(e)" />
+        <button type="button" class="pro-activate" disabled="@busy" @onclick="() => ActivatePro(null)">@DesktopText.ProActivateLabel</button>
+        @if (pro is { KeyStored: true })
+        {
+            <button type="button" class="pro-remove" disabled="@busy" @onclick="AskRemovePro">@DesktopText.ProRemoveLabel</button>
+        }
+    </div>
+    <p class="pro-result @proResultClass" role="status">@proResultText</p>
+    @if (removingPro)
+    {
+        <ConfirmDialog Question="@DesktopText.ProRemoveQuestion" ConfirmLabel="Remove" Busy="busy"
+                       OnConfirm="RemoveProConfirmed" OnCancel="CancelDialog" />
+    }
 </section>
 
 @code {
@@ -292,19 +320,168 @@
     private string resultText = string.Empty;
     private string resultClass = string.Empty;
 
+    // Suite Pro (job 367).
+    private ProView? pro;
+    private int proRequest;
+    private string typedKey = string.Empty;
+    private int proFieldKey;
+    private bool removingPro;
+    private string proResultText = string.Empty;
+    private string proResultClass = string.Empty;
+    private ElementReference proHeading;
+    private int proFocusSeen;
+    private bool proFocusPending;
+
     [Parameter]
     public EventCallback OnClose { get; set; }
+
+    /// <summary>Raised (a higher number each time) when the Suite Pro heading should get the focus, so it scrolls into view.</summary>
+    [Parameter]
+    public int ProFocusRequest { get; set; }
 
     /// <summary>Raised once a theme was saved, so the page applies the saved theme.</summary>
     [Parameter]
     public EventCallback OnThemeChanged { get; set; }
 
-    protected override Task OnInitializedAsync() => Load();
+    protected override Task OnInitializedAsync()
+    {
+        // Not awaited here, so the other sections show while a Keychain prompt holds the licence read.
+        _ = LoadPro();
+        return Load();
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (ProFocusRequest != proFocusSeen)
+        {
+            proFocusSeen = ProFocusRequest;
+            proFocusPending = ProFocusRequest > 0;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (proFocusPending)
+        {
+            proFocusPending = false;
+            await proHeading.FocusAsync();
+        }
+    }
 
     protected override async Task OnStateChangedAsync()
     {
         await Load();
+        await LoadPro();
         StateHasChanged();
+    }
+
+    // Only the newest request's result is shown; the read changes nothing and never throws.
+    private async Task LoadPro()
+    {
+        int mine = ++proRequest;
+        ProView now = await State.ProStatus();
+        if (mine == proRequest)
+        {
+            pro = now;
+            StateHasChanged();
+        }
+    }
+
+    private static string ProStateClass(ProView view) => view.Kind switch
+    {
+        ProViewKind.Active => "accent",
+        ProViewKind.Invalid or ProViewKind.Unreadable => "red",
+        ProViewKind.NotCovered or ProViewKind.NoBuildDate => "yellow",
+        _ => "grey",
+    };
+
+    // The name and licensee are shown as text only (Blazor encodes them), cleaned to one line first.
+    private static string ProStateText(ProView view) => view.Kind switch
+    {
+        ProViewKind.Active when view.Licence is { } licence =>
+            DesktopText.ProActiveText(DesktopText.OneLine(licence.Name), licence.Until),
+        ProViewKind.Invalid => DesktopText.ProInvalidText(view.Problem ?? LicenceKey.Malformed),
+        ProViewKind.NotCovered when view.Licence is { } licence && view.BuildDate is { } built =>
+            DesktopText.ProNotCoveredText(licence.Until, built),
+        ProViewKind.NoBuildDate => DesktopText.ProNoBuildDateText,
+        ProViewKind.Unsupported => DesktopText.ProUnsupportedText,
+        ProViewKind.Unreadable => DesktopText.ProUnreadableText,
+        ProViewKind.None when view.Licensee is { } licensee => DesktopText.ProFileOnlyText(DesktopText.OneLine(licensee)),
+        _ => DesktopText.ProNoneText,
+    };
+
+    private void ProKeyTyped(ChangeEventArgs e)
+    {
+        typedKey = e.Value?.ToString() ?? string.Empty;
+        ShowProResult(string.Empty, string.Empty);
+    }
+
+    // Enter in the field or Activate. The typed key is dropped and the field rebuilt once it is stored.
+    private async Task ActivatePro(KeyboardEventArgs? pressed)
+    {
+        if ((pressed is not null && pressed.Key != "Enter") || busy)
+        {
+            return;
+        }
+
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.ActivatePro(typedKey);
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        if (result.Kind == ActionKind.Done)
+        {
+            typedKey = string.Empty;
+            proFieldKey++;
+        }
+
+        ShowProResult(DesktopText.OneLine(result.Text), result.Kind == ActionKind.Done ? "accent" : "red");
+        await LoadPro();
+    }
+
+    private void AskRemovePro()
+    {
+        if (!busy)
+        {
+            ShowProResult(string.Empty, string.Empty);
+            removingPro = true;
+        }
+    }
+
+    private async Task RemoveProConfirmed(Confirmation confirmed)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        busy = true;
+        ActionResult result;
+        try
+        {
+            result = await Actions.RemovePro(confirmed);
+        }
+        finally
+        {
+            busy = false;
+            removingPro = false;
+        }
+
+        ShowProResult(DesktopText.OneLine(result.Text), result.Kind != ActionKind.Done ? "red"
+            : result.Reason == ActionReason.Unchanged ? "grey" : "accent");
+        await LoadPro();
+    }
+
+    private void ShowProResult(string text, string cssClass)
+    {
+        proResultText = text;
+        proResultClass = cssClass;
     }
 
     private static string Expires(KeyDetails details) =>
@@ -676,6 +853,7 @@
         {
             replacing = false;
             removing = false;
+            removingPro = false;
         }
     }
 
@@ -704,6 +882,7 @@
         }
 
         typed = string.Empty;
+        typedKey = string.Empty;
         return OnClose.InvokeAsync();
     }
 

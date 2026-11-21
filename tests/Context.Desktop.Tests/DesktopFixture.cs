@@ -171,6 +171,7 @@ internal sealed class DesktopFixture : IDisposable
         Outlook.Dispose();
         Bunit.Dispose();
         Keys.Dispose();
+        Licences.Dispose();
 
         // A panel's index read may still run on a pool thread; it writes context.db, so wait for it to finish
         // (and keep later ones out) while the folder is deleted.
@@ -244,6 +245,18 @@ internal sealed class DesktopFixture : IDisposable
     /// <summary>The located tm path the state reports (job 282); null means not found. Set it before <see cref="CreateState"/>.</summary>
     public string? TimesCommand { get; set; } = "/fake/tm";
 
+    /// <summary>The licence store the state's Pro reads (job 367); in memory, supported, empty. Set it up before <see cref="CreateState"/>.</summary>
+    public FakeLicenceStore LicenceStore { get; } = new FakeLicenceStore();
+
+    /// <summary>The test key pair the state's Pro trusts (job 367). Released in <see cref="Dispose"/>.</summary>
+    public TestLicences Licences { get; } = new TestLicences();
+
+    /// <summary>The build date the state's Pro checks a licence against (job 367); set it before <see cref="CreateState"/>.</summary>
+    public DateOnly? ProBuildDate { get; set; } = TestLicences.BuildDate;
+
+    /// <summary>The <c>SuitePro</c> folder of the activation file, outside the data folder; nothing is there yet.</summary>
+    public string ActivationFolder => Path.Combine(parent, "SuitePro");
+
     /// <summary>The command bar's hook to Main (job 282), registered with <see cref="Bunit"/>.</summary>
     public CommandBarContext CommandBar { get; } = new CommandBarContext();
 
@@ -277,7 +290,9 @@ internal sealed class DesktopFixture : IDisposable
             IsMac,
             TimesFolder,
             CommitLog,
-            () => TimesCommand);
+            () => TimesCommand,
+            pro: new Pro(LicenceStore, Licences.Keys, LicenceRevocations.None, ProBuildDate),
+            activationFile: new LicenceActivationFile(ActivationFolder));
         Actions = new DesktopActions(
             Notes, Todos, State, Launcher, link, feed, () => LocalNow, new CalendarStore(Root, Zone), TimesFolder, Notifier,
             ScreenCapture, UrlLauncher);

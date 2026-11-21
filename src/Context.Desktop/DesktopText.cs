@@ -52,4 +52,66 @@ internal static class DesktopText
 
         return DateOnly.TryParseExact(token, DateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out due);
     }
+
+    // Suite Pro (job 367): the Settings section, its results and the locked hint. Raw text; the panel cleans names.
+
+    /// <summary>The Settings heading of the Suite Pro section.</summary>
+    public const string ProHeading = "Suite Pro";
+
+    public const string ProNoneText = "No Pro licence activated.";
+
+    public const string ProUnsupportedText = "Suite Pro needs macOS or Windows.";
+
+    public const string ProUnreadableText = "Can't read the licence store.";
+
+    public const string ProNoBuildDateText = "This build has no build date, so Pro stays locked in it.";
+
+    public const string ProEmptyKeyText = "Paste your licence key first.";
+
+    public const string ProStoreFailedText = "Can't save the licence. Nothing was stored.";
+
+    public const string ProFileFailedText = "Can't write the activation file. Nothing was stored.";
+
+    public const string ProFileFailedKeyLeftText =
+        "Can't write the activation file, and the stored key could not be removed. Click Remove licence.";
+
+    public const string ProRemoveQuestion = "Remove the Suite Pro licence from this computer? Times uses it too.";
+
+    public const string ProRemovedText = "Suite Pro licence removed from this computer.";
+
+    public const string ProNothingToRemoveText = "No Pro licence was activated.";
+
+    public const string ProFileLeftText = "The licence key was removed, but the activation file could not be deleted.";
+
+    public const string ProRemoveFailedText = "Can't remove the licence. Nothing was changed.";
+
+    public const string ProActivateLabel = "Activate";
+
+    public const string ProRemoveLabel = "Remove licence";
+
+    public const string ProOpenSettingsLabel = "Open Settings";
+
+    /// <summary>The accent state line of an active licence.</summary>
+    public static string ProActiveText(string name, DateOnly until) =>
+        $"Suite Pro: {name} · updates until {Date(until)}.";
+
+    /// <summary>The grey state line when only <c>activation.json</c> names a licensee.</summary>
+    public static string ProFileOnlyText(string licensee) =>
+        $"No Pro licence activated. activation.json names {licensee}, but no key is stored on this computer.";
+
+    /// <summary>The red state line of a stored key that does not verify.</summary>
+    public static string ProInvalidText(string reason) => $"The stored licence key cannot be used: {reason}. Pro stays locked.";
+
+    /// <summary>The yellow state line of a licence whose updates end before this build.</summary>
+    public static string ProNotCoveredText(DateOnly until, DateOnly buildDate) =>
+        $"Your licence covers updates until {Date(until)}; this build is from {Date(buildDate)}, so Pro stays locked in it.";
+
+    /// <summary>The refusal of a typed key that does not verify.</summary>
+    public static string ProKeyRefusedText(string reason) => $"This licence key cannot be used: {reason}. Nothing was stored.";
+
+    /// <summary>The accent result of a successful activation.</summary>
+    public static string ProActivatedText(string name, DateOnly until) =>
+        $"Suite Pro activated for {name} · updates until {Date(until)}.";
+
+    private static string Date(DateOnly date) => date.ToString(DateFormat, CultureInfo.InvariantCulture);
 }

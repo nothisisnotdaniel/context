@@ -43,7 +43,7 @@
                 }
                 @if (page == Page.Settings)
                 {
-                    <SettingsPanel OnClose="CloseSettings" OnThemeChanged="ApplySavedTheme" />
+                    <SettingsPanel OnClose="CloseSettings" OnThemeChanged="ApplySavedTheme" ProFocusRequest="proFocusRequest" />
                 }
                 @if (page == Page.Appointment && appointmentShown is { } shownAppointment)
                 {
@@ -750,7 +750,26 @@ else
     private void CloseTodos() => page = Page.None;
 
     // The settings: shown at the top of the main region until closed or until a note opens.
-    private void ShowSettings() => OpenPage(Page.Settings);
+    private void ShowSettings()
+    {
+        proFocusRequest = 0;
+        OpenPage(Page.Settings);
+    }
+
+    // Job 367: raised by a ProLockedHint's Open Settings; the panel moves the focus (and so the view) to #pro-heading.
+    // 0 while Settings was opened any other way, so a panel opened later never takes the focus; each request is a new
+    // number (proFocusCount), so a second request while Settings is shown moves the focus again.
+    private int proFocusRequest;
+    private int proFocusCount;
+
+    /// <summary>Opens Settings scrolled to the Suite Pro section: the callback a <see cref="ProLockedHint"/> gets.</summary>
+    internal Task OpenProSettings()
+    {
+        ShowSettings();
+        proFocusRequest = ++proFocusCount;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
 
     private void CloseSettings() => page = Page.None;
 

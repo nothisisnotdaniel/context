@@ -97,8 +97,12 @@ internal sealed class DesktopState
         bool? isMac = null,
         string? timesFolder = null,
         ICommitLog? commitLog = null,
-        Func<string?>? timesCommand = null)
+        Func<string?>? timesCommand = null,
+        Pro? pro = null,
+        LicenceActivationFile? activationFile = null)
     {
+        Pro = pro ?? new Pro(new UnsupportedLicenceStore(), LicencePublicKeys.Embedded(), LicenceRevocations.Embedded(), null);
+        ActivationFile = activationFile;
         IsMac = isMac ?? OperatingSystem.IsMacOS();
         this.timesCommand = timesCommand;
         this.timesFolder = timesFolder;
@@ -1950,6 +1954,62 @@ internal sealed class DesktopState
             return new SensitiveKeyView(SensitiveKeyKind.Unreadable);
         }
     });
+
+    /// <summary>The one Suite Pro gate (job 367); the actions write its store and clears its cache.</summary>
+    public Pro Pro { get; }
+
+    /// <summary><c>SuitePro/activation.json</c>, shown only (never trusted); <c>null</c> when there is none to read.</summary>
+    public LicenceActivationFile? ActivationFile { get; }
+
+    /// <summary>
+    /// The Suite Pro state for Settings (job 367), off the calling thread, since reading a Keychain item Times wrote
+    /// may show the macOS prompt. The gate reads only the store; the activation file is read only for the
+    /// <see cref="ProViewKind.FileOnly"/> hint. Never throws.
+    /// </summary>
+    public Task<ProView> ProStatus() => Task.Run(() =>
+    {
+        try
+        {
+            ProStatus status = Pro.Status();
+            switch (status.Kind)
+            {
+                case ProStatusKind.Unsupported:
+                    return new ProView(ProViewKind.Unsupported);
+                case ProStatusKind.Unreadable:
+                    return new ProView(ProViewKind.Unreadable);
+                case ProStatusKind.Invalid:
+                    return new ProView(ProViewKind.Invalid, problem: status.Problem, keyStored: true);
+                case ProStatusKind.Valid when status.Licence is { } licence:
+                    if (Pro.BuildDate is not { } buildDate)
+                    {
+                        return new ProView(ProViewKind.NoBuildDate, licence, keyStored: true);
+                    }
+
+                    return status.Covered
+                        ? new ProView(ProViewKind.Active, licence, keyStored: true)
+                        : new ProView(ProViewKind.NotCovered, licence, buildDate: buildDate, keyStored: true);
+                default:
+                    return new ProView(ProViewKind.None, licensee: FileLicensee());
+            }
+        }
+        catch (Exception)
+        {
+            return new ProView(ProViewKind.Unreadable);
+        }
+    });
+
+    // The licensee activation.json names, or null when there is no readable file.
+    private string? FileLicensee()
+    {
+        try
+        {
+            return ActivationFile?.Read()?.Licensee;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// The note a <c>[[link]]</c> target or a typed name names, resolved like <c>/open</c>

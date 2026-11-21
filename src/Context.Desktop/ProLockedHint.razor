@@ -1,0 +1,20 @@
+@* The one locked hint of a Suite Pro feature (job 367): what Pro is, and a button that opens Settings at the Suite Pro
+   section (Main's OpenProSettings through OnOpenSettings). Plain text; the feature name is a fixed label. *@
+
+<div class="pro-locked-hint">
+    <p class="pro-locked grey">@Pro.LockedHint(Feature)</p>
+    <button type="button" class="pro-open-settings" @onclick="OpenSettings">@DesktopText.ProOpenSettingsLabel</button>
+</div>
+
+@code {
+    /// <summary>The feature's name, the start of the hint.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Feature { get; set; } = string.Empty;
+
+    /// <summary>Raised once per click on <c>Open Settings</c>.</summary>
+    [Parameter]
+    public EventCallback OnOpenSettings { get; set; }
+
+    private Task OpenSettings() => OnOpenSettings.InvokeAsync();
+}

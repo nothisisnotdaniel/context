@@ -491,7 +491,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     sensitive note `Make plain` and `Lock` instead of `Open in default editor`; both mark and make-plain ask in a
     `ConfirmDialog` and need a saved note.
   - **Rules (tests):** no file in `src/Context.Core/` or `src/Context/` mentions `AesGcm`, `ECDiffieHellman`,
-    `IKeyStore` or `SealedNote`; `DllImport`/`LibraryImport`/`extern ` appear only in `MacKeyStore.cs`, `OutlookComSource.cs`, (job 260, 282) `MacGlobalHotkey.cs` and (job 334) `SessionEndWatcher.cs`; `X509Store`
+    `IKeyStore` or `SealedNote`; `DllImport`/`LibraryImport`/`extern ` appear only in `MacKeyStore.cs`, `OutlookComSource.cs`, (job 260, 282) `MacGlobalHotkey.cs`, (job 334) `SessionEndWatcher.cs` and (job 367) `MacLicenceStore.cs` and `WindowsLicenceStore.cs`; `X509Store`
     and `CngKey` only in `WindowsKeyStore.cs`; no test references `WindowsKeyStore`, `MacKeyStore` or
     `PhotinoFileDialog` (tests use `FakeKeyStore`, which counts `Agree` and can throw, and `FakeFileDialog`), so
     `dotnet test` never touches a real key store, Keychain or file dialog; no new NuGet package.
@@ -502,6 +502,27 @@ Every factory agent reads this file before working on Context. Keep it short and
     on the first machine.
   - **Manual checks (no test can cover them):** on macOS and on Windows run setup, mark, open (the OS prompt
     appears), lock, restart, restore from the `.pfx`.
+- **Suite Pro** (job 367, desktop only): one licence for Times and Context, read byte for byte as Times#39 writes it.
+  Core holds ports of Times' `src/Times/Licence*.cs` and `Pro.cs`: `LicenceKey.TryVerify` (`CTX1-<b64url payload>.<b64url
+  sig>`, at most 1024 chars, ECDSA P-256 over the payload bytes in P1363 format, checked before the JSON is parsed;
+  Times' fixed refusal reasons, never the key), `LicencePublicKeys` (`FromTable` drops the whole table when a PEM holds a
+  private key, skips non-P-256 keys, bad ids and second PEM blocks), `LicenceRevocations`, `LicenceActivationFile`
+  (`<ApplicationData>/SuitePro/activation.json`, `{"format":1,"licenceId","licensee","updatesUntil"}`, written through
+  `PrivateFile` temp + move, `0700`/`0600`, read through `BoundedFile` at 4 KiB; shown only, never trusted), `ILicenceStore`
+  (`UnsupportedLicenceStore`) and `Pro` (`IsUnlocked`: the stored key verifies, is not revoked and `until` >= the build
+  date from `BuildInfo.BuildDate`, the `BuildDate` assembly metadata of `Directory.Build.props`, `-p:BuildDate=`
+  overrides; the status is read once and cached until `Forget()`, which `ActivatePro`/`RemovePro` call; `LockedHint`
+  without Times' CLI line). **The key table (`LicencePublicKeys.Embedded`) and the revocations must match Times'
+  compiled lists, and the licensee name rule (`LicenceKey.IsValidName`, a copy of Times' title rules) must match Times'; change both apps together.** The files are verify-only: no private key import, no signing, no
+  `HttpClient` (`DesktopSourceTests`). Desktop: `MacLicenceStore` (Keychain generic password `Suite Pro licence`/`key`,
+  access list only the resolved apphost, refuses the shared `dotnet` host) and `WindowsLicenceStore` (Credential Manager
+  `Suite/ProLicence`, UTF-8 blob), picked by `Program.cs` only; `DesktopState.ProStatus()` (off the UI thread, behind
+  `Loading…`), `DesktopActions.ActivatePro(key)`/`RemovePro(confirmation)`, the *Suite Pro* section last in
+  `SettingsPanel` (`h3#pro-heading`, `p.pro-state`, `input.pro-key` password with no value, `button.pro-activate`,
+  `button.pro-remove`) and `ProLockedHint` (`Feature`, `OnOpenSettings`; `Main.OpenProSettings` opens Settings and
+  focuses `#pro-heading`). No feature is gated yet. Tests use `FakeLicenceStore` and `TestLicences` (fresh P-256 keys,
+  signing only in the test projects, in `tests/Context.Tests`, linked into `Context.Desktop.Tests`); no test names the
+  real stores.
 - **Note history** (job 174, `NoteHistory.cs`, `TextDiff.cs`, desktop only): `NoteHistory(NoteStore, utcNow)` keeps a
   note `<folder>/<Title>.md`'s versions in `<folder>/.history/<Title>/<id>.md` and a sensitive `<Title>.ctxs`'s in
   `<root>/.history/<Title>/<id>~<sealed title>.ctxs` (`<id>` = `yyyyMMdd'T'HHmmssfff'Z'[-n]` from the clock;

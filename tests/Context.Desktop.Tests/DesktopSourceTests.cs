@@ -38,6 +38,12 @@ public sealed class DesktopSourceTests
     private const string RealWindowsStoreFile = "src/Context.Desktop/" + RealWindowsStore + ".cs";
     private const string RealMacStoreFile = "src/Context.Desktop/" + RealMacStore + ".cs";
 
+    // 367: the real licence stores (Keychain, Credential Manager), spelled in pieces: no test file may hold their names.
+    private const string RealMacProStore = "Mac" + "LicenceStore";
+    private const string RealWindowsProStore = "Windows" + "LicenceStore";
+    private const string RealMacProStoreFile = "src/Context.Desktop/" + RealMacProStore + ".cs";
+    private const string RealWindowsProStoreFile = "src/Context.Desktop/" + RealWindowsProStore + ".cs";
+
     // 260: the real area picker (runs screencapture) and the real hotkey (Carbon), spelled in pieces: no test file may
     // hold their names.
     private const string RealScreenCapture = "Mac" + "ScreenCapture";
@@ -2191,7 +2197,11 @@ public sealed class DesktopSourceTests
             .ToList();
 
         Assert.Equal(
-            new[] { RealHotkeyFile, RealMacStoreFile, RealOutlookFile, RealSessionWatcherFile }.Order(StringComparer.Ordinal),
+            new[]
+            {
+                RealHotkeyFile, RealMacStoreFile, RealOutlookFile, RealSessionWatcherFile, RealMacProStoreFile,
+                RealWindowsProStoreFile,
+            }.Order(StringComparer.Ordinal),
             found.Order(StringComparer.Ordinal));
     }
 
@@ -2564,7 +2574,7 @@ public sealed class DesktopSourceTests
         foreach (string folder in new[] { "tests/Context.Tests", "tests/Context.Desktop.Tests" })
         {
             found.AddRange(RepoFiles.Sources(root, folder, ".cs", ".csproj")
-                .Where(f => new[] { RealWindowsStore, RealMacStore, RealFileDialog }.Any(
+                .Where(f => new[] { RealWindowsStore, RealMacStore, RealFileDialog, RealMacProStore, RealWindowsProStore }.Any(
                     name => File.ReadAllText(Path.Combine(root, f)).Contains(name, StringComparison.Ordinal))));
         }
 
@@ -2572,6 +2582,46 @@ public sealed class DesktopSourceTests
         List<string> tests = RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs");
         Assert.Contains("tests/Context.Desktop.Tests/FakeKeyStore.cs", tests);
         Assert.Contains("tests/Context.Desktop.Tests/FakeFileDialog.cs", tests);
+        Assert.Contains("tests/Context.Tests/FakeLicenceStore.cs", RepoFiles.Sources(root, "tests/Context.Tests", ".cs"));
+    }
+
+    // 367 AC-9: the licence files only verify: no private key import, no signing, no network, no private key PEM, and
+    // nothing that logs. Other files (the calendar feed, the sensitive-note key stores) are not checked.
+    [Fact]
+    public void LicenceFiles_OnlyVerify()
+    {
+        string root = RepoFiles.Root();
+        List<string> files = RepoFiles.Sources(root, "src/Context.Core", ".cs")
+            .Where(f => Path.GetFileName(f).StartsWith("Licence", StringComparison.Ordinal) || f == "src/Context.Core/Pro.cs")
+            .Concat([RealMacProStoreFile, RealWindowsProStoreFile])
+            .ToList();
+        Assert.Equal(7, files.Count);
+        string[] banned =
+        [
+            "ImportECPrivateKey", "ImportPkcs8PrivateKey", "SignData", "HttpClient", "PRIVATE" + " KEY", "Console.",
+            "CrashLog", "Debug.Write", "Trace.",
+        ];
+
+        foreach (string file in files)
+        {
+            string text = File.ReadAllText(Path.Combine(root, file));
+            Assert.All(banned, b => Assert.False(text.Contains(b, StringComparison.Ordinal), file + " mentions " + b));
+        }
+    }
+
+    // 367 AC-9: the real licence stores are named only by themselves and Program.cs, which picks one per OS.
+    [Theory]
+    [InlineData(RealMacProStore, RealMacProStoreFile)]
+    [InlineData(RealWindowsProStore, RealWindowsProStoreFile)]
+    public void Sources_NameTheLicenceStoresOnlyInThemselvesAndProgram(string name, string file)
+    {
+        string root = RepoFiles.Root();
+        List<string> found = RepoFiles.Sources(root, "src", ".cs", ".razor")
+            .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains(name, StringComparison.Ordinal))
+            .ToList();
+
+        Assert.Equal(new[] { file, ProgramFile }.Order(StringComparer.Ordinal), found.Order(StringComparer.Ordinal));
+        Assert.Single(Regex.Matches(File.ReadAllText(Path.Combine(root, ProgramFile)), @"\bnew " + name + @"\b"));
     }
 
     // 139 AC-10: the Core calls that read an import source and write an export copy are named only in DesktopActions.cs.
