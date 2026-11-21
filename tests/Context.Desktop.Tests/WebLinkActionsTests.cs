@@ -111,5 +111,14 @@ public sealed class WebLinkActionsTests : IDisposable
         Assert.False(WebLink.TryParse(null, out _));
     }
 
+    // Review nit (code 1): a bare "mailto:" with no address is accepted (the mail app opens an empty message), pinned
+    // so a change in Uri.TryCreate shows up here.
+    [Fact]
+    public void TryParse_BareMailto_Pinned()
+    {
+        Assert.True(WebLink.TryParse("mailto:", out Uri uri));
+        Assert.Equal("mailto", uri.Scheme);
+    }
+
     private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
 }
