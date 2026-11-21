@@ -10,6 +10,8 @@ public sealed class NoteAttachmentsTests : IDisposable
     private static readonly byte[] WebP = Encoding.ASCII.GetBytes("RIFF\u0010\0\0\0WEBPVP8 ");
     private static readonly byte[] Pdf = Encoding.ASCII.GetBytes("%PDF-1.7\n%...");
     private static readonly byte[] Svg = Encoding.ASCII.GetBytes("<svg xmlns=\"http://www.w3.org/2000/svg\"><script/></svg>");
+    private static readonly byte[] Drawing = Encoding.UTF8.GetBytes(
+        "{\"type\":\"excalidraw\",\"version\":2,\"elements\":[{\"type\":\"rectangle\",\"x\":0,\"y\":0,\"width\":10,\"height\":10}]}");
     private static readonly byte[] Html = Encoding.ASCII.GetBytes("<html><script>alert(1)</script></html>");
 
     // Generous: the linear scans take well under a second; the old quadratic ones took hours.
@@ -772,6 +774,175 @@ public sealed class NoteAttachmentsTests : IDisposable
         Assert.True(File.Exists(outside));
     }
 
+    // Job 384 AC-4: a .excalidraw file is a drawing only when its bytes are a JSON object with "type":"excalidraw".
+    [Theory]
+    [InlineData("a.excalidraw", "{\"type\":\"excalidraw\",\"elements\":[]}", "Excalidraw")]
+    [InlineData("A.EXCALIDRAW", "{\"type\":\"excalidraw\",\"elements\":[]}", "Excalidraw")]
+    [InlineData("a.excalidraw", " {\"version\":2,\"files\":{\"x\":{\"type\":\"image\"}},\"type\":\"excalidraw\"} \n", "Excalidraw")]
+    [InlineData("a.json", "{\"type\":\"excalidraw\",\"elements\":[]}", "Unsupported")]
+    [InlineData("a.png", "{\"type\":\"excalidraw\",\"elements\":[]}", "Unsupported")]
+    [InlineData("a.excalidraw", "{\"type\":\"excalidrawlib\",\"elements\":[]}", "Unsupported")]
+    [InlineData("a.excalidraw", "{\"type\":1}", "Unsupported")]
+    [InlineData("a.excalidraw", "{\"x\":{\"type\":\"excalidraw\"}}", "Unsupported")]
+    [InlineData("a.excalidraw", "[{\"type\":\"excalidraw\"}]", "Unsupported")]
+    [InlineData("a.excalidraw", "{\"type\":\"excalidraw\"} x", "Unsupported")]
+    [InlineData("a.excalidraw", "{\"type\":\"excalidraw\"", "Unsupported")]
+    [InlineData("a.excalidraw", "not json", "Unsupported")]
+    [InlineData("a.excalidraw", "", "Unsupported")]
+    public void Sniff_Excalidraw_NeedsTheExtensionAndTheJsonType(string name, string text, string expected)
+    {
+        Assert.Equal(Enum.Parse<AttachmentType>(expected), NoteAttachments.Sniff(name, Encoding.UTF8.GetBytes(text)));
+    }
+
+    // Job 384 AC-4: a BOM is allowed; PNG bytes named .excalidraw are not a drawing.
+    [Fact]
+    public void Sniff_Excalidraw_BomAllowed_PngRefused()
+    {
+        byte[] bom = [0xEF, 0xBB, 0xBF, .. Drawing];
+
+        Assert.Equal(AttachmentType.Excalidraw, NoteAttachments.Sniff("a.excalidraw", bom));
+        Assert.Equal(AttachmentType.Unsupported, NoteAttachments.Sniff("a.excalidraw", Png));
+        Assert.Equal("application/json", NoteAttachments.MimeOf(AttachmentType.Excalidraw));
+        Assert.False(NoteAttachments.IsImage(AttachmentType.Excalidraw));
+    }
+
+    // Job 384 AC-4: Add stores a valid drawing as an image link (CleanName, 0600) and TryResolve resolves it.
+    [Fact]
+    public void Add_Drawing_StoresAndResolves()
+    {
+        store.Create("Note");
+        byte[] noteBytes = File.ReadAllBytes(NotePath("Note"));
+
+        AttachmentAdd added = attachments.Add("Note", "My Sketch (1).Excalidraw", Drawing);
+
+        Assert.Equal((AttachmentAddKind.Added, AttachmentType.Excalidraw), (added.Kind, added.Type));
+        Assert.Equal("My-Sketch-1.excalidraw", added.Name);
+        Assert.Equal("![My-Sketch-1.excalidraw](.attachments/My-Sketch-1.excalidraw)", added.Markdown);
+        string path = Path.Combine(root, ".attachments", "My-Sketch-1.excalidraw");
+        Assert.Equal(Drawing, File.ReadAllBytes(path));
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
+        }
+
+        Assert.Equal(noteBytes, File.ReadAllBytes(NotePath("Note")));
+        ResolvedAttachment? resolved = attachments.TryResolve("Note", added.Src!);
+        Assert.NotNull(resolved);
+        Assert.Equal((AttachmentType.Excalidraw, "application/json", false), (resolved.Type, resolved.Mime, resolved.IsImage));
+        Assert.Equal(Drawing, resolved.Bytes);
+    }
+
+    // Job 384 AC-4: a drawing that isn't one, or is over 10 MB, is not stored.
+    [Fact]
+    public void Add_Drawing_Refused_WritesNothing()
+    {
+        store.Create("Note");
+
+        Assert.Equal(AttachmentAddKind.Unsupported, attachments.Add("Note", "d.excalidraw", Png).Kind);
+        Assert.Equal(AttachmentAddKind.Unsupported,
+            attachments.Add("Note", "d.excalidraw", Encoding.UTF8.GetBytes("{\"type\":\"other\"}")).Kind);
+        Assert.Equal(AttachmentAddKind.TooLarge,
+            attachments.Add("Note", "d.excalidraw", new byte[NoteAttachments.MaxBytes + 1]).Kind);
+        Assert.False(Directory.Exists(Path.Combine(root, ".attachments")));
+    }
+
+    // Job 384 AC-5: drawing sources are distinct .excalidraw sources after "](", in text order, at most 20; image
+    // sources never hold one.
+    [Fact]
+    public void DrawingSources_DistinctDrawingsOnly_Capped_NotImages()
+    {
+        string text = "![b](.attachments/b.excalidraw) ![a](.attachments/a.png) ![b](.attachments/b.excalidraw) "
+            + "[l](.attachments/l.excalidraw) ![x](.attachments/../x.excalidraw) ![o](other/o.excalidraw) "
+            + "![n](.attachments/n.excalidraw.png) ![j](.attachments/j.json)\n"
+            + string.Concat(Enumerable.Range(1, 30).Select(i => $"![d](.attachments/d{i}.excalidraw)"));
+
+        IReadOnlyList<string> drawings = NoteAttachments.DrawingSources(text);
+
+        Assert.Equal(NoteAttachments.MaxInlineDrawings, drawings.Count);
+        Assert.Equal([".attachments/b.excalidraw", ".attachments/l.excalidraw", ".attachments/d1.excalidraw"], drawings.Take(3));
+        Assert.Equal(".attachments/d18.excalidraw", drawings[^1]);
+        Assert.DoesNotContain(NoteAttachments.ImageSources(text), s => s.EndsWith(".excalidraw", StringComparison.Ordinal));
+        Assert.Equal([".attachments/a.png"], NoteAttachments.ImageSources(text));
+    }
+
+    // Job 384 AC-5: a crafted note is scanned for drawings in linear time.
+    [Fact]
+    public async Task DrawingSources_AdversarialNote_FinishLinear()
+    {
+        StringBuilder text = new StringBuilder("![a](.attachments/real.excalidraw)\n");
+        while (text.Length < NoteStore.MaxEditBytes - 1)
+        {
+            text.Append(NoteAttachments.LinkMarker);
+        }
+
+        text.Append(')');
+        string note = text.ToString();
+
+        Task<IReadOnlyList<string>> scan = Task.Run(() => NoteAttachments.DrawingSources(note));
+
+        Assert.Same(scan, await Task.WhenAny(scan, Task.Delay(ScanBound)));
+        Assert.Equal([".attachments/real.excalidraw"], await scan);
+    }
+
+    // Job 384 AC-10: a move copies a linked drawing and rewrites its link on a clash; the source goes.
+    [Fact]
+    public void MoveWithNote_Drawing_CopiedAndLinkRewritten()
+    {
+        store.Create("Target");
+        store.CreateChild("Target", "Resident");
+        byte[] resident = Encoding.UTF8.GetBytes("{\"type\":\"excalidraw\",\"elements\":[{}]}");
+        attachments.Add("Target/Resident", "d.excalidraw", resident);
+        WriteNote("Note", "# Note\n\n![d.excalidraw](.attachments/d.excalidraw)\n");
+        attachments.Add("Note", "d.excalidraw", Drawing);
+
+        attachments.MoveWithNote("Note", "Target");
+
+        Assert.Equal("# Note\n\n![d.excalidraw](.attachments/d-2.excalidraw)\n",
+            File.ReadAllText(Path.Combine(root, "Target", "Note.md")));
+        Assert.Equal(Drawing, File.ReadAllBytes(Path.Combine(root, "Target", ".attachments", "d-2.excalidraw")));
+        Assert.Equal(resident, File.ReadAllBytes(Path.Combine(root, "Target", ".attachments", "d.excalidraw")));
+        Assert.False(File.Exists(Path.Combine(root, ".attachments", "d.excalidraw")));
+    }
+
+    // Job 384 AC-10: a delete removes a drawing only no other note links.
+    [Fact]
+    public void RemoveUnlinked_Drawing_SoleGoes_SharedStays()
+    {
+        WriteNote("Note", "x");
+        attachments.Add("Note", "sole.excalidraw", Drawing);
+        attachments.Add("Note", "shared.excalidraw", Drawing);
+        File.WriteAllText(NotePath("Note"), "![s](.attachments/sole.excalidraw) ![p](.attachments/shared.excalidraw)\n");
+        WriteNote("Other", "![p](.attachments/shared.excalidraw)\n");
+        store.TryFind("Note", out NoteInfo? note);
+        IReadOnlyList<string> linked = attachments.LinkedNamesOf("Note");
+
+        store.Delete("Note", removeHistory: true, removeAttachments: true);
+        int removed = attachments.RemoveUnlinked(note!, linked);
+
+        Assert.Equal(["sole.excalidraw", "shared.excalidraw"], linked);
+        Assert.Equal(1, removed);
+        Assert.False(File.Exists(Path.Combine(root, ".attachments", "sole.excalidraw")));
+        Assert.True(File.Exists(Path.Combine(root, ".attachments", "shared.excalidraw")));
+    }
+
+    // Job 384 AC-11: saving a note with a drawing link keeps it byte for byte and never writes the drawing file.
+    [Fact]
+    public void Save_DrawingLink_RoundTrips_DrawingUntouched()
+    {
+        const string Text = "# Note\n\n![x](.attachments/d.excalidraw)\n";
+        WriteNote("Note", "# Note\n");
+        attachments.Add("Note", "d.excalidraw", Drawing);
+        string drawingBefore = FileSnapshot.Take(root)[".attachments/d.excalidraw"];
+        store.TryFind("Note", out NoteInfo? note);
+        EditableNote opened = store.ReadForEdit(note!);
+
+        Assert.Equal(NoteSaveResult.Saved, store.SaveIfUnchanged(opened, Text, out _));
+
+        Assert.Equal(Encoding.UTF8.GetBytes(Text), File.ReadAllBytes(NotePath("Note")));
+        Assert.Equal(drawingBefore, FileSnapshot.Take(root)[".attachments/d.excalidraw"]);
+        Assert.Equal(Drawing, File.ReadAllBytes(Path.Combine(root, ".attachments", "d.excalidraw")));
+    }
+
     private static byte[] Bytes(string kind) => kind switch
     {
         "png" => Png,
@@ -831,13 +1002,16 @@ public sealed class NoteAttachmentsTests : IDisposable
     [Fact]
     public void LinkedNames_LooksOnlyAsFarAsTheLongestStoredName()
     {
-        string longest = Letters100 + ".jpeg";
-        string tooLong = Letters100 + ".jpegx";
-        string text = $"![a](.attachments/{longest}) ![b](.attachments/{tooLong}) ![c](.attachments/end.png)";
+        // Job 384: the longest stored name now ends in .excalidraw, so a drawing with a 100-character stem still counts.
+        string longest = Letters100 + ".excalidraw";
+        string tooLong = Letters100 + ".excalidrawx";
+        string image = Letters100 + ".jpeg";
+        string text = $"![a](.attachments/{longest}) ![b](.attachments/{tooLong}) ![i](.attachments/{image}) ![c](.attachments/end.png)";
 
         Assert.Equal(NoteAttachments.MaxScannedName, longest.Length);
-        Assert.Equal([longest, "end.png"], NoteAttachments.LinkedNames(text));
-        Assert.Equal([".attachments/" + longest, ".attachments/end.png"], NoteAttachments.ImageSources(text));
+        Assert.Equal([longest, image, "end.png"], NoteAttachments.LinkedNames(text));
+        Assert.Equal([".attachments/" + image, ".attachments/end.png"], NoteAttachments.ImageSources(text));
+        Assert.Equal([".attachments/" + longest], NoteAttachments.DrawingSources(text));
     }
 
     // Review round 1 (security): up to MaxLinkedNames a delete removes the sole attachments; past it every one stays.

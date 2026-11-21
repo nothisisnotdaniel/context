@@ -1552,8 +1552,9 @@ internal sealed class DesktopActions
     /// <summary>
     /// Opens the attachment PDF the link <paramref name="src"/> of the plain note <paramref name="name"/> points to in
     /// the system viewer: <see cref="INoteLauncher.Launch"/> once, only with a path <see cref="NoteAttachments.TryResolve"/>
-    /// accepted as a PDF; anything else is Refused <c>Can't open &lt;name&gt;.</c> (Failed when the launcher throws).
-    /// Never writes or refreshes.
+    /// accepted as a PDF, or (job 384) as an Excalidraw drawing that the note's own text links among its
+    /// <see cref="NoteAttachments.DrawingSources"/>; anything else is Refused <c>Can't open &lt;name&gt;.</c> (Failed when
+    /// the launcher throws). Never writes or refreshes.
     /// </summary>
     public Task<ActionResult> OpenAttachment(string name, string src) =>
         Run(() => OpenAttachmentNow(name, src), refresh: false);
@@ -4288,6 +4289,17 @@ internal sealed class DesktopActions
         try
         {
             AttachmentAdd added = attachments.Add(name, file.Name, file.Bytes);
+            if (added is { Kind: AttachmentAddKind.Added, Type: AttachmentType.Excalidraw, Name: not null, Src: not null })
+            {
+                // Job 384: a drawing that renders is inserted as an image of its SVG, else as a plain link.
+                string? svg = ExcalidrawSvg.Render(file.Bytes);
+                return svg is null
+                    ? new AttachmentLine(ActionKind.Done, AttachedText(added.Name), added.Src, added.Name, false,
+                        NoteAttachments.MimeOf(added.Type), null)
+                    : new AttachmentLine(ActionKind.Done, AttachedText(added.Name), added.Src, added.Name, true,
+                        ExcalidrawSvg.Mime, Convert.ToBase64String(Encoding.UTF8.GetBytes(svg)));
+            }
+
             return added.Kind switch
             {
                 AttachmentAddKind.Added when added.Name is not null && added.Src is not null => new AttachmentLine(
@@ -4313,17 +4325,20 @@ internal sealed class DesktopActions
     {
         int slash = src.LastIndexOfAny(['/', '\\']);
         string shown = src[(slash + 1)..];
+        bool drawing = NoteAttachments.IsDrawingSrc(src);
         ResolvedAttachment? resolved;
         try
         {
-            resolved = attachments.TryResolve(name, src);
+            // Job 384: a drawing opens only when the note's own text links it.
+            resolved = !drawing || LinksDrawing(name, src) ? attachments.TryResolve(name, src) : null;
         }
         catch (Exception)
         {
             resolved = null;
         }
 
-        if (resolved is null || resolved.Type != AttachmentType.Pdf)
+        AttachmentType expected = drawing ? AttachmentType.Excalidraw : AttachmentType.Pdf;
+        if (resolved is null || resolved.Type != expected)
         {
             return Refused(ActionReason.Invalid, OpenAttachmentText(shown));
         }
@@ -4338,6 +4353,11 @@ internal sealed class DesktopActions
             return Failed(ActionReason.WriteFailed, OpenAttachmentText(shown));
         }
     }
+
+    // True when the plain note's text holds src among its drawing sources; reads the note, never a sensitive one.
+    private bool LinksDrawing(string name, string src) =>
+        notes.TryFind(name, out NoteInfo? note) && note is not null
+        && NoteAttachments.DrawingSources(notes.Read(note)).Contains(src, StringComparer.Ordinal);
 
     private ActionResult OpenWebLinkNow(string? href)
     {

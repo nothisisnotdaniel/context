@@ -41,17 +41,52 @@ function blobUrl(mime, base64) {
   return URL.createObjectURL(new Blob([bytes], { type: mime }));
 }
 
-// An image whose src .NET gave bytes for is an <img> with a blob: URL; any other stays the grey placeholder.
+// An Excalidraw drawing stored next to the note (job 384); .NET renders it to an SVG and passes those bytes.
+const attachmentDrawing = /^\.attachments\/[^/\\]+\.excalidraw$/;
+
+export function isDrawingSrc(src) {
+  return typeof src === "string" && attachmentDrawing.test(src);
+}
+
+// An image whose src .NET gave bytes for is an <img> with a blob: URL; any other stays the grey placeholder. A drawing
+// with a URL also gets an "Open in Excalidraw" button under it, which only asks .NET to open the file.
 function imageView(editor) {
   return node => {
     const alt = node.attrs.alt || "";
-    const url = editor.images.get(node.attrs.src);
+    const src = node.attrs.src;
+    const url = editor.images.get(src);
     if (url) {
       const img = document.createElement("img");
       img.src = url;
       img.alt = alt;
       img.title = alt;
-      return { dom: img };
+      if (!isDrawingSrc(src)) {
+        return { dom: img };
+      }
+      const wrap = document.createElement("span");
+      wrap.className = "drawing";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "drawing-open";
+      button.textContent = "Open in Excalidraw";
+      // A name per drawing, so several drawings in one note can be told apart by a screen reader.
+      button.setAttribute("aria-label", alt ? "Open " + alt + " in Excalidraw" : "Open in Excalidraw");
+      button.contentEditable = "false";
+      button.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const call = editor.dotnet.invokeMethodAsync("OnAttachment", src);
+        if (call && typeof call.catch === "function") {
+          call.catch(() => {});
+        }
+      });
+      wrap.appendChild(img);
+      wrap.appendChild(button);
+      return {
+        dom: wrap,
+        stopEvent(event) { return event.target === button; },
+        ignoreMutation() { return true; },
+      };
     }
     const span = document.createElement("span");
     span.className = "image-placeholder grey";
@@ -59,6 +94,11 @@ function imageView(editor) {
     span.textContent = alt ? "[image: " + alt + "]" : "[image]";
     return { dom: span };
   };
+}
+
+// Test hook (job 384): the image node view factory for a fake editor.
+export function imageViewTest(editor) {
+  return imageView(editor);
 }
 
 // Reads the dropped files (each at most maxAttachmentBytes; a bigger one is not read) and makes one .NET call.

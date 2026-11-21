@@ -668,17 +668,17 @@ Every factory agent reads this file before working on Context. Keep it short and
     ends): `No template called <name>. Templates: <a>, <b>.` / `No template called <name>. Add one as templates/<name>.md.`,
     `Can't read template <name>.`, `Template <name> is too big.`, `templates is sensitive, so its templates can't be used.`,
     plus the `CreateNote` title texts.
-  - **Attachments** (job 177, `NoteAttachments.cs`, desktop only): images (PNG, JPEG, GIF, WebP) and PDFs live in
+  - **Attachments** (job 177, `NoteAttachments.cs`, desktop only): images (PNG, JPEG, GIF, WebP), PDFs and (job 384) Excalidraw drawings live in
     `<level folder>/.attachments/<name>` (the folder of the note file; `List()` never lists it, it starts with `.`).
     `CleanName` is the one stored-name rule (last segment, lower-case `[a-z0-9]` extension, stem `[A-Za-z0-9_-]` with
     `-` runs collapsed, leading `-` trimmed, cut to 100, trailing `-` trimmed, `attachment` for an empty or
     `ValidateTitle`-refused stem); `IsStoredName` checks that shape on a name itself; `ClashName(stem, n)` makes
-    `-2`..`-99` within 100. `Sniff` takes the type from magic bytes and requires the matching extension (no SVG/HTML).
+    `-2`..`-99` within 100. `Sniff` takes the type from magic bytes and requires the matching extension (no SVG/HTML); a `.excalidraw` name is `Excalidraw` only when its bytes are one JSON object (optional BOM, depth at most 64, nothing after it) whose top-level `type` is the string `excalidraw` (`MimeOf` `application/json`, not `IsImage`, linked as `![..](..)`).
     `Add(note, fileName, bytes)` (at most `MaxBytes` 10 MB; a note in `List()`; `.attachments` no link) writes a
     `0600` temp file in the folder, then a no-overwrite move, never touching the note or `context.db`.
     `TryResolve(note, src)` accepts only `.attachments/<stored name>`, a regular file inside the root, no link, at
     most `MaxBytes`, passing `Sniff`. `ImageSources(text)` (at most 20) and `LinkedNames(text)` (ordinal, followed
-    by `)` or a space, code included) never read files; both look only `MaxScannedName` (105) characters past each
+    by `)` or a space, code included) never read files; both look only `MaxScannedName` (111, `MaxExtensionLength` 10 for `excalidraw`) characters past each
     marker and keep distinct names in a `HashSet`, so a crafted note is scanned in linear time. A note linking more
     than `MaxLinkedNames` (100) names keeps every attachment: a `MoveWithNote` to another level changes nothing and
     throws `AttachmentMoveException` (the Failed text; a note never moves without its attachments) and `RemoveUnlinked`
@@ -693,7 +693,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     to `Delete` (each deleted child folder's `.attachments`, never through a link) and then calls `RemoveUnlinked`
     (never throws). `DesktopActions.AttachFiles(name, count, files)` (one line per file in `ActionResult.Attached`,
     more than 10: `Drop at most 10 files.`; sensitive: `Attachments can't be added to a sensitive note.`, no key-store
-    call) and `OpenAttachment(name, src)` (a `TryResolve` PDF to the launcher, else `Can't open <name>.`). The page
+    call) and `OpenAttachment(name, src)` (a `TryResolve` PDF to the launcher; a drawing (`NoteAttachments.IsDrawingSrc`) only when the plain note's text lists it in `DrawingSources` and it resolves as `Excalidraw`; else `Can't open <name>.`).
+    **Drawings** (job 384, `ExcalidrawSvg.cs`): `NoteAttachments.DrawingSources(text)` is `ImageSources`' scan for `.excalidraw` sources (at most `MaxInlineDrawings` 20; `ImageSources` never holds one). `ExcalidrawSvg.Render(bytes)` (pure, never throws) draws the non-deleted `rectangle`, `ellipse`, `diamond`, `line`, `arrow` (fixed head), `freedraw` and `text` elements in order (fields `x y width height angle points strokeColor backgroundColor strokeWidth opacity text fontSize textAlign`; any other type, `files` and frames skipped; viewBox = bounds + 10), writing only `svg g rect ellipse polygon polyline path text tspan`, no `href`/`style`/`on*`, colours only `#rgb`/`#rrggbb`/`#rrggbbaa` or 1-20 lower-case letters (else stroke `#1e1e1e`, fill `none`), numbers finite and clamped to ±1e6 (else the element is skipped), arrowheads inside the bounds, text XML-escaped (controls dropped; a lone surrogate escape skips the element); `null` for bad JSON, depth over 64, no `elements` array, over 5000 elements, 5000 points in one or 100,000 in all, or an SVG over 5,000,000 chars. `DesktopState.InlineImages` adds each rendering drawing as `image/svg+xml`; `AttachFiles` inserts a rendering drawing as an image of its SVG, else a plain link. The editor (`view.js` `isDrawingSrc`, `^\.attachments\/[^/\\]+\.excalidraw$`) draws a drawing with a URL as `span.drawing` with the `img` and `button.drawing-open` `Open in Excalidraw` (`aria-label` `Open <alt> in Excalidraw`), whose click only calls `OnAttachment(src)` (no transaction); test hooks `isDrawingSrc`, `imageViewTest(editor)`. Context never writes a drawing file; it is redrawn when the note is reopened. The page
     makes one `OnDrop(count, files)` call per drop, gets `insertAttachment` per stored file and shows images from
     `blob:` URLs built from the bytes `NoteEditor` passes to `mount` (none for a sensitive note); the bundle blocks
     window `dragover`/`drop` at load. At load it also registers one window `contextmenu` listener that calls

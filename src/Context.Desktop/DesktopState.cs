@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 
 namespace Context;
 
@@ -464,7 +465,9 @@ internal sealed class DesktopState
     /// <summary>
     /// The images the plain note <paramref name="name"/> shows inline, off the calling thread: each source of
     /// <see cref="NoteAttachments.ImageSources"/> in <paramref name="text"/> that <see cref="NoteAttachments.TryResolve"/>
-    /// accepts as an image, with its MIME type and base64 bytes. Empty on any error. Reads only.
+    /// accepts as an image, with its MIME type and base64 bytes, then (job 384) each source of
+    /// <see cref="NoteAttachments.DrawingSources"/> that resolves to an Excalidraw drawing and renders through
+    /// <see cref="ExcalidrawSvg.Render"/>, as <c>image/svg+xml</c> with the base64 of the SVG. Empty on any error. Reads only.
     /// </summary>
     public Task<IReadOnlyList<InlineImage>> InlineImages(string name, string text) => Task.Run(() =>
     {
@@ -478,6 +481,16 @@ internal sealed class DesktopState
                 if (resolved is not null && resolved.IsImage)
                 {
                     images.Insert(images.Count, new InlineImage(src, resolved.Mime, Convert.ToBase64String(resolved.Bytes)));
+                }
+            }
+
+            foreach (string src in NoteAttachments.DrawingSources(text))
+            {
+                ResolvedAttachment? resolved = attachments.TryResolve(name, src);
+                string? svg = resolved is { Type: AttachmentType.Excalidraw } ? ExcalidrawSvg.Render(resolved.Bytes) : null;
+                if (svg is not null)
+                {
+                    images.Insert(images.Count, new InlineImage(src, ExcalidrawSvg.Mime, Convert.ToBase64String(Encoding.UTF8.GetBytes(svg))));
                 }
             }
         }

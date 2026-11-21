@@ -289,6 +289,128 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
         Assert.Equal(link, bundle.Call("roundTrip", link));
     }
 
+    // Job 384 AC-8: isDrawingSrc matches only a stored .excalidraw name right under .attachments/.
+    [Theory]
+    [InlineData(".attachments/d.excalidraw", true)]
+    [InlineData(".attachments/My-Sketch_1.excalidraw", true)]
+    [InlineData(".attachments/d.excalidraw.png", false)]
+    [InlineData(".attachments/d.png", false)]
+    [InlineData(".attachments/a/d.excalidraw", false)]
+    [InlineData(".attachments/a\\d.excalidraw", false)]
+    [InlineData("other/d.excalidraw", false)]
+    [InlineData("x.attachments/d.excalidraw", false)]
+    [InlineData(".attachments/d.excalidraw ", false)]
+    [InlineData(".attachments/.excalidraw", false)]
+    [InlineData(".attachments/d.EXCALIDRAW", false)]
+    public void IsDrawingSrc_OnlyStoredDrawings(string src, bool expected)
+    {
+        Assert.Equal(expected ? "true" : "false", bundle.Json($"ContextEditor.isDrawingSrc({Js(src)})"));
+    }
+
+    // Job 384 AC-8/AC-11: a drawing image link is an image node and round-trips byte for byte.
+    [Theory]
+    [InlineData("![x](.attachments/d.excalidraw)\n")]
+    [InlineData("# Plan\n\nSee ![My-Sketch.excalidraw](.attachments/My-Sketch.excalidraw) here.\n")]
+    public void Drawing_IsImageNode_AndRoundTrips(string markdown)
+    {
+        using JsonDocument doc = JsonDocument.Parse(bundle.Call("docJson", markdown));
+
+        JsonElement image = Assert.Single(Nodes(doc.RootElement), n => Type(n) == "image");
+        Assert.EndsWith(".excalidraw", image.GetProperty("attrs").GetProperty("src").GetString(), StringComparison.Ordinal);
+        Assert.Equal(markdown, bundle.Call("roundTrip", markdown));
+    }
+
+    // Job 384 AC-8: the image node view of a drawing with a URL is the img plus an "Open in Excalidraw" button whose
+    // click only asks .NET to open the source; without a URL it is the placeholder; another image is the plain img.
+    [Theory]
+    [InlineData(".attachments/d.excalidraw", true)]
+    [InlineData(".attachments/d.excalidraw", false)]
+    [InlineData(".attachments/shot.png", true)]
+    public void ImageView_Drawing_OpenButton(string src, bool hasUrl)
+    {
+        string json = bundle.Json($$"""
+            (() => {
+              const element = tag => ({
+                tagName: tag.toUpperCase(), className: "", textContent: "", children: [], listeners: [],
+                appendChild(child) { this.children.push(child); return child; },
+                addEventListener(type, listener) { this.listeners.push({ type, listener }); },
+                setAttribute(name, value) { this.attrs = { ...(this.attrs || {}), [name]: String(value) }; },
+              });
+              globalThis.document = { createElement: element };
+              const calls = [];
+              const dispatches = [];
+              const images = new Map();
+              if ({{(hasUrl ? "true" : "false")}}) images.set({{Js(src)}}, "blob:drawing");
+              const editor = {
+                images,
+                dotnet: { invokeMethodAsync(...args) { calls.push(args); return undefined; } },
+                view: { dispatch(tr) { dispatches.push(tr); } },
+              };
+              try {
+                const view = ContextEditor.imageViewTest(editor)({ attrs: { src: {{Js(src)}}, alt: "Sketch" } });
+                const dom = view.dom;
+                const describe = e => ({ tag: e.tagName, cls: e.className, text: e.textContent, alt: e.alt ?? null,
+                  src: e.src ?? null, type: e.type ?? null, label: (e.attrs || {})["aria-label"] ?? null,
+                  listeners: e.listeners.map(l => l.type) });
+                const result = { dom: describe(dom), children: dom.children.map(describe) };
+                const button = dom.children.find(c => c.className === "drawing-open");
+                if (button) {
+                  const event = { target: button, prevented: 0, stopped: 0,
+                    preventDefault() { this.prevented++; }, stopPropagation() { this.stopped++; } };
+                  button.listeners.find(l => l.type === "click").listener(event);
+                  result.prevented = event.prevented;
+                  result.stopped = event.stopped;
+                  result.stopsButton = view.stopEvent({ target: button });
+                  result.stopsImage = view.stopEvent({ target: dom.children[0] });
+                }
+                result.calls = calls;
+                result.dispatches = dispatches.length;
+                return result;
+              } finally {
+                delete globalThis.document;
+              }
+            })()
+            """);
+
+        using JsonDocument doc = JsonDocument.Parse(json);
+        JsonElement root = doc.RootElement;
+        JsonElement dom = root.GetProperty("dom");
+        Assert.Equal(0, root.GetProperty("dispatches").GetInt32());
+        Assert.Equal("\"undefined\"", bundle.Json("typeof document"));
+        if (!hasUrl)
+        {
+            Assert.Equal(("SPAN", "image-placeholder grey", "[image: Sketch]"),
+                (dom.GetProperty("tag").GetString(), dom.GetProperty("cls").GetString(), dom.GetProperty("text").GetString()));
+            Assert.Empty(root.GetProperty("children").EnumerateArray());
+            Assert.Empty(root.GetProperty("calls").EnumerateArray());
+            return;
+        }
+
+        if (!src.EndsWith(".excalidraw", StringComparison.Ordinal))
+        {
+            Assert.Equal(("IMG", "blob:drawing", "Sketch"),
+                (dom.GetProperty("tag").GetString(), dom.GetProperty("src").GetString(), dom.GetProperty("alt").GetString()));
+            Assert.Empty(root.GetProperty("children").EnumerateArray());
+            return;
+        }
+
+        Assert.Equal(("SPAN", "drawing"), (dom.GetProperty("tag").GetString(), dom.GetProperty("cls").GetString()));
+        JsonElement[] children = root.GetProperty("children").EnumerateArray().ToArray();
+        Assert.Equal(2, children.Length);
+        Assert.Equal(("IMG", "blob:drawing", "Sketch"),
+            (children[0].GetProperty("tag").GetString(), children[0].GetProperty("src").GetString(), children[0].GetProperty("alt").GetString()));
+        Assert.Equal(("BUTTON", "drawing-open", "Open in Excalidraw", "button"),
+            (children[1].GetProperty("tag").GetString(), children[1].GetProperty("cls").GetString(),
+                children[1].GetProperty("text").GetString(), children[1].GetProperty("type").GetString()));
+        Assert.Equal("Open Sketch in Excalidraw", children[1].GetProperty("label").GetString());
+        Assert.Equal(1, root.GetProperty("prevented").GetInt32());
+        Assert.Equal(1, root.GetProperty("stopped").GetInt32());
+        Assert.True(root.GetProperty("stopsButton").GetBoolean());
+        Assert.False(root.GetProperty("stopsImage").GetBoolean());
+        JsonElement call = Assert.Single(root.GetProperty("calls").EnumerateArray());
+        Assert.Equal(["OnAttachment", src], call.EnumerateArray().Select(a => a.GetString()));
+    }
+
     // 177 AC-8/AC-12: a link whose name a move rewrote keeps its old label as written.
     [Theory]
     [InlineData("[a_b.pdf](.attachments/a_b-2.pdf)\n")]
