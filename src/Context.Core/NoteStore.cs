@@ -759,6 +759,8 @@ internal sealed class NoteStore
             {
                 File.Move(temp, path, overwrite: existing is not null);
             }
+            // File.Move(overwrite: false) fails when the target exists: a note that appeared after the check. In
+            // create-only mode that is a taken name; otherwise the exception is rethrown as before.
             catch (IOException) when (existing is null && File.Exists(path))
             {
                 if (!createOnly)
