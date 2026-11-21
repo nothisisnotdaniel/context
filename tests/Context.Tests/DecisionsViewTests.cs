@@ -1,6 +1,6 @@
 namespace Context.Tests;
 
-// 180: the data of decisions [tag]: every Decision: line, dated, with its people, newest first.
+// 180, 343: the data of decisions [tag]: every #!d decision paragraph, dated, with its number and people, newest first.
 public sealed class DecisionsViewTests : IDisposable
 {
     // UTC+1 with no clock changes, so no test depends on the machine's zone.
@@ -45,14 +45,17 @@ public sealed class DecisionsViewTests : IDisposable
     private static string Describe(Decision d) =>
         $"{d.Date:yyyy-MM-dd}|{d.Note}|{d.Line}|{string.Join(",", d.People)}|{d.Text}";
 
+    private static string Fields(Decision d) =>
+        $"{d.Note}|{d.Line}|{d.Number}|{d.Title}|{d.Headline}|{d.Text}";
+
     // AC-4: a meeting or daily note's title date is the decision's date.
     [Fact]
     public void Build_TitleDate_IsTheDate()
     {
-        Write("2026-11-10 Weekly sync", "# x\nDecision: ship it");
-        Write("2026-11-11", "Decision: daily");
+        Write("2026-11-10 Weekly sync", "# x\n#!d ship it");
+        Write("2026-11-11", "#!d daily");
         Write("meetings", "# meetings");
-        Write("meetings/2026-11-09 Sub", "Decision: nested");
+        Write("meetings/2026-11-09 Sub", "#!d nested");
 
         DecisionsView view = Build();
 
@@ -68,9 +71,9 @@ public sealed class DecisionsViewTests : IDisposable
     [Fact]
     public void Build_NoTitleDate_LastWriteDayInZone()
     {
-        Write("Plans", "Decision: late", new DateTime(2026, 11, 10, 23, 30, 0, DateTimeKind.Utc));
-        Write("2026-13-01 Bad", "Decision: bad date", new DateTime(2026, 3, 4, 10, 0, 0, DateTimeKind.Utc));
-        Write("2026-11-101", "Decision: digits after", new DateTime(2026, 3, 3, 10, 0, 0, DateTimeKind.Utc));
+        Write("Plans", "#!d late", new DateTime(2026, 11, 10, 23, 30, 0, DateTimeKind.Utc));
+        Write("2026-13-01 Bad", "#!d bad date", new DateTime(2026, 3, 4, 10, 0, 0, DateTimeKind.Utc));
+        Write("2026-11-101", "#!d digits after", new DateTime(2026, 3, 3, 10, 0, 0, DateTimeKind.Utc));
 
         DecisionsView view = Build();
 
@@ -84,21 +87,21 @@ public sealed class DecisionsViewTests : IDisposable
     public void Build_Sort_DateNoteLine()
     {
         // Names differ by more than case, so the test runs the same on case-insensitive file systems.
-        Write("2026-11-10 c", "Decision: c1");
-        Write("2026-11-10 B", "Decision: B1\nDecision: B2");
-        Write("2026-11-10 a", "Decision: a3\n\nDecision: a1");
-        Write("2026-11-12 z", "Decision: newest");
+        Write("2026-11-10 c", "#!d c1");
+        Write("2026-11-10 B", "#!d B1\n- #!d B2");
+        Write("2026-11-10 a", "#!d a3\n\n#!d a1");
+        Write("2026-11-12 z", "#!d newest");
 
         string[] order = Build().Decisions.Select(d => $"{d.Note}:{d.Line}").ToArray();
 
         Assert.Equal(["2026-11-12 z:1", "2026-11-10 a:1", "2026-11-10 a:3", "2026-11-10 B:1", "2026-11-10 B:2", "2026-11-10 c:1"], order);
     }
 
-    // AC-5: people on the line, distinct ignoring case, in line order.
+    // 343 AC-10: people in the whole paragraph, distinct ignoring case, in text order.
     [Fact]
     public void Build_People_DistinctInLineOrder()
     {
-        Write("Plan", "Decision: ship it with @[Anna] and @[anna] and @[Bo]");
+        Write("Plan", "#!d ship it with @[Anna]\nand @[anna] and @[Bo]");
 
         Decision decision = Assert.Single(Build().Decisions);
 
@@ -111,7 +114,7 @@ public sealed class DecisionsViewTests : IDisposable
     {
         Write("people", "# people");
         Write("people/Robert", "# Robert\naliases:: Bo");
-        Write("Plan", "Decision: ask @[Bo] and @[Robert] and @[Cy]");
+        Write("Plan", "#!d ask @[Bo] and @[Robert] and @[Cy]");
 
         Decision decision = Assert.Single(Build().Decisions);
 
@@ -126,8 +129,8 @@ public sealed class DecisionsViewTests : IDisposable
     [InlineData(" #Work ")]
     public void Build_TagFilter(string tag)
     {
-        Write("Plan", "#work\nDecision: ship it");
-        Write("Home", "#home\nDecision: paint");
+        Write("Plan", "#work\n\n#!d ship it");
+        Write("Home", "#home\n\n#!d paint");
 
         DecisionsView view = Build(tag);
 
@@ -140,8 +143,8 @@ public sealed class DecisionsViewTests : IDisposable
     [Fact]
     public void Build_TagFilter_BracketTag()
     {
-        Write("Plan", "#[project alpha]\nDecision: go");
-        Write("Home", "Decision: paint");
+        Write("Plan", "#[project alpha]\n\n#!d go");
+        Write("Home", "#!d paint");
 
         DecisionsView view = Build("#[Project  Alpha]");
 
@@ -181,7 +184,7 @@ public sealed class DecisionsViewTests : IDisposable
     [Fact]
     public void Build_BadIndex_IndexUnreadable_FileUnchanged()
     {
-        Write("Plan", "Decision: x");
+        Write("Plan", "#!d x");
         File.WriteAllText(DbPath, "this is not a database, just some text that fills the header....");
         byte[] before = File.ReadAllBytes(DbPath);
 
@@ -197,16 +200,53 @@ public sealed class DecisionsViewTests : IDisposable
     public void Build_SensitiveNote_NotListed()
     {
         Directory.CreateDirectory(root);
-        File.WriteAllText(Path.Combine(root, "Secret.ctxs"), "Decision: hidden");
-        Write("Plan", "Decision: open");
+        File.WriteAllText(Path.Combine(root, "Secret.ctxs"), "#!d hidden");
+        Write("Plan", "#!d open");
 
         Assert.Equal(["Plan"], Build().Decisions.Select(d => d.Note));
+    }
+
+    // 343 AC-10: number, title (last segment), headline and the full text, field by field; the old syntax is gone.
+    [Fact]
+    public void Build_Fields_NumberTitleHeadlineText()
+    {
+        Write("projects", "# projects");
+        Write("projects/Launch", "# Launch\n\n#!d12 Ship in March.\nThe beta was fine.\n\n- #!d bare item\n\nDecision: old");
+
+        Assert.Equal(
+            ["projects/Launch|3|12|Launch|Ship in March.|Ship in March.\nThe beta was fine.", "projects/Launch|6||Launch|bare item|bare item"],
+            Build().Decisions.Select(Fields));
+    }
+
+    // 343 AC-11: Find gives the owner's decision by number; an unknown number is NoDecisions; a bad index IndexUnreadable.
+    [Fact]
+    public void Find_ByNumber()
+    {
+        Write("Plan", "#!d7 go @[Anna]\nnow", new DateTime(2026, 2, 3, 12, 0, 0, DateTimeKind.Utc));
+
+        DecisionsView found = DecisionsView.Find(index, store, 7, Zone);
+        Assert.Equal(DecisionsViewKind.Found, found.Kind);
+        Decision decision = Assert.Single(found.Decisions);
+        Assert.Equal("Plan|1|7|Plan|go @[Anna]|go @[Anna]\nnow", Fields(decision));
+        Assert.Equal(["Anna"], decision.People);
+        Assert.Equal(new DateOnly(2026, 2, 3), decision.Date);
+
+        Assert.Equal(DecisionsViewKind.NoDecisions, DecisionsView.Find(index, store, 8, Zone).Kind);
+    }
+
+    [Fact]
+    public void Find_BadIndex_IndexUnreadable()
+    {
+        Write("Plan", "#!d7 x");
+        File.WriteAllText(DbPath, "this is not a database, just some text that fills the header....");
+
+        Assert.Equal(DecisionsViewKind.IndexUnreadable, DecisionsView.Find(index, store, 7, Zone).Kind);
     }
 
     [Fact]
     public void ToString_IsTypeName()
     {
         Assert.Equal("DecisionsView", new DecisionsView(DecisionsViewKind.NoDecisions, "secret", []).ToString());
-        Assert.Equal("Decision", new Decision("n", 1, new DateOnly(2026, 1, 1), "secret", ["p"]).ToString());
+        Assert.Equal("Decision", new Decision("n", 1, 5, new DateOnly(2026, 1, 1), "secret", ["p"]).ToString());
     }
 }

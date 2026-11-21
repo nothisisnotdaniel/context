@@ -1424,7 +1424,109 @@ internal sealed class DesktopState
     });
 
     /// <summary>
-    /// The <c>Decision:</c> lines of every plain note, or of the notes with <paramref name="tag"/>
+    /// Job 343: numbers the bare <c>#!d</c> markers of the plain note <paramref name="note"/>'s new
+    /// <paramref name="text"/> and removes the numbered markers another note owns (or that repeat in the text), under
+    /// the index lock: syncs the index, reads the owners, and reserves the new numbers in one <c>BEGIN IMMEDIATE</c>
+    /// transaction above the counter, the index and every number in the text (<see cref="DecisionNumbers.Apply"/>).
+    /// <c>null</c> when the text has no marker or anything fails (an unreadable index): the note is then saved as typed.
+    /// </summary>
+    internal DecisionEdits? NumberDecisions(string note, string text)
+    {
+        if (!text.Contains(DecisionParser.Token, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        try
+        {
+            lock (indexGate)
+            {
+                index.Sync(notes);
+                IReadOnlyDictionary<int, string> owners = index.DecisionOwners();
+                int floor = DecisionParser.Parse(text).Select(d => d.Number ?? 0).DefaultIfEmpty(0).Max();
+                DecisionEdits edits = DecisionNumbers.Apply(
+                    text,
+                    n => owners.TryGetValue(n, out string? owner) && !string.Equals(owner, note, StringComparison.Ordinal),
+                    count => index.ReserveDecisionNumbers(count, floor));
+                return edits.Changed ? edits : null;
+            }
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Job 343: after the app renamed or moved <paramref name="oldName"/> to <paramref name="newName"/>, its decision
+    /// numbers (and its subpages') stay with it. Never throws; on a failure the next sync gives the numbers to the
+    /// renamed note anyway, as no other note holds them.
+    /// </summary>
+    internal void MoveDecisionOwners(string oldName, string newName)
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                index.MoveDecisionOwners(oldName, newName);
+            }
+        }
+        catch (Exception)
+        {
+            // Left to the next sync.
+        }
+    }
+
+    /// <summary>
+    /// Job 343: the headline (raw) of each of <paramref name="numbers"/> (at most <see cref="MaxDecisionReferences"/>)
+    /// that a readable owner holds, off the calling thread under the index lock; unknown numbers are not in the result.
+    /// With <paramref name="sync"/> the index is synced first (a plain note); a sensitive note's lookups only read the
+    /// index. <c>null</c> on any failure.
+    /// </summary>
+    public Task<IReadOnlyDictionary<int, string>?> DecisionTitles(IReadOnlyList<int> numbers, bool sync) => Task.Run(() =>
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                if (sync)
+                {
+                    index.Sync(notes);
+                }
+
+                return (IReadOnlyDictionary<int, string>?)index.DecisionHeadlines(numbers.Take(MaxDecisionReferences));
+            }
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    });
+
+    /// <summary>
+    /// Job 343: the full name of the note that owns decision <paramref name="number"/> (read from the index only, off
+    /// the calling thread under the index lock), or <c>null</c> when none does or the index can't be read.
+    /// </summary>
+    public Task<string?> DecisionNote(int number) => Task.Run(() =>
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                return index.DecisionByNumber(number)?.Note;
+            }
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    });
+
+    /// <summary>The most distinct references a note's lookup asks for (job 343).</summary>
+    public const int MaxDecisionReferences = 500;
+
+    /// <summary>
+    /// The <c>#!d</c> decisions of every plain note, or of the notes with <paramref name="tag"/>
     /// (<see cref="DecisionsView.Build"/>, dated in the calendar's zone) after syncing the index, off the calling
     /// thread. Reads only and never throws: any failure gives the <see cref="DecisionsViewKind.IndexUnreadable"/> view.
     /// </summary>

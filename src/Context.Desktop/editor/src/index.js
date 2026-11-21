@@ -1,7 +1,8 @@
 // The bundle's entry: everything the page and the tests use hangs off globalThis.ContextEditor.
 import { roundTrip, isLossless, inlineNodes, docJson, splitTitle, outline, attributeRows, editAttributes, attributeSplit } from "./markdown.js";
 import { chipDom, headingDom } from "./schema.js";
-import { opensChip, typedBlock, typedMarkdown, commandMarkdown, typedAtMarkdown, toggledMarkdown, carriedMarkdown, changedCodeBlocksJson, copyText, toggleInlineCodeIn, toggleCodeBlockIn, mount, getMarkdown, isDirty, markClean, markCleanIf, destroy, focus, insertAttachment, headings, scrollToHeading, attributes, setAttributes, setLinkTitle } from "./view.js";
+import { opensChip, typedBlock, typedMarkdown, commandMarkdown, typedAtMarkdown, toggledMarkdown, carriedMarkdown, changedCodeBlocksJson, copyText, toggleInlineCodeIn, toggleCodeBlockIn, mount, getMarkdown, isDirty, markClean, markCleanIf, destroy, focus, insertAttachment, headings, scrollToHeading, attributes, setAttributes, setLinkTitle, applyDecisionEdits, decisionReferencesIn, setDecisionTitles, scrollToDecision, decisionEditsMarkdown, decisionRefsJson, pastedSliceMarkdown } from "./view.js";
+import { decisionsJson, stripDecisionMarkers, decisionReferences, applyDecisionEditsText, pastedDecisionMarkdown } from "./decisions.js";
 import { pastedMarkdown, titledMarkdown } from "./paste.js";
 import { isMermaidFence, mermaidResultJson, shouldRender } from "./mermaid.js";
 import { tokensJson, languageOptionsJson, withLanguage } from "./highlight.js";
@@ -64,6 +65,15 @@ globalThis.ContextEditor = Object.freeze({
   languageOptionsJson,
   withLanguage,
   copyText,
+  // Decisions (job 343): the parser mirror, the save edits replayed, the paste rule, the reference decorations.
+  decisionsJson,
+  stripDecisionMarkers,
+  decisionReferences,
+  applyDecisionEditsText,
+  pastedDecisionMarkdown,
+  decisionEditsMarkdown,
+  decisionRefsJson,
+  pastedSliceMarkdown,
   // Need a page.
   mount,
   getMarkdown,
@@ -78,6 +88,10 @@ globalThis.ContextEditor = Object.freeze({
   attributes,
   setAttributes,
   setLinkTitle,
+  applyDecisionEdits,
+  decisionReferencesIn,
+  setDecisionTitles,
+  scrollToDecision,
   toggleInlineCode: toggleInlineCodeIn,
   toggleCodeBlock: toggleCodeBlockIn,
 });

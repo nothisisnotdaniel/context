@@ -21,11 +21,11 @@ Every factory agent reads this file before working on Context. Keep it short and
     `#[Work]` are one tag. `TagParser.Format` shows a tag as `#tag`, or `#[tag]` when it has a space; all tag
     output uses it. `TagIndex.NormalizeTag` (for a typed tag, as in `context tags <tag>`) accepts `work`, `#work`, `[a b]`, `#[a b]`. `TagIndex` keeps the index in SQLite at `<root>/context.db` (`Microsoft.Data.Sqlite`,
     `Pooling=False`, parameterized SQL only): `notes(name, modified)` (last-write UTC ticks, NULL for a
-    note that couldn't be read so it is retried), `note_tags(note, tag)`, `note_links(note, target, heading)` (job 205: `heading` is the text after the first `#` or NULL; primary key stays `(note, target)`; a database without the column gets it through `ALTER TABLE` on every open, before any query; job 295: also `whole_key` and `part_key`, the upper-invariant of the target and of `NoteLinkParser.Split(target).Note`, NULL when empty, each with an index (`note_links_whole_key`, `note_links_part_key`), added the same way), `note_people(note, person, spelling)`, `note_decisions(note, line, text)` (job 180, primary key `(note, line)`; one row per `DecisionParser` line, written and pruned with the note's other rows), `note_todos(note, line, due, text, raw)` (job 201, primary key `(note, line)`; one row per open `NoteTodoParser` line, `due` `yyyy-MM-dd` or NULL, written and pruned like `note_decisions`), `note_topics(note, line, person, text, raw)` (job 253, primary key `(note, line)`; one row per `TopicParser` line, written and pruned like `note_decisions`; read by `Topics()`, plain notes only), `note_reviews(note, line, due, raw)` (job 256, primary key `(note)`; the first `ReviewDateParser` line of a plain note, `due` `yyyy-MM-dd`, written and pruned like `note_decisions`; read by `Reviews()`) and `note_attributes(note, key, value_key, value)` (job 157, primary key `(note, key, value_key)`, index on `(key, value_key)`) and `note_text` (job 170: FTS5 `fts5(note UNINDEXED, body, tokenize='trigram')` with FTS5 `secure-delete` on, set once in `Sync` after checking `note_text_config`; one row per plain note with its whole text, none for a note that can't be read or is over `NoteStore.MaxNoteBytes` (job 275: such a note is treated as unreadable, so it has no tag, link, people, attribute, decision, todo, topic, review or text rows and a NULL stored time); sensitive notes are never listed, so never indexed; every connection sets `PRAGMA secure_delete = ON`, so a deleted note's text doesn't linger in free pages of `context.db`; the rollback journal `context.db-journal` briefly holds the old pages and is unlinked, not zeroed, after each commit, which is outside this guarantee), `note_text_rows(note, row)` (job 295: note name -> its `note_text` rowid; re-indexing, deleting or pruning a note deletes its `note_text` row by that rowid, never `WHERE note`, and only while that row still names the note; the orphan prune goes through it; every non-upgrade `Sync` first drops each `note_text` row that is not its note's mapped row and each mapping whose row is gone or names another note, as an older version writing the same `context.db` leaves them, and clears those notes' stored time so they are re-parsed in that sync) and `note_skipped(note)` (job 295: one row per note over the cap, gone once the note is back under it, unreadable for another reason or gone). The cap counts the bytes actually read (`BoundedFile.Read` stops in its read loop): a note of exactly `MaxNoteBytes` bytes, a BOM or invalid UTF-8 bytes included, is indexed (invalid bytes decode as U+FFFD), one byte more is not. `Sync(NoteStore)` updates it
+    note that couldn't be read so it is retried), `note_tags(note, tag)`, `note_links(note, target, heading)` (job 205: `heading` is the text after the first `#` or NULL; primary key stays `(note, target)`; a database without the column gets it through `ALTER TABLE` on every open, before any query; job 295: also `whole_key` and `part_key`, the upper-invariant of the target and of `NoteLinkParser.Split(target).Note`, NULL when empty, each with an index (`note_links_whole_key`, `note_links_part_key`), added the same way), `note_people(note, person, spelling)`, `note_decisions(note, line, text, number)` (job 180, primary key `(note, line)`; job 343: one row per `DecisionParser` decision paragraph, `line` its marker line, `number` the marker's number or NULL for a bare `#!d`, added by `ALTER TABLE` on open like job 205, index `note_decisions_number`; written and pruned with the note's other rows), `decision_owners(number PRIMARY KEY, note)` and `decision_counter(high)` (job 343, see Decision log), `note_todos(note, line, due, text, raw)` (job 201, primary key `(note, line)`; one row per open `NoteTodoParser` line, `due` `yyyy-MM-dd` or NULL, written and pruned like `note_decisions`), `note_topics(note, line, person, text, raw)` (job 253, primary key `(note, line)`; one row per `TopicParser` line, written and pruned like `note_decisions`; read by `Topics()`, plain notes only), `note_reviews(note, line, due, raw)` (job 256, primary key `(note)`; the first `ReviewDateParser` line of a plain note, `due` `yyyy-MM-dd`, written and pruned like `note_decisions`; read by `Reviews()`) and `note_attributes(note, key, value_key, value)` (job 157, primary key `(note, key, value_key)`, index on `(key, value_key)`) and `note_text` (job 170: FTS5 `fts5(note UNINDEXED, body, tokenize='trigram')` with FTS5 `secure-delete` on, set once in `Sync` after checking `note_text_config`; one row per plain note with its whole text, none for a note that can't be read or is over `NoteStore.MaxNoteBytes` (job 275: such a note is treated as unreadable, so it has no tag, link, people, attribute, decision, todo, topic, review or text rows and a NULL stored time); sensitive notes are never listed, so never indexed; every connection sets `PRAGMA secure_delete = ON`, so a deleted note's text doesn't linger in free pages of `context.db`; the rollback journal `context.db-journal` briefly holds the old pages and is unlinked, not zeroed, after each commit, which is outside this guarantee), `note_text_rows(note, row)` (job 295: note name -> its `note_text` rowid; re-indexing, deleting or pruning a note deletes its `note_text` row by that rowid, never `WHERE note`, and only while that row still names the note; the orphan prune goes through it; every non-upgrade `Sync` first drops each `note_text` row that is not its note's mapped row and each mapping whose row is gone or names another note, as an older version writing the same `context.db` leaves them, and clears those notes' stored time so they are re-parsed in that sync) and `note_skipped(note)` (job 295: one row per note over the cap, gone once the note is back under it, unreadable for another reason or gone). The cap counts the bytes actually read (`BoundedFile.Read` stops in its read loop): a note of exactly `MaxNoteBytes` bytes, a BOM or invalid UTF-8 bytes included, is indexed (invalid bytes decode as U+FFFD), one byte more is not. `Sync(NoteStore)` updates it
     in one transaction and only re-parses files whose time changed. `PRAGMA user_version` holds the parser
-    version (`TagIndex.ParserVersion`, now 15: note todos are `- { }` lines, `- [ ]` is a note checkbox (job 329); 14 was `note_text_rows`, `note_skipped` and the `note_links` key columns; 13 was `#<n>` work item references in `note_items`; 12 was `review:yyyy-MM-dd` lines in `note_reviews`; 11 was `next: @[Name] topic` lines in `note_topics`, no longer note todos; 10 was the heading of a `[[Note#Heading]]` link in `note_links.heading`; 9 was open `- [ ]` lines in `note_todos`; 8 was `Decision:` lines in `note_decisions`; 7 was note text in `note_text`; 6 was a link target that runs into a code span is no link); when it is lower, `Sync` clears every stored time and empties `note_text` and `note_text_rows` in the same
+    version (`TagIndex.ParserVersion`, now 17: decisions are `#!d` paragraphs with a `number` (job 343); 16 was an `affiliation::` value as a comma-separated list (job 332); 15 was note todos as `- { }` lines, `- [ ]` a note checkbox (job 329); 14 was `note_text_rows`, `note_skipped` and the `note_links` key columns; 13 was `#<n>` work item references in `note_items`; 12 was `review:yyyy-MM-dd` lines in `note_reviews`; 11 was `next: @[Name] topic` lines in `note_topics`, no longer note todos; 10 was the heading of a `[[Note#Heading]]` link in `note_links.heading`; 9 was open `- [ ]` lines in `note_todos`; 8 was `Decision:` lines in `note_decisions`; 7 was note text in `note_text`; 6 was a link target that runs into a code span is no link); when it is lower, `Sync` clears every stored time and empties `note_text` and `note_text_rows` in the same
     transaction (so all notes are re-parsed and their text written once) and then sets it. Bump it whenever parsing changes. Queries: `Tags()`, `Reviews()`, `NotesWithTag`,
-    `NoteTags()`, `FindNote`, `Links` (job 295: reads `note_links` only through `TagIndex.LinksSql`, `WHERE note = $note OR whole_key IN ($k, $kmd) OR part_key IN ($k, $kmd)` with `$k` the upper-invariant name and `$kmd` = `$k` + `.MD`, so no `SCAN note_links`; then `NameLookup.ResolveLink` as before), `Skipped()` (job 295: the `note_skipped` names, ignoring case, then ordinal), `People()`, `NotesMentioning`, `NotesWithAttribute(key, value)` (by `AttributeParser.ValueKey`), `NotesWithoutAttribute(key)`, `AttributeValues(key)` (job 291: the `(Note, Value)` rows of `note_attributes` for the key, value as stored, by note (ordinal), then `rowid`), `Search(text, select)` (job 295: calls `select(note, body)` per row of `note_text MATCH $q` and keeps the non-null results, so no body is held after its row; `$q` the text as one FTS5 phrase: `"` + text with `"` doubled + `"`, always a parameter, so FTS syntax is literal), `Decisions(tag?)` (`(Note, Line, Text, Modified)` rows of `note_decisions` joined to `notes` with a stored time, `Modified` UTC; a tag keeps the notes with that `note_tags` row), `NoteTodos()` (`NoteTodo` rows of `note_todos` joined to `notes` with a stored time). A database that can't be opened or isn't valid throws `TagIndexException` (an
+    `NoteTags()`, `FindNote`, `Links` (job 295: reads `note_links` only through `TagIndex.LinksSql`, `WHERE note = $note OR whole_key IN ($k, $kmd) OR part_key IN ($k, $kmd)` with `$k` the upper-invariant name and `$kmd` = `$k` + `.MD`, so no `SCAN note_links`; then `NameLookup.ResolveLink` as before), `Skipped()` (job 295: the `note_skipped` names, ignoring case, then ordinal), `People()`, `NotesMentioning`, `NotesWithAttribute(key, value)` (by `AttributeParser.ValueKey`), `NotesWithoutAttribute(key)`, `AttributeValues(key)` (job 291: the `(Note, Value)` rows of `note_attributes` for the key, value as stored, by note (ordinal), then `rowid`), `Search(text, select)` (job 295: calls `select(note, body)` per row of `note_text MATCH $q` and keeps the non-null results, so no body is held after its row; `$q` the text as one FTS5 phrase: `"` + text with `"` doubled + `"`, always a parameter, so FTS syntax is literal), `Decisions(tag?)` (job 343: `IndexedDecision(Note, Line, Number, Text, Modified)` rows of `note_decisions` joined to `notes` with a stored time, `Modified` UTC, leaving out a numbered row whose note is not the number's owner; a tag keeps the notes with that `note_tags` row), `DecisionByNumber(n)`, `DecisionHeadlines(numbers)` (owned only), `DecisionOwners()`, `ReserveDecisionNumbers(count, floor)` and `MoveDecisionOwners(old, new)` (job 343, see Decision log), `NoteTodos()` (`NoteTodo` rows of `note_todos` joined to `notes` with a stored time). A database that can't be opened or isn't valid throws `TagIndexException` (an
     `IOException`) and is never deleted or overwritten. The file database waits up to `TagIndex.BusyTimeout` (5 s; an
     internal constructor argument shortens it for tests) for another process's lock, and `Sync` starts with
     `BEGIN IMMEDIATE`, so the desktop app and a command-line run can share it. `TagsView.Build`, `LinksView.Build`
@@ -185,18 +185,42 @@ Every factory agent reads this file before working on Context. Keep it short and
     included tag, no excluded one; no user text reaches SQL), notes sorted ignoring case then ordinal; kinds `Found`,
     `NoMatches`, `IndexUnreadable` (a `TagIndexException`). Sensitive notes are never indexed, so never listed. Desktop
     only (`SearchPanel`, saved searches).
-  - **Decision log** (job 180, `DecisionParser.cs`, `DecisionsView.cs`): `DecisionParser.Parse(markdown)` finds lines
-    outside fences (`TagParser.NumberedLinesOutsideFences`, 1-based numbers counting every line) that are optional
-    spaces or tabs, an optional `-`, `*` or `+` and one space, then `Decision:` ignoring case; the rest is trimmed and
-    collapsed (`TagParser.Collapse`), cut to `MaxTextLength` (1000) without splitting a surrogate pair; an empty rest,
-    `Decisions:`, text before it or `1. ` is no decision (`ParsedDecision(Line, Text)`). `DecisionsView.TryNormalizeTag`
-    (blank: no filter; else `NormalizeTag`, valid only when `NormalizeBracket` keeps it). `DecisionsView.Build(index,
-    store, tag, zone)`: an invalid tag is `InvalidTag` without opening the index; else `Sync`, `TagIndex.Decisions`,
-    each as `Decision(Note, Line, Date, Text, People)`: `Date` is the title's (last segment's) leading `yyyy-MM-dd`
-    (the whole title or followed by whitespace, a real date), else the last write time as a day in `zone`; `People`
-    the line's `PersonParser.Parse` mentions shown as `TagIndex.Aliases()` resolves them (else as written), distinct
-    by `PersonParser.Key`, in line order. Sorted by date descending, then note ignoring case, then ordinal, then line;
-    kinds `Found`, `NoDecisions`, `InvalidTag`, `IndexUnreadable` (`TagIndexException`). Sensitive notes never appear.
+  - **Decision log** (job 180, rewritten by job 343; `DecisionParser.cs`, `DecisionNumbers.cs`, `DecisionsView.cs`): a
+    decision is a paragraph that starts with a `#!d` marker. `DecisionParser.Markers(markdown)` reads the lines itself
+    (index of each, one trailing `\r` dropped, fences tracked by `TrimStart().StartsWith("```")`): a marker line is
+    optional BOM, spaces or tabs, an optional `-`, `*` or `+` plus one space, then `#!d`, then nothing or a space/tab
+    (bare) or 1-9 digits starting with 1-9 then nothing or a space/tab (numbered; `#!d12x`, `#!d0` are none). It counts
+    with a list marker, in the head region (only blank, ATX heading and column-0 `key::` lines before it), or after a
+    blank, heading or fence line. The paragraph runs to the line before the next blank, heading, fence, listed marker or
+    list line; `Text` is each line `TagParser.Collapse`d (empty ones left out) joined with `\n`, cut to `MaxTextLength`
+    (1000) without splitting a surrogate pair; `Headline` its first line. `Parse` keeps the markers with a non-empty
+    text (`ParsedDecision(Line, Number, Text, MarkerIndex, MarkerLength, StripLength)`; `StripLength` is the token plus
+    the spaces/tabs after it, plus the line ending when an unlisted marker is the whole line). `References(markdown)`:
+    `#!d<n>` at a line start or after whitespace (or after the BOM), outside fences and code spans (`CodeSpans`), not a
+    decision's own marker (a lone `#!d12` paragraph is a reference), not followed by a letter, digit, `-`, `_` or `#`;
+    distinct, in first-seen order. `StripMarkers` removes the numbered decisions' markers. `TryParseNumber` (`1234` or
+    `#!d1234`), `Format(n)`. `DecisionNumbers.Apply(text, isOwnedElsewhere, next)` (pure) numbers every bare decision in
+    document order with one `next(count)` call and strips each numbered one that repeats in the text or is owned
+    elsewhere; every other char stays; it returns `DecisionEdits(Text, Bare, Strip)`. Ownership: `Sync` ends with
+    `AssignDecisionOwners` (drops owners whose note is gone or, readable, no longer holds the number; an unreadable or
+    oversized owner keeps it; an unowned number goes to the holder with the oldest stored last-write time, then name
+    ignoring case, then ordinal). `ReserveDecisionNumbers(count, floor)` runs in one `BEGIN IMMEDIATE` transaction:
+    first = max(counter, every number in `note_decisions` and `decision_owners`, floor) + 1, the counter set to the last
+    (so a number is never reused while the database lasts); past `MaxNumber` (999999999) `TagIndexException`.
+    `DesktopState.NumberDecisions` (under `indexGate`: `Sync`, owners, `Apply`, null on any failure, so the note is saved
+    unnumbered) is called only by the plain path of `DesktopActions.SaveNote` (and so `RestoreVersion`), before the
+    write; the result's `ActionResult.Decisions` goes back to the editor. Capture, import, day's end, briefing, link
+    rewrites, the CLI and sensitive notes never number. Rename and Move call `MoveDecisionOwners` (the note and its
+    subpages, by `substr`, no `LIKE`). `DecisionsView.TryNormalizeTag` (blank: no filter; else `NormalizeTag`, valid only
+    when `NormalizeBracket` keeps it). `DecisionsView.Build(index, store, tag, zone)`: an invalid tag is `InvalidTag`
+    without opening the index; else `Sync`, `TagIndex.Decisions`, each as `Decision(Note, Line, Number, Date, Text,
+    People)` (`Title` the last segment, `Headline`): `Date` is the title's leading `yyyy-MM-dd` (the whole title or
+    followed by whitespace, a real date), else the last write time as a day in `zone`; `People` the paragraph's
+    `PersonParser.Parse` mentions shown as `TagIndex.Aliases()` resolves them (else as written), distinct by
+    `PersonParser.Key`, in text order. Sorted by date descending, then note ignoring case, then ordinal, then line; kinds
+    `Found`, `NoDecisions`, `InvalidTag`, `IndexUnreadable` (`TagIndexException`). `DecisionsView.Find(index, store,
+    number, zone)` gives the one owned decision. Sensitive notes never appear. The editor mirrors the parser in
+    `editor/src/decisions.js` (see Page editor).
   - **Similar notes** (job 268, `SimilarNotes.cs`): `SimilarNotes.TitleKey(name)` is the last segment's
     letter-or-digit runs, lower-cased invariant, joined by one space. `TitleMatch(a, b)`: no letter in either key is
     `None`; equal keys `Same`; keys equal once digits are removed (and different) `None`; a key under 5 characters
@@ -743,10 +767,13 @@ Every factory agent reads this file before working on Context. Keep it short and
   per hit, both through `OneLine`, exit 0, no hits no output; blank is the usage error `Type: context search <text>.`
   before the folder is read; too short `Type at least 3 characters to search.`, too long `Search text can be at most
   200 characters.`, bad db `Can't read context.db.`, all exit 1),
-  `decisions [tag...]` (job 180, see Decision log: arguments joined with one space as the tag; per decision
-  `<yyyy-MM-dd>\t<note>\t<people joined ", ">\t<text>`, each through `OneLine`, exit 0, none no output; an invalid
-  tag is the usage error `Type: context decisions [tag].` before the folder is read; bad db `Can't read context.db.`,
-  exit 1; `--json` is a usage error),
+  `decisions [--full] [tag...]` (job 180, job 343, see Decision log: arguments other than `--full` (any case) joined
+  with one space as the tag; per decision `<yyyy-MM-dd>\t<#!dN or empty>\t<note name>\t<people joined ", ">\t<headline>`,
+  each through `OneLine`, `--full` the whole text instead of the headline, exit 0, none no output),
+  `decisions <n>` or `decisions #!d<n>` (job 343: `#!d<n>`, `Note: <name>`, `Date: <date>`, `People: …`, a blank line,
+  then each text line through `OneLine`, exit 0; an unknown number `No decision #!d<n>.`, exit 1). A number mixed with
+  other arguments, or an invalid tag, is the usage error `Type: context decisions [--full] [tag] or context decisions
+  <number>.` before the folder is read; bad db `Can't read context.db.`, exit 1; `--json` is a usage error),
   `dayend [today|yyyy-MM-dd]` (job 171, see Day's end: `DayEnd.CloseDay` for today or that day, printing
   `Updated <D>.` and `Moved <n> todo(s) to <D+1>.`, exit 0; a sensitive D or D+1 note `Cli.SensitiveText`, a bad
   `todos.json` `Can't read todos.json.`, a failed write `Can't write <name>.`, all stderr only, exit 1; any other or a
@@ -1375,13 +1402,19 @@ Every factory agent reads this file before working on Context. Keep it short and
     then shows `button.search-back` (`Back to search`) above the breadcrumb; it shows the page again for that text
     with `Focus` = the note (that row, else the first, is the tab stop and gets the focus). It goes when another note,
     Today, a day or any page opens, the Search page included.
-    `DecisionsPanel` (job 180, `/decisions [tag]`; `Main`'s `decisionsShown`, after `SearchPanel`) has the heading
-    `Decisions` (with a tag `Decisions: #tag`) and `Close`, and lists `DesktopState.Decisions(tag)` (`DecisionsView.Build`
-    under `indexGate`, never throws): per decision a grey `span.date`, a `note-button` (through `OnOpen`, full name in
-    `title`), grey `span.people` (only with people) and the one-line `span.text` (cut by CSS, full text in `title`); at
+    `DecisionsPanel` (job 180, job 343, `/decisions [tag]`; `Main`'s `decisionsShown`, after `SearchPanel`) has the
+    heading `Decisions` (with a tag `Decisions: #tag`) and `Close`, and lists `DesktopState.Decisions(tag)`
+    (`DecisionsView.Build` under `indexGate`, never throws): per decision a grey `span.date`, `span.decision-number`
+    (a button `#!d1234` that opens the note at the decision through `OnOpenDecision`, or grey `unnumbered`), a
+    `note-button` with the note's title (last segment, through `NoteName`; full name in `title`; opens at the top
+    through `OnOpen`), grey `span.people` (only with people), `span.text` with the headline in a button (jumps like the
+    number; an unnumbered row opens the note at the top) and `button.decision-expand` (`aria-expanded`, `Show full
+    text` / `Hide full text`) that shows `p.decision-full` (each line through `OneLine`, `white-space: pre-wrap`); at
     most `MaxRows` (100), then grey `… <n> more`. Grey `Loading…`, grey `No decisions yet.` / `No decisions in notes
     tagged #<tag>.`, red `Can't read the decisions.`, red `Type /decisions [tag].` for an invalid tag (nothing read);
-    same read-only (no `Actions.`), reload and stale-result rules. Opening a note or `Today` closes it.
+    same read-only (no `Actions.`), reload and stale-result rules. Opening a note or `Today` closes it. `Main`'s
+    `RequestOpen(name, heading, decision)` keeps `pendingDecision` through the unsaved-changes dialog and gives the
+    new editor `Decision` (the open note itself jumps through `JumpToDecisionAsync`).
     `SimilarPanel` (job 268, `/similar`; `Main`'s `similarShown`, after `DecisionsPanel`) has the heading `Similar notes`
     and `Close`, and lists `DesktopState.Similar()` (under `indexGate`, never throws): per pair two `note-button`s
     (`OnOpen`), the grey `span.reason` (`same title`, `similar title`, `<n>% same text` rounded down, joined by `, `) and
@@ -1694,6 +1727,27 @@ Every factory agent reads this file before working on Context. Keep it short and
     A note that was read (or unlocked) but whose page editor didn't start (`mount` threw) shows red
     `The editor couldn't start. <name> was not changed.` (`p.editor-failed`, never together with `.unreadable`) and
     can't be saved, while a failed `focus` after a mount shows nothing.
+    **Decisions in the editor** (job 343, `editor/src/decisions.js`, DOM-free, mirrors `DecisionParser` char for char:
+    `decisionsJson`, `stripDecisionMarkers`, `decisionReferences` (JSON, distinct, at most 500), `applyDecisionEditsText`
+    (the k-th bare decision gets `bare[k]`; a number listed c times in `strip` loses its last c markers),
+    `pastedDecisionMarkdown(text, lastCut)`). In `view.js`: after a `Done` save whose `ActionResult.Decisions` changed,
+    `NoteEditor` calls `applyDecisionEdits(element, editsJson, saved)` (`{bare,strip}` integers only): the edits replace
+    only the changed range in one transaction with `addToHistory` false and no `OnChanged`, then `markCleanIf(saved)`;
+    true when clean, else it stays dirty and the pause restarts. Paste: `transformPasted` strips the numbered marker that
+    starts each pasted paragraph that has more text (plain and HTML, Shift-paste too; code and code blocks untouched),
+    and the smart-paste text goes through `pastedDecisionMarkdown`, unless the pasted text equals the last cut of this
+    mount (`clipboardTextSerializer` remembers it after a `cut` event) or it is a drag inside the editor. References are
+    a decoration plugin (no text change): `setDecisionTitles(element, [[n, headline|null]…])` draws a known number as
+    `span.decision-ref` (role `link`, `title` the headline, through `OneLine` in .NET, `data-decision`) and an unknown
+    one as grey `span.decision-ref-unknown` (`title` `No decision #!d<n>.`); code marks, code blocks and a paragraph's
+    own marker are skipped. `NoteEditor` reads `decisionReferencesIn` after mount, reload, restore and every `Done`
+    save, looks them up with `DesktopState.DecisionTitles(numbers, sync: !Sensitive)` and sends the titles; a click on
+    a reference calls `OnDecision(n)` -> `EditorInterop.DecisionClicked`: in the open note `scrollToDecision` jumps in
+    place, else `DesktopState.DecisionNote(n)` and `OnOpenDecision` -> `Main.RequestOpen(name, null, n)`; no owner:
+    grey `No decision #!d<n>.`. `scrollToDecision(element, n)` puts the cursor at the start of the paragraph whose text
+    starts with `#!d<n>`, scrolls it into view and adds the node decoration `decision-flash` (a CSS animation, none with
+    reduced motion); false for an unknown number, and the note shows grey `<name> has no decision #!d<n>.`. The
+    `Decision` parameter jumps once after mount, like `Heading`.
     **Heading links and the outline** (job 205): `outline(markdown, name)` (no DOM) and `headings(element)` (the live
     document) return JSON `[{level,text}]` of the body's headings in document order (the hidden title left out; text is
     the text nodes plus each chip's raw text, marks dropped, a line break as a space, trimmed); `scrollToHeading(element,

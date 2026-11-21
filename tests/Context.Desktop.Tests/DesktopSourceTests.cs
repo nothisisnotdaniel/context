@@ -821,8 +821,10 @@ public sealed class DesktopSourceTests
 
         Assert.NotEmpty(selectors);
         Assert.Contains(selectors, sel => sel.StartsWith(".note-editor-body", StringComparison.Ordinal));
+        // 343: the decision flash's animation and its reduced-motion switch (whose rule is .note-editor-body's).
         Assert.All(selectors, sel => Assert.True(
-            sel.StartsWith(".note-editor-body", StringComparison.Ordinal) || sel.Contains("ProseMirror", StringComparison.Ordinal),
+            sel.StartsWith(".note-editor-body", StringComparison.Ordinal) || sel.Contains("ProseMirror", StringComparison.Ordinal)
+                || sel is "@keyframes decision-flash" or "@media (prefers-reduced-motion: reduce)",
             sel));
     }
 
@@ -1268,7 +1270,13 @@ public sealed class DesktopSourceTests
         Assert.Equal(
             ["OnTag", "OnLink", "OnPerson", "OnDirty", "OnDrop", "OnAttachment", "OnChanged", "OnPasteLink"],
             invokable.Select(m => m.Groups[1].Value).ToArray());
-        Assert.Equal(8, Regex.Matches(text, @"\[JSInvokable").Count);
+        Assert.Equal(9, Regex.Matches(text, @"\[JSInvokable").Count);
+
+        // 343: OnDecision only raises DecisionClicked, and only for a number in range.
+        Assert.Contains(
+            "public Task OnDecision(int number) =>\n        number is >= 1 and <= DecisionParser.MaxNumber ? DecisionClicked?.Invoke(number) ?? Task.CompletedTask : Task.CompletedTask;",
+            text.Replace("\r\n", "\n", StringComparison.Ordinal),
+            StringComparison.Ordinal);
         Assert.All(invokable, m => Assert.Matches(
             @"^\s*(TagClicked\?\.Invoke\(raw\)|LinkClicked\?\.Invoke\(raw\)|PersonClicked\?\.Invoke\(raw\)|DirtyChanged\?\.Invoke\(dirty\)"
             + @"|FilesDropped\?\.Invoke\(new DroppedFiles\(count, files\)\)|AttachmentClicked\?\.Invoke\(href\)|LinkPasted\?\.Invoke\(url\)|Changed\?\.Invoke\(\)) \?\? Task\.CompletedTask$",
@@ -1326,7 +1334,7 @@ public sealed class DesktopSourceTests
         Assert.Matches(@"handleDOMEvents:\s*\{\s*(?://[^\n]*\n\s*)*keydown\(", text);
         Assert.Contains("opensChip", text, StringComparison.Ordinal);
         Assert.Equal(
-            ["OnAttachment", "OnChanged", "OnDirty", "OnDrop", "OnLink", "OnPasteLink", "OnPerson", "OnTag"],
+            ["OnAttachment", "OnChanged", "OnDecision", "OnDirty", "OnDrop", "OnLink", "OnPasteLink", "OnPerson", "OnTag"],
             Regex.Matches(text, @"invokeMethodAsync\(""(\w+)""").Select(m => m.Groups[1].Value).Distinct().Order(StringComparer.Ordinal));
     }
 

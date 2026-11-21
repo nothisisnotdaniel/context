@@ -81,9 +81,11 @@ internal sealed record ActionResult
         EditableNote? note = null,
         DateOnly? nextDue = null,
         IReadOnlyList<AttachmentLine>? attached = null,
-        string? name = null)
+        string? name = null,
+        DecisionEdits? decisions = null)
     {
         Name = name;
+        Decisions = decisions;
         Kind = kind;
         Reason = reason;
         Text = text;
@@ -94,6 +96,12 @@ internal sealed record ActionResult
 
     /// <summary>For <see cref="DesktopActions.RenameNote"/> when done: the note's new full name; else <c>null</c>.</summary>
     public string? Name { get; }
+
+    /// <summary>
+    /// For a <see cref="DesktopActions.SaveNote"/> that numbered or removed <c>#!d</c> markers (job 343): the edits, whose
+    /// <see cref="DecisionEdits.Text"/> is what was saved; else <c>null</c>.
+    /// </summary>
+    public DecisionEdits? Decisions { get; }
 
     /// <summary>For <see cref="DesktopActions.AttachFiles"/>: one line per dropped file, in drop order; else <c>null</c>.</summary>
     public IReadOnlyList<AttachmentLine>? Attached { get; }
@@ -2386,11 +2394,21 @@ internal sealed class DesktopActions
 
         try
         {
+            // Job 343: bare #!d markers get their numbers (reserved before the write, so a failed write only leaves a
+            // gap) and markers owned by another note go; an unreadable index saves the text as typed.
+            DecisionEdits? decisions = state.NumberDecisions(opened.Name, text);
+            if (decisions is not null && System.Text.Encoding.UTF8.GetByteCount(decisions.Text) > MaxNoteBytes)
+            {
+                decisions = null;
+            }
+
+            text = decisions?.Text ?? text;
             NoteHistory? history = KeepsVersion(opened, auto) ? state.HistoryStore : null;
             NoteSaveResult saved = notes.SaveIfUnchanged(opened, text, out EditableNote? savedNote, history);
             return saved switch
             {
-                NoteSaveResult.Saved => new ActionResult(ActionKind.Done, ActionReason.None, opened.Name, savedNote),
+                NoteSaveResult.Saved => new ActionResult(
+                    ActionKind.Done, ActionReason.None, opened.Name, savedNote, decisions: decisions),
                 NoteSaveResult.Unchanged => new ActionResult(ActionKind.Done, ActionReason.Unchanged, opened.Name, opened),
                 NoteSaveResult.ChangedOnDisk => Refused(ActionReason.ChangedOnDisk, ChangedOnDiskText(opened.Name)),
                 NoteSaveResult.TooLarge => Refused(ActionReason.Invalid, TooLargeText(opened.Name)),
@@ -3158,6 +3176,7 @@ internal sealed class DesktopActions
                 string oldName = source.Name;
                 ChangeRecent(list => RecentNotes.Renamed(list, oldName, renamedName));
                 ChangePinned(list => PinnedNotes.Renamed(list, oldName, renamedName));
+                state.MoveDecisionOwners(oldName, renamedName);
             }
 
             return UpdateLinks(plan, renamedName);
@@ -3769,6 +3788,7 @@ internal sealed class DesktopActions
                 string oldName = source.Name;
                 ChangeRecent(list => RecentNotes.Renamed(list, oldName, moved.Name));
                 ChangePinned(list => PinnedNotes.Renamed(list, oldName, moved.Name));
+                state.MoveDecisionOwners(oldName, moved.Name);
             }
 
             return new ActionResult(ActionKind.Done, ActionReason.None, moved.Name);

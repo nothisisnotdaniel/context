@@ -379,6 +379,22 @@ public sealed class SensitiveActionsTests : IDisposable
         Assert.Equal(2, data.Keys.Agrees);
     }
 
+    // 343 AC-4: a sensitive note is never numbered: its bare #!d stays bare and the save has no edits for the editor.
+    [Fact]
+    public async Task SaveNote_Sensitive_DecisionsNeverNumbered()
+    {
+        await Sealed("Plan", "# Plan\n");
+        EditableNote opened = (await data.State!.ReadSensitive("Plan"))!;
+
+        ActionResult result = await data.Actions!.SaveNote(opened, "# Plan\n\n#!d x\n");
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Null(result.Decisions);
+        Assert.Equal("# Plan\n\n#!d x\n", result.Note!.Text);
+        Assert.Equal("# Plan\n\n#!d x\n", (await data.State.ReadSensitive("Plan"))!.Text);
+        Assert.False(File.Exists(Path.Combine(data.Root, TagIndex.FileName)) && new TagIndex(data.Root).DecisionByNumber(1) is not null);
+    }
+
     // AC-5: an unchanged text writes nothing.
     [Fact]
     public async Task SaveNote_Sensitive_Unchanged_WritesNothing()

@@ -71,7 +71,7 @@
                 }
                 @if (decisionsShown is { } decisionsTag)
                 {
-                    <DecisionsPanel Tag="@decisionsTag" OnOpen="RequestOpen" OnClose="CloseDecisions" />
+                    <DecisionsPanel Tag="@decisionsTag" OnOpen="RequestOpen" OnOpenDecision="OpenDecision" OnClose="CloseDecisions" />
                 }
                 @if (similarShown)
                 {
@@ -136,7 +136,7 @@
                         }
                         int shownEditor = editorGeneration;
                         <NoteEditor @key="(name, openSensitive)" @ref="editor" Name="@name" Sensitive="openSensitive"
-                                    OnTag="ShowTag" OnOpenNote="RequestOpen" OnOpenHeading="OpenHeading" OnCreateNote="CreateLinked" Heading="@openHeading" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked"
+                                    OnTag="ShowTag" OnOpenNote="RequestOpen" OnOpenHeading="OpenHeading" OnCreateNote="CreateLinked" Heading="@openHeading" Decision="@openDecision" OnOpenDecision="OpenDecision" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked"
                                     OnAttach="AttachDropped" OnOpenAttachment="OpenAttachment"
                                     OnOutline="OutlineReport(shownEditor)" />
                         @* 338: a person page is a flat page, so it shows no Subpages section. *@
@@ -283,6 +283,9 @@ else
     private string? pendingHeading;
     // The heading a [[Note#Heading]] link opened the note at; the new editor jumps there once, after its mount.
     private string? openHeading;
+    // Job 343: the decision a reference or the log opened the note at; the new editor jumps there once, after its mount.
+    private int? pendingDecision;
+    private int? openDecision;
     private string? pendingPerson;
     private string? pendingLink;
     private bool pendingToday;
@@ -834,9 +837,15 @@ else
     // A [[Note#Heading]] link clicked in the editor: opens that note at the heading.
     private Task OpenHeading((string Name, string Heading) link) => RequestOpen(link.Name, link.Heading);
 
+    // A decision reference clicked in the editor, or a decision in the log (job 343): opens its note at the decision.
+    private Task OpenDecision((string Name, int Decision) target) => RequestOpen(target.Name, null, target.Decision);
+
     // Opens the note called name (null: no note) at heading (null: at the top), asking first when the open
     // note has unsaved changes. The open note itself only jumps to the heading, keeping what is typed.
-    private async Task RequestOpen(string? name, string? heading)
+    private Task RequestOpen(string? name, string? heading) => RequestOpen(name, heading, null);
+
+    // As above, or at decision (#!d<n>, job 343) when heading is null.
+    private async Task RequestOpen(string? name, string? heading, int? decision)
     {
         if (name is not null && string.Equals(name, openName, StringComparison.Ordinal))
         {
@@ -852,6 +861,10 @@ else
             {
                 await editor.JumpToHeadingAsync(heading);
             }
+            else if (decision is int number && editor is not null)
+            {
+                await editor.JumpToDecisionAsync(number);
+            }
 
             return;
         }
@@ -860,6 +873,7 @@ else
         {
             pendingName = name;
             pendingHeading = heading;
+            pendingDecision = decision;
             pendingPerson = null;
             pendingLink = null;
             pendingAppointment = null;
@@ -867,7 +881,7 @@ else
             return;
         }
 
-        ShowNote(name, heading);
+        ShowNote(name, heading, decision: decision);
     }
 
     // Saves the open note first when it has unsaved changes (job 203). True when unsaved changes are left because that
@@ -1093,7 +1107,7 @@ else
 
         if (pendingPerson is not { } person)
         {
-            ShowNote(pendingName, pendingHeading);
+            ShowNote(pendingName, pendingHeading, decision: pendingDecision);
             return;
         }
 
@@ -1125,6 +1139,7 @@ else
         pendingPickedDay = null;
         pendingName = null;
         pendingHeading = null;
+        pendingDecision = null;
         pendingPerson = null;
         pendingLink = null;
         pendingToday = false;
@@ -1176,7 +1191,7 @@ else
     }
 
     // record false: the open note was just renamed or moved, and the action already changed its recent entry in place.
-    private void ShowNote(string? name, string? heading = null, bool record = true)
+    private void ShowNote(string? name, string? heading = null, bool record = true, int? decision = null)
     {
         (string? Name, bool Sensitive) before = (openName, openSensitive);
         if (record && name is not null && !string.Equals(name, openName, StringComparison.Ordinal))
@@ -1187,7 +1202,9 @@ else
 
         openName = name;
         openHeading = name is null ? null : heading;
+        openDecision = name is null || heading is not null ? null : decision;
         pendingHeading = null;
+        pendingDecision = null;
         openSensitive = name is not null
             && Snapshot is { } snapshot
             && snapshot.Sensitive.Any(n => string.Equals(n.Name, name, StringComparison.Ordinal));
@@ -1299,7 +1316,7 @@ else
                 ShowBoard(rest);
                 break;
             case "/decisions":
-                // Every note's Decision: lines, or those of the notes with a tag: /decisions #work. Read only;
+                // Every note's #!d decisions, or those of the notes with a tag: /decisions #work. Read only;
                 // DecisionsPanel shows the usage line for an invalid tag.
                 decisionsShown = rest;
                 ShowStatus(string.Empty, string.Empty);

@@ -545,12 +545,52 @@ input[type="password"]:disabled {
     padding: 3px 0;
 }
 
-/* The decisions panel: one line per decision (grey date, note, grey people, the text), cut with the full text in title. */
+/* The decisions panel (job 343): one line per decision (grey date, the number or grey "unnumbered", the note's title,
+   grey people, the headline, the expand button), cut with the full text in title; the full paragraph unfolds below. */
 .decision-rows li {
     align-items: baseline;
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     padding: 3px 0;
+}
+
+.decision-rows .decision-number {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+}
+
+.decision-rows .decision-number button,
+.decision-rows .text button {
+    background: none;
+    border: none;
+    border-radius: 3px;
+    color: var(--accent-strong);
+    max-width: 100%;
+    padding: 0;
+    text-align: left;
+}
+
+.decision-rows .decision-number button:hover,
+.decision-rows .text button:hover {
+    text-decoration: underline;
+}
+
+.decision-rows .decision-expand {
+    flex: none;
+    font-size: 0.85em;
+    padding: 0 8px;
+}
+
+.decision-rows .decision-full {
+    background: var(--panel);
+    border-left: 3px solid var(--line);
+    color: var(--text);
+    flex-basis: 100%;
+    margin: 2px 0 4px;
+    padding: 4px 8px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 .decision-rows .date {
@@ -570,6 +610,10 @@ input[type="password"]:disabled {
 .decision-rows .text {
     flex: 1;
     min-width: 0;
+}
+
+.decision-rows .text button {
+    display: block;
 }
 
 /* The similar notes panel (job 268): both note names, the grey reason and the two Keep buttons on one line; on a

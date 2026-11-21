@@ -160,6 +160,17 @@
     [Parameter]
     public string? Heading { get; set; }
 
+    /// <summary>The decision number (<c>#!d1234</c>, job 343) to jump to once the note is mounted; read on the first mount only.</summary>
+    [Parameter]
+    public int? Decision { get; set; }
+
+    /// <summary>
+    /// Called with the owner's name and the number when a reference to a decision in another note is clicked (job 343);
+    /// the parent saves this note first. Without a delegate the owner is opened through <see cref="OnOpenNote"/>.
+    /// </summary>
+    [Parameter]
+    public EventCallback<(string Name, int Decision)> OnOpenDecision { get; set; }
+
     /// <summary>Called with the person's name (as found by PersonParser) when a mention in the text is clicked.</summary>
     [Parameter]
     public EventCallback<string> OnPerson { get; set; }
@@ -271,7 +282,17 @@
                     opened = saved;
                 }
 
-                if (edited)
+                if (result.Decisions is { Changed: true } decisions)
+                {
+                    // The save numbered or stripped markers (job 343): the page replays the same edits, out of the undo
+                    // history, and is clean only when its text is what was written (nothing typed during the save).
+                    dirty = !await ApplyDecisionEditsAsync(decisions);
+                    if (dirty)
+                    {
+                        RestartPause();
+                    }
+                }
+                else if (edited)
                 {
                     // Compared and marked in one turn of the page: what was typed during the save stays unsaved.
                     dirty = !await Interop.MarkCleanIfAsync(host, text);
@@ -286,6 +307,7 @@
 
                 ShowStatus(auto ? "Saved." : $"Saved {DesktopText.OneLine(result.Text)}.", auto ? "grey" : "accent");
                 await LoadOutlineAsync();
+                await LoadDecisionTitlesAsync();
             }
             else
             {
@@ -387,6 +409,7 @@
             dirty = false;
             await LoadAttributesAsync();
             await LoadOutlineAsync();
+            await LoadDecisionTitlesAsync();
         }
         catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
         {
@@ -417,6 +440,7 @@
             ShowStatus(string.Empty, string.Empty);
             await LoadAttributesAsync();
             await LoadOutlineAsync();
+            await LoadDecisionTitlesAsync();
         }
         catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
         {
@@ -448,6 +472,7 @@
         Interop.FilesDropped -= FilesDropped;
         Interop.AttachmentClicked -= AttachmentClicked;
         Interop.LinkPasted -= LinkPasted;
+        Interop.DecisionClicked -= DecisionClicked;
         Interop.Changed -= EditorChanged;
         await Interop.DestroyAsync();
     }
@@ -482,6 +507,7 @@
             Interop.FilesDropped += FilesDropped;
             Interop.AttachmentClicked += AttachmentClicked;
             Interop.LinkPasted += LinkPasted;
+            Interop.DecisionClicked += DecisionClicked;
             Interop.Changed += EditorChanged;
 
             // A sensitive note shows no images: nothing next to it is read.
@@ -509,9 +535,14 @@
 
             await LoadAttributesAsync();
             await LoadOutlineAsync();
+            await LoadDecisionTitlesAsync();
             if (Heading is { } heading)
             {
                 await JumpToHeadingAsync(heading);
+            }
+            else if (Decision is int decision)
+            {
+                await JumpToDecisionAsync(decision);
             }
         }
 
@@ -716,6 +747,212 @@
             // The page is gone; the editor stays where it is.
         }
     }
+
+    /// <summary>
+    /// Job 343: puts the cursor at the start of decision <paramref name="number"/>'s paragraph in the open note, scrolls
+    /// to it and flashes it, keeping unsaved text; without such a decision, says so in grey and stays where it is.
+    /// </summary>
+    internal async Task JumpToDecisionAsync(int number)
+    {
+        if (!mounted || disposed)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!await Interop.ScrollToDecisionAsync(host, number))
+            {
+                ShowStatus($"{DisplayName} has no decision {DecisionParser.Format(number)}.", "grey");
+            }
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            // The page is gone; the editor stays where it is.
+        }
+    }
+
+    // Replays a save's decision edits on the page; true when the page is then clean. A page that is gone stays dirty.
+    private async Task<bool> ApplyDecisionEditsAsync(DecisionEdits decisions)
+    {
+        try
+        {
+            return await Interop.ApplyDecisionEditsAsync(host, DecisionEditsJson(decisions), decisions.Text);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            return false;
+        }
+    }
+
+    // {"bare":[n…],"strip":[n…]}: integers only.
+    private static string DecisionEditsJson(DecisionEdits decisions)
+    {
+        using MemoryStream stream = new MemoryStream();
+        using (Utf8JsonWriter writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteStartArray("bare");
+            foreach (int number in decisions.Bare)
+            {
+                writer.WriteNumberValue(number);
+            }
+
+            writer.WriteEndArray();
+            writer.WriteStartArray("strip");
+            foreach (int number in decisions.Strip)
+            {
+                writer.WriteNumberValue(number);
+            }
+
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    // Job 343: reads the decision numbers the mounted editor references, looks up their headlines (a plain note syncs
+    // the index first; a sensitive note's lookups only read it) and draws the references. A failure draws none.
+    private async Task LoadDecisionTitlesAsync()
+    {
+        if (!mounted || disposed)
+        {
+            return;
+        }
+
+        try
+        {
+            List<int> numbers = ParseNumbers(await Interop.DecisionReferencesAsync(host));
+            if (numbers.Count == 0)
+            {
+                await Interop.SetDecisionTitlesAsync(host, "[]");
+                return;
+            }
+
+            IReadOnlyDictionary<int, string>? titles = await State.DecisionTitles(numbers, !Sensitive);
+            if (titles is null || disposed)
+            {
+                return;
+            }
+
+            await Interop.SetDecisionTitlesAsync(host, DecisionTitlesJson(numbers, titles));
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            // The page is gone; the references stay as they are drawn.
+        }
+    }
+
+    // The page's JSON array of numbers, each checked; anything else gives none.
+    private static List<int> ParseNumbers(string json)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Array
+                || document.RootElement.GetArrayLength() > DesktopState.MaxDecisionReferences)
+            {
+                return [];
+            }
+
+            List<int> numbers = [.. document.RootElement.EnumerateArray().Select(element =>
+                element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out int number)
+                    && number is >= 1 and <= DecisionParser.MaxNumber ? number : 0)];
+            return numbers.Contains(0) || numbers.Distinct().Count() != numbers.Count ? [] : numbers;
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    // [[n, headline or null], …]: each headline through OneLine and cut to 1000 chars (never inside a surrogate pair).
+    private static string DecisionTitlesJson(List<int> numbers, IReadOnlyDictionary<int, string> titles)
+    {
+        using MemoryStream stream = new MemoryStream();
+        using (Utf8JsonWriter writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartArray();
+            foreach (int number in numbers)
+            {
+                writer.WriteStartArray();
+                writer.WriteNumberValue(number);
+                if (titles.TryGetValue(number, out string? headline))
+                {
+                    string title = DesktopText.OneLine(headline);
+                    if (title.Length > DecisionParser.MaxTextLength)
+                    {
+                        int cut = char.IsHighSurrogate(title[DecisionParser.MaxTextLength - 1])
+                            ? DecisionParser.MaxTextLength - 1
+                            : DecisionParser.MaxTextLength;
+                        title = title[..cut];
+                    }
+
+                    writer.WriteStringValue(title);
+                }
+                else
+                {
+                    writer.WriteNullValue();
+                }
+
+                writer.WriteEndArray();
+            }
+
+            writer.WriteEndArray();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    // A clicked reference (job 343): a decision in this note is a jump in place; another note's opens that note at it
+    // (the parent saves this one first); a number no note owns says so in grey.
+    private Task DecisionClicked(int number) => InvokeAsync(async () =>
+    {
+        if (!mounted || disposed)
+        {
+            return;
+        }
+
+        Used();
+        bool here = false;
+        try
+        {
+            here = await Interop.ScrollToDecisionAsync(host, number);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            return;
+        }
+
+        if (here)
+        {
+            return;
+        }
+
+        string? owner = await State.DecisionNote(number);
+        if (owner is null)
+        {
+            ShowStatus($"No decision {DecisionParser.Format(number)}.", "grey");
+            StateHasChanged();
+            return;
+        }
+
+        if (string.Equals(owner, Name, StringComparison.Ordinal))
+        {
+            await JumpToDecisionAsync(number);
+            StateHasChanged();
+            return;
+        }
+
+        if (OnOpenDecision.HasDelegate)
+        {
+            await OnOpenDecision.InvokeAsync((owner, number));
+            return;
+        }
+
+        await OnOpenNote.InvokeAsync(owner);
+    });
 
     /// <summary>
     /// An outline button: moves to the <paramref name="index"/>-th heading of the mounted editor (by index only) and

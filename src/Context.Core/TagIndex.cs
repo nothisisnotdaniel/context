@@ -160,6 +160,19 @@ internal sealed class NameLookup
 }
 
 /// <summary>
+/// A decision row of the index (job 343): the note, the marker's 1-based line, its number (<c>null</c> when bare),
+/// the paragraph text (raw) and the note's stored last-write time (UTC).
+/// </summary>
+internal sealed record IndexedDecision(string Note, int Line, int? Number, string Text, DateTime Modified)
+{
+    /// <summary>The first line of <see cref="Text"/>.</summary>
+    public string Headline => Text.IndexOf('\n', StringComparison.Ordinal) is int end and >= 0 ? Text[..end] : Text;
+
+    /// <summary>Returns only the type name: the text is raw note text.</summary>
+    public override string ToString() => nameof(IndexedDecision);
+}
+
+/// <summary>
 /// Thrown when <c>context.db</c> can't be opened or isn't a valid database. The file is never
 /// deleted or overwritten then.
 /// </summary>
@@ -214,7 +227,10 @@ internal sealed class TagIndex
             note TEXT NOT NULL,
             line INTEGER NOT NULL,
             text TEXT NOT NULL,
+            number INTEGER,
             PRIMARY KEY(note, line));
+        CREATE TABLE IF NOT EXISTS decision_owners(number INTEGER PRIMARY KEY, note TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS decision_counter(high INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS note_todos(
             note TEXT NOT NULL,
             line INTEGER NOT NULL,
@@ -267,8 +283,10 @@ internal sealed class TagIndex
     /// <see cref="NoteStore.MaxNoteBytes"/>) and the link keys <c>note_links.whole_key</c>/<c>part_key</c>. 15: note
     /// todos are <c>- { }</c> lines (job 329); a <c>- [ ]</c> line is a note-local checkbox and no longer in <c>note_todos</c>.
     /// 16: an <c>affiliation::</c> value is a comma-separated list (job 332), one <c>note_attributes</c> row per part.
+    /// 17: decisions are <c>#!d</c> paragraphs (job 343), one <c>note_decisions</c> row per paragraph with its
+    /// <c>number</c> (NULL for a bare marker); <c>Decision:</c> lines are no longer read.
     /// </summary>
-    public const int ParserVersion = 16;
+    public const int ParserVersion = 17;
 
     /// <summary>
     /// How long opening <c>context.db</c> and starting <see cref="Sync"/>'s write transaction wait while another
@@ -478,10 +496,11 @@ internal sealed class TagIndex
                     Execute(
                         connection,
                         transaction,
-                        "INSERT INTO note_decisions(note, line, text) VALUES($note, $line, $text)",
+                        "INSERT INTO note_decisions(note, line, text, number) VALUES($note, $line, $text, $number)",
                         ("$note", note.Name),
                         ("$line", decision.Line),
-                        ("$text", decision.Text));
+                        ("$text", decision.Text),
+                        ("$number", decision.Number));
                 }
 
                 Execute(connection, transaction, "DELETE FROM note_todos WHERE note = $note", ("$note", note.Name));
@@ -599,6 +618,7 @@ internal sealed class TagIndex
             Execute(connection, transaction, "DELETE FROM note_items WHERE note NOT IN (SELECT name FROM notes)");
             Execute(connection, transaction, "DELETE FROM note_skipped WHERE note NOT IN (SELECT name FROM notes)");
             PruneOrphanText(connection, transaction);
+            AssignDecisionOwners(connection, transaction);
             if (upgrade)
             {
                 // A constant, not user input: PRAGMA takes no parameters.
@@ -677,18 +697,18 @@ internal sealed class TagIndex
     });
 
     /// <summary>
-    /// Every row of <c>note_decisions</c> with its note's stored last-write time (UTC), unsorted. With a non-blank
+    /// The decisions of the log, unsorted: every unnumbered <c>note_decisions</c> row, plus for each number only the
+    /// first row (lowest line) of its owner (<c>decision_owners</c>), each with its note's stored last-write time (UTC).
+    /// Rows of notes without a stored time (they couldn't be read) and of non-owners are left out. With a non-blank
     /// <paramref name="tag"/> (normalized by <see cref="NormalizeTag"/>, reaching SQL only as a parameter) only the
-    /// decisions of notes that have that tag. A note without a stored time (it couldn't be read) has no rows.
+    /// decisions of notes that have that tag.
     /// </summary>
-    public IReadOnlyList<(string Note, int Line, string Text, DateTime Modified)> Decisions(string? tag)
+    public IReadOnlyList<IndexedDecision> Decisions(string? tag)
     {
         string? wanted = string.IsNullOrWhiteSpace(tag) ? null : NormalizeTag(tag);
         return Run(connection =>
         {
-            List<(string Note, int Line, string Text, DateTime Modified)> rows = [];
-            string sql = "SELECT d.note, d.line, d.text, n.modified FROM note_decisions d "
-                + "JOIN notes n ON n.name = d.note WHERE n.modified IS NOT NULL";
+            string sql = DecisionSelect + " WHERE n.modified IS NOT NULL AND " + OwnedDecision;
             if (wanted is not null)
             {
                 sql += " AND d.note IN (SELECT note FROM note_tags WHERE tag = $tag)";
@@ -700,21 +720,135 @@ internal sealed class TagIndex
                 command.Parameters.AddWithValue("$tag", wanted);
             }
 
-            using SqliteDataReader reader = command.ExecuteReader();
-            while (reader.Read())
-            {
-                // A line or time edited by hand out of range is skipped, like a note that couldn't be read.
-                long line = reader.GetInt64(1);
-                long ticks = reader.GetInt64(3);
-                if (line < 1 || line > int.MaxValue || ticks < DateTime.MinValue.Ticks || ticks > DateTime.MaxValue.Ticks)
-                {
-                    continue;
-                }
+            return (IReadOnlyList<IndexedDecision>)ReadDecisions(command);
+        });
+    }
 
-                rows.Add((reader.GetString(0), (int)line, reader.GetString(2), new DateTime(ticks, DateTimeKind.Utc)));
+    /// <summary>
+    /// The decision numbered <paramref name="number"/> as its owner holds it (the owner's first row with that number), or
+    /// <c>null</c> when no readable owner holds it. The number reaches SQL only as a parameter.
+    /// </summary>
+    public IndexedDecision? DecisionByNumber(int number) => Run(connection =>
+    {
+        using SqliteCommand command = Command(
+            connection, null, DecisionSelect + " WHERE n.modified IS NOT NULL AND d.number = $number AND " + OwnedDecision);
+        command.Parameters.AddWithValue("$number", number);
+        return ReadDecisions(command).FirstOrDefault();
+    });
+
+    /// <summary>
+    /// The headline (first text line, raw) of each of <paramref name="numbers"/> that a readable owner holds, read in
+    /// one connection; unknown numbers are not in the result. Each number reaches SQL only as a parameter.
+    /// </summary>
+    public IReadOnlyDictionary<int, string> DecisionHeadlines(IEnumerable<int> numbers)
+    {
+        List<int> wanted = numbers.Distinct().ToList();
+        return Run(connection =>
+        {
+            Dictionary<int, string> headlines = [];
+            foreach (int number in wanted)
+            {
+                using SqliteCommand command = Command(
+                    connection, null, DecisionSelect + " WHERE n.modified IS NOT NULL AND d.number = $number AND " + OwnedDecision);
+                command.Parameters.AddWithValue("$number", number);
+                if (ReadDecisions(command).FirstOrDefault() is { } decision)
+                {
+                    headlines[number] = decision.Headline;
+                }
             }
 
-            return (IReadOnlyList<(string Note, int Line, string Text, DateTime Modified)>)rows;
+            return (IReadOnlyDictionary<int, string>)headlines;
+        });
+    }
+
+    /// <summary>Every <c>decision_owners</c> row: number -> owning note's full name.</summary>
+    public IReadOnlyDictionary<int, string> DecisionOwners() => Run(connection =>
+    {
+        Dictionary<int, string> owners = [];
+        using SqliteCommand command = Command(connection, null, "SELECT number, note FROM decision_owners");
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            long number = reader.GetInt64(0);
+            if (number is >= 1 and <= DecisionParser.MaxNumber)
+            {
+                owners[(int)number] = reader.GetString(1);
+            }
+        }
+
+        return (IReadOnlyDictionary<int, string>)owners;
+    });
+
+    /// <summary>
+    /// Reserves <paramref name="count"/> consecutive new decision numbers in one <c>BEGIN IMMEDIATE</c> transaction and
+    /// returns the first. It is one above the highest of <c>decision_counter</c>, every number in <c>note_decisions</c>
+    /// and <c>decision_owners</c>, and <paramref name="floor"/>; the counter then holds the last one, so a number is
+    /// never handed out twice while the database lasts (a failed write only leaves a gap). Throws
+    /// <see cref="TagIndexException"/> when the numbers would pass <see cref="DecisionParser.MaxNumber"/>.
+    /// </summary>
+    public int ReserveDecisionNumbers(int count, int floor = 0)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(count, 1);
+        PrivateFile.CreateFolder(root);
+        return Run(connection =>
+        {
+            using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
+            long high;
+            using (SqliteCommand select = Command(
+                connection,
+                transaction,
+                "SELECT MAX(COALESCE((SELECT MAX(high) FROM decision_counter), 0), "
+                    + "COALESCE((SELECT MAX(number) FROM note_decisions), 0), "
+                    + "COALESCE((SELECT MAX(number) FROM decision_owners), 0))"))
+            {
+                high = Convert.ToInt64(select.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            long first = Math.Max(high, floor) + 1;
+            long last = first + count - 1;
+            if (first < 1 || last > DecisionParser.MaxNumber)
+            {
+                throw new TagIndexException("No decision numbers are left.");
+            }
+
+            Execute(connection, transaction, "DELETE FROM decision_counter");
+            Execute(connection, transaction, "INSERT INTO decision_counter(high) VALUES($high)", ("$high", last));
+            transaction.Commit();
+            return (int)first;
+        });
+    }
+
+    /// <summary>
+    /// After the app renamed or moved <paramref name="oldName"/> to <paramref name="newName"/>: its owner rows, and
+    /// those of its subpages (<c>&lt;oldName&gt;/...</c>), name the new note. Compared ordinally, never with
+    /// <c>LIKE</c>; both names reach SQL only as parameters.
+    /// </summary>
+    public void MoveDecisionOwners(string oldName, string newName)
+    {
+        if (string.Equals(oldName, newName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        PrivateFile.CreateFolder(root);
+        Run(connection =>
+        {
+            using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
+            Execute(
+                connection,
+                transaction,
+                "UPDATE decision_owners SET note = $new WHERE note = $old",
+                ("$new", newName),
+                ("$old", oldName));
+            Execute(
+                connection,
+                transaction,
+                "UPDATE decision_owners SET note = $new || substr(note, length($prefix)) "
+                    + "WHERE length(note) > length($prefix) AND substr(note, 1, length($prefix)) = $prefix",
+                ("$new", newName),
+                ("$prefix", oldName + "/"));
+            transaction.Commit();
+            return 0;
         });
     }
 
@@ -1489,11 +1623,13 @@ internal sealed class TagIndex
             EnsureLinkColumn(connection, "heading");
             EnsureLinkColumn(connection, "whole_key");
             EnsureLinkColumn(connection, "part_key");
+            EnsureDecisionNumberColumn(connection);
             Execute(
                 connection,
                 null,
                 "CREATE INDEX IF NOT EXISTS note_links_whole_key ON note_links(whole_key); "
-                    + "CREATE INDEX IF NOT EXISTS note_links_part_key ON note_links(part_key);");
+                    + "CREATE INDEX IF NOT EXISTS note_links_part_key ON note_links(part_key); "
+                    + "CREATE INDEX IF NOT EXISTS note_decisions_number ON note_decisions(number);");
             return work(connection);
         }
         catch (SqliteException ex)
@@ -1564,10 +1700,111 @@ internal sealed class TagIndex
         }
     }
 
-    private static bool LinksHaveColumn(SqliteConnection connection, string column)
+    private static bool LinksHaveColumn(SqliteConnection connection, string column) =>
+        HasColumn(connection, "note_links", column);
+
+    private const string DecisionSelect =
+        "SELECT d.note, d.line, d.number, d.text, n.modified FROM note_decisions d JOIN notes n ON n.name = d.note";
+
+    // A row is in the log when it is unnumbered, or its note owns the number and it is that note's first row with it.
+    private const string OwnedDecision =
+        "(d.number IS NULL OR (EXISTS (SELECT 1 FROM decision_owners o WHERE o.number = d.number AND o.note = d.note) "
+            + "AND d.line = (SELECT MIN(e.line) FROM note_decisions e WHERE e.note = d.note AND e.number = d.number)))";
+
+    private static List<IndexedDecision> ReadDecisions(SqliteCommand command)
     {
+        List<IndexedDecision> rows = [];
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            // A line, number or time edited by hand out of range is skipped, like a note that couldn't be read.
+            long line = reader.GetInt64(1);
+            long? number = reader.IsDBNull(2) ? null : reader.GetInt64(2);
+            long ticks = reader.GetInt64(4);
+            if (line < 1 || line > int.MaxValue || ticks < DateTime.MinValue.Ticks || ticks > DateTime.MaxValue.Ticks
+                || number is < 1 or > DecisionParser.MaxNumber)
+            {
+                continue;
+            }
+
+            rows.Add(new IndexedDecision(
+                reader.GetString(0), (int)line, (int?)number, reader.GetString(3), new DateTime(ticks, DateTimeKind.Utc)));
+        }
+
+        return rows;
+    }
+
+    // Job 343: owner rows of notes that are gone, or that are readable and no longer hold the number, go; then each
+    // number without an owner goes to the note holding it with the oldest last-write time, then the lower name
+    // ignoring case, then ordinal. An unreadable or oversized owner (no stored time) keeps its numbers.
+    private static void AssignDecisionOwners(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        Execute(connection, transaction, "DELETE FROM decision_owners WHERE note NOT IN (SELECT name FROM notes)");
+        Execute(
+            connection,
+            transaction,
+            "DELETE FROM decision_owners WHERE note IN (SELECT name FROM notes WHERE modified IS NOT NULL) "
+                + "AND NOT EXISTS (SELECT 1 FROM note_decisions d WHERE d.note = decision_owners.note "
+                + "AND d.number = decision_owners.number)");
+        List<(long Number, string Note, long Modified)> holders = [];
+        using (SqliteCommand select = Command(
+            connection,
+            transaction,
+            "SELECT DISTINCT d.number, d.note, n.modified FROM note_decisions d JOIN notes n ON n.name = d.note "
+                + "WHERE d.number IS NOT NULL AND n.modified IS NOT NULL "
+                + "AND d.number NOT IN (SELECT number FROM decision_owners)"))
+        using (SqliteDataReader reader = select.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                holders.Add((reader.GetInt64(0), reader.GetString(1), reader.GetInt64(2)));
+            }
+        }
+
+        foreach (IGrouping<long, (long Number, string Note, long Modified)> group in holders.GroupBy(h => h.Number))
+        {
+            (long Number, string Note, long Modified) owner = group
+                .OrderBy(h => h.Modified)
+                .ThenBy(h => h.Note, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(h => h.Note, StringComparer.Ordinal)
+                .First();
+            Execute(
+                connection,
+                transaction,
+                "INSERT INTO decision_owners(number, note) VALUES($number, $note)",
+                ("$number", owner.Number),
+                ("$note", owner.Note));
+        }
+    }
+
+    // A database from before ParserVersion 17 has note_decisions without the number column: add it (NULL until the next
+    // Sync re-parses every note). Another process may add it at the same time; then its column is the one kept.
+    private static void EnsureDecisionNumberColumn(SqliteConnection connection)
+    {
+        if (HasColumn(connection, "note_decisions", "number"))
+        {
+            return;
+        }
+
+        try
+        {
+            Execute(connection, null, "ALTER TABLE note_decisions ADD COLUMN number INTEGER");
+        }
+        catch (SqliteException) when (HasColumn(connection, "note_decisions", "number"))
+        {
+            // Added by another process meanwhile.
+        }
+    }
+
+    private static bool HasColumn(SqliteConnection connection, string table, string column)
+    {
+        if (table is not ("note_links" or "note_decisions"))
+        {
+            throw new ArgumentException("Not an index table: " + table, nameof(table));
+        }
+
         using SqliteCommand command = Command(
-            connection, null, "SELECT COUNT(*) FROM pragma_table_info('note_links') WHERE name = $column");
+            connection, null, $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = $column");
         command.Parameters.AddWithValue("$column", column);
         return Convert.ToInt64(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) > 0;
     }

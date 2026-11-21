@@ -227,7 +227,7 @@ public sealed class SmartPasteBundleTests : IClassFixture<EditorBundle>
         string view = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "editor", "src", "view.js"));
 
         Assert.Contains(
-            "smartPaste(view.state, data.getData(\"text/plain\"), editor.shift && editor.lastKey !== 45)",
+            "smartPaste(view.state, pastedDecisionMarkdown(data.getData(\"text/plain\"), editor.lastCut), editor.shift && editor.lastKey !== 45)",
             view,
             StringComparison.Ordinal);
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(view, "invokeMethodAsync\\(\"OnPasteLink\""));

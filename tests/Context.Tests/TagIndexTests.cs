@@ -389,7 +389,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(16, TagIndex.ParserVersion);
+        Assert.Equal(17, TagIndex.ParserVersion);
     }
 
     // 024 AC-6
@@ -847,7 +847,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(16, TagIndex.ParserVersion);
+        Assert.Equal(17, TagIndex.ParserVersion);
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
         Assert.Equal(["A", "Beta"], NoteRows());
         Assert.Equal([("A", "work"), ("Beta", "home")], Rows());
@@ -1056,7 +1056,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(16, UserVersion());
+        Assert.Equal(17, UserVersion());
         Assert.Equal([("Anna", "[[ACME]]"), ("Anna", "Beta GmbH")], index.AttributeValues("affiliation"));
     }
 
@@ -1273,7 +1273,7 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal(["Anna|1", "AS|1"], index.People().Select(Describe));
         Assert.Empty(index.NotesMentioning("Anna Schmidt"));
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(16, TagIndex.ParserVersion);
+        Assert.Equal(17, TagIndex.ParserVersion);
     }
 
     // 170 ----------------------------------------------------------------------------------------
@@ -1468,95 +1468,220 @@ public sealed class TagIndexTests : IDisposable
         Assert.Empty(index.NotesWithTag("old"));
     }
 
-    // 180 ----------------------------------------------------------------------------------------
+    // 343 ----------------------------------------------------------------------------------------
 
-    private List<(string Note, long Line, string Text)> DecisionRows()
+    private List<(string Note, long Line, long? Number, string Text)> DecisionRows()
     {
         using SqliteConnection connection = Open();
         using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "SELECT note, line, text FROM note_decisions ORDER BY note, line";
+        command.CommandText = "SELECT note, line, number, text FROM note_decisions ORDER BY note, line";
         using SqliteDataReader reader = command.ExecuteReader();
-        List<(string Note, long Line, string Text)> rows = [];
+        List<(string Note, long Line, long? Number, string Text)> rows = [];
         while (reader.Read())
         {
-            rows.Add((reader.GetString(0), reader.GetInt64(1), reader.GetString(2)));
+            rows.Add((reader.GetString(0), reader.GetInt64(1), reader.IsDBNull(2) ? null : reader.GetInt64(2), reader.GetString(3)));
         }
 
         return rows;
     }
 
-    // 180 AC-3: one note_decisions row per decision; removing a line or the note removes its rows on the next Sync.
+    private void WriteNoteAt(string name, string text, DateTime time)
+    {
+        WriteNote(name, text);
+        File.SetLastWriteTimeUtc(Path.Combine(root, name + ".md"), time);
+    }
+
+    private static readonly DateTime Day1 = new DateTime(2026, 1, 1, 9, 0, 0, DateTimeKind.Utc);
+    private static readonly DateTime Day2 = new DateTime(2026, 1, 2, 9, 0, 0, DateTimeKind.Utc);
+    private static readonly DateTime Day3 = new DateTime(2026, 1, 3, 9, 0, 0, DateTimeKind.Utc);
+
+    // 343 AC-3: one note_decisions row per decision paragraph (note, first line, number or NULL, text); a removed
+    // paragraph or note loses its rows on the next Sync; Decision: lines give none.
     [Fact]
     public void Sync_Decisions_WrittenAndPruned()
     {
-        WriteNote("Plan", "# Plan\nDecision: ship it\n- decision: wait\n");
-        WriteNote("Other", "Decision: other");
-        string plan = Path.Combine(root, "Plan.md");
-        File.SetLastWriteTimeUtc(plan, new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc));
+        WriteNoteAt("Plan", "# Plan\n#!d12 ship it\nin March\n\n- #!d wait\n\nDecision: old\n", Day1);
+        WriteNoteAt("Other", "#!d other", Day1);
 
         index.Sync(store);
 
-        Assert.Equal([("Other", 1L, "other"), ("Plan", 2L, "ship it"), ("Plan", 3L, "wait")], DecisionRows());
+        Assert.Equal(
+            [("Other", 1L, null, "other"), ("Plan", 2L, 12L, "ship it\nin March"), ("Plan", 5L, null, "wait")],
+            DecisionRows());
 
-        File.WriteAllText(plan, "# Plan\nDecision: ship it\n");
-        File.SetLastWriteTimeUtc(plan, new DateTime(2026, 1, 3, 3, 4, 5, DateTimeKind.Utc));
+        WriteNoteAt("Plan", "# Plan\n#!d12 ship it\n", Day2);
         File.Delete(Path.Combine(root, "Other.md"));
         index.Sync(store);
 
-        Assert.Equal([("Plan", 2L, "ship it")], DecisionRows());
+        Assert.Equal([("Plan", 2L, 12L, "ship it")], DecisionRows());
     }
 
-    // 180 AC-3: a database at user_version 7 is fully re-parsed (decisions appear for unchanged notes) and set to the current version.
+    // 343 AC-3: ParserVersion is 17; a version-16 database whose note_decisions has no number column gets it and is
+    // re-read, so its old Decision: rows leave the log.
     [Fact]
-    public void Sync_Version7Database_ReparsedForDecisions()
+    public void Sync_Version16Database_AddsNumber_Reparses()
     {
-        WriteNote("Plan", "Decision: ship it");
-        File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc));
+        Assert.Equal(17, TagIndex.ParserVersion);
+        WriteNoteAt("Plan", "Decision: old\n\n#!d5 new", Day1);
         index.Sync(store);
         using (SqliteConnection connection = Open())
         {
             using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 7; DELETE FROM note_decisions;";
+            command.CommandText =
+                "DROP TABLE note_decisions; " +
+                "CREATE TABLE note_decisions(note TEXT NOT NULL, line INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY(note, line)); " +
+                "INSERT INTO note_decisions(note, line, text) VALUES('Plan', 1, 'old'); " +
+                "PRAGMA user_version = 16;";
             command.ExecuteNonQuery();
         }
 
-        Assert.Empty(DecisionRows());
-
         index.Sync(store);
 
-        Assert.Equal([("Plan", 1L, "ship it")], DecisionRows());
+        Assert.Equal([("Plan", 3L, 5L, "new")], DecisionRows());
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
+        IndexedDecision decision = Assert.Single(index.Decisions(null));
+        Assert.Equal(5, decision.Number);
     }
 
-    // 180 AC-3: a sensitive .ctxs note never adds decision rows.
+    // 343 AC-3: a sensitive .ctxs note never adds decision rows and owns nothing.
     [Fact]
     public void Sync_SensitiveNote_HasNoDecisionRows()
     {
-        WriteNote("Other", "Decision: kept");
-        File.WriteAllText(Path.Combine(root, "Plan.ctxs"), "Decision: secret");
+        WriteNoteAt("Other", "#!d1 kept", Day1);
+        File.WriteAllText(Path.Combine(root, "Plan.ctxs"), "#!d2 secret");
 
         index.Sync(store);
 
-        Assert.Equal([("Other", 1L, "kept")], DecisionRows());
+        Assert.Equal([("Other", 1L, 1L, "kept")], DecisionRows());
         Assert.DoesNotContain(index.Decisions(null), r => r.Note == "Plan");
+        Assert.Equal(new Dictionary<int, string> { [1] = "Other" }, index.DecisionOwners());
     }
 
-    // 180 AC-6: Decisions(tag) gives the stored time and filters by the note's tag, normalized and as a parameter.
+    // 343 AC-3: Decisions(tag) gives the stored time and number and filters by the note's tag, as a parameter.
     [Fact]
     public void Decisions_TagFilter_AndModified()
     {
-        WriteNote("Plan", "#work\nDecision: ship it");
-        WriteNote("Home", "#home\nDecision: paint");
-        DateTime time = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
-        File.SetLastWriteTimeUtc(Path.Combine(root, "Plan.md"), time);
+        WriteNoteAt("Plan", "#work\n\n#!d3 ship it", Day1);
+        WriteNoteAt("Home", "#home\n\n#!d paint", Day1);
         index.Sync(store);
 
-        (string Note, int Line, string Text, DateTime Modified) row = Assert.Single(index.Decisions("#Work"));
-        Assert.Equal(("Plan", 2, "ship it", time), row);
+        IndexedDecision row = Assert.Single(index.Decisions("#Work"));
+        Assert.Equal(("Plan", 3, (int?)3, "ship it", Day1), (row.Note, row.Line, row.Number, row.Text, row.Modified));
         Assert.Equal(DateTimeKind.Utc, row.Modified.Kind);
         Assert.Equal(2, index.Decisions(null).Count);
         Assert.Equal(2, index.Decisions(" ").Count);
         Assert.Empty(index.Decisions("x' OR '1'='1"));
+        Assert.Equal(nameof(IndexedDecision), row.ToString());
+    }
+
+    // 343 AC-4: reserved numbers come above the counter and every number in the index, are never reused after a
+    // decision is deleted, and respect the floor.
+    [Fact]
+    public void ReserveDecisionNumbers_AboveCounterAndIndex_NeverReused()
+    {
+        WriteNoteAt("Plan", "#!d40 x", Day1);
+        index.Sync(store);
+
+        Assert.Equal(41, index.ReserveDecisionNumbers(3));
+        Assert.Equal(44, index.ReserveDecisionNumbers(1));
+
+        File.Delete(Path.Combine(root, "Plan.md"));
+        index.Sync(store);
+        Assert.Empty(DecisionRows());
+
+        Assert.Equal(45, index.ReserveDecisionNumbers(1));
+        Assert.Equal(101, index.ReserveDecisionNumbers(2, floor: 100));
+        Assert.Equal(103, index.ReserveDecisionNumbers(1));
+    }
+
+    // 343 AC-4: a fresh database starts at 1; past the highest number it refuses.
+    [Fact]
+    public void ReserveDecisionNumbers_FreshAndExhausted()
+    {
+        Assert.Equal(1, index.ReserveDecisionNumbers(1));
+        Assert.Throws<TagIndexException>(() => index.ReserveDecisionNumbers(2, floor: DecisionParser.MaxNumber - 1));
+        Assert.Equal(2, index.ReserveDecisionNumbers(1));
+    }
+
+    // 343 AC-5: an unowned number goes to the holder with the oldest last-write time; non-owners are left out of the
+    // log and the lookups; the owner keeps it until it no longer holds it.
+    [Fact]
+    public void Sync_Ownership_OldestWins_UntilGone()
+    {
+        WriteNoteAt("Copy", "#!d7 copy text", Day2);
+        WriteNoteAt("Original", "#!d7 original text", Day1);
+        index.Sync(store);
+
+        Assert.Equal("Original", index.DecisionOwners()[7]);
+        IndexedDecision owned = Assert.Single(index.Decisions(null), d => d.Number == 7);
+        Assert.Equal("Original", owned.Note);
+        Assert.Equal("Original", index.DecisionByNumber(7)?.Note);
+        Assert.Equal(new Dictionary<int, string> { [7] = "original text" }, index.DecisionHeadlines([7, 8]));
+
+        // A newer copy doesn't take the number over while the owner holds it.
+        WriteNoteAt("Original", "#!d7 original text\nmore", Day3);
+        index.Sync(store);
+        Assert.Equal("Original", index.DecisionOwners()[7]);
+
+        // The owner drops it: the copy becomes the owner on the next Sync.
+        WriteNoteAt("Original", "no decision", Day3.AddHours(1));
+        index.Sync(store);
+        Assert.Equal("Copy", index.DecisionOwners()[7]);
+        Assert.Equal("copy text", index.DecisionByNumber(7)?.Text);
+    }
+
+    // 343 AC-5: same last-write time: the lower name ignoring case wins (ordinal order alone would pick "Zed").
+    [Theory]
+    [InlineData("beta", "Alpha", "Alpha")]
+    [InlineData("Zed", "apple", "apple")]
+    public void Sync_Ownership_Ties(string first, string second, string winner)
+    {
+        WriteNoteAt(first, "#!d9 x", Day1);
+        WriteNoteAt(second, "#!d9 y", Day1);
+        index.Sync(store);
+
+        Assert.Equal(winner, index.DecisionOwners()[9]);
+    }
+
+    // 343 AC-5: an unreadable (oversized) owner keeps the number.
+    [Fact]
+    public void Sync_Ownership_OversizedOwnerKeepsNumber()
+    {
+        WriteNoteAt("Owner", "#!d3 x", Day1);
+        WriteNoteAt("Copy", "#!d3 y", Day2);
+        index.Sync(store);
+        Assert.Equal("Owner", index.DecisionOwners()[3]);
+
+        WriteNoteAt("Owner", "#!d3 x\n" + new string('a', (int)NoteStore.MaxNoteBytes), Day3);
+        index.Sync(store);
+
+        Assert.Equal("Owner", index.DecisionOwners()[3]);
+        Assert.Null(index.DecisionByNumber(3));
+    }
+
+    // 343 AC-5: the owner rows move with a rename or move, subpages included, ordinally (no LIKE); a deleted note's go.
+    [Fact]
+    public void MoveDecisionOwners_NoteAndSubpages()
+    {
+        WriteNoteAt("A", "#!d1 a", Day1);
+        Directory.CreateDirectory(Path.Combine(root, "A"));
+        WriteNoteAt("A/Sub", "#!d2 sub", Day1);
+        WriteNoteAt("AB", "#!d3 ab", Day1);
+        WriteNoteAt("A_x", "#!d4 like", Day1);
+        index.Sync(store);
+
+        index.MoveDecisionOwners("A", "Z");
+
+        Assert.Equal(
+            new Dictionary<int, string> { [1] = "Z", [2] = "Z/Sub", [3] = "AB", [4] = "A_x" },
+            index.DecisionOwners());
+
+        // The files moved too: the next Sync keeps the moved owners.
+        File.Move(Path.Combine(root, "A.md"), Path.Combine(root, "Z.md"));
+        Directory.Move(Path.Combine(root, "A"), Path.Combine(root, "Z"));
+        index.Sync(store);
+        Assert.Equal("Z", index.DecisionOwners()[1]);
+        Assert.Equal("Z/Sub", index.DecisionOwners()[2]);
     }
 
     private static string Describe(NoteTodo todo) =>
@@ -1707,7 +1832,7 @@ public sealed class TagIndexTests : IDisposable
     }
 
     // 329 AC-2: a database written by version 14 (where "- [ ] a" was a note todo) is re-parsed once: the stale row
-    // goes, the "- { }" todo stays, and the index ends at version 16.
+    // goes, the "- { }" todo stays, and the index ends at version 17.
     [Fact]
     public void Sync_Version14Database_ReparsedForBraceTodos()
     {
@@ -1726,7 +1851,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(["Plan|2|-|b|- { } b"], index.NoteTodos().Select(Describe));
-        Assert.Equal(16, UserVersion());
+        Assert.Equal(17, UserVersion());
     }
 
     // 253 AC-3: a sensitive .ctxs note never has topic rows.
@@ -1801,7 +1926,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(["Plan|1|2026-12-01|review:2026-12-01"], ReviewRows(index));
-        Assert.Equal(16, UserVersion());
+        Assert.Equal(17, UserVersion());
     }
 
     // 256 AC-2, AC-9: a sensitive .ctxs note never has a review row.
@@ -2296,7 +2421,7 @@ public sealed class TagIndexTests : IDisposable
     }
 
     // 295 AC-8: a database at user_version 13 (old note_links, no note_text_rows or note_skipped) is upgraded by the
-    // next Sync: note_text emptied and rewritten once, the new tables and columns filled, user_version 16.
+    // next Sync: note_text emptied and rewritten once, the new tables and columns filled, user_version 17.
     [Fact]
     public void Sync_Version13Database_Upgraded()
     {
@@ -2328,7 +2453,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(16, UserVersion());
+        Assert.Equal(17, UserVersion());
         (List<(long Row, string Note)> text, List<(long Row, string Note)> map) = TextRowIds();
         Assert.Equal(["A", "B"], text.Select(r => r.Note).Order(StringComparer.Ordinal));
         Assert.Equal(text, map);

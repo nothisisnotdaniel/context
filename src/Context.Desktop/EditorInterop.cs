@@ -71,7 +71,7 @@ public sealed record InlineImage
 /// <c>ContextEditor</c>) for one host element and passes its tag, link and mention clicks and its dirty flips back as
 /// events. It never changes data: its <see cref="JSInvokableAttribute"/> methods only raise <see cref="TagClicked"/>,
 /// <see cref="LinkClicked"/>, <see cref="PersonClicked"/>, <see cref="DirtyChanged"/>, <see cref="FilesDropped"/>,
-/// <see cref="AttachmentClicked"/>, <see cref="LinkPasted"/> and <see cref="Changed"/>, and the component decides what to open, show or store.
+/// <see cref="AttachmentClicked"/>, <see cref="LinkPasted"/>, <see cref="DecisionClicked"/> and <see cref="Changed"/>, and the component decides what to open, show or store.
 /// </summary>
 internal sealed class EditorInterop
 {
@@ -116,6 +116,12 @@ internal sealed class EditorInterop
     /// decides whether to look up its page title.
     /// </summary>
     public event Func<string, Task>? LinkPasted;
+
+    /// <summary>
+    /// Raised with the number of a clicked decision reference (<c>#!d1234</c>, job 343), checked to be in range; the
+    /// component decides where to jump.
+    /// </summary>
+    public event Func<int, Task>? DecisionClicked;
 
     /// <summary>
     /// Opens <paramref name="markdown"/> in a new editor inside <paramref name="element"/>, showing the
@@ -190,6 +196,33 @@ internal sealed class EditorInterop
         js.InvokeAsync<bool>("ContextEditor.scrollToHeading", element, index);
 
     /// <summary>
+    /// Replays a save's decision edits (<paramref name="editsJson"/>, <c>{"bare":[n…],"strip":[n…]}</c>, integers only)
+    /// on the live document, out of the undo history, then marks the editor clean when its text equals
+    /// <paramref name="saved"/> (the text the save wrote). <c>true</c> when it is clean; <c>false</c> when it was edited
+    /// during the save and stays dirty.
+    /// </summary>
+    public ValueTask<bool> ApplyDecisionEditsAsync(ElementReference element, string editsJson, string saved) =>
+        js.InvokeAsync<bool>("ContextEditor.applyDecisionEdits", element, editsJson, saved);
+
+    /// <summary>The decision numbers the live document references, as a JSON array of integers (at most 500).</summary>
+    public ValueTask<string> DecisionReferencesAsync(ElementReference element) =>
+        js.InvokeAsync<string>("ContextEditor.decisionReferencesIn", element);
+
+    /// <summary>
+    /// Draws the references from <paramref name="titlesJson"/> (<c>[[n, headline or null], …]</c>, built by .NET; null
+    /// for a number with no decision); <c>false</c> when the editor refused it.
+    /// </summary>
+    public ValueTask<bool> SetDecisionTitlesAsync(ElementReference element, string titlesJson) =>
+        js.InvokeAsync<bool>("ContextEditor.setDecisionTitles", element, titlesJson);
+
+    /// <summary>
+    /// Puts the cursor at the start of decision <paramref name="number"/>'s paragraph, scrolls to it and flashes it;
+    /// <c>false</c> when the note has no such decision.
+    /// </summary>
+    public ValueTask<bool> ScrollToDecisionAsync(ElementReference element, int number) =>
+        js.InvokeAsync<bool>("ContextEditor.scrollToDecision", element, number);
+
+    /// <summary>
     /// Applies <paramref name="theme"/> to the page (job 341): <c>ContextEditor.setTheme</c> with one of the fixed
     /// names <c>system</c>, <c>light</c> or <c>dark</c>. Needs no mounted editor.
     /// </summary>
@@ -228,6 +261,11 @@ internal sealed class EditorInterop
     /// <summary>Called by the editor when a lone link was pasted.</summary>
     [JSInvokable]
     public Task OnPasteLink(string url) => LinkPasted?.Invoke(url) ?? Task.CompletedTask;
+
+    /// <summary>Called by the editor when a decision reference is clicked; a number out of range is ignored.</summary>
+    [JSInvokable]
+    public Task OnDecision(int number) =>
+        number is >= 1 and <= DecisionParser.MaxNumber ? DecisionClicked?.Invoke(number) ?? Task.CompletedTask : Task.CompletedTask;
 
     /// <summary>Removes the editor from the page and drops the reference the page holds.</summary>
     public async Task DestroyAsync()

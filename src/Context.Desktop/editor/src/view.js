@@ -4,7 +4,7 @@
 // .NET may answer with its page title through setLinkTitle.
 import { EditorState, Selection, TextSelection, Plugin, PluginKey } from "prosemirror-state";
 import { EditorView, Decoration, DecorationSet } from "prosemirror-view";
-import { Fragment } from "prosemirror-model";
+import { Fragment, Slice } from "prosemirror-model";
 import { keymap } from "prosemirror-keymap";
 import { history, undo, redo, closeHistory } from "prosemirror-history";
 import { baseKeymap, toggleMark, setBlockType, chainCommands, newlineInCode } from "prosemirror-commands";
@@ -15,6 +15,7 @@ import { smartPaste, linkMeta, linkTitleTransaction } from "./paste.js";
 import { codeBlockView, mermaidEditing, isMermaidFence } from "./mermaid.js";
 import { tokens, firstWord, languageOptions, withLanguage } from "./highlight.js";
 import { parse, serialize, splitTitle, joinTitle, headingList, attributeSplit, attributeBlockRowsJson, editAttributes, normalizePerson, isNetWhite } from "./markdown.js";
+import { MaxNumber, applyDecisionEditsText, decisionReferences as decisionReferencesText, pastedDecisionMarkdown, leadingMarkerLength, referenceAt, referenceMayStart, startsWithMarker } from "./decisions.js";
 
 const editors = new WeakMap();
 
@@ -793,6 +794,148 @@ function listItemView(node, view, getPos) {
   };
 }
 
+// Decisions (job 343). A transaction that replays a save's marker edits: kept out of the undo history, and no
+// OnChanged (the text was just saved).
+const decisionEditMeta = "decisionEdits";
+const decisionKey = new PluginKey("decisions");
+const maxTitleLength = 1000;
+
+// The text of a textblock with one char per document position (every leaf one U+FFFC) and its code-marked runs.
+function positionText(node) {
+  let text = "";
+  const code = [];
+  node.forEach(child => {
+    const start = text.length;
+    if (child.isText) {
+      text += child.text;
+      if (child.marks.some(mark => mark.type.name === "code")) {
+        code.push([start, text.length]);
+      }
+    } else {
+      text += "\ufffc";
+    }
+  });
+  return { text, code };
+}
+
+// Whether text (a paragraph's) starts with a numbered marker that is followed by more of the paragraph: a decision.
+function startsDecision(text) {
+  const length = leadingMarkerLength(text);
+  return length > 0 && text.slice(length).trim().length > 0;
+}
+
+// The reference decorations of doc: every #!d<n> that titles knows (outside code, not a paragraph's own marker).
+function referenceDecorations(doc, titles) {
+  const decorations = [];
+  if (titles.size === 0) {
+    return decorations;
+  }
+  doc.descendants((node, pos) => {
+    if (node.type.spec.code) {
+      return false;
+    }
+    if (!node.isTextblock) {
+      return true;
+    }
+    const { text, code } = positionText(node);
+    const ownMarker = node.type.name === "paragraph" && startsDecision(text);
+    let i = 0;
+    while (i < text.length) {
+      const run = code.find(([from, to]) => i >= from && i < to);
+      if (run) {
+        i = run[1];
+        continue;
+      }
+      if (text[i] === "#" && referenceMayStart(text, i) && !(i === 0 && ownMarker)) {
+        const ref = referenceAt(text, i);
+        if (ref !== null) {
+          if (titles.has(ref.number)) {
+            const title = titles.get(ref.number);
+            const attrs = typeof title === "string"
+              ? { class: "decision-ref", role: "link", title, "data-decision": String(ref.number) }
+              : { class: "decision-ref-unknown", title: "No decision #!d" + ref.number + "." };
+            decorations.push(Decoration.inline(pos + 1 + i, pos + 1 + ref.end, attrs));
+          }
+          i = ref.end;
+          continue;
+        }
+      }
+      i++;
+    }
+    return false;
+  });
+  return decorations;
+}
+
+// References drawn from the titles .NET looked up (no text change), and the flash on the paragraph a jump landed on.
+function decisionPlugin(editor) {
+  const build = (doc, flash) => {
+    const decorations = referenceDecorations(doc, editor.decisionTitles);
+    if (flash !== null) {
+      const node = doc.nodeAt(flash);
+      if (node) {
+        decorations.push(Decoration.node(flash, flash + node.nodeSize, { class: "decision-flash" }));
+      }
+    }
+    return { set: DecorationSet.create(doc, decorations), flash };
+  };
+  return new Plugin({
+    key: decisionKey,
+    state: {
+      init(config, state) { return build(state.doc, null); },
+      apply(tr, value, oldState, newState) {
+        const meta = tr.getMeta(decisionKey);
+        if (meta !== undefined) {
+          return build(newState.doc, typeof meta.flash === "number" ? meta.flash : (tr.docChanged ? null : value.flash));
+        }
+        return tr.docChanged ? build(newState.doc, null) : value;
+      },
+    },
+    props: {
+      decorations(state) { return decisionKey.getState(state).set; },
+    },
+  });
+}
+
+// A pasted slice without the numbered markers that start its paragraphs (the text and every reference stay).
+function strippedFragment(fragment) {
+  const nodes = [];
+  fragment.forEach(node => {
+    if (node.type.name === "paragraph") {
+      nodes.push(strippedParagraph(node));
+    } else if (node.isTextblock || node.type.spec.code || node.childCount === 0) {
+      nodes.push(node);
+    } else {
+      nodes.push(node.copy(strippedFragment(node.content)));
+    }
+  });
+  return Fragment.fromArray(nodes);
+}
+
+function strippedParagraph(node) {
+  const first = node.firstChild;
+  if (!first || !first.isText || first.marks.some(mark => mark.type.name === "code") || !startsDecision(positionText(node).text)) {
+    return node;
+  }
+  const length = leadingMarkerLength(first.text);
+  if (length === 0) {
+    return node;
+  }
+  const rest = [];
+  if (length < first.text.length) {
+    rest.push(schema.text(first.text.slice(length), first.marks));
+  }
+  for (let i = 1; i < node.childCount; i++) {
+    rest.push(node.child(i));
+  }
+  return node.copy(Fragment.fromArray(rest));
+}
+
+/** A pasted slice with its numbered markers stripped, unless keep (the paste is this editor's last cut). */
+export function pastedSlice(slice, keep) {
+  return keep ? slice : new Slice(strippedFragment(slice.content), slice.openStart, slice.openEnd);
+}
+
 // True when the document or the attribute block changed since the editor was opened or last marked clean.
 function editorDirty(editor) {
   return editor.attrs !== editor.cleanAttrs || !editor.view.state.doc.eq(editor.clean);
@@ -1016,7 +1159,10 @@ export function mount(element, markdown, dotnet, images, name) {
   const { head, body: afterHead } = JSON.parse(splitTitle(markdown, name));
   const { attrs, body } = attributeSplit(afterHead);
   const doc = parse(body);
-  const editor = { view: null, head, attrs, cleanAttrs: attrs, clean: doc, dirty: false, dotnet, images: new Map(), dropPos: null, links: [], shift: false, lastKey: 0 };
+  const editor = {
+    view: null, head, attrs, cleanAttrs: attrs, clean: doc, dirty: false, dotnet, images: new Map(), dropPos: null, links: [], shift: false, lastKey: 0,
+    decisionTitles: new Map(), lastCut: null, cutting: false, pasteText: null,
+  };
   for (const image of images || []) {
     if (image && typeof image.src === "string" && !editor.images.has(image.src)) {
       editor.images.set(image.src, blobUrl(image.mime, image.base64));
@@ -1031,6 +1177,7 @@ export function mount(element, markdown, dotnet, images, name) {
       codeHighlight(),
       keymap(editorKeys()),
       keymap(baseKeymap),
+      decisionPlugin(editor),
     ],
   });
   const view = new EditorView(element, {
@@ -1047,6 +1194,9 @@ export function mount(element, markdown, dotnet, images, name) {
           link.from = tr.mapping.map(link.from, 1);
           link.to = tr.mapping.map(link.to, -1);
         }
+        if (tr.getMeta(decisionEditMeta)) {
+          return;
+        }
         reportDirty(editor);
         // Every text change restarts .NET's auto-save pause; .NET reads nothing until the pause elapses.
         dotnet.invokeMethodAsync("OnChanged").catch(() => {});
@@ -1055,7 +1205,16 @@ export function mount(element, markdown, dotnet, images, name) {
     handleClickOn(view, pos, node) {
       return openChip(node, dotnet);
     },
-    handleClick(view, pos) {
+    handleClick(view, pos, event) {
+      const target = event && event.target;
+      const ref = target && typeof target.closest === "function" ? target.closest(".decision-ref") : null;
+      if (ref !== null) {
+        const number = Number(ref.getAttribute("data-decision"));
+        if (Number.isInteger(number) && number >= 1 && number <= MaxNumber) {
+          dotnet.invokeMethodAsync("OnDecision", number).catch(() => {});
+          return true;
+        }
+      }
       const href = attachmentAt(view, pos);
       if (href === null) {
         return false;
@@ -1070,7 +1229,7 @@ export function mount(element, markdown, dotnet, images, name) {
       if (!data) {
         return false;
       }
-      const tr = smartPaste(view.state, data.getData("text/plain"), editor.shift && editor.lastKey !== 45);
+      const tr = smartPaste(view.state, pastedDecisionMarkdown(data.getData("text/plain"), editor.lastCut), editor.shift && editor.lastKey !== 45);
       if (tr === null) {
         return false;
       }
@@ -1085,6 +1244,21 @@ export function mount(element, markdown, dotnet, images, name) {
         dotnet.invokeMethodAsync("OnPasteLink", url).catch(() => {});
       }
       return true;
+    },
+    // Copy and cut put the slice's plain text on the clipboard (ProseMirror's own text); a cut's is remembered, so
+    // pasting it back in this editor keeps its decision markers (a move). Every other paste loses them (job 343).
+    clipboardTextSerializer(slice) {
+      const text = slice.content.textBetween(0, slice.content.size, "\n\n");
+      if (editor.cutting) {
+        editor.lastCut = text;
+        editor.cutting = false;
+      }
+      return text;
+    },
+    transformPasted(slice, view) {
+      const keep = view.dragging ? true : editor.pasteText !== null && editor.pasteText === editor.lastCut;
+      editor.pasteText = null;
+      return pastedSlice(slice, keep);
     },
     handleDOMEvents: {
       // Every keydown notes whether Shift is held (a paste then is a plain one, as ProseMirror tells it). A keydown on
@@ -1108,6 +1282,20 @@ export function mount(element, markdown, dotnet, images, name) {
         if (event.keyCode === 16) {
           editor.shift = false;
         }
+        return false;
+      },
+      // Paste, cut and copy (job 343): remember the pasted plain text and whether the last copy was a cut, so a paste
+      // of this editor's last cut keeps its numbered decision markers.
+      paste(view, event) {
+        editor.pasteText = event && event.clipboardData ? event.clipboardData.getData("text/plain") : null;
+        return false;
+      },
+      cut() {
+        editor.cutting = true;
+        return false;
+      },
+      copy() {
+        editor.cutting = false;
         return false;
       },
       // Dropped files: remember where they landed (the cursor when that can't be told) and hand them to .NET.
@@ -1319,5 +1507,219 @@ export function setAttributes(element, editsJson) {
   }
   editor.attrs = attrs;
   reportDirty(editor);
+  return true;
+}
+
+// The transaction that replays a save's decision edits on state (only the changed range is replaced, so the selection
+// maps), out of the undo history; null for malformed edits.
+function decisionEditTransaction(state, editsJson) {
+  const body = serialize(state.doc);
+  const edited = applyDecisionEditsText(body, editsJson);
+  if (edited === null) {
+    return null;
+  }
+  const tr = state.tr.setMeta("addToHistory", false).setMeta(decisionEditMeta, true);
+  if (edited === body) {
+    return tr;
+  }
+  const next = parse(edited);
+  if (state.doc.content.findDiffStart(next.content) === null) {
+    return tr;
+  }
+  // Each changed text block gets its own small replace, so the cursor (and every other position) maps through the
+  // edits and stays in its paragraph; when the blocks don't pair up, one replace over the whole changed range.
+  const before = textBlocks(state.doc);
+  const after = textBlocks(next);
+  if (before.length === after.length && before.every((b, i) => b.node.type === after[i].node.type)) {
+    for (let i = 0; i < before.length; i++) {
+      const changed = diffRange(before[i].node.content, after[i].node.content);
+      if (changed !== null) {
+        const at = before[i].pos + 1;
+        tr.replace(tr.mapping.map(at + changed.start), tr.mapping.map(at + changed.endA),
+          new Slice(after[i].node.content.cut(changed.start, changed.endB), 0, 0));
+      }
+    }
+    if (tr.doc.eq(next)) {
+      return tr;
+    }
+  }
+  const whole = state.tr.setMeta("addToHistory", false).setMeta(decisionEditMeta, true);
+  const changed = diffRange(state.doc.content, next.content);
+  return whole.replace(changed.start, changed.endA, next.slice(changed.start, changed.endB));
+}
+
+/** The text blocks of doc in document order, each with its position. */
+function textBlocks(doc) {
+  const blocks = [];
+  doc.descendants((node, pos) => {
+    if (node.isTextblock) {
+      blocks.push({ node, pos });
+      return false;
+    }
+    return true;
+  });
+  return blocks;
+}
+
+/** Where fragment b differs from a ({ start, endA, endB }, fragment offsets), or null when they are equal. */
+function diffRange(a, b) {
+  const start = a.findDiffStart(b);
+  if (start === null) {
+    return null;
+  }
+  let { a: endA, b: endB } = a.findDiffEnd(b);
+  const overlap = start - Math.min(endA, endB);
+  if (overlap > 0) {
+    endA += overlap;
+    endB += overlap;
+  }
+  return { start, endA, endB };
+}
+
+/**
+ * Test hook, DOM-free: an "x" typed at document position cursor (its own history step), then the edits of editsJson
+ * replayed through decisionEditTransaction, as JSON { markdown, paragraph, undo }: the text of the paragraph that holds
+ * the cursor afterwards, and the markdown after one undo (the edits are not in the history, so the "x" is undone).
+ */
+export function decisionEditsMarkdown(markdown, editsJson, cursor) {
+  const doc = parse(String(markdown));
+  let state = EditorState.create({ doc, plugins: [history()] });
+  const at = Math.max(1, Math.min(Number(cursor) || 1, state.doc.content.size - 1));
+  state = state.apply(state.tr.setSelection(Selection.near(state.doc.resolve(at))));
+  state = state.apply(state.tr.insertText("x"));
+  state = state.apply(closeHistory(state.tr));
+  const tr = decisionEditTransaction(state, editsJson);
+  if (tr === null) {
+    return JSON.stringify(null);
+  }
+  state = state.apply(tr);
+  const paragraph = state.selection.$from.parent.textContent;
+  const edited = serialize(state.doc);
+  let undone = edited;
+  undo(state, t => { undone = serialize(state.apply(t).doc); });
+  return JSON.stringify({ markdown: edited, paragraph, undo: undone });
+}
+
+/**
+ * Test hook, DOM-free: the reference decorations of markdown given titlesJson (as setDecisionTitles takes it), as
+ * JSON [{ text, class, title, decision }].
+ */
+export function decisionRefsJson(markdown, titlesJson) {
+  const doc = parse(String(markdown));
+  const titles = new Map(JSON.parse(String(titlesJson)));
+  return JSON.stringify(referenceDecorations(doc, titles).map(d => ({
+    text: doc.textBetween(d.from, d.to),
+    class: d.type.attrs.class,
+    title: d.type.attrs.title,
+    decision: d.type.attrs["data-decision"] || null,
+  })));
+}
+
+/** Test hook, DOM-free: markdown pasted as a whole slice through pastedSlice (keep: it was this editor's last cut). */
+export function pastedSliceMarkdown(markdown, keep) {
+  const doc = parse(String(markdown));
+  return serialize(doc.type.create(doc.attrs, pastedSlice(new Slice(doc.content, 0, 0), !!keep).content));
+}
+
+/**
+ * Replays a save's decision edits (editsJson { bare, strip }, see applyDecisionEditsText) on the live document in one
+ * transaction, out of the undo history and without OnChanged; the cursor is mapped and stays in its paragraph. Then
+ * marks the editor clean when its text equals saved (the text the save wrote) and returns whether it did; an edit typed
+ * during the save keeps it dirty. False, changing nothing, without an editor or for malformed edits.
+ */
+export function applyDecisionEdits(element, editsJson, saved) {
+  const editor = editors.get(element);
+  if (!editor) {
+    return false;
+  }
+  const view = editor.view;
+  const tr = decisionEditTransaction(view.state, editsJson);
+  if (tr === null) {
+    return false;
+  }
+  if (tr.docChanged) {
+    view.dispatch(tr);
+  }
+  if (typeof saved === "string" && markCleanIf(element, saved)) {
+    return true;
+  }
+  reportDirty(editor);
+  return false;
+}
+
+/** The decision numbers the live document references, as a JSON array (at most 500); "[]" without an editor. */
+export function decisionReferencesIn(element) {
+  const editor = editors.get(element);
+  return editor ? decisionReferencesText(editorMarkdown(editor)) : "[]";
+}
+
+/**
+ * Sets the titles of the referenced decisions from titlesJson ([[n, headline or null], ...]; null for a number with no
+ * decision) and redraws the references. Returns false, changing nothing, without an editor or for malformed JSON.
+ */
+export function setDecisionTitles(element, titlesJson) {
+  const editor = editors.get(element);
+  if (!editor) {
+    return false;
+  }
+  let rows;
+  try {
+    rows = JSON.parse(String(titlesJson));
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(rows) || rows.length > 500) {
+    return false;
+  }
+  const titles = new Map();
+  for (const row of rows) {
+    if (!Array.isArray(row) || row.length !== 2 || !Number.isInteger(row[0]) || row[0] < 1 || row[0] > MaxNumber) {
+      return false;
+    }
+    const title = row[1];
+    if (title !== null && (typeof title !== "string" || title.length > maxTitleLength)) {
+      return false;
+    }
+    titles.set(row[0], title);
+  }
+  editor.decisionTitles = titles;
+  editor.view.dispatch(editor.view.state.tr.setMeta(decisionKey, {}));
+  return true;
+}
+
+/**
+ * Puts the cursor at the start of the paragraph that decision n starts (#!d<n>), scrolls it into view and flashes it
+ * (decision-flash, a CSS animation). Returns false, changing nothing, for a number not in the note or without an editor.
+ */
+export function scrollToDecision(element, n) {
+  const editor = editors.get(element);
+  if (!editor || !Number.isInteger(n) || n < 1 || n > MaxNumber) {
+    return false;
+  }
+  const view = editor.view;
+  let found = -1;
+  view.state.doc.descendants((node, pos) => {
+    if (found >= 0 || node.type.spec.code) {
+      return false;
+    }
+    if (node.type.name === "paragraph") {
+      const text = positionText(node).text;
+      if (startsWithMarker(text, n) && startsDecision(text)) {
+        found = pos;
+      }
+      return false;
+    }
+    return !node.isTextblock;
+  });
+  if (found < 0) {
+    return false;
+  }
+  const tr = view.state.tr.setSelection(TextSelection.create(view.state.doc, found + 1)).setMeta(decisionKey, { flash: found });
+  view.dispatch(tr.scrollIntoView());
+  view.focus();
+  const dom = view.nodeDOM(found);
+  if (dom && typeof dom.scrollIntoView === "function") {
+    dom.scrollIntoView({ block: "center" });
+  }
   return true;
 }

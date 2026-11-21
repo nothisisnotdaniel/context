@@ -39,7 +39,51 @@ internal sealed class EditorJs
         js.Setup<string>("ContextEditor.attributes", _ => true).SetResult("[]");
         js.Setup<bool>("ContextEditor.setAttributes", _ => SetAttributes()).SetResult(true);
         js.Setup<bool>("ContextEditor.setLinkTitle", _ => true).SetResult(true);
+        js.Setup<bool>("ContextEditor.applyDecisionEdits", i => ApplyDecisionEdits(i)).SetResult(true);
+        js.Setup<bool>("ContextEditor.applyDecisionEdits", _ => TypedDuringSave).SetResult(false);
+        js.Setup<string>("ContextEditor.decisionReferencesIn", _ => true).SetResult("[]");
+        js.Setup<bool>("ContextEditor.setDecisionTitles", _ => true).SetResult(true);
+        js.Setup<bool>("ContextEditor.scrollToDecision", _ => true).SetResult(false);
     }
+
+    /// <summary>
+    /// Job 343: when true, <c>ContextEditor.applyDecisionEdits</c> answers false (text was typed during the save, so
+    /// the page stays dirty); else it takes the saved text as the editor's, makes the editor clean and answers true.
+    /// </summary>
+    public bool TypedDuringSave { get; set; }
+
+    private bool ApplyDecisionEdits(JSRuntimeInvocation call)
+    {
+        if (TypedDuringSave)
+        {
+            return false;
+        }
+
+        Markdown = (string)call.Arguments[2]!;
+        js.Setup<string>("ContextEditor.getMarkdown", _ => true).SetResult(Markdown);
+        Dirty = false;
+        return true;
+    }
+
+    /// <summary>Makes every later <c>ContextEditor.decisionReferencesIn</c> call return <paramref name="json"/>.</summary>
+    public void SetDecisionReferences(string json) =>
+        js.Setup<string>("ContextEditor.decisionReferencesIn", _ => true).SetResult(json);
+
+    /// <summary>Makes every later <c>ContextEditor.scrollToDecision</c> call for <paramref name="number"/> answer true.</summary>
+    public void HasDecision(int number) =>
+        js.Setup<bool>("ContextEditor.scrollToDecision", i => (int)i.Arguments[1]! == number).SetResult(true);
+
+    /// <summary>The (edits JSON, saved text) pairs passed to <c>ContextEditor.applyDecisionEdits</c> so far.</summary>
+    public IReadOnlyList<(string Edits, string Saved)> DecisionEdits() =>
+        Calls("ContextEditor.applyDecisionEdits").Select(c => ((string)c.Arguments[1]!, (string)c.Arguments[2]!)).ToList();
+
+    /// <summary>The titles JSON passed to <c>ContextEditor.setDecisionTitles</c> so far.</summary>
+    public IReadOnlyList<string> DecisionTitles() =>
+        Calls("ContextEditor.setDecisionTitles").Select(c => (string)c.Arguments[1]!).ToList();
+
+    /// <summary>The numbers passed to <c>ContextEditor.scrollToDecision</c> so far.</summary>
+    public IReadOnlyList<int> DecisionJumps() =>
+        Calls("ContextEditor.scrollToDecision").Select(c => (int)c.Arguments[1]!).ToList();
 
     /// <summary>The (url, title) pairs passed to <c>ContextEditor.setLinkTitle</c> so far, in order.</summary>
     public IReadOnlyList<(string Url, string Title)> LinkTitles() =>

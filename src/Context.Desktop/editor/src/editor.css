@@ -303,3 +303,39 @@
   height: auto;
   max-width: 100%;
 }
+
+/* Decisions (job 343): a reference to a known decision reads as a link, an unknown one is grey; a jump flashes the
+   decision's paragraph once (a CSS animation, no timer). */
+.note-editor-body .decision-ref {
+  color: var(--accent-strong);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.note-editor-body .decision-ref-unknown {
+  color: var(--grey);
+  text-decoration: underline dotted;
+}
+
+.note-editor-body .decision-flash {
+  animation: decision-flash 1.2s ease-out 1;
+  border-radius: 4px;
+}
+
+@keyframes decision-flash {
+  from {
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .note-editor-body .decision-flash {
+    animation: none;
+    outline: 2px solid var(--accent);
+  }
+}

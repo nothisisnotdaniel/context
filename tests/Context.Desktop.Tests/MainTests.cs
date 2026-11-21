@@ -3441,8 +3441,8 @@ public sealed class MainTests : IDisposable
     [Fact]
     public async Task Decisions_ShowsDecisionsPanel_OpenHidesIt()
     {
-        data.WriteNote("2026-11-10 Anna", "# Anna\n#work\nDecision: ship it\n");
-        data.WriteNote("2026-11-11 Plan", "Decision: paint\n");
+        data.WriteNote("2026-11-10 Anna", "# Anna\n#work\n\n#!d ship it\n");
+        data.WriteNote("2026-11-11 Plan", "#!d paint\n");
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
@@ -3463,6 +3463,33 @@ public sealed class MainTests : IDisposable
         Assert.Equal("Decisions: #work", cut.Find(".decisions-panel h2").TextContent);
         await cut.Find("button.today-open").ClickAsync(new MouseEventArgs());
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".decisions-panel")), Wait);
+    }
+
+    // 343 AC-12: a decision's number in the panel opens its note and puts the editor at that decision; the same number
+    // with the note already open jumps in place without remounting.
+    [Fact]
+    public async Task Decisions_Number_OpensNoteAtDecision()
+    {
+        data.WriteNote("2026-11-10 Anna", "# Anna\n\n#!d7 ship it\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        js.HasDecision(7);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        await RunPalette(cut, "/decisions");
+        cut.WaitForAssertion(() => Assert.Equal("#!d7", cut.Find(".decisions-panel .decision-number button").TextContent), Wait);
+        await cut.Find(".decisions-panel .decision-number button").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("2026-11-10 Anna", cut.Find(".note-title").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal([7], js.DecisionJumps()), Wait);
+        Assert.Empty(cut.FindAll(".decisions-panel"));
+        int mounts = js.Calls("ContextEditor.mount").Count;
+
+        await RunPalette(cut, "/decisions");
+        cut.WaitForAssertion(() => Assert.Equal("#!d7", cut.Find(".decisions-panel .decision-number button").TextContent), Wait);
+        await cut.Find(".decisions-panel .decision-number button").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal([7, 7], js.DecisionJumps()), Wait);
+        Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
     }
 
     // 180 AC-8: an invalid tag shows the panel with the red usage line; Close hides it.
