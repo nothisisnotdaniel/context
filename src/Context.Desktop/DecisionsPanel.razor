@@ -48,7 +48,7 @@
                     @if (number is int n)
                     {
                         string marker = DecisionParser.Format(n);
-                        <span class="decision-number"><button type="button" class="link-button" title="Open @marker" @onclick="() => Jump(name, number)">@marker</button></span>
+                        <span class="decision-number"><button type="button" title="Open @marker" @onclick="() => Jump(name, number)">@marker</button></span>
                     }
                     else
                     {
@@ -59,7 +59,7 @@
                     {
                         <span class="people grey cut" title="@people">@people</span>
                     }
-                    <span class="text cut" title="@headline"><button type="button" class="link-button cut" @onclick="() => Jump(name, number)">@headline</button></span>
+                    <span class="text cut" title="@headline"><button type="button" class="cut" @onclick="() => Jump(name, number)">@headline</button></span>
                     <button type="button" class="decision-expand" aria-expanded="@(open ? "true" : "false")" @onclick="() => Toggle(key)">@(open ? "Hide full text" : "Show full text")</button>
                     @if (open)
                     {
