@@ -153,9 +153,11 @@ export const schema = new Schema({
       parseDOM: [{ tag: "strong" }, { tag: "b" }],
       toDOM() { return ["strong"]; },
     },
-    // Rendered without a live href: a span with the address in its title.
+    // Rendered without a live href: a span with the address in its title. Job 354: raw is the link's source as
+    // written ([text](dest) or <url>), dest what stood between its parentheses, sig and inner what its text looked like
+    // when parsed or typed; the serializer writes raw back while the text is unchanged (markdown.js).
     link: {
-      attrs: { href: {}, title: { default: null } },
+      attrs: { href: {}, title: { default: null }, raw: { default: null }, dest: { default: null }, sig: { default: null }, inner: { default: null } },
       inclusive: false,
       toDOM(mark) { return ["span", { class: "link", title: mark.attrs.href }, 0]; },
     },

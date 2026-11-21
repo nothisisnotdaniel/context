@@ -1,9 +1,9 @@
 // The bundle's entry: everything the page and the tests use hangs off globalThis.ContextEditor.
-import { roundTrip, isLossless, inlineNodes, docJson, splitTitle, outline, attributeRows, editAttributes, attributeSplit } from "./markdown.js";
+import { roundTrip, isLossless, inlineNodes, docJson, webHref, splitTitle, outline, attributeRows, editAttributes, attributeSplit } from "./markdown.js";
 import { chipDom, headingDom } from "./schema.js";
-import { opensChip, typedBlock, typedMarkdown, commandMarkdown, typedAtMarkdown, toggledMarkdown, carriedMarkdown, changedCodeBlocksJson, copyText, copyToClipboard, toggleInlineCodeIn, toggleCodeBlockIn, mount, getMarkdown, isDirty, markClean, markCleanIf, destroy, focus, insertAttachment, headings, scrollToHeading, attributes, setAttributes, setLinkTitle, applyDecisionEdits, decisionReferencesIn, setDecisionTitles, setDecisionPrefixes, scrollToDecision, decisionEditsMarkdown, decisionRefsJson } from "./view.js";
+import { opensChip, typedBlock, typedMarkdown, commandMarkdown, typedAtMarkdown, clickedLinkJson, linkDomJson, toggledMarkdown, carriedMarkdown, changedCodeBlocksJson, copyText, copyToClipboard, toggleInlineCodeIn, toggleCodeBlockIn, mount, getMarkdown, isDirty, markClean, markCleanIf, destroy, focus, insertAttachment, headings, scrollToHeading, attributes, setAttributes, setLinkTitle, applyDecisionEdits, decisionReferencesIn, setDecisionTitles, setDecisionPrefixes, scrollToDecision, decisionEditsMarkdown, decisionRefsJson } from "./view.js";
 import { decisionsJson, decisionReferences, applyDecisionEditsText, withFolderLine, pickerQuery, pickerRows, pickerKey, pickerAttrs, copyButtonAttrs } from "./decisions.js";
-import { pastedMarkdown, titledMarkdown } from "./paste.js";
+import { pastedMarkdown, pastedDocJson, titledMarkdown } from "./paste.js";
 import { isMermaidFence, mermaidResultJson, shouldRender } from "./mermaid.js";
 import { tokensJson, languageOptionsJson, withLanguage } from "./highlight.js";
 import { setTheme, mermaidTheme } from "./theme.js";
@@ -45,6 +45,11 @@ globalThis.ContextEditor = Object.freeze({
   opensChip,
   pastedMarkdown,
   titledMarkdown,
+  // Web links (job 354): the one web-link rule, the paste and click hooks and the link's toDOM spec.
+  webHref,
+  pastedDocJson,
+  clickedLinkJson,
+  linkDomJson,
   // Mermaid diagrams (job 263): the fence test, the frame reply check (over JSON text) and the size rule.
   isMermaidFence,
   mermaidResultJson,

@@ -178,7 +178,7 @@ internal static class Program
         DesktopActions actions = new DesktopActions(
             notes, todos, state, new ShellNoteLauncher(), calendarLink, feed, () => DateTime.Now, calendar,
             timesFolder, new SystemNotifier(),
-            ScreenCapture(folder));
+            ScreenCapture(folder), new ShellUrlLauncher());
 
         PhotinoBlazorAppBuilder builder = PhotinoBlazorAppBuilder.CreateDefault(args);
         builder.Services.AddSingleton(state);

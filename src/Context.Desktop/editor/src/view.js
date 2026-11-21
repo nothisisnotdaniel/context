@@ -11,10 +11,10 @@ import { baseKeymap, toggleMark, setBlockType, chainCommands, newlineInCode } fr
 import { splitListItem, liftListItem, sinkListItem } from "prosemirror-schema-list";
 import { inputRules, wrappingInputRule, textblockTypeInputRule, InputRule } from "prosemirror-inputrules";
 import { schema, taskClass } from "./schema.js";
-import { smartPaste, linkMeta, linkTitleTransaction } from "./paste.js";
+import { smartPaste, linkMeta, linkTitleTransaction, webLinkContent } from "./paste.js";
 import { codeBlockView, mermaidEditing, isMermaidFence } from "./mermaid.js";
 import { tokens, firstWord, languageOptions, withLanguage } from "./highlight.js";
-import { parse, serialize, splitTitle, joinTitle, headingList, attributeSplit, attributeBlockRowsJson, editAttributes, normalizePerson, isNetWhite } from "./markdown.js";
+import { parse, serialize, webHref, splitTitle, joinTitle, headingList, attributeSplit, attributeBlockRowsJson, editAttributes, normalizePerson, isNetWhite } from "./markdown.js";
 import { Token, readEdits, applySet, hasFolderLine, withFolderLine, decisionReferences as decisionReferencesText, leadingMarker, label, parseReference, referenceAt, referenceMayStart, pickerQuery, pickerRows, pickerKey, pickerAttrs, copyButtonAttrs, isPrefix } from "./decisions.js";
 
 const editors = new WeakMap();
@@ -26,7 +26,8 @@ const maxFilesPerDrop = 10;
 // The pasted links an editor still waits on a title for; the oldest is dropped past this.
 const maxPendingLinks = 20;
 
-// An attachment PDF link: the only href a click opens (through .NET, in the system viewer).
+// An attachment PDF link: a plain click opens it (through .NET, in the system viewer). A web link (webHref) opens on
+// Cmd/Ctrl+click (job 354); no other href is ever opened.
 const attachmentPdf = /^\.attachments\/[^/\\]+\.pdf$/;
 
 // A blob: URL for base64 bytes .NET checked (magic bytes and extension); never a URL from the note text.
@@ -79,13 +80,22 @@ async function sendDrop(dotnet, files) {
   await dotnet.invokeMethodAsync("OnDrop", count, sent).catch(() => {});
 }
 
-// The href of an attachment PDF link at pos, or null.
-function attachmentAt(view, pos) {
-  const node = view.state.doc.nodeAt(pos);
-  const marks = (node ? node.marks : []).concat(view.state.doc.resolve(pos).marks());
+// What a click at pos of doc opens (job 354): { kind: "attachment", href } for an attachment PDF link (any click),
+// { kind: "web", href } for a webHref link clicked with Mod (Cmd on macOS, Ctrl elsewhere), else null: a plain click
+// on a web link only places the caret, and any other href is never opened.
+export function linkClick(doc, pos, mod) {
+  const node = doc.nodeAt(pos);
+  const marks = (node ? node.marks : []).concat(doc.resolve(pos).marks());
   for (const mark of marks) {
-    if (mark.type === schema.marks.link && attachmentPdf.test(mark.attrs.href || "")) {
-      return mark.attrs.href;
+    if (mark.type !== schema.marks.link) {
+      continue;
+    }
+    const href = mark.attrs.href || "";
+    if (attachmentPdf.test(href)) {
+      return { kind: "attachment", href };
+    }
+    if (mod && webHref(href)) {
+      return { kind: "web", href };
     }
   }
   return null;
@@ -145,6 +155,18 @@ function plainText(state, from, end) {
   return plain;
 }
 
+// True when no text between from and end has the code mark.
+function noCodeBetween(state, from, end) {
+  let plain = true;
+  state.doc.nodesBetween(from, end, node => {
+    if (node.marks.some(m => m.type.spec.code)) {
+      plain = false;
+    }
+    return true;
+  });
+  return plain;
+}
+
 function rules() {
   const tagWord = new RegExp("(^|\\s)(#\\p{L}[\\p{L}\\p{Nd}_-]*)([\\s.,;:!?)])$", "u");
   const tagRule = new InputRule(tagWord, (state, match, start, end) => {
@@ -162,6 +184,23 @@ function rules() {
       return null;
     }
     return state.tr.replaceWith(start, end, schema.nodes.noteLink.create({ raw: match[0], target }));
+  });
+  // Job 354: [text](url) becomes a link on text once ")" is typed, when the parser reads it as one link to a webHref
+  // URL; never in code, after "!" or "\\". The link keeps the typed characters as its source; the next character is plain.
+  const webLinkRule = new InputRule(/\[[^\[\]\n\ufffc]+\]\((?:[^\s()\ufffc]|\([^\s()\ufffc]*\))+\)$/, (state, match, start, end) => {
+    if (inCode(state, start) || !noCodeBetween(state, start, end)) {
+      return null;
+    }
+    const $start = state.doc.resolve(start);
+    const before = $start.parentOffset > 0 ? state.doc.textBetween(start - 1, start, "\n", "\ufffc") : "";
+    const content = webLinkContent(match[0], before);
+    if (content === null) {
+      return null;
+    }
+    const outer = state.doc.resolve(start + 1).marks().filter(m => m.type !== schema.marks.link && !m.type.spec.code);
+    const nodes = [];
+    content.forEach(node => nodes.push(node.mark(outer.reduce((set, m) => m.addToSet(set), node.marks))));
+    return state.tr.replaceWith(start, end, nodes).setStoredMarks(outer);
   });
   // @[Person name] as markdown.js and PersonParser read it: '@' at the start of the textblock or after whitespace,
   // '[', text up to the first ']' on the line, a name normalizePerson accepts; only plain text, never in code.
@@ -206,6 +245,7 @@ function rules() {
       inlineCodeRule(),
       tagRule,
       linkRule,
+      webLinkRule,
       mentionRule,
       mentionParenRule,
     ],
@@ -326,13 +366,48 @@ function inlineCodeRule() {
     if (!plain) {
       return null;
     }
+    const text = codeSource(state.doc, from + 1, end);
+    if (text === null) {
+      return null;
+    }
     const marks = state.doc.resolve(from + 1).marks();
     const code = schema.marks.code.create();
-    const tr = state.tr.replaceWith(from, end, schema.text(match[2], code.addToSet(marks)));
+    const tr = state.tr.replaceWith(from, end, schema.text(text, code.addToSet(marks)));
     return tr.setStoredMarks(code.removeFromSet(marks));
   });
   rule.inCodeMark = false;
   return rule;
+}
+
+// The text from..to becomes as code (job 354): its characters, a whole link with a source as that source ([x](url)),
+// so the code holds what was typed. Null when a link crosses from or to.
+function codeSource(doc, from, to) {
+  const linkOf = node => (node ? node.marks.find(m => m.type === schema.marks.link) : undefined);
+  const first = linkOf(doc.resolve(from).nodeBefore);
+  const after = linkOf(doc.resolve(to).nodeAfter);
+  if ((first && first.isInSet(doc.resolve(from).nodeAfter ? doc.resolve(from).nodeAfter.marks : []))
+    || (after && after.isInSet(doc.resolve(to).nodeBefore ? doc.resolve(to).nodeBefore.marks : []))) {
+    return null;
+  }
+  let out = "";
+  let last = null;
+  doc.nodesBetween(from, to, (node, pos) => {
+    if (!node.isText) {
+      return true;
+    }
+    const link = linkOf(node);
+    if (link && typeof link.attrs.raw === "string") {
+      if (last === null || !link.eq(last)) {
+        out += link.attrs.raw;
+      }
+      last = link;
+      return false;
+    }
+    out += node.text.slice(Math.max(0, from - pos), to - pos);
+    last = null;
+    return false;
+  });
+  return out;
 }
 
 // A paragraph whose whole text is ``` or ```lang (lang: no whitespace, no backtick).
@@ -1274,6 +1349,28 @@ export function commandMarkdown(markdown, key, typed, before) {
   return serialize(state.doc);
 }
 
+/**
+ * Test hook (job 354): what a click at the ⟦ caret of markdown opens, as JSON: { kind: "web" | "attachment", href }
+ * or null (a plain click on a web link, any other href). mod is Cmd on macOS, Ctrl elsewhere. DOM-free.
+ */
+export function clickedLinkJson(markdown, mod) {
+  const { state } = markedState(markdown);
+  return JSON.stringify(linkClick(state.doc, state.selection.from, !!mod));
+}
+
+/** Test hook (job 354): the toDOM spec of the first link mark in markdown, as JSON; null without a link. DOM-free. */
+export function linkDomJson(markdown) {
+  let found = null;
+  parse(String(markdown)).descendants(node => {
+    const link = found === null ? node.marks.find(m => m.type === schema.marks.link) : null;
+    if (link) {
+      found = schema.marks.link.spec.toDOM(link, true);
+    }
+    return found === null;
+  });
+  return JSON.stringify(found);
+}
+
 /** Test hook: the markdown after typing text at the ⟦ caret (or over the ⟦ ⟧ selection) of markdown. DOM-free. */
 export function typedAtMarkdown(markdown, text) {
   const marked = markedState(markdown);
@@ -1400,11 +1497,16 @@ export function mount(element, markdown, dotnet, images, name) {
           return true;
         }
       }
-      const href = attachmentAt(view, pos);
-      if (href === null) {
+      const mod = !!event && (onMac ? event.metaKey : event.ctrlKey);
+      const link = linkClick(view.state.doc, pos, mod);
+      if (link === null) {
         return false;
       }
-      dotnet.invokeMethodAsync("OnAttachment", href).catch(() => {});
+      if (link.kind === "web") {
+        dotnet.invokeMethodAsync("OnWebLink", link.href).catch(() => {});
+      } else {
+        dotnet.invokeMethodAsync("OnAttachment", link.href).catch(() => {});
+      }
       return true;
     },
     // Smart paste (paste.js): a table or a lone link gets its own transaction; anything else, and every

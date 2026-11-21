@@ -187,6 +187,10 @@
     [Parameter]
     public EventCallback<string> OnOpenAttachment { get; set; }
 
+    /// <summary>Called with the href of a Cmd/Ctrl+clicked web link (job 354); the parent opens it.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpenWebLink { get; set; }
+
     /// <summary>True when <see cref="Name"/> is a sensitive note: it is unlocked instead of read.</summary>
     [Parameter]
     public bool Sensitive { get; set; }
@@ -486,6 +490,7 @@
         Interop.DirtyChanged -= DirtyChanged;
         Interop.FilesDropped -= FilesDropped;
         Interop.AttachmentClicked -= AttachmentClicked;
+        Interop.WebLinkClicked -= WebLinkClicked;
         Interop.LinkPasted -= LinkPasted;
         Interop.DecisionClicked -= DecisionClicked;
         Interop.DecisionCopied -= DecisionCopied;
@@ -523,6 +528,7 @@
             Interop.DirtyChanged += DirtyChanged;
             Interop.FilesDropped += FilesDropped;
             Interop.AttachmentClicked += AttachmentClicked;
+            Interop.WebLinkClicked += WebLinkClicked;
             Interop.LinkPasted += LinkPasted;
             Interop.DecisionClicked += DecisionClicked;
             Interop.DecisionCopied += DecisionCopied;
@@ -1247,6 +1253,8 @@
     private Task FilesDropped(DroppedFiles dropped) => InvokeAsync(() => OnAttach.InvokeAsync(dropped));
 
     private Task AttachmentClicked(string href) => InvokeAsync(() => OnOpenAttachment.InvokeAsync(href));
+
+    private Task WebLinkClicked(string href) => InvokeAsync(() => OnOpenWebLink.InvokeAsync(href));
 
     // A lone link was pasted: in a plain note, its page title is looked up in the background (DesktopState.PageTitle
     // asks nothing while the setting is off). A sensitive note's links never leave it.

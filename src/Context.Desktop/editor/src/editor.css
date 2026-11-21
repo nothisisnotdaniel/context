@@ -254,7 +254,9 @@
   white-space: nowrap;
 }
 
+/* Job 354: a web or attachment link is the accent colour, underlined; Cmd/Ctrl+click opens a web link. */
 .note-editor-body .link {
+  color: var(--accent-strong);
   text-decoration: underline;
 }
 

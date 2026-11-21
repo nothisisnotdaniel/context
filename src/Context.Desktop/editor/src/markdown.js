@@ -3,6 +3,7 @@
 // and never escapes text (job 290): what the user typed is what the file gets. The parser keeps a backslash escape
 // (\*) and an entity (&amp;) as their source characters in the text, so a note that holds them comes back byte for byte.
 import MarkdownIt from "markdown-it";
+import { Fragment } from "prosemirror-model";
 import { MarkdownParser, MarkdownSerializer, defaultMarkdownSerializer } from "prosemirror-markdown";
 import { schema } from "./schema.js";
 
@@ -216,6 +217,7 @@ function attachmentLinkRule(state, silent) {
   if (!silent) {
     const open = state.push("link_open", "a", 1);
     open.attrs = [["href", match[2]]];
+    open.meta = { raw: match[0], dest: match[2] };
     const text = state.push("text", "", 0);
     text.content = match[1];
     state.push("link_close", "a", -1);
@@ -224,7 +226,60 @@ function attachmentLinkRule(state, silent) {
   return true;
 }
 
+// Job 354: a web link keeps its source. The link and autolink rules run as before; on success the link_open token
+// gets meta { raw, dest }: raw is the exact source ([text](dest) or <url>) and dest what stood between the parentheses
+// (for an autolink, the address), and its href is the destination as written with backslash escapes and entities
+// resolved, never percent-encoded or decoded. A reference link ([a][ref]) gets no source and stays as lossy as before.
+function sourceRule(original, autolink) {
+  return (state, silent) => {
+    const start = state.pos;
+    const count = state.tokens.length;
+    if (!original(state, silent)) {
+      return false;
+    }
+    if (silent) {
+      return true;
+    }
+    let open = null;
+    for (let i = count; i < state.tokens.length && open === null; i++) {
+      if (state.tokens[i].type === "link_open") {
+        open = state.tokens[i];
+      }
+    }
+    if (open === null) {
+      return true;
+    }
+    const src = state.src;
+    const raw = src.slice(start, state.pos);
+    if (autolink) {
+      const inner = raw.slice(1, -1);
+      const href = /^[A-Za-z][A-Za-z0-9+.-]{1,31}:/.test(inner) ? inner : "mailto:" + inner;
+      open.attrs = [["href", href]];
+      open.meta = { raw, dest: href };
+      return true;
+    }
+    const labelEnd = state.md.helpers.parseLinkLabel(state, start, true);
+    if (labelEnd < 0 || src[labelEnd + 1] !== "(") {
+      return true;
+    }
+    let pos = labelEnd + 2;
+    while (pos < state.pos && (src[pos] === " " || src[pos] === "\n")) {
+      pos++;
+    }
+    const dest = state.md.helpers.parseLinkDestination(src, pos, state.pos);
+    const href = dest.ok ? dest.str : "";
+    const title = open.attrGet("title");
+    open.attrs = title ? [["href", href], ["title", title]] : [["href", href]];
+    open.meta = { raw, dest: src.slice(labelEnd + 2, state.pos - 1) };
+    return true;
+  };
+}
+
 const md = MarkdownIt("commonmark", { html: false, linkify: false, typographer: false });
+for (const name of ["link", "autolink"]) {
+  const rule = md.inline.ruler.__rules__.find(r => r.name === name);
+  md.inline.ruler.at(name, sourceRule(rule.fn, name === "autolink"));
+}
 md.inline.ruler.before("link", "note_link", noteLinkRule);
 md.inline.ruler.before("link", "attachment_link", attachmentLinkRule);
 md.inline.ruler.before("link", "tag", tagRule);
@@ -295,6 +350,182 @@ function listIsTight(tokens, i) {
   return false;
 }
 
+// ---- Job 354: link sources ----
+
+// The pieces of a link's text, as one string: each text run with its marks (the ones inside the link), each atom by
+// its raw text. The parser and the serializer build it the same way, so a link whose text, marks inside it and atoms
+// are unchanged gets the same signature and is written back as its source.
+function signature(pieces) {
+  const merged = [];
+  for (const piece of pieces) {
+    const last = merged[merged.length - 1];
+    if (piece.atom === null && last && last.atom === null && last.marks === piece.marks) {
+      last.text += piece.text;
+    } else if (piece.atom !== null || piece.text.length > 0) {
+      merged.push({ marks: piece.marks, text: piece.text, atom: piece.atom });
+    }
+  }
+  return merged.map(p => p.atom !== null ? "\ufffc" + p.atom : "<" + p.marks + ">" + p.text).join("\u0001");
+}
+
+const markTokens = { em_open: ["em", 1], em_close: ["em", -1], strong_open: ["strong", 1], strong_close: ["strong", -1] };
+const atomTokens = new Set(["tag", "note_link", "mention"]);
+
+// The link mark's attrs from its link_open token at tokens[i]: href and title, and (job 354) the source raw and dest
+// with the signature of the text up to link_close and the marks every text piece in it carries (inner).
+function linkAttrs(tok, tokens, i) {
+  const attrs = { href: tok.attrGet("href"), title: tok.attrGet("title") || null, raw: null, dest: null, sig: null, inner: null };
+  if (!tok.meta || typeof tok.meta.raw !== "string") {
+    return attrs;
+  }
+  const open = new Map();
+  const pieces = [];
+  for (let j = i + 1; j < tokens.length && tokens[j].type !== "link_close"; j++) {
+    const t = tokens[j];
+    const markDelta = markTokens[t.type];
+    if (markDelta) {
+      open.set(markDelta[0], (open.get(markDelta[0]) || 0) + markDelta[1]);
+      continue;
+    }
+    const marks = [...open.keys()].filter(name => open.get(name) > 0);
+    if (t.type === "text") {
+      pieces.push({ marks: marks.sort().join(","), text: t.content, atom: null });
+    } else if (t.type === "code_inline") {
+      pieces.push({ marks: marks.concat("code").sort().join(","), text: t.content.replace(/\n$/, ""), atom: null });
+    } else if (atomTokens.has(t.type)) {
+      pieces.push({ marks: "", text: "", atom: t.content });
+    } else {
+      pieces.push({ marks: "", text: "", atom: t.type === "hardbreak" ? "hard_break" : t.type });
+    }
+  }
+  return Object.assign(attrs, { raw: tok.meta.raw, dest: tok.meta.dest, sig: signature(pieces), inner: innerMarks(pieces) });
+}
+
+// The marks every text piece carries, sorted and joined by ","; "" without text.
+function innerMarks(pieces) {
+  const texts = pieces.filter(p => p.atom === null && p.text.length > 0).map(p => p.marks.split(",").filter(Boolean));
+  if (texts.length === 0) {
+    return "";
+  }
+  return texts[0].filter(name => texts.every(marks => marks.includes(name))).join(",");
+}
+
+const chipTypes = new Set(["tag", "noteLink", "mention"]);
+
+// The source of the link run (inline nodes that all carry link) as one text node with the marks around the link, when
+// the run still has the text, inner marks and atoms it was parsed with; else null.
+function sourceText(run, link) {
+  const texts = run.filter(node => node.isText);
+  const own = node => node.marks.filter(m => m.type !== link.type);
+  let common = own(texts.length > 0 ? texts[0] : run[0]);
+  for (const node of texts) {
+    common = common.filter(m => m.isInSet(node.marks));
+  }
+  const inner = new Set((link.attrs.inner || "").split(",").filter(Boolean));
+  const outer = common.filter(m => !inner.has(m.type.name));
+  const pieces = run.map(node => {
+    if (node.isText) {
+      const names = own(node).filter(m => !m.isInSet(outer)).map(m => m.type.name);
+      return { marks: names.sort().join(","), text: node.text, atom: null };
+    }
+    if (chipTypes.has(node.type.name)) {
+      return { marks: "", text: "", atom: node.attrs.raw };
+    }
+    return { marks: "", text: "", atom: node.type.name };
+  });
+  return signature(pieces) === link.attrs.sig ? schema.text(link.attrs.raw, outer) : null;
+}
+
+// The inline content with every link run that is unchanged since it was parsed or typed written as its source text.
+function withLinkSources(content) {
+  const nodes = [];
+  content.forEach(node => nodes.push(node));
+  const out = [];
+  let changed = false;
+  for (let i = 0; i < nodes.length;) {
+    const link = nodes[i].marks.find(m => m.type === schema.marks.link);
+    if (!link || typeof link.attrs.raw !== "string") {
+      out.push(nodes[i]);
+      i++;
+      continue;
+    }
+    let end = i;
+    while (end < nodes.length && link.isInSet(nodes[end].marks)) {
+      end++;
+    }
+    const run = nodes.slice(i, end);
+    const text = sourceText(run, link);
+    if (text !== null) {
+      out.push(text);
+      changed = true;
+    } else {
+      out.push(...run);
+    }
+    i = end;
+  }
+  return changed ? Fragment.from(out) : content;
+}
+
+// The document with withLinkSources applied to every textblock.
+function linkSources(node) {
+  if (node.isTextblock) {
+    const content = withLinkSources(node.content);
+    return content === node.content ? node : node.copy(content);
+  }
+  if (node.isLeaf || node.childCount === 0) {
+    return node;
+  }
+  const children = [];
+  let changed = false;
+  node.forEach(child => {
+    const next = linkSources(child);
+    changed = changed || next !== child;
+    children.push(next);
+  });
+  return changed ? node.copy(Fragment.from(children)) : node;
+}
+
+// A destination for a link that has no source (a pasted page title, a reference link): the href as is when it has no
+// whitespace, no angle bracket and balanced parentheses, else in <>; and its title. No backslash is added to the href.
+function destination(href, title) {
+  const text = typeof href === "string" ? href : "";
+  let depth = 0;
+  let balanced = true;
+  for (const c of text) {
+    depth += c === "(" ? 1 : c === ")" ? -1 : 0;
+    balanced = balanced && depth >= 0;
+  }
+  const plain = balanced && depth === 0 && !/[\s<>]/.test(text) && text.length > 0;
+  const dest = plain ? text : "<" + text + ">";
+  return title ? dest + " \"" + title.replace(/"/g, "\\\"") + "\"" : dest;
+}
+
+/** The link mark (job 354) for a link whose source is raw: attrs as the parser gives them, so it is saved as raw. */
+export function sourceLink(raw) {
+  const para = parser.parse(String(raw)).firstChild;
+  if (!para || para.type !== schema.nodes.paragraph || para.childCount === 0) {
+    return null;
+  }
+  const link = para.firstChild.marks.find(m => m.type === schema.marks.link);
+  if (!link || link.attrs.raw !== raw) {
+    return null;
+  }
+  let whole = true;
+  para.forEach(node => {
+    whole = whole && link.isInSet(node.marks);
+  });
+  return whole ? { link, content: para.content } : null;
+}
+
+/**
+ * Job 354: true when href is a web link a Cmd/Ctrl+click may open: http:, https: or mailto: (any case), at most 2048
+ * chars, no whitespace or control character. .NET checks it again (WebLink.TryParse).
+ */
+export function webHref(href) {
+  return typeof href === "string" && href.length > 0 && href.length <= 2048
+    && /^(?:https?|mailto):/i.test(href) && !/[\s\u0000-\u001f\u007f-\u009f]/.test(href);
+}
+
 const parser = new MarkdownParser(schema, tokenizer, {
   blockquote: { block: "blockquote" },
   paragraph: { block: "paragraph" },
@@ -319,7 +550,7 @@ const parser = new MarkdownParser(schema, tokenizer, {
   hardbreak: { node: "hard_break" },
   em: { mark: "em" },
   strong: { mark: "strong" },
-  link: { mark: "link", getAttrs: tok => ({ href: tok.attrGet("href"), title: tok.attrGet("title") || null }) },
+  link: { mark: "link", getAttrs: (tok, tokens, i) => linkAttrs(tok, tokens, i) },
   code_inline: { mark: "code", noCloseToken: true },
   tag: { node: "tag", getAttrs: tok => ({ raw: tok.content, tag: tok.meta.tag }) },
   note_link: { node: "noteLink", getAttrs: tok => ({ raw: tok.content, target: tok.meta.target }) },
@@ -400,7 +631,14 @@ const serializer = new MarkdownSerializer({
 }, {
   em: { open: "*", close: "*", mixable: true, expelEnclosingWhitespace: true },
   strong: { open: "**", close: "**", mixable: true, expelEnclosingWhitespace: true },
-  link: defaultMarkdownSerializer.marks.link,
+  // A link that changed since it was parsed (or has no source) is rebuilt as [text](dest), dest as it was written
+  // (job 354): no autolink form, no backslash added.
+  link: {
+    open: "[",
+    close(state, mark) {
+      return "](" + (typeof mark.attrs.dest === "string" ? mark.attrs.dest : destination(mark.attrs.href, mark.attrs.title)) + ")";
+    },
+  },
   code: defaultMarkdownSerializer.marks.code,
 });
 
@@ -413,7 +651,7 @@ export function parse(markdown) {
 
 /** Writes a document back as Markdown. */
 export function serialize(doc) {
-  const out = serializer.serialize(doc);
+  const out = serializer.serialize(linkSources(doc));
   return out.length > 0 && doc.attrs.trailingNewline ? out + "\n" : out;
 }
 

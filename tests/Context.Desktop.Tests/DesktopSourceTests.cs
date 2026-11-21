@@ -115,6 +115,10 @@ public sealed class DesktopSourceTests
     private const string RealLauncher = "Shell" + "NoteLauncher";
     private const string RealLauncherFile = "src/Context.Desktop/" + RealLauncher + ".cs";
 
+    // Job 354: the real URL launcher, named the same way so no test names it.
+    private const string RealUrlLauncher = "Shell" + "UrlLauncher";
+    private const string RealUrlLauncherFile = "src/Context.Desktop/" + RealUrlLauncher + ".cs";
+
     // 178: the real notifier, spelled in pieces too: no test file may hold its name (it would run osascript or PowerShell).
     private const string RealNotifier = "System" + "Notifier";
     private const string NotifierFolder = "src/Context.Desktop/";
@@ -1176,12 +1180,14 @@ public sealed class DesktopSourceTests
         Assert.Equal([ActionsFile, StateFile, ProgramFile], found.Order(StringComparer.Ordinal).ToArray());
     }
 
-    // 138 AC-9: nothing in the desktop project reads the link's text.
+    // 138 AC-9: nothing in the desktop project reads the link's text. 354: the URL launcher is the one exception; it
+    // gets only a checked web link's Uri (never the calendar link) and must pass its AbsoluteUri to the shell.
     [Fact]
     public void Sources_NeverReadTheCalendarLinksText()
     {
         string root = RepoFiles.Root();
         List<string> found = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
+            .Where(f => f != RealUrlLauncherFile)
             .Where(f => LinkText.IsMatch(File.ReadAllText(Path.Combine(root, f))))
             .ToList();
 
@@ -1341,9 +1347,11 @@ public sealed class DesktopSourceTests
 
         // 203: OnChanged (no parameters) only raises Changed; the editor decides when to save.
         Assert.Equal(
-            ["OnTag", "OnLink", "OnPerson", "OnDirty", "OnDrop", "OnAttachment", "OnChanged", "OnPasteLink"],
+            ["OnTag", "OnLink", "OnPerson", "OnDirty", "OnDrop", "OnAttachment", "OnWebLink", "OnChanged", "OnPasteLink"],
             invokable.Select(m => m.Groups[1].Value).ToArray());
-        Assert.Equal(11, Regex.Matches(text, @"\[JSInvokable").Count);
+        Assert.Equal(12, Regex.Matches(text, @"\[JSInvokable").Count);
+        // 354: OnWebLink only raises WebLinkClicked.
+        Assert.Contains("public Task OnWebLink(string href) => WebLinkClicked?.Invoke(href) ?? Task.CompletedTask;", text, StringComparison.Ordinal);
 
         // 343, 349: OnDecision only raises DecisionClicked and OnCopiedDecision only DecisionCopied, each only for a
         // reference that parses; DecisionPicks only reads through DecisionPicksSource (DesktopState.DecisionPicks).
@@ -1361,7 +1369,7 @@ public sealed class DesktopSourceTests
         Assert.DoesNotMatch(@"\bActions\b|DesktopActions", unix);
         Assert.All(invokable, m => Assert.Matches(
             @"^\s*(TagClicked\?\.Invoke\(raw\)|LinkClicked\?\.Invoke\(raw\)|PersonClicked\?\.Invoke\(raw\)|DirtyChanged\?\.Invoke\(dirty\)"
-            + @"|FilesDropped\?\.Invoke\(new DroppedFiles\(count, files\)\)|AttachmentClicked\?\.Invoke\(href\)|LinkPasted\?\.Invoke\(url\)|Changed\?\.Invoke\(\)) \?\? Task\.CompletedTask$",
+            + @"|FilesDropped\?\.Invoke\(new DroppedFiles\(count, files\)\)|AttachmentClicked\?\.Invoke\(href\)|WebLinkClicked\?\.Invoke\(href\)|LinkPasted\?\.Invoke\(url\)|Changed\?\.Invoke\(\)) \?\? Task\.CompletedTask$",
             m.Groups[2].Value));
         Assert.Equal(
             "DirtyChanged?.Invoke(dirty) ?? Task.CompletedTask",
@@ -1405,7 +1413,7 @@ public sealed class DesktopSourceTests
 
     // 142 AC-5: Enter on a focused chip goes through a keydown handler in the source and in the committed bundle,
     // and the page still calls back only through OnTag, OnLink, (141) OnDirty, (156) OnPerson, (177) OnDrop and
-    // OnAttachment and (244) OnPasteLink.
+    // OnAttachment, (244) OnPasteLink and (354) OnWebLink.
     [Theory]
     [InlineData("editor/src/view.js")]
     [InlineData("wwwroot/editor/editor.js")]
@@ -1416,7 +1424,7 @@ public sealed class DesktopSourceTests
         Assert.Matches(@"handleDOMEvents:\s*\{\s*(?://[^\n]*\n\s*)*keydown\(", text);
         Assert.Contains("opensChip", text, StringComparison.Ordinal);
         Assert.Equal(
-            ["DecisionPicks", "OnAttachment", "OnChanged", "OnCopiedDecision", "OnDecision", "OnDirty", "OnDrop", "OnLink", "OnPasteLink", "OnPerson", "OnTag"],
+            ["DecisionPicks", "OnAttachment", "OnChanged", "OnCopiedDecision", "OnDecision", "OnDirty", "OnDrop", "OnLink", "OnPasteLink", "OnPerson", "OnTag", "OnWebLink"],
             Regex.Matches(text, @"invokeMethodAsync\(""(\w+)""").Select(m => m.Groups[1].Value).Distinct().Order(StringComparer.Ordinal));
     }
 
@@ -1714,7 +1722,7 @@ public sealed class DesktopSourceTests
             .ToList();
 
         Assert.Equal(
-            new[] { RealLauncherFile, RealNotifierFile, RealScreenCaptureFile, RealTimesRunnerFile }.Order(StringComparer.Ordinal),
+            new[] { RealLauncherFile, RealNotifierFile, RealScreenCaptureFile, RealTimesRunnerFile, RealUrlLauncherFile }.Order(StringComparer.Ordinal),
             found.Order(StringComparer.Ordinal));
     }
 
@@ -1947,7 +1955,7 @@ public sealed class DesktopSourceTests
             StringComparison.Ordinal);
         Assert.Contains(
             "            timesFolder, new " + RealNotifier + "(),\n"
-                + "            ScreenCapture(folder));",
+                + "            ScreenCapture(folder), new " + RealUrlLauncher + "());",
             File.ReadAllText(Path.Combine(root, ProgramFile)).ReplaceLineEndings("\n"),
             StringComparison.Ordinal);
     }
@@ -2089,6 +2097,68 @@ public sealed class DesktopSourceTests
         Assert.Single(Regex.Matches(source, @"Process\.Start\("));
         Assert.DoesNotContain("Arguments", source, StringComparison.Ordinal);
         Assert.DoesNotContain("ArgumentList", source, StringComparison.Ordinal);
+    }
+
+    // 354: the URL launcher passes only the checked URI's AbsoluteUri as FileName through the shell, with no arguments.
+    [Fact]
+    public void UrlLauncher_UsesShellExecuteWithTheAbsoluteUriOnly()
+    {
+        string source = File.ReadAllText(Path.Combine(RepoFiles.Root(), RealUrlLauncherFile));
+
+        Assert.Contains("FileName = uri.AbsoluteUri,", source, StringComparison.Ordinal);
+        Assert.Contains("UseShellExecute = true,", source, StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(source, @"Process\.Start\("));
+        Assert.DoesNotContain("Arguments", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ArgumentList", source, StringComparison.Ordinal);
+    }
+
+    // 354: the real URL launcher is named only by itself and Program.cs, no test names it (tests use FakeUrlLauncher),
+    // and only DesktopActions calls Open on a URL launcher.
+    [Fact]
+    public void UrlLauncher_NamedOnlyInItselfAndProgram_NeverInTests()
+    {
+        string root = RepoFiles.Root();
+        List<string> named = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
+            .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains(RealUrlLauncher, StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        Assert.Equal([ProgramFile, RealUrlLauncherFile], named);
+
+        List<string> inTests = [];
+        foreach (string folder in new[] { "tests/Context.Tests", "tests/Context.Desktop.Tests" })
+        {
+            inTests.AddRange(RepoFiles.Sources(root, folder, ".cs", ".csproj")
+                .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains(RealUrlLauncher, StringComparison.Ordinal)));
+        }
+
+        Assert.True(inTests.Count == 0, "Tests name the real URL launcher: " + string.Join(", ", inTests));
+        Assert.Contains("tests/Context.Desktop.Tests/FakeUrlLauncher.cs", RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs"));
+
+        List<string> opening = RepoFiles.Sources(root, RepoFiles.DesktopFolder, ".cs", ".razor")
+            .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains("urlLauncher.Open(", StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal(["src/Context.Desktop/DesktopActions.cs"], opening);
+    }
+
+    // 354 AC-9: a link in the editor is the accent colour and keeps its underline, and --accent-strong reaches 4.5:1 on
+    // the editor background in the light and both dark theme blocks.
+    [Fact]
+    public void Css_EditorLinks_AccentColourReadable()
+    {
+        string desktop = Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder);
+        foreach (string css in new[] { Path.Combine(desktop, "editor", "src", "editor.css"), Path.Combine(desktop, "wwwroot", "editor", "editor.css") })
+        {
+            string link = ThemeBlock(File.ReadAllText(css), ".note-editor-body .link {");
+            Assert.Contains("color: var(--accent-strong);", link, StringComparison.Ordinal);
+            Assert.Contains("text-decoration: underline;", link, StringComparison.Ordinal);
+        }
+
+        string app = File.ReadAllText(Path.Combine(desktop, "wwwroot", "app.css"));
+        foreach (string theme in new[] { ThemeBlock(app, ":root {"), ThemeBlock(app, "@media (prefers-color-scheme: dark) {"), ThemeBlock(app, ":root[data-theme=\"dark\"] {") })
+        {
+            double ratio = Contrast(Colour(theme, "--accent-strong"), Colour(theme, "--background"));
+            Assert.True(ratio >= 4.5, $"--accent-strong on --background: {ratio:F2}");
+        }
     }
 
     // 134 AC-9: no test touches the real launcher (it would open apps); tests use FakeNoteLauncher.

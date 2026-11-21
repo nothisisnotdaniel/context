@@ -68,6 +68,9 @@ internal sealed class DesktopFixture : IDisposable
     /// <summary>The launcher the actions use for "Open in default editor"; it only records paths.</summary>
     public FakeNoteLauncher Launcher { get; } = new();
 
+    /// <summary>The URL launcher the actions open web links with (job 354).</summary>
+    public FakeUrlLauncher UrlLauncher { get; } = new();
+
     /// <summary>The Outlook source the state reads; in memory, Available, answering nothing. Released in <see cref="Dispose"/>.</summary>
     public FakeOutlookSource Outlook { get; } = new();
 
@@ -277,7 +280,7 @@ internal sealed class DesktopFixture : IDisposable
             () => TimesCommand);
         Actions = new DesktopActions(
             Notes, Todos, State, Launcher, link, feed, () => LocalNow, new CalendarStore(Root, Zone), TimesFolder, Notifier,
-            ScreenCapture);
+            ScreenCapture, UrlLauncher);
         Bunit.Services.AddSingleton(State);
         Bunit.Services.AddSingleton(Actions);
         Bunit.Services.AddTransient<EditorInterop>();

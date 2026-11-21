@@ -1145,7 +1145,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     place for endings, used by `NoteStore` and `SensitiveSession`: lines `TextDiff.Lines` marks `Same` keep their
     ending, added lines and a `TooDifferent` diff get the majority), mounts the page editor through `EditorInterop`
     (the only class that touches
-    `IJSRuntime`; `[JSInvokable]` `OnTag`/`OnLink`/`OnPerson`/`OnAttachment` only navigate, `OnDrop` only raises `FilesDropped`, `OnChanged` only raises `Changed`) and saves through
+    `IJSRuntime`; `[JSInvokable]` `OnTag`/`OnLink`/`OnPerson`/`OnAttachment`/`OnWebLink` only navigate (`OnWebLink` raises `WebLinkClicked`, `NoteEditor.OnOpenWebLink`), `OnDrop` only raises `FilesDropped`, `OnChanged` only raises `Changed`) and saves through
     `DesktopActions.SaveNote` -> `NoteStore.SaveIfUnchanged` (unchanged text writes nothing; version re-checked before
     the move; per-line endings and BOM kept, `saved` has the flags of the bytes written; temp file mode `0600`).
     **Auto save** (job 203): `view.js` calls `OnChanged` on every
@@ -1957,6 +1957,19 @@ Every factory agent reads this file before working on Context. Keep it short and
     and `titledMarkdown` (`SmartPasteBundleTests`). `view.js` `handlePaste` treats a paste as plain while Shift is held
     (own keydown/keyup tracking, ProseMirror's rule incl. key 45), records each pasted link (`maxPendingLinks` 20,
     mapped on every transaction) and calls `OnPasteLink(url)`; `setLinkTitle(element, url, title)` applies a title.
+    **Web links** (job 354): the `link` mark has `href, title, raw, dest, sig, inner`; `markdown.js` wraps markdown-it's
+    `link`/`autolink` rules (`sourceRule`) to keep the source (`raw`), the destination as written (`dest`) and a signature
+    of the link's content (`sig`); `href` is the destination unescaped but not percent-encoded. The serializer
+    (`linkSources`) writes an unchanged link run as its `raw`, and a renamed one as `[<new text>](<dest as written>)`
+    (`destination(href, title)` for a link without `dest`); reference links stay lossy. `webHref(href)` (1 to 2048 chars,
+    `http:`, `https:` or `mailto:`, no whitespace or control char) gates the input rule `webLinkRule` in `view.js` (on the
+    closing `)`, never in code, never after `!` or `\`; the outer marks carried over), the paste (`paste.js`
+    `linkedSlice`: each inline `[text](url)` of a normal paste becomes a link, a plain paste stays text) and clicks
+    (`linkClick(doc, pos, mod)`: an attachment PDF on any click `{kind:"attachment"}`, a `webHref` link only with Mod
+    (Cmd on macOS, Ctrl elsewhere) `{kind:"web"}`, which alone calls `OnWebLink`). Inline code typed around a link keeps
+    its source (`codeSource`). `toDOM` stays `span.link` with `title` = href (no live href); `editor.css` colours it
+    `var(--accent-strong)` with the underline. Test hooks `clickedLinkJson(markdown, mod)`, `pastedDocJson(text, plain,
+    start)`, `linkDomJson(markdown)`, `webHref` (`WebLinkBundleTests`, `RoundTrip/lossless/web-links.md`).
     `markdown.js` escapes no text at all (job 290; `RoundTrip/lossless/table.md`, `escaped-pipe.md`). Core `PageTitle.cs`:
     `IPageTitleSource`, `PageTitleFetcher(handler, timeout)` (one GET, `Accept` HTML, 2xx, final URI http(s), media type
     absent/`text/html`/`application/xhtml+xml`, first `MaxBodyBytes` 256 KiB, declared charset else UTF-8, first
@@ -2103,7 +2116,8 @@ Every factory agent reads this file before working on Context. Keep it short and
     `StartupUpdate.cs`, `VelopackUpdateSource.cs`) never mention `NoteStore`, `DefaultFolder`, `DesktopActions`,
     `Environment.GetEnvironmentVariable`, `args` or `Console.`, so an update never touches the data folder; no test
     references `VelopackUpdateSource` (tests use `FakeUpdateSource`, never the network).
-    **Launcher rule:** `Process` / `System.Diagnostics` appear only in `ShellNoteLauncher.cs`, (job 178)
+    **Launcher rule:** `Process` / `System.Diagnostics` appear only in `ShellNoteLauncher.cs`, (job 354)
+    `ShellUrlLauncher.cs`, (job 178)
     `SystemNotifier.cs`, (job 260) `MacScreenCapture.cs` and (job 282) `TimesProcessRunner.cs`, each named only in itself
     and in `Program.cs` (the runner also in its own `TimesProcessRunnerTests`, Unix-only temp `tm` scripts; every other
     test uses `FakeTimesRunner`), and (job 280)
@@ -2113,7 +2127,14 @@ Every factory agent reads this file before working on Context. Keep it short and
     `FakeNotifier`, which records `(title, body)` and can throw), and the notifier passes the text only as arguments or
     environment values. The only path `ShellNoteLauncher` ever gets is a checked note or attachment path (a note from `List()`, or an
     attachment PDF `NoteAttachments.TryResolve` accepted), and the only folder it gets is the fixed crash folder
-    `<root>/.logs` (`CrashHint.Folder`, job 237); no user text becomes a path or an argument; no test references `ShellNoteLauncher` (tests use `FakeNoteLauncher`, which records paths and can throw).
+    `<root>/.logs` (`CrashHint.Folder`, job 237); no user text becomes a path or an argument; no test references `ShellNoteLauncher` (tests use `FakeNoteLauncher`, which records paths and can throw). **Web links** (job 354): `IUrlLauncher.Open(Uri)` is a launcher of its own, never `INoteLauncher`;
+    `ShellUrlLauncher` (`Process.Start` with `UseShellExecute = true`, `FileName = uri.AbsoluteUri`, no arguments) is the
+    last `DesktopActions` constructor argument from `Program.cs`, and only `DesktopActions.OpenWebLink(href)` calls it
+    (never writes or refreshes): `WebLink.TryParse` (1 to 2048 chars, no whitespace or control char, scheme `http`,
+    `https` or `mailto` (any case), http(s) with `//`, a host and no userinfo, `Uri.TryCreate` absolute) gives Done, else
+    Refused `Can't open this link.` (Failed with the same text when the launcher throws); `Main.OpenWebLink` shows it as a
+    red status line. It is the one file exempt from the calendar-link-text rule (it reads only the checked web link's
+    `AbsoluteUri`); no test references `ShellUrlLauncher` (tests use `FakeUrlLauncher`, which records `Uri`s and can throw).
     Outside text goes through `DesktopText.OneLine` and Blazor's default encoding: never `MarkupString`,
     `AddMarkupContent` or `@((` raw markup; no `style=`, `<a `, `<form` or `<script` in `.razor` files; every
     `<button` has `type="button"`; no plain HTML event attributes (`on<event>=` without `@`); only `EditorInterop.cs`
@@ -2144,7 +2165,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `LinkCreateActionsTests` (`CreateLinkedNote`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `MailDigestPanelTests` (the Mail digest page and `/digest` through `Main`, with `FakeOutlookSource`) and `MailDigestActionsTests` (`AcceptSuggestion`, `SetMailDigestEnabled`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `ShareActionsTests` (`ShareNote`) and `ShareDialogTests` (Share through `Main`), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `ThemeActionsTests` (job 341), `PeoplePanelTests`, `ReviewPanelTests`, `DoneLogActionsTests` (the done-log append on completion) and `DonePanelTests` (the Done log page and `/donelog` through `Main`), `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StandupActionsTests` (`WriteStandup`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `WebLinkActionsTests` (`OpenWebLink`, with `FakeUrlLauncher`), `LinkCreateActionsTests` (`CreateLinkedNote`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `MailDigestPanelTests` (the Mail digest page and `/digest` through `Main`, with `FakeOutlookSource`) and `MailDigestActionsTests` (`AcceptSuggestion`, `SetMailDigestEnabled`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `ShareActionsTests` (`ShareNote`) and `ShareDialogTests` (Share through `Main`), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `ThemeActionsTests` (job 341), `PeoplePanelTests`, `ReviewPanelTests`, `DoneLogActionsTests` (the done-log append on completion) and `DonePanelTests` (the Done log page and `/donelog` through `Main`), `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StandupActionsTests` (`WriteStandup`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
     CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules, the transfer calls and no file system class in `.razor`), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),
