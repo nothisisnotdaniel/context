@@ -2735,6 +2735,32 @@ nav.saved-searches ul {
     margin: 0;
 }
 
+/* 383: the Times buttons, small secondary buttons in one row below the line; the checkpoint form only while open. */
+.times-today .times-actions,
+.times-today .times-form {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 6px 0 0;
+}
+
+.times-today .times-actions button,
+.times-today .times-form button {
+    font-size: 0.85em;
+    padding: 2px 8px;
+}
+
+.times-today .times-form .times-project,
+.times-today .times-form .times-name {
+    flex: 1 1 100%;
+    min-width: 0;
+}
+
+.times-today .times-result {
+    margin: 6px 0 0;
+}
+
 .day-appointments .day-appointments-bar {
     align-items: center;
     display: flex;

@@ -341,6 +341,26 @@ internal sealed class DesktopState
     }
 
     /// <summary>
+    /// Whether Times is there (job 383): the resolved Times folder is set and is a directory. Checked off the calling
+    /// thread; never throws, never writes.
+    /// </summary>
+    public Task<bool> HasTimes() => Task.Run(() =>
+    {
+        try
+        {
+            return timesFolder is not null && Directory.Exists(timesFolder);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    });
+
+    /// <summary>Times' project quicklist (<see cref="Context.TimesProjects.Read"/>, job 383) off the calling thread; read only.</summary>
+    public Task<IReadOnlyList<(int WorkItem, string Title)>> TimesProjects() =>
+        Task.Run(() => Context.TimesProjects.Read(timesFolder));
+
+    /// <summary>
     /// Today's Times bookings (<see cref="Context.TimesNow.Read"/>) off the calling thread, for today and now on the
     /// state's UTC clock in <see cref="Zone"/>. Only reads the Times folder; never throws (a failure is
     /// <see cref="TimesNowKind.Unreadable"/>).

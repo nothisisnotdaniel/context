@@ -1,28 +1,94 @@
 @inherits StateComponent
-@* Today's Times bookings in the right sidebar, right after the appointments (job 277): one grey line
-   "Arrived HH:mm[ · Left HH:mm] · Time left H:mm[ · #n name]" from DesktopState.TimesNow (read only, never a write
-   into Times' folder). Nothing at all when Times has nothing for today, one grey line when its day file can't be read.
+@* Today's Times bookings in the right sidebar, right after the appointments (job 277), with buttons since job 383:
+   one grey line "Arrived HH:mm[ · Left HH:mm] · Time left H:mm[ · #n name]" from DesktopState.TimesNow (read only),
+   then the buttons of today's state: Arrive (no arrival yet, or left), Break, Checkpoint… and Leave (working), End
+   break (on a break). Each runs one tm one-shot through DesktopActions.BookTimes, so Times stays the only writer of
+   its folder. Checkpoint… opens an inline form (project select, name field, Book, Cancel; Enter books, Esc cancels).
+   Nothing at all while Times' folder is not there; one grey line and no buttons when its day file can't be read.
    It reloads on every state change and every Tick (TimesChanged), keeping the shown line meanwhile, so no Loading…
-   ever shows. It takes no focus and has no buttons. *@
+   ever shows. *@
 
-@if (view is { Kind: TimesNowKind.Booked } booked)
-{
-    string line = Line(booked);
-    <section class="times-today" aria-label="Times">
-        <p class="grey times-line cut" title="@line">@line</p>
-    </section>
-}
-else if (view is { Kind: TimesNowKind.Unreadable })
+@if (present && view is { Kind: TimesNowKind.Unreadable })
 {
     <section class="times-today" aria-label="Times">
         <p class="grey times-line">Can't read Times' day file.</p>
     </section>
 }
+else if (present && view is { } times)
+{
+    <section class="times-today" aria-label="Times" aria-busy="@(running ? "true" : null)">
+        @if (times.Kind == TimesNowKind.Booked)
+        {
+            string line = Line(times);
+            <p class="grey times-line cut" title="@line">@line</p>
+        }
+        <div class="times-actions">
+            @switch (times.Kind == TimesNowKind.Booked ? times.State : TimesNowState.Out)
+            {
+                case TimesNowState.Working:
+                    <button type="button" class="times-break" disabled="@running" @onclick="() => Book(TimesAction.Break)">Break</button>
+                    <button type="button" class="times-checkpoint" disabled="@running" aria-expanded="@(formOpen ? "true" : "false")"
+                            @ref="checkpointButton" @onclick="OpenForm">Checkpoint…</button>
+                    <button type="button" class="times-leave" disabled="@running" @onclick="() => Book(TimesAction.Leave)">Leave</button>
+                    break;
+                case TimesNowState.OnBreak:
+                    <button type="button" class="times-breakend" disabled="@running" @onclick="() => Book(TimesAction.BreakEnd)">End break</button>
+                    break;
+                default:
+                    <button type="button" class="times-arrive" disabled="@running" @onclick="() => Book(TimesAction.Arrive)">Arrive</button>
+                    break;
+            }
+        </div>
+        @if (formOpen && times.Kind == TimesNowKind.Booked && times.State == TimesNowState.Working)
+        {
+            <div class="times-form">
+                <select class="times-project" aria-label="Project" disabled="@running" value="@ProjectValue"
+                        @onchange="ProjectChosen" @onkeydown="FormKey">
+                    <option value="">No project</option>
+                    @for (int i = 0; i < projects.Count; i++)
+                    {
+                        string label = DesktopText.OneLine($"#{projects[i].WorkItem.ToString(CultureInfo.InvariantCulture)} {projects[i].Title}");
+                        string value = (i + 1).ToString(CultureInfo.InvariantCulture);
+                        <option value="@value">@label</option>
+                    }
+                </select>
+                <input type="text" class="times-name" value="@checkpointName" maxlength="@TimesBooking.MaxName"
+                       disabled="@running" aria-label="Checkpoint name" placeholder="Checkpoint name" spellcheck="false"
+                       @ref="nameInput" @oninput="NameTyped" @onkeydown="NameKey" />
+                <button type="button" class="times-book" disabled="@running" @onclick="BookCheckpoint">Book</button>
+                <button type="button" class="times-cancel" disabled="@running" @onclick="CancelForm">Cancel</button>
+            </div>
+        }
+        @if (result is { } shown)
+        {
+            <p class="@(shown.Kind == ActionKind.Done ? "accent" : "red") times-result" role="status">@DesktopText.OneLine(shown.Text)</p>
+        }
+    </section>
+}
 
 @code {
     private TimesNow? view;
+    private bool present;
     private int request;
     private bool disposed;
+    private bool running;
+    private bool formOpen;
+    private bool focusName;
+    private bool focusCheckpoint;
+    private int? position;
+    private string checkpointName = string.Empty;
+    private IReadOnlyList<(int WorkItem, string Title)> projects = [];
+    private ActionResult? result;
+    private ElementReference checkpointButton;
+    private ElementReference nameInput;
+
+    /// <summary>The name field (for tests).</summary>
+    internal ElementReference NameInputReference => nameInput;
+
+    /// <summary>The Checkpoint… button (for tests).</summary>
+    internal ElementReference CheckpointButtonReference => checkpointButton;
+
+    private string ProjectValue => position?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
 
     /// <summary>The panel's one line for a booked day; every Times name through <see cref="DesktopText.OneLine"/>.</summary>
     internal static string Line(TimesNow times)
@@ -41,6 +107,103 @@ else if (view is { Kind: TimesNowKind.Unreadable })
     }
 
     private static string Time(TimeOnly? time) => time?.ToString("HH:mm", CultureInfo.InvariantCulture) ?? string.Empty;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusName && formOpen)
+        {
+            focusName = false;
+            await nameInput.FocusAsync();
+        }
+        else if (focusCheckpoint && !formOpen)
+        {
+            focusCheckpoint = false;
+            await checkpointButton.FocusAsync();
+        }
+    }
+
+    // One booking at a time: a click while a run is pending starts nothing. On success the form closes and the panel
+    // reads TimesNow once, so the new state's buttons show; a failure keeps the form and its input.
+    private async Task Book(TimesAction action)
+    {
+        if (running)
+        {
+            return;
+        }
+
+        running = true;
+        result = null;
+        try
+        {
+            ActionResult booked = action == TimesAction.Checkpoint
+                ? await Actions.BookTimes(action, position, checkpointName)
+                : await Actions.BookTimes(action);
+            result = booked;
+            if (booked.Kind == ActionKind.Done)
+            {
+                formOpen = false;
+                checkpointName = string.Empty;
+                position = null;
+                await Load();
+            }
+        }
+        finally
+        {
+            running = false;
+        }
+    }
+
+    private Task BookCheckpoint() => Book(TimesAction.Checkpoint);
+
+    private async Task OpenForm()
+    {
+        if (running || formOpen)
+        {
+            return;
+        }
+
+        formOpen = true;
+        focusName = true;
+        result = null;
+        projects = await State.TimesProjects();
+    }
+
+    private void CancelForm()
+    {
+        if (running || !formOpen)
+        {
+            return;
+        }
+
+        formOpen = false;
+        focusCheckpoint = true;
+    }
+
+    private void NameTyped(ChangeEventArgs e) => checkpointName = e.Value?.ToString() ?? string.Empty;
+
+    private void ProjectChosen(ChangeEventArgs e) =>
+        position = int.TryParse(e.Value?.ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out int chosen)
+            && chosen >= 1 && chosen <= projects.Count ? chosen : null;
+
+    private async Task NameKey(KeyboardEventArgs key)
+    {
+        if (key.Key == "Enter")
+        {
+            await BookCheckpoint();
+        }
+        else
+        {
+            FormKey(key);
+        }
+    }
+
+    private void FormKey(KeyboardEventArgs key)
+    {
+        if (key.Key == "Escape")
+        {
+            CancelForm();
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -89,14 +252,20 @@ else if (view is { Kind: TimesNowKind.Unreadable })
         }
     }
 
-    // Keeps the shown line while it reloads; an older request's result is dropped.
+    // Keeps the shown line and buttons while it reloads; an older request's result is dropped.
     private async Task Load()
     {
         int mine = ++request;
-        TimesNow result = await State.TimesNow();
+        bool has = await State.HasTimes();
+        TimesNow read = await State.TimesNow();
         if (mine == request)
         {
-            view = result;
+            present = has;
+            view = read;
+            if (read is not { Kind: TimesNowKind.Booked, State: TimesNowState.Working })
+            {
+                formOpen = false;
+            }
         }
     }
 }

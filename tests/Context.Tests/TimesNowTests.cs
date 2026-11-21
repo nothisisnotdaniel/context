@@ -279,4 +279,33 @@ public sealed class TimesNowTests : IDisposable
         Assert.Equal(new TimeSpan(2, 30, 0), day.WorkTimeAt(new TimeOnly(10, 30)));
         Assert.Equal(TimeSpan.FromMinutes(5), day.WorkTimeAt(new TimeOnly(8, 0)));
     }
+    // 383 AC-2, AC-3: the state of the day, read from TimesDay only.
+    [Theory]
+    [InlineData("""{"entries":[{"kind":"arrival","time":"08:00"}]}""", "Booked", "Working")]
+    [InlineData("""{"entries":[{"kind":"arrival","time":"08:00"},{"kind":"breakStart","time":"09:00"}]}""", "Booked", "OnBreak")]
+    [InlineData("""{"entries":[{"kind":"arrival","time":"08:00"},{"kind":"breakStart","time":"09:00"},{"kind":"breakEnd","time":"09:30"}]}""", "Booked", "Working")]
+    [InlineData("""{"entries":[{"kind":"arrival","time":"08:00"},{"kind":"leaving","time":"09:00"}]}""", "Booked", "Left")]
+    [InlineData("""{"entries":[{"kind":"arrival","time":"08:00"},{"kind":"breakStart","time":"09:00"},{"kind":"leaving","time":"09:30"}]}""", "Booked", "Left")]
+    [InlineData("""{"entries":[]}""", "None", "Out")]
+    [InlineData("""{"absence":"vacation"}""", "None", "Out")]
+    [InlineData("{", "Unreadable", "Out")]
+    public void Read_State(string json, string kindName, string stateName)
+    {
+        TimesNowKind kind = Enum.Parse<TimesNowKind>(kindName);
+        TimesNowState state = Enum.Parse<TimesNowState>(stateName);
+        WriteDay(json);
+
+        TimesNow now = Read(10, 0);
+
+        Assert.Equal(kind, now.Kind);
+        Assert.Equal(state, now.State);
+    }
+
+    // 383 AC-2: no day file and no folder are Out.
+    [Fact]
+    public void Read_NoFileOrFolder_IsOut()
+    {
+        Assert.Equal(TimesNowState.Out, Read(10, 0).State);
+        Assert.Equal(TimesNowState.Out, TimesNow.Read(null, Today, new TimeOnly(10, 0)).State);
+    }
 }

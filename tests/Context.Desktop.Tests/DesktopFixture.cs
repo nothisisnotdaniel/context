@@ -245,6 +245,9 @@ internal sealed class DesktopFixture : IDisposable
     /// <summary>The located tm path the state reports (job 282); null means not found. Set it before <see cref="CreateState"/>.</summary>
     public string? TimesCommand { get; set; } = "/fake/tm";
 
+    /// <summary>When true, the state and the actions get no Times folder at all (job 383); set it before <see cref="CreateState"/>.</summary>
+    public bool NoTimesFolder { get; set; }
+
     /// <summary>The Times runner the actions book a meeting through (job 381); it never starts tm.</summary>
     public FakeTimesRunner TimesRunner { get; } = new FakeTimesRunner();
 
@@ -291,13 +294,13 @@ internal sealed class DesktopFixture : IDisposable
             OutlookTimeout,
             PageTitles,
             IsMac,
-            TimesFolder,
+            NoTimesFolder ? null : TimesFolder,
             CommitLog,
             () => TimesCommand,
             pro: new Pro(LicenceStore, Licences.Keys, LicenceRevocations.None, ProBuildDate),
             activationFile: new LicenceActivationFile(ActivationFolder));
         Actions = new DesktopActions(
-            Notes, Todos, State, Launcher, link, feed, () => LocalNow, new CalendarStore(Root, Zone), TimesFolder, Notifier,
+            Notes, Todos, State, Launcher, link, feed, () => LocalNow, new CalendarStore(Root, Zone), NoTimesFolder ? null : TimesFolder, Notifier,
             ScreenCapture, UrlLauncher, TimesRunner);
         Bunit.Services.AddSingleton(State);
         Bunit.Services.AddSingleton(Actions);

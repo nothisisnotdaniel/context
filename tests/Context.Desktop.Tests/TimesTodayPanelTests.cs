@@ -1,10 +1,13 @@
 using AngleSharp.Dom;
 using Bunit;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
 
 namespace Context.Tests;
 
 // 277 AC-4 to AC-7: today's Times line in the right sidebar, right after the appointments, through Main. The Times
 // folder is the fixture's own; the state's UTC clock (09:30 UTC, 10:30 in the fixture's zone) gives today and now.
+// 383: the panel's buttons; the actions' local clock (10:05) gives the booked time, FakeTimesRunner the runs.
 public sealed class TimesTodayPanelTests : IDisposable
 {
     // The panel and the sidebar load on Task.Run; every wait passes this bounded timeout.
@@ -17,6 +20,11 @@ public sealed class TimesTodayPanelTests : IDisposable
           {"kind":"checkpoint","time":"08:05","name":"Review","workItem":1234}
         ]}
         """;
+
+    // The section's text for the Booked day while working: the line, then the three buttons' texts.
+    private const string WorkingButtons = "Break Checkpoint… Leave";
+
+    private const string BookedLine = "Arrived 08:00 · Time left 5:30 · #1234 Review" + WorkingButtons;
 
     private readonly DesktopFixture data = new();
 
@@ -31,8 +39,18 @@ public sealed class TimesTodayPanelTests : IDisposable
     private void WriteDay(string json) =>
         File.WriteAllText(Path.Combine(data.TimesFolder, "2026-10-29.json"), json);
 
-    private static string Line(IRenderedComponent<Main> cut) =>
-        cut.Find("section.times-today").TextContent.Trim();
+    private static string Line(IRenderedComponent<Main> cut) => Flat(cut.Find("section.times-today"));
+
+    // The section's text with whitespace runs between elements dropped, so "line" + "Break Checkpoint… Leave".
+    private static string Flat(IElement section)
+    {
+        string line = section.QuerySelector("p.times-line")?.TextContent ?? string.Empty;
+        string buttons = string.Join(" ", Buttons(section));
+        return line + buttons;
+    }
+
+    private static string[] Buttons(IElement section) =>
+        section.QuerySelectorAll("button").Select(b => b.TextContent.Trim()).ToArray();
 
     private static void WaitForLine(IRenderedComponent<Main> cut, string line) =>
         cut.WaitForAssertion(() => Assert.Equal(line, Line(cut)), Wait);
@@ -54,7 +72,7 @@ public sealed class TimesTodayPanelTests : IDisposable
         WriteDay(Booked);
 
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        WaitForLine(cut, "Arrived 08:00 · Time left 5:30 · #1234 Review");
+        WaitForLine(cut, BookedLine);
         WaitForSidebar(cut);
 
         IElement aside = cut.Find("aside.todos-region");
@@ -63,11 +81,12 @@ public sealed class TimesTodayPanelTests : IDisposable
         Assert.Equal("SECTION", section.TagName);
         Assert.Contains("times-today", section.ClassList);
         Assert.Equal("Times", section.GetAttribute("aria-label"));
-        IElement line = Assert.Single(section.Children);
+        IElement line = section.Children[0];
         Assert.Equal("P", line.TagName);
         Assert.Contains("grey", line.ClassList);
         Assert.Equal("Arrived 08:00 · Time left 5:30 · #1234 Review", line.GetAttribute("title"));
-        Assert.Empty(section.QuerySelectorAll("button, input, a, [tabindex]"));
+        Assert.Equal(["Break", "Checkpoint…", "Leave"], Buttons(section));
+        Assert.Empty(section.QuerySelectorAll("input, a, [tabindex]"));
     }
 
     // AC-5: once left: arrival, leaving and time left; no checkpoint part.
@@ -87,7 +106,8 @@ public sealed class TimesTodayPanelTests : IDisposable
 
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
-        WaitForLine(cut, "Arrived 08:00 · Left 16:40 · Time left 0:15");
+        WaitForLine(cut, "Arrived 08:00 · Left 16:40 · Time left 0:15Arrive");
+        Assert.Equal("Arrived 08:00 · Left 16:40 · Time left 0:15", cut.Find("p.times-line").TextContent);
     }
 
     // AC-5: a checkpoint without a work item shows only its name, cleaned onto one line.
@@ -105,7 +125,7 @@ public sealed class TimesTodayPanelTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
         string expected = "Arrived 08:00 · Time left 5:30 · " + DesktopText.OneLine("Docs\nand <b>more</b>\u0007");
-        WaitForLine(cut, expected);
+        cut.WaitForAssertion(() => Assert.Equal(expected, cut.Find("p.times-line").TextContent), Wait);
         Assert.Empty(cut.FindAll("section.times-today b"));
         Assert.DoesNotContain('\n', Line(cut));
         Assert.DoesNotContain('\u0007', Line(cut));
@@ -126,18 +146,19 @@ public sealed class TimesTodayPanelTests : IDisposable
             () => Assert.Contains("Plan", cut.Find("section.to-review").TextContent, StringComparison.Ordinal), Wait);
         IElement line = Assert.Single(cut.Find("section.times-today").Children);
         Assert.Contains("grey", line.ClassList);
+        Assert.Empty(cut.FindAll("section.times-today button"));
     }
 
-    // AC-6, AC-7: None renders nothing: after the day file becomes an absence and Tick runs, the section goes.
+    // AC-6, AC-7 (383 AC-1): once Times' folder is gone and Tick runs, the section goes.
     [Fact]
     public async Task None_RendersNothing()
     {
         WriteDay(Booked);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        WaitForLine(cut, "Arrived 08:00 · Time left 5:30 · #1234 Review");
+        WaitForLine(cut, BookedLine);
         WaitForSidebar(cut);
 
-        WriteDay("""{"absence":"vacation"}""");
+        Directory.Delete(data.TimesFolder, recursive: true);
         data.State!.Tick();
 
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("section.times-today")), Wait);
@@ -162,7 +183,7 @@ public sealed class TimesTodayPanelTests : IDisposable
                 }
             }
         };
-        WaitForLine(cut, "Arrived 08:00 · Time left 5:30 · #1234 Review");
+        WaitForLine(cut, BookedLine);
         WaitForSidebar(cut);
 
         WriteDay(
@@ -176,7 +197,7 @@ public sealed class TimesTodayPanelTests : IDisposable
         data.UtcNow = data.UtcNow.AddMinutes(1);
         data.State!.Tick();
 
-        WaitForLine(cut, "Arrived 08:00 · Time left 5:29 · #42 Plan");
+        WaitForLine(cut, "Arrived 08:00 · Time left 5:29 · #42 Plan" + WorkingButtons);
         lock (seen)
         {
             Assert.DoesNotContain(seen, text => text.Contains("Loading", StringComparison.Ordinal));
@@ -195,7 +216,7 @@ public sealed class TimesTodayPanelTests : IDisposable
         WriteDay(Booked);
         await data.State!.Refresh();
 
-        WaitForLine(cut, "Arrived 08:00 · Time left 5:30 · #1234 Review");
+        WaitForLine(cut, BookedLine);
     }
 
     // AC-4: loading the panel changes nothing in the Times folder.
@@ -207,7 +228,7 @@ public sealed class TimesTodayPanelTests : IDisposable
         SortedDictionary<string, string> before = FileSnapshot.Take(data.TimesFolder);
 
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        WaitForLine(cut, "Arrived 08:00 · Time left 5:30 · #1234 Review");
+        WaitForLine(cut, BookedLine);
         WaitForSidebar(cut);
         data.State!.Tick();
         await data.State.TimesNow();
