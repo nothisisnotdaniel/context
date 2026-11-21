@@ -860,6 +860,7 @@ p.decision-clash button {
 .tag-panel,
 .find-panel,
 .decisions-panel,
+.glossary-panel,
 .similar-panel {
     border-bottom: 1px solid var(--line);
     margin-bottom: 16px;
