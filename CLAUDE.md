@@ -210,7 +210,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `IsForeign`); `WithFolderLine` adds it once after a leading ATX title, else as line 1, with the note's ending.
     **Numbering** (`DecisionNumbers.Apply(text, folder, keeps, next)`, pure): every bare marker gets
     `!d <own prefix>-<n>` in document order from one `next(count)` call; a plain number, another prefix and an own token
-    `keeps(n, text)` refuses are replaced in place; a repeat of an own token with the same text is one decision, with
+    `keeps(n, text)` refuses are replaced in place (a plain number typed after `!d ` is the token, so `!d 3 people hired` becomes `!d ab12-<n> people hired` and the `3` is gone); a repeat of an own token with the same text is one decision, with
     another text it is renumbered; then the folder line is added when own-prefix decisions are left; a note of another
     folder is never changed (`Foreign`); no numbers left keeps the markers (`Unnumbered`). `DecisionEdits(Text, Set,
     Folder)` (`Set` per marker `DecisionSet(Index, Old, New)`, `Changed`, `Noteworthy`). `DecisionNumbering.Number`

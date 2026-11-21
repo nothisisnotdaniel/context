@@ -643,7 +643,6 @@ input[type="password"]:disabled {
     white-space: pre;
 }
 
-.decision-picker li.selected,
 .decision-picker li[aria-selected="true"]:not([aria-disabled="true"]) {
     background: var(--accent-strong);
     color: var(--on-accent);

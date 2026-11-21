@@ -1985,7 +1985,7 @@ internal sealed class TagIndex
             alias = DecisionFolder.NewPrefix(AliasRandom);
             if (++tries > 10_000)
             {
-                throw new TagIndexException($"Can't read {FileName}.");
+                throw new TagIndexException($"Can't find a free decision prefix in {FileName}.");
             }
         }
         while (taken.Contains(alias));
