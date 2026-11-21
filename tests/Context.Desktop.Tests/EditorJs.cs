@@ -16,8 +16,11 @@ internal sealed class EditorJs
 {
     private readonly BunitJSInterop js;
 
+    private readonly BunitContext context;
+
     public EditorJs(BunitContext context, bool dirty = false, string markdown = "")
     {
+        this.context = context;
         js = context.JSInterop;
         js.SetupVoid("ContextEditor.mount", _ => true).SetVoidResult();
         js.SetupVoid("ContextEditor.focus", _ => true).SetVoidResult();
@@ -44,6 +47,8 @@ internal sealed class EditorJs
         js.Setup<string>("ContextEditor.decisionReferencesIn", _ => true).SetResult("[]");
         js.Setup<bool>("ContextEditor.setDecisionTitles", _ => true).SetResult(true);
         js.Setup<bool>("ContextEditor.scrollToDecision", _ => true).SetResult(false);
+        js.Setup<bool>("ContextEditor.setDecisionPrefixes", _ => true).SetResult(true);
+        js.Setup<string>("ContextEditor.copyToClipboard", _ => true).SetResult("Copied");
     }
 
     /// <summary>
@@ -69,9 +74,13 @@ internal sealed class EditorJs
     public void SetDecisionReferences(string json) =>
         js.Setup<string>("ContextEditor.decisionReferencesIn", _ => true).SetResult(json);
 
-    /// <summary>Makes every later <c>ContextEditor.scrollToDecision</c> call for <paramref name="number"/> answer true.</summary>
-    public void HasDecision(int number) =>
-        js.Setup<bool>("ContextEditor.scrollToDecision", i => (int)i.Arguments[1]! == number).SetResult(true);
+    /// <summary>Makes every later <c>ContextEditor.scrollToDecision</c> call for <paramref name="token"/> answer true.</summary>
+    public void HasDecision(string token) =>
+        js.Setup<bool>("ContextEditor.scrollToDecision", i => (string)i.Arguments[1]! == token).SetResult(true);
+
+    /// <summary>The (own, alias) pairs passed to <c>ContextEditor.setDecisionPrefixes</c> so far (job 349).</summary>
+    public IReadOnlyList<string> DecisionPrefixes() =>
+        Calls("ContextEditor.setDecisionPrefixes").Select(c => (string)c.Arguments[1]!).ToList();
 
     /// <summary>The (edits JSON, saved text) pairs passed to <c>ContextEditor.applyDecisionEdits</c> so far.</summary>
     public IReadOnlyList<(string Edits, string Saved)> DecisionEdits() =>
@@ -81,9 +90,9 @@ internal sealed class EditorJs
     public IReadOnlyList<string> DecisionTitles() =>
         Calls("ContextEditor.setDecisionTitles").Select(c => (string)c.Arguments[1]!).ToList();
 
-    /// <summary>The numbers passed to <c>ContextEditor.scrollToDecision</c> so far.</summary>
-    public IReadOnlyList<int> DecisionJumps() =>
-        Calls("ContextEditor.scrollToDecision").Select(c => (int)c.Arguments[1]!).ToList();
+    /// <summary>The tokens passed to <c>ContextEditor.scrollToDecision</c> so far.</summary>
+    public IReadOnlyList<string> DecisionJumps() =>
+        Calls("ContextEditor.scrollToDecision").Select(c => (string)c.Arguments[1]!).ToList();
 
     /// <summary>The (url, title) pairs passed to <c>ContextEditor.setLinkTitle</c> so far, in order.</summary>
     public IReadOnlyList<(string Url, string Title)> LinkTitles() =>
@@ -196,9 +205,13 @@ internal sealed class EditorJs
         return true;
     }
 
-    /// <summary>The calls of <paramref name="identifier"/> so far.</summary>
+    /// <summary>
+    /// The calls of <paramref name="identifier"/> so far, read on the renderer's dispatcher: a component's calls are
+    /// recorded there, also those made after a load the page started by itself, so the list is never read mid-write.
+    /// </summary>
     public IReadOnlyList<JSRuntimeInvocation> Calls(string identifier) =>
-        js.Invocations.Where(i => i.Identifier == identifier).ToList();
+        context.Renderer.Dispatcher.InvokeAsync(() => js.Invocations.Where(i => i.Identifier == identifier).ToList())
+            .GetAwaiter().GetResult();
 
     /// <summary>The markdown passed to the latest mount.</summary>
     public string MountedText() => (string)Calls("ContextEditor.mount")[^1].Arguments[1]!;

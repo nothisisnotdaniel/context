@@ -339,3 +339,26 @@
     outline: 2px solid var(--accent);
   }
 }
+
+/* Job 349: the Copy reference button after a decision's marker (a widget: it changes no text). Theme colours only. */
+.note-editor-body button.decision-copy {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--grey);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75em;
+  margin: 0 4px;
+  padding: 0 6px;
+  vertical-align: baseline;
+}
+
+.note-editor-body button.decision-copy:hover {
+  color: var(--accent-strong);
+}
+
+.note-editor-body button.decision-copy:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}

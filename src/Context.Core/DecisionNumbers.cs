@@ -1,33 +1,31 @@
 namespace Context;
 
-/// <summary>Who else holds a decision number, for <see cref="DecisionNumbers.Apply"/> (job 343).</summary>
-internal enum DecisionHolder
+/// <summary>
+/// One token a save wrote (job 349): the <see cref="Index"/>-th decision of the text (<see cref="DecisionParser.Parse"/>,
+/// in document order) had the token <see cref="Old"/> (lower case; <c>null</c> when bare) and now has
+/// <see cref="New"/> (<c>ab12-1234</c>).
+/// </summary>
+internal sealed record DecisionSet(int Index, string? Old, string New)
 {
-    /// <summary>No other note owns the number: the marker stays.</summary>
-    None,
-
-    /// <summary>Another note owns it and logs this same text: this marker is a copy and goes.</summary>
-    Copy,
-
-    /// <summary>Another note owns it with another text, or its text can't be read: the marker stays (a clash).</summary>
-    Other,
+    /// <summary>Returns only the type name.</summary>
+    public override string ToString() => nameof(DecisionSet);
 }
 
 /// <summary>
-/// What <see cref="DecisionNumbers.Apply"/> did to a note's text: the new text, the numbers given to the bare markers
-/// (in marker order), the numbers whose marker was removed (in marker order), the numbers kept although another note
-/// owns them, and the bare markers left as typed because no numbers were left. Integers and the note's own text only.
+/// What <see cref="DecisionNumbers.Apply"/> did to a note's text (job 349): the new text, the tokens it set (in marker
+/// order), the folder GUID whose <c>decision-folder::</c> line it added, the markers left as typed because no numbers
+/// were left, and whether the note belongs to another folder (then nothing changed).
 /// </summary>
 internal sealed record DecisionEdits
 {
     public DecisionEdits(
-        string text, IReadOnlyList<int> bare, IReadOnlyList<int> strip, IReadOnlyList<int>? kept = null, int unnumbered = 0)
+        string text, IReadOnlyList<DecisionSet> set, Guid? folder = null, int unnumbered = 0, bool foreign = false)
     {
         Text = text;
-        Bare = bare;
-        Strip = strip;
-        Kept = kept ?? [];
+        Set = set;
+        Folder = folder;
         Unnumbered = unnumbered;
+        Foreign = foreign;
     }
 
     /// <summary>Returns only the type name: the text is raw note text.</summary>
@@ -36,115 +34,112 @@ internal sealed record DecisionEdits
     /// <summary>The note's text after the edits (the same instance when nothing changed).</summary>
     public string Text { get; }
 
-    /// <summary>The k-th bare marker that starts a decision got the k-th number.</summary>
-    public IReadOnlyList<int> Bare { get; }
+    /// <summary>The tokens set, in marker order.</summary>
+    public IReadOnlyList<DecisionSet> Set { get; }
 
-    /// <summary>One entry per removed numbered marker: a copy of another note's decision, or a repeat in this note.</summary>
-    public IReadOnlyList<int> Strip { get; }
+    /// <summary>The GUID of the <c>decision-folder::</c> line added, or <c>null</c> when none was.</summary>
+    public Guid? Folder { get; }
 
-    /// <summary>
-    /// The numbers another note owns that this note keeps because its text differs from the owner's (or the owner's
-    /// can't be read), once each in marker order: only the owner's is in the log.
-    /// </summary>
-    public IReadOnlyList<int> Kept { get; }
-
-    /// <summary>How many bare markers stay bare because no decision numbers are left.</summary>
+    /// <summary>How many markers kept their typed (or missing) token because no decision numbers are left.</summary>
     public int Unnumbered { get; }
 
-    /// <summary>Whether any marker changed.</summary>
-    public bool Changed => Bare.Count > 0 || Strip.Count > 0;
+    /// <summary>Whether the note's first <c>decision-folder::</c> line names another folder: it is never numbered.</summary>
+    public bool Foreign { get; }
 
-    /// <summary>Whether the user should be told something: a change, a clash kept, or numbers that ran out.</summary>
-    public bool Noteworthy => Changed || Kept.Count > 0 || Unnumbered > 0;
+    /// <summary>Whether the text changed.</summary>
+    public bool Changed => Set.Count > 0 || Folder is not null;
+
+    /// <summary>Whether the user should be told something: a change, numbers that ran out, or another folder's note.</summary>
+    public bool Noteworthy => Changed || Unnumbered > 0 || Foreign;
 }
 
-/// <summary>Numbers the bare <c>#!d</c> markers of a note and removes markers it doesn't own (job 343). Pure strings.</summary>
+/// <summary>
+/// Numbers the <c>!d</c> markers of a note with the folder's prefix (job 349): pure strings, the index is reached only
+/// through the callbacks.
+/// </summary>
 internal static class DecisionNumbers
 {
     /// <summary>
-    /// Turns every bare marker that starts a decision (<see cref="DecisionParser.Parse"/>) into <c>#!d&lt;n&gt;</c>, in
-    /// document order, and removes (<see cref="ParsedDecision.StripLength"/>) every numbered marker that already came
-    /// earlier in this text, or whose first decision in this text <paramref name="holder"/> (given the number and that
-    /// decision's text) calls a <see cref="DecisionHolder.Copy"/>; a <see cref="DecisionHolder.Other"/> keeps its
-    /// marker and is listed in <see cref="DecisionEdits.Kept"/>. The paragraph and every reference stay.
-    /// <paramref name="next"/> is called at most once, with the count of bare markers, and returns the first of that
-    /// many consecutive numbers, or <c>null</c> when none are left: the bare markers then stay as typed. Every other char
-    /// (line endings, BOM) stays as it was.
+    /// Gives every decision of <paramref name="text"/> (<see cref="DecisionParser.Parse"/>) that has no token of the own
+    /// prefix it may keep a fresh <c>&lt;prefix&gt;-&lt;n&gt;</c>, in document order: a bare marker, a plain number, a
+    /// token of another prefix, and an own-prefix token that <paramref name="keeps"/> (given the number and the
+    /// decision's text) refuses. An own-prefix token that repeats in the text is kept when its text equals the first kept
+    /// one's, else replaced. A bare marker gets <c> &lt;token&gt;</c> after <c>!d</c>; any other token is replaced in
+    /// place; every other char stays. When own-prefix tokens remain and the note has no <c>decision-folder::</c> line,
+    /// <see cref="DecisionFolder.WithFolderLine"/> adds it. A note whose first such line names another folder is left as
+    /// it is (<see cref="DecisionEdits.Foreign"/>). <paramref name="next"/> is called at most once, with the count of
+    /// tokens to set, and returns the first of that many consecutive numbers, or <c>null</c> when none are left: those
+    /// markers then stay as typed (<see cref="DecisionEdits.Unnumbered"/>).
     /// </summary>
-    public static DecisionEdits Apply(string text, Func<int, string, DecisionHolder> holder, Func<int, int?> next)
+    public static DecisionEdits Apply(
+        string text, DecisionFolder folder, Func<int, string, bool> keeps, Func<int, int?> next)
     {
         IReadOnlyList<ParsedDecision> decisions = DecisionParser.Parse(text);
-        HashSet<int> seen = [];
-        HashSet<ParsedDecision> stripped = [];
-        List<int> strip = [];
-        List<int> kept = [];
-        int bareCount = 0;
-        foreach (ParsedDecision decision in decisions)
+        if (decisions.Count == 0)
         {
-            if (decision.Number is not int number)
-            {
-                bareCount++;
-            }
-            else if (!seen.Add(number))
-            {
-                // A repeat: the first one keeps the number (or, as a copy, went too).
-                stripped.Add(decision);
-                strip.Add(number);
-            }
-            else
-            {
-                DecisionHolder held = holder(number, decision.Text);
-                if (held == DecisionHolder.Copy)
-                {
-                    stripped.Add(decision);
-                    strip.Add(number);
-                }
-                else if (held == DecisionHolder.Other)
-                {
-                    kept.Add(number);
-                }
-            }
+            return new DecisionEdits(text, []);
         }
 
-        if (bareCount == 0 && strip.Count == 0)
+        Guid? noteGuid = DecisionFolder.NoteGuid(text);
+        if (noteGuid is Guid guid && guid != folder.Guid)
         {
-            return new DecisionEdits(text, [], [], kept);
+            return new DecisionEdits(text, [], foreign: true);
         }
 
-        int? first = bareCount > 0 ? next(bareCount) : null;
-        if (first is int start && (start < 1 || start > DecisionParser.MaxNumber - bareCount + 1))
+        Dictionary<int, string> keptTexts = [];
+        List<int> replace = [];
+        for (int i = 0; i < decisions.Count; i++)
+        {
+            ParsedDecision decision = decisions[i];
+            if (decision.Prefix == folder.Prefix && decision.Number is int number)
+            {
+                bool keep = keptTexts.TryGetValue(number, out string? kept)
+                    ? string.Equals(kept, decision.Text, StringComparison.Ordinal)
+                    : keeps(number, decision.Text);
+                if (keep)
+                {
+                    keptTexts.TryAdd(number, decision.Text);
+                    continue;
+                }
+            }
+
+            replace.Add(i);
+        }
+
+        int? first = replace.Count > 0 ? next(replace.Count) : null;
+        if (first is int start && (start < 1 || start > DecisionParser.MaxNumber - replace.Count + 1))
         {
             throw new ArgumentOutOfRangeException(nameof(next), "The reserved numbers are out of range.");
         }
 
-        int unnumbered = bareCount > 0 && first is null ? bareCount : 0;
-        if (strip.Count == 0 && first is null)
+        int unnumbered = replace.Count > 0 && first is null ? replace.Count : 0;
+        List<DecisionSet> set = [];
+        string edited = text;
+        if (first is int from)
         {
-            return new DecisionEdits(text, [], [], kept, unnumbered);
+            System.Text.StringBuilder builder = new(text.Length + (replace.Count * 16));
+            int at = 0;
+            foreach (int i in replace)
+            {
+                ParsedDecision decision = decisions[i];
+                string token = DecisionParser.Label(folder.Prefix, from + set.Count);
+                set.Add(new DecisionSet(i, decision.Token, token));
+                builder.Append(text, at, decision.TokenIndex - at);
+                builder.Append(decision.Bare ? " " + token : token);
+                at = decision.TokenIndex + decision.TokenLength;
+            }
+
+            builder.Append(text, at, text.Length - at);
+            edited = builder.ToString();
         }
 
-        List<int> bare = [];
-        System.Text.StringBuilder builder = new(text.Length + (bareCount * 10));
-        int at = 0;
-        foreach (ParsedDecision decision in decisions)
+        Guid? added = null;
+        if (noteGuid is null && (keptTexts.Count > 0 || set.Count > 0))
         {
-            if (decision.Number is null && first is int from)
-            {
-                int number = from + bare.Count;
-                bare.Add(number);
-                int end = decision.MarkerIndex + decision.MarkerLength;
-                builder.Append(text, at, end - at);
-                builder.Append(number.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                at = end;
-            }
-            else if (stripped.Contains(decision))
-            {
-                builder.Append(text, at, decision.MarkerIndex - at);
-                at = decision.MarkerIndex + decision.StripLength;
-            }
+            edited = DecisionFolder.WithFolderLine(edited, folder.Guid);
+            added = folder.Guid;
         }
 
-        builder.Append(text, at, text.Length - at);
-        return new DecisionEdits(builder.ToString(), bare, strip, kept, unnumbered);
+        return new DecisionEdits(set.Count == 0 && added is null ? text : edited, set, added, unnumbered);
     }
 }

@@ -1,8 +1,8 @@
 // The bundle's entry: everything the page and the tests use hangs off globalThis.ContextEditor.
 import { roundTrip, isLossless, inlineNodes, docJson, splitTitle, outline, attributeRows, editAttributes, attributeSplit } from "./markdown.js";
 import { chipDom, headingDom } from "./schema.js";
-import { opensChip, typedBlock, typedMarkdown, commandMarkdown, typedAtMarkdown, toggledMarkdown, carriedMarkdown, changedCodeBlocksJson, copyText, toggleInlineCodeIn, toggleCodeBlockIn, mount, getMarkdown, isDirty, markClean, markCleanIf, destroy, focus, insertAttachment, headings, scrollToHeading, attributes, setAttributes, setLinkTitle, applyDecisionEdits, decisionReferencesIn, setDecisionTitles, scrollToDecision, decisionEditsMarkdown, decisionRefsJson, pastedSliceMarkdown } from "./view.js";
-import { decisionsJson, stripDecisionMarkers, decisionReferences, applyDecisionEditsText, pastedDecisionMarkdown } from "./decisions.js";
+import { opensChip, typedBlock, typedMarkdown, commandMarkdown, typedAtMarkdown, toggledMarkdown, carriedMarkdown, changedCodeBlocksJson, copyText, copyToClipboard, toggleInlineCodeIn, toggleCodeBlockIn, mount, getMarkdown, isDirty, markClean, markCleanIf, destroy, focus, insertAttachment, headings, scrollToHeading, attributes, setAttributes, setLinkTitle, applyDecisionEdits, decisionReferencesIn, setDecisionTitles, setDecisionPrefixes, scrollToDecision, decisionEditsMarkdown, decisionRefsJson } from "./view.js";
+import { decisionsJson, decisionReferences, applyDecisionEditsText, withFolderLine, pickerQuery, pickerRows, pickerKey, pickerAttrs, copyButtonAttrs } from "./decisions.js";
 import { pastedMarkdown, titledMarkdown } from "./paste.js";
 import { isMermaidFence, mermaidResultJson, shouldRender } from "./mermaid.js";
 import { tokensJson, languageOptionsJson, withLanguage } from "./highlight.js";
@@ -65,15 +65,24 @@ globalThis.ContextEditor = Object.freeze({
   languageOptionsJson,
   withLanguage,
   copyText,
-  // Decisions (job 343): the parser mirror, the save edits replayed, the paste rule, the reference decorations.
+  copyToClipboard,
+  // Decisions (jobs 343, 349): the parser mirror, the save edits replayed, the folder line, the reference and Copy
+  // reference decorations, and the picker's pure rules (as JSON for the tests: Jint reads plain values).
   decisionsJson,
-  stripDecisionMarkers,
   decisionReferences,
   applyDecisionEditsText,
-  pastedDecisionMarkdown,
+  withFolderLine,
   decisionEditsMarkdown,
   decisionRefsJson,
-  pastedSliceMarkdown,
+  pickerQuery,
+  pickerRowsJson: (decisionsText, query) => JSON.stringify(pickerRows(JSON.parse(String(decisionsText)), query)),
+  pickerKeyJson: (stateText, key) => JSON.stringify(pickerKey(JSON.parse(String(stateText)), key)),
+  pickerAttrsJson: () => JSON.stringify(pickerAttrs()),
+  copyButtonAttrsJson: (shownLabel, ref) => JSON.stringify(copyButtonAttrs(shownLabel, ref)),
+  pickerRows,
+  pickerKey,
+  pickerAttrs,
+  copyButtonAttrs,
   // Need a page.
   mount,
   getMarkdown,
@@ -91,6 +100,7 @@ globalThis.ContextEditor = Object.freeze({
   applyDecisionEdits,
   decisionReferencesIn,
   setDecisionTitles,
+  setDecisionPrefixes,
   scrollToDecision,
   toggleInlineCode: toggleInlineCodeIn,
   toggleCodeBlock: toggleCodeBlockIn,

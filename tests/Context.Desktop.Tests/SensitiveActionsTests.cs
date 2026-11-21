@@ -392,7 +392,7 @@ public sealed class SensitiveActionsTests : IDisposable
         Assert.Null(result.Decisions);
         Assert.Equal("# Plan\n\n#!d x\n", result.Note!.Text);
         Assert.Equal("# Plan\n\n#!d x\n", (await data.State.ReadSensitive("Plan"))!.Text);
-        Assert.False(File.Exists(Path.Combine(data.Root, TagIndex.FileName)) && new TagIndex(data.Root).DecisionByNumber(1) is not null);
+        Assert.False(File.Exists(Path.Combine(data.Root, TagIndex.FileName)) && new TagIndex(data.Root).DecisionByKey("ab12", 1) is not null);
     }
 
     // AC-5: an unchanged text writes nothing.

@@ -4,8 +4,8 @@ using Microsoft.AspNetCore.Components.Web;
 
 namespace Context.Tests;
 
-// 180 AC-8, AC-9, 343 AC-10: the panel of /decisions [tag]: every #!d decision, newest first, with its date, number,
-// note, people and headline, the full text on demand.
+// 180 AC-8, AC-9, 343 AC-10, 349 AC-5, AC-9: the panel of /decisions [tag]: every !d decision, newest first, with its
+// date, label, note, people and headline, Copy reference, the notes holding a copy, the full text on demand.
 public sealed class DecisionsPanelTests : IDisposable
 {
     private const string NotADatabase = "this is not a database, just some text that fills the header....";
@@ -14,6 +14,8 @@ public sealed class DecisionsPanelTests : IDisposable
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
 
     private readonly DesktopFixture data = new();
+
+    public DecisionsPanelTests() => data.WriteDecisionFolder();
 
     public void Dispose() => data.Dispose();
 
@@ -24,8 +26,8 @@ public sealed class DecisionsPanelTests : IDisposable
     public async Task Render_Rows_HeadingDateNumberNotePeopleText()
     {
         data.WriteNote("meetings", "# meetings\n");
-        data.WriteFile(Path.Combine("meetings", "2026-11-10 Weekly sync.md"), "# x\n#!d12 ship it with @[Anna] and @[Bo]\nsecond line\n");
-        data.WriteNote("2026-11-12", "- #!d paint the wall\n");
+        data.WriteFile(Path.Combine("meetings", "2026-11-10 Weekly sync.md"), "# x\n!d ab12-12 ship it with @[Anna] and @[Bo]\nsecond line\n");
+        data.WriteNote("2026-11-12", "- !d paint the wall\n");
         await data.RefreshAsync();
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
         List<string> opened = [];
@@ -43,7 +45,7 @@ public sealed class DecisionsPanelTests : IDisposable
         AngleSharp.Dom.IElement date = row.QuerySelector(".date")!;
         Assert.Equal("2026-11-10", date.TextContent);
         Assert.True(date.ClassList.Contains("grey"));
-        Assert.Equal("#!d12", row.QuerySelector(".decision-number button")!.TextContent);
+        Assert.Equal("Decision 12", row.QuerySelector(".decision-number button")!.TextContent);
         AngleSharp.Dom.IElement unnumbered = cut.FindAll(".decision-rows li")[0].QuerySelector(".decision-number")!;
         Assert.Equal("unnumbered", unnumbered.TextContent);
         Assert.True(unnumbered.ClassList.Contains("grey"));
@@ -75,7 +77,7 @@ public sealed class DecisionsPanelTests : IDisposable
     [Fact]
     public async Task Expand_ShowsAndHidesFullText()
     {
-        data.WriteNote("2026-11-10 Plan", "#!d3 one\ntwo\u0007 words\n");
+        data.WriteNote("2026-11-10 Plan", "!d ab12-3 one\ntwo\u0007 words\n");
         await data.RefreshAsync();
         IRenderedComponent<DecisionsPanel> cut = Render(string.Empty);
         cut.WaitForAssertion(() => Assert.Equal(["2026-11-10 Plan"], NoteNames(cut)), Wait);
@@ -99,23 +101,90 @@ public sealed class DecisionsPanelTests : IDisposable
     [Fact]
     public async Task Jump_NumberAndHeadline_OpenDecision_UnnumberedOpensNote()
     {
-        data.WriteNote("2026-11-10 Plan", "#!d3 go\n");
-        data.WriteNote("2026-11-09 Old", "#!d stay\n");
+        data.WriteNote("2026-11-10 Plan", "!d AB12-3 go\n");
+        data.WriteNote("2026-11-09 Old", "!d stay\n");
         await data.RefreshAsync();
         List<string> opened = [];
-        List<(string Name, int Decision)> jumps = [];
+        List<(string Name, string Decision)> jumps = [];
         IRenderedComponent<DecisionsPanel> cut = data.Bunit.Render<DecisionsPanel>(p => p
             .Add(c => c.Tag, string.Empty)
             .Add(c => c.OnOpen, (string name) => opened.Add(name))
-            .Add(c => c.OnOpenDecision, ((string Name, int Decision) d) => jumps.Add(d)));
+            .Add(c => c.OnOpenDecision, ((string Name, string Decision) d) => jumps.Add(d)));
         cut.WaitForAssertion(() => Assert.Equal(["2026-11-10 Plan", "2026-11-09 Old"], NoteNames(cut)), Wait);
 
         await cut.FindAll(".decision-rows li")[0].QuerySelector(".decision-number button")!.ClickAsync(new MouseEventArgs());
         await cut.FindAll(".decision-rows li")[0].QuerySelector(".text button")!.ClickAsync(new MouseEventArgs());
         await cut.FindAll(".decision-rows li")[1].QuerySelector(".text button")!.ClickAsync(new MouseEventArgs());
 
-        Assert.Equal([("2026-11-10 Plan", 3), ("2026-11-10 Plan", 3)], jumps);
+        Assert.Equal([("2026-11-10 Plan", "ab12-3"), ("2026-11-10 Plan", "ab12-3")], jumps);
         Assert.Equal(["2026-11-09 Old"], opened);
+    }
+
+    // 349 AC-9: own decisions show as Decision <n>, other prefixes as Decision <p>-<n>; Copy reference copies #!d<ref>
+    // through copyText and shows the grey Copied line; nothing is written.
+    [Fact]
+    public async Task Labels_AndCopyReference()
+    {
+        data.WriteNote("2026-11-10 Plan", $"{DesktopFixture.DecisionFolderLine}\n!d ab12-1234 we ship\n");
+        data.WriteNote("2026-11-09 Theirs", "!d zz99-4 they ship\n");
+        await data.RefreshAsync();
+        data.Bunit.JSInterop.Setup<string>("ContextEditor.copyToClipboard", _ => true).SetResult("Copied");
+        IRenderedComponent<DecisionsPanel> cut = Render(string.Empty);
+        cut.WaitForAssertion(() => Assert.Equal(["2026-11-10 Plan", "2026-11-09 Theirs"], NoteNames(cut)), Wait);
+        Assert.Empty(cut.FindAll("p[role=status]"));
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, TagIndex.FileName);
+
+        Assert.Equal(
+            ["Decision 1234", "Decision zz99-4"],
+            cut.FindAll(".decision-number button").Select(b => b.TextContent));
+        AngleSharp.Dom.IElement copy = cut.FindAll("button.decision-copy")[1];
+        Assert.Equal("Copy", copy.TextContent);
+        Assert.Equal("Copy reference to Decision zz99-4", copy.GetAttribute("aria-label"));
+
+        await cut.FindAll("button.decision-copy")[0].ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("Copied #!d1234.", cut.Find("p.decision-copied").TextContent), Wait);
+        Assert.True(cut.Find("p.decision-copied").ClassList.Contains("grey"));
+
+        await cut.FindAll("button.decision-copy")[1].ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Equal("Copied #!dzz99-4.", cut.Find("p.decision-copied").TextContent), Wait);
+
+        Assert.Equal(
+            ["#!d1234", "#!dzz99-4"],
+            data.Bunit.JSInterop.Invocations["ContextEditor.copyToClipboard"].Select(i => (string)i.Arguments[0]!));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName));
+    }
+
+    // 349 AC-9: a clipboard that refuses shows the red line.
+    [Fact]
+    public async Task CopyReference_Refused_RedLine()
+    {
+        data.WriteNote("2026-11-10 Plan", $"{DesktopFixture.DecisionFolderLine}\n!d ab12-7 go\n");
+        await data.RefreshAsync();
+        data.Bunit.JSInterop.Setup<string>("ContextEditor.copyToClipboard", _ => true).SetResult("Can't copy");
+        IRenderedComponent<DecisionsPanel> cut = Render(string.Empty);
+        cut.WaitForAssertion(() => Assert.Equal(["2026-11-10 Plan"], NoteNames(cut)), Wait);
+
+        await cut.Find("button.decision-copy").ClickAsync(new MouseEventArgs());
+
+        cut.WaitForAssertion(() => Assert.Equal("Can't copy #!d7.", cut.Find("p.red[role=status]").TextContent), Wait);
+    }
+
+    // 349 AC-5: a copy (same token, same text) in other notes is one row for the owner, with Also in naming them.
+    [Fact]
+    public async Task Copies_OneRow_AlsoIn()
+    {
+        data.WriteNote("2026-11-10 Plan", $"{DesktopFixture.DecisionFolderLine}\n!d ab12-5 we ship\n");
+        File.SetLastWriteTimeUtc(Path.Combine(data.Root, "2026-11-10 Plan.md"), new DateTime(2026, 11, 10, 9, 0, 0, DateTimeKind.Utc));
+        data.WriteNote("Copy B", $"{DesktopFixture.DecisionFolderLine}\n!d ab12-5 we ship\n");
+        data.WriteNote("Copy A", $"{DesktopFixture.DecisionFolderLine}\n- !d ab12-5 we ship\n");
+        await data.RefreshAsync();
+
+        IRenderedComponent<DecisionsPanel> cut = Render(string.Empty);
+
+        cut.WaitForAssertion(() => Assert.Equal(["2026-11-10 Plan"], NoteNames(cut)), Wait);
+        AngleSharp.Dom.IElement places = cut.Find(".decision-places");
+        Assert.Equal("Also in: Copy A, Copy B", places.TextContent);
+        Assert.True(places.ClassList.Contains("grey"));
     }
 
     // AC-8: a tag filters and is in the heading.
@@ -125,8 +194,8 @@ public sealed class DecisionsPanelTests : IDisposable
     [InlineData("[work]")]
     public async Task Render_Tag_FiltersAndHeading(string tag)
     {
-        data.WriteNote("2026-11-10 Plan", "#work\n\n#!d go\n");
-        data.WriteNote("2026-11-11 Home", "#home\n\n#!d paint\n");
+        data.WriteNote("2026-11-10 Plan", "#work\n\n!d go\n");
+        data.WriteNote("2026-11-11 Home", "#home\n\n!d paint\n");
         await data.RefreshAsync();
 
         IRenderedComponent<DecisionsPanel> cut = Render(tag);
@@ -141,7 +210,7 @@ public sealed class DecisionsPanelTests : IDisposable
     {
         for (int i = 0; i < DecisionsPanel.MaxRows + 3; i++)
         {
-            data.WriteNote($"2026-11-10 n{i:D3}", "#!d x\n");
+            data.WriteNote($"2026-11-10 n{i:D3}", "!d x\n");
         }
 
         await data.RefreshAsync();
@@ -160,7 +229,7 @@ public sealed class DecisionsPanelTests : IDisposable
     {
         for (int i = 0; i < DecisionsPanel.MaxRows; i++)
         {
-            data.WriteNote($"2026-11-10 n{i:D3}", "#!d x\n");
+            data.WriteNote($"2026-11-10 n{i:D3}", "!d x\n");
         }
 
         await data.RefreshAsync();
@@ -191,7 +260,7 @@ public sealed class DecisionsPanelTests : IDisposable
     [Fact]
     public async Task Render_BadIndex_RedLine()
     {
-        data.WriteNote("Plan", "#!d x\n");
+        data.WriteNote("Plan", "!d x\n");
         data.WriteFile(TagIndex.FileName, NotADatabase);
         await data.RefreshAsync();
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
@@ -210,7 +279,7 @@ public sealed class DecisionsPanelTests : IDisposable
     [InlineData("#")]
     public async Task Render_InvalidTag_RedLine_NothingRead(string tag)
     {
-        data.WriteNote("Plan", "#!d x\n");
+        data.WriteNote("Plan", "!d x\n");
         await data.RefreshAsync();
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
 
@@ -230,7 +299,7 @@ public sealed class DecisionsPanelTests : IDisposable
         IRenderedComponent<DecisionsPanel> cut = Render(string.Empty);
         cut.WaitForAssertion(() => Assert.Equal("No decisions yet.", cut.Find("p[role=status]").TextContent), Wait);
 
-        data.WriteNote("2026-11-10 Plan", "#!d go\n");
+        data.WriteNote("2026-11-10 Plan", "!d go\n");
         File.SetLastWriteTimeUtc(Path.Combine(data.Root, "2026-11-10 Plan.md"), new DateTime(2030, 1, 1, 12, 0, 0, DateTimeKind.Utc));
         await data.State!.Refresh();
 
@@ -241,8 +310,8 @@ public sealed class DecisionsPanelTests : IDisposable
     [Fact]
     public async Task TagChanges_StaleResultDropped_UnderIndexGate()
     {
-        data.WriteNote("2026-11-10 Plan", "#alpha\n\n#!d a\n");
-        data.WriteNote("2026-11-11 Review", "#omega\n\n#!d o\n");
+        data.WriteNote("2026-11-10 Plan", "#alpha\n\n!d a\n");
+        data.WriteNote("2026-11-11 Review", "#omega\n\n!d o\n");
         await data.RefreshAsync();
         object gate = DesktopFixture.IndexGate(data.State!);
         IRenderedComponent<DecisionsPanel> cut;
@@ -269,7 +338,7 @@ public sealed class DecisionsPanelTests : IDisposable
     [Fact]
     public async Task Render_HostileText_AsText()
     {
-        data.WriteNote("2026-11-10 <b>x<b>", "#!d say <img src=x>\u0007 with @[<i>e</i>]\n");
+        data.WriteNote("2026-11-10 <b>x<b>", "!d say <img src=x>\u0007 with @[<i>e</i>]\n");
         await data.RefreshAsync();
 
         IRenderedComponent<DecisionsPanel> cut = Render(string.Empty);

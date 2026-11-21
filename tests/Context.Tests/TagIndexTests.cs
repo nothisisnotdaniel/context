@@ -389,7 +389,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(17, TagIndex.ParserVersion);
+        Assert.Equal(18, TagIndex.ParserVersion);
     }
 
     // 024 AC-6
@@ -438,13 +438,13 @@ public sealed class TagIndexTests : IDisposable
         using (SqliteConnection connection = Open())
         {
             using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version = 17";
+            command.CommandText = "PRAGMA user_version = 19";
             command.ExecuteNonQuery();
         }
 
         index.Sync(store);
 
-        Assert.Equal(17, UserVersion());
+        Assert.Equal(19, UserVersion());
     }
 
     // 048 AC-4: the old constructor means a tag link only.
@@ -847,7 +847,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(17, TagIndex.ParserVersion);
+        Assert.Equal(18, TagIndex.ParserVersion);
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
         Assert.Equal(["A", "Beta"], NoteRows());
         Assert.Equal([("A", "work"), ("Beta", "home")], Rows());
@@ -1056,7 +1056,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(17, UserVersion());
+        Assert.Equal(18, UserVersion());
         Assert.Equal([("Anna", "[[ACME]]"), ("Anna", "Beta GmbH")], index.AttributeValues("affiliation"));
     }
 
@@ -1273,7 +1273,7 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal(["Anna|1", "AS|1"], index.People().Select(Describe));
         Assert.Empty(index.NotesMentioning("Anna Schmidt"));
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(17, TagIndex.ParserVersion);
+        Assert.Equal(18, TagIndex.ParserVersion);
     }
 
     // 170 ----------------------------------------------------------------------------------------
@@ -1468,18 +1468,35 @@ public sealed class TagIndexTests : IDisposable
         Assert.Empty(index.NotesWithTag("old"));
     }
 
-    // 343 ----------------------------------------------------------------------------------------
+    // 343, 349 -----------------------------------------------------------------------------------
 
-    private List<(string Note, long Line, long? Number, string Text)> DecisionRows()
+    private static readonly Guid OwnFolder = new("11111111-2222-3333-4444-555555555555");
+
+    private static readonly Guid ForeignFolder = new("99999999-8888-7777-6666-555555555555");
+
+    private void WriteDecisionFolder(string prefix = "ab12")
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(
+            Path.Combine(root, DecisionFolder.FileName),
+            "{\"prefix\":\"" + prefix + "\",\"guid\":\"" + OwnFolder.ToString("D") + "\",\"migrated\":true}");
+    }
+
+    private List<(string Note, long Line, string? Prefix, long? Number, string Text)> DecisionRows()
     {
         using SqliteConnection connection = Open();
         using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "SELECT note, line, number, text FROM note_decisions ORDER BY note, line";
+        command.CommandText = "SELECT note, line, prefix, number, text FROM note_decisions ORDER BY note, line";
         using SqliteDataReader reader = command.ExecuteReader();
-        List<(string Note, long Line, long? Number, string Text)> rows = [];
+        List<(string Note, long Line, string? Prefix, long? Number, string Text)> rows = [];
         while (reader.Read())
         {
-            rows.Add((reader.GetString(0), reader.GetInt64(1), reader.IsDBNull(2) ? null : reader.GetInt64(2), reader.GetString(3)));
+            rows.Add((
+                reader.GetString(0),
+                reader.GetInt64(1),
+                reader.IsDBNull(2) ? null : reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetInt64(3),
+                reader.GetString(4)));
         }
 
         return rows;
@@ -1495,78 +1512,88 @@ public sealed class TagIndexTests : IDisposable
     private static readonly DateTime Day2 = new DateTime(2026, 1, 2, 9, 0, 0, DateTimeKind.Utc);
     private static readonly DateTime Day3 = new DateTime(2026, 1, 3, 9, 0, 0, DateTimeKind.Utc);
 
-    // 343 AC-3: one note_decisions row per decision paragraph (note, first line, number or NULL, text); a removed
-    // paragraph or note loses its rows on the next Sync; Decision: lines give none.
+    // 349 AC-1: one note_decisions row per !d paragraph (note, marker line, key prefix and number, text); a bare or
+    // plain marker has neither; a removed paragraph or note loses its rows on the next Sync; Decision: lines give none.
     [Fact]
     public void Sync_Decisions_WrittenAndPruned()
     {
-        WriteNoteAt("Plan", "# Plan\n#!d12 ship it\nin March\n\n- #!d wait\n\nDecision: old\n", Day1);
-        WriteNoteAt("Other", "#!d other", Day1);
+        WriteDecisionFolder();
+        WriteNoteAt("Plan", "# Plan\n!d ab12-12 ship it\nin March\n\n- !d wait\n\n!d 5 plain\n\n!d ZZ99-3 other\n\nDecision: old\n", Day1);
+        WriteNoteAt("Other", "!d other", Day1);
 
         index.Sync(store);
 
         Assert.Equal(
-            [("Other", 1L, null, "other"), ("Plan", 2L, 12L, "ship it\nin March"), ("Plan", 5L, null, "wait")],
+            [
+                ("Other", 1L, null, null, "other"), ("Plan", 2L, "ab12", 12L, "ship it\nin March"), ("Plan", 5L, null, null, "wait"),
+                ("Plan", 7L, null, null, "plain"), ("Plan", 9L, "zz99", 3L, "other"),
+            ],
             DecisionRows());
 
-        WriteNoteAt("Plan", "# Plan\n#!d12 ship it\n", Day2);
+        WriteNoteAt("Plan", "# Plan\n!d ab12-12 ship it\n", Day2);
         File.Delete(Path.Combine(root, "Other.md"));
         index.Sync(store);
 
-        Assert.Equal([("Plan", 2L, 12L, "ship it")], DecisionRows());
+        Assert.Equal([("Plan", 2L, "ab12", 12L, "ship it")], DecisionRows());
     }
 
-    // 343 AC-3: ParserVersion is 17; a version-16 database whose note_decisions has no number column gets it and is
-    // re-read, so its old Decision: rows leave the log.
+    // 349 AC-10: ParserVersion is 18; a version-17 database (note_decisions without prefix, decision_owners keyed by
+    // number) gets the column and new owners and is re-read, so the decisions carry their prefix.
     [Fact]
-    public void Sync_Version16Database_AddsNumber_Reparses()
+    public void Sync_Version17Database_AddsPrefix_Reparses()
     {
-        Assert.Equal(17, TagIndex.ParserVersion);
-        WriteNoteAt("Plan", "Decision: old\n\n#!d5 new", Day1);
+        Assert.Equal(18, TagIndex.ParserVersion);
+        WriteDecisionFolder();
+        WriteNoteAt("Plan", "!d ab12-5 new", Day1);
         index.Sync(store);
         using (SqliteConnection connection = Open())
         {
             using SqliteCommand command = connection.CreateCommand();
             command.CommandText =
-                "DROP TABLE note_decisions; " +
-                "CREATE TABLE note_decisions(note TEXT NOT NULL, line INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY(note, line)); " +
-                "INSERT INTO note_decisions(note, line, text) VALUES('Plan', 1, 'old'); " +
-                "PRAGMA user_version = 16;";
+                "DROP TABLE note_decisions; DROP TABLE decision_owners; " +
+                "CREATE TABLE note_decisions(note TEXT NOT NULL, line INTEGER NOT NULL, text TEXT NOT NULL, number INTEGER, PRIMARY KEY(note, line)); " +
+                "CREATE TABLE decision_owners(number INTEGER PRIMARY KEY, note TEXT NOT NULL); " +
+                "INSERT INTO note_decisions(note, line, text, number) VALUES('Plan', 1, 'old', 5); " +
+                "INSERT INTO decision_owners(number, note) VALUES(5, 'Plan'); " +
+                "PRAGMA user_version = 17;";
             command.ExecuteNonQuery();
         }
 
         index.Sync(store);
 
-        Assert.Equal([("Plan", 3L, 5L, "new")], DecisionRows());
+        Assert.Equal([("Plan", 1L, "ab12", 5L, "new")], DecisionRows());
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
         IndexedDecision decision = Assert.Single(index.Decisions(null));
-        Assert.Equal(5, decision.Number);
+        Assert.Equal(("ab12", (int?)5), (decision.Prefix, decision.Number));
+        Assert.Equal(new Dictionary<int, string> { [5] = "Plan" }, index.DecisionOwners("ab12"));
     }
 
-    // 343 AC-3: a sensitive .ctxs note never adds decision rows and owns nothing.
+    // 349 AC-11: a sensitive .ctxs note never adds decision rows and owns nothing.
     [Fact]
     public void Sync_SensitiveNote_HasNoDecisionRows()
     {
-        WriteNoteAt("Other", "#!d1 kept", Day1);
-        File.WriteAllText(Path.Combine(root, "Plan.ctxs"), "#!d2 secret");
+        WriteDecisionFolder();
+        WriteNoteAt("Other", "!d ab12-1 kept", Day1);
+        File.WriteAllText(Path.Combine(root, "Plan.ctxs"), "!d ab12-2 secret");
 
         index.Sync(store);
 
-        Assert.Equal([("Other", 1L, 1L, "kept")], DecisionRows());
+        Assert.Equal([("Other", 1L, "ab12", 1L, "kept")], DecisionRows());
         Assert.DoesNotContain(index.Decisions(null), r => r.Note == "Plan");
-        Assert.Equal(new Dictionary<int, string> { [1] = "Other" }, index.DecisionOwners());
+        Assert.Equal(new Dictionary<int, string> { [1] = "Other" }, index.DecisionOwners("ab12"));
     }
 
-    // 343 AC-3: Decisions(tag) gives the stored time and number and filters by the note's tag, as a parameter.
+    // 343 AC-3: Decisions(tag) gives the stored time and key and filters by the note's tag, as a parameter.
     [Fact]
     public void Decisions_TagFilter_AndModified()
     {
-        WriteNoteAt("Plan", "#work\n\n#!d3 ship it", Day1);
-        WriteNoteAt("Home", "#home\n\n#!d paint", Day1);
+        WriteDecisionFolder();
+        WriteNoteAt("Plan", "#work\n\n!d ab12-3 ship it", Day1);
+        WriteNoteAt("Home", "#home\n\n!d paint", Day1);
         index.Sync(store);
 
         IndexedDecision row = Assert.Single(index.Decisions("#Work"));
-        Assert.Equal(("Plan", 3, (int?)3, "ship it", Day1), (row.Note, row.Line, row.Number, row.Text, row.Modified));
+        Assert.Equal(("Plan", 3, "ab12", (int?)3, "ship it", Day1), (row.Note, row.Line, row.Prefix, row.Number, row.Text, row.Modified));
         Assert.Equal(DateTimeKind.Utc, row.Modified.Kind);
         Assert.Equal(2, index.Decisions(null).Count);
         Assert.Equal(2, index.Decisions(" ").Count);
@@ -1574,78 +1601,106 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal(nameof(IndexedDecision), row.ToString());
     }
 
-    // 343 AC-4, round 2 feedback 1: reserved numbers come above the counter, step over every number in the index or
-    // in taken, are never reused after a decision is deleted, and a typed number never moves the counter.
+    // 349 AC-3: reserved numbers come above the counter, step over every own-prefix number in the index or in taken
+    // (another prefix's never count), are never reused after a decision is deleted, and a typed number never moves the
+    // counter.
     [Fact]
     public void ReserveDecisionNumbers_AboveCounter_StepsOverUsed_NeverReused()
     {
-        WriteNoteAt("Plan", "#!d2 x\n\n#!d900000000 typed", Day1);
+        WriteDecisionFolder();
+        WriteNoteAt("Plan", "!d ab12-2 x\n\n!d ab12-900000000 typed\n\n!d zz99-3 other", Day1);
         index.Sync(store);
 
-        Assert.Equal(3, index.ReserveDecisionNumbers(3));
-        Assert.Equal(6, index.ReserveDecisionNumbers(1));
+        Assert.Equal(3, index.ReserveDecisionNumbers("ab12", 3));
+        Assert.Equal(6, index.ReserveDecisionNumbers("ab12", 1));
 
         File.Delete(Path.Combine(root, "Plan.md"));
         index.Sync(store);
         Assert.Empty(DecisionRows());
 
-        Assert.Equal(7, index.ReserveDecisionNumbers(1));
-        Assert.Equal(10, index.ReserveDecisionNumbers(2, [8, 9, 13]));
-        Assert.Equal(12, index.ReserveDecisionNumbers(1));
-        Assert.Equal(14, index.ReserveDecisionNumbers(1, [13]));
+        Assert.Equal(7, index.ReserveDecisionNumbers("ab12", 1));
+        Assert.Equal(10, index.ReserveDecisionNumbers("ab12", 2, [8, 9, 13]));
+        Assert.Equal(12, index.ReserveDecisionNumbers("ab12", 1));
+        Assert.Equal(14, index.ReserveDecisionNumbers("ab12", 1, [13]));
     }
 
-    // 343 AC-4, round 2 feedback 1: a fresh database starts at 1; a huge typed number is stepped over, not a new floor;
-    // past the highest number it gives null and leaves the counter as it was.
+    // 343 AC-4: a fresh database starts at 1; a huge typed number is stepped over, not a new floor; past the highest
+    // number it gives null and leaves the counter as it was.
     [Fact]
     public void ReserveDecisionNumbers_FreshHugeTypedAndExhausted()
     {
-        WriteNoteAt("Typed", "#!d999999999 huge", Day1);
+        WriteDecisionFolder();
+        WriteNoteAt("Typed", "!d ab12-999999999 huge", Day1);
         index.Sync(store);
 
-        Assert.Equal(1, index.ReserveDecisionNumbers(1));
-        Assert.Equal(2, index.ReserveDecisionNumbers(DecisionParser.MaxNumber - 3));
-        Assert.Null(index.ReserveDecisionNumbers(2));
-        Assert.Equal(DecisionParser.MaxNumber - 1, index.ReserveDecisionNumbers(1));
-        Assert.Null(index.ReserveDecisionNumbers(1));
+        Assert.Equal(1, index.ReserveDecisionNumbers("ab12", 1));
+        Assert.Equal(2, index.ReserveDecisionNumbers("ab12", DecisionParser.MaxNumber - 3));
+        Assert.Null(index.ReserveDecisionNumbers("ab12", 2));
+        Assert.Equal(DecisionParser.MaxNumber - 1, index.ReserveDecisionNumbers("ab12", 1));
+        Assert.Null(index.ReserveDecisionNumbers("ab12", 1));
     }
 
-    // Round 2 feedback 3: each owned number maps to the text of its owner's first row; an owner without a row has none.
+    // 349 AC-5: each owned number maps to the text of its owner's first row; an owner without a row has none.
     [Fact]
     public void OwnedDecisionTexts_OwnersFirstRow()
     {
-        WriteNoteAt("Owner", "#!d4 first\n\n#!d4 second", Day1);
-        WriteNoteAt("Copy", "#!d4 other", Day1.AddDays(1));
+        WriteDecisionFolder();
+        WriteNoteAt("Owner", "!d ab12-4 first\n\n!d ab12-4 second", Day1);
+        WriteNoteAt("Copy", "!d ab12-4 other", Day1.AddDays(1));
         index.Sync(store);
 
-        Assert.Equal(new Dictionary<int, string> { [4] = "first" }, index.OwnedDecisionTexts());
+        Assert.Equal(new Dictionary<int, string> { [4] = "first" }, index.OwnedDecisionTexts("ab12"));
+        Assert.Empty(index.OwnedDecisionTexts("zz99"));
     }
 
-    // 343 AC-5: an unowned number goes to the holder with the oldest last-write time; non-owners are left out of the
-    // log and the lookups; the owner keeps it until it no longer holds it.
+    // 349 AC-5: an unowned key goes to the holder with the oldest last-write time; non-owners with another text are left
+    // out of the log and the lookups; the owner keeps it until it no longer holds it.
     [Fact]
     public void Sync_Ownership_OldestWins_UntilGone()
     {
-        WriteNoteAt("Copy", "#!d7 copy text", Day2);
-        WriteNoteAt("Original", "#!d7 original text", Day1);
+        WriteDecisionFolder();
+        WriteNoteAt("Copy", "!d ab12-7 copy text", Day2);
+        WriteNoteAt("Original", "!d ab12-7 original text", Day1);
         index.Sync(store);
 
-        Assert.Equal("Original", index.DecisionOwners()[7]);
+        Assert.Equal("Original", index.DecisionOwners("ab12")[7]);
         IndexedDecision owned = Assert.Single(index.Decisions(null), d => d.Number == 7);
         Assert.Equal("Original", owned.Note);
-        Assert.Equal("Original", index.DecisionByNumber(7)?.Note);
-        Assert.Equal(new Dictionary<int, string> { [7] = "original text" }, index.DecisionHeadlines([7, 8]));
+        Assert.Empty(owned.Places);
+        Assert.Equal("Original", index.DecisionByKey("ab12", 7)?.Note);
+        Assert.Null(index.DecisionByKey("zz99", 7));
+        Assert.Equal(
+            new Dictionary<(string, int), string> { [("ab12", 7)] = "original text" },
+            index.DecisionHeadlines([("ab12", 7), ("ab12", 8), ("zz99", 7)]));
 
         // A newer copy doesn't take the number over while the owner holds it.
-        WriteNoteAt("Original", "#!d7 original text\nmore", Day3);
+        WriteNoteAt("Original", "!d ab12-7 original text\nmore", Day3);
         index.Sync(store);
-        Assert.Equal("Original", index.DecisionOwners()[7]);
+        Assert.Equal("Original", index.DecisionOwners("ab12")[7]);
 
         // The owner drops it: the copy becomes the owner on the next Sync.
         WriteNoteAt("Original", "no decision", Day3.AddHours(1));
         index.Sync(store);
-        Assert.Equal("Copy", index.DecisionOwners()[7]);
-        Assert.Equal("copy text", index.DecisionByNumber(7)?.Text);
+        Assert.Equal("Copy", index.DecisionOwners("ab12")[7]);
+        Assert.Equal("copy text", index.DecisionByKey("ab12", 7)?.Text);
+    }
+
+    // 349 AC-5: the same key with the same text in several notes (and twice in one) is one decision: one log row for
+    // the owner, the other places listed in note and line order.
+    [Fact]
+    public void Decisions_Copies_ListedAsPlaces()
+    {
+        WriteDecisionFolder();
+        WriteNoteAt("Owner", "!d ab12-4 same\n\n!d ab12-4 same", Day1);
+        WriteNoteAt("b copy", "x\n\n!d ab12-4 same", Day2);
+        WriteNoteAt("A copy", "!d ab12-4 same", Day2);
+        WriteNoteAt("Changed", "!d ab12-4 other", Day2);
+        index.Sync(store);
+
+        IndexedDecision decision = Assert.Single(index.Decisions(null));
+        Assert.Equal("Owner", decision.Note);
+        Assert.Equal([("A copy", 1), ("b copy", 3), ("Owner", 3)], decision.Places);
+        Assert.Equal(decision.Places, index.DecisionByKey("ab12", 4)?.Places);
     }
 
     // 343 AC-5: same last-write time: the lower name ignoring case wins (ordinal order alone would pick "Zed").
@@ -1654,52 +1709,107 @@ public sealed class TagIndexTests : IDisposable
     [InlineData("Zed", "apple", "apple")]
     public void Sync_Ownership_Ties(string first, string second, string winner)
     {
-        WriteNoteAt(first, "#!d9 x", Day1);
-        WriteNoteAt(second, "#!d9 y", Day1);
+        WriteDecisionFolder();
+        WriteNoteAt(first, "!d ab12-9 x", Day1);
+        WriteNoteAt(second, "!d ab12-9 y", Day1);
         index.Sync(store);
 
-        Assert.Equal(winner, index.DecisionOwners()[9]);
+        Assert.Equal(winner, index.DecisionOwners("ab12")[9]);
     }
 
     // 343 AC-5: an unreadable (oversized) owner keeps the number.
     [Fact]
     public void Sync_Ownership_OversizedOwnerKeepsNumber()
     {
-        WriteNoteAt("Owner", "#!d3 x", Day1);
-        WriteNoteAt("Copy", "#!d3 y", Day2);
+        WriteDecisionFolder();
+        WriteNoteAt("Owner", "!d ab12-3 x", Day1);
+        WriteNoteAt("Copy", "!d ab12-3 y", Day2);
         index.Sync(store);
-        Assert.Equal("Owner", index.DecisionOwners()[3]);
+        Assert.Equal("Owner", index.DecisionOwners("ab12")[3]);
 
-        WriteNoteAt("Owner", "#!d3 x\n" + new string('a', (int)NoteStore.MaxNoteBytes), Day3);
+        WriteNoteAt("Owner", "!d ab12-3 x\n" + new string('a', (int)NoteStore.MaxNoteBytes), Day3);
         index.Sync(store);
 
-        Assert.Equal("Owner", index.DecisionOwners()[3]);
-        Assert.Null(index.DecisionByNumber(3));
+        Assert.Equal("Owner", index.DecisionOwners("ab12")[3]);
+        Assert.Null(index.DecisionByKey("ab12", 3));
     }
 
-    // 343 AC-5: the owner rows move with a rename or move, subpages included, ordinally (no LIKE); a deleted note's go.
+    // 343 AC-5: the owner rows move with a rename or move, subpages included, ordinally (no LIKE).
     [Fact]
     public void MoveDecisionOwners_NoteAndSubpages()
     {
-        WriteNoteAt("A", "#!d1 a", Day1);
+        WriteDecisionFolder();
+        WriteNoteAt("A", "!d ab12-1 a", Day1);
         Directory.CreateDirectory(Path.Combine(root, "A"));
-        WriteNoteAt("A/Sub", "#!d2 sub", Day1);
-        WriteNoteAt("AB", "#!d3 ab", Day1);
-        WriteNoteAt("A_x", "#!d4 like", Day1);
+        WriteNoteAt("A/Sub", "!d ab12-2 sub", Day1);
+        WriteNoteAt("AB", "!d ab12-3 ab", Day1);
+        WriteNoteAt("A_x", "!d ab12-4 like", Day1);
         index.Sync(store);
 
         index.MoveDecisionOwners("A", "Z");
 
         Assert.Equal(
             new Dictionary<int, string> { [1] = "Z", [2] = "Z/Sub", [3] = "AB", [4] = "A_x" },
-            index.DecisionOwners());
+            index.DecisionOwners("ab12"));
 
         // The files moved too: the next Sync keeps the moved owners.
         File.Move(Path.Combine(root, "A.md"), Path.Combine(root, "Z.md"));
         Directory.Move(Path.Combine(root, "A"), Path.Combine(root, "Z"));
         index.Sync(store);
-        Assert.Equal("Z", index.DecisionOwners()[1]);
-        Assert.Equal("Z/Sub", index.DecisionOwners()[2]);
+        Assert.Equal("Z", index.DecisionOwners("ab12")[1]);
+        Assert.Equal("Z/Sub", index.DecisionOwners("ab12")[2]);
+    }
+
+    // 349 AC-6: a foreign note that uses the own prefix gets one random alias (unlike the own prefix and every stored
+    // prefix), stored once; its decisions are keyed by the alias; its file is not changed; warned starts false.
+    [Fact]
+    public void Sync_PrefixClash_GivesAliasOnce()
+    {
+        WriteDecisionFolder();
+        string foreign = $"# F\ndecision-folder:: {ForeignFolder:D}\n!d ab12-3 theirs\n\n!d zz99-1 more";
+        WriteNoteAt("Foreign", foreign, Day1);
+        WriteNoteAt("Alpha", "!d ab12-3 mine\n\n!d cd34-1 x", Day1);
+        // "ab12" (own) and "cd34" (stored) are drawn first and skipped; "ef56" is taken.
+        Queue<int> draws = new([
+            .. "ab12".Select(c => DecisionFolder.Alphabet.IndexOf(c)),
+            .. "cd34".Select(c => DecisionFolder.Alphabet.IndexOf(c)),
+            .. "ef56".Select(c => DecisionFolder.Alphabet.IndexOf(c)),
+        ]);
+        index.AliasRandom = _ => draws.Dequeue();
+
+        index.Sync(store);
+
+        DecisionFolderAlias alias = Assert.Single(index.DecisionFolderAliases());
+        Assert.Equal((ForeignFolder.ToString("D"), "ab12", "ef56", false), (alias.Guid, alias.Prefix, alias.Alias, alias.Warned));
+        Assert.Contains(("Foreign", 3L, "ef56", 3L, "theirs"), DecisionRows());
+        Assert.Contains(("Foreign", 5L, "zz99", 1L, "more"), DecisionRows());
+        Assert.Equal("mine", index.DecisionByKey("ab12", 3)?.Text);
+        Assert.Equal("theirs", index.DecisionByKey("ef56", 3)?.Text);
+        Assert.Equal(foreign, File.ReadAllText(Path.Combine(root, "Foreign.md")));
+
+        // A later Sync keeps the alias and draws nothing.
+        index.AliasRandom = _ => throw new InvalidOperationException("no new alias");
+        WriteNoteAt("Foreign", foreign + "\n", Day2);
+        index.Sync(store);
+        Assert.Equal("ef56", Assert.Single(index.DecisionFolderAliases()).Alias);
+
+        index.MarkDecisionFolderWarned(ForeignFolder.ToString("D"));
+        Assert.True(Assert.Single(index.DecisionFolderAliases()).Warned);
+    }
+
+    // 349 AC-6: a foreign note with other prefixes only, or without a folder file, gets no alias.
+    [Fact]
+    public void Sync_ForeignWithoutClash_NoAlias()
+    {
+        WriteNoteAt("Foreign", $"decision-folder:: {ForeignFolder:D}\n!d ab12-3 theirs", Day1);
+        index.Sync(store);
+        Assert.Empty(index.DecisionFolderAliases());
+
+        WriteDecisionFolder("cd34");
+        WriteNoteAt("Foreign", $"decision-folder:: {ForeignFolder:D}\n!d ab12-3 theirs\n", Day2);
+        index.Sync(store);
+        Assert.Empty(index.DecisionFolderAliases());
+        Assert.Equal("cd34", index.OwnPrefix);
     }
 
     private static string Describe(NoteTodo todo) =>
@@ -1869,7 +1979,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(["Plan|2|-|b|- { } b"], index.NoteTodos().Select(Describe));
-        Assert.Equal(17, UserVersion());
+        Assert.Equal(18, UserVersion());
     }
 
     // 253 AC-3: a sensitive .ctxs note never has topic rows.
@@ -1944,7 +2054,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(["Plan|1|2026-12-01|review:2026-12-01"], ReviewRows(index));
-        Assert.Equal(17, UserVersion());
+        Assert.Equal(18, UserVersion());
     }
 
     // 256 AC-2, AC-9: a sensitive .ctxs note never has a review row.
@@ -2471,7 +2581,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(17, UserVersion());
+        Assert.Equal(18, UserVersion());
         (List<(long Row, string Note)> text, List<(long Row, string Note)> map) = TextRowIds();
         Assert.Equal(["A", "B"], text.Select(r => r.Note).Order(StringComparer.Ordinal));
         Assert.Equal(text, map);

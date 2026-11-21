@@ -3441,8 +3441,9 @@ public sealed class MainTests : IDisposable
     [Fact]
     public async Task Decisions_ShowsDecisionsPanel_OpenHidesIt()
     {
-        data.WriteNote("2026-11-10 Anna", "# Anna\n#work\n\n#!d ship it\n");
-        data.WriteNote("2026-11-11 Plan", "#!d paint\n");
+        data.WriteDecisionFolder();
+        data.WriteNote("2026-11-10 Anna", "# Anna\n#work\n\n!d ship it\n");
+        data.WriteNote("2026-11-11 Plan", "!d paint\n");
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
@@ -3465,30 +3466,31 @@ public sealed class MainTests : IDisposable
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".decisions-panel")), Wait);
     }
 
-    // 343 AC-12: a decision's number in the panel opens its note and puts the editor at that decision; the same number
+    // 343 AC-12, 349 AC-9: a decision's label in the panel opens its note and puts the editor at that decision; the same number
     // with the note already open jumps in place without remounting.
     [Fact]
     public async Task Decisions_Number_OpensNoteAtDecision()
     {
-        data.WriteNote("2026-11-10 Anna", "# Anna\n\n#!d7 ship it\n");
+        data.WriteDecisionFolder();
+        data.WriteNote("2026-11-10 Anna", $"# Anna\n{DesktopFixture.DecisionFolderLine}\n\n!d ab12-7 ship it\n");
         EditorJs js = new EditorJs(data.Bunit);
-        js.HasDecision(7);
+        js.HasDecision("ab12-7");
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
         await RunPalette(cut, "/decisions");
-        cut.WaitForAssertion(() => Assert.Equal("#!d7", cut.Find(".decisions-panel .decision-number button").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Decision 7", cut.Find(".decisions-panel .decision-number button").TextContent), Wait);
         await cut.Find(".decisions-panel .decision-number button").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Equal("2026-11-10 Anna", cut.Find(".note-title").TextContent), Wait);
-        cut.WaitForAssertion(() => Assert.Equal([7], js.DecisionJumps()), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(["ab12-7"], js.DecisionJumps()), Wait);
         Assert.Empty(cut.FindAll(".decisions-panel"));
         int mounts = js.Calls("ContextEditor.mount").Count;
 
         await RunPalette(cut, "/decisions");
-        cut.WaitForAssertion(() => Assert.Equal("#!d7", cut.Find(".decisions-panel .decision-number button").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Decision 7", cut.Find(".decisions-panel .decision-number button").TextContent), Wait);
         await cut.Find(".decisions-panel .decision-number button").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal([7, 7], js.DecisionJumps()), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(["ab12-7", "ab12-7"], js.DecisionJumps()), Wait);
         Assert.Equal(mounts, js.Calls("ContextEditor.mount").Count);
     }
 
@@ -3512,16 +3514,64 @@ public sealed class MainTests : IDisposable
     [Fact]
     public async Task Decisions_NumbersRanOut_AlertLine()
     {
-        data.WriteNote("inbox", "# inbox\n\n#!d keep it\n");
+        data.WriteDecisionFolder();
+        data.WriteNote("inbox", "# inbox\n\n!d keep it\n");
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         Assert.Empty(cut.FindAll("p.decision-notice"));
-        Assert.Equal(1, new TagIndex(data.Root).ReserveDecisionNumbers(DecisionParser.MaxNumber));
+        Assert.Equal(1, new TagIndex(data.Root).ReserveDecisionNumbers("ab12", DecisionParser.MaxNumber));
 
         await data.Actions!.CaptureText("one");
 
         cut.WaitForAssertion(() => Assert.Equal(
             DesktopActions.DecisionNumbersRanOutText, cut.Find("p.decision-notice[role=alert]").TextContent), Wait);
         Assert.True(cut.Find("p.decision-notice").ClassList.Contains("red"));
+    }
+
+    // 349 AC-6: a note of another folder whose markers use the own prefix gets an alias; Main shows the grey clash line
+    // once (taking it marks the folder warned), Dismiss hides it, and a later Main shows it no more.
+    [Fact]
+    public async Task Decisions_PrefixClash_LineOnce_Dismiss()
+    {
+        data.WriteDecisionFolder();
+        data.WriteNote("Theirs", "# Theirs\ndecision-folder:: 99999999-8888-7777-6666-555555555555\n\n!d ab12-3 theirs\n");
+        new TagIndex(data.Root).Sync(new NoteStore(data.Root));
+        DecisionFolderAlias alias = Assert.Single(new TagIndex(data.Root).DecisionFolderAliases());
+        Assert.False(alias.Warned);
+
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            $"Notes from another folder also use the decision prefix ab12. Here they show as {alias.Alias}.Dismiss",
+            cut.Find("p.decision-clash[role=status]").TextContent), Wait);
+        Assert.False(cut.Find("p.decision-clash").ClassList.Contains("red"));
+        Assert.True(Assert.Single(new TagIndex(data.Root).DecisionFolderAliases()).Warned);
+
+        await cut.Find("p.decision-clash button").ClickAsync(new MouseEventArgs());
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("p.decision-clash")), Wait);
+
+        IRenderedComponent<Main> again = data.Bunit.Render<Main>();
+        await data.RefreshAsync();
+        again.WaitForAssertion(() => Assert.NotEmpty(again.FindAll("main")), Wait);
+        Assert.Empty(again.FindAll("p.decision-clash"));
+    }
+
+    // 349 AC-2: a decision-folder.json that can't be read numbers nothing and Main shows the red alert line; the file is
+    // never overwritten.
+    [Fact]
+    public async Task Decisions_FolderFileUnreadable_RedLine()
+    {
+        data.WriteFile(DecisionFolder.FileName, "not json");
+        data.WriteNote("inbox", "# inbox\n\n!d keep it\n");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        Assert.Empty(cut.FindAll("p.decision-folder-unreadable"));
+
+        await data.Actions!.CaptureText("one");
+
+        cut.WaitForAssertion(() => Assert.Equal(
+            DecisionFolder.UnreadableText, cut.Find("p.decision-folder-unreadable[role=alert]").TextContent), Wait);
+        Assert.True(cut.Find("p.decision-folder-unreadable").ClassList.Contains("red"));
+        Assert.Equal("not json", File.ReadAllText(Path.Combine(data.Root, DecisionFolder.FileName)));
+        Assert.Contains("!d keep it\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")), StringComparison.Ordinal);
     }
 
     // 169 AC-7: the palette lists /review with its description.

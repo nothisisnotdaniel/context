@@ -1,9 +1,10 @@
 @using System.Globalization
 @inherits StateComponent
-@* The #!d decisions of every note, or of the notes with a tag (DesktopState.Decisions, job 343), newest first, each
-   with its date, number, note, people and headline; the full paragraph unfolds below. Clicking the number or the
-   headline opens the note at the decision, the note button at the top. It reads only, and reloads whenever the state
-   changes. *@
+@* The !d decisions of every note, or of the notes with a tag (DesktopState.Decisions, jobs 343 and 349), newest
+   first, each with its date, label (Decision 1234, Decision ab12-1234), note, people, headline, Copy reference and the
+   other notes that hold a copy (Also in); the full paragraph unfolds below. Clicking the label or the headline opens the
+   note at the decision, the note button at the top. It reads only (Copy reference writes the clipboard), and reloads
+   whenever the state changes. *@
 
 <section class="decisions-panel" aria-label="Decisions">
     <div class="panel-bar">
@@ -32,6 +33,10 @@
     }
     else
     {
+        @if (copied is { } copiedText)
+        {
+            <p class="@(copiedOk ? "grey decision-copied" : "red")" role="status">@copiedText</p>
+        }
         <ul class="decision-rows">
             @foreach (Decision decision in view.Decisions.Take(MaxRows))
             {
@@ -42,13 +47,13 @@
                 string headline = DesktopText.OneLine(decision.Headline);
                 (string Note, int Line) key = (decision.Note, decision.Line);
                 bool open = expanded.Contains(key);
-                int? number = decision.Number;
+                string? label = decision.Label;
                 <li>
                     <span class="date grey">@decision.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</span>
-                    @if (number is int n)
+                    @if (label is string shown)
                     {
-                        string marker = DecisionParser.Format(n);
-                        <span class="decision-number"><button type="button" title="Open @marker" @onclick="() => Jump(name, number)">@marker</button></span>
+                        string marker = $"Decision {shown}";
+                        <span class="decision-number"><button type="button" title="Open @marker" @onclick="() => Jump(name, label)">@marker</button></span>
                     }
                     else
                     {
@@ -59,8 +64,17 @@
                     {
                         <span class="people grey cut" title="@people">@people</span>
                     }
-                    <span class="text cut" title="@headline"><button type="button" class="cut" @onclick="() => Jump(name, number)">@headline</button></span>
+                    <span class="text cut" title="@headline"><button type="button" class="cut" @onclick="() => Jump(name, label)">@headline</button></span>
+                    @if (label is string copy)
+                    {
+                        <button type="button" class="decision-copy" aria-label="Copy reference to Decision @copy" title="Copy reference to Decision @copy" @onclick="() => Copy(copy)">Copy</button>
+                    }
                     <button type="button" class="decision-expand" aria-expanded="@(open ? "true" : "false")" @onclick="() => Toggle(key)">@(open ? "Hide full text" : "Show full text")</button>
+                    @if (decision.Places.Count > 0)
+                    {
+                        string also = DesktopText.OneLine(string.Join(", ", decision.Places.Select(p => p.Note).Distinct(StringComparer.Ordinal)));
+                        <span class="decision-places grey cut" title="@also">Also in: @also</span>
+                    }
                     @if (open)
                     {
                         <p class="decision-full">@FullText(decision.Text)</p>
@@ -94,16 +108,59 @@
     [Parameter]
     public EventCallback<string> OnOpen { get; set; }
 
-    /// <summary>Called with a note's name and a decision number when the number or headline is clicked (job 343).</summary>
+    /// <summary>
+    /// Called with a note's name and the decision's marker token there (<c>ab12-1234</c>) when the label or headline is
+    /// clicked (jobs 343 and 349).
+    /// </summary>
     [Parameter]
-    public EventCallback<(string Name, int Decision)> OnOpenDecision { get; set; }
+    public EventCallback<(string Name, string Decision)> OnOpenDecision { get; set; }
+
+    [Inject]
+    private EditorInterop Interop { get; set; } = null!;
+
+    // The Copy reference line (grey Copied #!d<ref>., red when the clipboard refused).
+    private string? copied;
+    private bool copiedOk;
 
     [Parameter]
     public EventCallback OnClose { get; set; }
 
-    // A numbered decision opens its note at it; an unnumbered one (or without a delegate) opens the note at the top.
-    private Task Jump(string name, int? number) =>
-        number is int n && OnOpenDecision.HasDelegate ? OnOpenDecision.InvokeAsync((name, n)) : OnOpen.InvokeAsync(name);
+    // A numbered decision opens its note at it (the marker's token from the index); an unnumbered one, one the index no
+    // longer knows (or without a delegate) opens the note at the top.
+    private async Task Jump(string name, string? label)
+    {
+        if (label is not null && OnOpenDecision.HasDelegate && DecisionParser.TryParseReference(label, out DecisionRef reference)
+            && await State.DecisionNote(reference) is { } found && string.Equals(found.Note, name, StringComparison.Ordinal))
+        {
+            await OnOpenDecision.InvokeAsync((name, found.Token));
+            return;
+        }
+
+        await OnOpen.InvokeAsync(name);
+    }
+
+    // Job 349: copies the row's reference (#!d1234, #!dab12-1234), rebuilt from its parsed parts, through copyText.
+    private async Task Copy(string label)
+    {
+        if (!DecisionParser.TryParseReference(label, out DecisionRef reference))
+        {
+            return;
+        }
+
+        string text = DecisionParser.Format(reference.Prefix, reference.Number);
+        bool ok;
+        try
+        {
+            ok = await Interop.CopyTextAsync(text);
+        }
+        catch (Exception e) when (e is Microsoft.JSInterop.JSException or Microsoft.JSInterop.JSDisconnectedException or TaskCanceledException)
+        {
+            ok = false;
+        }
+
+        copiedOk = ok;
+        copied = ok ? $"Copied {text}." : $"Can't copy {text}.";
+    }
 
     private void Toggle((string Note, int Line) key)
     {

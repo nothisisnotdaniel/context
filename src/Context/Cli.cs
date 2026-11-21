@@ -30,7 +30,7 @@ internal sealed class Cli
     private const string IndexUnreadable = "Can't read context.db.";
     private const string FindForm = "Type: context find <attribute> <value>.";
     private const string SearchForm = "Type: context search <text>.";
-    private const string DecisionsForm = "Type: context decisions [--full] [tag] or context decisions <number>.";
+    private const string DecisionsForm = "Type: context decisions [--full] [tag] or context decisions <reference>.";
     private const string ItemForm = "Type: context item <n> [--json] [--open] with the work item's number.";
     private const string OpenFlag = "--open";
     private const string LaunchFailed = "Can't start the desktop app.";
@@ -56,8 +56,8 @@ internal sealed class Cli
         ("tags [tag...]", "List tags with counts, or the notes with a tag."),
         ("find <attribute> <value...>", "List the notes with an attribute line, e.g. find role Bereichsleiter."),
         ("search <text...>", "List the notes whose text contains the text, with the first matching line."),
-        ("decisions [--full] [tag...]", "List the #!d decisions of all notes, or of the notes with a tag, newest first; --full prints the whole text."),
-        ("decisions <number>", "Show decision #!d<number> with its note, date, people and whole text."),
+        ("decisions [--full] [tag...]", "List the !d decisions of all notes, or of the notes with a tag, newest first; --full prints the whole text."),
+        ("decisions <reference>", "Show decision #!d1234 or #!dab12-1234 with its note, date, people, copies and whole text."),
         ("current", "Today's Times bookings, appointments, due todos and linked notes."),
         ("review", "The last 7 days' changed notes and done todos, overdue todos and the next 7 days' appointments."),
         ("today", "Print today's note, creating it with the day's appointments and due todos."),
@@ -130,6 +130,12 @@ internal sealed class Cli
         this.zone = zone;
         this.timesFolder = timesFolder;
     }
+
+    /// <summary>The random source of a new <c>decision-folder.json</c> prefix (job 349); tests set a fake.</summary>
+    internal Func<int, int> DecisionRandom { get; init; } = DecisionFolder.RandomBelow;
+
+    /// <summary>The GUID source of a new <c>decision-folder.json</c> (job 349); tests set a fake.</summary>
+    internal Func<Guid> DecisionGuid { get; init; } = Guid.NewGuid;
 
     /// <summary>Runs one command and returns its exit code. Never throws.</summary>
     public int Run(string[] args)
@@ -502,6 +508,11 @@ internal sealed class Cli
             return Error($"Can't write {Inbox.NoteName}. Nothing was captured.");
         }
 
+        if (result == CaptureResult.Captured)
+        {
+            NumberDecisions(session, Inbox.NoteName);
+        }
+
         return result switch
         {
             CaptureResult.Captured => Done("Captured."),
@@ -801,6 +812,7 @@ internal sealed class Cli
             case DayEndKind.TodosUnreadable:
                 return Error("Can't read todos.json.");
             case DayEndKind.Done:
+                NumberDecisions(session, result.Name);
                 Out($"Updated {Date(day)}.");
                 Out($"Moved {result.Moved.Count} todo(s) to {Date(result.To)}.");
                 return ExitOk;
@@ -965,19 +977,20 @@ internal sealed class Cli
         }
     }
 
-    // decisions [--full] [tag...] | decisions <n> | decisions #!d<n>: a number never comes with anything else.
+    // decisions [--full] [tag...] | decisions <ref>: 1234, #!d1234, ab12-1234 or #!dab12-1234 (any case); a reference
+    // never comes with anything else.
     private Func<Session, int>? ParseDecisions(string[] args, out string? usage)
     {
         usage = null;
-        if (args.Any(a => DecisionParser.TryParseNumber(a, out _)))
+        if (args.Any(a => DecisionParser.TryParseReference(a, out _)))
         {
-            if (args.Length != 1 || !DecisionParser.TryParseNumber(args[0], out int number))
+            if (args.Length != 1 || !DecisionParser.TryParseReference(args[0], out DecisionRef reference))
             {
                 usage = DecisionsForm;
                 return null;
             }
 
-            return s => ShowDecision(s, number);
+            return s => ShowDecision(s, reference);
         }
 
         bool full = args.Any(a => string.Equals(a, "--full", StringComparison.OrdinalIgnoreCase));
@@ -991,19 +1004,25 @@ internal sealed class Cli
         return s => Decisions(s, tag, full);
     }
 
-    private int ShowDecision(Session session, int number)
+    private int ShowDecision(Session session, DecisionRef reference)
     {
-        DecisionsView view = DecisionsView.Find(session.Index, session.Notes, number, zone);
+        DecisionFolder.Load(folder, DecisionRandom, DecisionGuid);
+        DecisionsView view = DecisionsView.Find(session.Index, session.Notes, reference, zone);
         switch (view.Kind)
         {
             case DecisionsViewKind.IndexUnreadable:
                 return Error(IndexUnreadable);
             case DecisionsViewKind.Found:
                 Decision decision = view.Decisions[0];
-                Out(DecisionParser.Format(number));
+                Out(decision.Reference ?? DecisionParser.Format(reference.Prefix, reference.Number));
                 Out($"Note: {OneLine(decision.Note)}");
                 Out($"Date: {Date(decision.Date)}");
                 Out($"People: {string.Join(", ", decision.People.Select(OneLine))}");
+                if (decision.Places.Count > 0)
+                {
+                    Out($"Also in: {string.Join(", ", decision.Places.Select(p => OneLine(p.Note)).Distinct(StringComparer.Ordinal))}");
+                }
+
                 Out(string.Empty);
                 foreach (string line in decision.Text.Split('\n'))
                 {
@@ -1012,12 +1031,32 @@ internal sealed class Cli
 
                 return ExitOk;
             default:
-                return Error($"No decision {DecisionParser.Format(number)}.");
+                string? own = DecisionFolder.Read(session.Notes.Root)?.Prefix;
+                return Error($"No decision {DecisionParser.Token}{DecisionsView.LabelOf(reference.Prefix, reference.Number, own)}.");
+        }
+    }
+
+    // Job 349: after a command wrote the plain note `name`, its !d markers are numbered in a second write
+    // (DecisionNumbering.NumberWritten), once decision-folder.json reads fine (created when missing). Any failure leaves
+    // the text as written and the exit code unchanged.
+    private void NumberDecisions(Session session, string name)
+    {
+        try
+        {
+            if (DecisionFolder.Load(folder, DecisionRandom, DecisionGuid) is { } decisionFolder)
+            {
+                DecisionNumbering.NumberWritten(session.Index, session.Notes, decisionFolder, name);
+            }
+        }
+        catch (Exception)
+        {
+            // Left to the next save.
         }
     }
 
     private int Decisions(Session session, string tag, bool full)
     {
+        DecisionFolder.Load(folder, DecisionRandom, DecisionGuid);
         DecisionsView view = DecisionsView.Build(session.Index, session.Notes, tag, zone);
         switch (view.Kind)
         {
@@ -1030,7 +1069,7 @@ internal sealed class Cli
                 foreach (Decision decision in view.Decisions)
                 {
                     string people = string.Join(", ", decision.People.Select(OneLine));
-                    string number = decision.Number is int n ? DecisionParser.Format(n) : string.Empty;
+                    string number = decision.Reference ?? string.Empty;
                     string text = OneLine(full ? decision.Text : decision.Headline);
                     Out($"{Date(decision.Date)}\t{number}\t{OneLine(decision.Note)}\t{people}\t{text}");
                 }
@@ -1913,6 +1952,7 @@ internal sealed class Cli
         try
         {
             NoteInfo created = session.Notes.Create(title);
+            NumberDecisions(session, created.Name);
             Out($"Created {OneLine(created.Name)}");
             return ExitOk;
         }
@@ -1951,6 +1991,7 @@ internal sealed class Cli
         try
         {
             NoteInfo created = session.Notes.CreateWithText(prepared.Title, prepared.Text);
+            NumberDecisions(session, created.Name);
             Out($"Created {OneLine(created.Name)}");
             return ExitOk;
         }
@@ -2015,6 +2056,7 @@ internal sealed class Cli
             return Error($"Can't save {OneLine(title)}. Nothing changed.");
         }
 
+        NumberDecisions(session, note.Name);
         Out($"{(replaced ? "Replaced" : "Imported")} {OneLine(note.Name)}.");
         Out($"The source is unchanged; delete it if you don't need the plain copy: {shownSource}");
         return ExitOk;

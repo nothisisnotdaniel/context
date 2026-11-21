@@ -342,6 +342,22 @@ internal sealed class DesktopFixture : IDisposable
     /// </summary>
     public void WritePinned(params string[] names) => new PinnedNotesStore(Root).Write(names);
 
+    /// <summary>The GUID <see cref="WriteDecisionFolder"/> writes (job 349).</summary>
+    public static readonly Guid DecisionFolderGuid = new("11111111-2222-3333-4444-555555555555");
+
+    /// <summary>The <c>decision-folder::</c> line of a note numbered with <see cref="WriteDecisionFolder"/>'s folder.</summary>
+    public static readonly string DecisionFolderLine = "decision-folder:: " + DecisionFolderGuid.ToString("D");
+
+    /// <summary>
+    /// Writes <c>decision-folder.json</c> with <paramref name="prefix"/>, <see cref="DecisionFolderGuid"/> and
+    /// <paramref name="migrated"/> (job 349), so no test draws a random prefix.
+    /// </summary>
+    public void WriteDecisionFolder(string prefix = "ab12", bool migrated = true) =>
+        WriteFile(
+            DecisionFolder.FileName,
+            "{\"prefix\":\"" + prefix + "\",\"guid\":\"" + DecisionFolderGuid.ToString("D") + "\",\"migrated\":"
+                + (migrated ? "true" : "false") + "}");
+
     public void WriteFile(string relative, string text)
     {
         string path = Path.Combine(Root, relative);

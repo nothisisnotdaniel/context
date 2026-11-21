@@ -160,17 +160,29 @@ internal sealed class NameLookup
 }
 
 /// <summary>
-/// A decision row of the index (job 343): the note, the marker's 1-based line, its number (<c>null</c> when bare),
-/// the paragraph text (raw) and the note's stored last-write time (UTC).
+/// A decision row of the index (jobs 343, 349): the note, the marker's 1-based line, its key prefix and number (both
+/// <c>null</c> when it has no number yet), the paragraph text (raw) and the note's stored last-write time (UTC).
 /// </summary>
-internal sealed record IndexedDecision(string Note, int Line, int? Number, string Text, DateTime Modified)
+internal sealed record IndexedDecision(string Note, int Line, string? Prefix, int? Number, string Text, DateTime Modified)
 {
+    /// <summary>
+    /// The other places that hold the same key with the same text (copies, job 349): (note, 1-based line), in note and
+    /// line order; empty when there are none or the decision has no number.
+    /// </summary>
+    public IReadOnlyList<(string Note, int Line)> Places { get; init; } = [];
+
     /// <summary>The first line of <see cref="Text"/>.</summary>
     public string Headline => Text.IndexOf('\n', StringComparison.Ordinal) is int end and >= 0 ? Text[..end] : Text;
 
     /// <summary>Returns only the type name: the text is raw note text.</summary>
     public override string ToString() => nameof(IndexedDecision);
 }
+
+/// <summary>
+/// A <c>decision_folders</c> row (job 349): a foreign folder's GUID, the prefix its notes share with this folder, the
+/// alias they show as here, and whether the clash line was shown.
+/// </summary>
+internal sealed record DecisionFolderAlias(string Guid, string Prefix, string Alias, bool Warned);
 
 /// <summary>
 /// Thrown when <c>context.db</c> can't be opened or isn't a valid database. The file is never
@@ -228,8 +240,18 @@ internal sealed class TagIndex
             line INTEGER NOT NULL,
             text TEXT NOT NULL,
             number INTEGER,
+            prefix TEXT,
             PRIMARY KEY(note, line));
-        CREATE TABLE IF NOT EXISTS decision_owners(number INTEGER PRIMARY KEY, note TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS decision_owners(
+            prefix TEXT NOT NULL,
+            number INTEGER NOT NULL,
+            note TEXT NOT NULL,
+            PRIMARY KEY(prefix, number));
+        CREATE TABLE IF NOT EXISTS decision_folders(
+            guid TEXT NOT NULL PRIMARY KEY,
+            prefix TEXT NOT NULL,
+            alias TEXT NOT NULL,
+            warned INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE IF NOT EXISTS decision_counter(high INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS note_todos(
             note TEXT NOT NULL,
@@ -285,8 +307,11 @@ internal sealed class TagIndex
     /// 16: an <c>affiliation::</c> value is a comma-separated list (job 332), one <c>note_attributes</c> row per part.
     /// 17: decisions are <c>#!d</c> paragraphs (job 343), one <c>note_decisions</c> row per paragraph with its
     /// <c>number</c> (NULL for a bare marker); <c>Decision:</c> lines are no longer read.
+    /// 18: decisions are <c>!d</c> paragraphs with an optional <c>&lt;prefix&gt;-&lt;n&gt;</c> token (job 349);
+    /// <c>note_decisions.prefix</c> is the key prefix (an alias for a clashing foreign folder, <c>decision_folders</c>),
+    /// and <c>decision_owners</c> is keyed by <c>(prefix, number)</c>.
     /// </summary>
-    public const int ParserVersion = 17;
+    public const int ParserVersion = 18;
 
     /// <summary>
     /// How long opening <c>context.db</c> and starting <see cref="Sync"/>'s write transaction wait while another
@@ -311,6 +336,15 @@ internal sealed class TagIndex
         this.root = Path.GetFullPath(root);
         this.busyTimeout = busyTimeout;
     }
+
+    /// <summary>
+    /// The random source of a new decision alias (job 349): an int below the bound. Cryptographic by default; tests set
+    /// a fake.
+    /// </summary>
+    internal Func<int, int> AliasRandom { get; set; } = DecisionFolder.RandomBelow;
+
+    /// <summary>The own folder's decision prefix (<c>decision-folder.json</c> in the root), or <c>null</c> when it can't be read.</summary>
+    public string? OwnPrefix => DecisionFolder.Read(root)?.Prefix;
 
     /// <summary>How many times this instance opened the database (one per sync or query); for tests.</summary>
     internal int Reads => Volatile.Read(ref reads);
@@ -340,6 +374,7 @@ internal sealed class TagIndex
     {
         PrivateFile.CreateFolder(root);
         IReadOnlyList<NoteInfo> notes = store.List();
+        DecisionFolder? folder = DecisionFolder.Read(root);
         Run(connection =>
         {
             // BEGIN IMMEDIATE: take the write lock up front (waiting up to the busy timeout), so a sync never fails
@@ -491,16 +526,24 @@ internal sealed class TagIndex
                 }
 
                 Execute(connection, transaction, "DELETE FROM note_decisions WHERE note = $note", ("$note", note.Name));
+                string? alias = decisions.Count > 0 && folder is not null && body is not null
+                    && decisions.Any(d => d.Prefix == folder.Prefix)
+                    && DecisionFolder.NoteGuid(body) is Guid noteGuid && noteGuid != folder.Guid
+                        ? DecisionAlias(connection, transaction, noteGuid, folder.Prefix)
+                        : null;
                 foreach (ParsedDecision decision in decisions)
                 {
+                    // A plain number is replaced by the next save: like a bare marker, it has no number yet.
+                    string? prefix = decision.Prefix is null ? null : (decision.Prefix == folder?.Prefix ? alias : null) ?? decision.Prefix;
                     Execute(
                         connection,
                         transaction,
-                        "INSERT INTO note_decisions(note, line, text, number) VALUES($note, $line, $text, $number)",
+                        "INSERT INTO note_decisions(note, line, text, number, prefix) VALUES($note, $line, $text, $number, $prefix)",
                         ("$note", note.Name),
                         ("$line", decision.Line),
                         ("$text", decision.Text),
-                        ("$number", decision.Number));
+                        ("$number", prefix is null ? null : decision.Number),
+                        ("$prefix", prefix));
                 }
 
                 Execute(connection, transaction, "DELETE FROM note_todos WHERE note = $note", ("$note", note.Name));
@@ -697,11 +740,12 @@ internal sealed class TagIndex
     });
 
     /// <summary>
-    /// The decisions of the log, unsorted: every unnumbered <c>note_decisions</c> row, plus for each number only the
-    /// first row (lowest line) of its owner (<c>decision_owners</c>), each with its note's stored last-write time (UTC).
-    /// Rows of notes without a stored time (they couldn't be read) and of non-owners are left out. With a non-blank
-    /// <paramref name="tag"/> (normalized by <see cref="NormalizeTag"/>, reaching SQL only as a parameter) only the
-    /// decisions of notes that have that tag.
+    /// The decisions of the log, unsorted: every unnumbered <c>note_decisions</c> row, plus for each key
+    /// <c>(prefix, number)</c> only the first row (lowest line) of its owner (<c>decision_owners</c>), each with its
+    /// note's stored last-write time (UTC) and its copies (<see cref="IndexedDecision.Places"/>: every other row with the
+    /// same key and the same text). Rows of notes without a stored time (they couldn't be read) and of non-owners are
+    /// left out. With a non-blank <paramref name="tag"/> (normalized by <see cref="NormalizeTag"/>, reaching SQL only as
+    /// a parameter) only the decisions of notes that have that tag.
     /// </summary>
     public IReadOnlyList<IndexedDecision> Decisions(string? tag)
     {
@@ -720,52 +764,60 @@ internal sealed class TagIndex
                 command.Parameters.AddWithValue("$tag", wanted);
             }
 
-            return (IReadOnlyList<IndexedDecision>)ReadDecisions(command);
+            return (IReadOnlyList<IndexedDecision>)WithPlaces(connection, ReadDecisions(command));
         });
     }
 
     /// <summary>
-    /// The decision numbered <paramref name="number"/> as its owner holds it (the owner's first row with that number), or
-    /// <c>null</c> when no readable owner holds it. The number reaches SQL only as a parameter.
+    /// The decision with key <paramref name="prefix"/>-<paramref name="number"/> as its owner holds it (the owner's
+    /// first row with that key, with its <see cref="IndexedDecision.Places"/>), or <c>null</c> when no readable owner
+    /// holds it. Both reach SQL only as parameters.
     /// </summary>
-    public IndexedDecision? DecisionByNumber(int number) => Run(connection =>
+    public IndexedDecision? DecisionByKey(string prefix, int number) => Run(connection =>
     {
         using SqliteCommand command = Command(
-            connection, null, DecisionSelect + " WHERE n.modified IS NOT NULL AND d.number = $number AND " + OwnedDecision);
+            connection,
+            null,
+            DecisionSelect + " WHERE n.modified IS NOT NULL AND d.prefix = $prefix AND d.number = $number AND " + OwnedDecision);
+        command.Parameters.AddWithValue("$prefix", prefix);
         command.Parameters.AddWithValue("$number", number);
-        return ReadDecisions(command).FirstOrDefault();
+        return WithPlaces(connection, ReadDecisions(command)).FirstOrDefault();
     });
 
     /// <summary>
-    /// The headline (first text line, raw) of each of <paramref name="numbers"/> that a readable owner holds, read in
-    /// one connection; unknown numbers are not in the result. Each number reaches SQL only as a parameter.
+    /// The headline (first text line, raw) of each key of <paramref name="keys"/> that a readable owner holds, read in
+    /// one connection; unknown keys are not in the result. Each part reaches SQL only as a parameter.
     /// </summary>
-    public IReadOnlyDictionary<int, string> DecisionHeadlines(IEnumerable<int> numbers)
+    public IReadOnlyDictionary<(string Prefix, int Number), string> DecisionHeadlines(IEnumerable<(string Prefix, int Number)> keys)
     {
-        List<int> wanted = numbers.Distinct().ToList();
+        List<(string Prefix, int Number)> wanted = keys.Distinct().ToList();
         return Run(connection =>
         {
-            Dictionary<int, string> headlines = [];
-            foreach (int number in wanted)
+            Dictionary<(string Prefix, int Number), string> headlines = [];
+            foreach ((string prefix, int number) in wanted)
             {
                 using SqliteCommand command = Command(
-                    connection, null, DecisionSelect + " WHERE n.modified IS NOT NULL AND d.number = $number AND " + OwnedDecision);
+                    connection,
+                    null,
+                    DecisionSelect + " WHERE n.modified IS NOT NULL AND d.prefix = $prefix AND d.number = $number AND " + OwnedDecision);
+                command.Parameters.AddWithValue("$prefix", prefix);
                 command.Parameters.AddWithValue("$number", number);
                 if (ReadDecisions(command).FirstOrDefault() is { } decision)
                 {
-                    headlines[number] = decision.Headline;
+                    headlines[(prefix, number)] = decision.Headline;
                 }
             }
 
-            return (IReadOnlyDictionary<int, string>)headlines;
+            return (IReadOnlyDictionary<(string Prefix, int Number), string>)headlines;
         });
     }
 
-    /// <summary>Every <c>decision_owners</c> row: number -> owning note's full name.</summary>
-    public IReadOnlyDictionary<int, string> DecisionOwners() => Run(connection =>
+    /// <summary>The <c>decision_owners</c> rows of <paramref name="prefix"/>: number -> owning note's full name.</summary>
+    public IReadOnlyDictionary<int, string> DecisionOwners(string prefix) => Run(connection =>
     {
         Dictionary<int, string> owners = [];
-        using SqliteCommand command = Command(connection, null, "SELECT number, note FROM decision_owners");
+        using SqliteCommand command = Command(connection, null, "SELECT number, note FROM decision_owners WHERE prefix = $prefix");
+        command.Parameters.AddWithValue("$prefix", prefix);
         using SqliteDataReader reader = command.ExecuteReader();
         while (reader.Read())
         {
@@ -780,17 +832,19 @@ internal sealed class TagIndex
     });
 
     /// <summary>
-    /// Every owned number whose owner holds it in a row: number -> the text of the owner's first row with it (the one
-    /// the log shows). An owner with no row (unreadable or oversized) has no entry. Raw note text.
+    /// Every owned number of <paramref name="prefix"/> whose owner holds it in a row: number -> the text of the owner's
+    /// first row with it (the one the log shows). An owner with no row (unreadable or oversized) has no entry. Raw note
+    /// text.
     /// </summary>
-    public IReadOnlyDictionary<int, string> OwnedDecisionTexts() => Run(connection =>
+    public IReadOnlyDictionary<int, string> OwnedDecisionTexts(string prefix) => Run(connection =>
     {
         Dictionary<int, string> texts = [];
         using SqliteCommand command = Command(
             connection,
             null,
-            "SELECT o.number, (SELECT d.text FROM note_decisions d WHERE d.note = o.note AND d.number = o.number "
-                + "ORDER BY d.line LIMIT 1) FROM decision_owners o");
+            "SELECT o.number, (SELECT d.text FROM note_decisions d WHERE d.note = o.note AND d.prefix = o.prefix "
+                + "AND d.number = o.number ORDER BY d.line LIMIT 1) FROM decision_owners o WHERE o.prefix = $prefix");
+        command.Parameters.AddWithValue("$prefix", prefix);
         using SqliteDataReader reader = command.ExecuteReader();
         while (reader.Read())
         {
@@ -805,14 +859,50 @@ internal sealed class TagIndex
     });
 
     /// <summary>
-    /// Reserves <paramref name="count"/> consecutive new decision numbers in one <c>BEGIN IMMEDIATE</c> transaction and
-    /// returns the first: the lowest run above <c>decision_counter</c> (the last number handed out) in which no number is
-    /// in <c>note_decisions</c>, <c>decision_owners</c> or <paramref name="taken"/>. The counter then holds the run's
-    /// last number, so a number is never handed out twice while the database lasts (a failed write only leaves a gap),
-    /// and a number typed by hand never moves the counter: a huge one is only stepped over. <c>null</c> when no such run
-    /// is left at or below <see cref="DecisionParser.MaxNumber"/> (the counter is then unchanged).
+    /// Every <c>decision_folders</c> row (job 349): a foreign folder's GUID (as stored), the prefix it shares with this
+    /// folder, the alias its decisions show as here, and whether the clash was shown. Rows with a malformed prefix or
+    /// alias are left out.
     /// </summary>
-    public int? ReserveDecisionNumbers(int count, IReadOnlyCollection<int>? taken = null)
+    public IReadOnlyList<DecisionFolderAlias> DecisionFolderAliases() => Run(connection =>
+    {
+        List<DecisionFolderAlias> rows = [];
+        using SqliteCommand command = Command(
+            connection, null, "SELECT guid, prefix, alias, warned FROM decision_folders ORDER BY rowid");
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            string prefix = reader.GetString(1);
+            string alias = reader.GetString(2);
+            if (DecisionFolder.IsPrefix(prefix) && DecisionFolder.IsPrefix(alias))
+            {
+                rows.Add(new DecisionFolderAlias(reader.GetString(0), prefix, alias, reader.GetInt64(3) != 0));
+            }
+        }
+
+        return (IReadOnlyList<DecisionFolderAlias>)rows;
+    });
+
+    /// <summary>Marks the clash of folder <paramref name="guid"/> as shown (job 349); the GUID reaches SQL as a parameter.</summary>
+    public void MarkDecisionFolderWarned(string guid)
+    {
+        PrivateFile.CreateFolder(root);
+        Run(connection =>
+        {
+            Execute(connection, null, "UPDATE decision_folders SET warned = 1 WHERE guid = $guid", ("$guid", guid));
+            return 0;
+        });
+    }
+
+    /// <summary>
+    /// Reserves <paramref name="count"/> consecutive new decision numbers of <paramref name="prefix"/> (the own folder's)
+    /// in one <c>BEGIN IMMEDIATE</c> transaction and returns the first: the lowest run above <c>decision_counter</c> (the
+    /// last number handed out) in which no number is in <c>note_decisions</c> or <c>decision_owners</c> with that prefix,
+    /// or in <paramref name="taken"/>. The counter then holds the run's last number, so a number is never handed out
+    /// twice while the database lasts (a failed write only leaves a gap), and a number typed by hand never moves the
+    /// counter: a huge one is only stepped over. <c>null</c> when no such run is left at or below
+    /// <see cref="DecisionParser.MaxNumber"/> (the counter is then unchanged).
+    /// </summary>
+    public int? ReserveDecisionNumbers(string prefix, int count, IReadOnlyCollection<int>? taken = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(count, 1);
         PrivateFile.CreateFolder(root);
@@ -832,10 +922,11 @@ internal sealed class TagIndex
             using (SqliteCommand select = Command(
                 connection,
                 transaction,
-                "SELECT number FROM note_decisions WHERE number > $high "
-                    + "UNION SELECT number FROM decision_owners WHERE number > $high"))
+                "SELECT number FROM note_decisions WHERE prefix = $prefix AND number > $high "
+                    + "UNION SELECT number FROM decision_owners WHERE prefix = $prefix AND number > $high"))
             {
                 select.Parameters.AddWithValue("$high", high);
+                select.Parameters.AddWithValue("$prefix", prefix);
                 using SqliteDataReader reader = select.ExecuteReader();
                 while (reader.Read())
                 {
@@ -1683,13 +1774,14 @@ internal sealed class TagIndex
             EnsureLinkColumn(connection, "heading");
             EnsureLinkColumn(connection, "whole_key");
             EnsureLinkColumn(connection, "part_key");
-            EnsureDecisionNumberColumn(connection);
+            EnsureDecisionColumns(connection);
             Execute(
                 connection,
                 null,
                 "CREATE INDEX IF NOT EXISTS note_links_whole_key ON note_links(whole_key); "
                     + "CREATE INDEX IF NOT EXISTS note_links_part_key ON note_links(part_key); "
-                    + "CREATE INDEX IF NOT EXISTS note_decisions_number ON note_decisions(number);");
+                    + "CREATE INDEX IF NOT EXISTS note_decisions_number ON note_decisions(number); "
+                    + "CREATE INDEX IF NOT EXISTS note_decisions_key ON note_decisions(prefix, number);");
             return work(connection);
         }
         catch (SqliteException ex)
@@ -1764,12 +1856,13 @@ internal sealed class TagIndex
         HasColumn(connection, "note_links", column);
 
     private const string DecisionSelect =
-        "SELECT d.note, d.line, d.number, d.text, n.modified FROM note_decisions d JOIN notes n ON n.name = d.note";
+        "SELECT d.note, d.line, d.number, d.text, n.modified, d.prefix FROM note_decisions d JOIN notes n ON n.name = d.note";
 
-    // A row is in the log when it is unnumbered, or its note owns the number and it is that note's first row with it.
+    // A row is in the log when it is unnumbered, or its note owns the key and it is that note's first row with it.
     private const string OwnedDecision =
-        "(d.number IS NULL OR (EXISTS (SELECT 1 FROM decision_owners o WHERE o.number = d.number AND o.note = d.note) "
-            + "AND d.line = (SELECT MIN(e.line) FROM note_decisions e WHERE e.note = d.note AND e.number = d.number)))";
+        "(d.number IS NULL OR (EXISTS (SELECT 1 FROM decision_owners o WHERE o.prefix = d.prefix AND o.number = d.number "
+            + "AND o.note = d.note) AND d.line = (SELECT MIN(e.line) FROM note_decisions e WHERE e.note = d.note "
+            + "AND e.prefix = d.prefix AND e.number = d.number)))";
 
     private static List<IndexedDecision> ReadDecisions(SqliteCommand command)
     {
@@ -1777,26 +1870,139 @@ internal sealed class TagIndex
         using SqliteDataReader reader = command.ExecuteReader();
         while (reader.Read())
         {
-            // A line, number or time edited by hand out of range is skipped, like a note that couldn't be read.
+            // A line, number, prefix or time edited by hand out of range is skipped, like a note that couldn't be read.
             long line = reader.GetInt64(1);
             long? number = reader.IsDBNull(2) ? null : reader.GetInt64(2);
             long ticks = reader.GetInt64(4);
+            string? prefix = reader.IsDBNull(5) ? null : reader.GetString(5);
             if (line < 1 || line > int.MaxValue || ticks < DateTime.MinValue.Ticks || ticks > DateTime.MaxValue.Ticks
-                || number is < 1 or > DecisionParser.MaxNumber)
+                || number is < 1 or > DecisionParser.MaxNumber || (number is null) != (prefix is null)
+                || (prefix is not null && !DecisionFolder.IsPrefix(prefix)))
             {
                 continue;
             }
 
             rows.Add(new IndexedDecision(
-                reader.GetString(0), (int)line, (int?)number, reader.GetString(3), new DateTime(ticks, DateTimeKind.Utc)));
+                reader.GetString(0), (int)line, prefix, (int?)number, reader.GetString(3), new DateTime(ticks, DateTimeKind.Utc)));
         }
 
         return rows;
     }
 
-    // Job 343: owner rows of notes that are gone, or that are readable and no longer hold the number, go; then each
-    // number without an owner goes to the note holding it with the oldest last-write time, then the lower name
-    // ignoring case, then ordinal. An unreadable or oversized owner (no stored time) keeps its numbers.
+    // The decisions with their copies: for each numbered one, every other readable row with its key and its text, in
+    // note and line order (job 349).
+    private static List<IndexedDecision> WithPlaces(SqliteConnection connection, List<IndexedDecision> decisions)
+    {
+        if (!decisions.Any(d => d.Number is not null))
+        {
+            return decisions;
+        }
+
+        Dictionary<(string Prefix, long Number, string Text), List<(string Note, int Line)>> rows = [];
+        using (SqliteCommand command = Command(
+            connection,
+            null,
+            "SELECT d.prefix, d.number, d.text, d.note, d.line FROM note_decisions d JOIN notes n ON n.name = d.note "
+                + "WHERE n.modified IS NOT NULL AND d.number IS NOT NULL AND d.prefix IS NOT NULL "
+                + "AND EXISTS (SELECT 1 FROM note_decisions e WHERE e.prefix = d.prefix AND e.number = d.number "
+                + "AND (e.note <> d.note OR e.line <> d.line))"))
+        using (SqliteDataReader reader = command.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                long line = reader.GetInt64(4);
+                if (line < 1 || line > int.MaxValue)
+                {
+                    continue;
+                }
+
+                (string, long, string) key = (reader.GetString(0), reader.GetInt64(1), reader.GetString(2));
+                if (!rows.TryGetValue(key, out List<(string Note, int Line)>? places))
+                {
+                    places = [];
+                    rows[key] = places;
+                }
+
+                places.Add((reader.GetString(3), (int)line));
+            }
+        }
+
+        List<IndexedDecision> found = new(decisions.Count);
+        foreach (IndexedDecision decision in decisions)
+        {
+            if (decision is { Prefix: string prefix, Number: int number }
+                && rows.TryGetValue((prefix, number, decision.Text), out List<(string Note, int Line)>? places))
+            {
+                List<(string Note, int Line)> others = places
+                    .Where(p => !(p.Note == decision.Note && p.Line == decision.Line))
+                    .OrderBy(p => p.Note, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(p => p.Note, StringComparer.Ordinal)
+                    .ThenBy(p => p.Line)
+                    .ToList();
+                found.Add(others.Count == 0 ? decision : decision with { Places = others });
+            }
+            else
+            {
+                found.Add(decision);
+            }
+        }
+
+        return found;
+    }
+
+    // Job 349: the alias of the foreign folder guid whose notes use the own prefix: the stored one, or a new random one
+    // (4 alphabet chars, unlike the own prefix and every stored prefix and alias), stored once.
+    private string DecisionAlias(SqliteConnection connection, SqliteTransaction transaction, Guid guid, string ownPrefix)
+    {
+        string key = guid.ToString("D");
+        using (SqliteCommand select = Command(connection, transaction, "SELECT alias FROM decision_folders WHERE guid = $guid"))
+        {
+            select.Parameters.AddWithValue("$guid", key);
+            if (select.ExecuteScalar() is string stored && DecisionFolder.IsPrefix(stored))
+            {
+                return stored;
+            }
+        }
+
+        HashSet<string> taken = new(StringComparer.Ordinal) { ownPrefix };
+        using (SqliteCommand select = Command(
+            connection,
+            transaction,
+            "SELECT prefix FROM decision_folders UNION SELECT alias FROM decision_folders "
+                + "UNION SELECT DISTINCT prefix FROM note_decisions WHERE prefix IS NOT NULL"))
+        using (SqliteDataReader reader = select.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                taken.Add(reader.GetString(0));
+            }
+        }
+
+        string alias;
+        int tries = 0;
+        do
+        {
+            alias = DecisionFolder.NewPrefix(AliasRandom);
+            if (++tries > 10_000)
+            {
+                throw new TagIndexException($"Can't read {FileName}.");
+            }
+        }
+        while (taken.Contains(alias));
+
+        Execute(
+            connection,
+            transaction,
+            "INSERT OR REPLACE INTO decision_folders(guid, prefix, alias, warned) VALUES($guid, $prefix, $alias, 0)",
+            ("$guid", key),
+            ("$prefix", ownPrefix),
+            ("$alias", alias));
+        return alias;
+    }
+
+    // Owner rows of notes that are gone, or that are readable and no longer hold the key, go; then each key
+    // (prefix, number) without an owner goes to the note holding it with the oldest last-write time, then the lower name
+    // ignoring case, then ordinal (jobs 343, 349). An unreadable or oversized owner (no stored time) keeps its keys.
     private static void AssignDecisionOwners(SqliteConnection connection, SqliteTransaction transaction)
     {
         Execute(connection, transaction, "DELETE FROM decision_owners WHERE note NOT IN (SELECT name FROM notes)");
@@ -1805,25 +2011,26 @@ internal sealed class TagIndex
             transaction,
             "DELETE FROM decision_owners WHERE note IN (SELECT name FROM notes WHERE modified IS NOT NULL) "
                 + "AND NOT EXISTS (SELECT 1 FROM note_decisions d WHERE d.note = decision_owners.note "
-                + "AND d.number = decision_owners.number)");
-        List<(long Number, string Note, long Modified)> holders = [];
+                + "AND d.prefix = decision_owners.prefix AND d.number = decision_owners.number)");
+        List<(string Prefix, long Number, string Note, long Modified)> holders = [];
         using (SqliteCommand select = Command(
             connection,
             transaction,
-            "SELECT DISTINCT d.number, d.note, n.modified FROM note_decisions d JOIN notes n ON n.name = d.note "
-                + "WHERE d.number IS NOT NULL AND n.modified IS NOT NULL "
-                + "AND d.number NOT IN (SELECT number FROM decision_owners)"))
+            "SELECT DISTINCT d.prefix, d.number, d.note, n.modified FROM note_decisions d JOIN notes n ON n.name = d.note "
+                + "WHERE d.number IS NOT NULL AND d.prefix IS NOT NULL AND n.modified IS NOT NULL "
+                + "AND NOT EXISTS (SELECT 1 FROM decision_owners o WHERE o.prefix = d.prefix AND o.number = d.number)"))
         using (SqliteDataReader reader = select.ExecuteReader())
         {
             while (reader.Read())
             {
-                holders.Add((reader.GetInt64(0), reader.GetString(1), reader.GetInt64(2)));
+                holders.Add((reader.GetString(0), reader.GetInt64(1), reader.GetString(2), reader.GetInt64(3)));
             }
         }
 
-        foreach (IGrouping<long, (long Number, string Note, long Modified)> group in holders.GroupBy(h => h.Number))
+        foreach (IGrouping<(string, long), (string Prefix, long Number, string Note, long Modified)> group
+            in holders.GroupBy(h => (h.Prefix, h.Number)))
         {
-            (long Number, string Note, long Modified) owner = group
+            (string Prefix, long Number, string Note, long Modified) owner = group
                 .OrderBy(h => h.Modified)
                 .ThenBy(h => h.Note, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(h => h.Note, StringComparer.Ordinal)
@@ -1831,40 +2038,70 @@ internal sealed class TagIndex
             Execute(
                 connection,
                 transaction,
-                "INSERT INTO decision_owners(number, note) VALUES($number, $note)",
+                "INSERT INTO decision_owners(prefix, number, note) VALUES($prefix, $number, $note)",
+                ("$prefix", owner.Prefix),
                 ("$number", owner.Number),
                 ("$note", owner.Note));
         }
     }
 
-    // A database from before ParserVersion 17 has note_decisions without the number column: add it (NULL until the next
-    // Sync re-parses every note). Another process may add it at the same time; then its column is the one kept.
-    private static void EnsureDecisionNumberColumn(SqliteConnection connection)
+    // A database from before ParserVersion 17 has note_decisions without the number column, and one from before 18
+    // without the prefix column: add them (NULL until the next Sync re-parses every note). A decision_owners table of
+    // job 343 (keyed by number alone) is dropped and made again; the next Sync gives every key its owner. Another
+    // process may do the same at the same time; then its change is the one kept.
+    private static void EnsureDecisionColumns(SqliteConnection connection)
     {
-        if (HasColumn(connection, "note_decisions", "number"))
+        foreach (string column in new[] { "number", "prefix" })
         {
-            return;
+            if (HasColumn(connection, "note_decisions", column))
+            {
+                continue;
+            }
+
+            try
+            {
+                Execute(
+                    connection,
+                    null,
+                    column == "number"
+                        ? "ALTER TABLE note_decisions ADD COLUMN number INTEGER"
+                        : "ALTER TABLE note_decisions ADD COLUMN prefix TEXT");
+            }
+            catch (SqliteException) when (HasColumn(connection, "note_decisions", column))
+            {
+                // Added by another process meanwhile.
+            }
         }
 
-        try
+        if (!HasColumn(connection, "decision_owners", "prefix"))
         {
-            Execute(connection, null, "ALTER TABLE note_decisions ADD COLUMN number INTEGER");
-        }
-        catch (SqliteException) when (HasColumn(connection, "note_decisions", "number"))
-        {
-            // Added by another process meanwhile.
+            try
+            {
+                using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
+                if (!HasColumn(connection, "decision_owners", "prefix", transaction))
+                {
+                    Execute(connection, transaction, "DROP TABLE decision_owners");
+                    Execute(connection, transaction, Schema);
+                }
+
+                transaction.Commit();
+            }
+            catch (SqliteException) when (HasColumn(connection, "decision_owners", "prefix"))
+            {
+                // Made again by another process meanwhile.
+            }
         }
     }
 
-    private static bool HasColumn(SqliteConnection connection, string table, string column)
+    private static bool HasColumn(SqliteConnection connection, string table, string column, SqliteTransaction? transaction = null)
     {
-        if (table is not ("note_links" or "note_decisions"))
+        if (table is not ("note_links" or "note_decisions" or "decision_owners"))
         {
             throw new ArgumentException("Not an index table: " + table, nameof(table));
         }
 
         using SqliteCommand command = Command(
-            connection, null, $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = $column");
+            connection, transaction, $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = $column");
         command.Parameters.AddWithValue("$column", column);
         return Convert.ToInt64(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) > 0;
     }

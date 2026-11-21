@@ -18,10 +18,21 @@ internal enum DecisionsViewKind
     IndexUnreadable,
 }
 
-/// <summary>One <c>#!d</c> decision paragraph of a note (job 343), with its day and the people mentioned in it.</summary>
+/// <summary>
+/// One <c>!d</c> decision paragraph of a note (jobs 343, 349), with its day, the people mentioned in it, its label and
+/// the other places that hold a copy of it.
+/// </summary>
 internal sealed record Decision
 {
-    public Decision(string note, int line, int? number, DateOnly date, string text, IReadOnlyList<string> people)
+    public Decision(
+        string note,
+        int line,
+        int? number,
+        DateOnly date,
+        string text,
+        IReadOnlyList<string> people,
+        string? label = null,
+        IReadOnlyList<(string Note, int Line)>? places = null)
     {
         Note = note;
         Line = line;
@@ -29,7 +40,21 @@ internal sealed record Decision
         Date = date;
         Text = text;
         People = people;
+        Label = number is int n ? label ?? DecisionParser.Label(null, n) : null;
+        Places = places ?? [];
     }
+
+    /// <summary>
+    /// How the decision is named (job 349): <c>1234</c> for the own folder's, <c>ab12-1234</c> for another prefix (the
+    /// alias for a clash); <c>null</c> without a number.
+    /// </summary>
+    public string? Label { get; }
+
+    /// <summary>The reference that points at it: <c>#!d</c> plus <see cref="Label"/>; <c>null</c> without a number.</summary>
+    public string? Reference => Label is null ? null : DecisionParser.Token + Label;
+
+    /// <summary>The other (note, 1-based line) places that hold the same number with the same text (copies).</summary>
+    public IReadOnlyList<(string Note, int Line)> Places { get; }
 
     /// <summary>
     /// Returns only the type name: the contents are raw outside text, so formatting this record must never print them.
@@ -133,8 +158,9 @@ internal sealed record DecisionsView
             index.Sync(store);
             IReadOnlyList<IndexedDecision> rows = index.Decisions(wanted.Length == 0 ? null : wanted);
             PersonAliases aliases = rows.Count == 0 ? PersonAliases.Empty : index.Aliases();
+            string? own = rows.Count == 0 ? null : index.OwnPrefix;
             List<Decision> decisions = rows
-                .Select(r => ToDecision(r, aliases, zone))
+                .Select(r => ToDecision(r, aliases, zone, own))
                 .OrderByDescending(d => d.Date)
                 .ThenBy(d => d.Note, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(d => d.Note, StringComparer.Ordinal)
@@ -150,21 +176,24 @@ internal sealed record DecisionsView
     }
 
     /// <summary>
-    /// Syncs the index and finds the decision numbered <paramref name="number"/> as its owner holds it
-    /// (<see cref="TagIndex.DecisionByNumber"/>): <c>Found</c> with that one decision, <c>NoDecisions</c> when no
-    /// readable owner holds it, <c>IndexUnreadable</c>. Never throws for an unreadable index.
+    /// Syncs the index and finds the decision <paramref name="reference"/> points at as its owner holds it
+    /// (<see cref="TagIndex.DecisionByKey"/>; no prefix is the own folder's): <c>Found</c> with that one decision,
+    /// <c>NoDecisions</c> when no readable owner holds it (or the own prefix can't be read for a plain number),
+    /// <c>IndexUnreadable</c>. Never throws for an unreadable index.
     /// </summary>
-    public static DecisionsView Find(TagIndex index, NoteStore store, int number, TimeZoneInfo zone)
+    public static DecisionsView Find(TagIndex index, NoteStore store, DecisionRef reference, TimeZoneInfo zone)
     {
         try
         {
             index.Sync(store);
-            if (index.DecisionByNumber(number) is not { } row)
+            string? own = index.OwnPrefix;
+            string? prefix = reference.Prefix ?? own;
+            if (prefix is null || index.DecisionByKey(prefix, reference.Number) is not { } row)
             {
                 return new DecisionsView(DecisionsViewKind.NoDecisions, string.Empty, []);
             }
 
-            return new DecisionsView(DecisionsViewKind.Found, string.Empty, [ToDecision(row, index.Aliases(), zone)]);
+            return new DecisionsView(DecisionsViewKind.Found, string.Empty, [ToDecision(row, index.Aliases(), zone, own)]);
         }
         catch (TagIndexException)
         {
@@ -172,8 +201,20 @@ internal sealed record DecisionsView
         }
     }
 
-    private static Decision ToDecision(IndexedDecision row, PersonAliases aliases, TimeZoneInfo zone) =>
-        new(row.Note, row.Line, row.Number, DateOf(row.Note, row.Modified, zone), row.Text, PeopleOf(row.Text, aliases));
+    private static Decision ToDecision(IndexedDecision row, PersonAliases aliases, TimeZoneInfo zone, string? own) =>
+        new(
+            row.Note,
+            row.Line,
+            row.Number,
+            DateOf(row.Note, row.Modified, zone),
+            row.Text,
+            PeopleOf(row.Text, aliases),
+            row.Number is int n ? LabelOf(row.Prefix, n, own) : null,
+            row.Places);
+
+    /// <summary>A key's label (job 349): the number alone for the own prefix, else <c>&lt;prefix&gt;-&lt;n&gt;</c>.</summary>
+    public static string LabelOf(string? prefix, int number, string? own) =>
+        DecisionParser.Label(prefix is null || prefix == own ? null : prefix, number);
 
     // The title's leading yyyy-MM-dd (the whole title, or followed by whitespace) when it is a real date, else the
     // last write time as a day in the zone.
