@@ -8,6 +8,16 @@ Category: ux
 
 Run the checklist below on macOS in the desktop app and tick each step.
 
+## Checklist
+
+- [ ] Open a note with a tag chip, a link chip and a mention chip.
+- [ ] With System Settings > Keyboard > Keyboard navigation off, press Tab: note whether the chips are skipped.
+- [ ] Turn Keyboard navigation on and press Tab: each chip gets focus, in order.
+- [ ] The focus ring is visible in light and in dark mode.
+- [ ] Enter on a focused chip opens it; a click still opens it.
+- [ ] With a chip focused, Cmd+S saves and Cmd+K opens the palette.
+- [ ] If any step fails, add a fix item that names the step and what you saw.
+
 ## Why
 
 Focus behaviour depends on the OS web view, which bUnit and Jint can't show.

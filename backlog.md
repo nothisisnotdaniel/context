@@ -159,7 +159,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#77](backlog/077-quick-switcher.md) Quick switcher → 364-quick-switcher
 - [x] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39) → 367-pro-licence-context
 - [x] [#454](backlog/454-fix-flaky-repository-settings-page-test.md) Fix flaky repository settings page test → 382-fix-flaky-settings-test
-- [h] [#438](backlog/438-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on macOS and Windows
+- [h] [#462](backlog/462-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on macOS
+- [h] [#463](backlog/463-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on Windows
 - [?] [#59](backlog/059-ask-context.md) Ask Context
 - [x] [#64](backlog/064-search-across-context-and-times.md) Search across Context and Times → 379-search-context-times
 - [x] [#83](backlog/083-glossary.md) Glossary → 380-glossary-terms
@@ -193,17 +194,20 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#233](backlog/233-sensitive-notes-recovery-rules.md) Sensitive-notes recovery rules
 - [ ] [#129](backlog/129-pin-the-windows-certificate-by-thumbprint.md) Pin the Windows certificate by thumbprint
 - [ ] [#131](backlog/131-check-the-sensitive-setup-dialog-input.md) Check the sensitive-setup dialog input widths by eye
-- [h] [#133](backlog/133-run-the-sensitive-notes-manual-checks.md) Run the sensitive-notes manual checks on macOS and Windows
+- [h] [#464](backlog/464-run-the-sensitive-notes-manual-checks.md) Run the sensitive-notes manual checks on macOS
+- [h] [#465](backlog/465-run-the-sensitive-notes-manual-checks.md) Run the sensitive-notes manual checks on Windows
 - [ ] [#228](backlog/228-tags-and-links-panel-fixes.md) Tags and links panel fixes
 - [h] [#138](backlog/138-look-at-the-tags-and-links.md) Look at the tags and links panels in a running window
 - [ ] [#225](backlog/225-settings-calendar-link-field.md) Settings calendar link field
 - [h] [#145](backlog/145-look-at-the-notes-bar-buttons.md) Look at the notes bar buttons in a narrow sidebar
-- [h] [#146](backlog/146-check-desktop-settings-key-details-on.md) Check desktop settings key details on Windows and macOS
+- [h] [#466](backlog/466-check-desktop-settings-key-details-on.md) Check desktop settings key details on macOS
+- [h] [#467](backlog/467-check-desktop-settings-key-details-on.md) Check desktop settings key details on Windows
 - [ ] [#151](backlog/151-clear-the-capture-status-line-on.md) Clear the capture status line on new input
 - [h] [#152](backlog/152-check-the-capture-row-at-the.md) Check the capture row at the minimum window size
 - [h] [#153](backlog/153-check-the-unsaved-changes-dot-in.md) Check the unsaved-changes dot in both themes
 - [ ] [#154](backlog/154-ignore-held-enter-repeats-on-a.md) Ignore held Enter repeats on a focused chip
-- [h] [#155](backlog/155-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view
+- [h] [#468](backlog/468-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view on macOS
+- [h] [#469](backlog/469-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view on Windows
 - [ ] [#156](backlog/156-hide-the-empty-editor-box-when.md) Hide the empty editor box when the editor fails to start
 - [ ] [#226](backlog/226-cli-and-console-todo-hints.md) CLI and console todo hints
 - [ ] [#160](backlog/160-replace-the-console-text-parity-rule.md) Replace the console text-parity rule in CLAUDE.md
@@ -282,7 +286,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#301](backlog/301-meeting-note-title-shows-the-meeting.md) Meeting note title shows the meeting name, not only the date
 - [?] [#302](backlog/302-one-path-to-endreload-in-statecomponent.md) One path to EndReload in StateComponent
 - [?] [#304](backlog/304-same-selector-for-the-re-found.md) Same selector for the re-found note button in ReviewPanelTests
-- [h] [#308](backlog/308-check-right-click-in-a-release.md) Check right click in a Release build on macOS and Windows
+- [h] [#470](backlog/470-check-right-click-in-a-release.md) Check right click in a Release build on macOS
+- [h] [#471](backlog/471-check-right-click-in-a-release.md) Check right click in a Release build on Windows
 - [h] [#309](backlog/309-check-the-narrower-pick-a-day.md) Check the narrower Pick a day popover in light and dark mode
 - [?] [#311](backlog/311-skip-one-outlook-item-when-its.md) Skip one Outlook item when its Sensitivity can't be read
 - [ ] [#312](backlog/312-ask-before-a-link-with-creates.md) Ask before a link with # creates a note
@@ -315,13 +320,14 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#339](backlog/339-share-a-note-as-pdf.md) Share a note as PDF
 - [ ] [#340](backlog/340-briefing-links-for-note-names-with.md) Briefing links for note names with brackets
 - [?] [#342](backlog/342-cap-the-screenshot-folder-watcher-s.md) Cap the screenshot folder watcher's seen set
-- [h] [#343](backlog/343-check-the-screenshot-hotkey-and-watched.md) Check the screenshot hotkey and watched folder on macOS
+- [h] [#472](backlog/472-check-the-screenshot-capture-on-macos.md) Check the screenshot capture on macOS
+- [h] [#473](backlog/473-check-the-screenshot-capture-on-windows.md) Check the screenshot capture on Windows
 - [?] [#344](backlog/344-harden-the-mermaid-svg-blob-url.md) Harden the mermaid SVG blob: URL
-- [h] [#345](backlog/345-check-the-spacing-of-the-drawing.md) Check the spacing of the Drawing diagram hint
 - [?] [#346](backlog/346-redraw-diagrams-when-the-system-theme.md) Redraw diagrams when the system theme changes
 - [?] [#347](backlog/347-keep-the-old-diagram-while-it.md) Keep the old diagram while it redraws
 - [?] [#348](backlog/348-descriptive-alt-text-for-diagrams.md) Descriptive alt text for diagrams
-- [h] [#349](backlog/349-check-that-mermaid-diagrams-draw-on.md) Check that mermaid diagrams draw on macOS and Windows
+- [h] [#474](backlog/474-check-that-mermaid-diagrams-draw-on.md) Check that mermaid diagrams draw on macOS
+- [h] [#475](backlog/475-check-that-mermaid-diagrams-draw-on.md) Check that mermaid diagrams draw on Windows
 - [?] [#350](backlog/350-standup-catch-feed-and-calendar-errors.md) Standup: catch feed and calendar errors while composing
 - [?] [#351](backlog/351-standup-opens-today-s-note-before.md) /standup opens today's note before writing
 - [ ] [#353](backlog/353-fix-flaky-record-whileanotheractionisbusy-stilllis.md) Fix flaky Record_WhileAnotherActionIsBusy_StillListed test
@@ -412,20 +418,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#459](backlog/459-close-the-sensitive-note-race-in.md) Close the sensitive-note race in create-only import save
 - [?] [#460](backlog/460-refuse-case-only-clashes-on-case.md) Refuse case-only clashes on case-sensitive file systems in import save
 - [?] [#461](backlog/461-fixed-order-for-import-refusal-texts.md) Fixed order for import refusal texts
-- [h] [#462](backlog/462-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on macOS
-- [h] [#463](backlog/463-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on Windows
-- [h] [#464](backlog/464-run-the-sensitive-notes-manual-checks.md) Run the sensitive-notes manual checks on macOS
-- [h] [#465](backlog/465-run-the-sensitive-notes-manual-checks.md) Run the sensitive-notes manual checks on Windows
-- [h] [#466](backlog/466-check-desktop-settings-key-details-on.md) Check desktop settings key details on macOS
-- [h] [#467](backlog/467-check-desktop-settings-key-details-on.md) Check desktop settings key details on Windows
-- [h] [#468](backlog/468-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view on macOS
-- [h] [#469](backlog/469-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view on Windows
-- [h] [#470](backlog/470-check-right-click-in-a-release.md) Check right click in a Release build on macOS
-- [h] [#471](backlog/471-check-right-click-in-a-release.md) Check right click in a Release build on Windows
-- [h] [#472](backlog/472-check-the-screenshot-capture-on-macos.md) Check the screenshot capture on macOS
-- [h] [#473](backlog/473-check-the-screenshot-capture-on-windows.md) Check the screenshot capture on Windows
-- [h] [#474](backlog/474-check-that-mermaid-diagrams-draw-on.md) Check that mermaid diagrams draw on macOS
-- [h] [#475](backlog/475-check-that-mermaid-diagrams-draw-on.md) Check that mermaid diagrams draw on Windows
 
 ## Dropped with the terminal UI
 

@@ -8,6 +8,14 @@ Category: test
 
 Run the checklist below on macOS after sensitive notes are set up, and tick each step.
 
+## Checklist
+
+- [ ] Settings shows the key's name, a 64-character fingerprint and `Does not expire`.
+- [ ] The fingerprint is the same after a restart.
+- [ ] Showing Settings never brings up a Keychain or Touch ID prompt.
+- [ ] With no machine key yet (fresh user account), Settings shows no key details and no prompt.
+- [ ] If any step fails, add a fix item that names the step and what you saw.
+
 ## Why
 
 MachineKeyDetails reads the real key store, which no test touches.
