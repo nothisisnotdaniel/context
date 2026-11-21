@@ -341,4 +341,16 @@ public sealed class StandupTests : IDisposable
         Assert.Equal("2026-11-16", result.Name);
         Assert.Equal(before, FileSnapshot.Take(root));
     }
+
+    // 361 AC-10: the standup reads todos.json only; a todo found only in the archive is not shown.
+    [Fact]
+    public void Compose_ArchivedTodo_NotShown()
+    {
+        TodoArchiveFile.Archive(root, Guid.NewGuid(), "archived friday", new DateTime(2026, 11, 13, 9, 0, 0, DateTimeKind.Utc));
+
+        Assert.StartsWith(
+            "Yesterday (2026-11-13)\n- No Times bookings in the last 7 days.\n\nToday\n",
+            Compose(),
+            StringComparison.Ordinal);
+    }
 }

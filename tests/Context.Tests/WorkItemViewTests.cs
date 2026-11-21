@@ -242,4 +242,36 @@ public sealed class WorkItemViewTests : IDisposable
         Assert.Empty(view.Commits);
         Assert.Empty(view.FailedRepos);
     }
+
+    // 361 AC-7: archived done todos that mention the item are in DoneTodos after the todos.json ones done later; a bad
+    // archive sets ArchiveUnreadable and DoneTodos still lists the todos.json matches.
+    [Fact]
+    public void Build_ArchivedTodos_InDoneTodos_BadArchiveFlagged()
+    {
+        TodoItem open = AddTodo("open #1234", 12);
+        TodoItem done = AddTodo("done #1234", 5, doneHours: 1);
+        Guid archivedId = Guid.NewGuid();
+        string archive = Path.Combine(root, TodoStore.ArchiveFileName);
+        TodoArchiveFile.Write(
+            archive,
+            TodoArchiveFile.Entry(archivedId, "old #1234 with @[Anna]", new DateOnly(2026, 8, 1), Now.AddDays(-90), Now.AddDays(-60)),
+            TodoArchiveFile.Entry(Guid.NewGuid(), "old #99", new DateOnly(2026, 8, 1), Now.AddDays(-90), Now.AddDays(-60)));
+
+        WorkItemView view = Build();
+
+        Assert.Equal([open.Id], view.OpenTodos.Select(t => t.Id));
+        Assert.Equal([done.Id, archivedId], view.DoneTodos.Select(t => t.Id));
+        Assert.Equal(["Anna"], view.People.Select(p => p.Name));
+        Assert.False(view.ArchiveUnreadable);
+        Assert.False(view.TodosUnreadable);
+
+        File.WriteAllText(archive, "[{");
+
+        WorkItemView bad = Build();
+
+        Assert.True(bad.ArchiveUnreadable);
+        Assert.False(bad.TodosUnreadable);
+        Assert.Equal([open.Id], bad.OpenTodos.Select(t => t.Id));
+        Assert.Equal([done.Id], bad.DoneTodos.Select(t => t.Id));
+    }
 }

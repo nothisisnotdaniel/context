@@ -18,6 +18,8 @@ public sealed class DataWatcherTests : IDisposable
     [InlineData("NOTE.MD")]
     [InlineData("with space.Md")]
     [InlineData("todos.json")]
+    [InlineData("todos-archive.json")] // 361 AC-9
+    [InlineData("TODOS-ARCHIVE.JSON")]
     [InlineData("calendar-link.ics")]
     [InlineData("calendar/work.ics")]
     [InlineData("calendar/WORK.ICS")]
@@ -34,6 +36,8 @@ public sealed class DataWatcherTests : IDisposable
     [InlineData("context.db-journal")]
     [InlineData("context.db-wal")]
     [InlineData(".todos.json.0123456789abcdef.tmp")]
+    [InlineData(".todos-archive.json.0123456789abcdef.tmp")] // 361 AC-9
+    [InlineData("sub/todos-archive.json")]
     [InlineData(".settings.json.0123456789abcdef.tmp")]
     [InlineData("../settings.json")]
     [InlineData(".Note.md.0123456789abcdef.tmp")]

@@ -120,6 +120,10 @@
         {
             <p class="red" role="status">Can't read the todos.</p>
         }
+        @if (view.ArchiveUnreadable)
+        {
+            <p class="red todo-archive-unreadable" role="status">Can't read the todo archive.</p>
+        }
     }
     @if (askingTopic is { } topicAsked)
     {

@@ -66,6 +66,10 @@
         {
             <p class="red" role="status">Can't read the todos.</p>
         }
+        @if (view.ArchiveUnreadable)
+        {
+            <p class="red todo-archive-unreadable" role="status">Can't read the todo archive.</p>
+        }
         @if (view.People.Count > 0)
         {
             <h2>People</h2>

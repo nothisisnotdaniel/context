@@ -25,6 +25,7 @@ internal sealed class Cli
 
     private const string StandupForm = "Type: context standup.";
     private const string TodosUnreadable = "Can't read todos.json.";
+    private const string ArchiveUnreadable = "Can't read todos-archive.json.";
     private const string DoneLogFailed = "Couldn't add it to the done log.";
     private const string DoneLogUnreadable = "Can't read the done log.";
     private const string IndexUnreadable = "Can't read context.db.";
@@ -1668,7 +1669,8 @@ internal sealed class Cli
 
         WorkItemView view = WorkItemView.Build(
             session.Index, session.Notes, session.Todos, session.Calendar, session.Feed, timesFolder, repositories, commitLog, item);
-        int exit = view.IndexUnreadable || view.TodosUnreadable || settingsUnreadable || view.Hours.SkippedFiles > 0
+        int exit = view.IndexUnreadable || view.TodosUnreadable || view.ArchiveUnreadable || settingsUnreadable
+            || view.Hours.SkippedFiles > 0
             || view.CommitsKind == WorkItemCommitsKind.GitMissing || view.FailedRepos.Count > 0
             ? ExitError
             : ExitOk;
@@ -1690,6 +1692,11 @@ internal sealed class Cli
         if (view.TodosUnreadable)
         {
             Err(TodosUnreadable);
+        }
+
+        if (view.ArchiveUnreadable)
+        {
+            Err(ArchiveUnreadable);
         }
 
         if (view.Hours.SkippedFiles > 0)

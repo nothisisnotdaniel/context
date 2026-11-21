@@ -80,7 +80,9 @@ internal sealed class TodoStoreException : IOException
 /// its content and position among identical todos. <see cref="Migrate()"/>, called once when the desktop app or a
 /// todo-reading command starts, writes those derived ids into the file; reads never write, and derivation stays the
 /// fallback for a file changed while the app runs. A done todo stays in the file with a <c>done</c> field (a todo
-/// without one is open); <see cref="List"/> gives the open todos and <see cref="ListDone"/> the done ones.
+/// without one is open); <see cref="List"/> gives the open todos and <see cref="ListDone"/> the done ones. Job 361:
+/// every write moves the todos done more than <see cref="ArchiveAfter"/> ago into <c>todos-archive.json</c> (same
+/// format), written first; <see cref="ListAllDone"/> reads the done todos of both files.
 /// </summary>
 internal sealed class TodoStore
 {
@@ -95,6 +97,15 @@ internal sealed class TodoStore
 
     /// <summary>The largest <c>todos.json</c> that is read (5 MB); a bigger one can't be read.</summary>
     public const long MaxFileBytes = 5L * 1024 * 1024;
+
+    /// <summary>The file name of the archive of old done todos inside the root (job 361).</summary>
+    public const string ArchiveFileName = "todos-archive.json";
+
+    /// <summary>The largest <c>todos-archive.json</c> that is read or written (20 MB); a bigger one can't be read.</summary>
+    public const long MaxArchiveBytes = 20L * 1024 * 1024;
+
+    /// <summary>A todo done longer ago than this (strictly) moves to the archive on the next write.</summary>
+    public static readonly TimeSpan ArchiveAfter = TimeSpan.FromDays(30);
 
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
@@ -120,6 +131,15 @@ internal sealed class TodoStore
 
     /// <summary>The full path of <c>todos.json</c>.</summary>
     public string FilePath => Path.Combine(root, FileName);
+
+    /// <summary>The full path of <c>todos-archive.json</c>.</summary>
+    public string ArchivePath => Path.Combine(root, ArchiveFileName);
+
+    /// <summary>
+    /// Test hook: called with the target path (<see cref="ArchivePath"/> or <see cref="FilePath"/>) just before that
+    /// file's temp write. A test makes it throw to simulate a failed write.
+    /// </summary>
+    internal Action<string>? BeforeWrite { get; init; }
 
     /// <summary>
     /// Every open todo, sorted by <see cref="TodoItem.Due"/>; within one date the untimed todos first, then the timed
@@ -177,6 +197,25 @@ internal sealed class TodoStore
     /// </summary>
     public IReadOnlyList<TodoItem> ListDone() =>
         Read().Where(t => t.Done is not null).OrderByDescending(t => t.Done).ThenBy(t => t.Created).ToList();
+
+    /// <summary>
+    /// The done todos of <c>todos.json</c> and <c>todos-archive.json</c> (job 361) in <see cref="ListDone"/> order:
+    /// <see cref="TodoItem.Done"/> latest first, then <see cref="TodoItem.Created"/>, then <c>todos.json</c> before the
+    /// archive, then file order. A todo in both files is listed once, as its <c>todos.json</c> copy. A missing archive
+    /// lists nothing from it; one that can't be read (see <see cref="ArchivePath"/>) sets
+    /// <paramref name="archiveUnreadable"/> and only the <c>todos.json</c> done todos are returned. Throws
+    /// <see cref="TodoStoreException"/> like <see cref="ListDone"/> for a bad <c>todos.json</c>. Reads only.
+    /// </summary>
+    public IReadOnlyList<TodoItem> ListAllDone(out bool archiveUnreadable)
+    {
+        List<TodoItem> done = Read().Where(t => t.Done is not null).ToList();
+        archiveUnreadable = !TryReadArchive(out List<TodoItem> archive);
+        HashSet<Guid> ids = done.Select(t => t.Id).ToHashSet();
+
+        // OrderBy is stable, so the concatenation keeps todos.json before the archive, each in file order.
+        return done.Concat(archive.Where(t => !ids.Contains(t.Id)))
+            .OrderByDescending(t => t.Done).ThenBy(t => t.Created).ToList();
+    }
 
     /// <summary>
     /// Adds a todo (recurring when <paramref name="repeat"/> is set), creating the root folder if needed, and returns
@@ -411,13 +450,43 @@ internal sealed class TodoStore
 
     private List<TodoItem> Read() => Read(out _, out _);
 
+    private List<TodoItem> Read(out bool allStored, out int badIds) =>
+        Read(FilePath, FileName, MaxFileBytes, out allStored, out badIds);
+
+    /// <summary>
+    /// The archive's todos: <c>true</c> with an empty list when it is missing, <c>false</c> (and an empty list) when it
+    /// can't be read or parsed, is over <see cref="MaxArchiveBytes"/> or holds a todo without a valid <c>done</c>.
+    /// </summary>
+    private bool TryReadArchive(out List<TodoItem> archive)
+    {
+        try
+        {
+            archive = Read(ArchivePath, ArchiveFileName, MaxArchiveBytes, out _, out _);
+        }
+        catch (TodoStoreException)
+        {
+            archive = [];
+            return false;
+        }
+
+        if (archive.Any(t => t.Done is null))
+        {
+            archive = [];
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <param name="path">The file to read.</param>
+    /// <param name="fileName">Its name, for the exception text.</param>
+    /// <param name="maxBytes">The largest file that is read.</param>
     /// <param name="allStored"><c>true</c> when every todo has a stored, non-empty, unique id (or the file is missing).</param>
     /// <param name="badIds">The number of todos whose <c>id</c> is present but not a GUID string.</param>
-    private List<TodoItem> Read(out bool allStored, out int badIds)
+    private static List<TodoItem> Read(string path, string fileName, long maxBytes, out bool allStored, out int badIds)
     {
         allStored = true;
         badIds = 0;
-        string path = FilePath;
         if (!File.Exists(path) && !Directory.Exists(path))
         {
             return [];
@@ -426,18 +495,18 @@ internal sealed class TodoStore
         List<TodoJson?>? items;
         try
         {
-            byte[] bytes = BoundedFile.Read(path, MaxFileBytes);
+            byte[] bytes = BoundedFile.Read(path, maxBytes);
             items = JsonSerializer.Deserialize<List<TodoJson?>>(bytes, JsonOptions);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException
             or NotSupportedException or ArgumentException)
         {
-            throw new TodoStoreException($"Can't read {FileName}.", ex);
+            throw new TodoStoreException($"Can't read {fileName}.", ex);
         }
 
         if (items is null)
         {
-            throw new TodoStoreException($"Can't read {FileName}.");
+            throw new TodoStoreException($"Can't read {fileName}.");
         }
 
         List<TodoItem> todos = new List<TodoItem>(items.Count);
@@ -447,7 +516,7 @@ internal sealed class TodoStore
         {
             if (item?.Text is null || item.Due is null)
             {
-                throw new TodoStoreException($"Can't read {FileName}.");
+                throw new TodoStoreException($"Can't read {fileName}.");
             }
 
             Guid stored = StoredId(item.Id, out bool bad);
@@ -486,7 +555,7 @@ internal sealed class TodoStore
             {
                 if (!TodoRepeat.TryParseStored(stored, out TodoRepeat parsed))
                 {
-                    throw new TodoStoreException($"Can't read {FileName}.");
+                    throw new TodoStoreException($"Can't read {fileName}.");
                 }
 
                 repeat = parsed;
@@ -497,7 +566,7 @@ internal sealed class TodoStore
             {
                 if (!TryParseStoredTime(storedTime, out TimeOnly parsedTime))
                 {
-                    throw new TodoStoreException($"Can't read {FileName}.");
+                    throw new TodoStoreException($"Can't read {fileName}.");
                 }
 
                 time = parsedTime;
@@ -506,7 +575,7 @@ internal sealed class TodoStore
             MeetingLink? meeting = null;
             if (item.Meeting is { } storedMeeting && storedMeeting.ValueKind != JsonValueKind.Null)
             {
-                meeting = ReadMeeting(storedMeeting) ?? throw new TodoStoreException($"Can't read {FileName}.");
+                meeting = ReadMeeting(storedMeeting) ?? throw new TodoStoreException($"Can't read {fileName}.");
             }
 
             todos.Add(new TodoItem(
@@ -613,7 +682,59 @@ internal sealed class TodoStore
         return Guid.Empty;
     }
 
+    /// <summary>
+    /// Writes <paramref name="todos"/> to <c>todos.json</c>, first moving every todo done more than
+    /// <see cref="ArchiveAfter"/> ago into <c>todos-archive.json</c> (job 361). The archive is written first; when it
+    /// can't be read, would be over <see cref="MaxArchiveBytes"/> or its write fails, those todos stay in
+    /// <c>todos.json</c> and the archive is not touched. A failed <c>todos.json</c> write throws as before; a todo
+    /// moved by then is in both files, never in neither.
+    /// </summary>
     private void Write(List<TodoItem> todos)
+    {
+        DateTime cutoff = DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc) - ArchiveAfter;
+        List<TodoItem> old = todos.Where(t => t.Done is { } done && done < cutoff).ToList();
+        List<TodoItem> kept = todos;
+        if (old.Count > 0 && TryReadArchive(out List<TodoItem> archive))
+        {
+            Dictionary<Guid, int> at = [];
+            for (int i = 0; i < archive.Count; i++)
+            {
+                at.TryAdd(archive[i].Id, i);
+            }
+
+            foreach (TodoItem todo in old)
+            {
+                if (at.TryGetValue(todo.Id, out int index))
+                {
+                    archive[index] = todo;
+                }
+                else
+                {
+                    at[todo.Id] = archive.Count;
+                    archive.Add(todo);
+                }
+            }
+
+            byte[] bytes = Serialize(archive);
+            if (bytes.LongLength <= MaxArchiveBytes)
+            {
+                try
+                {
+                    WriteFile(ArchivePath, ArchiveFileName, bytes);
+                    HashSet<Guid> moved = old.Select(t => t.Id).ToHashSet();
+                    kept = todos.Where(t => !(t.Done is not null && moved.Contains(t.Id))).ToList();
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // The old done todos stay in todos.json; the next write tries again.
+                }
+            }
+        }
+
+        WriteFile(FilePath, FileName, Serialize(kept));
+    }
+
+    private static byte[] Serialize(List<TodoItem> todos)
     {
         List<TodoJson> items = todos
             .Select(t => new TodoJson
@@ -637,15 +758,22 @@ internal sealed class TodoStore
             })
             .ToList();
         string json = JsonSerializer.Serialize(items, JsonOptions) + "\n";
-        string temp = Path.Combine(root, $".{FileName}.{Guid.NewGuid():N}.tmp");
+        return Utf8NoBom.GetBytes(json);
+    }
+
+    /// <summary>Writes <paramref name="bytes"/> to a temp file in the root, then moves it over <paramref name="path"/>.</summary>
+    private void WriteFile(string path, string fileName, byte[] bytes)
+    {
+        BeforeWrite?.Invoke(path);
+        string temp = Path.Combine(root, $".{fileName}.{Guid.NewGuid():N}.tmp");
         try
         {
             using (FileStream stream = PrivateFile.OpenNew(temp))
             {
-                stream.Write(Utf8NoBom.GetBytes(json));
+                stream.Write(bytes);
             }
 
-            File.Move(temp, FilePath, overwrite: true);
+            File.Move(temp, path, overwrite: true);
         }
         finally
         {

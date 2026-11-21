@@ -344,4 +344,31 @@ public sealed class CliItemTests : IDisposable
         Assert.Equal(1, code);
         Assert.Equal("Can't start the desktop app.\n", stderr.ToString());
     }
+
+    // 361 AC-8: `item` lists an archived done todo as a done todo; a bad archive writes its line to stderr after the
+    // output and exits 1, the todos.json todos still printed.
+    [Fact]
+    public void Item_ArchivedTodos_AndBadArchive()
+    {
+        AddTodo("recent #1234", 9, done: true);
+        DateTime done = new DateTime(2026, 9, 20, 12, 0, 0, DateTimeKind.Utc);
+        TodoArchiveFile.Archive(root, Guid.NewGuid(), "archived #1234", done);
+
+        Result result = Run("item", "1234");
+
+        Assert.Equal((0, string.Empty), (result.Code, result.Err));
+        Assert.Equal(
+            ["Todos", "done\t2026-11-10\trecent #1234", "done\t2026-09-20\tarchived #1234", "People"],
+            result.OutLines.SkipWhile(l => l != "Todos").Take(4));
+
+        File.WriteAllText(Path.Combine(root, TodoStore.ArchiveFileName), "not json");
+
+        Result bad = Run("item", "1234");
+
+        Assert.Equal(1, bad.Code);
+        Assert.Equal(["Can't read todos-archive.json."], bad.ErrLines);
+        Assert.Equal(
+            ["Todos", "done\t2026-11-10\trecent #1234", "People"],
+            bad.OutLines.SkipWhile(l => l != "Todos").Take(3));
+    }
 }
