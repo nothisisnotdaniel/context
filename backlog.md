@@ -161,7 +161,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [h] [#438](backlog/438-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on macOS and Windows
 - [?] [#59](backlog/059-ask-context.md) Ask Context
 - [x] [#64](backlog/064-search-across-context-and-times.md) Search across Context and Times → 379-search-context-times
-- [ ] [#83](backlog/083-glossary.md) Glossary
+- [x] [#83](backlog/083-glossary.md) Glossary → 380-glossary-terms
 - [ ] [#103](backlog/103-meeting-flow.md) Meeting flow (after: Times#4)
 - [x] [#234](backlog/234-release-and-ci-workflow-hardening.md) Release and CI workflow hardening → 272-release-ci-hardening
 - [x] [#113](backlog/113-refuse-removed-secret-options-after-a.md) Refuse removed secret options after a command → 273-refuse-removed-secret-options
