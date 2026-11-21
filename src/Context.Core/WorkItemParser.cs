@@ -2,7 +2,8 @@ namespace Context;
 
 /// <summary>
 /// Finds work item references <c>#&lt;n&gt;</c> (the Times work item numbers) in Markdown text. A reference is <c>#</c>
-/// (or, job 381, Azure DevOps' <c>AB#</c> with <c>AB</c> in any case) at the start of a line or after whitespace, then 1 to <see cref="MaxDigits"/> ASCII digits with a first digit
+/// (or, job 381, Azure DevOps' <c>AB#</c> with <c>AB</c> in any case) at the start of a line or after whitespace,
+/// then 1 to <see cref="MaxDigits"/> ASCII digits with a first digit
 /// 1-9, not directly followed by a letter, a digit, <c>-</c>, <c>_</c> or <c>#</c>. Lines inside fenced code blocks
 /// and text inside inline backtick spans are skipped, as in <see cref="TagParser"/>. A reference is never a tag (a tag
 /// starts with a letter).

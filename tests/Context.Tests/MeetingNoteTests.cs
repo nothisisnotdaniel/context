@@ -975,6 +975,16 @@ public sealed class MeetingNoteTests : IDisposable
     [InlineData("", "Meeting")]
     [InlineData("Line\nbreak #5", "Line break")]
     [InlineData("`#12` code", "`#12` code")]
+    [InlineData("#05 Weekly", "05 Weekly")]
+    [InlineData("#007 Bond", "007 Bond")]
+    [InlineData("#0 Zero", "0 Zero")]
+    [InlineData("#abc Topic", "abc Topic")]
+    [InlineData("## - #05 Weekly", "05 Weekly")]
+    [InlineData("--version", "version")]
+    [InlineData("-x #1", "x")]
+    [InlineData("#", "Meeting")]
+    [InlineData("--", "Meeting")]
+    [InlineData("Weekly #05", "Weekly #05")]
     public void BookingName_RemovesWorkItems(string title, string expected)
     {
         Assert.Equal(expected, MeetingNote.BookingName(new Appointment(title, null, At(15, 9), At(15, 10), false)));

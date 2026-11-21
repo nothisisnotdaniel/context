@@ -913,7 +913,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   usage error) then runs Times through the injected `ITimesRunner` (`Program` passes `TimesProcessRunner`, 10 s; tests
   `FakeTimesRunner`) with `MeetingNote.BookingArguments`: `checkpoint`, `H:mm`, `#<position>` when the note's first
   work item is on `TimesProjects.Read(timesFolder)`, then `BookingName` (one-line title without work item tokens,
-  collapsed, max 200, else `Meeting`); success adds `Booked <H:mm> <name> in Times.`, a failure (`BookingOutcome`:
+  collapsed, leading `#`/`-` dropped so Times never reads a project or an option, max 200, else `Meeting`); success adds `Booked <H:mm> <name> in Times.`, a failure (`BookingOutcome`:
   not installed, timed out, `Times refused the booking: <first output line>`, all-day) is one stderr line and exit 1
   after the printed note; it fetches the feed once and never opens `context.db`),
   `new <title...> [--template <name...>]` (job 165: title words joined with one space; `--template` matched ignoring

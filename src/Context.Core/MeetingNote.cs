@@ -238,12 +238,15 @@ internal static class MeetingNote
     /// <summary>
     /// The name a Times booking gets (job 381): the one-line title with every work item token
     /// <see cref="WorkItemParser"/> finds (<c>#&lt;n&gt;</c>, <c>AB#&lt;n&gt;</c>) removed, whitespace runs collapsed to
-    /// one space, trimmed, cut to <see cref="MaxBookingName"/> characters (never inside a surrogate pair, trimmed again);
-    /// <see cref="FallbackTitle"/> when nothing is left.
+    /// one space, trimmed, every leading <c>#</c> and <c>-</c> dropped (Times joins its arguments again and would read
+    /// a first word like <c>#05</c> as its project or <c>--version</c> as an option), cut to
+    /// <see cref="MaxBookingName"/> characters (never inside a surrogate pair, trimmed again); <see cref="FallbackTitle"/>
+    /// when nothing is left.
     /// </summary>
     public static string BookingName(Appointment appointment)
     {
         string name = TagParser.CollapseWhitespace(WorkItemParser.RemoveReferences(OneLine(appointment.Title)));
+        name = name.TrimStart('#', '-', ' ');
         name = Cut(name, MaxBookingName).TrimEnd();
         return name.Length == 0 ? FallbackTitle : name;
     }

@@ -2626,11 +2626,28 @@ public sealed class CliTests : IDisposable
         Assert.Equal([["checkpoint", "10:00", "#2", "Sprint"]], runner!.Calls);
     }
 
+    // 381 (security review): a title whose first word starts with # or - never reaches tm as a project or an option;
+    // with a quicklist hit there is still exactly one #<position>.
+    [Fact]
+    public void Meeting_Book_HashTitle_OnePositionOnly()
+    {
+        WriteIcs("weekly.ics", "BEGIN:VCALENDAR\r\n" + Event("#05 Weekly AB#1234", "20261029T091500Z", "20261029T100000Z") + "END:VCALENDAR\r\n");
+        WriteQuicklist();
+
+        Result result = Run("meeting", "--book");
+
+        Assert.Equal((0, string.Empty), (result.Code, result.Err));
+        Assert.EndsWith("\nBooked 9:15 05 Weekly in Times.\n", result.Out, StringComparison.Ordinal);
+        Assert.Equal([["checkpoint", "9:15", "#2", "05 Weekly"]], runner!.Calls);
+    }
+
     // 381 AC-9: a work item not on the quicklist (or none at all) books without a position; an empty name is Meeting.
     [Theory]
     [InlineData("Planning #99", "Planning")]
     [InlineData("Planning", "Planning")]
     [InlineData("AB#1234", "Meeting")]
+    [InlineData("#05 Weekly", "05 Weekly")]
+    [InlineData("--version", "version")]
     public void Meeting_Book_NoQuicklistHit_NoPosition(string title, string name)
     {
         WriteIcs("one.ics", "BEGIN:VCALENDAR\r\n" + Event(title, "20261029T091500Z", "20261029T100000Z") + "END:VCALENDAR\r\n");
