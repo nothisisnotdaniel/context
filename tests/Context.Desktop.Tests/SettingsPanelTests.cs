@@ -451,7 +451,7 @@ public sealed class SettingsPanelTests : IDisposable
             Assert.DoesNotContain(Marker, snapshot.Current?.Reason ?? string.Empty, StringComparison.Ordinal);
         }
 
-        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.settings-open");
         cut.WaitForAssertion(() => Assert.Equal("No calendar link set.", cut.Find(".calendar-link-state").TextContent), Wait);
 
         // Typing and saving.
@@ -475,10 +475,10 @@ public sealed class SettingsPanelTests : IDisposable
         await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
         Assert.Equal(ReplaceQuestion, cut.Find("[role=dialog] .question").TextContent);
         Clean();
-        await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.cancel");
         Clean();
         await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
         Assert.Equal("Calendar link saved (https://other.example/…).", cut.Find(".settings-result").TextContent);
         Assert.Equal(OtherMarkerLink + "\n", File.ReadAllText(LinkPath));
         Clean();
@@ -493,7 +493,7 @@ public sealed class SettingsPanelTests : IDisposable
             File.SetUnixFileMode(data.Root, UnixFileMode.UserRead | UnixFileMode.UserExecute);
             try
             {
-                await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+                await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
             }
             finally
             {
@@ -520,13 +520,13 @@ public sealed class SettingsPanelTests : IDisposable
 
         // Removed.
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll("button.calendar-link-remove")), Wait);
-        await cut.Find("button.calendar-link-remove").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.calendar-link-remove");
         Clean();
-        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
         Assert.Equal("Calendar link removed.", cut.Find(".settings-result").TextContent);
         Assert.False(File.Exists(LinkPath));
         Clean();
-        await cut.Find(".settings-panel button.close").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, ".settings-panel button.close");
         Clean();
 
         Assert.All(results, r =>
@@ -853,9 +853,10 @@ public sealed class SettingsPanelTests : IDisposable
             ("button.theme-system", "system", "Theme: System.", ["true", "false", "false"]),
         ];
         List<string> applied = ["system"];
+        await Settled(cut);
         foreach ((string button, string name, string text, string[] pressed) in steps)
         {
-            await cut.Find(button).ClickAsync(new MouseEventArgs());
+            await StaleClick.ClickAsync(cut, button);
 
             cut.WaitForAssertion(() => Assert.Equal(text, cut.Find("p.theme-result").TextContent), Wait);
             Assert.Contains("accent", cut.Find("p.theme-result").ClassList);
@@ -864,6 +865,10 @@ public sealed class SettingsPanelTests : IDisposable
             Assert.Equal(applied, data.Themes());
             Assert.Equal(Enum.Parse<AppTheme>(name, ignoreCase: true), new SettingsStore(data.Root).ReadTheme());
             Assert.True(new SettingsStore(data.Root).ReadFetchTitles());
+
+            // 363: the save goes on to render the page again (OnThemeChanged, Load() and the state's reload), so the
+            // next click waits until the page is settled.
+            await Settled(cut);
         }
     }
 
@@ -876,7 +881,7 @@ public sealed class SettingsPanelTests : IDisposable
         byte[] before = File.ReadAllBytes(SettingsPath);
         int builds = data.State!.Builds;
 
-        await cut.Find("button.theme-dark").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.theme-dark");
 
         Assert.Equal(string.Empty, cut.Find("p.theme-result").TextContent);
         Assert.Equal(["false", "false", "true"], Pressed(cut));
@@ -894,7 +899,7 @@ public sealed class SettingsPanelTests : IDisposable
         IRenderedComponent<Main> cut = await OpenSettingsInMain();
         byte[] before = File.ReadAllBytes(SettingsPath);
 
-        await cut.Find("button.theme-dark").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.theme-dark");
 
         cut.WaitForAssertion(
             () => Assert.Equal(DesktopActions.SettingsNotSavedText, cut.Find("p.theme-result").TextContent), Wait);
@@ -912,7 +917,7 @@ public sealed class SettingsPanelTests : IDisposable
         IRenderedComponent<Main> cut = await OpenSettingsInMain();
         byte[] before = File.ReadAllBytes(SettingsPath);
 
-        await cut.Find("button.theme-light").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.theme-light");
 
         cut.WaitForAssertion(
             () => Assert.Equal(DesktopActions.SettingsNotSavedText, cut.Find("p.theme-result").TextContent), Wait);
@@ -988,6 +993,19 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.Equal(["false", "false", "true"], Pressed(cut));
     }
 
+    // 363: the theme buttons are enabled, nothing shows Loading…, every state reload has finished and the renderer has
+    // nothing left queued.
+    private async Task Settled(IRenderedComponent<Main> cut)
+    {
+        cut.WaitForAssertion(() =>
+        {
+            Assert.All(ThemeButtons, b => Assert.False(cut.Find(b).HasAttribute("disabled"), b));
+            Assert.DoesNotContain("Loading…", cut.Markup, StringComparison.Ordinal);
+        }, Wait);
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        await cut.InvokeAsync(() => { });
+    }
+
     // Renders Main, waits for its first setTheme and for every load of the page, then opens Settings and waits until
     // nothing on the page shows Loading….
     private async Task<IRenderedComponent<Main>> OpenSettingsInMain()
@@ -995,7 +1013,7 @@ public sealed class SettingsPanelTests : IDisposable
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         Assert.True(await data.ThemeSet.WaitAsync(Wait));
         cut.WaitForAssertion(() => Assert.DoesNotContain("Loading…", cut.Markup, StringComparison.Ordinal), Wait);
-        await cut.Find("button.settings-open").ClickAsync(new MouseEventArgs());
+        await StaleClick.ClickAsync(cut, "button.settings-open");
         cut.WaitForAssertion(() =>
         {
             Assert.NotEmpty(cut.FindAll(".settings-panel div.theme-choice"));
