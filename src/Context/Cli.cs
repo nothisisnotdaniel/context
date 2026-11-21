@@ -1037,7 +1037,8 @@ internal sealed class Cli
     }
 
     // Job 349: after a command wrote the plain note `name`, its !d markers are numbered in a second write
-    // (DecisionNumbering.NumberWritten), once decision-folder.json reads fine (created when missing). Any failure leaves
+    // (DecisionNumbering.NumberWritten), once decision-folder.json reads fine (created when missing), its previous bytes
+    // kept as a history version first (job 351). Any failure (also of the history) leaves
     // the text as written and the exit code unchanged.
     private void NumberDecisions(Session session, string name)
     {
@@ -1045,7 +1046,8 @@ internal sealed class Cli
         {
             if (DecisionFolder.Load(folder, DecisionRandom, DecisionGuid) is { } decisionFolder)
             {
-                DecisionNumbering.NumberWritten(session.Index, session.Notes, decisionFolder, name);
+                NoteHistory history = new NoteHistory(session.Notes, () => now().ToUniversalTime());
+                DecisionNumbering.NumberWritten(session.Index, session.Notes, history, decisionFolder, name);
             }
         }
         catch (Exception)

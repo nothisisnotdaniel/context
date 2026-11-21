@@ -4,6 +4,8 @@ namespace Context.Tests;
 
 // 349 AC-3, AC-4, AC-5 (343 AC-4, AC-5): DesktopActions.SaveNote numbers !d markers with the folder's prefix and adds
 // the decision-folder line; copies keep their token; rename and move keep the owners; real files and a real context.db.
+// 351 AC-4, AC-5: the app's numbering writes after capture, import, the day's end, a merge and a triage append keep
+// the note's previous bytes as a history version first.
 public sealed class DecisionActionsTests : IDisposable
 {
     private static readonly DateTime Old = new(2026, 10, 1, 8, 0, 0, DateTimeKind.Utc);
@@ -286,6 +288,119 @@ public sealed class DecisionActionsTests : IDisposable
         Assert.Equal(6, CountOf(source, "NumberWritten("));
         Assert.Equal(4, CountOf(source, "NumberDayEnd("));
         Assert.Equal(7, CountOf(source, "Numbered("));
+    }
+
+    // 351 AC-4: a capture that numbers the inbox keeps the inbox as captured (its "!d 3 people hired" paragraph with
+    // the 3 still there) as one version first. A captured line is a timestamped list item, not a decision paragraph,
+    // so the bare marker is typed into the inbox before.
+    [Fact]
+    public async Task CaptureText_Numbered_KeepsCapturedTextAsVersion()
+    {
+        data.WriteNote(Inbox.NoteName, $"# {Inbox.NoteName}\n\n!d 3 people hired\n");
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.CaptureText("call Anna");
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Equal(
+            $"# {Inbox.NoteName}\n{Line}\n\n!d ab12-1 people hired\n- 2026-10-29 10:05 call Anna\n",
+            File.ReadAllText(PathOf(Inbox.NoteName)));
+        string kept = Assert.Single(VersionsOf(Inbox.NoteName));
+        Assert.Equal($"# {Inbox.NoteName}\n\n!d 3 people hired\n- 2026-10-29 10:05 call Anna\n", kept);
+    }
+
+    // 351 AC-4: import, the day's end and a merge also keep the text as written before they number it.
+    [Fact]
+    public async Task ImportNote_Numbered_KeepsImportedTextAsVersion()
+    {
+        string source = data.Outside("Plan.md");
+        byte[] imported = Encoding.UTF8.GetBytes("# Plan\r\n\r\n!d go\r\n");
+        File.WriteAllBytes(source, imported);
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.ImportNote(source, null);
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Equal($"# Plan\r\n{Line}\r\n\r\n!d ab12-1 go\r\n", File.ReadAllText(PathOf("Plan")));
+        NoteInfo note = Find("Plan");
+        NoteVersion version = Assert.Single(data.State!.HistoryStore.Versions(note));
+        Assert.True(data.State.HistoryStore.TryRead(note, version.Id, out byte[]? bytes));
+        Assert.Equal(imported, bytes);
+    }
+
+    [Fact]
+    public async Task EndDay_Numbered_KeepsWrittenTextAsVersion()
+    {
+        data.WriteNote("2026-10-29", "# 2026-10-29\n\n!d no meetings on Monday\n");
+        data.AddTodo("call Anna", DesktopFixture.Today);
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.EndDay(DesktopFixture.Today);
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Contains("!d ab12-1 no meetings on Monday", File.ReadAllText(PathOf("2026-10-29")), StringComparison.Ordinal);
+        string kept = VersionsOf("2026-10-29")[0];
+        Assert.Contains("!d no meetings on Monday", kept, StringComparison.Ordinal);
+        Assert.Contains("call Anna", kept, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MergeNotes_Numbered_KeepsMergedTextAsVersion()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        data.WriteNote("Old", "# Old\n\n!d bare\n");
+        await data.RefreshAsync();
+
+        ActionResult merged = await data.Actions!.MergeNotes("Plan", "Old", new Confirmation());
+
+        Assert.Equal(ActionKind.Done, merged.Kind);
+        Assert.Contains("!d ab12-1 bare", File.ReadAllText(PathOf("Plan")), StringComparison.Ordinal);
+        string kept = VersionsOf("Plan")[0];
+        Assert.Contains("!d bare", kept, StringComparison.Ordinal);
+        Assert.DoesNotContain("ab12-", kept, StringComparison.Ordinal);
+    }
+
+    // 351 AC-5: a triage append that numbers keeps the target's previous bytes as one version; one that numbers
+    // nothing keeps none.
+    [Fact]
+    public async Task TriageAppend_Numbered_KeepsPreviousBytes_PlainKeepsNone()
+    {
+        const string Item = "- 2026-10-28 09:20 !d hire two people";
+        data.WriteNote(Inbox.NoteName, $"# {Inbox.NoteName}\n{Item}\n");
+        data.WriteNote("Plan", "# Plan\r\n");
+        byte[] before = File.ReadAllBytes(PathOf("Plan"));
+        await data.RefreshAsync();
+
+        ActionResult added = await data.Actions!.TriageAppend(InboxTriage.Parse(Item)!, "Plan", null);
+
+        Assert.Equal(ActionKind.Done, added.Kind);
+        Assert.Contains("!d ab12-1 hire two people", File.ReadAllText(PathOf("Plan")), StringComparison.Ordinal);
+        NoteInfo note = Find("Plan");
+        NoteVersion version = Assert.Single(data.State!.HistoryStore.Versions(note));
+        Assert.True(data.State.HistoryStore.TryRead(note, version.Id, out byte[]? bytes));
+        Assert.Equal(before, bytes);
+
+        const string Plain = "- 2026-10-28 09:25 call Anna";
+        data.WriteNote(Inbox.NoteName, $"# {Inbox.NoteName}\n{Plain}\n");
+        data.WriteNote("Other", "# Other\n");
+        await data.RefreshAsync();
+
+        ActionResult plain = await data.Actions.TriageAppend(InboxTriage.Parse(Plain)!, "Other", null);
+
+        Assert.Equal(ActionKind.Done, plain.Kind);
+        Assert.Contains("call Anna", File.ReadAllText(PathOf("Other")), StringComparison.Ordinal);
+        Assert.Empty(data.State.HistoryStore.Versions(Find("Other")));
+    }
+
+    private NoteInfo Find(string name) => Assert.IsType<NoteInfo>(data.Notes!.TryFind(name, out NoteInfo? found) ? found : null);
+
+    // The note's kept versions as text, newest first.
+    private List<string> VersionsOf(string name)
+    {
+        NoteInfo note = Find(name);
+        return data.State!.HistoryStore.Versions(note)
+            .Select(v => data.State.HistoryStore.TryRead(note, v.Id, out byte[]? bytes) ? Encoding.UTF8.GetString(bytes!) : "")
+            .ToList();
     }
 
     private static int CountOf(string text, string part)

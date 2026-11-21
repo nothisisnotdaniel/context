@@ -59,26 +59,31 @@ internal static class DecisionNumbering
     /// <summary>
     /// After a write that was not a save (capture, import, the day's end, a merge) of the plain note
     /// <paramref name="name"/>: numbers it in a second write that goes through only while the file is as it was read
-    /// (else the next save numbers it). Returns whether it wrote; never throws. A sensitive note is never found here
+    /// (else the next save numbers it), keeping the file's previous bytes in <paramref name="history"/> first (job 351),
+    /// so a wrong numbering can be undone. Returns whether it wrote; never throws: when the history can't be kept
+    /// (<see cref="NoteHistoryException"/>) the note stays as written. A sensitive note is never found here
     /// (<see cref="NoteStore.TryFind"/>), so it is never numbered.
     /// </summary>
-    public static bool NumberWritten(TagIndex index, NoteStore store, DecisionFolder folder, string name) =>
-        NumberWritten(index, store, folder, name, out _);
+    public static bool NumberWritten(TagIndex index, NoteStore store, NoteHistory history, DecisionFolder folder, string name) =>
+        NumberWritten(index, store, history, folder, name, out _);
 
     /// <summary>
-    /// <see cref="NumberWritten(TagIndex, NoteStore, DecisionFolder, string)"/>, also giving the numbering's result
+    /// <see cref="NumberWritten(TagIndex, NoteStore, NoteHistory, DecisionFolder, string)"/>, also giving the numbering's result
     /// (<c>null</c> when there was nothing to tell), so the desktop can tell when no numbers were left.
     /// </summary>
-    public static bool NumberWritten(TagIndex index, NoteStore store, DecisionFolder folder, string name, out DecisionEdits? numbered) =>
-        NumberWritten(index, store, () => folder, name, out numbered);
+    public static bool NumberWritten(
+        TagIndex index, NoteStore store, NoteHistory history, DecisionFolder folder, string name, out DecisionEdits? numbered) =>
+        NumberWritten(index, store, history, () => folder, name, out numbered);
 
     /// <summary>
-    /// <see cref="NumberWritten(TagIndex, NoteStore, DecisionFolder, string, out DecisionEdits?)"/> that asks
+    /// <see cref="NumberWritten(TagIndex, NoteStore, NoteHistory, DecisionFolder, string, out DecisionEdits?)"/> that asks
     /// <paramref name="folder"/> for the folder id only when the note holds a <c>!d</c> marker, so a write without one
     /// never creates <c>decision-folder.json</c>; a <c>null</c> folder numbers nothing.
     /// </summary>
-    public static bool NumberWritten(TagIndex index, NoteStore store, Func<DecisionFolder?> folder, string name, out DecisionEdits? numbered)
+    public static bool NumberWritten(
+        TagIndex index, NoteStore store, NoteHistory history, Func<DecisionFolder?> folder, string name, out DecisionEdits? numbered)
     {
+        ArgumentNullException.ThrowIfNull(history);
         numbered = null;
         try
         {
@@ -99,11 +104,11 @@ internal static class DecisionNumbering
                 return false;
             }
 
-            return store.SaveIfUnchanged(opened, edits.Text, out _) == NoteSaveResult.Saved;
+            return store.SaveIfUnchanged(opened, edits.Text, out _, history) == NoteSaveResult.Saved;
         }
         catch (Exception)
         {
-            // The write is done; the markers stay as they are until the next save.
+            // The write is done (a failed history keep writes nothing); the markers stay as they are until the next save.
             return false;
         }
     }

@@ -1923,6 +1923,34 @@ public sealed class CliTests : IDisposable
         Assert.Equal($"# inbox\n{FolderLine}\n!d ab12-1 we ship\n\n- 2026-10-29 09:00 more\n", Read("inbox.md"));
     }
 
+    // 351 AC-6: the numbering write keeps the inbox as captured (the 3 still there) as one version in .history first.
+    [Fact]
+    public void Capture_NumbersDecision_KeepsCapturedBytesAsVersion()
+    {
+        WriteDecisionFolder();
+        WriteNote("inbox", "# inbox\n!d 3 people hired\n\n");
+
+        Assert.Equal(0, Run("capture", "more").Code);
+
+        Assert.Equal($"# inbox\n{FolderLine}\n!d ab12-1 people hired\n\n- 2026-10-29 09:00 more\n", Read("inbox.md"));
+        string version = Assert.Single(Directory.GetFiles(Path.Combine(root, NoteHistory.FolderName, "inbox")));
+        Assert.Equal(
+            Encoding.UTF8.GetBytes("# inbox\n!d 3 people hired\n\n- 2026-10-29 09:00 more\n"),
+            File.ReadAllBytes(version));
+    }
+
+    // 351 AC-6: a capture that numbers nothing keeps no version.
+    [Fact]
+    public void Capture_NothingNumbered_KeepsNoVersion()
+    {
+        WriteDecisionFolder();
+        WriteNote("inbox", "# inbox\n");
+
+        Assert.Equal(0, Run("capture", "more").Code);
+
+        Assert.False(Directory.Exists(Path.Combine(root, NoteHistory.FolderName)));
+    }
+
     // 349 AC-11: dayend numbers the day's note after its write.
     [Fact]
     public void Dayend_NumbersDecision()
