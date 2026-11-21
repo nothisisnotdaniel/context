@@ -401,6 +401,9 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#448](backlog/448-keep-good-glossary-entries-when-one.md) Keep good glossary entries when one is bad
 - [?] [#449](backlog/449-check-glossary-underline-contrast-in-dark.md) Check glossary underline contrast in dark mode
 - [?] [#450](backlog/450-remove-unreachable-glossary-toolong-message.md) Remove unreachable glossary TooLong message
+- [?] [#451](backlog/451-pass-the-meeting-booking-name-to.md) Pass the meeting booking name to Times as one argument
+- [?] [#452](backlog/452-say-when-a-meeting-booking-loses.md) Say when a meeting booking loses its quicklist project
+- [?] [#453](backlog/453-explain-a-changed-meeting-booking-name.md) Explain a changed meeting booking name
 
 ## Dropped with the terminal UI
 
