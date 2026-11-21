@@ -385,6 +385,10 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#431](backlog/431-scroll-the-selected-quick-switcher-row.md) Scroll the selected quick switcher row into view
 - [?] [#432](backlog/432-share-the-quick-switcher-and-palette.md) Share the quick switcher and palette CSS
 - [?] [#433](backlog/433-check-focus-after-a-quick-switcher.md) Check focus after a quick switcher pick
+- [?] [#434](backlog/434-share-one-class-for-the-suite.md) Share one class for the Suite Pro entry-row buttons
+- [?] [#435](backlog/435-clear-the-typed-licence-key-after.md) Clear the typed licence key after a refused or failed activation
+- [?] [#436](backlog/436-don-t-follow-a-suitepro-symlink.md) Don't follow a SuitePro symlink when tightening the activation folder
+- [?] [#437](backlog/437-strict-utf-8-decoding-of-the.md) Strict UTF-8 decoding of the Keychain licence entry
 
 ## Dropped with the terminal UI
 
