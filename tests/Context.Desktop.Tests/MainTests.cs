@@ -3537,6 +3537,9 @@ public sealed class MainTests : IDisposable
         new TagIndex(data.Root).Sync(new NoteStore(data.Root));
         DecisionFolderAlias alias = Assert.Single(new TagIndex(data.Root).DecisionFolderAliases());
         Assert.False(alias.Warned);
+        // As Program does at start: the stored clash makes one due.
+        data.CreateState().CheckDecisionClashes();
+        Assert.True(data.State!.DecisionClashesDue);
 
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
 
@@ -3553,6 +3556,29 @@ public sealed class MainTests : IDisposable
         await data.RefreshAsync();
         again.WaitForAssertion(() => Assert.NotEmpty(again.FindAll("main")), Wait);
         Assert.Empty(again.FindAll("p.decision-clash"));
+    }
+
+    // 349 AC-6: a clash the desktop's own sync stores while Main is open shows on the next state change, once; a state
+    // change with no clash due starts no clash read.
+    [Fact]
+    public async Task Decisions_PrefixClash_StoredWhileOpen_ShowsOnNextStateChange()
+    {
+        data.WriteDecisionFolder();
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.RefreshAsync();
+        cut.WaitForAssertion(() => Assert.NotEmpty(cut.FindAll("main")), Wait);
+        Assert.False(data.State!.DecisionClashesDue);
+        Assert.Empty(cut.FindAll("p.decision-clash"));
+
+        data.WriteNote("Theirs", "# Theirs\ndecision-folder:: 99999999-8888-7777-6666-555555555555\n\n!d ab12-3 theirs\n");
+        await data.State.Tags();
+        Assert.True(data.State.DecisionClashesDue);
+        await data.RefreshAsync();
+
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll("p.decision-clash[role=status]")), Wait);
+        cut.WaitForAssertion(() => Assert.False(data.State.DecisionClashesDue), Wait);
+        await data.RefreshAsync();
+        Assert.Single(cut.FindAll("p.decision-clash"));
     }
 
     // 349 AC-2: a decision-folder.json that can't be read numbers nothing and Main shows the red alert line; the file is

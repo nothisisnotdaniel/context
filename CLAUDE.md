@@ -227,7 +227,11 @@ Every factory agent reads this file before working on Context. Keep it short and
     prefix gives that GUID a random alias (unlike the own prefix and every stored prefix and alias) once; its decisions
     are keyed as `<alias>-<n>` and its file is never changed. `Main` shows grey `p.decision-clash` (`role="status"`)
     `Notes from another folder also use the decision prefix <p>. Here they show as <alias>.` with `Dismiss`, once per
-    GUID (`DesktopState.TakeDecisionClashes` sets `warned` through `MarkDecisionFolderWarned`). **Migration**
+    GUID (`DesktopState.TakeDecisionClashes` sets `warned` through `MarkDecisionFolderWarned`). It reads them off the
+    dispatcher and nothing waits for it, only while `DesktopState.DecisionClashesDue` (`TagIndex.HasUnwarnedDecisionFolders`,
+    an in-memory flag the last `Sync`, `DecisionFolderAliases` or `MarkDecisionFolderWarned` set; `Program` calls
+    `CheckDecisionClashes` after the migration, so a clash another process stored counts) is true, so a start or state
+    change without a clash reads nothing. **Migration**
     (`DecisionMigration.Run`, `Program.cs` calls `DesktopActions.MigrateDecisions` after `ConvertTodoMarkers`, before
     the first numbering): unless `migrated`, every readable plain note with a legacy marker and no foreign GUID gets
     `#!d<n>` -> `!d <prefix>-<n>`, bare `#!d` -> `!d <prefix>-<fresh n>` and the folder line, its old bytes kept as a

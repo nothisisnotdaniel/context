@@ -1812,6 +1812,39 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal("cd34", index.OwnPrefix);
     }
 
+    // 349 AC-6: HasUnwarnedDecisionFolders follows the index without a query of its own: false before a sync, true
+    // after a sync that stores a clash (also for another instance that only syncs), false once it is marked warned.
+    [Fact]
+    public void HasUnwarnedDecisionFolders_FollowsSyncAndWarned()
+    {
+        WriteDecisionFolder();
+        WriteNoteAt("Foreign", $"# F\ndecision-folder:: {ForeignFolder:D}\n!d ab12-3 theirs", Day1);
+        Assert.False(index.HasUnwarnedDecisionFolders);
+
+        index.Sync(store);
+        Assert.True(index.HasUnwarnedDecisionFolders);
+
+        TagIndex other = new TagIndex(root);
+        Assert.False(other.HasUnwarnedDecisionFolders);
+        other.Sync(store);
+        Assert.True(other.HasUnwarnedDecisionFolders);
+
+        index.MarkDecisionFolderWarned(ForeignFolder.ToString("D"));
+        Assert.False(index.HasUnwarnedDecisionFolders);
+        other.Sync(store);
+        Assert.False(other.HasUnwarnedDecisionFolders);
+    }
+
+    // 349 AC-6: with no clash a sync leaves the flag false.
+    [Fact]
+    public void HasUnwarnedDecisionFolders_NoClash_False()
+    {
+        WriteDecisionFolder();
+        WriteNoteAt("Alpha", "!d ab12-3 mine", Day1);
+        index.Sync(store);
+        Assert.False(index.HasUnwarnedDecisionFolders);
+    }
+
     private static string Describe(NoteTodo todo) =>
         $"{todo.Note}|{todo.Line}|{todo.Due?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? "-"}|{todo.Text}|{todo.Raw}";
 

@@ -385,14 +385,21 @@ else
         TakeConversion();
 
         _ = TakeItemPage();
-        _ = InvokeAsync(async () =>
+        if (State.DecisionClashesDue)
         {
-            if (await TakeDecisionClashesAsync())
-            {
-                StateHasChanged();
-            }
-        });
+            ShowDecisionClashesLater();
+        }
     }
+
+    // Job 349: reads the clash lines off the dispatcher and redraws once one was added; nothing waits for it. It runs
+    // only while one is due (DesktopState.DecisionClashesDue), so a start or state change without a clash reads nothing.
+    private void ShowDecisionClashesLater() => _ = InvokeAsync(async () =>
+    {
+        if (await TakeDecisionClashesAsync())
+        {
+            StateHasChanged();
+        }
+    });
 
     // Job 349: the clash lines shown (a foreign folder whose notes use the own decision prefix), each once: taking it
     // marks it warned in the index; Dismiss hides it.
@@ -473,9 +480,11 @@ else
     // line points to /briefing.
     protected override async Task OnStateChangedAsync()
     {
-        if (await TakeDecisionClashesAsync())
+        // Job 349: a clash line is taken apart from the rest, only when the index saw one not yet shown, so a state
+        // change never waits on the index for it.
+        if (State.DecisionClashesDue)
         {
-            StateHasChanged();
+            ShowDecisionClashesLater();
         }
 
         bool started = TakeConversion();

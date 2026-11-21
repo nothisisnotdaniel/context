@@ -321,6 +321,10 @@ internal sealed class TagIndex
     public static readonly TimeSpan BusyTimeout = TimeSpan.FromSeconds(5);
 
     private readonly string root;
+
+    // Job 349: whether the last Sync, DecisionFolderAliases or MarkDecisionFolderWarned saw a decision_folders row not
+    // yet warned; an in-memory flag, so a caller can skip the query while nothing is left to show.
+    private volatile bool unwarnedDecisionFolders;
     private readonly TimeSpan busyTimeout;
     private int reads;
 
@@ -668,10 +672,24 @@ internal sealed class TagIndex
                 Execute(connection, transaction, $"PRAGMA user_version = {ParserVersion}");
             }
 
+            bool unwarned = AnyUnwarnedDecisionFolder(connection, transaction);
             transaction.Commit();
+            unwarnedDecisionFolders = unwarned;
             return 0;
         });
     }
+
+    /// <summary>
+    /// Job 349: <c>true</c> when the last <see cref="Sync"/>, <see cref="DecisionFolderAliases"/> or
+    /// <see cref="MarkDecisionFolderWarned"/> of this instance saw a <c>decision_folders</c> row not yet warned (also one
+    /// another process stored). Reads no file, so it is cheap to ask on every state change; <c>false</c> before any of
+    /// them ran.
+    /// </summary>
+    public bool HasUnwarnedDecisionFolders => unwarnedDecisionFolders;
+
+    // The rows DecisionFolderAliases lists (well-formed only), so a malformed row never keeps the flag set.
+    private static bool AnyUnwarnedDecisionFolder(SqliteConnection connection, SqliteTransaction? transaction) =>
+        ReadDecisionFolderAliases(connection, transaction).Any(row => !row.Warned);
 
     /// <summary>
     /// Runs <paramref name="select"/> on each <c>(note, body)</c> row of <c>note_text</c> that contains
@@ -865,9 +883,17 @@ internal sealed class TagIndex
     /// </summary>
     public IReadOnlyList<DecisionFolderAlias> DecisionFolderAliases() => Run(connection =>
     {
+        IReadOnlyList<DecisionFolderAlias> rows = ReadDecisionFolderAliases(connection, null);
+        unwarnedDecisionFolders = rows.Any(row => !row.Warned);
+        return rows;
+    });
+
+    private static IReadOnlyList<DecisionFolderAlias> ReadDecisionFolderAliases(
+        SqliteConnection connection, SqliteTransaction? transaction)
+    {
         List<DecisionFolderAlias> rows = [];
         using SqliteCommand command = Command(
-            connection, null, "SELECT guid, prefix, alias, warned FROM decision_folders ORDER BY rowid");
+            connection, transaction, "SELECT guid, prefix, alias, warned FROM decision_folders ORDER BY rowid");
         using SqliteDataReader reader = command.ExecuteReader();
         while (reader.Read())
         {
@@ -879,8 +905,8 @@ internal sealed class TagIndex
             }
         }
 
-        return (IReadOnlyList<DecisionFolderAlias>)rows;
-    });
+        return rows;
+    }
 
     /// <summary>Marks the clash of folder <paramref name="guid"/> as shown (job 349); the GUID reaches SQL as a parameter.</summary>
     public void MarkDecisionFolderWarned(string guid)
@@ -889,6 +915,7 @@ internal sealed class TagIndex
         Run(connection =>
         {
             Execute(connection, null, "UPDATE decision_folders SET warned = 1 WHERE guid = $guid", ("$guid", guid));
+            unwarnedDecisionFolders = AnyUnwarnedDecisionFolder(connection, null);
             return 0;
         });
     }

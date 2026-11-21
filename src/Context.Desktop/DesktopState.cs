@@ -1770,6 +1770,32 @@ internal sealed class DesktopState
     });
 
     /// <summary>
+    /// Job 349: whether <see cref="TakeDecisionClashes"/> may have a clash to show, as the index saw at its last sync or
+    /// clash read (<see cref="CheckDecisionClashes"/> at start). Reads no file and takes no lock, so <c>Main</c> asks it
+    /// at start and on every state change and starts the background read only when it is true.
+    /// </summary>
+    public bool DecisionClashesDue => index.HasUnwarnedDecisionFolders;
+
+    /// <summary>
+    /// Job 349: reads the stored clashes once at start (<c>Program</c>, right after the migration), so
+    /// <see cref="DecisionClashesDue"/> also tells a clash another process stored. Never throws.
+    /// </summary>
+    internal void CheckDecisionClashes()
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                _ = index.DecisionFolderAliases();
+            }
+        }
+        catch (Exception)
+        {
+            // An unreadable index shows no clash line; the next sync tries again.
+        }
+    }
+
+    /// <summary>
     /// Job 349: the clash lines not shown yet: each foreign folder that uses the own prefix and has not been
     /// <c>warned</c>, as (guid, prefix, alias), each then marked warned so it shows once. Empty on any failure.
     /// </summary>

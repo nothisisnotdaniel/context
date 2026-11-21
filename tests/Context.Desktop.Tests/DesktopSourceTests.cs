@@ -2682,6 +2682,18 @@ public sealed class DesktopSourceTests
         Assert.Contains("Actions.MakePlain(name, confirmed)", main, StringComparison.Ordinal);
     }
 
+    // 349 AC-6: a state change never waits on the index for the clash lines; it starts the read only while one is due.
+    [Fact]
+    public void Main_StateChange_NeverAwaitsTheClashRead()
+    {
+        string main = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "Main.razor"));
+        string changed = Between(main, "protected override async Task OnStateChangedAsync()", "TakeConversion();");
+
+        Assert.Contains("if (State.DecisionClashesDue)", changed, StringComparison.Ordinal);
+        Assert.Contains("ShowDecisionClashesLater();", changed, StringComparison.Ordinal);
+        Assert.DoesNotContain("await TakeDecisionClashesAsync", changed, StringComparison.Ordinal);
+    }
+
     private static bool MentionsJSRuntime(string source) => source.Contains("JSRuntime", StringComparison.Ordinal);
 
     private static HashSet<string> Components(string root) =>

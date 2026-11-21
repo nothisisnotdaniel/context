@@ -256,6 +256,9 @@ internal static class Program
         // refresh and the first numbering; the old bytes of each rewritten note are kept as a version.
         actions.MigrateDecisions().GetAwaiter().GetResult();
 
+        // Job 349: the clash lines Main shows; a clash stored by another process is found here.
+        state.CheckDecisionClashes();
+
         // Todos stored without a usable id get their derived ids written once, before the watcher and the first
         // refresh; an unreadable file is left alone and shows as unreadable.
         todos.Migrate();
