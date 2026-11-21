@@ -149,7 +149,7 @@
                         int shownEditor = editorGeneration;
                         <NoteEditor @key="(name, openSensitive)" @ref="editor" Name="@name" Sensitive="openSensitive"
                                     OnTag="ShowTag" OnOpenNote="RequestOpen" OnOpenHeading="OpenHeading" OnCreateNote="CreateLinked" Heading="@openHeading" Decision="@openDecision" OnOpenDecision="OpenDecision" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked"
-                                    OnAttach="AttachDropped" OnOpenAttachment="OpenAttachment"
+                                    OnAttach="AttachDropped" OnOpenAttachment="OpenAttachment" OnOpenWebLink="OpenWebLink"
                                     OnOutline="OutlineReport(shownEditor)" />
                         @* 338: a person page is a flat page, so it shows no Subpages section. *@
                         @if (People.PersonOf(name) is null && Children(Snapshot, name) is { Count: > 0 } children)
@@ -2611,6 +2611,21 @@ else
             return;
         }
 
+        if (opened.Kind == ActionKind.Done)
+        {
+            ShowStatus(string.Empty, string.Empty);
+        }
+        else
+        {
+            ShowStatus(DesktopText.OneLine(opened.Text), "red");
+        }
+    }
+
+    // A Cmd/Ctrl+click on a web link in the editor (job 354): opens it in the default browser or mail app; a refusal
+    // or failure is a red line.
+    private async Task OpenWebLink(string href)
+    {
+        ActionResult opened = await Actions.OpenWebLink(href);
         if (opened.Kind == ActionKind.Done)
         {
             ShowStatus(string.Empty, string.Empty);

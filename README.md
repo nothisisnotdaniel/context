@@ -326,6 +326,15 @@ Each suggestion has `Accept` and `Dismiss`. Nothing is added to your todos or no
 suggestion stays hidden until Context restarts. Context never changes, sends or moves a mail, stores no mail on disk,
 and the command-line tool, `review` and the briefing never see it.
 
+### Web links
+
+Write or paste a web or mail link as `[Name](https://example.com)` and the editor shows it as the coloured, underlined
+word `Name` once you type the closing `)`; text after it, such as `: more`, stays plain. The file keeps the link exactly
+as you wrote it, and renaming the link's text keeps its address as written. Hover a link to see its address;
+Cmd+click (Ctrl+click on Windows) opens it in your default browser or mail app, and a plain click only places the cursor
+so you can edit it. Only `http://`, `https://` and `mailto:` links open; any other link, or one with a user name in it
+(`https://a@b.com`), shows the red line `Can't open this link.` Attachment PDFs still open on a plain click.
+
 ### Smart paste
 
 When you paste plain text into a note in the desktop app, Context tidies it up:
@@ -340,6 +349,8 @@ When you paste plain text into a note in the desktop app, Context tidies it up:
   `"paste":{"fetchTitles":true}` in `settings.json`; while it is off, and always in sensitive notes, nothing is
   downloaded. A title that would not save as the same link (for example one holding `#tag` or `[[...]]`) is not
   used.
+- A Markdown link such as `[Name](https://example.com)` in the pasted text becomes a link on `Name`; the text around
+  it stays plain.
 - Headings and code are left alone: pasting there works as before.
 
 Ctrl+Shift+V (Cmd+Shift+V on macOS) pastes the text exactly as it is, with no table and no title. On macOS the app

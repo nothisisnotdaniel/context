@@ -301,6 +301,7 @@ internal sealed class DesktopActions
     private readonly TodoStore todos;
     private readonly DesktopState state;
     private readonly INoteLauncher launcher;
+    private readonly IUrlLauncher? urlLauncher;
     private readonly CalendarLink? calendarLink;
     private readonly CalendarFeed? calendarFeed;
     private readonly Func<DateTime> localNow;
@@ -342,8 +343,10 @@ internal sealed class DesktopActions
         CalendarStore? calendar = null,
         string? timesFolder = null,
         INotifier? notifier = null,
-        IScreenCapture? screenCapture = null)
+        IScreenCapture? screenCapture = null,
+        IUrlLauncher? urlLauncher = null)
     {
+        this.urlLauncher = urlLauncher;
         this.screenCapture = screenCapture;
         this.notifier = notifier;
         this.localNow = localNow ?? (() => DateTime.Now);
@@ -498,6 +501,9 @@ internal sealed class DesktopActions
 
     /// <summary>The red line when an attachment link can't be opened.</summary>
     public static string OpenAttachmentText(string name) => $"Can't open {name}.";
+
+    /// <summary>The red line when a web link can't be (or may not be) opened (job 354).</summary>
+    public const string OpenWebLinkText = "Can't open this link.";
 
     /// <summary>The red line when a delete fails.</summary>
     public static string DeleteFailedText(string name) => $"Can't delete {name}.";
@@ -1492,6 +1498,14 @@ internal sealed class DesktopActions
     /// </summary>
     public Task<ActionResult> OpenAttachment(string name, string src) =>
         Run(() => OpenAttachmentNow(name, src), refresh: false);
+
+    /// <summary>
+    /// Opens the web link <paramref name="href"/> (a Cmd/Ctrl+click in the editor, job 354) in the default browser or
+    /// mail app: <see cref="IUrlLauncher.Open"/> once, only with a <see cref="Uri"/> <see cref="WebLink.TryParse"/>
+    /// accepted; anything else is Refused <see cref="OpenWebLinkText"/> (Failed when the launcher throws). Never goes
+    /// through the <see cref="INoteLauncher"/>, never writes and never refreshes.
+    /// </summary>
+    public Task<ActionResult> OpenWebLink(string? href) => Run(() => OpenWebLinkNow(href), refresh: false);
 
     /// <summary>
     /// Opens the crash folder of <paramref name="hint"/> in the OS file manager through the <see cref="INoteLauncher"/>
@@ -4106,6 +4120,24 @@ internal sealed class DesktopActions
         catch (Exception)
         {
             return Failed(ActionReason.WriteFailed, OpenAttachmentText(shown));
+        }
+    }
+
+    private ActionResult OpenWebLinkNow(string? href)
+    {
+        if (urlLauncher is null || !WebLink.TryParse(href, out Uri uri))
+        {
+            return Refused(ActionReason.Invalid, OpenWebLinkText);
+        }
+
+        try
+        {
+            urlLauncher.Open(uri);
+            return new ActionResult(ActionKind.Done, ActionReason.None, string.Empty);
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, OpenWebLinkText);
         }
     }
 

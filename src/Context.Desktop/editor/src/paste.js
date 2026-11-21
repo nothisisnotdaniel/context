@@ -6,7 +6,7 @@ import { Fragment, Slice } from "prosemirror-model";
 import { EditorState, Selection, TextSelection } from "prosemirror-state";
 import { closeHistory } from "prosemirror-history";
 import { schema } from "./schema.js";
-import { parse, serialize } from "./markdown.js";
+import { parse, serialize, sourceLink, webHref } from "./markdown.js";
 
 const maxRows = 500;
 const maxTabs = 49;
@@ -120,7 +120,61 @@ export function smartPaste(state, text, plain) {
   if (tasks !== null) {
     return taskTransaction(state, tasks);
   }
+  const linked = linkedSlice(text);
+  if (linked !== null) {
+    return state.tr.replaceSelection(linked).scrollIntoView();
+  }
   return null;
+}
+
+// An inline [text](url) in pasted text (job 354): a label without brackets or a line break, then a destination
+// without whitespace whose parentheses nest one level at most.
+const inlineLink = /\[[^\[\]\n]+\]\((?:[^\s()]|\([^\s()]*\))+\)/g;
+
+/**
+ * The content of a link at raw ([text](url) in source form) in text, when the parser reads exactly raw as one link to
+ * a webHref URL and the character before it is no "!" (an image) or "\\" (an escape); else null. The input rule and
+ * the paste share it.
+ */
+export function webLinkContent(raw, before) {
+  if (before === "!" || before === "\\") {
+    return null;
+  }
+  const found = sourceLink(raw);
+  return found !== null && webHref(found.link.attrs.href) ? found.content : null;
+}
+
+/**
+ * The slice a normal paste of text inserts when it holds at least one inline [text](url) to a web link (job 354): one
+ * paragraph per line, each such link a link mark saved as its source, every other character plain text. Else null.
+ */
+export function linkedSlice(text) {
+  if (typeof text !== "string" || !text.includes("](")) {
+    return null;
+  }
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  let found = false;
+  const paragraphs = lines.map(line => {
+    const nodes = [];
+    let last = 0;
+    for (const match of line.matchAll(inlineLink)) {
+      const content = webLinkContent(match[0], match.index > 0 ? line[match.index - 1] : "");
+      if (content === null) {
+        continue;
+      }
+      if (match.index > last) {
+        nodes.push(schema.text(line.slice(last, match.index)));
+      }
+      content.forEach(node => nodes.push(node));
+      last = match.index + match[0].length;
+      found = true;
+    }
+    if (last < line.length) {
+      nodes.push(schema.text(line.slice(last)));
+    }
+    return schema.nodes.paragraph.create(null, nodes);
+  });
+  return found ? new Slice(Fragment.from(paragraphs), 1, 1) : null;
 }
 
 function taskTransaction(state, markdown) {
@@ -251,6 +305,22 @@ export function pastedMarkdown(text, plain, start, cursor, end) {
   }
   const link = tr.getMeta(linkMeta);
   return JSON.stringify({ markdown: serialize(state.apply(tr).doc), link: typeof link === "string" ? link : null });
+}
+
+/**
+ * Test hook, DOM-free (job 354): the document after pasting text at the end of start, as JSON in docJson's shape; the
+ * default paste (smartPaste gives null) inserts text as unmarked text, one paragraph per line, as ProseMirror does.
+ */
+export function pastedDocJson(text, plain, start) {
+  let state = startState(start);
+  state = state.apply(state.tr.setSelection(Selection.atEnd(state.doc)));
+  let tr = smartPaste(state, String(text), !!plain);
+  if (tr === null) {
+    const paragraphs = String(text).replace(/\r\n?/g, "\n").split("\n")
+      .map(line => schema.nodes.paragraph.create(null, line.length > 0 ? schema.text(line) : null));
+    tr = state.tr.replaceSelection(new Slice(Fragment.from(paragraphs), 1, 1));
+  }
+  return JSON.stringify(state.apply(tr).doc.toJSON());
 }
 
 /**

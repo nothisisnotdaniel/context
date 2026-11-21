@@ -71,7 +71,7 @@ public sealed record InlineImage
 /// <c>ContextEditor</c>) for one host element and passes its tag, link and mention clicks and its dirty flips back as
 /// events. It never changes data: its <see cref="JSInvokableAttribute"/> methods only raise <see cref="TagClicked"/>,
 /// <see cref="LinkClicked"/>, <see cref="PersonClicked"/>, <see cref="DirtyChanged"/>, <see cref="FilesDropped"/>,
-/// <see cref="AttachmentClicked"/>, <see cref="LinkPasted"/>, <see cref="DecisionClicked"/> and <see cref="Changed"/>, and the component decides what to open, show or store.
+/// <see cref="AttachmentClicked"/>, <see cref="WebLinkClicked"/>, <see cref="LinkPasted"/>, <see cref="DecisionClicked"/> and <see cref="Changed"/>, and the component decides what to open, show or store.
 /// </summary>
 internal sealed class EditorInterop
 {
@@ -110,6 +110,12 @@ internal sealed class EditorInterop
 
     /// <summary>Raised with the href of a clicked attachment PDF link, as written (<c>.attachments/x.pdf</c>).</summary>
     public event Func<string, Task>? AttachmentClicked;
+
+    /// <summary>
+    /// Raised with the href of a web link Cmd/Ctrl+clicked in the editor (job 354; raw, untrusted: the editor's
+    /// <c>webHref</c> passed it, and the app's open action checks it again).
+    /// </summary>
+    public event Func<string, Task>? WebLinkClicked;
 
     /// <summary>
     /// Raised with the URL of a lone link just pasted into the editor as plain text (raw, untrusted); the component
@@ -283,6 +289,10 @@ internal sealed class EditorInterop
     /// <summary>Called by the editor when an attachment PDF link is clicked.</summary>
     [JSInvokable]
     public Task OnAttachment(string href) => AttachmentClicked?.Invoke(href) ?? Task.CompletedTask;
+
+    /// <summary>Called by the editor when a web link is Cmd/Ctrl+clicked (job 354).</summary>
+    [JSInvokable]
+    public Task OnWebLink(string href) => WebLinkClicked?.Invoke(href) ?? Task.CompletedTask;
 
     /// <summary>Called by the editor on every change of its text.</summary>
     [JSInvokable]

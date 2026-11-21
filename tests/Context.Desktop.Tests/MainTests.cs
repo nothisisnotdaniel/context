@@ -1320,6 +1320,27 @@ public sealed class MainTests : IDisposable
         Assert.Single(data.Launcher.Launched);
     }
 
+    // 354 AC-8: a Cmd/Ctrl+clicked web link (OnWebLink) goes to OpenWebLink and opens through the URL launcher; a
+    // refused one shows the red line in the main status and launches nothing.
+    [Fact]
+    public async Task WebLinkClick_OpensUrl_OrRedLine()
+    {
+        data.WriteNote("Plan", "# Plan\n\n[Site](https://example.com/a)\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await OpenFull(cut, js, "Plan");
+
+        await cut.InvokeAsync(() => js.Page().OnWebLink("https://example.com/a"));
+        cut.WaitForAssertion(() => Assert.Single(data.UrlLauncher.Opened), Wait);
+        Assert.Equal(new Uri("https://example.com/a"), data.UrlLauncher.Opened[0]);
+
+        await cut.InvokeAsync(() => js.Page().OnWebLink("javascript:alert(1)"));
+        cut.WaitForAssertion(() => Assert.Equal("Can't open this link.", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
+        Assert.Single(data.UrlLauncher.Opened);
+        Assert.Empty(data.Launcher.Launched);
+    }
+
     // 152: writes Meetings with the subpage Meetings/Meeting 1 (and Plan, Archive at the top level).
     private void WriteMeetings()
     {
