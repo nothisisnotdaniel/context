@@ -302,6 +302,7 @@ internal sealed class DesktopActions
     private readonly DesktopState state;
     private readonly INoteLauncher launcher;
     private readonly IUrlLauncher? urlLauncher;
+    private readonly ITimesRunner? timesRunner;
     private readonly CalendarLink? calendarLink;
     private readonly CalendarFeed? calendarFeed;
     private readonly Func<DateTime> localNow;
@@ -344,8 +345,10 @@ internal sealed class DesktopActions
         string? timesFolder = null,
         INotifier? notifier = null,
         IScreenCapture? screenCapture = null,
-        IUrlLauncher? urlLauncher = null)
+        IUrlLauncher? urlLauncher = null,
+        ITimesRunner? timesRunner = null)
     {
+        this.timesRunner = timesRunner;
         this.urlLauncher = urlLauncher;
         this.screenCapture = screenCapture;
         this.notifier = notifier;
@@ -1160,6 +1163,25 @@ internal sealed class DesktopActions
     /// result's text is the note's name when done, else <see cref="MeetingNote.WriteFailedText"/>.
     /// </summary>
     public Task<ActionResult> OpenMeetingNote(Appointment appointment) => Run(() => OpenMeetingNoteNow(appointment));
+
+    /// <summary>
+    /// The appointment <c>/meeting</c> picks (job 381): <see cref="MeetingNote.Select"/> on the injected local clock, so
+    /// a blank argument is the current or next appointment; <c>null</c> with the CLI's error text otherwise.
+    /// </summary>
+    public Appointment? SelectMeeting(IReadOnlyList<Appointment> appointments, string argument, out string? error) =>
+        MeetingNote.Select(appointments, argument, localNow(), out error);
+
+    /// <summary>
+    /// Books <paramref name="appointment"/> as a Times checkpoint (job 381) once the user said <c>Book</c> in the
+    /// <see cref="ConfirmDialog"/>: <see cref="MeetingNote.BookingArguments"/> (the first work item of the note
+    /// <paramref name="noteName"/>, read only, against Times' quicklist) through the <see cref="ITimesRunner"/>, never a
+    /// shell. Done with <see cref="MeetingNote.BookedText"/>, else Failed with the CLI's text; without a confirmation,
+    /// or for an all-day appointment, Refused and nothing runs. Nothing in the data folder is written.
+    /// </summary>
+    public Task<ActionResult> BookMeeting(Appointment appointment, string noteName, Confirmation? confirmed) =>
+        confirmed is null
+            ? Task.FromResult(Refused(ActionReason.NotConfirmed, NotConfirmedText))
+            : Run(() => BookMeetingNow(appointment, noteName), refresh: false);
 
     /// <summary>
     /// Makes sure today's daily note (<see cref="DailyNoteName"/>, the day from the injected local clock) exists
@@ -3160,6 +3182,36 @@ internal sealed class DesktopActions
             DayEndKind.TodosUnreadable => new ActionResult(failed, ActionReason.Unreadable, DayEndTodosUnreadableText),
             _ => new ActionResult(failed, ActionReason.WriteFailed, DayEndWriteFailedText(result.Name)),
         };
+    }
+
+    private ActionResult BookMeetingNow(Appointment appointment, string noteName)
+    {
+        if (appointment.AllDay)
+        {
+            return Refused(ActionReason.Invalid, MeetingNote.AllDayBookingText);
+        }
+
+        string text = string.Empty;
+        try
+        {
+            if (notes.TryOpen(noteName, out Note? note) && note is not null)
+            {
+                text = note.Text;
+            }
+        }
+        catch (Exception)
+        {
+            // No note text: no quicklist number, the booking goes on with the name only.
+        }
+
+        IReadOnlyList<string> arguments =
+            MeetingNote.BookingArguments(appointment, text, TimesProjects.Read(timesFolder));
+        TimesRunResult result = timesRunner is null
+            ? TimesRunResult.NotFound()
+            : timesRunner.Run(arguments).GetAwaiter().GetResult();
+        return MeetingNote.BookingOutcome(appointment, result, out string shown)
+            ? new ActionResult(ActionKind.Done, ActionReason.None, shown)
+            : Failed(ActionReason.None, shown);
     }
 
     private ActionResult OpenMeetingNoteNow(Appointment appointment)

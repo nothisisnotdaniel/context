@@ -23,7 +23,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     `Pooling=False`, parameterized SQL only): `notes(name, modified)` (last-write UTC ticks, NULL for a
     note that couldn't be read so it is retried), `note_tags(note, tag)`, `note_links(note, target, heading)` (job 205: `heading` is the text after the first `#` or NULL; primary key stays `(note, target)`; a database without the column gets it through `ALTER TABLE` on every open, before any query; job 295: also `whole_key` and `part_key`, the upper-invariant of the target and of `NoteLinkParser.Split(target).Note`, NULL when empty, each with an index (`note_links_whole_key`, `note_links_part_key`), added the same way), `note_people(note, person, spelling)`, `note_decisions(note, line, text, number, prefix)` (job 180, primary key `(note, line)`; job 343: one row per `DecisionParser` decision paragraph, `line` its marker line, `number` the marker's number or NULL for a bare `!d`, added by `ALTER TABLE` on open like job 205, index `note_decisions_number`; job 349: `prefix` the key's prefix (the token's, the own prefix for a plain number, a clash alias for a foreign folder's note), added the same way; written and pruned with the note's other rows), `decision_owners(prefix, number, note)` (job 349, primary key `(prefix, number)`), `decision_counter(high)` (job 343, one counter for every prefix) and `decision_folders(guid PRIMARY KEY, prefix, alias, warned)` (job 349, see Decision log), `note_todos(note, line, due, text, raw)` (job 201, primary key `(note, line)`; one row per open `NoteTodoParser` line, `due` `yyyy-MM-dd` or NULL, written and pruned like `note_decisions`), `note_topics(note, line, person, text, raw)` (job 253, primary key `(note, line)`; one row per `TopicParser` line, written and pruned like `note_decisions`; read by `Topics()`, plain notes only), `note_reviews(note, line, due, raw)` (job 256, primary key `(note)`; the first `ReviewDateParser` line of a plain note, `due` `yyyy-MM-dd`, written and pruned like `note_decisions`; read by `Reviews()`) and `note_attributes(note, key, value_key, value)` (job 157, primary key `(note, key, value_key)`, index on `(key, value_key)`) and `note_text` (job 170: FTS5 `fts5(note UNINDEXED, body, tokenize='trigram')` with FTS5 `secure-delete` on, set once in `Sync` after checking `note_text_config`; one row per plain note with its whole text, none for a note that can't be read or is over `NoteStore.MaxNoteBytes` (job 275: such a note is treated as unreadable, so it has no tag, link, people, attribute, decision, todo, topic, review or text rows and a NULL stored time); sensitive notes are never listed, so never indexed; every connection sets `PRAGMA secure_delete = ON`, so a deleted note's text doesn't linger in free pages of `context.db`; the rollback journal `context.db-journal` briefly holds the old pages and is unlinked, not zeroed, after each commit, which is outside this guarantee), `note_text_rows(note, row)` (job 295: note name -> its `note_text` rowid; re-indexing, deleting or pruning a note deletes its `note_text` row by that rowid, never `WHERE note`, and only while that row still names the note; the orphan prune goes through it; every non-upgrade `Sync` first drops each `note_text` row that is not its note's mapped row and each mapping whose row is gone or names another note, as an older version writing the same `context.db` leaves them, and clears those notes' stored time so they are re-parsed in that sync) and `note_skipped(note)` (job 295: one row per note over the cap, gone once the note is back under it, unreadable for another reason or gone). The cap counts the bytes actually read (`BoundedFile.Read` stops in its read loop): a note of exactly `MaxNoteBytes` bytes, a BOM or invalid UTF-8 bytes included, is indexed (invalid bytes decode as U+FFFD), one byte more is not. `Sync(NoteStore)` updates it
     in one transaction and only re-parses files whose time changed. `PRAGMA user_version` holds the parser
-    version (`TagIndex.ParserVersion`, now 19: `Term:: meaning` glossary lines in `note_glossary` (job 380); 18 was decisions as `!d` paragraphs with a `prefix` and `number` (job 349); 17 was `#!d` paragraphs with a number (job 343); 16 was an `affiliation::` value as a comma-separated list (job 332); 15 was note todos as `- { }` lines, `- [ ]` a note checkbox (job 329); 14 was `note_text_rows`, `note_skipped` and the `note_links` key columns; 13 was `#<n>` work item references in `note_items`; 12 was `review:yyyy-MM-dd` lines in `note_reviews`; 11 was `next: @[Name] topic` lines in `note_topics`, no longer note todos; 10 was the heading of a `[[Note#Heading]]` link in `note_links.heading`; 9 was open `- [ ]` lines in `note_todos`; 8 was `Decision:` lines in `note_decisions`; 7 was note text in `note_text`; 6 was a link target that runs into a code span is no link); when it is lower, `Sync` clears every stored time and empties `note_text` and `note_text_rows` in the same
+    version (`TagIndex.ParserVersion`, now 20: work item references also as `AB#<n>` in `note_items` (job 381); 19 was `Term:: meaning` glossary lines in `note_glossary` (job 380); 18 was decisions as `!d` paragraphs with a `prefix` and `number` (job 349); 17 was `#!d` paragraphs with a number (job 343); 16 was an `affiliation::` value as a comma-separated list (job 332); 15 was note todos as `- { }` lines, `- [ ]` a note checkbox (job 329); 14 was `note_text_rows`, `note_skipped` and the `note_links` key columns; 13 was `#<n>` work item references in `note_items`; 12 was `review:yyyy-MM-dd` lines in `note_reviews`; 11 was `next: @[Name] topic` lines in `note_topics`, no longer note todos; 10 was the heading of a `[[Note#Heading]]` link in `note_links.heading`; 9 was open `- [ ]` lines in `note_todos`; 8 was `Decision:` lines in `note_decisions`; 7 was note text in `note_text`; 6 was a link target that runs into a code span is no link); when it is lower, `Sync` clears every stored time and empties `note_text` and `note_text_rows` in the same
     transaction (so all notes are re-parsed and their text written once) and then sets it. Bump it whenever parsing changes. Queries: `Tags()`, `Reviews()`, `NotesWithTag`,
     `NoteTags()`, `FindNote`, `Links` (job 295: reads `note_links` only through `TagIndex.LinksSql`, `WHERE note = $note OR whole_key IN ($k, $kmd) OR part_key IN ($k, $kmd)` with `$k` the upper-invariant name and `$kmd` = `$k` + `.MD`, so no `SCAN note_links`; then `NameLookup.ResolveLink` as before), `Skipped()` (job 295: the `note_skipped` names, ignoring case, then ordinal), `People()`, `NotesMentioning`, `NotesWithAttribute(key, value)` (by `AttributeParser.ValueKey`), `NotesWithoutAttribute(key)`, `AttributeValues(key)` (job 291: the `(Note, Value)` rows of `note_attributes` for the key, value as stored, by note (ordinal), then `rowid`), `Search(text, select)` (job 295: calls `select(note, body)` per row of `note_text MATCH $q` and keeps the non-null results, so no body is held after its row; `$q` the text as one FTS5 phrase: `"` + text with `"` doubled + `"`, always a parameter, so FTS syntax is literal), `Decisions(tag?)` (job 343: `IndexedDecision(Note, Line, Number, Text, Modified)` rows of `note_decisions` joined to `notes` with a stored time, `Modified` UTC, leaving out a numbered row whose note is not the number's owner; a tag keeps the notes with that `note_tags` row), `DecisionByKey(prefix, n)`, `DecisionHeadlines(keys)` (owned only), `DecisionOwners(prefix)`, `ReserveDecisionNumbers(prefix, count, taken?)` (one shared counter), `OwnedDecisionTexts(prefix)`, `DecisionFolderAliases()`, `MarkDecisionFolderWarned(guid)` and `MoveDecisionOwners(old, new)` (jobs 343, 349, see Decision log), `NoteTodos()` (`NoteTodo` rows of `note_todos` joined to `notes` with a stored time). A database that can't be opened or isn't valid throws `TagIndexException` (an
     `IOException`) and is never deleted or overwritten. The file database waits up to `TagIndex.BusyTimeout` (5 s; an
@@ -103,7 +103,10 @@ Every factory agent reads this file before working on Context. Keep it short and
   - **Work items** (job 280, `WorkItemParser.cs`, `WorkItemView.cs`, `GitCommitLog.cs`, `DesktopRequest.cs`):
     `WorkItemParser.Parse` finds `#<n>` (Times' work item numbers) at line start or after whitespace: 1 to 9 ASCII
     digits, the first 1-9, not followed by a letter, digit, `-`, `_` or `#`; outside fences and code spans (shared
-    helpers); distinct, first-seen order; never a tag. `TryParseNumber` reads a typed number (optional `#`).
+    helpers); distinct, first-seen order; never a tag. Since job 381 also `AB#<n>` (Azure Boards; `AB` in any case,
+    at line start or after whitespace, same digit and end rules; the reported start stays the `#`).
+    `RemoveReferences(line)` drops every such token (the Times booking name). `TryParseNumber` reads a typed number
+    (optional `#`).
     `note_items(note, item)` holds them per plain note (written and pruned like `note_decisions`);
     `TagIndex.NotesWithItem(n)` leaves out the item's own page. A work item's page is `items/<n>` (`WorkItems.PageNote`,
     `ItemOf`: a direct subpage of the top-level `items`, ignoring case); `WorkItems.EnsurePage` creates `items`
@@ -899,11 +902,20 @@ Every factory agent reads this file before working on Context. Keep it short and
   `todos.json` still prints the text with its `- Can't read todos.json.` lines, writes `Can't read todos.json.` to
   stderr and exits 1; any argument, `--json` too, is the usage error `Type: context standup.` before the folder is
   read; writes nothing apart from the migrate),
-  `meeting <n>` (job 167, see Meeting note: prints the note for appointment `n` of today's `current` list like
-  `note show`, creating it first; no appointments is `There are no appointments today.`, a number beyond them
-  `There is no appointment <n> today.`, a sensitive one `Cli.SensitiveText`, a failed write `Can't write <name>.`, all
-  exit 1; a missing or non-number argument (ASCII digits, at least 1) or `--json` is a usage error; it fetches the feed
-  once and never opens `context.db`),
+  `meeting [<n>|<H:mm>|<title...>] [--book]` (jobs 167, 381, see Meeting note: prints the note like `note show`,
+  creating it first; `MeetingNote.Select` picks: no argument (or a blank one) the running timed appointment, else the
+  next timed one today (`There is no current or next appointment today.`); a single all-digits argument is number `n`
+  of today's `current` list (`There is no appointment <n> today.`; `0` or an overflow is the usage error
+  `Cli.MeetingNumberForm`); `H:mm`/`HH:mm` the first timed one running then (`There is no appointment at H:mm
+  today.`); other words, joined by one space, a title (exact ignoring case, else contains; `There is no appointment
+  called <text> today.`); no appointments is `There are no appointments today.`, a sensitive one `Cli.SensitiveText`, a
+  failed write `Can't write <name>.`, all exit 1. `--book` (any position and case, once; not with `--json`, which is a
+  usage error) then runs Times through the injected `ITimesRunner` (`Program` passes `TimesProcessRunner`, 10 s; tests
+  `FakeTimesRunner`) with `MeetingNote.BookingArguments`: `checkpoint`, `H:mm`, `#<position>` when the note's first
+  work item is on `TimesProjects.Read(timesFolder)`, then `BookingName` (one-line title without work item tokens,
+  collapsed, leading `#`/`-` dropped so Times never reads a project or an option, max 200, else `Meeting`); success adds `Booked <H:mm> <name> in Times.`, a failure (`BookingOutcome`:
+  not installed, timed out, `Times refused the booking: <first output line>`, all-day) is one stderr line and exit 1
+  after the printed note; it fetches the feed once and never opens `context.db`),
   `new <title...> [--template <name...>]` (job 165: title words joined with one space; `--template` matched ignoring
   case; prints `Created <name>`; with a template see Templates, without one the plain `# <title>\n` note through
   `Create`; an invalid title or an existing note gives the `ValidateTitle` text or `Note <name> already exists.`, every
@@ -1278,10 +1290,17 @@ Every factory agent reads this file before working on Context. Keep it short and
     calls `DesktopActions.OpenDailyNote()` and opens the note (a sensitive one through the unlock flow), with the
     accent `Created <name>` after a create and the red failure text otherwise. With today's note already open it keeps
     the editor and only closes a shown page (Triage, People, Tags, Settings, Appointment).
-    `/meeting <number>` (job 167) picks the appointment from the shown `Snapshot.Current` (numbered as `context current`
-    numbers them; the desktop no longer shows the numbers, job 216) and works like `/today` through
-    `DesktopActions.OpenMeetingNote(appointment)`; a blank or invalid number is red `Type /meeting <number>.`, no
-    appointments or a number beyond them the CLI's texts in red, a failed write red `Can't write <name>.`.
+    `/meeting [<number>|<H:mm>|<title>]` (jobs 167, 381) picks the appointment from the shown `Snapshot.Current`
+    through `DesktopActions.SelectMeeting` (`MeetingNote.Select`, the CLI's rules and texts; numbered as `context
+    current` numbers them, the desktop no longer shows the numbers, job 216) and works like `/today` through
+    `DesktopActions.OpenMeetingNote(appointment)`; an all-digits argument that is no valid number is red
+    `Type /meeting [<number>|<H:mm>|<title>].`, the CLI's texts in red otherwise, a failed write red `Can't write
+    <name>.`. When the note was just created (also after a discard), the appointment is timed and
+    `DesktopState.TimesCommandFound` is true, a `ConfirmDialog` asks `Book <name> at <H:mm> in Times?` (`Book`/Cancel,
+    Escape cancels, nothing runs); `Book` calls `DesktopActions.BookMeeting(appointment, note, confirmation)`
+    (`NotConfirmed` without one, all-day refused) with the CLI's arguments through the injected `ITimesRunner` and
+    shows accent `Booked <H:mm> <name> in Times.` or the CLI's failure text in red. The appointment page's create
+    link offers no booking.
     `/briefing` (job 172, hint `Open today's briefing`, argument ignored) works like `/today` through
     `DesktopActions.OpenBriefing()` (`BriefingName()` for the unsaved-changes check): accent `Created <name>` after a
     create, red `briefings is sensitive, so no briefing can be written.` (`BriefingSensitiveText`) or
@@ -1294,7 +1313,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     `LegacyNameFor` keeps the old top-level `yyyy-MM-dd <title>` rule (89-character cut, leading dots kept);
     `IsNoteOf(appointment, name)` is true for either name, ignoring case (the desktop's unsaved-changes checks for
     `/meeting` and `Create a new note`). `Format` writes `# yyyy-MM-dd`, `#meeting`, `- Title:`, `- Time:`
-    (`MeetingNote.Time`), `- Location:` (only when set) and `- Attendees:` (`@[name]` mentions, or `none`).
+    (`MeetingNote.Time`), `- Location:` (only when set), `- Attendees:` (`@[name]` mentions, or `none`) and, since
+    job 381, empty `## Notes`, `## Decisions` and `## Actions` sections (`SectionsText`; todos under Actions are
+    ordinary note todos).
     `Ensure(notes, appointment)` returns `Existing` for an existing new-style note (any case), else `Existing` or
     `Sensitive` for a top-level legacy note, all without writing; else it creates the missing `Meetings`
     (`# Meetings\n`) and `Meetings/<part>` (`# <part>\n`) through `Create`/`CreateChild` (existing ones in any case are
@@ -2114,8 +2135,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     to Context, everything else to Times as separate arguments (one leading `times`/`tm` dropped; in `cp`/`checkpoint`
     a quicklist work item becomes `#<position>`); `Suggest` ranks command names with `CommandMatcher` and lists
     quicklist rows after `cp `. Core `TimesProjects.Read(timesFolder)` reads Times' `projects.json` (read-only, 64 KiB,
-    any bad row: empty). `TimesExecutable.Find` looks in `~/.dotnet/tools` then `PATH` (`tm`, `tm.exe` on Windows);
-    `TimesProcessRunner` runs it with `ArgumentList`, stdin closed, `NO_COLOR=1`, 64 KiB per stream, killed after 10 s.
+    any bad row: empty). `ITimesRunner`, `TimesExecutable` and `TimesProcessRunner` live in Core since job 381 (the
+    CLI's `meeting --book` uses them too). `TimesExecutable.Find` looks in `~/.dotnet/tools` then `PATH` (`tm`,
+    `tm.exe` on Windows); `TimesProcessRunner` runs it with `ArgumentList`, stdin closed, `NO_COLOR=1`, 64 KiB per stream, killed after 10 s.
     Context lines go through `CommandBarContext` (a singleton) to `Main.RunFromBar`, which Main registers in
     `OnInitialized` and unregisters on dispose (the one Actions caller not bound to an event attribute, allowed by
     `ActionCallProblems`); `todo` uses `TodoCommand.TryParse` (shared with the palette's `/todo`), `note` calls
@@ -2214,10 +2236,13 @@ Every factory agent reads this file before working on Context. Keep it short and
     references `VelopackUpdateSource` (tests use `FakeUpdateSource`, never the network).
     **Launcher rule:** `Process` / `System.Diagnostics` appear only in `ShellNoteLauncher.cs`, (job 354)
     `ShellUrlLauncher.cs`, (job 178)
-    `SystemNotifier.cs`, (job 260) `MacScreenCapture.cs` and (job 282) `TimesProcessRunner.cs`, each named only in itself
-    and in `Program.cs` (the runner also in its own `TimesProcessRunnerTests`, Unix-only temp `tm` scripts; every other
-    test uses `FakeTimesRunner`), and (job 280)
-    outside the desktop only in Core's `GitCommitLog.cs` and the command line's `ProcessDesktopLauncher.cs` (both
+    `SystemNotifier.cs`, (job 260) `MacScreenCapture.cs` and (job 282) `TimesProcessRunner.cs` (in Core since job 381),
+    each named only in itself and in `Program.cs` (the runner in both the desktop's and the command line's
+    `Program.cs`, and in its own `TimesProcessRunnerTests` in `Context.Tests`, Unix-only temp `tm` scripts, plus
+    `WorkItemSourceTests`, which reads its source; every other test uses `FakeTimesRunner`, in `Context.Tests` and
+    linked into `Context.Desktop.Tests`), and (job 280)
+    outside the desktop only in Core's `GitCommitLog.cs` and `TimesProcessRunner.cs` and the command line's
+    `ProcessDesktopLauncher.cs` (all
     `ArgumentList` only, never a shell; `WorkItemSourceTests`); no test names `ProcessDesktopLauncher`; no test
     names `MacScreenCapture` or `MacGlobalHotkey` (tests use `FakeScreenCapture` and `FakeGlobalHotkey`); no test names `SystemNotifier` (tests use
     `FakeNotifier`, which records `(title, body)` and can throw), and the notifier passes the text only as arguments or

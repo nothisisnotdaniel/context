@@ -389,7 +389,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(19, TagIndex.ParserVersion);
+        Assert.Equal(20, TagIndex.ParserVersion);
     }
 
     // 024 AC-6
@@ -847,7 +847,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(19, TagIndex.ParserVersion);
+        Assert.Equal(20, TagIndex.ParserVersion);
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
         Assert.Equal(["A", "Beta"], NoteRows());
         Assert.Equal([("A", "work"), ("Beta", "home")], Rows());
@@ -1056,7 +1056,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(19, UserVersion());
+        Assert.Equal(20, UserVersion());
         Assert.Equal([("Anna", "[[ACME]]"), ("Anna", "Beta GmbH")], index.AttributeValues("affiliation"));
     }
 
@@ -1273,7 +1273,7 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal(["Anna|1", "AS|1"], index.People().Select(Describe));
         Assert.Empty(index.NotesMentioning("Anna Schmidt"));
         Assert.Equal(TagIndex.ParserVersion, UserVersion());
-        Assert.Equal(19, TagIndex.ParserVersion);
+        Assert.Equal(20, TagIndex.ParserVersion);
     }
 
     // 170 ----------------------------------------------------------------------------------------
@@ -1542,7 +1542,7 @@ public sealed class TagIndexTests : IDisposable
     [Fact]
     public void Sync_Version17Database_AddsPrefix_Reparses()
     {
-        Assert.Equal(19, TagIndex.ParserVersion);
+        Assert.Equal(20, TagIndex.ParserVersion);
         WriteDecisionFolder();
         WriteNoteAt("Plan", "!d ab12-5 new", Day1);
         index.Sync(store);
@@ -2012,7 +2012,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(["Plan|2|-|b|- { } b"], index.NoteTodos().Select(Describe));
-        Assert.Equal(19, UserVersion());
+        Assert.Equal(20, UserVersion());
     }
 
     // 253 AC-3: a sensitive .ctxs note never has topic rows.
@@ -2087,7 +2087,7 @@ public sealed class TagIndexTests : IDisposable
         index.Sync(store);
 
         Assert.Equal(["Plan|1|2026-12-01|review:2026-12-01"], ReviewRows(index));
-        Assert.Equal(19, UserVersion());
+        Assert.Equal(20, UserVersion());
     }
 
     // 256 AC-2, AC-9: a sensitive .ctxs note never has a review row.
@@ -2614,7 +2614,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(19, UserVersion());
+        Assert.Equal(20, UserVersion());
         (List<(long Row, string Note)> text, List<(long Row, string Note)> map) = TextRowIds();
         Assert.Equal(["A", "B"], text.Select(r => r.Note).Order(StringComparer.Ordinal));
         Assert.Equal(text, map);
@@ -2665,11 +2665,11 @@ public sealed class TagIndexTests : IDisposable
         Assert.Equal(0, Count("SELECT COUNT(*) FROM note_glossary WHERE note IN ('A', 'Secret')"));
     }
 
-    // 380 AC-2: an index at version 18 (no note_glossary rows yet) re-parses every unchanged note once and ends at 19.
+    // 380 AC-2: an index at version 18 (no note_glossary rows yet) re-parses every unchanged note once and ends at the current version (20 since job 381).
     [Fact]
-    public void Glossary_Version18Database_ReparsesOnce_EndsAt19()
+    public void Glossary_Version18Database_ReparsesOnce_EndsAtCurrentVersion()
     {
-        Assert.Equal(19, TagIndex.ParserVersion);
+        Assert.Equal(20, TagIndex.ParserVersion);
         WriteNoteAt("A", "API:: first\n", Day1);
         index.Sync(store);
         using (SqliteConnection connection = Open())
@@ -2681,7 +2681,7 @@ public sealed class TagIndexTests : IDisposable
 
         index.Sync(store);
 
-        Assert.Equal(19, UserVersion());
+        Assert.Equal(20, UserVersion());
         Assert.Equal(["A|0|API|API|first"], GlossaryRows());
         using (SqliteConnection connection = Open())
         {

@@ -37,6 +37,9 @@ internal sealed class Cli
     private const string ItemForm = "Type: context item <n> [--json] [--open] with the work item's number.";
     private const string OpenFlag = "--open";
     private const string LaunchFailed = "Can't start the desktop app.";
+    private const string MeetingNumberForm = "Type: context meeting <n> with the appointment's number in context current.";
+    private const string MeetingForm = "Type: context meeting [<n>|<H:mm>|<title...>] [--book].";
+    private const string BookFlag = "--book";
 
     // Job 273: refused anywhere on the line. Spelled in pieces: the whole word must not appear in the source.
     private const string RemovedSecretOption = "--pass" + "phrase";
@@ -66,7 +69,7 @@ internal sealed class Cli
         ("today", "Print today's note, creating it with the day's appointments and due todos."),
         ("dayend [today|yyyy-MM-dd]", "Write Times' worked hours into the day's note and move its due todos to the next day."),
         ("standup", "Print a standup: the last workday's bookings and done todos, today's plan and what is blocked."),
-        ("meeting <n>", "Print the note for today's appointment n (as listed by current), creating it first."),
+        ("meeting [<n>|<H:mm>|<title...>] [--book]", "Print the note for today's current or next appointment, appointment n of current, the one at H:mm or with that title, creating it first; --book books it in Times."),
         ("new <title...> [--template <name>]", "Create a note, from templates/<name>.md if given."),
         ("import <path>", "Store a Markdown file as a note."),
         ("export <note> <path>", "Write a note to a new plain file."),
@@ -84,6 +87,7 @@ internal sealed class Cli
     private readonly string? timesFolder;
     private readonly IDesktopLauncher? launcher;
     private readonly ICommitLog commitLog;
+    private readonly ITimesRunner? timesRunner;
 
     /// <param name="stdout">Where results go.</param>
     /// <param name="stderr">Where error and warning lines go.</param>
@@ -93,6 +97,7 @@ internal sealed class Cli
     /// <param name="http">The handler the Exchange calendar download goes through.</param>
     /// <param name="timesFolder">Times' data folder (<see cref="TimesFolder.Resolve(string?)"/>), only ever read; <c>null</c> for none.</param>
     /// <param name="launcher">Starts the desktop app for <c>item &lt;n&gt; --open</c>.</param>
+    /// <param name="timesRunner">Runs <c>tm</c> for <c>meeting --book</c> (job 381).</param>
     internal Cli(
         TextWriter stdout,
         TextWriter stderr,
@@ -101,14 +106,15 @@ internal sealed class Cli
         Func<DateTime> now,
         HttpMessageHandler http,
         string? timesFolder,
-        IDesktopLauncher launcher)
-        : this(stdout, stderr, folder, today, now, http, TimeZoneInfo.Local, timesFolder, launcher, new GitCommitLog())
+        IDesktopLauncher launcher,
+        ITimesRunner? timesRunner)
+        : this(stdout, stderr, folder, today, now, http, TimeZoneInfo.Local, timesFolder, launcher, new GitCommitLog(), timesRunner)
     {
     }
 
     /// <summary>
     /// Like the other constructor with a fixed zone (tests). Without a launcher <c>--open</c> can't start the desktop
-    /// app; without a commit log <c>git</c> is run.
+    /// app; without a commit log <c>git</c> is run; without a Times runner <c>meeting --book</c> finds no Times.
     /// </summary>
     internal Cli(
         TextWriter stdout,
@@ -120,8 +126,10 @@ internal sealed class Cli
         TimeZoneInfo zone,
         string? timesFolder = null,
         IDesktopLauncher? launcher = null,
-        ICommitLog? commitLog = null)
+        ICommitLog? commitLog = null,
+        ITimesRunner? timesRunner = null)
     {
+        this.timesRunner = timesRunner;
         this.launcher = launcher;
         this.commitLog = commitLog ?? new GitCommitLog();
         this.stdout = stdout;
@@ -287,13 +295,7 @@ internal sealed class Cli
                 // Arguments were refused in RunCommand.
                 return Standup;
             case "meeting":
-                if (args.Length != 1 || !MeetingNote.TryParseNumber(args[0], out int number))
-                {
-                    usage = "Type: context meeting <n> with the appointment's number in context current.";
-                    return null;
-                }
-
-                return session => Meeting(session, number);
+                return ParseMeeting(args, out usage);
             case "new":
                 return ParseNew(args, out usage);
             case "import":
@@ -887,12 +889,41 @@ internal sealed class Cli
         return todosUnreadable ? Error(TodosUnreadable) : ExitOk;
     }
 
-    // Prints the note for today's appointment number (1-based, current view order) like note show, creating it first
-    // with the appointment's title, time, location and attendees when it is missing.
-    private int Meeting(Session session, int number)
+    // meeting [<n>|<H:mm>|<title...>] [--book] (job 381): --book once at most, in any position and case; a single
+    // digits-only argument must be a number of at least 1 (job 167). Everything else is picked by MeetingNote.Select.
+    private Func<Session, int>? ParseMeeting(string[] args, out string? usage)
+    {
+        usage = null;
+        int books = args.Count(IsBookFlag);
+        if (books > 1)
+        {
+            usage = MeetingForm;
+            return null;
+        }
+
+        string[] words = [.. args.Where(a => !IsBookFlag(a))];
+        if (words.Length == 1 && words[0].Length > 0 && words[0].All(char.IsAsciiDigit)
+            && !MeetingNote.TryParseNumber(words[0], out _))
+        {
+            usage = MeetingNumberForm;
+            return null;
+        }
+
+        // One argument as given, so a digits-only one is the number; several joined with one space are a title.
+        string argument = words.Length == 1 ? words[0] : string.Join(' ', words);
+        bool book = books == 1;
+        return session => Meeting(session, argument, book);
+    }
+
+    private static bool IsBookFlag(string arg) => string.Equals(arg, BookFlag, StringComparison.OrdinalIgnoreCase);
+
+    // Prints the note for today's appointment (MeetingNote.Select: current or next, number, time or title) like note
+    // show, creating it first with the appointment's title, time, location and attendees when it is missing. With
+    // book the note is printed first, then tm books it as a checkpoint (job 381).
+    private int Meeting(Session session, string argument, bool book)
     {
         IReadOnlyList<Appointment> appointments = MeetingNote.Today(session.Calendar, session.Feed, today());
-        if (MeetingNote.Pick(appointments, number, out string? error) is not { } appointment)
+        if (MeetingNote.Select(appointments, argument, now(), out string? error) is not { } appointment)
         {
             return Error(error ?? MeetingNote.NoAppointmentsText);
         }
@@ -912,7 +943,35 @@ internal sealed class Cli
             return Error(SensitiveText(OneLine(result.Name)));
         }
 
-        return ShowNote(session, result.Name);
+        int shown = ShowNote(session, result.Name, out string? noteText);
+        if (!book || shown != ExitOk)
+        {
+            return shown;
+        }
+
+        return Book(appointment, noteText ?? string.Empty);
+    }
+
+    // Books the printed meeting as a Times checkpoint through the runner only (no shell); never for an all-day one.
+    private int Book(Appointment appointment, string noteText)
+    {
+        if (appointment.AllDay)
+        {
+            return Error(MeetingNote.AllDayBookingText);
+        }
+
+        IReadOnlyList<string> arguments =
+            MeetingNote.BookingArguments(appointment, noteText, TimesProjects.Read(timesFolder));
+        TimesRunResult run = timesRunner is null
+            ? TimesRunResult.NotFound()
+            : timesRunner.Run(arguments).GetAwaiter().GetResult();
+        if (MeetingNote.BookingOutcome(appointment, run, out string text))
+        {
+            Out(text);
+            return ExitOk;
+        }
+
+        return Error(text);
     }
 
     /// <summary>The error line for a command that would need the text of a sensitive note.</summary>
@@ -927,8 +986,12 @@ internal sealed class Cli
             ? SensitiveText(OneLine(locked.Name))
             : null;
 
-    private int ShowNote(Session session, string name)
+    private int ShowNote(Session session, string name) => ShowNote(session, name, out _);
+
+    // Like ShowNote; text is the printed (cleaned) note text, null when nothing was printed.
+    private int ShowNote(Session session, string name, out string? text)
     {
+        text = null;
         Note? note;
         try
         {
@@ -946,18 +1009,19 @@ internal sealed class Cli
             return Error($"Can't read {OneLine(name.Trim())}.");
         }
 
-        string text = SafeText.Clean(note.Text);
+        string cleaned = SafeText.Clean(note.Text);
+        text = cleaned;
         if (session.Json)
         {
             string shown = OneLine(note.Name);
             return Json(w =>
             {
                 w.WriteString("name", shown);
-                w.WriteString("text", text);
+                w.WriteString("text", cleaned);
             });
         }
 
-        stdout.Write(text.Length == 0 || text.EndsWith('\n') ? text : text + "\n");
+        stdout.Write(cleaned.Length == 0 || cleaned.EndsWith('\n') ? cleaned : cleaned + "\n");
         return ExitOk;
     }
 

@@ -138,8 +138,20 @@ named after its date and title (for example `2026-10-29 Review Q4 plan`). When i
 tagged `#meeting`, with the appointment's title, time, location and attendees; an existing note is printed as it is and
 never changed. A new note also gets the still-open points of the same meeting's previous note (its open
 `- { }` todos and `- [ ]` checkboxes, and the lines under an `Open points` heading) under `## From last time`, with a link to that note; the
-previous note is only read, never changed. In the desktop app, `/meeting 2` in the command palette opens the same note (numbered as
-`context current` numbers them).
+previous note is only read, never changed. A new note has empty `## Notes`, `## Decisions` and `## Actions` sections;
+a todo you write under Actions (`- { } Send minutes`) shows up in `context todos` like any other note todo. In the
+desktop app, `/meeting 2` in the command palette opens the same note (numbered as `context current` numbers them).
+
+You don't need the number: `context meeting` alone picks the appointment that is running now, or else the next one
+today; `context meeting 14:00` picks the one running at 14:00, and `context meeting review` the one whose title is
+`review` (ignoring case) or else contains it. `/meeting`, `/meeting 14:00` and `/meeting review` do the same in the
+desktop app.
+
+To book the meeting in Times as well, add `--book`: `context meeting --book` prints the note and then runs
+`tm checkpoint <start time> <title>`, with `#<position>` when the note's first work item (`#1234` or `AB#1234`) is on
+Times' quicklist, and prints `Booked 10:00 Sprint review in Times.`. In the desktop app, a newly created meeting note
+asks `Book Sprint review at 10:00 in Times?` instead; nothing is booked unless you choose `Book`. All-day appointments
+are never booked.
 
 To carry one point over without moving it under `Open points`, mark its checkbox `- [>]`: right-click the box in the
 editor, or press Ctrl+Alt+N (Cmd+Option+N on a Mac) with the caret in the line, and do the same again to take the mark
@@ -296,7 +308,8 @@ desktop app, `/donelog` shows it grouped by week, newest week first.
 
 ### Work items
 
-A work item from Times is referenced as `#1234` (digits only, so it is never a tag). Its page is the note `items/1234`:
+A work item from Times is referenced as `#1234` (digits only, so it is never a tag), or as `AB#1234` as Azure Boards
+writes it. Its page is the note `items/1234`:
 above its links it shows the notes, todos, people and meetings that mention `#1234`, the hours booked on it in Times
 (per ISO week and in total, read from Times' day files, never changed) and the commits whose message mentions it in
 the git repositories you list in Settings, under *Repository folders* (absolute paths, at most 20; stored as

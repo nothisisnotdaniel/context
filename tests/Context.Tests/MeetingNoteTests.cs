@@ -261,7 +261,8 @@ public sealed class MeetingNoteTests : IDisposable
 
         Assert.Equal(
             "# 2026-11-15\n\n#meeting\n\n- Title: Budget review\n- Time: 2026-11-15 14:00-15:30\n"
-            + "- Location: Room 4\n- Attendees: @[Anna Schmidt], Bob [ext], Eve*, CON\n",
+            + "- Location: Room 4\n- Attendees: @[Anna Schmidt], Bob [ext], Eve*, CON\n"
+            + "\n## Notes\n\n## Decisions\n\n## Actions\n",
             text);
         Assert.Contains(MeetingNote.Tag, TagParser.Parse(text));
         Assert.Equal(["Anna Schmidt"], PersonParser.Parse(text));
@@ -274,7 +275,8 @@ public sealed class MeetingNoteTests : IDisposable
         Appointment appointment = new Appointment(string.Empty, null, At(15, 9), At(15, 10), false);
 
         Assert.Equal(
-            "# 2026-11-15\n\n#meeting\n\n- Title: (no title)\n- Time: 2026-11-15 09:00-10:00\n- Attendees: none\n",
+            "# 2026-11-15\n\n#meeting\n\n- Title: (no title)\n- Time: 2026-11-15 09:00-10:00\n- Attendees: none\n"
+            + "\n## Notes\n\n## Decisions\n\n## Actions\n",
             MeetingNote.Format(appointment));
         Assert.DoesNotContain("Location", MeetingNote.Format(new Appointment("x", string.Empty, At(15, 9), At(15, 10), false)));
     }
@@ -319,6 +321,12 @@ public sealed class MeetingNoteTests : IDisposable
                 "- Time: 2026-11-15 09:00-10:00",
                 "- Location: Here there�",
                 "- Attendees: Name Next",
+                string.Empty,
+                "## Notes",
+                string.Empty,
+                "## Decisions",
+                string.Empty,
+                "## Actions",
                 string.Empty,
             ],
             lines);
@@ -770,5 +778,270 @@ public sealed class MeetingNoteTests : IDisposable
         Assert.Equal(
             File.ReadAllBytes(Path.Combine(other, "Meetings", "Weekly", "2026-11-19.md")),
             File.ReadAllBytes(NotePath("Meetings/Weekly/2026-11-19")));
+    }
+
+    // 381 ------------------------------------------------------------------------------------------
+
+    private static readonly DateTime Noon = At(15, 12);
+
+    private static Appointment Timed(string title, int hour, int minute, int endHour, int endMinute) =>
+        new(title, null, At(15, hour, minute), At(15, endHour, endMinute), false);
+
+    private static Appointment AllDay(string title) => new(title, null, At(15, 0), At(16, 0), true);
+
+    private static Appointment? Select(IReadOnlyList<Appointment> list, string argument, DateTime now, out string? error) =>
+        MeetingNote.Select(list, argument, now, out error);
+
+    // 381 AC-1: no argument (or blank) picks the first running timed appointment; all-day ones are never picked.
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData(" \t ")]
+    public void Select_Blank_PicksRunning(string argument)
+    {
+        Appointment allDay = AllDay("Holiday");
+        Appointment first = Timed("First", 11, 0, 13, 0);
+        Appointment second = Timed("Second", 11, 30, 12, 30);
+        Appointment later = Timed("Later", 14, 0, 15, 0);
+
+        Assert.Same(first, Select([allDay, later, first, second], argument, Noon, out string? error));
+        Assert.Null(error);
+    }
+
+    // 381 AC-1: nothing running: the timed one with the earliest start after now, ties in list order; an end equal to
+    // now no longer runs and a start equal to now runs.
+    [Fact]
+    public void Select_Blank_NothingRunning_PicksNextEarliest_TiesInListOrder()
+    {
+        Appointment past = Timed("Past", 9, 0, 12, 0);
+        Appointment late = Timed("Late", 16, 0, 17, 0);
+        Appointment tieA = Timed("Tie A", 14, 0, 15, 0);
+        Appointment tieB = Timed("Tie B", 14, 0, 14, 30);
+
+        Assert.Same(tieA, Select([past, late, tieA, tieB], string.Empty, Noon, out _));
+        Assert.Same(late, Select([past, late], string.Empty, Noon, out _));
+        Appointment startsNow = Timed("Now", 12, 0, 12, 30);
+        Assert.Same(startsNow, Select([past, late, startsNow], string.Empty, Noon, out _));
+    }
+
+    // 381 AC-1: only all-day or past appointments: the fixed line; none at all: the old line.
+    [Fact]
+    public void Select_Blank_NoneLeft_Errors()
+    {
+        Assert.Null(Select([AllDay("Holiday"), Timed("Past", 9, 0, 10, 0)], string.Empty, Noon, out string? error));
+        Assert.Equal("There is no current or next appointment today.", error);
+        Assert.Equal(MeetingNote.NoCurrentText, error);
+
+        Assert.Null(Select([], string.Empty, Noon, out error));
+        Assert.Equal("There are no appointments today.", error);
+        Assert.Null(Select([], "Standup", Noon, out error));
+        Assert.Equal("There are no appointments today.", error);
+    }
+
+    // 381 AC-2: digits only (as given) is the number, as Pick; an all-day appointment can be picked by number.
+    [Fact]
+    public void Select_Digits_IsTheNumber()
+    {
+        Appointment allDay = AllDay("Holiday");
+        Appointment timed = Timed("Standup", 9, 0, 9, 15);
+
+        Assert.Same(allDay, Select([allDay, timed], "1", Noon, out _));
+        Assert.Same(timed, Select([allDay, timed], "02", Noon, out _));
+        Assert.Null(Select([allDay, timed], "3", Noon, out string? error));
+        Assert.Equal("There is no appointment 3 today.", error);
+    }
+
+    // 381 AC-3: H:mm and HH:mm pick the first timed appointment with start <= t < end; no match is the fixed line.
+    [Theory]
+    [InlineData("9:30", "Standup")]
+    [InlineData("09:30", "Standup")]
+    [InlineData(" 9:30 ", "Standup")]
+    [InlineData("10:00", "Review")]
+    [InlineData("10:59", "Review")]
+    public void Select_Time_PicksRunningThen(string argument, string expected)
+    {
+        Appointment allDay = AllDay("Holiday");
+        Appointment standup = Timed("Standup", 9, 0, 10, 0);
+        Appointment review = Timed("Review", 10, 0, 11, 0);
+        Appointment overlap = Timed("Overlap", 9, 15, 10, 30);
+
+        Assert.Equal(expected, Select([allDay, standup, review, overlap], argument, Noon, out _)?.Title);
+    }
+
+    [Theory]
+    [InlineData("11:00", "There is no appointment at 11:00 today.")]
+    [InlineData("08:05", "There is no appointment at 8:05 today.")]
+    [InlineData("0:00", "There is no appointment at 0:00 today.")]
+    [InlineData("23:59", "There is no appointment at 23:59 today.")]
+    public void Select_Time_NoMatch_FixedLine(string argument, string expected)
+    {
+        Assert.Null(Select([AllDay("Holiday"), Timed("Review", 10, 0, 11, 0)], argument, Noon, out string? error));
+        Assert.Equal(expected, error);
+    }
+
+    // 381 AC-3/AC-4: only a real time is a time; 25:00, 9:5 or 9.30 are titles.
+    [Theory]
+    [InlineData("9:30", true)]
+    [InlineData("09:30", true)]
+    [InlineData("23:59", true)]
+    [InlineData("0:00", true)]
+    [InlineData("24:00", false)]
+    [InlineData("25:00", false)]
+    [InlineData("9:60", false)]
+    [InlineData("9:5", false)]
+    [InlineData("009:30", false)]
+    [InlineData("9.30", false)]
+    [InlineData(":30", false)]
+    [InlineData("９:30", false)]
+    public void TryParseTime_RealTimesOnly(string text, bool expected)
+    {
+        Assert.Equal(expected, MeetingNote.TryParseTime(text, out _));
+    }
+
+    [Fact]
+    public void Select_InvalidTime_IsATitle()
+    {
+        Appointment odd = Timed("Call 25:00 sharp", 9, 0, 10, 0);
+
+        Assert.Same(odd, Select([Timed("Other", 10, 0, 11, 0), odd], "25:00", Noon, out _));
+        Assert.Null(Select([odd], "24:00", Noon, out string? error));
+        Assert.Equal("There is no appointment called 24:00 today.", error);
+    }
+
+    // 381 AC-4: an exact title (ignoring case) beats an earlier contains match; else the first containing it.
+    [Fact]
+    public void Select_Title_ExactBeatsContains_ThenFirstContains()
+    {
+        Appointment weeklyReview = Timed("Weekly review", 9, 0, 10, 0);
+        Appointment review = Timed("Review", 13, 0, 14, 0);
+        Appointment budgetReview = Timed("Budget REVIEW", 15, 0, 16, 0);
+
+        Assert.Same(review, Select([weeklyReview, review, budgetReview], "review", Noon, out _));
+        Assert.Same(weeklyReview, Select([weeklyReview, budgetReview], "REVIEW", Noon, out _));
+        Assert.Same(budgetReview, Select([weeklyReview, budgetReview], "budget   review", Noon, out _));
+        Appointment holiday = AllDay("Holiday");
+        Assert.Same(holiday, Select([weeklyReview, holiday], "holiday", Noon, out _));
+    }
+
+    // 381 AC-4: no match is one line naming the text; outside text stays one line.
+    [Fact]
+    public void Select_Title_NoMatch_OneLine()
+    {
+        Assert.Null(Select([Timed("Review", 9, 0, 10, 0)], "Planning", Noon, out string? error));
+        Assert.Equal("There is no appointment called Planning today.", error);
+
+        Assert.Null(Select([Timed("Review", 9, 0, 10, 0)], "a\nb\u0007", Noon, out error));
+        Assert.Equal("There is no appointment called a b� today.", error);
+        Assert.DoesNotContain('\n', error!);
+    }
+
+    // 381 AC-5: a new note is Format (now ending in the three sections), then the topics, then the carry-over.
+    [Fact]
+    public void Ensure_WithTopicsAndCarryOver_ExactBytes()
+    {
+        WriteWeekly("2026-11-12", "# 2026-11-12\n\n## Actions\n\n- { } Send budget\n- [ ] Book room\n");
+        NoteTopic topic = new NoteTopic("people/Anna", 3, "Anna", "Ask about Q4", "next: @[Anna] Ask about Q4");
+
+        MeetingNote.Ensure(new NoteStore(root), Weekly(), topics: [topic]);
+
+        Assert.Equal(
+            "# 2026-11-19\n\n#meeting\n\n- Title: Weekly\n- Time: 2026-11-19 09:00-09:30\n- Attendees: none\n"
+            + "\n## Notes\n\n## Decisions\n\n## Actions\n"
+            + "\n## Topics\n\n- @[Anna]: Ask about Q4 (from [[people/Anna]])\n"
+            + "\n## From last time\n\nFrom [[Meetings/Weekly/2026-11-12]]:\n\n- { } Send budget\n- [ ] Book room\n",
+            Created());
+    }
+
+    // 381 AC-5: an existing note is never changed (no sections added).
+    [Fact]
+    public void Ensure_ExistingNote_NoSectionsAdded()
+    {
+        WriteWeekly("2026-11-19", "mine\n");
+        byte[] before = File.ReadAllBytes(NotePath("Meetings/Weekly/2026-11-19"));
+
+        Assert.Equal(MeetingNoteKind.Existing, MeetingNote.Ensure(new NoteStore(root), Weekly()).Kind);
+        Assert.Equal(before, File.ReadAllBytes(NotePath("Meetings/Weekly/2026-11-19")));
+    }
+
+    // 381 AC-9: the booking name drops every #<n>/AB#<n> token the parser finds, collapses, trims and caps at 200.
+    [Theory]
+    [InlineData("Sprint review AB#1234", "Sprint review")]
+    [InlineData("#12 Planning  #34 sync", "Planning sync")]
+    [InlineData("ab#7 Retro", "Retro")]
+    [InlineData("Release #1a and xAB#12 and AB#0", "Release #1a and xAB#12 and AB#0")]
+    [InlineData("Release #1.0", "Release .0")]
+    [InlineData("AB#12a", "AB#12a")]
+    [InlineData("AB#1234", "Meeting")]
+    [InlineData("", "Meeting")]
+    [InlineData("Line\nbreak #5", "Line break")]
+    [InlineData("`#12` code", "`#12` code")]
+    [InlineData("#05 Weekly", "05 Weekly")]
+    [InlineData("#007 Bond", "007 Bond")]
+    [InlineData("#0 Zero", "0 Zero")]
+    [InlineData("#abc Topic", "abc Topic")]
+    [InlineData("## - #05 Weekly", "05 Weekly")]
+    [InlineData("--version", "version")]
+    [InlineData("-x #1", "x")]
+    [InlineData("#", "Meeting")]
+    [InlineData("--", "Meeting")]
+    [InlineData("Weekly #05", "Weekly #05")]
+    public void BookingName_RemovesWorkItems(string title, string expected)
+    {
+        Assert.Equal(expected, MeetingNote.BookingName(new Appointment(title, null, At(15, 9), At(15, 10), false)));
+    }
+
+    [Fact]
+    public void BookingName_CappedAt200()
+    {
+        string name = MeetingNote.BookingName(new Appointment(new string('x', 300), null, At(15, 9), At(15, 10), false));
+
+        Assert.Equal(new string('x', 200), name);
+        Assert.Equal(200, MeetingNote.MaxBookingName);
+    }
+
+    // 381 AC-9: checkpoint, H:mm, #<position> when the note's first work item is on the quicklist, then the name.
+    [Fact]
+    public void BookingArguments_QuicklistHitAndMiss()
+    {
+        Appointment appointment = new Appointment("Sprint AB#1234", null, At(15, 9, 5), At(15, 10), false);
+        IReadOnlyList<(int WorkItem, string Title)> projects = [(77, "Other"), (1234, "Sprint"), (1234, "Again")];
+
+        Assert.Equal(
+            ["checkpoint", "9:05", "#2", "Sprint"],
+            MeetingNote.BookingArguments(appointment, "- Title: Sprint AB#1234\nsee #77\n", projects));
+        Assert.Equal(
+            ["checkpoint", "9:05", "#1", "Sprint"],
+            MeetingNote.BookingArguments(appointment, "#77 first, then AB#1234", projects));
+        Assert.Equal(
+            ["checkpoint", "9:05", "Sprint"],
+            MeetingNote.BookingArguments(appointment, "#555 only", projects));
+        Assert.Equal(["checkpoint", "9:05", "Sprint"], MeetingNote.BookingArguments(appointment, "no items", projects));
+        Assert.Equal(["checkpoint", "9:05", "Sprint"], MeetingNote.BookingArguments(appointment, "AB#1234", []));
+    }
+
+    // 381 AC-9/AC-10: the texts for each run result; Times' output is one cleaned, capped line.
+    [Fact]
+    public void BookingOutcome_TextsPerKind()
+    {
+        Appointment appointment = new Appointment("Sprint #9", null, At(15, 14, 0), At(15, 15), false);
+
+        Assert.True(MeetingNote.BookingOutcome(appointment, new TimesRunResult(TimesRunKind.Done, 0, "ok", string.Empty), out string text));
+        Assert.Equal("Booked 14:00 Sprint in Times.", text);
+        Assert.False(MeetingNote.BookingOutcome(appointment, TimesRunResult.NotFound(), out text));
+        Assert.Equal("Times isn't installed, so nothing was booked.", text);
+        Assert.False(MeetingNote.BookingOutcome(appointment, TimesRunResult.TimedOut(), out text));
+        Assert.Equal("Times didn't answer in time.", text);
+        Assert.False(MeetingNote.BookingOutcome(
+            appointment, new TimesRunResult(TimesRunKind.Done, 2, "out line\n", "\n  \n bad\u001b time \nmore\n"), out text));
+        Assert.Equal("Times refused the booking: bad� time", text);
+        Assert.False(MeetingNote.BookingOutcome(
+            appointment, new TimesRunResult(TimesRunKind.Done, 1, "\nfrom stdout\n", string.Empty), out text));
+        Assert.Equal("Times refused the booking: from stdout", text);
+        Assert.False(MeetingNote.BookingOutcome(
+            appointment, new TimesRunResult(TimesRunKind.Done, 1, new string('y', 500), string.Empty), out text));
+        Assert.Equal("Times refused the booking: " + new string('y', 200), text);
+        Assert.False(MeetingNote.BookingOutcome(appointment, new TimesRunResult(TimesRunKind.Done, 3, string.Empty, string.Empty), out text));
+        Assert.Equal("Times refused the booking: exit code 3", text);
+        Assert.Equal("Book Sprint at 14:00 in Times?", MeetingNote.BookingQuestion(appointment));
     }
 }

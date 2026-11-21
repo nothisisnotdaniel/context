@@ -194,10 +194,12 @@ internal static class Program
             pro: Pro.ForBuild(LicenceStore()),
             activationFile: new LicenceActivationFile(LicenceActivationFile.DefaultFolder(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData))));
+        // The Times runner (job 282): the command bar's one-shots and /meeting's booking (job 381); no shell, 10 s timeout.
+        TimesProcessRunner timesRunner = new TimesProcessRunner(TimesCommand, TimeSpan.FromSeconds(10));
         DesktopActions actions = new DesktopActions(
             notes, todos, state, new ShellNoteLauncher(), calendarLink, feed, () => DateTime.Now, calendar,
             timesFolder, new SystemNotifier(),
-            ScreenCapture(folder), new ShellUrlLauncher());
+            ScreenCapture(folder), new ShellUrlLauncher(), timesRunner);
 
         PhotinoBlazorAppBuilder builder = PhotinoBlazorAppBuilder.CreateDefault(args);
         builder.Services.AddSingleton(state);
@@ -327,7 +329,6 @@ internal static class Program
 
         // The command bar (job 282): on macOS Control+Option+Space opens a small window that runs Times one-shots
         // (`tm <words>`, no shell, 10 s timeout) or Context's todo, note and capture lines through Main's hook.
-        TimesProcessRunner timesRunner = new TimesProcessRunner(TimesCommand, TimeSpan.FromSeconds(10));
         PhotinoCommandBarWindow commandBar = new PhotinoCommandBarWindow(
             app.MainWindow,
             () => new CommandBarHost(timesRunner, commandBarContext, () => TimesProjects.Read(timesFolder), Task.Delay));

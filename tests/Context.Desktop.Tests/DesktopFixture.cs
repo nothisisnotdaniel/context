@@ -245,6 +245,9 @@ internal sealed class DesktopFixture : IDisposable
     /// <summary>The located tm path the state reports (job 282); null means not found. Set it before <see cref="CreateState"/>.</summary>
     public string? TimesCommand { get; set; } = "/fake/tm";
 
+    /// <summary>The Times runner the actions book a meeting through (job 381); it never starts tm.</summary>
+    public FakeTimesRunner TimesRunner { get; } = new FakeTimesRunner();
+
     /// <summary>The licence store the state's Pro reads (job 367); in memory, supported, empty. Set it up before <see cref="CreateState"/>.</summary>
     public FakeLicenceStore LicenceStore { get; } = new FakeLicenceStore();
 
@@ -295,7 +298,7 @@ internal sealed class DesktopFixture : IDisposable
             activationFile: new LicenceActivationFile(ActivationFolder));
         Actions = new DesktopActions(
             Notes, Todos, State, Launcher, link, feed, () => LocalNow, new CalendarStore(Root, Zone), TimesFolder, Notifier,
-            ScreenCapture, UrlLauncher);
+            ScreenCapture, UrlLauncher, TimesRunner);
         Bunit.Services.AddSingleton(State);
         Bunit.Services.AddSingleton(Actions);
         Bunit.Services.AddTransient<EditorInterop>();

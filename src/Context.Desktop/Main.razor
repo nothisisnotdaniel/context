@@ -240,6 +240,12 @@
             <ConfirmDialog Question="@($"Restore {DesktopText.OneLine(restored)} to the version from {HistoryPanel.TimeText(version.SavedUtc, State.Zone)}? The current text is kept as a version.")"
                            ConfirmLabel="Restore" Busy="running" OnConfirm="RestoreConfirmed" OnCancel="CancelRestore" />
         }
+        @if (bookingOffer is { } offer)
+        {
+            @* Job 381: a just-created meeting note's appointment is booked in Times only after this explicit yes. *@
+            <ConfirmDialog Question="@MeetingNote.BookingQuestion(offer.Appointment)" ConfirmLabel="Book"
+                           Busy="running" OnConfirm="BookConfirmed" OnCancel="CancelBooking" />
+        }
         @if (paletteOpen)
         {
             <CommandPalette OnRun="RunCommand" OnClose="ClosePalette" />
@@ -318,6 +324,10 @@ else
     private DateOnly? pendingPickedDay;
     private bool pendingBriefing;
     private Appointment? pendingMeeting;
+    // Job 381: true when pendingMeeting came from /meeting, so its created note offers the Times booking.
+    private bool pendingMeetingOffersBooking;
+    // Job 381: the created meeting note whose appointment the Book dialog offers to book in Times.
+    private (Appointment Appointment, string Note)? bookingOffer;
     private bool paletteOpen;
     // The quick switcher (job 364) and the notes it offers, taken from the snapshot when it opens.
     private bool switcherOpen;
@@ -885,6 +895,7 @@ else
             pendingBriefing = false;
             pendingAppointment = null;
             pendingMeeting = first;
+            pendingMeetingOffersBooking = false;
             discarding = true;
             return;
         }
@@ -1221,7 +1232,9 @@ else
 
         if (pendingMeeting is { } meeting)
         {
+            bool offersBooking = pendingMeetingOffersBooking;
             pendingMeeting = null;
+            pendingMeetingOffersBooking = false;
             pendingAppointment = null;
             if (running)
             {
@@ -1240,6 +1253,11 @@ else
             }
 
             ShowDaily(meetingNote);
+            if (offersBooking)
+            {
+                OfferBooking(meeting, meetingNote);
+            }
+
             return;
         }
 
@@ -1693,15 +1711,16 @@ else
                 break;
             }
             case "/meeting":
-                // The number of today's appointment in the snapshot's current view, numbered as `context current`.
-                if (!MeetingNote.TryParseNumber(rest, out int meetingNumber))
+                // Job 381: like `context meeting`: blank is the current or next appointment, digits the number in the
+                // snapshot's current view (numbered as `context current`), H:mm the one running then, else a title.
+                if (rest.Length > 0 && rest.All(char.IsAsciiDigit) && !MeetingNote.TryParseNumber(rest, out _))
                 {
-                    ShowStatus("Type /meeting <number>.", "red");
+                    ShowStatus(MeetingUsageText, "red");
                     break;
                 }
 
-                Appointment? appointment = MeetingNote.Pick(
-                    Snapshot?.Current?.Appointments ?? [], meetingNumber, out string? meetingError);
+                Appointment? appointment = Actions.SelectMeeting(
+                    Snapshot?.Current?.Appointments ?? [], rest, out string? meetingError);
                 if (appointment is null)
                 {
                     ShowStatus(DesktopText.OneLine(meetingError ?? MeetingNote.NoAppointmentsText), "red");
@@ -1721,6 +1740,7 @@ else
                     pendingBriefing = false;
                     pendingAppointment = null;
                     pendingMeeting = appointment;
+                    pendingMeetingOffersBooking = true;
                     discarding = true;
                     break;
                 }
@@ -1739,6 +1759,7 @@ else
                     }
 
                     ShowDaily(meetingNote);
+                    OfferBooking(appointment, meetingNote);
                 }
 
                 break;
@@ -3133,6 +3154,43 @@ else
 
         return null;
     }
+
+    // Job 381: the red text for a digits-only /meeting argument that isn't a number of at least 1.
+    internal const string MeetingUsageText = "Type /meeting [<number>|<H:mm>|<title>].";
+
+    // Job 381: only a note /meeting just created, for a timed appointment, with tm found, offers the booking.
+    private void OfferBooking(Appointment appointment, ActionResult meetingNote)
+    {
+        if (meetingNote.Kind == ActionKind.Done && meetingNote.Reason != ActionReason.Unchanged
+            && !appointment.AllDay && State.TimesCommandFound)
+        {
+            bookingOffer = (appointment, meetingNote.Text);
+        }
+    }
+
+    private async Task BookConfirmed(Confirmation confirmed)
+    {
+        if (bookingOffer is not { } offer || running)
+        {
+            return;
+        }
+
+        running = true;
+        ActionResult booked;
+        try
+        {
+            booked = await Actions.BookMeeting(offer.Appointment, offer.Note, confirmed);
+        }
+        finally
+        {
+            running = false;
+            bookingOffer = null;
+        }
+
+        ShowStatus(DesktopText.OneLine(booked.Text), booked.Kind == ActionKind.Done ? "accent" : "red");
+    }
+
+    private void CancelBooking() => bookingOffer = null;
 
     private void ShowStatus(string text, string cssClass)
     {

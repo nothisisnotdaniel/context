@@ -26,6 +26,7 @@
     <Compile Include="..\Context.Tests\TodoArchiveFile.cs" Link="TodoArchiveFile.cs" />
     <Compile Include="..\Context.Tests\TestLicences.cs" Link="TestLicences.cs" />
     <Compile Include="..\Context.Tests\FakeLicenceStore.cs" Link="FakeLicenceStore.cs" />
+    <Compile Include="..\Context.Tests\FakeTimesRunner.cs" Link="FakeTimesRunner.cs" />
   </ItemGroup>
 
   <ItemGroup>

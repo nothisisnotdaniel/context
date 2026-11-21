@@ -53,8 +53,10 @@ public sealed class DesktopSourceTests
 
     // 282: the real Times runner (starts tm), named only by itself, Program.cs and its own test.
     private const string RealTimesRunner = "Times" + "ProcessRunner";
-    private const string RealTimesRunnerFile = "src/Context.Desktop/" + RealTimesRunner + ".cs";
-    private const string RealTimesRunnerTestFile = "tests/Context.Desktop.Tests/" + RealTimesRunner + "Tests.cs";
+    // Job 381: the runner and its test moved to Core and Context.Tests, so the command line can book too.
+    private const string RealTimesRunnerFile = "src/Context.Core/" + RealTimesRunner + ".cs";
+    private const string RealTimesRunnerTestFile = "tests/Context.Tests/" + RealTimesRunner + "Tests.cs";
+    private const string CliProgramFile = "src/Context/Program.cs";
     private const string CommandBarFolder = "src/Context.Desktop/wwwroot/commandbar/";
 
     // 136: SealedNote.cs makes P-256 keys in memory with .NET's ECDiffieHellman.Create; that writes no data.
@@ -1728,7 +1730,7 @@ public sealed class DesktopSourceTests
             .ToList();
 
         Assert.Equal(
-            new[] { RealLauncherFile, RealNotifierFile, RealScreenCaptureFile, RealTimesRunnerFile, RealUrlLauncherFile }.Order(StringComparer.Ordinal),
+            new[] { RealLauncherFile, RealNotifierFile, RealScreenCaptureFile, RealUrlLauncherFile }.Order(StringComparer.Ordinal),
             found.Order(StringComparer.Ordinal));
     }
 
@@ -1961,7 +1963,7 @@ public sealed class DesktopSourceTests
             StringComparison.Ordinal);
         Assert.Contains(
             "            timesFolder, new " + RealNotifier + "(),\n"
-                + "            ScreenCapture(folder), new " + RealUrlLauncher + "());",
+                + "            ScreenCapture(folder), new " + RealUrlLauncher + "(), timesRunner);",
             File.ReadAllText(Path.Combine(root, ProgramFile)).ReplaceLineEndings("\n"),
             StringComparison.Ordinal);
     }
@@ -2021,25 +2023,31 @@ public sealed class DesktopSourceTests
             RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs"));
     }
 
-    // 282 AC-9: only the Times runner's own test names the real runner (it starts temp scripts); every other test uses
-    // FakeTimesRunner. In the app only the runner itself and Program.cs name it.
+    // 282 AC-9, 381: only the Times runner's own test names the real runner (it starts temp scripts); every other test
+    // uses FakeTimesRunner (WorkItemSourceTests only reads its source). In the apps only the runner itself (in Core
+    // since job 381) and the two Program.cs name it.
     [Fact]
     public void Sources_NameTheTimesRunnerOnlyInItselfProgramAndItsTest()
     {
         string root = RepoFiles.Root();
         List<string> found = [];
-        foreach (string folder in new[] { "tests/Context.Tests", "tests/Context.Desktop.Tests", RepoFiles.DesktopFolder })
+        foreach (string folder in new[] { "tests/Context.Tests", "tests/Context.Desktop.Tests", RepoFiles.DesktopFolder, "src/Context.Core", "src/Context" })
         {
             found.AddRange(RepoFiles.Sources(root, folder, ".cs", ".razor", ".csproj")
                 .Where(f => File.ReadAllText(Path.Combine(root, f)).Contains(RealTimesRunner, StringComparison.Ordinal)));
         }
 
         Assert.Equal(
-            new[] { ProgramFile, RealTimesRunnerFile, RealTimesRunnerTestFile }.Order(StringComparer.Ordinal),
+            new[] { ProgramFile, CliProgramFile, RealTimesRunnerFile, RealTimesRunnerTestFile, "tests/Context.Tests/WorkItemSourceTests.cs" }
+                .Order(StringComparer.Ordinal),
             found.Order(StringComparer.Ordinal));
         Assert.Contains(
-            "tests/Context.Desktop.Tests/FakeTimesRunner.cs",
-            RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs"));
+            "tests/Context.Tests/FakeTimesRunner.cs",
+            RepoFiles.Sources(root, "tests/Context.Tests", ".cs"));
+        Assert.Contains(
+            "<Compile Include=\"..\\Context.Tests\\FakeTimesRunner.cs\" Link=\"FakeTimesRunner.cs\" />",
+            File.ReadAllText(Path.Combine(root, "tests/Context.Desktop.Tests/Context.Desktop.Tests.csproj")),
+            StringComparison.Ordinal);
     }
 
     // 282 AC-9: the bar page sets shown text only through textContent and runs no built code.
