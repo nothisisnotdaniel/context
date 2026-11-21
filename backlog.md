@@ -380,6 +380,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#427](backlog/427-hint-cmd-or-ctrl-click-in.md) Hint Cmd or Ctrl click in the web link title
 - [?] [#428](backlog/428-keep-unrelated-status-messages-when-a.md) Keep unrelated status messages when a web link opens
 - [?] [#429](backlog/429-keep-reference-style-links-byte-for.md) Keep reference-style links byte for byte on save
+- [?] [#430](backlog/430-warn-when-the-todo-archive-nears.md) Warn when the todo archive nears its 20 MB cap
 
 ## Dropped with the terminal UI
 
