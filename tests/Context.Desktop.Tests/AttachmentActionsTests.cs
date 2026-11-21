@@ -7,6 +7,9 @@ public sealed class AttachmentActionsTests : IDisposable
 {
     private static readonly byte[] Png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
     private static readonly byte[] Pdf = Encoding.ASCII.GetBytes("%PDF-1.7\n%...");
+    private static readonly byte[] Drawing = Encoding.UTF8.GetBytes(
+        "{\"type\":\"excalidraw\",\"elements\":[{\"type\":\"rectangle\",\"x\":0,\"y\":0,\"width\":40,\"height\":20}]}");
+    private static readonly byte[] Unrenderable = Encoding.UTF8.GetBytes("{\"type\":\"excalidraw\"}");
     private static readonly byte[] Svg = Encoding.ASCII.GetBytes("<svg xmlns=\"http://www.w3.org/2000/svg\"/>");
 
     // Generous: the bounded scans take well under a second; the old quadratic ones took hours.
@@ -350,6 +353,131 @@ public sealed class AttachmentActionsTests : IDisposable
 
         Assert.Equal(ActionKind.Done, result.Kind);
         Assert.False(Directory.Exists(Path.Combine(data.Root, "Plan")));
+    }
+
+    // Job 384 AC-6: each linked drawing that resolves and renders is an inline SVG image after the images; others
+    // are left out.
+    [Fact]
+    public async Task InlineImages_Drawings_RenderedAsSvg()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        await data.RefreshAsync();
+        await data.Actions!.AttachFiles("Plan", 3,
+        [
+            new DroppedFile("d.excalidraw", Drawing.Length, Drawing),
+            new DroppedFile("bad.excalidraw", Unrenderable.Length, Unrenderable),
+            new DroppedFile("shot.png", Png.Length, Png),
+        ]);
+        string text = "![d](.attachments/d.excalidraw) ![b](.attachments/bad.excalidraw) "
+            + "![m](.attachments/missing.excalidraw) ![s](.attachments/shot.png)\n";
+
+        IReadOnlyList<InlineImage> images = await data.State!.InlineImages("Plan", text);
+
+        Assert.Equal([".attachments/shot.png", ".attachments/d.excalidraw"], images.Select(i => i.Src));
+        InlineImage drawing = images[1];
+        Assert.Equal("image/svg+xml", drawing.Mime);
+        Assert.Equal(ExcalidrawSvg.Render(Drawing), Encoding.UTF8.GetString(Convert.FromBase64String(drawing.Base64)));
+    }
+
+    // Job 384 AC-6: a sensitive note gets no drawing, with no key-store call.
+    [Fact]
+    public async Task InlineImages_Sensitive_None()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("Secret", "# Secret\n");
+        data.WriteFile(Path.Combine(".attachments", "d.excalidraw"), Encoding.UTF8.GetString(Drawing));
+        await data.RefreshAsync();
+
+        IReadOnlyList<InlineImage> images = await data.State!.InlineImages("Secret", "![d](.attachments/d.excalidraw)\n");
+
+        Assert.Empty(images);
+        Assert.Equal(0, data.Keys.Agrees);
+    }
+
+    // Job 384 AC-7: a dropped drawing is stored and inserted as an image of its SVG; one that doesn't render is a link.
+    [Fact]
+    public async Task AttachFiles_Drawing_InsertedAsSvgImage_OrLink()
+    {
+        data.WriteNote("Plan", "# Plan\n");
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.AttachFiles("Plan", 2,
+        [
+            new DroppedFile("Sketch.excalidraw", Drawing.Length, Drawing),
+            new DroppedFile("bad.excalidraw", Unrenderable.Length, Unrenderable),
+        ]);
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        AttachmentLine drawing = result.Attached![0];
+        Assert.Equal((ActionKind.Done, "Attached Sketch.excalidraw.", ".attachments/Sketch.excalidraw", true, "image/svg+xml"),
+            (drawing.Kind, drawing.Text, drawing.Src, drawing.IsImage, drawing.Mime));
+        Assert.Equal(ExcalidrawSvg.Render(Drawing), Encoding.UTF8.GetString(Convert.FromBase64String(drawing.Base64!)));
+        AttachmentLine link = result.Attached![1];
+        Assert.Equal((ActionKind.Done, ".attachments/bad.excalidraw", false, (string?)null),
+            (link.Kind, link.Src, link.IsImage, link.Base64));
+        Assert.Equal(Drawing, File.ReadAllBytes(Path.Combine(data.Root, ".attachments", "Sketch.excalidraw")));
+    }
+
+    // Job 384 AC-7: a drawing dropped on a sensitive note is refused with the existing text and no key-store call.
+    [Fact]
+    public async Task AttachFiles_Drawing_Sensitive_Refused()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteSensitive("Secret", "# Secret\n");
+        await data.RefreshAsync();
+        SortedDictionary<string, string> before = Files();
+
+        ActionResult result = await data.Actions!.AttachFiles("Secret", 1, [new DroppedFile("d.excalidraw", Drawing.Length, Drawing)]);
+
+        Assert.Equal((ActionKind.Refused, "Attachments can't be added to a sensitive note."), (result.Kind, result.Text));
+        Assert.Equal(0, data.Keys.Agrees);
+        Assert.Equal(before, Files());
+    }
+
+    // Job 384 AC-9: a drawing the note links is launched once with its resolved path.
+    [Fact]
+    public async Task OpenAttachment_LinkedDrawing_LaunchesOnce()
+    {
+        await WriteLinked("Plan", "d.excalidraw", Drawing);
+
+        ActionResult result = await data.Actions!.OpenAttachment("Plan", ".attachments/d.excalidraw");
+
+        Assert.Equal(ActionKind.Done, result.Kind);
+        Assert.Equal([Path.Combine(data.Root, ".attachments", "d.excalidraw")], data.Launcher.Launched);
+    }
+
+    // Job 384 AC-9: a drawing the note doesn't link, a missing one, or a fake one is refused and never launched.
+    [Theory]
+    [InlineData("Other", ".attachments/d.excalidraw", "d.excalidraw")]
+    [InlineData("Plan", ".attachments/missing.excalidraw", "missing.excalidraw")]
+    [InlineData("Plan", ".attachments/fake.excalidraw", "fake.excalidraw")]
+    [InlineData("Gone", ".attachments/d.excalidraw", "d.excalidraw")]
+    public async Task OpenAttachment_DrawingNotLinkedOrResolved_Refused(string note, string src, string shown)
+    {
+        await WriteLinked("Plan", "d.excalidraw", Drawing);
+        data.WriteNote("Plan", "# Plan\n\n![d](.attachments/d.excalidraw) ![m](.attachments/missing.excalidraw) "
+            + "![f](.attachments/fake.excalidraw)\n");
+        data.WriteFile(Path.Combine(".attachments", "fake.excalidraw"), "<svg onload=\"x\"/>");
+        data.WriteNote("Other", "# Other\n");
+        await data.RefreshAsync();
+
+        ActionResult result = await data.Actions!.OpenAttachment(note, src);
+
+        Assert.Equal((ActionKind.Refused, $"Can't open {shown}."), (result.Kind, result.Text));
+        Assert.Empty(data.Launcher.Launched);
+    }
+
+    // Job 384 AC-9: a launcher that throws on a drawing gives Failed with the same text.
+    [Fact]
+    public async Task OpenAttachment_Drawing_LauncherThrows_Failed()
+    {
+        await WriteLinked("Plan", "d.excalidraw", Drawing);
+        data.Launcher.Throws = new InvalidOperationException("secret detail");
+
+        ActionResult result = await data.Actions!.OpenAttachment("Plan", ".attachments/d.excalidraw");
+
+        Assert.Equal((ActionKind.Failed, "Can't open d.excalidraw."), (result.Kind, result.Text));
+        Assert.Single(data.Launcher.Launched);
     }
 
     private async Task WriteLinked(string title, string file, byte[] bytes)

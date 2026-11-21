@@ -1320,6 +1320,51 @@ public sealed class MainTests : IDisposable
         Assert.Single(data.Launcher.Launched);
     }
 
+    // Job 384 AC-7 (page side): a dropped drawing is stored and inserted once as an image of its SVG.
+    [Fact]
+    public async Task Drop_Drawing_InsertsSvgImage()
+    {
+        byte[] drawing = System.Text.Encoding.UTF8.GetBytes(
+            "{\"type\":\"excalidraw\",\"elements\":[{\"type\":\"ellipse\",\"x\":0,\"y\":0,\"width\":30,\"height\":20}]}");
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await OpenFull(cut, js, "Plan");
+
+        await cut.InvokeAsync(() => js.Page().OnDrop(1, [new DroppedFile("sketch.excalidraw", drawing.Length, drawing)]));
+
+        cut.WaitForAssertion(() => Assert.Equal("Attached sketch.excalidraw.", cut.Find(".note-editor .status .line").TextContent), Wait);
+        JSRuntimeInvocation insert = Assert.Single(js.Calls("ContextEditor.insertAttachment"));
+        string svg = ExcalidrawSvg.Render(drawing)!;
+        Assert.Equal(
+            [".attachments/sketch.excalidraw", "sketch.excalidraw", true, "image/svg+xml",
+                Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(svg))],
+            insert.Arguments.Skip(1));
+        Assert.Equal(drawing, File.ReadAllBytes(Path.Combine(data.Root, ".attachments", "sketch.excalidraw")));
+    }
+
+    // Job 384 AC-6/AC-8/AC-9 (page side): a note with a drawing mounts its SVG, and its Open in Excalidraw click
+    // (OnAttachment) launches the drawing file.
+    [Fact]
+    public async Task Open_Drawing_MountsSvg_AndClickLaunches()
+    {
+        string json = "{\"type\":\"excalidraw\",\"elements\":[{\"type\":\"rectangle\",\"x\":0,\"y\":0,\"width\":10,\"height\":10}]}";
+        data.WriteNote("Plan", "# Plan\n\n![d](.attachments/d.excalidraw)\n");
+        data.WriteFile(Path.Combine(".attachments", "d.excalidraw"), json);
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await OpenFull(cut, js, "Plan");
+
+        InlineImage image = Assert.Single(js.MountedImages());
+        Assert.Equal((".attachments/d.excalidraw", "image/svg+xml"), (image.Src, image.Mime));
+        Assert.Equal(ExcalidrawSvg.Render(System.Text.Encoding.UTF8.GetBytes(json)),
+            System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(image.Base64)));
+
+        await cut.InvokeAsync(() => js.Page().OnAttachment(".attachments/d.excalidraw"));
+        cut.WaitForAssertion(() => Assert.Single(data.Launcher.Launched), Wait);
+        Assert.Equal(Path.Combine(data.Root, ".attachments", "d.excalidraw"), data.Launcher.Launched[0]);
+    }
+
     // 354 AC-8: a Cmd/Ctrl+clicked web link (OnWebLink) goes to OpenWebLink and opens through the URL launcher; a
     // refused one shows the red line in the main status and launches nothing.
     [Fact]

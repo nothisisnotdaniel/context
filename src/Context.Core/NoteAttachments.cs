@@ -12,6 +12,9 @@ internal enum AttachmentType
     Gif,
     WebP,
     Pdf,
+
+    /// <summary>An Excalidraw drawing (job 384): a <c>.excalidraw</c> JSON object whose top-level <c>type</c> is <c>"excalidraw"</c>.</summary>
+    Excalidraw,
 }
 
 /// <summary>How <see cref="NoteAttachments.Add"/> ended.</summary>
@@ -54,7 +57,7 @@ internal sealed record AttachmentAdd
     /// <summary><c>.attachments/&lt;name&gt;</c>, only when added.</summary>
     public string? Src => Name is null ? null : NoteAttachments.FolderName + "/" + Name;
 
-    /// <summary><c>![name](.attachments/name)</c> for an image, <c>[name](.attachments/name)</c> for a PDF; only when added.</summary>
+    /// <summary><c>![name](.attachments/name)</c> for an image or drawing, <c>[name](.attachments/name)</c> for a PDF; only when added.</summary>
     public string? Markdown { get; }
 }
 
@@ -119,8 +122,14 @@ internal sealed class NoteAttachments
     /// <summary>The longest stem of a stored name (the part before its one <c>.</c>).</summary>
     public const int MaxStemLength = 100;
 
-    /// <summary>The longest extension a stored file can have (<c>jpeg</c>, <c>webp</c>).</summary>
-    public const int MaxExtensionLength = 4;
+    /// <summary>The longest extension a stored file can have (<c>excalidraw</c>, job 384).</summary>
+    public const int MaxExtensionLength = 10;
+
+    /// <summary>The most drawings a note shows inline (job 384), on top of <see cref="MaxInlineImages"/>.</summary>
+    public const int MaxInlineDrawings = 20;
+
+    /// <summary>The extension of an Excalidraw drawing.</summary>
+    public const string DrawingExtension = "excalidraw";
 
     /// <summary>The longest name a link scan looks at: stem, <c>.</c> and extension.</summary>
     public const int MaxScannedName = MaxStemLength + 1 + MaxExtensionLength;
@@ -186,13 +195,20 @@ internal sealed class NoteAttachments
 
     /// <summary>
     /// The type of <paramref name="bytes"/> when its magic bytes are PNG, JPEG, GIF, WebP or PDF and the extension of
-    /// <paramref name="name"/> (after its last <c>.</c>, ignoring case) is that type's; else
+    /// <paramref name="name"/> (after its last <c>.</c>, ignoring case) is that type's; for the extension
+    /// <c>excalidraw</c>, <see cref="AttachmentType.Excalidraw"/> when the bytes are one UTF-8 JSON object (a BOM
+    /// allowed) whose top-level <c>type</c> is the string <c>"excalidraw"</c>; else
     /// <see cref="AttachmentType.Unsupported"/>.
     /// </summary>
     public static AttachmentType Sniff(string name, ReadOnlySpan<byte> bytes)
     {
         int dot = name.LastIndexOf('.');
         string extension = dot < 0 ? string.Empty : name[(dot + 1)..].ToLowerInvariant();
+        if (extension == DrawingExtension)
+        {
+            return IsExcalidrawJson(bytes) ? AttachmentType.Excalidraw : AttachmentType.Unsupported;
+        }
+
         AttachmentType type = FromBytes(bytes);
         bool matches = type switch
         {
@@ -218,6 +234,7 @@ internal sealed class NoteAttachments
         AttachmentType.Gif => "image/gif",
         AttachmentType.WebP => "image/webp",
         AttachmentType.Pdf => "application/pdf",
+        AttachmentType.Excalidraw => "application/json",
         _ => "application/octet-stream",
     };
 
@@ -303,7 +320,7 @@ internal sealed class NoteAttachments
         }
 
         string name = Store(folder, clean, bytes);
-        string link = IsImage(type) ? $"![{name}]({FolderName}/{name})" : $"[{name}]({FolderName}/{name})";
+        string link = IsImage(type) || type == AttachmentType.Excalidraw ? $"![{name}]({FolderName}/{name})" : $"[{name}]({FolderName}/{name})";
         return new AttachmentAdd(AttachmentAddKind.Added, type, name, link);
     }
 
@@ -451,6 +468,39 @@ internal sealed class NoteAttachments
 
         return sources;
     }
+
+    /// <summary>
+    /// The distinct drawing sources (job 384) in <paramref name="text"/>: the <see cref="ImageSources"/> rules, but only
+    /// names with the <c>.excalidraw</c> extension, at most <see cref="MaxInlineDrawings"/>. Nothing is read;
+    /// <see cref="TryResolve"/> still checks each.
+    /// </summary>
+    public static IReadOnlyList<string> DrawingSources(string text)
+    {
+        List<string> sources = [];
+        HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
+        int at = 0;
+        while (sources.Count < MaxInlineDrawings)
+        {
+            string? name = NextLinkedName(text, ref at, ')');
+            if (name is null)
+            {
+                break;
+            }
+
+            string src = SrcPrefix + name;
+            if (IsDrawingName(name) && seen.Add(src))
+            {
+                sources.Add(src);
+            }
+        }
+
+        return sources;
+    }
+
+    /// <summary>True when <paramref name="src"/> is <c>.attachments/&lt;stored name&gt;.excalidraw</c>.</summary>
+    public static bool IsDrawingSrc(string src) =>
+        src.StartsWith(SrcPrefix, StringComparison.Ordinal) && IsStoredName(src[SrcPrefix.Length..])
+        && IsDrawingName(src[SrcPrefix.Length..]);
 
     /// <summary>
     /// The distinct names (ordinal) of every <c>](.attachments/&lt;name&gt;</c> in <paramref name="text"/> that is
@@ -938,6 +988,49 @@ internal sealed class NoteAttachments
     {
         string extension = name[(name.LastIndexOf('.') + 1)..];
         return extension is "png" or "jpg" or "jpeg" or "gif" or "webp";
+    }
+
+    private static bool IsDrawingName(string name) =>
+        name.EndsWith("." + DrawingExtension, StringComparison.Ordinal);
+
+    // One complete JSON object (UTF-8, an optional BOM, at most 64 deep) whose last top-level "type" is "excalidraw".
+    private static bool IsExcalidrawJson(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.StartsWith((ReadOnlySpan<byte>)[0xEF, 0xBB, 0xBF]))
+        {
+            bytes = bytes[3..];
+        }
+
+        try
+        {
+            System.Text.Json.Utf8JsonReader reader = new System.Text.Json.Utf8JsonReader(
+                bytes, new System.Text.Json.JsonReaderOptions { MaxDepth = ExcalidrawSvg.MaxDepth });
+            if (!reader.Read() || reader.TokenType != System.Text.Json.JsonTokenType.StartObject)
+            {
+                return false;
+            }
+
+            bool found = false;
+            while (reader.Read() && reader.TokenType == System.Text.Json.JsonTokenType.PropertyName)
+            {
+                bool isType = reader.ValueTextEquals("type"u8);
+                reader.Read();
+                if (isType)
+                {
+                    found = reader.TokenType == System.Text.Json.JsonTokenType.String
+                        && reader.ValueTextEquals("excalidraw"u8);
+                }
+
+                reader.Skip();
+            }
+
+            return reader.TokenType == System.Text.Json.JsonTokenType.EndObject && reader.CurrentDepth == 0
+                && !reader.Read() && found;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
     }
 
     private static AttachmentType FromBytes(ReadOnlySpan<byte> bytes)

@@ -319,6 +319,20 @@ img.ProseMirror-separator {
   max-width: 100%;
 }
 
+/* 384: a drawing's SVG with its "Open in Excalidraw" button under it; the button takes the app's button colours. */
+.note-editor-body .drawing {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.note-editor-body .drawing-open {
+  font-size: 12px;
+  padding: 1px 8px;
+}
+
 .note-editor-body .image-placeholder {
   color: var(--grey);
   font-style: italic;
