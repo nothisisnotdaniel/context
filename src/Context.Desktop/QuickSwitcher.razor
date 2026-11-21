@@ -1,0 +1,129 @@
+@* The quick switcher (Ctrl/Cmd+P, job 364): a text field and the notes whose name matches it (NoteSwitcher: recent,
+   then pinned, then the rest). Up/Down pick a row, Enter or a click opens it through OnOpen; a query that matches
+   nothing offers Create "<query>" through OnCreate. Esc or a click on the backdrop closes it. It changes nothing itself. *@
+
+<div class="dialog-backdrop" @onclick="Backdrop">
+    <div class="dialog switcher" role="dialog" aria-modal="true" aria-label="Open note" @onclick:stopPropagation="true">
+        <input type="text" class="switcher-input" value="@typed" maxlength="400" spellcheck="false"
+               aria-label="Note name" placeholder="Type a note name" aria-controls="@(ActiveRow() is null ? null : "switcher-list")"
+               aria-activedescendant="@ActiveRow()" @ref="input" @oninput="Typed" @onkeydown="Key" />
+        @if (createName is { } create)
+        {
+            <ul class="switcher-list" id="switcher-list" role="listbox" aria-label="Notes">
+                <li class="switcher-row create selected" id="switcher-create" role="option" aria-selected="true" @onclick="() => OnCreate.InvokeAsync(create)">
+                    <span class="name accent">Create "@DesktopText.OneLine(create)"</span>
+                </li>
+            </ul>
+        }
+        else if (rows.Count == 0)
+        {
+            <p class="grey none">No notes yet.</p>
+        }
+        else
+        {
+            <ul class="switcher-list" id="switcher-list" role="listbox" aria-label="Notes">
+                @for (int i = 0; i < rows.Count; i++)
+                {
+                    string row = rows[i];
+                    bool picked = i == selected;
+                    <li class="switcher-row @(picked ? "selected" : string.Empty)" id="switcher-row-@i" role="option" aria-selected="@(picked ? "true" : "false")"
+                        @key="row" @onclick="() => OnOpen.InvokeAsync(row)">
+                        <span class="name cut" title="@DesktopText.OneLine(row)">@DesktopText.OneLine(row)</span>
+                        @if (Locked.Contains(row))
+                        {
+                            <span class="locked grey">locked</span>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+</div>
+
+@code {
+    private ElementReference input;
+
+    // The id of the selected row, so a screen reader announces it while focus stays in the input; null with no rows.
+    private string? ActiveRow() => createName is not null ? "switcher-create" : rows.Count == 0 ? null : $"switcher-row-{selected}";
+    private string typed = string.Empty;
+    private int selected;
+    private IReadOnlyList<string> rows = [];
+    // The trimmed query when it is not blank and matches no note: the one Create row.
+    private string? createName;
+
+    /// <summary>Every plain and sensitive note by its full name.</summary>
+    [Parameter]
+    public IReadOnlyList<string> Names { get; set; } = [];
+
+    /// <summary>The sensitive ones among <see cref="Names"/>, shown with the visible word <c>locked</c>.</summary>
+    [Parameter]
+    public IReadOnlySet<string> Locked { get; set; } = new HashSet<string>(StringComparer.Ordinal);
+
+    [Parameter]
+    public IReadOnlyList<string> Recent { get; set; } = [];
+
+    [Parameter]
+    public IReadOnlyList<string> Pinned { get; set; } = [];
+
+    /// <summary>Called with the picked note's full name.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    /// <summary>Called with the trimmed query to create a note of that title.</summary>
+    [Parameter]
+    public EventCallback<string> OnCreate { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    protected override void OnInitialized() => Find();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await input.FocusAsync();
+        }
+    }
+
+    private void Find()
+    {
+        rows = NoteSwitcher.Match(Names, Recent, Pinned, typed);
+        string trimmed = typed.Trim();
+        createName = rows.Count == 0 && trimmed.Length > 0 ? trimmed : null;
+        selected = 0;
+    }
+
+    private void Typed(ChangeEventArgs e)
+    {
+        typed = e.Value?.ToString() ?? string.Empty;
+        Find();
+    }
+
+    private Task Key(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "ArrowDown":
+                selected = rows.Count == 0 ? 0 : (selected + 1) % rows.Count;
+                return Task.CompletedTask;
+            case "ArrowUp":
+                selected = rows.Count == 0 ? 0 : (selected + rows.Count - 1) % rows.Count;
+                return Task.CompletedTask;
+            case "Enter":
+                if (createName is { } create)
+                {
+                    return OnCreate.InvokeAsync(create);
+                }
+
+                return rows.Count == 0 ? Task.CompletedTask : OnOpen.InvokeAsync(rows[Math.Min(selected, rows.Count - 1)]);
+            case "Escape":
+                return OnClose.InvokeAsync();
+            default:
+                return Task.CompletedTask;
+        }
+    }
+
+    // A click on the backdrop outside the dialog; clicks inside stop at the dialog.
+    private Task Backdrop() => OnClose.InvokeAsync();
+}
