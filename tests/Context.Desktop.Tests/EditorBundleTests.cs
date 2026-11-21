@@ -613,7 +613,7 @@ public sealed class EditorBundleTests : IClassFixture<EditorBundle>
     public void Sources_NeverSetLevelOne()
     {
         string folder = Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "editor", "src");
-        string[] files = ["decisions.js", "highlight.js", "index.js", "markdown.js", "mermaid-frame.js", "mermaid.js", "paste.js", "schema.js", "theme.js", "view.js"];
+        string[] files = ["decisions.js", "glossary.js", "highlight.js", "index.js", "markdown.js", "mermaid-frame.js", "mermaid.js", "paste.js", "schema.js", "theme.js", "view.js"];
         Assert.Equal(files, Directory.EnumerateFiles(folder, "*.js").Select(f => Path.GetFileName(f)).Order(StringComparer.Ordinal).ToArray());
 
         foreach (string file in files)

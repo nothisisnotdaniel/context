@@ -1,0 +1,125 @@
+@using System.Globalization
+@inherits StateComponent
+@* The glossary (job 380, DesktopState.Glossary): every Term:: meaning line of the plain notes, one term per
+   upper-invariant spelling with each meaning and the note it came from, sorted by term. The filter narrows the loaded
+   rows in memory (GlossaryView.Narrow), so typing reads no index. It reads only and reloads whenever the state
+   changes. *@
+
+<section class="page glossary-panel" aria-label="Glossary">
+    <div class="panel-bar">
+        <h2>Glossary</h2>
+        <button type="button" class="close" aria-label="Close" title="Close" @onclick="() => OnClose.InvokeAsync()"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" /></svg></button>
+    </div>
+    <input type="text" class="glossary-filter" value="@typed" maxlength="@GlossaryView.MaxFilterLength" aria-label="Filter the glossary"
+           placeholder="Filter" @oninput="Typed" />
+    @if (loadedView is null)
+    {
+        <p class="grey" role="status">Loading…</p>
+    }
+    else
+    {
+        GlossaryView view = GlossaryView.Narrow(loadedView, typed);
+        @if (view.Kind is GlossaryViewKind.IndexUnreadable)
+        {
+            <p class="red" role="status">Can't read the glossary.</p>
+        }
+        else if (view.Kind is GlossaryViewKind.TooLong)
+        {
+            <p class="red" role="status">The filter can be at most @(GlossaryView.MaxFilterLength.ToString(CultureInfo.InvariantCulture)) characters.</p>
+        }
+        else if (view.Kind is GlossaryViewKind.Empty)
+        {
+            <p class="grey" role="status">No terms yet. Write Term:: meaning in a note.</p>
+        }
+        else if (view.Kind is GlossaryViewKind.NoMatches)
+        {
+            <p class="grey" role="status">No terms match "@DesktopText.OneLine(typed.Trim())".</p>
+        }
+        else
+        {
+            <dl class="glossary-rows">
+                @foreach (GlossaryTerm term in view.Terms.Take(MaxRows))
+                {
+                    string shownTerm = DesktopText.OneLine(term.Term);
+                    <dt class="glossary-term">@shownTerm</dt>
+                    @foreach (GlossaryMeaning meaning in term.Meanings)
+                    {
+                        string name = meaning.Note;
+                        string full = DesktopText.OneLine(name);
+                        string title = DesktopText.NoteName(meaning.Title);
+                        string text = DesktopText.OneLine(meaning.Meaning);
+                        <dd class="glossary-meaning">
+                            <span class="glossary-text">@text</span>
+                            <button type="button" class="note-button cut" title="@full" @onclick="() => OnOpen.InvokeAsync(name)">@title</button>
+                        </dd>
+                    }
+                }
+            </dl>
+            @if (view.Terms.Count > MaxRows)
+            {
+                <p class="grey more">@More(view.Terms.Count)</p>
+            }
+        }
+    }
+</section>
+
+@code {
+    /// <summary>At most this many terms are shown; a grey <c>… N more</c> line follows when there are more.</summary>
+    internal const int MaxRows = 200;
+
+    // The whole glossary as last loaded (no filter); the shown rows are narrowed from it.
+    private GlossaryView? loadedView;
+    private string typed = string.Empty;
+    private int? shownRequest;
+    private int request;
+
+    /// <summary>The filter typed after <c>/glossary</c>; it fills the filter field when <see cref="Request"/> changes.</summary>
+    [Parameter]
+    public string Filter { get; set; } = string.Empty;
+
+    /// <summary>A new number for each <c>/glossary</c>, so the same filter typed again resets the field.</summary>
+    [Parameter]
+    public int Request { get; set; }
+
+    /// <summary>Called with a note's name when it is clicked.</summary>
+    [Parameter]
+    public EventCallback<string> OnOpen { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    private static string More(int count) =>
+        $"{CurrentView.Outside} {(count - MaxRows).ToString(CultureInfo.InvariantCulture)} more";
+
+    // Narrows the loaded rows only: no index read.
+    private void Typed(ChangeEventArgs e) => typed = e.Value?.ToString() ?? string.Empty;
+
+    protected override Task OnParametersSetAsync()
+    {
+        bool first = shownRequest is null;
+        if (shownRequest != Request)
+        {
+            shownRequest = Request;
+            typed = Filter ?? string.Empty;
+        }
+
+        return first ? Load() : Task.CompletedTask;
+    }
+
+    protected override async Task OnStateChangedAsync()
+    {
+        await Load();
+        StateHasChanged();
+    }
+
+    // Keeps the shown rows while it reloads; an older request's result is dropped.
+    private async Task Load()
+    {
+        int mine = ++request;
+        GlossaryView result = await State.Glossary(string.Empty);
+        if (mine == request)
+        {
+            loadedView = result;
+        }
+    }
+}

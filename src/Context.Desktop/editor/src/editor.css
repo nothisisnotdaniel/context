@@ -315,6 +315,15 @@
   text-underline-offset: 2px;
 }
 
+/* Glossary terms (job 380): a dotted accent underline, the text keeps its colour (contrast as the body text); the
+   meanings show in the native title on hover. */
+.note-editor-body span.glossary-term {
+  cursor: help;
+  text-decoration: underline dotted var(--accent-strong);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
 .note-editor-body .decision-ref-unknown {
   color: var(--grey);
   text-decoration: underline dotted;

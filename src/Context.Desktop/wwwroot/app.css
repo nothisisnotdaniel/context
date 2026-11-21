@@ -516,6 +516,7 @@ input[type="password"]:disabled {
 .find-notes .note-button,
 .search-hits .note-button,
 .decision-rows .note-button,
+.glossary-rows .note-button,
 .similar-rows .note-button {
     background: none;
     border: none;
@@ -543,6 +544,7 @@ input[type="password"]:disabled {
 .find-notes .note-button:hover:not(:disabled),
 .search-hits .note-button:hover:not(:disabled),
 .decision-rows .note-button:hover:not(:disabled),
+.glossary-rows .note-button:hover:not(:disabled),
 .similar-rows .note-button:hover:not(:disabled) {
     text-decoration: underline;
 }
@@ -2501,6 +2503,43 @@ nav.saved-searches ul {
 .review-appointment .location {
     flex: 0 1 auto;
     min-width: 4em;
+}
+
+/* The glossary (job 380): the filter, then each term as a bold dt with one dd per meaning: the text, then the note's
+   title as a link-like button. The text-field focus ring is the shared input[type="text"] rule. */
+.glossary-panel .glossary-filter {
+    box-sizing: border-box;
+    margin: 0 0 8px;
+    width: 100%;
+}
+
+.glossary-rows {
+    margin: 0;
+}
+
+.glossary-rows dt.glossary-term {
+    font-weight: 600;
+    margin: 10px 0 2px;
+    overflow-wrap: anywhere;
+}
+
+.glossary-rows dd.glossary-meaning {
+    align-items: baseline;
+    display: flex;
+    gap: 10px;
+    margin: 0 0 2px 16px;
+    min-width: 0;
+}
+
+.glossary-rows .glossary-text {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.glossary-rows .note-button {
+    flex: none;
+    max-width: 40%;
 }
 
 /* The done log (job 293): a week heading per Monday, then one row per entry, laid out like the review's todo rows. */

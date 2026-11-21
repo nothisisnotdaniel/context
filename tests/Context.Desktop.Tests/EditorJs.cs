@@ -49,6 +49,7 @@ internal sealed class EditorJs
         js.Setup<bool>("ContextEditor.scrollToDecision", _ => true).SetResult(false);
         js.Setup<bool>("ContextEditor.setDecisionPrefixes", _ => true).SetResult(true);
         js.Setup<string>("ContextEditor.copyToClipboard", _ => true).SetResult("Copied");
+        js.Setup<bool>("ContextEditor.setGlossary", _ => true).SetResult(true);
     }
 
     /// <summary>
@@ -89,6 +90,10 @@ internal sealed class EditorJs
     /// <summary>The titles JSON passed to <c>ContextEditor.setDecisionTitles</c> so far.</summary>
     public IReadOnlyList<string> DecisionTitles() =>
         Calls("ContextEditor.setDecisionTitles").Select(c => (string)c.Arguments[1]!).ToList();
+
+    /// <summary>The terms JSON passed to <c>ContextEditor.setGlossary</c> so far (job 380).</summary>
+    public IReadOnlyList<string> Glossary() =>
+        Calls("ContextEditor.setGlossary").Select(c => (string)c.Arguments[1]!).ToList();
 
     /// <summary>The tokens passed to <c>ContextEditor.scrollToDecision</c> so far.</summary>
     public IReadOnlyList<string> DecisionJumps() =>

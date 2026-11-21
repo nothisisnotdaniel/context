@@ -235,6 +235,17 @@ internal sealed class EditorInterop
         js.InvokeAsync<bool>("ContextEditor.setDecisionTitles", element, titlesJson);
 
     /// <summary>
+    /// Sets the glossary terms the editor decorates (job 380): each term (one line, already cleaned) with its hover title
+    /// (its meanings, one per line), sent as the JSON array <c>[[term, title], ...]</c>. Draws only: no text, dirty state
+    /// or undo step changes.
+    /// </summary>
+    public ValueTask<bool> SetGlossaryAsync(ElementReference element, IReadOnlyList<(string Term, string Title)> terms) =>
+        js.InvokeAsync<bool>(
+            "ContextEditor.setGlossary",
+            element,
+            System.Text.Json.JsonSerializer.Serialize(terms.Select(t => new[] { t.Term, t.Title }).ToList()));
+
+    /// <summary>
     /// Puts the cursor at the start of the paragraph whose marker has <paramref name="token"/> (lower case,
     /// <c>ab12-1234</c>), scrolls to it and flashes it; <c>false</c> when the note has no such decision.
     /// </summary>

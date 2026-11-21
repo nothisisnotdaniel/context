@@ -1847,6 +1847,82 @@ internal sealed class DesktopState
     });
 
     /// <summary>
+    /// The glossary (job 380, <see cref="GlossaryView.Build"/> after syncing the index), kept to the terms that match
+    /// <paramref name="filter"/>, off the calling thread under the index lock. Reads only and never throws: any failure
+    /// gives the <see cref="GlossaryViewKind.IndexUnreadable"/> view.
+    /// </summary>
+    public Task<GlossaryView> Glossary(string filter) => Task.Run(() =>
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                return GlossaryView.Build(index, notes, filter);
+            }
+        }
+        catch (Exception)
+        {
+            return new GlossaryView(GlossaryViewKind.IndexUnreadable, []);
+        }
+    });
+
+    /// <summary>The most glossary terms the editor gets to decorate (job 380), longest first.</summary>
+    public const int MaxGlossaryTerms = 500;
+
+    /// <summary>The most meanings one term's hover lists; the rest is one <c>… n more</c> line.</summary>
+    public const int MaxGlossaryMeanings = 20;
+
+    // One line per meaning, "<meaning> (<note title>)", at most MaxGlossaryMeanings, then "… n more".
+    private static string GlossaryTitle(GlossaryTerm term)
+    {
+        IEnumerable<string> lines = term.Meanings
+            .Take(MaxGlossaryMeanings)
+            .Select(m => $"{DesktopText.OneLine(m.Meaning)} ({DesktopText.NoteName(m.Title)})");
+        if (term.Meanings.Count > MaxGlossaryMeanings)
+        {
+            string more = (term.Meanings.Count - MaxGlossaryMeanings).ToString(CultureInfo.InvariantCulture);
+            lines = lines.Append($"{CurrentView.Outside} {more} more");
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    /// <summary>
+    /// Job 380: every glossary term for the editor's hover, each through <see cref="DesktopText.OneLine"/>, with its
+    /// title: one <c>&lt;meaning&gt; (&lt;note title&gt;)</c> line per meaning (at most <see cref="MaxGlossaryMeanings"/>),
+    /// joined with <c>\n</c>. Longest term first (then ordinal), at most <see cref="MaxGlossaryTerms"/>. Off the calling
+    /// thread under the index lock; with <paramref name="sync"/> the index is synced first (a plain note), a sensitive
+    /// note's lookups only read it. <c>null</c> on any failure.
+    /// </summary>
+    public Task<IReadOnlyList<(string Term, string Title)>?> GlossaryTitles(bool sync) => Task.Run(() =>
+    {
+        try
+        {
+            lock (indexGate)
+            {
+                if (sync)
+                {
+                    index.Sync(notes);
+                }
+
+                GlossaryView view = GlossaryView.FromRows(index.Glossary());
+                IEnumerable<(string Term, string Title)> terms = view.Terms
+                    .Select(term => (Term: DesktopText.OneLine(term.Term), Title: GlossaryTitle(term)))
+                    .Where(t => t.Term.Length > 0);
+                return (IReadOnlyList<(string Term, string Title)>?)terms
+                    .OrderByDescending(t => t.Term.Length)
+                    .ThenBy(t => t.Term, StringComparer.Ordinal)
+                    .Take(MaxGlossaryTerms)
+                    .ToList();
+            }
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    });
+
+    /// <summary>
     /// The similar plain notes (job 268, <see cref="SimilarNotesView.Build"/> after syncing the index), off the calling
     /// thread under the index lock. Reads only and never throws: any failure is
     /// <see cref="SimilarNotesKind.IndexUnreadable"/>.

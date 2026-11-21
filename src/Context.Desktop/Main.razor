@@ -37,6 +37,10 @@
                 {
                     <DonePanel OnClose="CloseDone" />
                 }
+                @if (page == Page.Glossary)
+                {
+                    <GlossaryPanel Filter="@glossaryShown" Request="glossaryRequest" OnOpen="RequestOpen" OnClose="CloseGlossary" />
+                }
                 @if (page == Page.MailDigest)
                 {
                     <MailDigestPanel OnClose="CloseMailDigest" />
@@ -283,8 +287,12 @@ else
     // A search result whose opening waits for the unsaved-changes dialog.
     private (string Note, string Text)? pendingSearchBack;
     private string? decisionsShown;
+
+    // Job 380: the filter typed after /glossary, and a new number per /glossary so the panel resets its field.
+    private string glossaryShown = string.Empty;
+    private int glossaryRequest;
     private bool similarShown;
-    private enum Page { None, Triage, People, Tags, Settings, Appointment, Board, Search, MailDigest, Done, Todos }
+    private enum Page { None, Triage, People, Tags, Settings, Appointment, Board, Search, MailDigest, Done, Todos, Glossary }
 
     // The board's tag (normalized) while Page.Board is shown (job 242).
     private string? boardShown;
@@ -733,6 +741,16 @@ else
     private void ShowDone() => OpenPage(Page.Done);
 
     private void CloseDone() => page = Page.None;
+
+    // The glossary (job 380): every Term:: meaning line, a page in place of the note area.
+    private void ShowGlossary(string filter)
+    {
+        glossaryShown = filter;
+        glossaryRequest++;
+        OpenPage(Page.Glossary);
+    }
+
+    private void CloseGlossary() => page = Page.None;
 
     // The Mail digest (job 286): suggestions from recent Outlook mail, read only on its Read mail button.
     private void ShowMailDigest() => OpenPage(Page.MailDigest);
@@ -1571,6 +1589,9 @@ else
             case "/donelog":
                 // The argument is ignored.
                 ShowDone();
+                break;
+            case "/glossary":
+                ShowGlossary(rest);
                 break;
             case "/digest":
                 // The argument is ignored.
