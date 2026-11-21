@@ -155,7 +155,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#416](backlog/416-keep-a-history-version-when-the.md) Keep a history version when the app numbers decisions → 351-decision-number-history
 - [x] [#262](backlog/262-rename-a-note-update-its-title.md) Rename a note: update its # title line too → 353-rename-updates-title
 - [x] [#257](backlog/257-web-links-work-in-the-note.md) Web links work in the note editor → 354-web-links-editor
-- [ ] [#191](backlog/191-archive-done-todos-a-month-after.md) Archive done todos a month after they are done
+- [x] [#191](backlog/191-archive-done-todos-a-month-after.md) Archive done todos a month after they are done → 361-archive-done-todos
 - [ ] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39)
 - [ ] [#77](backlog/077-quick-switcher.md) Quick switcher
 - [ ] [#59](backlog/059-ask-context.md) Ask Context
