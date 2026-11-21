@@ -1546,8 +1546,8 @@ internal sealed class DesktopState
 
     /// <summary>
     /// Job 349: after a write that was not a save, numbers the plain note <paramref name="name"/> in a second write
-    /// (<see cref="DecisionNumbering.NumberWritten(TagIndex, NoteStore, Func{DecisionFolder}, string, out DecisionEdits?)"/>;
-    /// the folder id is loaded only for a note with a marker)
+    /// (<see cref="DecisionNumbering.NumberWritten(TagIndex, NoteStore, NoteHistory, Func{DecisionFolder}, string, out DecisionEdits?)"/>;
+    /// the folder id is loaded only for a note with a marker; job 351: its previous bytes kept in <see cref="HistoryStore"/>)
     /// under the index lock, keeping <see cref="DecisionNumbersRanOut"/> like a save. Never throws.
     /// </summary>
     internal void NumberWritten(string name)
@@ -1557,7 +1557,7 @@ internal sealed class DesktopState
             DecisionEdits? edits;
             lock (indexGate)
             {
-                DecisionNumbering.NumberWritten(index, notes, LoadDecisionFolder, name, out edits);
+                DecisionNumbering.NumberWritten(index, notes, HistoryStore, LoadDecisionFolder, name, out edits);
             }
 
             NoteRanOut(edits);

@@ -240,11 +240,14 @@ Every factory agent reads this file before working on Context. Keep it short and
     is marked migrated, else the next start runs again. **Write paths**: `DesktopState.NumberDecisions` (under
     `indexGate`) for `SaveNote`/`RestoreVersion`, `NoteToday`, `TriageAppend`, `TriageToNote`, the briefing, the link
     rewrites of `RenameNote` and merge (`Numbered`); `DesktopState.NumberWritten` after capture, import and the day's
-    end; both keep `DecisionNumbersRanOut` (red `p.decision-notice`, `role="alert"`, while set), and `NoteEditor`
+    end (job 351: `DecisionNumbering.NumberWritten` takes a required `NoteHistory` and keeps the previous bytes as a
+    version before its write; a failed keep returns `false` and writes nothing; `TriageAppend` onto an existing note
+    passes `HistoryStore` only when `Numbered` changed the appended text); both keep `DecisionNumbersRanOut` (red `p.decision-notice`, `role="alert"`, while set), and `NoteEditor`
     shows `Saved[ <name>]. <DesktopActions.DecisionNoticeText>` in red after a save with unnumbered markers or a note of
     another folder (`Saved. Decisions in notes from another folder are not numbered.`). The CLI numbers after
     `capture`, `dayend`, `new` and `import` (only when `decision-folder.json` reads fine; a failure leaves the text, exit
-    code unchanged). Sensitive notes never number. Rename and Move call `MoveDecisionOwners`. **View**:
+    code unchanged; job 351: the numbering write keeps a version in `.history/` through a
+    `NoteHistory(session.Notes, now().ToUniversalTime)`). Sensitive notes never number. Rename and Move call `MoveDecisionOwners`. **View**:
     `DecisionsView.TryNormalizeTag`; `Build(index, store, tag, zone)` as job 343 (`InvalidTag` without opening the
     index; `Date` the title's leading `yyyy-MM-dd`, else the last write day in `zone`; `People` resolved through
     `Aliases()`; sorted by date descending, note, line), each `Decision` with `Label` (`1234` own, `ab12-1234` other or
@@ -506,7 +509,9 @@ Every factory agent reads this file before working on Context. Keep it short and
   follow a link or reparse point and list only regular files with a valid name (newest first, `NoteVersion`).
   `NoteStore.SaveIfUnchanged(..., history)` keeps the previous bytes after the version check, before the move; only
   `DesktopActions.SaveNote` and the link rewrites of `DesktopActions.RenameNote` (job 206, always a version, no
-  `KeptWithin` gap) pass one (capture, day's end, briefing, import and the CLI keep none). `Rename`/`Move`
+  `KeptWithin` gap) pass one, and (job 351) every decision-numbering write after a write that was not a save
+  (`DecisionNumbering.NumberWritten`, desktop and CLI) and a `TriageAppend` that numbers; plain capture, day's end,
+  briefing, import and other CLI writes keep none. `Rename`/`Move`
   move `.history/<Title>/` along (never over an existing one; moved back when the note move fails); only `DeleteNote`
   passes `removeHistory: true` to `Delete`/`DeleteSensitive`. `List()` drops top-level dot-files. Sensitive: a save
   copies the old sealed file byte for byte (zero `Agree`); a rename seals the new file, moves the history (a clash

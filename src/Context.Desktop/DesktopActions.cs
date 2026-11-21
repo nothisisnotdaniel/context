@@ -2787,8 +2787,11 @@ internal sealed class DesktopActions
                 }
 
                 EditableNote opened = notes.ReadForEdit(found);
-                NoteSaveResult result = notes.SaveIfUnchanged(
-                    opened, Numbered(found.Name, Appended(opened.Text, item.Text)), out EditableNote? saved);
+                string appended = Appended(opened.Text, item.Text);
+                string text = Numbered(found.Name, appended);
+                // Job 351: a numbering rewrites the user's text, so the note's previous bytes are kept first.
+                NoteHistory? history = string.Equals(text, appended, StringComparison.Ordinal) ? null : state.HistoryStore;
+                NoteSaveResult result = notes.SaveIfUnchanged(opened, text, out EditableNote? saved, history);
                 switch (result)
                 {
                     case NoteSaveResult.Saved:
