@@ -390,6 +390,12 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#436](backlog/436-don-t-follow-a-suitepro-symlink.md) Don't follow a SuitePro symlink when tightening the activation folder
 - [?] [#437](backlog/437-strict-utf-8-decoding-of-the.md) Strict UTF-8 decoding of the Keychain licence entry
 - [?] [#439](backlog/439-shared-async-wait-helper-for-desktop.md) Shared async wait helper for desktop tests
+- [?] [#440](backlog/440-let-n-work-item-searches-be.md) Let #<n> work-item searches be saved
+- [?] [#441](backlog/441-show-an-error-for-a-date.md) Show an error for a date the search range can't read
+- [?] [#442](backlog/442-cap-how-many-times-day-files.md) Cap how many Times day files one search reads
+- [?] [#443](backlog/443-test-that-a-note-without-a.md) Test that a note without a modified date is left out of a date range
+- [?] [#444](backlog/444-let-the-gap-space-the-open.md) Let the gap space the (open) label in search results
+- [?] [#445](backlog/445-say-when-the-date-range-doesn.md) Say when the date range doesn't apply to a tag filter
 
 ## Dropped with the terminal UI
 
