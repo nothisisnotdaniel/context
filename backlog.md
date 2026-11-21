@@ -182,8 +182,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#232](backlog/232-search-index-limits-and-accessibility.md) Search index limits and accessibility → 295-search-index-limits
 - [x] [#37](backlog/037-note-store-cleanup.md) Note store cleanup → 298-note-store-cleanup
 - [ ] [#98](backlog/098-sharing-notes-with-key-exchange.md) Sharing notes with key exchange spike
-- [?] [#93](backlog/093-phone-companion-app.md) Phone companion app
-- [?] [#94](backlog/094-browser-extension.md) Browser extension
+- [h] [#93](backlog/093-phone-companion-app.md) Phone companion app
+- [h] [#94](backlog/094-browser-extension.md) Browser extension
 - [?] [#95](backlog/095-local-ai-for-ask-context.md) Local AI for Ask Context
 - [x] [#96](backlog/096-excalidraw-drawings.md) Excalidraw drawings → 384-excalidraw-drawings
 - [?] [#97](backlog/097-azure-devops-status.md) Azure DevOps status
@@ -366,7 +366,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [h] [#403](backlog/403-check-the-second-start-on-windows.md) Check the second start on Windows
 - [ ] [#408](backlog/408-tooltip-on-the-global-todo-marker.md) Tooltip on the global todo marker
 - [?] [#409](backlog/409-build-notehistory-after-the-todo-braces.md) Build NoteHistory after the todo-braces record check
-- [?] [#410](backlog/410-check-the-carry-over-arrow-box.md) Check the carry-over arrow box width in both themes
+- [h] [#410](backlog/410-check-the-carry-over-arrow-box.md) Check the carry-over arrow box width in both themes
 - [?] [#411](backlog/411-loading-state-and-group-counts-on.md) Loading state and group counts on the Todos page
 - [?] [#412](backlog/412-check-the-contrast-of-grey-source.md) Check the contrast of grey source buttons in dark mode
 - [?] [#413](backlog/413-tell-person-rows-apart-from-same.md) Tell person rows apart from same-named notes in search
@@ -385,7 +385,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#430](backlog/430-warn-when-the-todo-archive-nears.md) Warn when the todo archive nears its 20 MB cap
 - [?] [#431](backlog/431-scroll-the-selected-quick-switcher-row.md) Scroll the selected quick switcher row into view
 - [?] [#432](backlog/432-share-the-quick-switcher-and-palette.md) Share the quick switcher and palette CSS
-- [?] [#433](backlog/433-check-focus-after-a-quick-switcher.md) Check focus after a quick switcher pick
+- [h] [#433](backlog/433-check-focus-after-a-quick-switcher.md) Check focus after a quick switcher pick
 - [?] [#434](backlog/434-share-one-class-for-the-suite.md) Share one class for the Suite Pro entry-row buttons
 - [?] [#435](backlog/435-clear-the-typed-licence-key-after.md) Clear the typed licence key after a refused or failed activation
 - [?] [#436](backlog/436-don-t-follow-a-suitepro-symlink.md) Don't follow a SuitePro symlink when tightening the activation folder
@@ -406,7 +406,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#452](backlog/452-say-when-a-meeting-booking-loses.md) Say when a meeting booking loses its quicklist project
 - [?] [#453](backlog/453-explain-a-changed-meeting-booking-name.md) Explain a changed meeting booking name
 - [?] [#455](backlog/455-strip-leading-unicode-dashes-and-non.md) Strip leading Unicode dashes and non-breaking spaces from Times booking names
-- [?] [#456](backlog/456-check-the-times-panel-s-booking.md) Check the Times panel's booking fields in dark mode
+- [h] [#456](backlog/456-check-the-times-panel-s-booking.md) Check the Times panel's booking fields in dark mode
 - [?] [#457](backlog/457-clear-a-stale-times-result-line.md) Clear a stale Times result line when the booking form is cancelled
 - [?] [#458](backlog/458-readable-excalidraw-drawings-in-dark-mode.md) Readable Excalidraw drawings in dark mode
 - [?] [#459](backlog/459-close-the-sensitive-note-race-in.md) Close the sensitive-note race in create-only import save
