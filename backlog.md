@@ -269,7 +269,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#274](backlog/274-visible-heading-for-the-sidebar-outline.md) Visible heading for the sidebar outline
 - [?] [#275](backlog/275-one-helper-for-opening-a-daily.md) One helper for opening a daily note in Main.razor
 - [?] [#276](backlog/276-feedback-when-a-day-pick-is.md) Feedback when a day pick is ignored while busy
-- [?] [#277](backlog/277-arrow-and-page-keys-in-the.md) Arrow and Page keys in the Pick a day calendar do not scroll the page
+- [ ] [#277](backlog/277-arrow-and-page-keys-in-the.md) Arrow and Page keys in the Pick a day calendar do not scroll the page
 - [?] [#280](backlog/280-keep-the-old-appointment-rows-dimmed.md) Keep the old appointment rows dimmed while stepping days
 - [?] [#281](backlog/281-one-reset-helper-for-the-pending.md) One reset helper for the pending state in Main.razor
 - [?] [#283](backlog/283-spacing-for-the-no-note-placeholder.md) Spacing for the no-note placeholder in the note area
