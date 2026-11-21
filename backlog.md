@@ -151,7 +151,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#377](backlog/377-dependency-list-with-licence-links.md) Dependency list with licence links → 339-dependency-licence-list
 - [x] [#310](backlog/310-choose-light-dark-or-system-theme.md) Choose light, dark or system theme in Settings → 341-theme-setting
 - [x] [#255](backlog/255-decisions-longer-than-one-line-a.md) Numbered #!d decisions: a marked paragraph, referenced as #!d1234 → 343-numbered-decisions
-- [ ] [#419](backlog/419-decision-markers-app-numbered-d-with.md) Decision markers: app-numbered !d with a folder prefix, #!d references with a picker
+- [x] [#419](backlog/419-decision-markers-app-numbered-d-with.md) Decision markers: app-numbered !d with a folder prefix, #!d references with a picker → 349-decision-folder-prefix
 - [ ] [#416](backlog/416-keep-a-history-version-when-the.md) Keep a history version when the app numbers decisions
 - [ ] [#262](backlog/262-rename-a-note-update-its-title.md) Rename a note: update its # title line too
 - [ ] [#257](backlog/257-web-links-work-in-the-note.md) Web links work in the note editor
