@@ -412,6 +412,20 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#459](backlog/459-close-the-sensitive-note-race-in.md) Close the sensitive-note race in create-only import save
 - [?] [#460](backlog/460-refuse-case-only-clashes-on-case.md) Refuse case-only clashes on case-sensitive file systems in import save
 - [?] [#461](backlog/461-fixed-order-for-import-refusal-texts.md) Fixed order for import refusal texts
+- [h] [#462](backlog/462-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on macOS
+- [h] [#463](backlog/463-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on Windows
+- [h] [#464](backlog/464-run-the-sensitive-notes-manual-checks.md) Run the sensitive-notes manual checks on macOS
+- [h] [#465](backlog/465-run-the-sensitive-notes-manual-checks.md) Run the sensitive-notes manual checks on Windows
+- [h] [#466](backlog/466-check-desktop-settings-key-details-on.md) Check desktop settings key details on macOS
+- [h] [#467](backlog/467-check-desktop-settings-key-details-on.md) Check desktop settings key details on Windows
+- [h] [#468](backlog/468-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view on macOS
+- [h] [#469](backlog/469-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view on Windows
+- [h] [#470](backlog/470-check-right-click-in-a-release.md) Check right click in a Release build on macOS
+- [h] [#471](backlog/471-check-right-click-in-a-release.md) Check right click in a Release build on Windows
+- [h] [#472](backlog/472-check-the-screenshot-capture-on-macos.md) Check the screenshot capture on macOS
+- [h] [#473](backlog/473-check-the-screenshot-capture-on-windows.md) Check the screenshot capture on Windows
+- [h] [#474](backlog/474-check-that-mermaid-diagrams-draw-on.md) Check that mermaid diagrams draw on macOS
+- [h] [#475](backlog/475-check-that-mermaid-diagrams-draw-on.md) Check that mermaid diagrams draw on Windows
 
 ## Dropped with the terminal UI
 
