@@ -513,7 +513,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   date from `BuildInfo.BuildDate`, the `BuildDate` assembly metadata of `Directory.Build.props`, `-p:BuildDate=`
   overrides; the status is read once and cached until `Forget()`, which `ActivatePro`/`RemovePro` call; `LockedHint`
   without Times' CLI line). **The key table (`LicencePublicKeys.Embedded`) and the revocations must match Times'
-  compiled lists; change both apps together.** The files are verify-only: no private key import, no signing, no
+  compiled lists, and the licensee name rule (`LicenceKey.IsValidName`, a copy of Times' title rules) must match Times'; change both apps together.** The files are verify-only: no private key import, no signing, no
   `HttpClient` (`DesktopSourceTests`). Desktop: `MacLicenceStore` (Keychain generic password `Suite Pro licence`/`key`,
   access list only the resolved apphost, refuses the shared `dotnet` host) and `WindowsLicenceStore` (Credential Manager
   `Suite/ProLicence`, UTF-8 blob), picked by `Program.cs` only; `DesktopState.ProStatus()` (off the UI thread, behind

@@ -3054,6 +3054,14 @@ nav.saved-searches ul {
     flex: none;
 }
 
+.settings-panel .pro-result {
+    margin: 6px 0 0;
+}
+
+.settings-panel .pro-result:empty {
+    display: none;
+}
+
 .pro-locked-hint {
     display: flex;
     gap: 8px;
