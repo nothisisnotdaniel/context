@@ -418,6 +418,23 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#459](backlog/459-close-the-sensitive-note-race-in.md) Close the sensitive-note race in create-only import save
 - [?] [#460](backlog/460-refuse-case-only-clashes-on-case.md) Refuse case-only clashes on case-sensitive file systems in import save
 - [?] [#461](backlog/461-fixed-order-for-import-refusal-texts.md) Fixed order for import refusal texts
+- [ ] [#476](backlog/476-journal-view-of-the-days-with.md) Journal view of the days with content
+- [ ] [#477](backlog/477-calendar-markers-for-notes-and-appointments.md) Calendar markers for notes and appointments (after: #476)
+- [ ] [#478](backlog/478-focus-mode-for-writing.md) Focus mode for writing
+- [ ] [#479](backlog/479-active-status-and-priority-for-todos.md) Active status and priority for todos
+- [ ] [#480](backlog/480-todo-detail-view-and-undo-of.md) Todo detail view and undo of a Done
+- [ ] [#481](backlog/481-todos-of-the-whole-meeting-series.md) Todos of the whole meeting series
+- [ ] [#482](backlog/482-backup-to-zip-and-restore-into.md) Backup to ZIP and restore into a separate folder
+- [ ] [#483](backlog/483-thin-out-note-history-with-protected.md) Thin out note history with protected versions
+- [ ] [#484](backlog/484-word-diff-in-note-history.md) Word diff in note history
+- [ ] [#485](backlog/485-shared-ai-layer-with-preview-budget.md) Shared AI layer with preview, budget and logs
+- [ ] [#486](backlog/486-ai-meeting-summary.md) AI meeting summary (after: #485)
+- [ ] [#487](backlog/487-ai-task-suggestions-with-evidence.md) AI task suggestions with evidence (after: #485)
+- [ ] [#488](backlog/488-ai-writing-help.md) AI writing help (after: #485)
+- [ ] [#489](backlog/489-sources-for-a-note.md) Sources for a note
+- [ ] [#490](backlog/490-attendees-by-role-on-the-appointment.md) Attendees by role on the appointment page
+- [ ] [#491](backlog/491-earlier-meetings-of-a-series-on.md) Earlier meetings of a series on the appointment page
+- [ ] [#492](backlog/492-import-a-logseq-graph.md) Import a LogSeq graph
 
 ## Dropped with the terminal UI
 
