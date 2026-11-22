@@ -159,6 +159,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#77](backlog/077-quick-switcher.md) Quick switcher → 364-quick-switcher
 - [x] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39) → 367-pro-licence-context
 - [x] [#454](backlog/454-fix-flaky-repository-settings-page-test.md) Fix flaky repository settings page test → 382-fix-flaky-settings-test
+- [ ] [#89](backlog/089-call-to-meeting-note.md) Call to meeting note
 - [h] [#462](backlog/462-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on macOS
 - [h] [#463](backlog/463-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on Windows
 - [?] [#59](backlog/059-ask-context.md) Ask Context
@@ -217,7 +218,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#121](backlog/121-open-empty-notes-in-the-default.md) Open empty notes in the default editor on macOS and Linux
 - [ ] [#101](backlog/101-work-item-references.md) Work item references
 - [ ] [#91](backlog/091-windows-device-check-at-open.md) Windows device check at open
-- [ ] [#89](backlog/089-call-to-meeting-note.md) Call to meeting note
 - [ ] [#88](backlog/088-vacation-handover.md) Vacation handover
 - [ ] [#67](backlog/067-email-to-note.md) Email to note
 - [ ] [#58](backlog/058-flagged-mail-to-the-inbox.md) Flagged mail to the inbox
