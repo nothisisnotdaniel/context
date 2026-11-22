@@ -11,3 +11,7 @@ Find out what breaks when the data folders sit in OneDrive or iCloud Drive on ma
 ## Why
 
 Syncing through the user's own cloud keeps the suite free to run, but synced folders are known to break databases and create silent conflicts. Finding out first avoids data loss.
+
+## Notes
+
+- Candidate design from Creacility/assistant PLAN.md (compared on 2026-11-22): every saved version is a new file that never changes, each with a checksum; a conflict (two machines changed the same note) asks the user which version to keep instead of writing a conflict copy; settings that belong to one machine (window, paths, key store) stay per device and are never synced. Check this design against OneDrive and iCloud in the spike.
