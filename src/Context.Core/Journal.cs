@@ -29,7 +29,7 @@ internal sealed class Journal
         {
             string[] parts = note.Name.Split('/');
             string title = note.Title;
-            if (!(parts.Length == 1 || (parts.Length == 3 && parts[0] == MeetingNote.FolderName && title.Length == 10))
+            if (!(parts.Length == 1 || (parts.Length == 3 && parts[0].Equals(MeetingNote.FolderName, StringComparison.OrdinalIgnoreCase) && title.Length == 10))
                 || title.Length < 10 || (title.Length > 10 && title[10] != ' ')
                 || !DateOnly.TryParseExact(title[..10], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly date)
                 || date > today)

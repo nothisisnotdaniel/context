@@ -229,7 +229,7 @@ internal sealed class RecurrenceRule
     /// </summary>
     public List<DateTime>? Occurrences(
         DateTime start, DateTime? until, DateOnly from, DateOnly to, RecurrenceBudget budget,
-        Func<DateTime, bool>? firstEligible = null)
+        Func<DateTime, bool>? firstEligible = null, Action<DateOnly>? incomplete = null)
     {
         DateOnly first = DateOnly.FromDateTime(start);
         TimeOnly time = TimeOnly.FromDateTime(start);
@@ -243,13 +243,8 @@ internal sealed class RecurrenceRule
         int counted = 1;
         List<DateTime> result = [];
         List<int> candidates = [];
-        for (int examined = 0; examined < MaxPeriodsPerEvent; examined++)
+        for (int examined = 0; ; examined++)
         {
-            if (!budget.Take(1))
-            {
-                return null;
-            }
-
             long offset = period * interval;
             if (!PeriodStart(first, offset, out long periodStart))
             {
@@ -261,10 +256,17 @@ internal sealed class RecurrenceRule
                 break;
             }
 
+            if (examined == MaxPeriodsPerEvent || !budget.Take(1))
+            {
+                ReportIncomplete();
+                return examined == MaxPeriodsPerEvent ? result : null;
+            }
+
             candidates.Clear();
             Candidates(first, offset, candidates);
             if (!budget.Take(candidates.Count))
             {
+                ReportIncomplete();
                 return null;
             }
 
@@ -310,6 +312,14 @@ internal sealed class RecurrenceRule
             }
 
             period++;
+
+            void ReportIncomplete()
+            {
+                if (count is null || counted < count.Value)
+                {
+                    incomplete?.Invoke(DateOnly.FromDayNumber((int)Math.Max(first.DayNumber, periodStart)));
+                }
+            }
         }
 
         return result;

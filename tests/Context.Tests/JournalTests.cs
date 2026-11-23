@@ -9,6 +9,37 @@ public sealed class JournalTests : IDisposable
     public void Dispose() => Directory.Delete(root, true);
 
     [Fact]
+    public void LowercaseMeetingsRoot_QualifiesWithoutCalendar()
+    {
+        NoteStore notes = new(root);
+        notes.Create("meetings");
+        notes.CreateChild("meetings", "Standup");
+        notes.CreateChild("meetings/Standup", "2026-10-29");
+        Journal journal = new(notes, Today, null, _ => []);
+        Assert.Equal(["meetings/Standup/2026-10-29"], Assert.Single(journal.ReadBatch()).Meetings);
+        Assert.True(journal.Exhausted);
+    }
+
+    [Fact]
+    public void HistoryProbeLimit_PreservesSurvivingAppointment()
+    {
+        CalendarStore calendar = new(root, TimeZoneInfo.Utc);
+        Directory.CreateDirectory(calendar.Folder);
+        DateOnly start = Today.AddDays(-RecurrenceRule.MaxPeriodsPerEvent);
+        string Stamp(DateOnly date) => date.ToString("yyyyMMdd", CultureInfo.InvariantCulture) + "T090000Z";
+        string exclusions = string.Join(",", Enumerable.Range(0, RecurrenceRule.MaxPeriodsPerEvent)
+            .Select(i => Stamp(start.AddDays(i))));
+        string text = "BEGIN:VCALENDAR\nBEGIN:VEVENT\nSUMMARY:Review\nDTSTART:" + Stamp(start)
+            + "\nRRULE:FREQ=DAILY\nEXDATE:" + exclusions + "\nEND:VEVENT\nEND:VCALENDAR";
+        File.WriteAllText(Path.Combine(calendar.Folder, "series.ics"), text);
+        Journal journal = new(new NoteStore(root), Today, calendar.Oldest(Today, null), date => calendar.Day(date).Appointments);
+        JournalDay day = Assert.Single(journal.ReadBatch());
+        Assert.Equal(Today, day.Date);
+        Assert.Equal("Review", Assert.Single(day.Appointments).Title);
+        Assert.True(journal.Exhausted);
+    }
+
+    [Fact]
     public void DailyMeetingAndLegacyNotes_KeepBodiesAndStoredTargets()
     {
         NoteStore notes = new(root);

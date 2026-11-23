@@ -80,20 +80,29 @@ internal sealed class CalendarStore
 
     public DateOnly? Oldest(DateOnly through, string? cached)
     {
+        DateOnly? unsearched = null;
+        void IncludeUnsearched(DateOnly lower)
+        {
+            if (lower <= through && (unsearched is null || lower < unsearched))
+            {
+                unsearched = lower;
+            }
+        }
+
         IReadOnlyList<Appointment> feed = [];
         if (cached is not null)
         {
             try
             {
-                feed = IcsParser.HistoryStarts(cached, local, through);
+                feed = IcsParser.HistoryStarts(cached, local, through, IncludeUnsearched);
             }
             catch (FormatException)
             {
                 // Readable calendar files still contribute when the cached copy is malformed.
             }
         }
-        return Read(feed, a => DateOnly.FromDateTime(a.Start) <= through, text => IcsParser.HistoryStarts(text, local, through))
-            .Appointments.Select(a => (DateOnly?)DateOnly.FromDateTime(a.Start)).Min();
+        return Read(feed, a => DateOnly.FromDateTime(a.Start) <= through, text => IcsParser.HistoryStarts(text, local, through, IncludeUnsearched))
+            .Appointments.Select(a => (DateOnly?)DateOnly.FromDateTime(a.Start)).Append(unsearched).Min();
     }
 
     private CalendarDay Read(

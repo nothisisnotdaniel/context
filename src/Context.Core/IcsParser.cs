@@ -172,7 +172,7 @@ internal static class IcsParser
     /// occurrences near the day, the <c>RDATE</c>s, minus the <c>EXDATE</c>s and <paramref name="overridden"/>.
     /// </summary>
     private static List<Appointment> Occurrences(
-        EventBuilder builder, TimeZoneInfo local, DateOnly day, Exclusions? overridden, RecurrenceBudget budget, bool history = false)
+        EventBuilder builder, TimeZoneInfo local, DateOnly day, Exclusions? overridden, RecurrenceBudget budget, Action<DateOnly>? incomplete = null)
     {
         Appointment? first = builder.Build(local);
         if (first is null || builder.Start is null)
@@ -203,7 +203,7 @@ internal static class IcsParser
             && overridden?.Contains(start, first.AllDay) != true && DateTime.MaxValue - start >= duration;
 
         RecurrenceRule? rule = builder.Rules.Count == 1 ? RecurrenceRule.Parse(builder.Rules[0]) : null;
-        if ((!history || !Eligible(first.Start)) && rule is not null && TryUntil(rule.Until, source.Value, local, out DateTime? until))
+        if ((incomplete is null || !Eligible(first.Start)) && rule is not null && TryUntil(rule.Until, source.Value, local, out DateTime? until))
         {
             long days = (long)Math.Ceiling(Math.Max(0, duration.TotalDays));
             long fromDay = Math.Max(0, day.DayNumber - Math.Min(days, DateOnly.MaxValue.DayNumber) - 2);
@@ -211,10 +211,16 @@ internal static class IcsParser
             List<DateTime>? walls = rule.Occurrences(
                 source.Value.Wall,
                 until,
-                history ? DateOnly.FromDateTime(source.Value.Wall) : DateOnly.FromDayNumber((int)fromDay),
+                incomplete is not null ? DateOnly.FromDateTime(source.Value.Wall) : DateOnly.FromDayNumber((int)fromDay),
                 DateOnly.FromDayNumber((int)toDay),
                 budget,
-                history ? wall => TryLocal(source.Value.At(wall), local) is { } at && Eligible(at) : null);
+                incomplete is not null ? wall => TryLocal(source.Value.At(wall), local) is { } at && Eligible(at) : null,
+                incomplete is null ? null : pending =>
+                {
+                    // Source and display zones can differ by more than one calendar day.
+                    int lower = Math.Max(DateOnly.FromDateTime(first.Start).DayNumber, pending.DayNumber - 2);
+                    incomplete(DateOnly.FromDayNumber(lower));
+                });
             foreach (DateTime wall in walls ?? [])
             {
                 DateTime? start = TryLocal(source.Value.At(wall), local);
@@ -272,7 +278,7 @@ internal static class IcsParser
         return (replaced, hiddenSeries);
     }
 
-    internal static IReadOnlyList<Appointment> HistoryStarts(string text, TimeZoneInfo local, DateOnly through)
+    internal static IReadOnlyList<Appointment> HistoryStarts(string text, TimeZoneInfo local, DateOnly through, Action<DateOnly> incomplete)
     {
         List<EventBuilder> events = Scan(text);
         (Dictionary<string, Exclusions> replaced, HashSet<string> hidden) = Replacements(events, local);
@@ -296,7 +302,7 @@ internal static class IcsParser
             {
                 replaced.TryGetValue(item.Uid, out overridden);
             }
-            result.AddRange(Occurrences(item, local, through, overridden, budget, history: true));
+            result.AddRange(Occurrences(item, local, through, overridden, budget, incomplete));
         }
         return result;
     }
