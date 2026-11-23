@@ -45,6 +45,8 @@ internal sealed class DesktopState
 
     // Guards the Outlook cache: one call per day (appointments), each with its start time.
     private readonly object outlookGate = new();
+    private readonly object journalDayGate = new();
+    private OutlookCall<Appointment>? lastJournalDay;
     private readonly Dictionary<DateOnly, OutlookCall<DateOnly>> outlookHistory = [];
     private Dictionary<DateOnly, OutlookCall<Appointment>> outlookDays = new();
 
@@ -1026,7 +1028,7 @@ internal sealed class DesktopState
 
     internal Action<DateOnly>? BeforeJournalDay { get; set; }
 
-    public Task<(Journal Journal, OutlookStatus Status)> OpenJournal() => Task.Run(() =>
+    public Task<(Journal Journal, JournalOutlook Outlook)> OpenJournal() => Task.Run(() =>
     {
         DateOnly day = today();
         string? cached = feed?.ReadCache();
@@ -1052,12 +1054,22 @@ internal sealed class DesktopState
                 first = dates[0];
             }
         }
-        return (new Journal(notes, day, first, date =>
+        JournalOutlook journalOutlook = new(status, JournalOutlookDay);
+        return (new Journal(notes.List, note => JournalNoteFile.Open(notes.Root, note), day, first, date =>
         {
             BeforeJournalDay?.Invoke(date);
-            return ReadDay(date, status == OutlookStatus.Ok ? OutlookDay(date).Items : [], cached).Appointments;
-        }), status);
+            return ReadDay(date, journalOutlook.Day(date), cached).Appointments;
+        }), journalOutlook);
     });
+
+    // A later journal, even on a different date, shares the outstanding-call limit until Outlook returns.
+    private (OutlookStatus Status, IReadOnlyList<Appointment> Items) JournalOutlookDay(DateOnly day)
+    {
+        lock (journalDayGate)
+        {
+            return lastJournalDay?.Read.IsCompleted == false ? (OutlookStatus.TimedOut, []) : OutlookDay(day, journal: true);
+        }
+    }
 
     // The day's appointments from the calendar files, the feed's cached copy and Outlook's; never downloads.
     private CalendarDay ReadDay(DateOnly day, IReadOnlyList<Appointment> fromOutlook) =>
@@ -1283,7 +1295,7 @@ internal sealed class DesktopState
     }
 
     // Outlook's appointments of the day, through the cache; Off and nothing asked when Outlook is off. Never throws.
-    private (OutlookStatus Status, IReadOnlyList<Appointment> Items) OutlookDay(DateOnly day)
+    private (OutlookStatus Status, IReadOnlyList<Appointment> Items) OutlookDay(DateOnly day, bool journal = false)
     {
         try
         {
@@ -1306,6 +1318,10 @@ internal sealed class DesktopState
                 call = cached;
             }
 
+            if (journal)
+            {
+                lastJournalDay = call;
+            }
             return Finish(call);
         }
         catch (Exception)

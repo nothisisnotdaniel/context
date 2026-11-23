@@ -2,12 +2,17 @@
 
 <section class="page journal-panel" aria-label="Journal">
     <div class="panel-bar"><h2>Journal</h2><button type="button" class="close" @onclick="OnClose">Close</button></div>
-    @if (OutlookStatusLine.Text(status) is { } line)
+    @for (int index = 0; index <= entries.Count; index++)
     {
-        <p class="@OutlookStatusLine.Css(status)" role="status">@line</p>
-    }
-    @foreach (JournalDay entry in entries)
-    {
+        if (index == statusIndex && OutlookStatusLine.Text(status) is { } line)
+        {
+            <p class="@OutlookStatusLine.Css(status)" role="status">@line</p>
+        }
+        if (index == entries.Count)
+        {
+            break;
+        }
+        JournalDay entry = entries[index];
         DateTime start = entry.Date.ToDateTime(TimeOnly.MinValue);
         <article @key="entry.Date">
             <h3>@entry.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</h3>
@@ -25,11 +30,12 @@
             }
             @foreach (Appointment item in entry.Appointments)
             {
-                <button type="button" class="journal-appointment" @onclick="() => OnAppointment.InvokeAsync((item.Title, entry.Date))">@CurrentView.Time(item, start, start.AddDays(1)) @DesktopText.OneLine(item.Title)</button>
+                string title = DesktopText.OneLine(item.Title.Length == 0 ? "(no title)" : item.Title);
+                <button type="button" class="journal-appointment" @onclick="() => OnAppointment.InvokeAsync((item.Title, entry.Date))">@CurrentView.Time(item, start, start.AddDays(1)) @title</button>
             }
         </article>
     }
-    @if (journal is null || (loading && entries.Count == 0))
+    @if (entries.Count == 0 && journal?.Exhausted != true)
     {
         <p class="grey" role="status">Loading…</p>
     }
@@ -50,7 +56,9 @@
     private readonly List<JournalDay> entries = [];
     private ElementReference marker;
     private Journal? journal;
+    private JournalOutlook? outlook;
     private OutlookStatus status = OutlookStatus.Off;
+    private int statusIndex;
     private bool loading;
     private bool watch;
     private bool disposed;
@@ -58,7 +66,8 @@
     protected override async Task OnInitializedAsync()
     {
         Bridge.JournalBottom += SignalBottom;
-        (journal, status) = await State.OpenJournal();
+        (journal, outlook) = await State.OpenJournal();
+        status = outlook.Status;
         await Load();
     }
 
@@ -73,7 +82,14 @@
         loading = true;
         try
         {
-            entries.AddRange(await Task.Run(journal.ReadBatch));
+            IReadOnlyList<JournalDay> batch = await Task.Run(journal.ReadBatch);
+            if (outlook!.Status != status)
+            {
+                // Put a new status with this batch so previously visible headings keep their positions.
+                statusIndex = entries.Count;
+                status = outlook.Status;
+            }
+            entries.AddRange(batch);
             watch = !journal.Exhausted;
         }
         finally

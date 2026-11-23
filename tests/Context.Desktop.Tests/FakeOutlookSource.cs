@@ -9,6 +9,7 @@ internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
 {
     private readonly object gate = new();
     private readonly ManualResetEventSlim open = new(initialState: true);
+    private readonly ManualResetEventSlim appointmentsOpen = new(initialState: true);
     private readonly List<(DateOnly Day, TimeZoneInfo Zone)> appointmentCalls = [];
     private readonly List<(DateTime SinceUtc, int Max)> mailCalls = [];
     private int availabilityCalls;
@@ -16,6 +17,7 @@ internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
 
     public int OldestCalls => Volatile.Read(ref oldestCalls);
     public TaskCompletionSource OldestEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource AppointmentsEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public OutlookAvailability Available { get; set; } = OutlookAvailability.Available;
 
@@ -85,8 +87,14 @@ internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
     /// <summary>Makes every later read wait until <see cref="Release"/> or <see cref="Dispose"/>.</summary>
     public void Block() => open.Reset();
 
+    public void BlockAppointments() => appointmentsOpen.Reset();
+
     /// <summary>Lets every waiting and later read through.</summary>
-    public void Release() => open.Set();
+    public void Release()
+    {
+        appointmentsOpen.Set();
+        open.Set();
+    }
 
     public OutlookAvailability Availability()
     {
@@ -110,6 +118,8 @@ internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
             appointmentCalls.Add((day, zone));
         }
 
+        AppointmentsEntered.TrySetResult();
+        appointmentsOpen.Wait();
         open.Wait();
         if (Throws is not null)
         {
@@ -149,5 +159,5 @@ internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
     }
 
     /// <summary>Releases the gate, so no read stays blocked after the test; the gate itself is kept for late reads.</summary>
-    public void Dispose() => open.Set();
+    public void Dispose() => Release();
 }

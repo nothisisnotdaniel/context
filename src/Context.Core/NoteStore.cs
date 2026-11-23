@@ -590,10 +590,6 @@ internal sealed class NoteStore
     /// </summary>
     public string Read(NoteInfo note) => DecodeText(BoundedFile.Read(note.Path, MaxNoteBytes));
 
-    /// <summary>Reads a previously listed note, checking its current file and location when opening it.</summary>
-    public string ReadPlainFile(NoteInfo note) => DecodeText(BoundedFile.Read(note.Path, MaxNoteBytes,
-        file => IsPlainFile(file) && Contains(file.FullName)));
-
     /// <summary>
     /// Reads <paramref name="note"/> for editing: the text with <c>\r\n</c>
     /// turned into <c>\n</c> and the BOM dropped, plus the SHA-256 of the file's bytes and whether it had CRLF

@@ -1627,8 +1627,9 @@ public sealed class NoteStoreTests : IDisposable
         NoteInfo local = notes.CreateWithText("2026-10-29", "Local fixture");
         NoteInfo outside = other.CreateWithText("2026-10-29", "Other fixture");
 
-        Assert.Equal("Local fixture", notes.ReadPlainFile(local));
-        Assert.ThrowsAny<IOException>(() => notes.ReadPlainFile(outside));
+        using FileStream plain = JournalNoteFile.Open(notes.Root, local);
+        Assert.Equal("Local fixture", NoteStore.DecodeText(BoundedFile.Read(plain, NoteStore.MaxNoteBytes)));
+        Assert.ThrowsAny<IOException>(() => JournalNoteFile.Open(notes.Root, outside));
     }
 
     // 275 AC-4: a FIFO x.md reads as "" without blocking.

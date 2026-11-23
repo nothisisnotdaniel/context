@@ -13,19 +13,31 @@ internal sealed class JournalDay
 
 internal sealed class Journal
 {
-    private readonly NoteStore notes;
+    private readonly Func<NoteInfo, FileStream> openPlain;
     private readonly Func<DateOnly, IReadOnlyList<Appointment>> appointments;
     private readonly Dictionary<DateOnly, List<NoteInfo>> candidates = [];
     private readonly HashSet<string> tagged = new(StringComparer.Ordinal);
     private readonly DateOnly? oldest;
     private DateOnly? next;
 
-    public Journal(NoteStore notes, DateOnly today, DateOnly? calendarStart, Func<DateOnly, IReadOnlyList<Appointment>> appointments)
+    public Journal(Func<IReadOnlyList<NoteInfo>> listNotes, Func<NoteInfo, FileStream> openPlain,
+        DateOnly today, DateOnly? calendarStart, Func<DateOnly, IReadOnlyList<Appointment>> appointments)
     {
-        this.notes = notes;
+        this.openPlain = openPlain;
         this.appointments = appointments;
         oldest = calendarStart;
-        foreach (NoteInfo note in notes.List())
+        IReadOnlyList<NoteInfo> notes;
+        try
+        {
+            notes = listNotes();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            notes = [];
+        }
+
+        // Like the editor's exact-name lookup, select the first listed file for each name.
+        foreach (NoteInfo note in notes.DistinctBy(n => n.Name, StringComparer.Ordinal))
         {
             string[] parts = note.Name.Split('/');
             string title = note.Title;
@@ -87,7 +99,11 @@ internal sealed class Journal
                 }
                 else if (note.Parent is not null || items.Any(a => MeetingNote.IsNoteOf(a, note.Name)) || tagged.Contains(note.Name))
                 {
-                    meetings.Add(note.Name);
+                    using FileStream? plain = TryOpen(note);
+                    if (plain is not null)
+                    {
+                        meetings.Add(note.Name);
+                    }
                 }
             }
             if (!string.IsNullOrWhiteSpace(body) || meetings.Count > 0 || items.Count > 0)
@@ -99,11 +115,24 @@ internal sealed class Journal
         return result;
     }
 
-    private string? Read(NoteInfo note)
+    private FileStream? TryOpen(NoteInfo note)
     {
         try
         {
-            return notes.ReadPlainFile(note);
+            return openPlain(note);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private string? Read(NoteInfo note)
+    {
+        using FileStream? plain = TryOpen(note);
+        try
+        {
+            return plain is null ? null : NoteStore.DecodeText(BoundedFile.Read(plain, NoteStore.MaxNoteBytes));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {

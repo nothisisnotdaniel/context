@@ -2218,12 +2218,12 @@ public sealed class DesktopSourceTests
             RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs"));
     }
 
-    // 136 AC-10, 217 AC-8: native calls live only in the macOS key store and the Outlook COM source (334: and the
-    // Windows session end watcher).
+    // Native calls stay in the desktop platform adapters. Journal reads need a regular-file check on the open handle.
     [Fact]
     public void Sources_HaveNativeCallsOnlyInTheMacStore()
     {
         string root = RepoFiles.Root();
+        const string JournalFile = "src/Context.Desktop/JournalNoteFile.cs";
         string[] native = ["DllImport", "LibraryImport", "extern "];
         List<string> found = RepoFiles.Sources(root, "src", ".cs", ".razor")
             .Where(f => native.Any(n => File.ReadAllText(Path.Combine(root, f)).Contains(n, StringComparison.Ordinal)))
@@ -2233,9 +2233,12 @@ public sealed class DesktopSourceTests
             new[]
             {
                 RealHotkeyFile, RealMacStoreFile, RealOutlookFile, RealSessionWatcherFile, RealMacProStoreFile,
-                RealWindowsProStoreFile,
+                RealWindowsProStoreFile, JournalFile,
             }.Order(StringComparer.Ordinal),
             found.Order(StringComparer.Ordinal));
+        string journal = File.ReadAllText(Path.Combine(root, JournalFile));
+        Assert.Equal(["CreateFileW", "FGetAttrList", "GetFileType", "GetFinalPathNameByHandleW", "Statx", "UnixOpen", "UnixOpenAt"],
+            Regex.Matches(journal, @"\bextern\s+\w+\s+(\w+)\(").Select(match => match.Groups[1].Value).Order(StringComparer.Ordinal));
     }
 
     // 260 AC-10, AC-11: the real area picker and hotkey are named only by themselves and Program.cs, which picks them

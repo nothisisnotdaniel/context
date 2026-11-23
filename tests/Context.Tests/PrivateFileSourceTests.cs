@@ -21,6 +21,10 @@ public sealed partial class PrivateFileSourceTests
     [GeneratedRegex(@"(?<![A-Za-z0-9_])(Directory\.CreateDirectory\(|File\.WriteAll|File\.AppendAll|File\.Create\(|File\.OpenWrite\(|File\.Open\(|File\.Copy\(|new StreamWriter\(|new FileStream\()")]
     private static partial Regex WriteCall();
 
+    // The two-argument handle constructor wraps an existing handle. Only its literal read-only form is exempt.
+    [GeneratedRegex(@"^new FileStream\(\s*\w+\s*,\s*FileAccess\.Read\s*\)$")]
+    private static partial Regex ReadOnlyHandle();
+
     [GeneratedRegex(@"^\s*(?:(?:public|internal|private|protected|static|async|override|sealed|unsafe)\s+)+[\w<>\[\],.?() ]+?\s+(\w+)\s*\(")]
     private static partial Regex MethodDeclaration();
 
@@ -72,8 +76,9 @@ public sealed partial class PrivateFileSourceTests
 
     // A FileStream that only reads an existing file.
     private static bool IsReadOnlyStream(string statement) =>
-        statement.Contains("FileMode.Open,", StringComparison.Ordinal)
-        && statement.Contains("FileAccess.Read,", StringComparison.Ordinal);
+        (statement.Contains("FileMode.Open,", StringComparison.Ordinal)
+            && statement.Contains("FileAccess.Read,", StringComparison.Ordinal))
+        || ReadOnlyHandle().IsMatch(statement);
 
     private static string? EnclosingMethod(string[] lines, int index)
     {
@@ -166,7 +171,9 @@ public sealed partial class PrivateFileSourceTests
                     + "        using var w = new FileStream(p, FileMode.Create);\n"
                     + "        PrivateFile.OpenNew(p);\n"
                     + "        File.Copy(p, p + \".bak\");\n"
-                    + "        using var r = File.Open(p, FileMode.Open, FileAccess.Read, FileShare.Read);\n    }\n}\n");
+                    + "        using var r = File.Open(p, FileMode.Open, FileAccess.Read, FileShare.Read);\n"
+                    + "        using var fromHandle = new FileStream(handle, FileAccess.Read);\n"
+                    + "        using var writable = new FileStream(handle, FileAccess.ReadWrite);\n    }\n}\n");
 
             List<string> hits = Hits(src);
 
@@ -175,6 +182,7 @@ public sealed partial class PrivateFileSourceTests
                     "Context.Core/Sample.cs:5 (Bad): File.WriteAll",
                     "Context.Core/Sample.cs:8 (Bad): new FileStream(",
                     "Context.Core/Sample.cs:10 (Bad): File.Copy(",
+                    "Context.Core/Sample.cs:13 (Bad): new FileStream(",
                 ],
                 hits);
         }

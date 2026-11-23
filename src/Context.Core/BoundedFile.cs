@@ -12,12 +12,10 @@ internal static class BoundedFile
     /// <see cref="UnauthorizedAccessException"/> when access is denied, and <see cref="FileTooLargeException"/> when it
     /// is larger than <paramref name="maxBytes"/>, and <see cref="IOException"/> when it is not seekable or can't be read. Exception messages are fixed texts.
     /// </summary>
-    public static byte[] Read(string path, long maxBytes) => Read(path, maxBytes, null);
-
-    internal static byte[] Read(string path, long maxBytes, Func<FileInfo, bool>? isEligible)
+    public static byte[] Read(string path, long maxBytes)
     {
         FileInfo info = new FileInfo(path);
-        if (!info.Exists || (isEligible is not null && !isEligible(info)))
+        if (!info.Exists)
         {
             throw new FileNotFoundException("No such file.");
         }
@@ -33,8 +31,12 @@ internal static class BoundedFile
         }
 
         using FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        // Recheck the entry after opening and before reading any bytes from this stream.
-        if (!stream.CanSeek || (isEligible is not null && !isEligible(new FileInfo(path))))
+        return Read(stream, maxBytes);
+    }
+
+    internal static byte[] Read(FileStream stream, long maxBytes)
+    {
+        if (!stream.CanSeek)
         {
             throw new IOException("Not a regular file.");
         }
