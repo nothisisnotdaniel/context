@@ -438,6 +438,8 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#493](backlog/493-show-note-todos-on-the-person.md) Show note todos on the person's page
 - [x] [#494](backlog/494-new-notes-can-be-added-after.md) New notes can be added after a note is linked to an appointment → 395-new-note-after-appointment
 - [ ] [#495](backlog/495-checkbox-icon-for-todos-and-the.md) Checkbox icon for Todos, and the ! button opens the decision overview
+- [ ] [#496](backlog/496-make-recentnotesactionstests-open-anyroute-putsitf.md) Make RecentNotesActionsTests.Open_AnyRoute_PutsItFirst_Once reliable
+- [ ] [#497](backlog/497-show-feedback-while-the-appointment-page.md) Show feedback while the appointment page checks for a meeting note
 
 ## Dropped with the terminal UI
 
