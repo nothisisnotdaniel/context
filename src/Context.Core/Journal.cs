@@ -17,15 +17,18 @@ internal sealed class Journal
     private readonly Func<DateOnly, IReadOnlyList<Appointment>> appointments;
     private readonly Dictionary<DateOnly, List<NoteInfo>> candidates = [];
     private readonly HashSet<string> tagged = new(StringComparer.Ordinal);
-    private readonly DateOnly? oldest;
+    private readonly DateOnly? oldestLocal;
+    private readonly Func<DateOnly?>? outlookStart;
     private DateOnly? next;
 
     public Journal(Func<IReadOnlyList<NoteInfo>> listNotes, Func<NoteInfo, FileStream> openPlain,
-        DateOnly today, DateOnly? calendarStart, Func<DateOnly, IReadOnlyList<Appointment>> appointments)
+        DateOnly today, DateOnly? calendarStart, Func<DateOnly, IReadOnlyList<Appointment>> appointments,
+        Func<DateOnly?>? outlookStart = null)
     {
         this.openPlain = openPlain;
         this.appointments = appointments;
-        oldest = calendarStart;
+        this.outlookStart = outlookStart;
+        oldestLocal = calendarStart;
         IReadOnlyList<NoteInfo> notes;
         try
         {
@@ -57,7 +60,7 @@ internal sealed class Journal
             }
             if (title.Length == 10 || tagged.Contains(note.Name))
             {
-                oldest = oldest is null || date < oldest ? date : oldest;
+                oldestLocal = oldestLocal is null || date < oldestLocal ? date : oldestLocal;
             }
 
             if (!candidates.TryGetValue(date, out List<NoteInfo>? group))
@@ -67,10 +70,14 @@ internal sealed class Journal
             }
             group.Add(note);
         }
-        next = oldest <= today ? today : null;
+        next = Oldest <= today ? today : null;
     }
 
     public bool Exhausted => next is null;
+
+    // A failed Outlook day read withdraws its bound. Notes and readable calendars keep their own bound.
+    private DateOnly? Oldest => outlookStart?.Invoke() is { } date && (oldestLocal is null || date < oldestLocal)
+        ? date : oldestLocal;
 
     public IReadOnlyList<JournalDay> ReadBatch()
     {
@@ -89,12 +96,16 @@ internal sealed class Journal
                     if (text is not null)
                     {
                         daily = note.Name;
-                        string clean = SafeText.Clean(text);
-                        int newline = clean.IndexOf('\n');
-                        string line = newline < 0 ? clean : clean[..newline];
-                        body = line.StartsWith("# ", StringComparison.Ordinal) && line[2..].Trim() == note.Name
-                            ? newline < 0 ? string.Empty : clean[(newline + 1)..]
-                            : clean;
+                        int newline = text.IndexOf('\n');
+                        string line = newline < 0 ? text : text[..newline];
+                        if (line.StartsWith("# ", StringComparison.Ordinal) && line[2..].Trim() == note.Name)
+                        {
+                            text = newline < 0 ? string.Empty : text[(newline + 1)..];
+                        }
+                        if (!string.IsNullOrWhiteSpace(text))
+                        {
+                            body = SafeText.Clean(text);
+                        }
                     }
                 }
                 else if (note.Parent is not null || items.Any(a => MeetingNote.IsNoteOf(a, note.Name)) || tagged.Contains(note.Name))
@@ -106,11 +117,11 @@ internal sealed class Journal
                     }
                 }
             }
-            if (!string.IsNullOrWhiteSpace(body) || meetings.Count > 0 || items.Count > 0)
+            if (body is not null || meetings.Count > 0 || items.Count > 0)
             {
                 result.Add(new JournalDay { Date = date, Daily = daily, Body = body, Meetings = meetings, Appointments = items });
             }
-            next = date == oldest ? null : date.AddDays(-1);
+            next = Oldest is { } oldest && date > oldest ? date.AddDays(-1) : null;
         }
         return result;
     }

@@ -2237,7 +2237,7 @@ public sealed class DesktopSourceTests
             }.Order(StringComparer.Ordinal),
             found.Order(StringComparer.Ordinal));
         string journal = File.ReadAllText(Path.Combine(root, JournalFile));
-        Assert.Equal(["CreateFileW", "FGetAttrList", "GetFileType", "GetFinalPathNameByHandleW", "Statx", "UnixOpen", "UnixOpenAt"],
+        Assert.Equal(["CreateFileW", "FGetAttrList", "GetFileType", "GetFinalPathNameByHandleW", "NtOpenFile", "Statx", "UnixOpen", "UnixOpenAt"],
             Regex.Matches(journal, @"\bextern\s+\w+\s+(\w+)\(").Select(match => match.Groups[1].Value).Order(StringComparer.Ordinal));
     }
 

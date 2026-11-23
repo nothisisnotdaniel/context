@@ -47,7 +47,7 @@ internal sealed class DesktopState
     private readonly object outlookGate = new();
     private readonly object journalDayGate = new();
     private OutlookCall<Appointment>? lastJournalDay;
-    private readonly Dictionary<DateOnly, OutlookCall<DateOnly>> outlookHistory = [];
+    private (DateOnly Day, OutlookCall<DateOnly> Call)? outlookHistory;
     private Dictionary<DateOnly, OutlookCall<Appointment>> outlookDays = new();
 
     // The mail suggestions accepted or dismissed in this session (job 286); never written to disk.
@@ -1032,35 +1032,38 @@ internal sealed class DesktopState
     {
         DateOnly day = today();
         string? cached = feed?.ReadCache();
-        DateOnly? first = calendar.Oldest(day, cached);
-        OutlookStatus status = OutlookStatus.Off;
-        if (OutlookOn())
-        {
-            OutlookCall<DateOnly> call;
-            lock (outlookGate)
-            {
-                // The calendar zone belongs to this state. Only unfinished reads are shared.
-                if (!outlookHistory.TryGetValue(day, out OutlookCall<DateOnly>? existing) || existing.Read.IsCompleted)
-                {
-                    existing = Start(utcNow(), () => outlook.Oldest(day, calendar.Zone));
-                    outlookHistory[day] = existing;
-                }
-                call = existing;
-            }
-            (OutlookStatus outcome, IReadOnlyList<DateOnly> dates) = Finish(call);
-            status = outcome;
-            if (outcome == OutlookStatus.Ok && dates.Count > 0 && (first is null || dates[0] < first))
-            {
-                first = dates[0];
-            }
-        }
+        DateOnly? localStart = calendar.Oldest(day, cached);
+        (OutlookStatus status, IReadOnlyList<DateOnly> dates) = OutlookOn() ? JournalHistory(day) : (OutlookStatus.Off, []);
         JournalOutlook journalOutlook = new(status, JournalOutlookDay);
-        return (new Journal(notes.List, note => JournalNoteFile.Open(notes.Root, note), day, first, date =>
+        return (new Journal(notes.List, note => JournalNoteFile.Open(notes.Root, note), day, localStart, date =>
         {
             BeforeJournalDay?.Invoke(date);
             return ReadDay(date, journalOutlook.Day(date), cached).Appointments;
-        }), journalOutlook);
+        }, () => journalOutlook.Status == OutlookStatus.Ok && dates.Count > 0 ? dates[0] : null), journalOutlook);
     });
+
+    private (OutlookStatus Status, IReadOnlyList<DateOnly> Dates) JournalHistory(DateOnly day)
+    {
+        OutlookCall<DateOnly> call;
+        lock (outlookGate)
+        {
+            if (outlookHistory is { } pending && !pending.Call.Read.IsCompleted)
+            {
+                // An earlier day's unfinished search cannot answer a new date or start another Outlook thread.
+                if (pending.Day != day)
+                {
+                    return (OutlookStatus.TimedOut, []);
+                }
+                call = pending.Call;
+            }
+            else
+            {
+                call = Start(utcNow(), () => outlook.Oldest(day, calendar.Zone));
+                outlookHistory = (day, call);
+            }
+        }
+        return Finish(call);
+    }
 
     // A later journal, even on a different date, shares the outstanding-call limit until Outlook returns.
     private (OutlookStatus Status, IReadOnlyList<Appointment> Items) JournalOutlookDay(DateOnly day)

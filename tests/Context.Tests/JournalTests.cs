@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.Win32.SafeHandles;
 using Xunit.Abstractions;
 
 namespace Context.Tests;
@@ -87,6 +88,21 @@ public sealed class JournalTests : IDisposable
         Assert.True(journal.Exhausted);
         Assert.Empty(journal.ReadBatch());
         Assert.Equal(Enumerable.Range(0, 6).Select(i => Today.AddDays(-i)), reads);
+    }
+
+    [Fact]
+    public void DailyQualification_UsesTheDecodedBodyBeforeCleaningItForDisplay()
+    {
+        NoteStore notes = new(root);
+        notes.CreateWithText("2026-10-29", "# 2026-10-29\r\n  \r\t\n");
+        notes.CreateWithText("2026-10-28", "#\t2026-10-28");
+        Journal journal = Open(notes, null, _ => []);
+
+        JournalDay day = Assert.Single(journal.ReadBatch());
+        Assert.Equal(Today.AddDays(-1), day.Date);
+        Assert.Equal("2026-10-28", day.Daily);
+        Assert.Equal("#    2026-10-28", day.Body);
+        Assert.True(journal.Exhausted);
     }
 
     [Fact]
@@ -181,7 +197,7 @@ public sealed class JournalTests : IDisposable
         Appointment item = new("Scheduled", null, start, start.AddHours(1), false);
         // The listed pathname is still eligible. Give its reader a different real file handle, without racing threads.
         Journal journal = new(notes.List, note => note.Name == daily.Name
-            ? JournalNoteFile.Open(notes.Root, note, _ => File.OpenHandle(other.Path))
+            ? JournalNoteFile.Open(notes.Root, note, () => File.OpenHandle(other.Path))
             : JournalNoteFile.Open(notes.Root, note), Today, Today, _ => [item]);
 
         JournalDay day = Assert.Single(journal.ReadBatch());
@@ -189,6 +205,52 @@ public sealed class JournalTests : IDisposable
         Assert.Null(day.Daily);
         Assert.Equal(["2026-10-29 Tagged"], day.Meetings);
         Assert.Same(item, Assert.Single(day.Appointments));
+    }
+
+    [Fact]
+    public void RedirectedMeetingFolder_IsRejectedBeforeOpeningTheNote()
+    {
+        NoteStore notes = new(root);
+        notes.Create("Meetings");
+        notes.CreateChild("Meetings", "Series");
+        NoteInfo meeting = notes.CreateChild("Meetings/Series", "2026-10-29");
+        using (FileStream original = JournalNoteFile.Open(root, meeting))
+        {
+            Assert.True(original.CanRead);
+        }
+
+        string meetings = Path.Combine(root, "Meetings");
+        string series = Path.Combine(meetings, "Series");
+        string stored = Path.Combine(meetings, "Stored");
+        Directory.Move(series, stored);
+        Func<SafeFileHandle, FileAttributes>? readDirectoryAttributes = null;
+        int directories = 0;
+        try
+        {
+            Directory.CreateSymbolicLink(series, stored);
+            Assert.True(File.GetAttributes(series).HasFlag(FileAttributes.ReparsePoint));
+            Assert.ThrowsAny<IOException>(() => JournalNoteFile.Open(root, meeting));
+            output.WriteLine("Read-time check used a local directory link.");
+        }
+        catch (IOException ex) when (OperatingSystem.IsWindows() && (ex.HResult & 0xffff) == 1314)
+        {
+            // The native directory handles and the leaf are real. Supply the reparse bit on the second parent
+            // when the Windows test account cannot create a directory link.
+            Directory.Move(stored, series);
+            readDirectoryAttributes = handle =>
+            {
+                FileAttributes type = File.GetAttributes(handle);
+                return ++directories == 2 ? type | FileAttributes.ReparsePoint : type;
+            };
+            output.WriteLine("Windows denied directory-link creation (1314). The fixture supplied the Series handle's reparse bit.");
+        }
+
+        Assert.ThrowsAny<IOException>(() => JournalNoteFile.Open(root, meeting,
+            () => throw new InvalidOperationException("The leaf open was reached."), readDirectoryAttributes));
+        if (readDirectoryAttributes is not null)
+        {
+            Assert.Equal(2, directories);
+        }
     }
 
     [Theory]

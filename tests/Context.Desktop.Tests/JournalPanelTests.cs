@@ -164,6 +164,8 @@ public sealed class JournalPanelTests : IDisposable
         }
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await data.State!.ReloadsSettled().WaitAsync(Wait);
+        ConcurrentQueue<DateOnly> reads = new();
+        data.State.BeforeJournalDay = reads.Enqueue;
         await Open(cut);
         if (populated)
         {
@@ -180,9 +182,47 @@ public sealed class JournalPanelTests : IDisposable
         {
             cut.WaitForAssertion(() => Assert.Contains("No journal entries.", cut.Find(".journal-panel").TextContent), Wait);
         }
-        int calls = data.Outlook.AppointmentCalls;
+        DateOnly[] expected = Enumerable.Range(0, populated ? 43 : 0).Select(i => DesktopFixture.Today.AddDays(-i)).ToArray();
+        Assert.Equal(expected, reads.ToArray());
         await Bottom(cut);
-        Assert.Equal(calls, data.Outlook.AppointmentCalls);
+        Assert.Equal(expected, reads.ToArray());
+    }
+
+    [Fact]
+    public async Task FinalBatch_StaysLoadingThroughRenderUntilTheEntriesArrive()
+    {
+        data.WriteNote(Date(14), "Last day");
+        data.CreateState();
+        IRenderedComponent<JournalPanel> cut = data.Bunit.Render<JournalPanel>();
+        Assert.True(await watching.WaitAsync(Wait));
+        TaskCompletionSource<bool> finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Func<Journal, Task<IReadOnlyList<JournalDay>>> read = cut.Instance.ReadBatchAsync;
+        cut.Instance.ReadBatchAsync = async journal =>
+        {
+            IReadOnlyList<JournalDay> batch = await read(journal);
+            finished.TrySetResult(journal.Exhausted);
+            await release.Task.WaitAsync(Wait);
+            return batch;
+        };
+
+        Task append = cut.InvokeAsync(cut.Instance.Bridge.OnJournalBottom);
+        try
+        {
+            Assert.True(await finished.Task.WaitAsync(Wait));
+            cut.Render();
+            Assert.Empty(cut.FindAll("article"));
+            Assert.Equal("Loading…", cut.Find("[role=status]").TextContent);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+        await append.WaitAsync(Wait);
+        cut.WaitForAssertion(() => Assert.Equal(Date(14), cut.Find("h3").TextContent), Wait);
+        Assert.Equal("Last day", cut.Find(".journal-body").TextContent);
+        Assert.Equal("Open " + Date(14), cut.Find(".journal-open").GetAttribute("aria-label"));
+        Assert.Empty(cut.FindAll("[role=status]"));
     }
 
     [Theory]
@@ -220,6 +260,10 @@ public sealed class JournalPanelTests : IDisposable
         if (outlook)
         {
             Assert.Equal("Journal text", entries[0].Body);
+            Appointment past = Assert.Single(entries[0].Appointments);
+            Assert.Equal("Past today", past.Title);
+            Assert.Equal(DesktopFixture.Today.ToDateTime(new TimeOnly(7, 0)), past.Start);
+            Assert.Equal(DesktopFixture.Today.ToDateTime(new TimeOnly(7, 30)), past.End);
         }
         foreach (JournalDay day in entries.Where(e => e.Date.Day != 29))
         {
@@ -281,6 +325,8 @@ public sealed class JournalPanelTests : IDisposable
             await data.Outlook.OldestEntered.Task.WaitAsync(Wait);
             AssertLocalDay(await first.WaitAsync(Wait));
             AssertLocalDay(await state.OpenJournal().WaitAsync(Wait));
+            data.Day = DesktopFixture.Today.AddDays(1);
+            AssertLocalDay(await state.OpenJournal().WaitAsync(Wait));
             Assert.Equal(1, data.Outlook.OldestCalls);
         }
         finally
@@ -293,6 +339,41 @@ public sealed class JournalPanelTests : IDisposable
             Assert.Equal(OutlookStatus.TimedOut, opened.Outlook.Status);
             Assert.Equal("Read locally", Assert.Single(opened.Journal.ReadBatch()).Body);
         }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DeniedOutlookDay_StopsAtTheRemainingLocalHistory(bool local)
+    {
+        new SettingsStore(data.Root).SaveOutlook(true);
+        DateOnly oldest = DesktopFixture.Today.AddDays(-42);
+        DateTime start = oldest.ToDateTime(new TimeOnly(9, 0));
+        data.Outlook.Days[oldest] = [new Appointment("Older Outlook item", null, start, start.AddHours(1), false)];
+        if (local)
+        {
+            data.WriteNote(Date(1), "Local note");
+            data.WriteCalendar("local.ics", DesktopFixture.Calendar(DesktopFixture.Event("Local meeting", "20261027T090000", "20261027T100000")));
+        }
+        DesktopState state = data.CreateState();
+        List<DateOnly> reads = [];
+        state.BeforeJournalDay = reads.Add;
+        (Journal journal, JournalOutlook outlook) = await state.OpenJournal().WaitAsync(Wait);
+        Assert.Equal(OutlookStatus.Ok, outlook.Status);
+        data.Outlook.AppointmentKind = OutlookReadKind.Denied;
+
+        IReadOnlyList<JournalDay> entries = journal.ReadBatch();
+        Assert.Equal(OutlookStatus.Denied, outlook.Status);
+        Assert.Equal(1, data.Outlook.AppointmentCalls);
+        Assert.Equal(local ? new[] { DesktopFixture.Today.AddDays(-1), DesktopFixture.Today.AddDays(-2) } : [], entries.Select(e => e.Date));
+        if (local)
+        {
+            Assert.Equal("Local note", entries[0].Body);
+            Assert.Equal("Local meeting", Assert.Single(entries[1].Appointments).Title);
+        }
+        Assert.True(journal.Exhausted);
+        Assert.Empty(journal.ReadBatch());
+        Assert.Equal(Enumerable.Range(0, local ? 3 : 1).Select(i => DesktopFixture.Today.AddDays(-i)), reads);
     }
 
     [Fact]
@@ -349,10 +430,13 @@ public sealed class JournalPanelTests : IDisposable
         (Journal journal, _) = await state.OpenJournal().WaitAsync(Wait);
         Assert.Equal("First batch", Assert.Single(journal.ReadBatch()).Body);
 
-        ActionResult sealedNote = await data.Actions!.MarkSensitive(meeting, new Confirmation()).WaitAsync(Wait);
-        Assert.Equal(ActionKind.Done, sealedNote.Kind);
+        data.WriteSensitive(meeting, "#meeting");
+        string plain = Path.Combine(data.Root, meeting + ".md");
+        File.Delete(plain);
+        Assert.False(File.Exists(plain));
         Assert.True(File.Exists(Path.Combine(data.Root, meeting + NoteStore.SensitiveExtension)));
         JournalDay day = Assert.Single(journal.ReadBatch());
+        Assert.Equal(DesktopFixture.Today.AddDays(-14), day.Date);
         Assert.Empty(day.Meetings);
         Assert.Equal("Scheduled", Assert.Single(day.Appointments).Title);
         Assert.True(journal.Exhausted);

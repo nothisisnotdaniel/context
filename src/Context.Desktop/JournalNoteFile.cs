@@ -8,7 +8,8 @@ namespace Context;
 /// <summary>Opens a listed Markdown file and verifies the type and location of the handle that will supply its bytes.</summary>
 internal static class JournalNoteFile
 {
-    public static FileStream Open(string root, NoteInfo note, Func<string, SafeFileHandle>? openFile = null)
+    public static FileStream Open(string root, NoteInfo note, Func<SafeFileHandle>? openFile = null,
+        Func<SafeFileHandle, FileAttributes>? readDirectoryAttributes = null)
     {
         string relative = Path.GetRelativePath(root, note.Path);
         if (Path.IsPathRooted(relative) || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
@@ -19,8 +20,7 @@ internal static class JournalNoteFile
 
         using SafeFileHandle folder = OpenHandle(root, directory: true);
         string expected = Path.Join(CheckedPath(folder, directory: true), relative);
-        SafeFileHandle file = openFile?.Invoke(note.Path) ?? (OperatingSystem.IsWindows()
-            ? OpenHandle(note.Path, directory: false) : OpenBelow(folder, relative));
+        SafeFileHandle file = OpenBelow(folder, relative, openFile, readDirectoryAttributes ?? File.GetAttributes);
         try
         {
             // Both names come from live handles. A replacement at the listed path cannot vouch for another stream.
@@ -39,30 +39,38 @@ internal static class JournalNoteFile
 
     private static IOException Ineligible() => new IOException("Not a regular note file.");
 
-    // Open each Unix component relative to its pinned parent, refusing links below the configured root.
-    private static SafeFileHandle OpenBelow(SafeFileHandle parent, string relative)
+    // Open one component at a time from its pinned parent. Never resolve a descendant through a directory link.
+    private static SafeFileHandle OpenBelow(SafeFileHandle parent, string relative, Func<SafeFileHandle>? openFile,
+        Func<SafeFileHandle, FileAttributes> readDirectoryAttributes)
     {
         int separator = relative.IndexOf(Path.DirectorySeparatorChar);
         if (separator < 0)
         {
-            return OpenHandle(relative, directory: false, parent);
+            return openFile?.Invoke() ?? OpenHandle(relative, directory: false, parent);
         }
         using SafeFileHandle child = OpenHandle(relative[..separator], directory: true, parent);
         if (child.IsInvalid)
         {
             throw Ineligible();
         }
-        return OpenBelow(child, relative[(separator + 1)..]);
+        if (OperatingSystem.IsWindows())
+        {
+            CheckWindowsType(child, readDirectoryAttributes(child), directory: true);
+        }
+        return OpenBelow(child, relative[(separator + 1)..], openFile, readDirectoryAttributes);
     }
 
     private static SafeFileHandle OpenHandle(string path, bool directory, SafeFileHandle? parent = null)
     {
         if (OperatingSystem.IsWindows())
         {
-            const uint GenericRead = 0x80000000, ReadAttributes = 0x80, OpenExisting = 3;
-            const uint BackupSemantics = 0x02000000, OpenReparsePoint = 0x00200000;
-            return CreateFileW(path, directory ? ReadAttributes : GenericRead, FileShare.ReadWrite, IntPtr.Zero,
-                OpenExisting, directory ? BackupSemantics : OpenReparsePoint, IntPtr.Zero);
+            if (parent is not null)
+            {
+                return WindowsOpenAt(parent, path, directory);
+            }
+            const uint Traverse = 0x20, ReadAttributes = 0x80, OpenExisting = 3, BackupSemantics = 0x02000000;
+            return CreateFileW(path, Traverse | ReadAttributes, FileShare.ReadWrite, IntPtr.Zero, OpenExisting,
+                BackupSemantics, IntPtr.Zero);
         }
 
         // Read-only, nonblocking (including FIFOs), no controlling terminal, close-on-exec.
@@ -89,6 +97,55 @@ internal static class JournalNoteFile
         return new SafeFileHandle((IntPtr)fd, ownsHandle: true);
     }
 
+    private static SafeFileHandle WindowsOpenAt(SafeFileHandle parent, string component, bool directory)
+    {
+        const uint ReadData = 1, Traverse = 0x20, ReadAttributes = 0x80, Synchronize = 0x100000;
+        const uint DirectoryFile = 1, NonDirectoryFile = 0x40, SynchronousIo = 0x20, OpenReparsePoint = 0x00200000;
+        const uint DontReparse = 0x1000;
+        ushort bytes = checked((ushort)(component.Length * sizeof(char)));
+        GCHandle text = GCHandle.Alloc(component, GCHandleType.Pinned);
+        GCHandle name = default;
+        try
+        {
+            name = GCHandle.Alloc(new UnicodeString { Length = bytes, MaximumLength = bytes, Buffer = text.AddrOfPinnedObject() },
+                GCHandleType.Pinned);
+            ObjectAttributes attributes = new()
+            {
+                Length = Marshal.SizeOf<ObjectAttributes>(),
+                RootDirectory = parent.DangerousGetHandle(),
+                ObjectName = name.AddrOfPinnedObject(),
+                Attributes = DontReparse,
+            };
+            int status = NtOpenFile(out SafeFileHandle child, ReadAttributes | Synchronize | (directory ? Traverse : ReadData),
+                ref attributes, out _, FileShare.ReadWrite, SynchronousIo | OpenReparsePoint | (directory ? DirectoryFile : NonDirectoryFile));
+            if (status != 0)
+            {
+                child.Dispose();
+                throw Ineligible();
+            }
+            return child;
+        }
+        finally
+        {
+            if (name.IsAllocated)
+            {
+                name.Free();
+            }
+            text.Free();
+            GC.KeepAlive(parent);
+        }
+    }
+
+    private static void CheckWindowsType(SafeFileHandle handle, FileAttributes attributes, bool directory)
+    {
+        const uint Disk = 1;
+        FileAttributes type = attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint | FileAttributes.Device);
+        if (GetFileType(handle) != Disk || type != (directory ? FileAttributes.Directory : 0))
+        {
+            throw Ineligible();
+        }
+    }
+
     private static string CheckedPath(SafeFileHandle handle, bool directory)
     {
         if (handle.IsInvalid)
@@ -97,12 +154,7 @@ internal static class JournalNoteFile
         }
         if (OperatingSystem.IsWindows())
         {
-            const uint Disk = 1;
-            FileAttributes type = File.GetAttributes(handle) & (FileAttributes.Directory | FileAttributes.ReparsePoint | FileAttributes.Device);
-            if (GetFileType(handle) != Disk || type != (directory ? FileAttributes.Directory : 0))
-            {
-                throw Ineligible();
-            }
+            CheckWindowsType(handle, File.GetAttributes(handle), directory);
             StringBuilder path = new(512);
             uint length = GetFinalPathNameByHandleW(handle, path, (uint)path.Capacity, 0);
             if (length > path.Capacity && length <= 32768)
@@ -161,6 +213,36 @@ internal static class JournalNoteFile
         [FieldOffset(0)] public uint Mask;
         [FieldOffset(28)] public ushort Mode;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct UnicodeString
+    {
+        public ushort Length;
+        public ushort MaximumLength;
+        public IntPtr Buffer;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ObjectAttributes
+    {
+        public int Length;
+        public IntPtr RootDirectory;
+        public IntPtr ObjectName;
+        public uint Attributes;
+        public IntPtr SecurityDescriptor;
+        public IntPtr SecurityQualityOfService;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IoStatusBlock
+    {
+        public IntPtr Status;
+        public UIntPtr Information;
+    }
+
+    [DllImport("ntdll.dll", ExactSpelling = true)]
+    private static extern int NtOpenFile(out SafeFileHandle file, uint access, ref ObjectAttributes attributes,
+        out IoStatusBlock result, FileShare share, uint options);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern SafeFileHandle CreateFileW(string path, uint access, FileShare share, IntPtr security,

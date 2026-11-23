@@ -18,10 +18,10 @@
             <h3>@entry.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</h3>
             @if (entry.Daily is { } daily)
             {
-                <button type="button" class="journal-open" @onclick="() => OnOpen.InvokeAsync(daily)">Open</button>
-                @if (!string.IsNullOrWhiteSpace(entry.Body))
+                <button type="button" class="journal-open" aria-label="Open @daily" @onclick="() => OnOpen.InvokeAsync(daily)">Open</button>
+                @if (entry.Body is { } body)
                 {
-                    <div class="journal-body">@entry.Body</div>
+                    <div class="journal-body">@body</div>
                 }
             }
             @foreach (string meeting in entry.Meetings)
@@ -35,13 +35,9 @@
             }
         </article>
     }
-    @if (entries.Count == 0 && journal?.Exhausted != true)
+    @if (entries.Count == 0)
     {
-        <p class="grey" role="status">Loading…</p>
-    }
-    @if (journal?.Exhausted == true && entries.Count == 0)
-    {
-        <p class="grey" role="status">No journal entries.</p>
+        <p class="grey" role="status">@(exhausted ? "No journal entries." : "Loading…")</p>
     }
     <div class="journal-bottom" @ref="marker"></div>
 </section>
@@ -53,6 +49,8 @@
     [Parameter] public EventCallback<(string Title, DateOnly Day)> OnAppointment { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
 
+    internal Func<Journal, Task<IReadOnlyList<JournalDay>>> ReadBatchAsync { get; set; } = journal => Task.Run(journal.ReadBatch);
+
     private readonly List<JournalDay> entries = [];
     private ElementReference marker;
     private Journal? journal;
@@ -60,6 +58,7 @@
     private OutlookStatus status = OutlookStatus.Off;
     private int statusIndex;
     private bool loading;
+    private bool exhausted;
     private bool watch;
     private bool disposed;
 
@@ -75,14 +74,14 @@
 
     private async Task Load()
     {
-        if (disposed || loading || journal is null || journal.Exhausted)
+        if (disposed || loading || journal is null || exhausted)
         {
             return;
         }
         loading = true;
         try
         {
-            IReadOnlyList<JournalDay> batch = await Task.Run(journal.ReadBatch);
+            IReadOnlyList<JournalDay> batch = await ReadBatchAsync(journal);
             if (outlook!.Status != status)
             {
                 // Put a new status with this batch so previously visible headings keep their positions.
@@ -90,7 +89,8 @@
                 status = outlook.Status;
             }
             entries.AddRange(batch);
-            watch = !journal.Exhausted;
+            exhausted = journal.Exhausted;
+            watch = !exhausted;
         }
         finally
         {
