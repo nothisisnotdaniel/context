@@ -90,6 +90,13 @@ internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
         return Available;
     }
 
+    public OutlookRead<DateOnly> Oldest(DateOnly today, TimeZoneInfo zone)
+    {
+        open.Wait();
+        return new OutlookRead<DateOnly>(AppointmentKind, Days.Where(pair => pair.Key <= today && pair.Value.Count > 0)
+            .Select(pair => pair.Key).Order().Take(1).ToList());
+    }
+
     public OutlookRead<Appointment> Appointments(DateOnly day, TimeZoneInfo zone)
     {
         lock (gate)

@@ -78,6 +78,24 @@ internal sealed class CalendarStore
     public CalendarDay All(IReadOnlyList<Appointment> extra) =>
         Read(extra, _ => true, text => IcsParser.Parse(text, local));
 
+    public DateOnly? Oldest(DateOnly through, string? cached)
+    {
+        IReadOnlyList<Appointment> feed = [];
+        if (cached is not null)
+        {
+            try
+            {
+                feed = IcsParser.HistoryStarts(cached, local);
+            }
+            catch (FormatException)
+            {
+                // Readable calendar files still contribute when the cached copy is malformed.
+            }
+        }
+        return Read(feed, a => DateOnly.FromDateTime(a.Start) <= through, text => IcsParser.HistoryStarts(text, local))
+            .Appointments.Select(a => (DateOnly?)DateOnly.FromDateTime(a.Start)).Min();
+    }
+
     private CalendarDay Read(
         IReadOnlyList<Appointment> extra,
         Func<Appointment, bool> keep,

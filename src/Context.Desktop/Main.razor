@@ -33,6 +33,10 @@
                 {
                     <TriagePanel Guard="TriageHeld" OnTriaged="Triaged" OnClose="CloseTriage" />
                 }
+                @if (page == Page.Journal)
+                {
+                    <JournalPanel OnOpen="RequestOpen" OnAppointment="OpenAppointment" OnClose="CloseJournal" />
+                }
                 @if (page == Page.Done)
                 {
                     <DonePanel OnClose="CloseDone" />
@@ -53,7 +57,7 @@
                 {
                     <AppointmentPanel Title="@shownAppointment.Title" Day="@shownAppointment.Day" OnOpen="RequestOpen" OnCreate="CreateAppointmentNote" OnCreated="AppointmentNoteCreated" OnClose="CloseAppointment" />
                 }
-                @if (reviewShown)
+                @if (page != Page.Journal && reviewShown)
                 {
                     <ReviewPanel OnOpen="RequestOpen" OnClose="CloseReview" />
                 }
@@ -73,11 +77,11 @@
                 {
                     <TagsPanel Selected="@tagShown" OnTag="ShowTag" OnClose="CloseTags" />
                 }
-                @if (tagShown is { } tag)
+                @if (page != Page.Journal && tagShown is { } tag)
                 {
                     <TagPanel Tag="@tag" OnOpen="RequestOpen" OnBoard="ShowBoard" OnClose="CloseTag" />
                 }
-                @if (findShown is { } find)
+                @if (page != Page.Journal && findShown is { } find)
                 {
                     <FindPanel Key="@find.Key" Value="@find.Value" OnOpen="RequestOpen" OnClose="CloseFind" />
                 }
@@ -85,11 +89,11 @@
                 {
                     <SearchPanel Text="@search" Request="@searchRequest" Focus="@searchFocus" OnOpen="OpenFromSearch" OnClose="CloseSearch" />
                 }
-                @if (decisionsShown is { } decisionsTag)
+                @if (page != Page.Journal && decisionsShown is { } decisionsTag)
                 {
                     <DecisionsPanel Tag="@decisionsTag" OnOpen="RequestOpen" OnOpenDecision="OpenDecision" OnClose="CloseDecisions" />
                 }
-                @if (similarShown)
+                @if (page != Page.Journal && similarShown)
                 {
                     <SimilarPanel OnOpen="RequestOpen" OnClose="CloseSimilar" Guard="MergeHeld" OnMerged="Merged" />
                 }
@@ -277,6 +281,7 @@ else
     private readonly object outlineReceiver = new();
     private string? tagShown;
     private Page page;
+    private Page journalReturn;
     private bool reviewShown;
     private (string Key, string Value)? findShown;
     private string? searchShown;
@@ -298,7 +303,7 @@ else
     private string glossaryShown = string.Empty;
     private int glossaryRequest;
     private bool similarShown;
-    private enum Page { None, Triage, People, Tags, Settings, Appointment, Board, Search, MailDigest, Done, Todos, Glossary }
+    private enum Page { None, Triage, People, Tags, Settings, Appointment, Board, Search, MailDigest, Journal, Done, Todos, Glossary }
 
     // The board's tag (normalized) while Page.Board is shown (job 242).
     private string? boardShown;
@@ -749,6 +754,17 @@ else
 
     // The done log (job 293): done.md grouped by week, a page in place of the note area.
     private void ShowDone() => OpenPage(Page.Done);
+
+    private void ShowJournal()
+    {
+        if (page != Page.Journal)
+        {
+            journalReturn = page;
+            page = Page.Journal;
+        }
+    }
+
+    private void CloseJournal() => page = journalReturn;
 
     private void CloseDone() => page = Page.None;
 
@@ -1611,6 +1627,9 @@ else
                 break;
             case "/settings":
                 ShowSettings();
+                break;
+            case "/journal":
+                ShowJournal();
                 break;
             case "/donelog":
                 // The argument is ignored.

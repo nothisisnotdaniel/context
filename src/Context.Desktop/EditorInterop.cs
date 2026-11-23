@@ -79,6 +79,34 @@ internal sealed class EditorInterop
     private DotNetObjectReference<EditorInterop>? self;
     private ElementReference? host;
 
+    public event Func<Task>? JournalBottom;
+
+    [JSInvokable]
+    public Task OnJournalBottom() => JournalBottom?.Invoke() ?? Task.CompletedTask;
+
+    public ValueTask WatchJournal(ElementReference marker)
+    {
+        self ??= DotNetObjectReference.Create(this);
+        return js.InvokeVoidAsync("ContextJournal.watch", marker, self, marker.Id);
+    }
+
+    public async ValueTask StopJournal(ElementReference marker)
+    {
+        try
+        {
+            await js.InvokeVoidAsync("ContextJournal.stop", marker.Id);
+        }
+        catch (Exception e) when (e is JSDisconnectedException or JSException or TaskCanceledException or InvalidOperationException)
+        {
+            // The window may already have closed.
+        }
+        finally
+        {
+            self?.Dispose();
+            self = null;
+        }
+    }
+
     public EditorInterop(IJSRuntime js)
     {
         this.js = js;

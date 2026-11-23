@@ -3206,3 +3206,26 @@ nav.saved-searches ul {
     align-items: center;
     flex-wrap: wrap;
 }
+
+.current-region:has(.journal-panel) {
+    overflow-anchor: none;
+}
+
+.journal-body {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.journal-panel article {
+    padding-block: 0.5rem;
+    border-bottom: 1px solid var(--line);
+}
+
+.journal-panel article button {
+    display: block;
+}
+
+.journal-bottom {
+    height: 1px;
+    overflow-anchor: none;
+}

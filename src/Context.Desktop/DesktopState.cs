@@ -1023,6 +1023,30 @@ internal sealed class DesktopState
     private DateTime LocalNow() =>
         TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc), calendar.Zone);
 
+    internal Action<DateOnly>? BeforeJournalDay { get; set; }
+
+    public Task<(Journal Journal, OutlookStatus Status)> OpenJournal() => Task.Run(() =>
+    {
+        DateOnly day = today();
+        string? cached = feed?.ReadCache();
+        DateOnly? first = calendar.Oldest(day, cached);
+        OutlookStatus status = OutlookStatus.Off;
+        if (OutlookOn())
+        {
+            (OutlookStatus outcome, IReadOnlyList<DateOnly> dates) = Finish(Start(utcNow(), () => outlook.Oldest(day, calendar.Zone)));
+            status = outcome;
+            if (outcome == OutlookStatus.Ok && dates.Count > 0 && (first is null || dates[0] < first))
+            {
+                first = dates[0];
+            }
+        }
+        return (new Journal(notes, day, first, date =>
+        {
+            BeforeJournalDay?.Invoke(date);
+            return ReadDay(date, status == OutlookStatus.Ok ? OutlookDay(date).Items : [], cached).Appointments;
+        }), status);
+    });
+
     // The day's appointments from the calendar files, the feed's cached copy and Outlook's; never downloads.
     private CalendarDay ReadDay(DateOnly day, IReadOnlyList<Appointment> fromOutlook) =>
         ReadDay(day, fromOutlook, feed?.ReadCache());

@@ -212,7 +212,7 @@ public sealed class DesktopSourceTests
         Assert.True(found.Count == 0, "Forbidden markup in .razor files: " + string.Join(", ", found));
     }
 
-    // AC-6 / 094 AC-12: exactly the CSP meta tag, two external scripts (the editor bundle and blazor.webview.js), no
+    // AC-6 / 094 AC-12: exactly the CSP meta tag, local external scripts, no
     // inline script or style.
     [Fact]
     public void IndexHtml_HasCspAndNoInlineCode()
@@ -229,10 +229,10 @@ public sealed class DesktopSourceTests
         MatchCollection scripts = Regex.Matches(html, "<script\\b([^>]*)>(.*?)</script>", RegexOptions.IgnoreCase
             | RegexOptions.Singleline);
         Assert.Equal(
-            [" src=\"editor/editor.js\"", " src=\"_framework/blazor.webview.js\""],
+            [" src=\"journal.js\"", " src=\"editor/editor.js\"", " src=\"_framework/blazor.webview.js\""],
             scripts.Select(m => m.Groups[1].Value).ToArray());
         Assert.All(scripts, m => Assert.Equal(string.Empty, m.Groups[2].Value));
-        Assert.Equal(2, Regex.Matches(html, "<script", RegexOptions.IgnoreCase).Count);
+        Assert.Equal(3, Regex.Matches(html, "<script", RegexOptions.IgnoreCase).Count);
         Assert.Equal(
             ["app.css", "editor/editor.css"],
             Regex.Matches(html, "<link\\s+href=\"([^\"]*)\"\\s+rel=\"stylesheet\"").Select(m => m.Groups[1].Value).ToArray());
@@ -1357,9 +1357,9 @@ public sealed class DesktopSourceTests
 
         // 203: OnChanged (no parameters) only raises Changed; the editor decides when to save.
         Assert.Equal(
-            ["OnTag", "OnLink", "OnPerson", "OnDirty", "OnDrop", "OnAttachment", "OnWebLink", "OnChanged", "OnPasteLink"],
+            ["OnJournalBottom", "OnTag", "OnLink", "OnPerson", "OnDirty", "OnDrop", "OnAttachment", "OnWebLink", "OnChanged", "OnPasteLink"],
             invokable.Select(m => m.Groups[1].Value).ToArray());
-        Assert.Equal(12, Regex.Matches(text, @"\[JSInvokable").Count);
+        Assert.Equal(13, Regex.Matches(text, @"\[JSInvokable").Count);
         // 354: OnWebLink only raises WebLinkClicked.
         Assert.Contains("public Task OnWebLink(string href) => WebLinkClicked?.Invoke(href) ?? Task.CompletedTask;", text, StringComparison.Ordinal);
 
@@ -1378,7 +1378,7 @@ public sealed class DesktopSourceTests
         Assert.Contains("public async Task<string> DecisionPicks(string query)", unix, StringComparison.Ordinal);
         Assert.DoesNotMatch(@"\bActions\b|DesktopActions", unix);
         Assert.All(invokable, m => Assert.Matches(
-            @"^\s*(TagClicked\?\.Invoke\(raw\)|LinkClicked\?\.Invoke\(raw\)|PersonClicked\?\.Invoke\(raw\)|DirtyChanged\?\.Invoke\(dirty\)"
+            @"^\s*(JournalBottom\?\.Invoke\(\)|TagClicked\?\.Invoke\(raw\)|LinkClicked\?\.Invoke\(raw\)|PersonClicked\?\.Invoke\(raw\)|DirtyChanged\?\.Invoke\(dirty\)"
             + @"|FilesDropped\?\.Invoke\(new DroppedFiles\(count, files\)\)|AttachmentClicked\?\.Invoke\(href\)|WebLinkClicked\?\.Invoke\(href\)|LinkPasted\?\.Invoke\(url\)|Changed\?\.Invoke\(\)) \?\? Task\.CompletedTask$",
             m.Groups[2].Value));
         Assert.Equal(

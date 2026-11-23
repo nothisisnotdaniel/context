@@ -237,46 +237,7 @@ internal static class IcsParser
             }
         }
 
-        foreach (ContentLine line in builder.RecurrenceDates)
-        {
-            if (string.Equals(line.Parameter("VALUE"), "PERIOD", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            foreach (string part in line.Value.Split(','))
-            {
-                if (part.Contains('/'))
-                {
-                    continue;
-                }
-
-                SourceTime? added = ReadSource(part, line, local);
-                if (added is null)
-                {
-                    continue;
-                }
-
-                DateTime? start;
-                if (source.Value.Date)
-                {
-                    start = TryLocal(added.Value, local)?.Date;
-                }
-                else if (added.Value.Date)
-                {
-                    start = TryLocal(source.Value.At(added.Value.Wall + source.Value.Wall.TimeOfDay), local);
-                }
-                else
-                {
-                    start = TryLocal(added.Value, local);
-                }
-
-                if (start is not null && seen.Add(start.Value))
-                {
-                    starts.Add(start.Value);
-                }
-            }
-        }
+        AddRecurrenceDates(builder, local, source.Value, starts, seen);
 
         Exclusions excluded = new Exclusions();
         foreach (ContentLine line in builder.ExceptionDates)
@@ -304,6 +265,75 @@ internal static class IcsParser
         }
 
         return result;
+    }
+
+    // DTSTART bounds the rule, including when its first occurrence is excluded. Explicit RDATEs can precede it.
+    internal static IReadOnlyList<Appointment> HistoryStarts(string text, TimeZoneInfo local)
+    {
+        List<EventBuilder> events = Scan(text);
+        HashSet<string> hidden = events.Where(e => e.Uid is not null && e.RecurrenceId is null && (e.Private || e.Cancelled))
+            .Select(e => e.Uid!).ToHashSet(StringComparer.Ordinal);
+        List<Appointment> result = [];
+        foreach (EventBuilder item in events)
+        {
+            if ((item.Uid is not null && hidden.Contains(item.Uid)) || item.Build(local) is not { } first || item.Start is null)
+            {
+                continue;
+            }
+            result.Add(first);
+            if (item.RecurrenceDates.Count > 0 && ReadSource(item.Start.Value, item.Start, local) is { } source)
+            {
+                List<DateTime> added = [];
+                AddRecurrenceDates(item, local, source, added, [first.Start]);
+                result.AddRange(added.Select(start => new Appointment(first.Title, null, start, start, first.AllDay)));
+            }
+        }
+        return result;
+    }
+
+    private static void AddRecurrenceDates(EventBuilder builder, TimeZoneInfo local, SourceTime source,
+        List<DateTime> starts, HashSet<DateTime> seen)
+    {
+        foreach (ContentLine line in builder.RecurrenceDates)
+        {
+            if (string.Equals(line.Parameter("VALUE"), "PERIOD", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            foreach (string part in line.Value.Split(','))
+            {
+                if (part.Contains('/'))
+                {
+                    continue;
+                }
+
+                SourceTime? added = ReadSource(part, line, local);
+                if (added is null)
+                {
+                    continue;
+                }
+
+                DateTime? start;
+                if (source.Date)
+                {
+                    start = TryLocal(added.Value, local)?.Date;
+                }
+                else if (added.Value.Date)
+                {
+                    start = TryLocal(source.At(added.Value.Wall + source.Wall.TimeOfDay), local);
+                }
+                else
+                {
+                    start = TryLocal(added.Value, local);
+                }
+
+                if (start is not null && seen.Add(start.Value))
+                {
+                    starts.Add(start.Value);
+                }
+            }
+        }
     }
 
     /// <summary>

@@ -1,0 +1,104 @@
+@implements IAsyncDisposable
+
+<section class="page journal-panel" aria-label="Journal">
+    <div class="panel-bar"><h2>Journal</h2><button type="button" class="close" @onclick="OnClose">Close</button></div>
+    @if (OutlookStatusLine.Text(status) is { } line)
+    {
+        <p class="@OutlookStatusLine.Css(status)" role="status">@line</p>
+    }
+    @foreach (JournalDay entry in entries)
+    {
+        DateTime start = entry.Date.ToDateTime(TimeOnly.MinValue);
+        <article @key="entry.Date">
+            <h3>@entry.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</h3>
+            @if (entry.Daily is { } daily)
+            {
+                <button type="button" class="journal-open" @onclick="() => OnOpen.InvokeAsync(daily)">Open</button>
+                @if (!string.IsNullOrWhiteSpace(entry.Body))
+                {
+                    <div class="journal-body">@entry.Body</div>
+                }
+            }
+            @foreach (string meeting in entry.Meetings)
+            {
+                <button type="button" class="journal-meeting" @onclick="() => OnOpen.InvokeAsync(meeting)">@DesktopText.OneLine(meeting)</button>
+            }
+            @foreach (Appointment item in entry.Appointments)
+            {
+                <button type="button" class="journal-appointment" @onclick="() => OnAppointment.InvokeAsync((item.Title, entry.Date))">@CurrentView.Time(item, start, start.AddDays(1)) @DesktopText.OneLine(item.Title)</button>
+            }
+        </article>
+    }
+    @if (journal is null || (loading && entries.Count == 0))
+    {
+        <p class="grey" role="status">Loading…</p>
+    }
+    @if (journal?.Exhausted == true && entries.Count == 0)
+    {
+        <p class="grey" role="status">No journal entries.</p>
+    }
+    <div class="journal-bottom" @ref="marker"></div>
+</section>
+
+@code {
+    [Inject] internal DesktopState State { get; set; } = null!;
+    [Inject] internal EditorInterop Bridge { get; set; } = null!;
+    [Parameter] public EventCallback<string> OnOpen { get; set; }
+    [Parameter] public EventCallback<(string Title, DateOnly Day)> OnAppointment { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private readonly List<JournalDay> entries = [];
+    private ElementReference marker;
+    private Journal? journal;
+    private OutlookStatus status = OutlookStatus.Off;
+    private bool loading;
+    private bool watch;
+    private bool disposed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Bridge.JournalBottom += SignalBottom;
+        (journal, status) = await State.OpenJournal();
+        await Load();
+    }
+
+    private Task SignalBottom() => InvokeAsync(Load);
+
+    private async Task Load()
+    {
+        if (disposed || loading || journal is null || journal.Exhausted)
+        {
+            return;
+        }
+        loading = true;
+        try
+        {
+            entries.AddRange(await Task.Run(journal.ReadBatch));
+            watch = !journal.Exhausted;
+        }
+        finally
+        {
+            loading = false;
+        }
+        if (!disposed)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (watch && !disposed)
+        {
+            watch = false;
+            await Bridge.WatchJournal(marker);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        disposed = true;
+        Bridge.JournalBottom -= SignalBottom;
+        await Bridge.StopJournal(marker);
+    }
+}
