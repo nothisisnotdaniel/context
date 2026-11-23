@@ -435,6 +435,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#490](backlog/490-attendees-by-role-on-the-appointment.md) Attendees by role on the appointment page
 - [ ] [#491](backlog/491-earlier-meetings-of-a-series-on.md) Earlier meetings of a series on the appointment page
 - [ ] [#492](backlog/492-import-a-logseq-graph.md) Import a LogSeq graph
+- [ ] [#493](backlog/493-show-note-todos-on-the-person.md) Show note todos on the person's page
 
 ## Dropped with the terminal UI
 
