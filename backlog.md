@@ -436,7 +436,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#491](backlog/491-earlier-meetings-of-a-series-on.md) Earlier meetings of a series on the appointment page
 - [ ] [#492](backlog/492-import-a-logseq-graph.md) Import a LogSeq graph
 - [ ] [#493](backlog/493-show-note-todos-on-the-person.md) Show note todos on the person's page
-- [ ] [#494](backlog/494-new-notes-can-be-added-after.md) New notes can be added after a note is linked to an appointment
+- [x] [#494](backlog/494-new-notes-can-be-added-after.md) New notes can be added after a note is linked to an appointment → 395-new-note-after-appointment
 - [ ] [#495](backlog/495-checkbox-icon-for-todos-and-the.md) Checkbox icon for Todos, and the ! button opens the decision overview
 
 ## Dropped with the terminal UI
