@@ -2004,9 +2004,19 @@ Every factory agent reads this file before working on Context. Keep it short and
     second click keeps it, no reload). It lists `DesktopState.AppointmentPage(title, day)` (`MeetingPrep.Related(...,
     max: null)` over the title and the union of the attendees of those appointments; `Sync`, `NoteTags()`, `List()`
     under `indexGate`; any failure gives `IndexUnreadable`, red `Can't read the related notes.`) as `note-button`s
-    (title, full name in `title`, grey `.matches`) through `RequestOpen`; with none, `button.create-note-link`
-    `Create a new note` runs the `/meeting` steps (`Main.CreateAppointmentNote`, the first such appointment re-read
-    through `DayAppointments`) and opens the meeting note with accent `Created <name>`.
+    (title, full name in `title`, grey `.matches`) through `RequestOpen`; with none (and no appointment on the day,
+    grey `No related notes.`). Job 395: `button.create-note-link` `Create a new note` follows the list too, whenever
+    related notes are listed or the appointment is on the day (not with `Loading…` or the red line). A click checks
+    `DesktopState.MeetingNoteExists(first)` (`MeetingNote.Exists`: today's `Meetings/<part>/yyyy-MM-dd` or the legacy
+    name; off the UI thread, false on any error): missing, it runs the `/meeting` steps (`Main.CreateAppointmentNote`,
+    the first such appointment re-read through `DayAppointments`) and opens the meeting note with accent
+    `Created <name>`; present, it shows `div.create-note-entry` below the list: `input.create-note-title`
+    (`aria-label`/placeholder `Note title`, `maxlength` 200, prefilled with `MeetingNote.TitlePartFor`, focused),
+    `button.create-note-confirm` `Create note` and `button.create-note-cancel` `Cancel`. Enter or Create calls
+    `DesktopActions.CreateNote`; Done closes the field and `OnCreated` goes to `Main.AppointmentNoteCreated`
+    (`RequestOpen`, so a dirty editor asks first, then accent `Created <name>`); a refusal shows the red
+    `p.create-note-result` (`role="status"`) and keeps the field, its text and focus. Esc or Cancel closes it with
+    nothing written and focuses the link again; a second click while open focuses the field.
     **Meeting todos** (job 287; the desktop has no `/current`, so the appointment page stands in for it and for the
     appointment's menu; `context current` is unchanged): `MeetingTodosPanel` (`section.meeting-todos`, `h3 Todos`) sits
     on the appointment page below the topics and, in `Main`, above the editor of a note named `Meetings/<part>/yyyy-MM-dd`

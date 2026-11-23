@@ -374,6 +374,16 @@ internal static class MeetingNote
     }
 
     /// <summary>
+    /// Whether the meeting note of <paramref name="appointment"/> exists (job 395): the same lookups as
+    /// <see cref="Ensure"/> makes before it creates one (<see cref="NameFor"/> as a plain note, then
+    /// <see cref="LegacyNameFor"/> as a plain or sensitive note), so true exactly when <see cref="Ensure"/> would write
+    /// nothing. Reads the note list only; IO errors propagate.
+    /// </summary>
+    public static bool Exists(NoteStore notes, Appointment appointment) =>
+        (notes.TryFind(NameFor(appointment), out NoteInfo? current) && current is not null)
+        || Existing(notes, LegacyNameFor(appointment)) is not null;
+
+    /// <summary>
     /// Whether <paramref name="name"/> is the meeting note of <paramref name="appointment"/>: its
     /// <see cref="NameFor"/> or <see cref="LegacyNameFor"/>, ignoring case.
     /// </summary>
