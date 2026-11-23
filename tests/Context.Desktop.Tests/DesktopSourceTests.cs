@@ -142,6 +142,7 @@ public sealed class DesktopSourceTests
     private static readonly string[] UpdateFiles =
     [
         "src/Context.Desktop/IUpdateSource.cs", "src/Context.Desktop/StartupUpdate.cs", RealUpdateSourceFile,
+        "src/Context.Desktop/UpdateOutcome.cs", "src/Context.Desktop/UpdateStatus.cs",
     ];
 
     private static readonly string[] ActionsUsers = ["src/Context.Desktop/Program.cs", "src/Context.Desktop/StateComponent.cs"];
@@ -1642,6 +1643,29 @@ public sealed class DesktopSourceTests
         // Fire and forget: the window never waits for the update.
         Assert.DoesNotMatch(@"update\.Start\(\)\s*\.\s*(Wait|Result|GetAwaiter)", program);
         Assert.DoesNotContain("await", program, StringComparison.Ordinal);
+    }
+
+    // 396 AC-6: only UpdateLog writes, only .logs/update.log, through PrivateFile and the crash log's no-link rule;
+    // Program.cs builds it on the data folder and starts the one update after the hand-over return.
+    [Fact]
+    public void UpdateLog_WritesOnlyThroughPrivateFile_AndProgramWiresIt()
+    {
+        string root = RepoFiles.Root();
+        string source = File.ReadAllText(Path.Combine(root, "src/Context.Desktop/UpdateLog.cs"));
+
+        Assert.DoesNotMatch(@"\bNoteStore\b|\bDesktopActions\b|\bDesktopState\b|\bConsole\.|\bVelopack|\.Move\(|\.Delete\(|File\.Replace\(", source);
+        Assert.Contains("PrivateFile.CreateFolder(", source, StringComparison.Ordinal);
+        Assert.Contains("PrivateFile.OpenNew(", source, StringComparison.Ordinal);
+        Assert.Contains("PrivateFile.Rewrite(", source, StringComparison.Ordinal);
+        Assert.Contains("CrashLog.IsPlainFolder(", source, StringComparison.Ordinal);
+
+        string program = File.ReadAllText(Path.Combine(root, ProgramFile)).ReplaceLineEndings("\n");
+        int handOver = program.IndexOf("if (start.HandOver)", StringComparison.Ordinal);
+        Assert.True(handOver >= 0);
+        Assert.True(program.IndexOf("new StartupUpdate(", StringComparison.Ordinal) > handOver);
+        Assert.Single(Regex.Matches(program, @"new UpdateLog\("));
+        Assert.Matches(@"new UpdateLog\(\s*NoteStore\.DefaultFolder\(\),", program);
+        Assert.Contains("builder.Services.AddSingleton(updateStatus);", program, StringComparison.Ordinal);
     }
 
     // 133 AC-12, AC-10: the update classes know nothing about the data folder, the actions, the environment or the
