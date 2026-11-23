@@ -6,7 +6,7 @@ Category: bug
 
 ## What
 
-Reported by the user: once there is one note linked with an appointment, adding a new note no longer works. Reproduce it in the desktop app (link a note to an appointment, for example through the appointment page or /meeting, then try to create another note through the notes bar, the palette and capture), find the cause and fix it. Add a test that fails before the fix. Do not guess the cause up front: the report does not say which way of adding a note fails or whether an error is shown, so write down what you found in build.md.
+Reported by the user: once there is one note linked with an appointment, adding a new note no longer works. Reproduce it in the desktop app (link a note to an appointment, for example through the appointment page or /meeting, then try to create another note from that appointment's page first, since that is where the user hit it, and also through the notes bar, the palette and capture), find the cause and fix it. Add a test that fails before the fix. Do not guess the cause up front: the report does not say which way of adding a note fails or whether an error is shown, so write down what you found in build.md.
 
 ## Why
 
