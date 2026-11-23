@@ -440,6 +440,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#495](backlog/495-checkbox-icon-for-todos-and-the.md) Checkbox icon for Todos, and the ! button opens the decision overview
 - [ ] [#496](backlog/496-make-recentnotesactionstests-open-anyroute-putsitf.md) Make RecentNotesActionsTests.Open_AnyRoute_PutsItFirst_Once reliable
 - [ ] [#497](backlog/497-show-feedback-while-the-appointment-page.md) Show feedback while the appointment page checks for a meeting note
+- [ ] [#498](backlog/498-show-the-app-version-and-log.md) Show the app version and log each update check
 
 ## Dropped with the terminal UI
 
