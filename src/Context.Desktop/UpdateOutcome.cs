@@ -32,6 +32,10 @@ internal sealed record UpdateOutcome(DateTime Utc, string Version, UpdateResultK
     private static readonly Regex UrlTail = new(
         @"(https?://[^\s?#]*)[?#]\S*", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
+    // The user name and password of an http(s) address, which are dropped as well.
+    private static readonly Regex UrlUser = new(
+        @"(https?://)[^/@\s]+@", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
     /// <summary>The outcome as a short line for the log and Settings.</summary>
     public string Text => Kind switch
     {
@@ -68,12 +72,12 @@ internal sealed record UpdateOutcome(DateTime Utc, string Version, UpdateResultK
 
     /// <summary>
     /// <paramref name="raw"/> on one line: CR, LF and tab become spaces, other control characters a placeholder, and
-    /// any http(s) address loses its query and fragment.
+    /// any http(s) address loses its user name, password, query and fragment.
     /// </summary>
     public static string OneLine(string raw)
     {
         string line = raw.Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ');
         line = SafeText.Clean(line);
-        return UrlTail.Replace(line, "$1");
+        return UrlTail.Replace(UrlUser.Replace(line, "$1"), "$1");
     }
 }

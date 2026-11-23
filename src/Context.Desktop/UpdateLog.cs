@@ -21,6 +21,9 @@ internal sealed class UpdateLog
     /// <summary>One line is cut to this many characters.</summary>
     public const int MaxLineLength = 1000;
 
+    // A cut-off start of the home folder at the end of a line is hidden only from this many characters on.
+    private const int MinHomeTail = 3;
+
     private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     private readonly Func<DateTime> utcNow;
@@ -31,7 +34,8 @@ internal sealed class UpdateLog
         Folder = Path.Combine(root, CrashLog.FolderName);
         LogPath = Path.Combine(Folder, FileName);
         this.utcNow = utcNow;
-        this.home = string.IsNullOrEmpty(home) ? null : home.TrimEnd('/', '\\');
+        string? trimmed = home?.TrimEnd('/', '\\');
+        this.home = string.IsNullOrEmpty(trimmed) ? null : trimmed;
     }
 
     /// <summary>The crash folder, <c>&lt;root&gt;/.logs</c>.</summary>
@@ -123,10 +127,30 @@ internal sealed class UpdateLog
             + " " + outcome.Text;
         if (home is not null)
         {
-            text = text.Replace(home, "~", StringComparison.OrdinalIgnoreCase);
+            text = HideHome(text, home);
+            string swapped = home.Contains('\\') ? home.Replace('\\', '/') : home.Replace('/', '\\');
+            if (swapped != home)
+            {
+                text = HideHome(text, swapped);
+            }
         }
 
         text = UpdateOutcome.OneLine(text);
         return text.Length <= MaxLineLength ? text : text[..MaxLineLength];
+    }
+
+    // The home folder becomes ~, also a start of it left at the end of a failure message that was cut.
+    private static string HideHome(string text, string home)
+    {
+        text = text.Replace(home, "~", StringComparison.OrdinalIgnoreCase);
+        for (int length = home.Length - 1; length >= MinHomeTail; length--)
+        {
+            if (text.EndsWith(home[..length], StringComparison.OrdinalIgnoreCase))
+            {
+                return text[..^length] + "~";
+            }
+        }
+
+        return text;
     }
 }

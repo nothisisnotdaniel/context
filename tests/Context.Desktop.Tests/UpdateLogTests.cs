@@ -96,6 +96,35 @@ public sealed class UpdateLogTests : IDisposable
         Assert.Equal([Stamp + " 1.0.0 failed: X: a b c d ~/f"], Lines());
     }
 
+    // AC-4 (nits): a home folder cut off at the end of a long message, or written with the other separator, is hidden
+    // too, and so is the user part of a URL.
+    [Fact]
+    public void Write_HidesACutHome_SwappedSeparators_AndUrlUser()
+    {
+        string message = new string('x', UpdateOutcome.MaxMessage - 8) + " /home/someone/AppData";
+        UpdateOutcome cut = UpdateOutcome.Failure(Now, "1.0.0", new InvalidOperationException(message));
+        UpdateOutcome swapped = new UpdateOutcome(
+            Now, "1.0.0", UpdateResultKind.Failed, null, @"X: at \home\Someone\f via https://user:token@h.invalid/p");
+
+        UpdateLog log = Create();
+        log.Write(cut);
+        log.Write(swapped);
+
+        string[] lines = Lines();
+        Assert.EndsWith(" ~", lines[0], StringComparison.Ordinal);
+        Assert.DoesNotContain("/hom", lines[0], StringComparison.Ordinal);
+        Assert.Equal(Stamp + " 1.0.0 failed: X: at ~\\f via https://h.invalid/p", lines[1]);
+    }
+
+    // AC-6 (nit): a home folder of only separators is no home folder, so the line is still written.
+    [Fact]
+    public void Write_HomeIsRoot_StillWritesTheLine()
+    {
+        new UpdateLog(root, () => Now, "/").Write(Outcome(UpdateResultKind.NoNewer));
+
+        Assert.Equal([Stamp + " 1.2.3-develop.4 no newer version"], Lines());
+    }
+
     // AC-5: only the newest MaxLines lines are kept.
     [Fact]
     public void Write_KeepsTheNewestMaxLines()
