@@ -342,6 +342,23 @@ internal sealed class DesktopState
     }
 
     /// <summary>
+    /// Whether the meeting note of <paramref name="appointment"/> already exists (job 395, the appointment page's create
+    /// link: <see cref="MeetingNote.Exists"/>), off the calling thread. Reads only and never throws: false on a failure,
+    /// so the link then runs the <c>/meeting</c> steps, which report it.
+    /// </summary>
+    public Task<bool> MeetingNoteExists(Appointment appointment) => Task.Run(() =>
+    {
+        try
+        {
+            return MeetingNote.Exists(notes, appointment);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    });
+
+    /// <summary>
     /// Whether Times is there (job 383): the resolved Times folder is set and is a directory. Checked off the calling
     /// thread; never throws, never writes.
     /// </summary>

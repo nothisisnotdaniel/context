@@ -2982,6 +2982,36 @@ nav.saved-searches ul {
     text-decoration: underline;
 }
 
+/* Job 395: the appointment page's title field for a new note, under the create link. */
+.create-note-entry {
+    display: flex;
+    gap: 6px;
+    margin: 0 0 8px;
+}
+
+.create-note-entry .create-note-title {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.create-note-entry .create-note-confirm {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: var(--on-accent);
+    flex: none;
+}
+
+.create-note-entry .create-note-cancel {
+    flex: none;
+}
+
+.create-note-result {
+    margin: 0 0 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* Job 237: the one-line crash hint over the top of the window, until dismissed. */
 .crash-hint {
     align-items: center;

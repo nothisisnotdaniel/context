@@ -354,6 +354,271 @@ public sealed class AppointmentPanelTests : IDisposable
         Assert.Equal(3, cut.FindAll(".day-appointments .appointment-item").Count);
     }
 
+    private const string BudgetMeeting = "Meetings/Budget/2026-10-29";
+
+    private const string TitleField = ".appointment-page .create-note-entry input.create-note-title";
+
+    // The Budget meeting note of 2026-10-29 with its parents, as /meeting writes them.
+    private void WriteBudgetMeeting()
+    {
+        data.WriteNote("Meetings", "# Meetings\n");
+        data.WriteFile(Path.Combine("Meetings", "Budget.md"), "# Budget\n");
+        data.WriteFile(Path.Combine("Meetings", "Budget", "2026-10-29.md"), "# 2026-10-29\n\n#meeting\n");
+    }
+
+    // Renders Main, opens the first Budget appointment's page and waits until it lists its related notes.
+    private async Task<IRenderedComponent<Main>> BudgetPage()
+    {
+        IRenderedComponent<Main> cut = await RenderMain();
+        await ClickItem(cut, 0);
+        WaitForPage(cut);
+        Assert.NotEmpty(cut.FindAll(".appointment-page .note-button"));
+        return cut;
+    }
+
+    // "the title field shows", then one empty dispatcher call, so the render that showed it has run its after-render
+    // focus call (that call renders nothing, so no wait could see it); the last focus call went to the field.
+    private async Task WaitForTitleField(IRenderedComponent<Main> cut)
+    {
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(TitleField)), Wait);
+        await cut.InvokeAsync(() => { });
+        Assert.Equal(TitleFieldId(cut), LastFocusId());
+    }
+
+    // "the field is gone", then as above: the last focus call went to the create link.
+    private async Task WaitForLinkFocus(IRenderedComponent<Main> cut)
+    {
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".appointment-page .create-note-entry")), Wait);
+        await cut.InvokeAsync(() => { });
+        Assert.Equal(cut.FindComponent<AppointmentPanel>().Instance.CreateLinkReference.Id, LastFocusId());
+    }
+
+    private static string TitleFieldId(IRenderedComponent<Main> cut)
+    {
+        string id = cut.FindComponent<AppointmentPanel>().Instance.TitleFieldReference.Id;
+        Assert.False(string.IsNullOrEmpty(id));
+        return id;
+    }
+
+    private string? LastFocusId() =>
+        data.Bunit.JSInterop.Invocations.LastOrDefault(i => i.Identifier == "Blazor._internal.domWrapper.focus") is
+            { Arguments: [ElementReference target, ..] }
+            ? target.Id
+            : null;
+
+    private async Task TypeTitle(IRenderedComponent<Main> cut, string title, string? key)
+    {
+        await cut.InvokeAsync(() => cut.Find(TitleField).InputAsync(new ChangeEventArgs { Value = title }));
+        if (key is not null)
+        {
+            await cut.InvokeAsync(() => cut.Find(TitleField).KeyDownAsync(new KeyboardEventArgs { Key = key }));
+        }
+    }
+
+    // ".note-title is <name>, a new editor is mounted and .main-status is the accent Created <name>".
+    private void WaitForCreated(IRenderedComponent<Main> cut, EditorJs js, int mounts, string name)
+    {
+        cut.WaitForAssertion(() => Assert.Equal(name, cut.Find(".note-title").GetAttribute("title")), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Created " + name, cut.Find(".main-status").TextContent), Wait);
+        Assert.Contains("accent", cut.Find(".main-status").ClassList);
+    }
+
+    // 395 AC-1: with related notes listed, the create link shows after the list.
+    [Fact]
+    public async Task Related_CreateLink_ShowsAfterTheList()
+    {
+        WriteDay();
+        WriteNotes();
+        IRenderedComponent<Main> cut = await BudgetPage();
+
+        IElement link = Assert.Single(cut.FindAll(".appointment-page button.create-note-link"));
+        Assert.Equal("Create a new note", link.TextContent);
+        Assert.Equal("button", link.GetAttribute("type"));
+        Assert.True(Before(cut.Find(".appointment-page ul.appointment-notes"), link));
+        Assert.Empty(cut.FindAll(".appointment-page > p.grey"));
+        Assert.Empty(cut.FindAll(".appointment-page .create-note-entry"));
+    }
+
+    // 395 AC-1: once the meeting note exists (its Meetings/Budget parent is related), the link still shows.
+    [Fact]
+    public async Task MeetingNoteExists_CreateLinkStillShows()
+    {
+        WriteDay();
+        WriteBudgetMeeting();
+        IRenderedComponent<Main> cut = await BudgetPage();
+
+        Assert.Contains("Meetings/Budget", Notes(cut).Select(n => n.Title));
+        Assert.Single(cut.FindAll(".appointment-page button.create-note-link"));
+    }
+
+    // 395 AC-1: with no matching appointment but related notes, the list shows with the link; with neither, the grey
+    // line stays and there is no link.
+    [Fact]
+    public async Task NoAppointment_RelatedListedWithLink_NoneGreyLine()
+    {
+        WriteDay();
+        data.WriteNote("Nothing much", "# Nothing\n");
+        await data.RefreshAsync();
+
+        IRenderedComponent<AppointmentPanel> cut = data.Bunit.Render<AppointmentPanel>(p => p
+            .Add(c => c.Title, "Nothing")
+            .Add(c => c.Day, new DateOnly(2026, 10, 29)));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".appointment-page .note-button")), Wait);
+        Assert.Single(cut.FindAll(".appointment-page button.create-note-link"));
+
+        IRenderedComponent<AppointmentPanel> none = data.Bunit.Render<AppointmentPanel>(p => p
+            .Add(c => c.Title, "Zilch")
+            .Add(c => c.Day, new DateOnly(2026, 10, 29)));
+        none.WaitForAssertion(() =>
+            Assert.DoesNotContain("Loading…", none.Find(".appointment-page").TextContent, StringComparison.Ordinal), Wait);
+        Assert.Equal("No related notes.", none.Find(".appointment-page p.grey").TextContent);
+        Assert.Empty(none.FindAll(".appointment-page .create-note-link"));
+    }
+
+    // 395 AC-2: related notes listed but no meeting note yet: the link runs the /meeting steps.
+    [Fact]
+    public async Task Related_NoMeetingNote_CreateLink_MakesAndOpensMeetingNote()
+    {
+        WriteDay();
+        WriteNotes();
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await BudgetPage();
+
+        await Click(cut, () => cut.Find(".appointment-page button.create-note-link"));
+
+        WaitForCreated(cut, js, 0, BudgetMeeting);
+        Assert.Contains(
+            "11:00", File.ReadAllText(Path.Combine(data.Root, "Meetings", "Budget", "2026-10-29.md")), StringComparison.Ordinal);
+        Assert.Empty(cut.FindAll(".appointment-page"));
+    }
+
+    // 395 AC-3: the meeting note exists: the link opens the title field (prefilled, focused) and writes nothing;
+    // Create note makes the note, opens it and shows Created.
+    [Fact]
+    public async Task MeetingNoteExists_CreateLink_ShowsField_CreateMakesAndOpensNote()
+    {
+        WriteDay();
+        WriteBudgetMeeting();
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await BudgetPage();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, ".desktop");
+
+        await Click(cut, () => cut.Find(".appointment-page button.create-note-link"));
+        await WaitForTitleField(cut);
+
+        IElement input = cut.Find(TitleField);
+        Assert.Equal("text", input.GetAttribute("type"));
+        Assert.Equal("Note title", input.GetAttribute("aria-label"));
+        Assert.Equal("Note title", input.GetAttribute("placeholder"));
+        Assert.Equal("200", input.GetAttribute("maxlength"));
+        Assert.Equal("Budget", input.GetAttribute("value"));
+        Assert.Equal(
+            ["create-note-title", "create-note-confirm", "create-note-cancel"],
+            cut.FindAll(".appointment-page .create-note-entry > *").Select(e => e.ClassName ?? string.Empty).ToArray());
+        Assert.Equal("Create note", cut.Find(".create-note-entry button.create-note-confirm").TextContent);
+        Assert.Equal("Cancel", cut.Find(".create-note-entry button.create-note-cancel").TextContent);
+        Assert.True(Before(cut.Find(".appointment-page button.create-note-link"), cut.Find(".appointment-page .create-note-entry")));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, ".desktop"));
+
+        await Click(cut, () => cut.Find(".create-note-entry button.create-note-confirm"));
+
+        WaitForCreated(cut, js, 0, "Budget");
+        Assert.Equal("# Budget\n", File.ReadAllText(Path.Combine(data.Root, "Budget.md")));
+        Assert.Empty(cut.FindAll(".appointment-page"));
+    }
+
+    // 395 AC-3: Enter in the field creates the typed title.
+    [Fact]
+    public async Task MeetingNoteExists_EnterCreatesTypedTitle()
+    {
+        WriteDay();
+        WriteBudgetMeeting();
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await BudgetPage();
+        await Click(cut, () => cut.Find(".appointment-page button.create-note-link"));
+        await WaitForTitleField(cut);
+
+        await TypeTitle(cut, "Budget follow-up", "Enter");
+
+        WaitForCreated(cut, js, 0, "Budget follow-up");
+        Assert.True(File.Exists(Path.Combine(data.Root, "Budget follow-up.md")));
+    }
+
+    // 395 AC-3: Esc and Cancel close the field, write nothing and give the focus back to the link.
+    [Theory]
+    [InlineData("Escape")]
+    [InlineData("Cancel")]
+    public async Task MeetingNoteExists_EscOrCancel_ClosesNothingWritten(string how)
+    {
+        WriteDay();
+        WriteBudgetMeeting();
+        IRenderedComponent<Main> cut = await BudgetPage();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, ".desktop");
+        await Click(cut, () => cut.Find(".appointment-page button.create-note-link"));
+        await WaitForTitleField(cut);
+        await TypeTitle(cut, "Typed", how == "Escape" ? "Escape" : null);
+        if (how == "Cancel")
+        {
+            await Click(cut, () => cut.Find(".create-note-entry button.create-note-cancel"));
+        }
+
+        await WaitForLinkFocus(cut);
+        Assert.Single(cut.FindAll(".appointment-page"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, ".desktop"));
+    }
+
+    // 395 AC-3: a taken name or an invalid title shows the refusal in red and keeps the field and its text.
+    [Theory]
+    [InlineData("Budget 2027", "Note Budget 2027 already exists.")]
+    [InlineData("a/b", null)]
+    public async Task MeetingNoteExists_Refused_RedLineFieldKept(string title, string? text)
+    {
+        WriteDay();
+        WriteNotes();
+        WriteBudgetMeeting();
+        IRenderedComponent<Main> cut = await BudgetPage();
+        await Click(cut, () => cut.Find(".appointment-page button.create-note-link"));
+        await WaitForTitleField(cut);
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root, ".desktop");
+
+        await TypeTitle(cut, title, "Enter");
+
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".appointment-page p.red.create-note-result")), Wait);
+        IElement line = cut.Find(".appointment-page p.create-note-result");
+        Assert.Equal(text ?? NoteStore.ValidateTitle(title), line.TextContent);
+        Assert.Equal(title, cut.Find(TitleField).GetAttribute("value"));
+        Assert.Single(cut.FindAll(".appointment-page"));
+        Assert.Equal(before, FileSnapshot.Take(data.Root, ".desktop"));
+    }
+
+    // 395 AC-3: with a dirty editor whose save fails, the note is made and the discard question asks, as for the notes
+    // bar's entry row; Discard opens the new note.
+    [Fact]
+    public async Task MeetingNoteExists_DirtyEditor_CreatedThenDiscardAsked()
+    {
+        WriteDay();
+        WriteBudgetMeeting();
+        data.WriteNote("Plan", "# Plan\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await RenderMain();
+        await OpenFromList(cut, js, "Plan");
+        await ClickItem(cut, 0);
+        WaitForPage(cut);
+        await Click(cut, () => cut.Find(".appointment-page button.create-note-link"));
+        await WaitForTitleField(cut);
+        js.EditUnsavable("# Plan\n\nUnsaved\n");
+
+        await TypeTitle(cut, "Fresh", "Enter");
+
+        cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
+        Assert.True(File.Exists(Path.Combine(data.Root, "Fresh.md")));
+        int mounts = js.Calls("ContextEditor.mount").Count;
+        await Click(cut, () => cut.Find("[role=dialog] button.confirm"));
+        cut.WaitForAssertion(() => Assert.Equal("Fresh", cut.Find(".note-title").GetAttribute("title")), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
+    }
+
     private static string[] TopicRows(IRenderedComponent<Main> cut) =>
         cut.FindAll(".appointment-page section.topics li.topic .text").Select(t => t.TextContent).ToArray();
 

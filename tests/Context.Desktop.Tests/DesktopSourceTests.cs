@@ -412,13 +412,14 @@ public sealed class DesktopSourceTests
         Assert.All(rules, r => Assert.DoesNotMatch(@"#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(", r.Body));
     }
 
-    // 214 AC-10: the sidebar appointments, the appointment page and its create link are styled with only the theme's
+    // 214 AC-10 (395: and the title field's row): the sidebar appointments, the appointment page and its create link are styled with only the theme's
     // variables: no hex, rgb( or named colour, so light and dark mode both work.
     [Theory]
     [InlineData("day-appointments")]
     [InlineData("appointment-item")]
     [InlineData("appointment-page")]
     [InlineData("create-note-link")]
+    [InlineData("create-note-entry")]
     public void AppCss_AppointmentRules_UseOnlyThemeVariables(string name)
     {
         string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"))

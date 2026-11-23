@@ -1,8 +1,10 @@
 @inherits StateComponent
 @* The appointment page in the main region: every note related to the shown day's appointments with this title
    (DesktopState.AppointmentPage: meeting prep with no cap, over the title and the union of their attendees). A note
-   opens through OnOpen; with none, a link asks Main for the meeting note of the first such appointment. It reads only,
-   and reloads whenever the state changes, keeping the shown rows. Above the notes, the open topics for the next 1:1 with
+   opens through OnOpen. Below them (or alone, with none) a link asks Main for the meeting note of the first such
+   appointment; once that note exists (job 395) the link opens a title field instead, which creates a plain note like
+   the notes bar's entry row (DesktopActions.CreateNote) and hands its name to OnCreated. It reloads whenever the state
+   changes, keeping the shown rows. Above the notes, the open topics for the next 1:1 with
    the attendees (job 253) each have a checkbox that ticks the topic off in its note after a confirmation. Below them, the
    todos tied to these appointments (job 287, MeetingTodosPanel). *@
 
@@ -46,32 +48,45 @@
     {
         <p class="red" role="status">Can't read the related notes.</p>
     }
-    else if (view.Related.Count == 0)
+    else
     {
-        @if (view.First is not null)
+        @if (view.Related.Count > 0)
         {
-            <button type="button" class="create-note-link" @onclick="() => OnCreate.InvokeAsync()">Create a new note</button>
+            <ul class="appointment-notes" aria-labelledby="appointment-notes-heading">
+                @foreach (RelatedNote note in view.Related)
+                {
+                    string name = note.Name;
+                    string shownName = DesktopText.OneLine(name);
+                    string noteTitle = DesktopText.OneLine(NoteTitle(name));
+                    string matches = DesktopText.OneLine(Matches(note));
+                    <li>
+                        <button type="button" class="note-button cut" title="@shownName" @onclick="() => OnOpen.InvokeAsync(name)">@noteTitle</button>
+                        <span class="matches grey cut" title="@matches">@matches</span>
+                    </li>
+                }
+            </ul>
         }
-        else
+        else if (view.First is null)
         {
             <p class="grey" role="status">No related notes.</p>
         }
-    }
-    else
-    {
-        <ul class="appointment-notes" aria-labelledby="appointment-notes-heading">
-            @foreach (RelatedNote note in view.Related)
+        @if (view.Related.Count > 0 || view.First is not null)
+        {
+            <button type="button" class="create-note-link" @ref="createLink" @onclick="CreateClicked">Create a new note</button>
+        }
+        @if (newTitle is not null)
+        {
+            <div class="create-note-entry">
+                <input type="text" class="create-note-title" aria-label="Note title" placeholder="Note title" maxlength="200"
+                       value="@newTitle" disabled="@creating" @ref="titleField" @oninput="TitleTyped" @onkeydown="TitleKey" />
+                <button type="button" class="create-note-confirm" disabled="@creating" @onclick="CreateTitled">Create note</button>
+                <button type="button" class="create-note-cancel" disabled="@creating" @onclick="CloseEntry">Cancel</button>
+            </div>
+            @if (createFailed is { } failedText)
             {
-                string name = note.Name;
-                string shownName = DesktopText.OneLine(name);
-                string noteTitle = DesktopText.OneLine(NoteTitle(name));
-                string matches = DesktopText.OneLine(Matches(note));
-                <li>
-                    <button type="button" class="note-button cut" title="@shownName" @onclick="() => OnOpen.InvokeAsync(name)">@noteTitle</button>
-                    <span class="matches grey cut" title="@matches">@matches</span>
-                </li>
+                <p class="red create-note-result" role="status" title="@failedText">@failedText</p>
             }
-        </ul>
+        }
     }
     @if (askingTopic is { } topicAsked)
     {
@@ -87,6 +102,20 @@
     private bool running;
     private (string Title, DateOnly Day)? loaded;
     private int request;
+    private ElementReference createLink;
+    private ElementReference titleField;
+    // The title field's text while it is open (job 395), else null; its red refusal text; a create running.
+    private string? newTitle;
+    private string? createFailed;
+    private bool creating;
+    private bool checkingLink;
+    private bool focusField;
+    private bool focusLink;
+
+    // Tests: bUnit leaves a re-rendered element's reference attribute empty, so they compare these ids.
+    internal ElementReference CreateLinkReference => createLink;
+
+    internal ElementReference TitleFieldReference => titleField;
 
     /// <summary>The appointments' title (raw; ordinal equality picks the appointments).</summary>
     [Parameter]
@@ -109,6 +138,13 @@
     [Parameter]
     public EventCallback OnCreate { get; set; }
 
+    /// <summary>
+    /// Called with the full name of a note the title field created (job 395); Main opens it like the notes bar's entry
+    /// row does and shows <c>Created &lt;name&gt;</c>.
+    /// </summary>
+    [Parameter]
+    public EventCallback<string> OnCreated { get; set; }
+
     [Parameter]
     public EventCallback OnClose { get; set; }
 
@@ -125,6 +161,8 @@
         loaded = (Title, Day);
         view = null;
         topicResult = null;
+        newTitle = null;
+        createFailed = null;
         return Load();
     }
 
@@ -132,6 +170,120 @@
     {
         await Load();
         StateHasChanged();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusField)
+        {
+            focusField = false;
+            await titleField.FocusAsync();
+        }
+        else if (focusLink)
+        {
+            focusLink = false;
+            await createLink.FocusAsync();
+        }
+    }
+
+    // The create link: while the first appointment's meeting note is missing, Main runs the /meeting steps (job 214);
+    // once it exists, or with no such appointment, the title field opens, prefilled with the meeting note's title part.
+    private async Task CreateClicked()
+    {
+        if (view is null || checkingLink || creating)
+        {
+            return;
+        }
+
+        if (newTitle is not null)
+        {
+            focusField = true;
+            return;
+        }
+
+        Appointment? first = view.First;
+        checkingLink = true;
+        bool exists;
+        try
+        {
+            exists = first is null || await State.MeetingNoteExists(first);
+        }
+        finally
+        {
+            checkingLink = false;
+        }
+
+        if (!exists)
+        {
+            await OnCreate.InvokeAsync();
+            return;
+        }
+
+        DateTime midnight = Day.ToDateTime(TimeOnly.MinValue);
+        newTitle = MeetingNote.TitlePartFor(first ?? new Appointment(Title, null, midnight, midnight, false));
+        createFailed = null;
+        focusField = true;
+    }
+
+    private void TitleTyped(ChangeEventArgs e)
+    {
+        newTitle = e.Value?.ToString() ?? string.Empty;
+        createFailed = null;
+    }
+
+    private async Task TitleKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await CreateTitled();
+        }
+        else if (e.Key == "Escape")
+        {
+            CloseEntry();
+        }
+    }
+
+    private void CloseEntry()
+    {
+        if (creating || newTitle is null)
+        {
+            return;
+        }
+
+        newTitle = null;
+        createFailed = null;
+        focusLink = true;
+    }
+
+    // Create note and Enter: the notes bar entry row's action; a refusal keeps the field and its text.
+    private async Task CreateTitled()
+    {
+        if (newTitle is not { } title || creating)
+        {
+            return;
+        }
+
+        creating = true;
+        ActionResult made;
+        try
+        {
+            made = await Actions.CreateNote(title);
+        }
+        finally
+        {
+            creating = false;
+        }
+
+        if (made.Kind != ActionKind.Done)
+        {
+            createFailed = DesktopText.OneLine(made.Text);
+            focusField = true;
+            return;
+        }
+
+        newTitle = null;
+        createFailed = null;
+        await OnCreated.InvokeAsync(made.Text);
     }
 
     private void AskTopic(NoteTopic topic)

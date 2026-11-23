@@ -51,7 +51,7 @@
                 }
                 @if (page == Page.Appointment && appointmentShown is { } shownAppointment)
                 {
-                    <AppointmentPanel Title="@shownAppointment.Title" Day="@shownAppointment.Day" OnOpen="RequestOpen" OnCreate="CreateAppointmentNote" OnClose="CloseAppointment" />
+                    <AppointmentPanel Title="@shownAppointment.Title" Day="@shownAppointment.Day" OnOpen="RequestOpen" OnCreate="CreateAppointmentNote" OnCreated="AppointmentNoteCreated" OnClose="CloseAppointment" />
                 }
                 @if (reviewShown)
                 {
@@ -917,6 +917,14 @@ else
         }
 
         ShowDaily(meetingNote);
+    }
+
+    // Job 395: a note the appointment page's title field created opens like one made in the notes bar's entry row
+    // (RequestOpen: saved first, or the discard dialog asks), with the accent Created line.
+    private async Task AppointmentNoteCreated(string name)
+    {
+        await RequestOpen(name);
+        ShowStatus($"Created {DesktopText.OneLine(name)}", "accent");
     }
 
     private void CloseAppointment()
