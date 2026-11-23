@@ -159,7 +159,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#77](backlog/077-quick-switcher.md) Quick switcher → 364-quick-switcher
 - [x] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39) → 367-pro-licence-context
 - [x] [#454](backlog/454-fix-flaky-repository-settings-page-test.md) Fix flaky repository settings page test → 382-fix-flaky-settings-test
-- [ ] [#476](backlog/476-journal-view-of-the-days-with.md) Journal view of the days with content
+- [x] [#476](backlog/476-journal-view-of-the-days-with.md) Journal view of the days with content → 398-journal-view-of-the-days.c71256cffb364068ad89ae4a2b4a13da
 - [ ] [#89](backlog/089-call-to-meeting-note.md) Call to meeting note
 - [h] [#462](backlog/462-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on macOS
 - [h] [#463](backlog/463-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on Windows
