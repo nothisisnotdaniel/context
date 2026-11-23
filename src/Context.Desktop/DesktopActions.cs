@@ -1043,6 +1043,21 @@ internal sealed class DesktopActions
     public Task<ActionResult> CreateSubpage(string parent, string title) => Run(() => CreateSubpageNow(parent, title));
 
     /// <summary>
+    /// Creates the note <paramref name="title"/> under the appointment page <c>Meetings/&lt;title part&gt;</c> of
+    /// <paramref name="appointment"/> (job 397), the parent of its dated meeting notes. The title is checked first with
+    /// the <see cref="CreateSubpage"/> rules (the <see cref="NoteStore.ValidateTitle"/> text; with a title part of at most
+    /// <see cref="MeetingNote.MaxTitlePart"/> the full name stays under <see cref="NoteStore.MaxNameLength"/>, which
+    /// <see cref="CreateSubpage"/>'s code still checks); a sensitive top-level <c>Meetings</c> is
+    /// Refused/<see cref="ActionReason.Locked"/> with <see cref="NoSubpagesText"/>; none of these writes anything or
+    /// asks for a key. Otherwise the missing <c>Meetings</c> and <c>Meetings/&lt;part&gt;</c> are created through
+    /// <see cref="MeetingNote.EnsurePage"/> and the note through <see cref="CreateSubpage"/>'s code, with its texts (a
+    /// sibling with that title, in any case, is Refused/<see cref="ActionReason.Exists"/>). A failed write is Failed
+    /// with <see cref="CreateFailedText"/>; parents made before it stay. The result's text is the full name when done.
+    /// </summary>
+    public Task<ActionResult> CreateAppointmentNote(Appointment appointment, string title) =>
+        Run(() => CreateAppointmentNoteNow(appointment, title));
+
+    /// <summary>
     /// Creates the note a clicked <c>[[link]]</c> to a missing note names. The name is the note part of
     /// <paramref name="target"/> (<see cref="NoteLinkParser.Split"/>, so a heading is dropped), trimmed, with one
     /// trailing <c>.md</c> removed (ignoring case), split at <c>/</c> with each segment trimmed (and normalized like
@@ -3728,6 +3743,33 @@ internal sealed class DesktopActions
         {
             return Failed(ActionReason.WriteFailed, CreateFailedText);
         }
+    }
+
+    private ActionResult CreateAppointmentNoteNow(Appointment appointment, string title)
+    {
+        string normalized = NoteStore.NormalizeTitle(title);
+        string? invalid = NoteStore.ValidateTitle(normalized);
+        if (invalid is not null)
+        {
+            return Refused(ActionReason.Invalid, invalid);
+        }
+
+        NoteInfo parent;
+        try
+        {
+            if (notes.TryFindSensitive(MeetingNote.FolderName, out _))
+            {
+                return Refused(ActionReason.Locked, NoSubpagesText(MeetingNote.FolderName));
+            }
+
+            parent = MeetingNote.EnsurePage(notes, appointment);
+        }
+        catch (Exception)
+        {
+            return Failed(ActionReason.WriteFailed, CreateFailedText);
+        }
+
+        return CreateSubpageNow(parent.Name, title);
     }
 
     private ActionResult CreateLinkedNoteNow(string target)

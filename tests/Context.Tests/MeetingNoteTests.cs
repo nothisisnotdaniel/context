@@ -519,6 +519,45 @@ public sealed class MeetingNoteTests : IDisposable
         Assert.Equal(before, FileSnapshot.Take(root));
     }
 
+    // 397 AC-2: EnsurePage creates Meetings and Meetings/<part> when missing and returns the page.
+    [Fact]
+    public void EnsurePage_Missing_CreatesBothParents()
+    {
+        NoteInfo page = MeetingNote.EnsurePage(new NoteStore(root), Meeting("Planning: Q4"));
+
+        Assert.Equal("Meetings/Planning Q4", page.Name);
+        Assert.Equal("# Meetings\n", File.ReadAllText(Path.Combine(root, "Meetings.md")));
+        Assert.Equal("# Planning Q4\n", File.ReadAllText(Path.Combine(root, "Meetings", "Planning Q4.md")));
+        Assert.Equal(2, Directory.GetFiles(root, "*.md", SearchOption.AllDirectories).Length);
+    }
+
+    // 397 AC-2: existing parents in another case are reused unchanged, nothing written.
+    [Fact]
+    public void EnsurePage_Existing_ReusedNothingWritten()
+    {
+        WriteFile("meetings.md", "# meetings\n");
+        WriteFile(Path.Combine("meetings", "planning.md"), "# planning\n\nkept\n");
+        SortedDictionary<string, string> before = FileSnapshot.Take(root);
+
+        NoteInfo page = MeetingNote.EnsurePage(new NoteStore(root), Meeting("Planning"));
+
+        Assert.Equal("meetings/planning", page.Name);
+        Assert.Equal(before, FileSnapshot.Take(root));
+    }
+
+    // 397 AC-4: a sensitive top-level Meetings: a plain IOException, nothing written.
+    [Fact]
+    public void EnsurePage_SensitiveMeetings_ThrowsIOException()
+    {
+        WriteFile("Meetings.ctxs", "sealed");
+        SortedDictionary<string, string> before = FileSnapshot.Take(root);
+
+        IOException error = Assert.Throws<IOException>(() => MeetingNote.EnsurePage(new NoteStore(root), Meeting("Planning")));
+
+        Assert.IsNotType<NoteExistsException>(error);
+        Assert.Equal(before, FileSnapshot.Take(root));
+    }
+
     // 220 AC-8: a sensitive Meetings that appears in between is a plain IOException too.
     [Fact]
     public void Ensure_SensitiveMeetingsAppearsInBetween_ThrowsIOException()

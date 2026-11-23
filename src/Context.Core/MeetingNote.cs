@@ -491,6 +491,29 @@ internal static class MeetingNote
     }
 
     /// <summary>
+    /// Makes sure the appointment page <c>Meetings/&lt;part&gt;</c> (<see cref="TitlePartFor"/>) exists, the parent of
+    /// the dated meeting notes (job 397): the missing <c>Meetings</c> (<c># Meetings\n</c>) and
+    /// <c>Meetings/&lt;part&gt;</c> (<c># &lt;part&gt;\n</c>) are created like <see cref="Ensure"/> does, existing ones
+    /// (in any case) reused unchanged with their own spelling. Throws <see cref="IOException"/> when a sensitive
+    /// top-level <c>Meetings</c> is in the way (before anything is written) or a page can't be created, and
+    /// <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> when the folder can't be read or written.
+    /// </summary>
+    public static NoteInfo EnsurePage(NoteStore notes, Appointment appointment)
+    {
+        string part = TitlePartFor(appointment);
+        CheckFolderNotSensitive(notes);
+        try
+        {
+            NoteInfo folder = Parent(notes, null, FolderName);
+            return Parent(notes, folder.Name, part);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new IOException("The meetings page can't be created.", ex);
+        }
+    }
+
+    /// <summary>
     /// The topics section of a new meeting note: <c>\n## Topics\n\n</c>, then one
     /// <c>- @[&lt;Person&gt;]: &lt;Text&gt; (from [[&lt;note&gt;]])</c> line per topic (plain <c>from &lt;note&gt;</c> for a
     /// name with <c>[</c>, <c>]</c>, <c>#</c> or a backtick), at most <see cref="MeetingCarryOver.MaxLines"/> lines, then

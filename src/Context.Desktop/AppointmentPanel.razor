@@ -2,8 +2,8 @@
 @* The appointment page in the main region: every note related to the shown day's appointments with this title
    (DesktopState.AppointmentPage: meeting prep with no cap, over the title and the union of their attendees). A note
    opens through OnOpen. Below them (or alone, with none) a link asks Main for the meeting note of the first such
-   appointment; once that note exists (job 395) the link opens a title field instead, which creates a plain note like
-   the notes bar's entry row (DesktopActions.CreateNote) and hands its name to OnCreated. It reloads whenever the state
+   appointment; once that note exists (job 395) the link opens a title field instead, which creates the note under the
+   appointment page Meetings/<title part> (job 397, DesktopActions.CreateAppointmentNote) and hands its name to OnCreated. It reloads whenever the state
    changes, keeping the shown rows. Above the notes, the open topics for the next 1:1 with
    the attendees (job 253) each have a checkbox that ticks the topic off in its note after a confirmation. Below them, the
    todos tied to these appointments (job 287, MeetingTodosPanel). *@
@@ -219,10 +219,16 @@
             return;
         }
 
-        DateTime midnight = Day.ToDateTime(TimeOnly.MinValue);
-        newTitle = MeetingNote.TitlePartFor(first ?? new Appointment(Title, null, midnight, midnight, false));
+        newTitle = MeetingNote.TitlePartFor(first ?? StandIn());
         createFailed = null;
         focusField = true;
+    }
+
+    // With no appointment of the title on the day, one at midnight stands in for it: its title part names the page.
+    private Appointment StandIn()
+    {
+        DateTime midnight = Day.ToDateTime(TimeOnly.MinValue);
+        return new Appointment(Title, null, midnight, midnight, false);
     }
 
     private void TitleTyped(ChangeEventArgs e)
@@ -267,7 +273,7 @@
         ActionResult made;
         try
         {
-            made = await Actions.CreateNote(title);
+            made = await Actions.CreateAppointmentNote(view?.First ?? StandIn(), title);
         }
         finally
         {
