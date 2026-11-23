@@ -442,6 +442,9 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#497](backlog/497-show-feedback-while-the-appointment-page.md) Show feedback while the appointment page checks for a meeting note
 - [x] [#498](backlog/498-show-the-app-version-and-log.md) Show the app version and log each update check → 396-version-and-update-log
 - [ ] [#499](backlog/499-new-notes-from-an-appointment-page.md) New notes from an appointment page go under that appointment
+- [ ] [#500](backlog/500-refuse-a-fifo-or-device-node.md) Refuse a FIFO or device node as a log file
+- [ ] [#501](backlog/501-plain-wording-for-a-failed-update.md) Plain wording for a failed update check
+- [ ] [#502](backlog/502-hide-the-home-folder-in-the.md) Hide the home folder in the update log only at a path boundary
 
 ## Dropped with the terminal UI
 
