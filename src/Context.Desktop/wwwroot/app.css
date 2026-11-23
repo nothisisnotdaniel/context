@@ -3208,6 +3208,7 @@ nav.saved-searches ul {
 }
 
 .current-region:has(.journal-panel) {
+    scrollbar-gutter: stable;
     overflow-anchor: none;
 }
 
@@ -3222,6 +3223,9 @@ nav.saved-searches ul {
 }
 
 .journal-panel article button {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
     display: block;
 }
 

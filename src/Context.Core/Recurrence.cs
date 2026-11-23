@@ -228,7 +228,8 @@ internal sealed class RecurrenceRule
     /// examines more than <see cref="MaxPeriodsPerEvent"/> periods.
     /// </summary>
     public List<DateTime>? Occurrences(
-        DateTime start, DateTime? until, DateOnly from, DateOnly to, RecurrenceBudget budget)
+        DateTime start, DateTime? until, DateOnly from, DateOnly to, RecurrenceBudget budget,
+        Func<DateTime, bool>? firstEligible = null)
     {
         DateOnly first = DateOnly.FromDateTime(start);
         TimeOnly time = TimeOnly.FromDateTime(start);
@@ -298,9 +299,13 @@ internal sealed class RecurrenceRule
                     }
                 }
 
-                if (date >= from)
+                if (date >= from && (firstEligible is null || firstEligible(at)))
                 {
                     result.Add(at);
+                    if (firstEligible is not null)
+                    {
+                        return result;
+                    }
                 }
             }
 

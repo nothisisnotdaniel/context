@@ -85,14 +85,14 @@ internal sealed class CalendarStore
         {
             try
             {
-                feed = IcsParser.HistoryStarts(cached, local);
+                feed = IcsParser.HistoryStarts(cached, local, through);
             }
             catch (FormatException)
             {
                 // Readable calendar files still contribute when the cached copy is malformed.
             }
         }
-        return Read(feed, a => DateOnly.FromDateTime(a.Start) <= through, text => IcsParser.HistoryStarts(text, local))
+        return Read(feed, a => DateOnly.FromDateTime(a.Start) <= through, text => IcsParser.HistoryStarts(text, local, through))
             .Appointments.Select(a => (DateOnly?)DateOnly.FromDateTime(a.Start)).Min();
     }
 

@@ -131,32 +131,7 @@ internal static class IcsParser
         DateTime from = day.ToDateTime(TimeOnly.MinValue);
         DateTime to = day == DateOnly.MaxValue ? DateTime.MaxValue : from.AddDays(1);
 
-        Dictionary<string, Exclusions> replaced = new Dictionary<string, Exclusions>(StringComparer.Ordinal);
-        // Cancelled or private series: their overrides are hidden too.
-        HashSet<string> hiddenSeries = new HashSet<string>(StringComparer.Ordinal);
-        foreach (EventBuilder builder in events)
-        {
-            if (builder.Uid is null)
-            {
-                continue;
-            }
-
-            if (builder.RecurrenceId is not null)
-            {
-                if (!replaced.TryGetValue(builder.Uid, out Exclusions? exclusions))
-                {
-                    exclusions = new Exclusions();
-                    replaced.Add(builder.Uid, exclusions);
-                }
-
-                exclusions.Add(builder.RecurrenceId.Value, builder.RecurrenceId, local);
-            }
-            else if (builder.Cancelled || builder.Private)
-            {
-                hiddenSeries.Add(builder.Uid);
-            }
-        }
-
+        (Dictionary<string, Exclusions> replaced, HashSet<string> hiddenSeries) = Replacements(events, local);
         RecurrenceBudget budget = new RecurrenceBudget();
         List<Appointment> result = [];
         foreach (EventBuilder builder in events)
@@ -197,7 +172,7 @@ internal static class IcsParser
     /// occurrences near the day, the <c>RDATE</c>s, minus the <c>EXDATE</c>s and <paramref name="overridden"/>.
     /// </summary>
     private static List<Appointment> Occurrences(
-        EventBuilder builder, TimeZoneInfo local, DateOnly day, Exclusions? overridden, RecurrenceBudget budget)
+        EventBuilder builder, TimeZoneInfo local, DateOnly day, Exclusions? overridden, RecurrenceBudget budget, bool history = false)
     {
         Appointment? first = builder.Build(local);
         if (first is null || builder.Start is null)
@@ -215,8 +190,20 @@ internal static class IcsParser
         List<DateTime> starts = [first.Start];
         HashSet<DateTime> seen = [first.Start];
 
+        Exclusions excluded = new Exclusions();
+        foreach (ContentLine line in builder.ExceptionDates)
+        {
+            foreach (string part in line.Value.Split(','))
+            {
+                excluded.Add(part, line, local);
+            }
+        }
+
+        bool Eligible(DateTime start) => !excluded.Contains(start, first.AllDay)
+            && overridden?.Contains(start, first.AllDay) != true && DateTime.MaxValue - start >= duration;
+
         RecurrenceRule? rule = builder.Rules.Count == 1 ? RecurrenceRule.Parse(builder.Rules[0]) : null;
-        if (rule is not null && TryUntil(rule.Until, source.Value, local, out DateTime? until))
+        if ((!history || !Eligible(first.Start)) && rule is not null && TryUntil(rule.Until, source.Value, local, out DateTime? until))
         {
             long days = (long)Math.Ceiling(Math.Max(0, duration.TotalDays));
             long fromDay = Math.Max(0, day.DayNumber - Math.Min(days, DateOnly.MaxValue.DayNumber) - 2);
@@ -224,9 +211,10 @@ internal static class IcsParser
             List<DateTime>? walls = rule.Occurrences(
                 source.Value.Wall,
                 until,
-                DateOnly.FromDayNumber((int)fromDay),
+                history ? DateOnly.FromDateTime(source.Value.Wall) : DateOnly.FromDayNumber((int)fromDay),
                 DateOnly.FromDayNumber((int)toDay),
-                budget);
+                budget,
+                history ? wall => TryLocal(source.Value.At(wall), local) is { } at && Eligible(at) : null);
             foreach (DateTime wall in walls ?? [])
             {
                 DateTime? start = TryLocal(source.Value.At(wall), local);
@@ -239,24 +227,10 @@ internal static class IcsParser
 
         AddRecurrenceDates(builder, local, source.Value, starts, seen);
 
-        Exclusions excluded = new Exclusions();
-        foreach (ContentLine line in builder.ExceptionDates)
-        {
-            foreach (string part in line.Value.Split(','))
-            {
-                excluded.Add(part, line, local);
-            }
-        }
-
         List<Appointment> result = [];
         foreach (DateTime start in starts)
         {
-            if (excluded.Contains(start, first.AllDay) || (overridden is not null && overridden.Contains(start, first.AllDay)))
-            {
-                continue;
-            }
-
-            if (DateTime.MaxValue - start < duration)
+            if (!Eligible(start))
             {
                 continue;
             }
@@ -267,26 +241,62 @@ internal static class IcsParser
         return result;
     }
 
-    // DTSTART bounds the rule, including when its first occurrence is excluded. Explicit RDATEs can precede it.
-    internal static IReadOnlyList<Appointment> HistoryStarts(string text, TimeZoneInfo local)
+    private static (Dictionary<string, Exclusions>, HashSet<string>) Replacements(List<EventBuilder> events, TimeZoneInfo local)
     {
-        List<EventBuilder> events = Scan(text);
-        HashSet<string> hidden = events.Where(e => e.Uid is not null && e.RecurrenceId is null && (e.Private || e.Cancelled))
-            .Select(e => e.Uid!).ToHashSet(StringComparer.Ordinal);
-        List<Appointment> result = [];
-        foreach (EventBuilder item in events)
+        Dictionary<string, Exclusions> replaced = new Dictionary<string, Exclusions>(StringComparer.Ordinal);
+        // Cancelled or private series: their overrides are hidden too.
+        HashSet<string> hiddenSeries = new HashSet<string>(StringComparer.Ordinal);
+        foreach (EventBuilder builder in events)
         {
-            if ((item.Uid is not null && hidden.Contains(item.Uid)) || item.Build(local) is not { } first || item.Start is null)
+            if (builder.Uid is null)
             {
                 continue;
             }
-            result.Add(first);
-            if (item.RecurrenceDates.Count > 0 && ReadSource(item.Start.Value, item.Start, local) is { } source)
+
+            if (builder.RecurrenceId is not null)
             {
-                List<DateTime> added = [];
-                AddRecurrenceDates(item, local, source, added, [first.Start]);
-                result.AddRange(added.Select(start => new Appointment(first.Title, null, start, start, first.AllDay)));
+                if (!replaced.TryGetValue(builder.Uid, out Exclusions? exclusions))
+                {
+                    exclusions = new Exclusions();
+                    replaced.Add(builder.Uid, exclusions);
+                }
+
+                exclusions.Add(builder.RecurrenceId.Value, builder.RecurrenceId, local);
             }
+            else if (builder.Cancelled || builder.Private)
+            {
+                hiddenSeries.Add(builder.Uid);
+            }
+        }
+
+        return (replaced, hiddenSeries);
+    }
+
+    internal static IReadOnlyList<Appointment> HistoryStarts(string text, TimeZoneInfo local, DateOnly through)
+    {
+        List<EventBuilder> events = Scan(text);
+        (Dictionary<string, Exclusions> replaced, HashSet<string> hidden) = Replacements(events, local);
+        RecurrenceBudget budget = new RecurrenceBudget();
+        List<Appointment> result = [];
+        foreach (EventBuilder item in events)
+        {
+            if ((item.Uid is not null && hidden.Contains(item.Uid)) || item.Build(local) is not { } first)
+            {
+                continue;
+            }
+
+            if (item.RecurrenceId is not null)
+            {
+                result.Add(first);
+                continue;
+            }
+
+            Exclusions? overridden = null;
+            if (item.Uid is not null)
+            {
+                replaced.TryGetValue(item.Uid, out overridden);
+            }
+            result.AddRange(Occurrences(item, local, through, overridden, budget, history: true));
         }
         return result;
     }

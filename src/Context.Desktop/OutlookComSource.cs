@@ -60,10 +60,15 @@ internal sealed class OutlookComSource : IOutlookSource
             items.IncludeRecurrences = true;
             DateTime end = ToMachine(today.AddDays(1).ToDateTime(TimeOnly.MinValue), zone);
             dynamic visible = Hold(held, items.Restrict("[Start] < '" + Filter(end) + "' AND ([Sensitivity] = 0 OR [Sensitivity] = 1)"));
+            int walked = 0;
             for (object? item = visible.GetFirst(); item is not null; item = visible.GetNext())
             {
                 try
                 {
+                    if (walked++ >= MaxItems)
+                    {
+                        return new OutlookRead<DateOnly>(OutlookReadKind.Failed);
+                    }
                     if (ReadAppointment(item, zone) is { } appointment && DateOnly.FromDateTime(appointment.Start) <= today)
                     {
                         return new OutlookRead<DateOnly>(OutlookReadKind.Ok, [DateOnly.FromDateTime(appointment.Start)]);

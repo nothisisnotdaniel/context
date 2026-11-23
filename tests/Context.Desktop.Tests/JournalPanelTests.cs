@@ -218,6 +218,31 @@ public sealed class JournalPanelTests : IDisposable
         Assert.Equal(requests, data.Http.Requests);
     }
 
+    [Theory]
+    [InlineData("EXDATE", false)]
+    [InlineData("CLASS:PRIVATE", false)]
+    [InlineData("STATUS:CANCELLED", false)]
+    [InlineData("CLASS:PRIVATE", true)]
+    public async Task ExcludedHistory_StartsOnlyAtVisibleOccurrence(string exclusion, bool repeats)
+    {
+        string master = DesktopFixture.Event("Old", "20261026T080000", "20261026T090000")
+            .Replace("END:VEVENT", "UID:series\r\n"
+                + (exclusion == "EXDATE" ? "RDATE:20261025T080000\r\nEXDATE:20261025T080000,20261026T080000\r\n" : string.Empty)
+                + (repeats ? "RRULE:FREQ=DAILY;COUNT=2\r\n" : string.Empty) + "END:VEVENT");
+        string replacement = exclusion == "EXDATE" ? string.Empty
+            : DesktopFixture.Event("Hidden", "20261026T080000", "20261026T090000")
+                .Replace("END:VEVENT", "UID:series\r\nRECURRENCE-ID:20261026T080000\r\n" + exclusion + "\r\nEND:VEVENT");
+        data.WriteCalendar("series.ics", DesktopFixture.Calendar(master, replacement));
+        DesktopState state = data.CreateState();
+        List<DateOnly> reads = [];
+        state.BeforeJournalDay = reads.Add;
+        (Journal journal, _) = await state.OpenJournal().WaitAsync(Wait);
+        IReadOnlyList<JournalDay> entries = journal.ReadBatch();
+        Assert.True(journal.Exhausted);
+        Assert.Equal(repeats ? new[] { DesktopFixture.Today.AddDays(-2) } : [], entries.Select(entry => entry.Date));
+        Assert.Equal(Enumerable.Range(0, repeats ? 3 : 0).Select(i => DesktopFixture.Today.AddDays(-i)), reads);
+    }
+
     [Fact]
     public async Task TimedOutHistory_LeavesLocalDayReadable()
     {
@@ -227,9 +252,14 @@ public sealed class JournalPanelTests : IDisposable
         data.Outlook.Block();
         try
         {
-            (Journal journal, OutlookStatus status) = await data.CreateState().OpenJournal().WaitAsync(Wait);
-            Assert.Equal(OutlookStatus.TimedOut, status);
-            Assert.Equal("Read locally", Assert.Single(journal.ReadBatch()).Body);
+            DesktopState state = data.CreateState();
+            for (int i = 0; i < 2; i++)
+            {
+                (Journal journal, OutlookStatus status) = await state.OpenJournal().WaitAsync(Wait);
+                Assert.Equal(OutlookStatus.TimedOut, status);
+                Assert.Equal("Read locally", Assert.Single(journal.ReadBatch()).Body);
+            }
+            Assert.Equal(1, data.Outlook.OldestCalls);
         }
         finally
         {
@@ -244,7 +274,9 @@ public sealed class JournalPanelTests : IDisposable
         data.Outlook.AppointmentKind = OutlookReadKind.Denied;
         data.WriteNote(Date(0), "Daily text");
         data.WriteNote(Date(0) + " Standup", "#meeting");
-        data.WriteCalendar("one.ics", DesktopFixture.Calendar(DesktopFixture.Event("Review", "20261029T090000", "20261029T093000")));
+        data.WriteCalendar("one.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("Review", "20261029T090000", "20261029T093000"),
+            DesktopFixture.Event("Review", "20261028T140000", "20261028T143000")));
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await data.State!.ReloadsSettled().WaitAsync(Wait);
         await Open(cut);
@@ -265,7 +297,11 @@ public sealed class JournalPanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(Date(0) + " Standup", cut.Find(".note-area:not([hidden]) .note-title").GetAttribute("title")), Wait);
         await Open(cut);
         cut.WaitForElement(".journal-appointment", Wait);
-        await StaleClick.ClickAsync(cut, ".journal-appointment");
-        cut.WaitForAssertion(() => Assert.Contains("Review", cut.Find(".appointment-page h2").TextContent), Wait);
+        const string older = ".journal-panel article:nth-of-type(2)";
+        Assert.Equal(Date(1), cut.Find(older + " h3").TextContent);
+        Assert.Equal("14:00-14:30 Review", cut.Find(older + " .journal-appointment").TextContent.Trim());
+        await StaleClick.ClickAsync(cut, older + " .journal-appointment");
+        cut.WaitForAssertion(() => Assert.Equal("Review", cut.Find(".appointment-page h2").TextContent), Wait);
+        Assert.Equal(DesktopFixture.Today.AddDays(-1), cut.FindComponent<AppointmentPanel>().Instance.Day);
     }
 }

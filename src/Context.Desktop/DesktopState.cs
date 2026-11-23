@@ -45,6 +45,7 @@ internal sealed class DesktopState
 
     // Guards the Outlook cache: one call per day (appointments), each with its start time.
     private readonly object outlookGate = new();
+    private readonly Dictionary<DateOnly, OutlookCall<DateOnly>> outlookHistory = [];
     private Dictionary<DateOnly, OutlookCall<Appointment>> outlookDays = new();
 
     // The mail suggestions accepted or dismissed in this session (job 286); never written to disk.
@@ -1033,7 +1034,18 @@ internal sealed class DesktopState
         OutlookStatus status = OutlookStatus.Off;
         if (OutlookOn())
         {
-            (OutlookStatus outcome, IReadOnlyList<DateOnly> dates) = Finish(Start(utcNow(), () => outlook.Oldest(day, calendar.Zone)));
+            OutlookCall<DateOnly> call;
+            lock (outlookGate)
+            {
+                // The calendar zone belongs to this state. Only unfinished reads are shared.
+                if (!outlookHistory.TryGetValue(day, out OutlookCall<DateOnly>? existing) || existing.Read.IsCompleted)
+                {
+                    existing = Start(utcNow(), () => outlook.Oldest(day, calendar.Zone));
+                    outlookHistory[day] = existing;
+                }
+                call = existing;
+            }
+            (OutlookStatus outcome, IReadOnlyList<DateOnly> dates) = Finish(call);
             status = outcome;
             if (outcome == OutlookStatus.Ok && dates.Count > 0 && (first is null || dates[0] < first))
             {
