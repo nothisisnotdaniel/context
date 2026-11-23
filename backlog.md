@@ -441,6 +441,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#496](backlog/496-make-recentnotesactionstests-open-anyroute-putsitf.md) Make RecentNotesActionsTests.Open_AnyRoute_PutsItFirst_Once reliable
 - [ ] [#497](backlog/497-show-feedback-while-the-appointment-page.md) Show feedback while the appointment page checks for a meeting note
 - [x] [#498](backlog/498-show-the-app-version-and-log.md) Show the app version and log each update check → 396-version-and-update-log
+- [ ] [#499](backlog/499-new-notes-from-an-appointment-page.md) New notes from an appointment page go under that appointment
 
 ## Dropped with the terminal UI
 
