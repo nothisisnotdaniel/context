@@ -17,13 +17,15 @@ public sealed class ProSettingsTests : IDisposable
 
     private string ActivationPath => Path.Combine(data.ActivationFolder, LicenceActivationFile.FileName);
 
-    // AC-5: the heading is last, the state line a status, and with nothing stored it says so in grey.
+    // AC-5: the heading is last before job 396's Version section, the state line a status, and with nothing stored
+    // it says so in grey.
     [Fact]
     public async Task Section_IsLast_NoLicence_GreyLine()
     {
         IRenderedComponent<SettingsPanel> cut = await Show();
 
-        IElement heading = cut.FindAll("h3").Last();
+        Assert.Equal("Version", cut.FindAll("h3").Last().TextContent);
+        IElement heading = cut.FindAll("h3")[^2];
         Assert.Equal("Suite Pro", heading.TextContent);
         Assert.Equal("pro-heading", heading.Id);
         Assert.Equal("-1", heading.GetAttribute("tabindex"));

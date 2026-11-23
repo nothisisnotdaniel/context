@@ -14,6 +14,9 @@ internal sealed class FakeUpdateSource : IUpdateSource
     /// <summary>What the check answers: is there a newer version?</summary>
     public bool Newer { get; set; }
 
+    /// <summary>What <see cref="FoundVersion"/> answers: the version the check found.</summary>
+    public string? FoundVersion { get; set; }
+
     public Exception? InstalledThrows { get; set; }
 
     public Exception? CheckThrows { get; set; }

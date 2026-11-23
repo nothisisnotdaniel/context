@@ -784,7 +784,7 @@ public sealed class MainTests : IDisposable
         IElement panel = cut.Find("main.current-region").Children[1];
         Assert.True(panel.ClassList.Contains("settings-panel"));
         Assert.Equal("Settings", panel.QuerySelector("h2")!.TextContent);
-        Assert.Equal(["Appearance", "Exchange calendar", "Outlook", "Pasting", "Screenshots", "Command bar", "Repository folders", "Sensitive notes", "Suite Pro"], panel.QuerySelectorAll("h3").Select(h => h.TextContent).ToArray());
+        Assert.Equal(["Appearance", "Exchange calendar", "Outlook", "Pasting", "Screenshots", "Command bar", "Repository folders", "Sensitive notes", "Suite Pro", "Version"], panel.QuerySelectorAll("h3").Select(h => h.TextContent).ToArray());
         Assert.Empty(cut.FindAll(".palette"));
 
         await cut.Find(".settings-panel button.close").ClickAsync(new MouseEventArgs());

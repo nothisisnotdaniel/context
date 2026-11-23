@@ -12,6 +12,9 @@ internal interface IUpdateSource
     /// <summary>Asks the release feed for a newer version and remembers it. True when there is one.</summary>
     public Task<bool> CheckAsync();
 
+    /// <summary>The version the last <see cref="CheckAsync"/> found, or <c>null</c>.</summary>
+    public string? FoundVersion { get; }
+
     /// <summary>Downloads the version the last <see cref="CheckAsync"/> found.</summary>
     public Task DownloadAsync();
 

@@ -210,6 +210,9 @@ internal static class Program
         }
 
         builder.Services.AddSingleton(actions);
+        // Job 396: what this start's update check found, shown in Settings' Version section.
+        UpdateStatus updateStatus = new UpdateStatus();
+        builder.Services.AddSingleton(updateStatus);
         builder.Services.AddTransient<EditorInterop>();
         builder.Services.AddSingleton<IAutoSavePause>(new AutoSavePause());
         // Filled in once the window exists; the guard only calls it after a save-first finished.
@@ -338,8 +341,16 @@ internal static class Program
         _ = state.Refresh();
 
         // Installed Windows copies only: look for a newer build in the background; it is put in place after exit.
+        // Job 396: every start's outcome becomes one line in <data folder>/.logs/update.log and shows in Settings.
+        UpdateLog updateLog = new UpdateLog(
+            NoteStore.DefaultFolder(),
+            () => DateTime.UtcNow,
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
         StartupUpdate update = new StartupUpdate(
-            new VelopackUpdateSource(StartupUpdate.IncludePrereleases(StartupUpdate.CurrentVersion)));
+            new VelopackUpdateSource(StartupUpdate.IncludePrereleases(StartupUpdate.CurrentVersion)),
+            updateStatus,
+            updateLog.Write,
+            () => DateTime.UtcNow);
         _ = update.Start();
         app.Run();
         crashLog.End();

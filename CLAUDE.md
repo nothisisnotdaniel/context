@@ -559,7 +559,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   `HttpClient` (`DesktopSourceTests`). Desktop: `MacLicenceStore` (Keychain generic password `Suite Pro licence`/`key`,
   access list only the resolved apphost, refuses the shared `dotnet` host) and `WindowsLicenceStore` (Credential Manager
   `Suite/ProLicence`, UTF-8 blob), picked by `Program.cs` only; `DesktopState.ProStatus()` (off the UI thread, behind
-  `Loading…`), `DesktopActions.ActivatePro(key)`/`RemovePro(confirmation)`, the *Suite Pro* section last in
+  `Loading…`), `DesktopActions.ActivatePro(key)`/`RemovePro(confirmation)`, the *Suite Pro* section (before job 396's *Version*) in
   `SettingsPanel` (`h3#pro-heading`, `p.pro-state`, `input.pro-key` password with no value, `button.pro-activate`,
   `button.pro-remove`) and `ProLockedHint` (`Feature`, `OnOpenSettings`; `Main.OpenProSettings` opens Settings and
   focuses `#pro-heading`). No feature is gated yet. Tests use `FakeLicenceStore` and `TestLicences` (fresh P-256 keys,
@@ -1089,7 +1089,7 @@ Every factory agent reads this file before working on Context. Keep it short and
     code on every installed copy. The repository URL is fixed in every installed copy: never rename, transfer or
     delete the repository or the account while installed copies exist (whoever registers the old name afterwards
     controls their update feed); ship a build with the new URL first. No token is embedded in the app; while the repository is private the
-    unauthenticated updater finds nothing and stays silent. The installer cannot run in `dotnet test`: after a change
+    unauthenticated updater finds nothing and stays silent apart from the Settings *Version* section and `.logs/update.log` (job 396). The installer cannot run in `dotnet test`: after a change
     to the desktop jobs, the next develop run is the real check.
   - **Signing (macOS only):** the switch is the repository variable `MACOS_SIGNING` (empty, `off` or `on`, exact
     case). `vars.` appears only as `vars.MACOS_SIGNING` in the job-level `env:` of `release` and `desktop-macos`;
@@ -2239,11 +2239,31 @@ Every factory agent reads this file before working on Context. Keep it short and
     `DownloadAsync` once, then `ApplyOnExit` once (put in place after the app closes, no restart; Velopack's updater waits
     only 60 s for the app to close, and after that `VelopackApp.Build().Run()` applies the pending package at the
     next start and restarts into it). Any exception or
-    cancellation is swallowed with no output; the next start tries again. `StartupUpdate.IncludePrereleases(version)`
+    cancellation is swallowed with no output on screen; the next start tries again. Job 396: each run ends in one
+    `UpdateOutcome(Utc, Version, Kind, NewVersion, Error)` (`UpdateResultKind` `NotInstalled`, `NoNewer`, `Downloaded`
+    (`IUpdateSource.FoundVersion`), `Failed`; `Text` `not installed`, `no newer version`, `downloaded <v>, applies on
+    exit`, `failed: <type>: <message>`, the message one line, cut to `MaxMessage` 200, no stack trace, through
+    `UpdateOutcome.OneLine`: CR/LF/tab to spaces, `SafeText.Clean`, a URL's query and fragment dropped).
+    `StartupUpdate(source, UpdateStatus, record, utcNow)` sets `UpdateStatus.Installed` (`bool?`, null until read or
+    when `IsInstalled` threw), calls `record` (a throw swallowed) and then sets `UpdateStatus.Last`; `UpdateStatus`
+    (thread-safe, a singleton service `Program.cs` registers) raises `Changed`, a throwing listener ignored.
+    `UpdateLog(root, utcNow, home)`.`Write` (the `record` Program passes, never throws) appends
+    `yyyy-MM-ddTHH:mm:ssZ <ShownVersion> <Text>` (home folder as `~`, line cut to 1000) to `<root>/.logs/update.log`:
+    folder through `PrivateFile.CreateFolder` and `CrashLog.IsPlainFolder`, a linked or non-file `update.log` left
+    alone, existing lines read as strict UTF-8 (oversized or unreadable: start over), the newest `MaxLines` 100 kept
+    and the oldest dropped until under `CrashLog.MaxBytes`, written through `PrivateFile.Rewrite`/`OpenNew`; the crash
+    log's rotation never touches it. `StartupUpdate.ShownVersion(v)` drops `+<commit>` (blank: `development build`).
+    Velopack may keep its own log under `%LOCALAPPDATA%\ContextDesktop`; Context never relies on it. `StartupUpdate.IncludePrereleases(version)`
     is true only for a SemVer version with a prerelease label (`StartupUpdate.CurrentVersion` is the assembly's
     informational version). `VelopackUpdateSource` is the one real source: Velopack's `UpdateManager` over
     `GithubSource` with the fixed repository URL, no access token (so it can never list a draft release), no explicit channel and no downgrade; installed
-    means Windows, installed by `Setup.exe` and not the portable copy. There is no update UI.
+    means Windows, installed by `Setup.exe` and not the portable copy. The only update UI is the read-only *Version*
+    section last in `SettingsPanel` (after *Suite Pro*): `h3#version-heading`, `p.app-version` `Version <ShownVersion>`,
+    `p.update-mode` (grey `Checking for updates…` before the first outcome, `Couldn't tell whether this copy updates
+    itself.`, `This copy doesn't update itself (not installed by Setup.exe).`, else `Updates itself from the
+    develop|stable channel.`; grey `Update status unknown.` without an `UpdateStatus` service) and `p.update-last`
+    (`role="status"`, grey `No update check yet.` or `Last check <yyyy-MM-dd HH:mm in State.Zone>: <Text>`, red when
+    failed); it re-renders on `UpdateStatus.Changed` and has no button and no dialog.
     `wwwroot/index.html` (CSP meta tag, `img-src 'self' blob:` for attachment images, `frame-src 'self'` for the Mermaid frame (job 263), only `_framework/blazor.webview.js` and `editor/editor.js`), `wwwroot/app.css`
     and `wwwroot/editor/editor.css`.
   - **Desktop rules:** the Core writing calls (`Create`, `Save`, `SaveIfUnchanged`, `Add`, `Complete` (also `NoteTodos.Complete`), `Set`, `Clear`, `Delete`,
@@ -2270,7 +2290,9 @@ Every factory agent reads this file before working on Context. Keep it short and
     `ConfirmDialog.razor`.
     `Velopack` is named only in `VelopackUpdateSource.cs` and `Program.cs`; the update classes (`IUpdateSource.cs`,
     `StartupUpdate.cs`, `VelopackUpdateSource.cs`) never mention `NoteStore`, `DefaultFolder`, `DesktopActions`,
-    `Environment.GetEnvironmentVariable`, `args` or `Console.`, so an update never touches the data folder; no test
+    `Environment.GetEnvironmentVariable`, `args` or `Console.` (job 396: also `UpdateOutcome.cs` and `UpdateStatus.cs`);
+    the one write of an update is `UpdateLog.cs`'s `.logs/update.log` (only through `PrivateFile`, no `Move`/`Delete`,
+    names no store or actions), built in `Program.cs` on `NoteStore.DefaultFolder()`; no test
     references `VelopackUpdateSource` (tests use `FakeUpdateSource`, never the network).
     **Launcher rule:** `Process` / `System.Diagnostics` appear only in `ShellNoteLauncher.cs`, (job 354)
     `ShellUrlLauncher.cs`, (job 178)
@@ -2324,7 +2346,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   - `tests/Context.Desktop.Tests/`: xUnit + bunit, references `Context.Desktop` and `Context.Core`; one test class per
     component or class, plus `EditorBundleTests` (Jint on the committed `editor.js` against `RoundTrip/lossless` and
     `RoundTrip/lossy` fixtures, compared with the C# parsers; `.gitattributes` keeps their bytes), `EditorJs` (bunit
-    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `WebLinkActionsTests` (`OpenWebLink`, with `FakeUrlLauncher`), `LinkCreateActionsTests` (`CreateLinkedNote`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `MailDigestPanelTests` (the Mail digest page and `/digest` through `Main`, with `FakeOutlookSource`) and `MailDigestActionsTests` (`AcceptSuggestion`, `SetMailDigestEnabled`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `ShareActionsTests` (`ShareNote`) and `ShareDialogTests` (Share through `Main`), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `ThemeActionsTests` (job 341), `PeoplePanelTests`, `ReviewPanelTests`, `DoneLogActionsTests` (the done-log append on completion) and `DonePanelTests` (the Done log page and `/donelog` through `Main`), `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StandupActionsTests` (`WriteStandup`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
+    JSInterop setups for the page editor), `EditingFlowTests` and `TodoEntryTests`, `StartupUpdateTests` (with `FakeUpdateSource`), `UpdateLogTests` (job 396, temp root, fixed clock), `NoteActionsTests` (note actions, with `FakeNoteLauncher`), `WebLinkActionsTests` (`OpenWebLink`, with `FakeUrlLauncher`), `LinkCreateActionsTests` (`CreateLinkedNote`), `CaptureActionsTests` (`CaptureText`), `TriageActionsTests` (the triage actions) and `TriagePanelTests` (the panel, `/triage` and the `Triage` button through `Main`), `MailDigestPanelTests` (the Mail digest page and `/digest` through `Main`, with `FakeOutlookSource`) and `MailDigestActionsTests` (`AcceptSuggestion`, `SetMailDigestEnabled`), `NoteTransferActionsTests` (`ImportNote`, `ExportNote`; sources and targets in `DesktopFixture.Outside`, with `FakeFileDialog` for the panels), `ShareActionsTests` (`ShareNote`) and `ShareDialogTests` (Share through `Main`), `SettingsPanelTests` (with the link-secrecy marker test through `Main`), `ThemeActionsTests` (job 341), `PeoplePanelTests`, `ReviewPanelTests`, `DoneLogActionsTests` (the done-log append on completion) and `DonePanelTests` (the Done log page and `/donelog` through `Main`), `CalendarLinkActionsTests`, `DayEndActionsTests` (`EndDay`, `AutoDayEnd`; Times files in `DesktopFixture.TimesFolder`), `StandupActionsTests` (`WriteStandup`), `StartNoteActionsTests` (`AutoOpenToday`), `BriefingActionsTests` (`AutoBriefing`, `OpenBriefing`), `ReminderActionsTests` (`AutoReminders`, with `FakeNotifier`) and `TimedTodoTests` (the palette's timed `/todo`), `KeyDetailsTests`, `DesktopStrongNameTests` (the `Context.snk` key on `Context.Desktop` and its tests, keyed `InternalsVisibleTo`), `DesktopDependencyTests` (no terminal UI library, no Jint
     outside tests, exact npm versions, Velopack only in `Context.Desktop`), `DesktopSourceTests` (raw markup, risky elements,
     CSP, write sites, event-handler-only actions, button types, checkbox-only inputs, JS interop, the launcher rule, the calendar-link, browser-storage and logging rules, the transfer calls and no file system class in `.razor`), `DesktopFixture` (temp folder, deleted under the state's `indexGate` so a panel's index read never races it; injected
     day/clocks, `FakeHttpHandler` linked from `Context.Tests`, a `BunitContext` serving the state and the actions),

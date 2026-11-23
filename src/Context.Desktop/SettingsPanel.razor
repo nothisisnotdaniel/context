@@ -9,7 +9,9 @@
    the masked link from DesktopState.CalendarLinkSetting. Every section reloads whenever the state changes.
    Suite Pro (job 367) comes last: DesktopState.ProStatus is loaded on its own (a Keychain prompt may hold it), the key
    is typed into a password field with no value that is built anew after an activation, and ProFocusRequest moves the
-   focus to its heading (Main's OpenProSettings). *@
+   focus to its heading (Main's OpenProSettings). Version (job 396) comes after it: the running version, whether this copy
+   updates itself and from which channel, and this start's update outcome from the optional UpdateStatus service,
+   re-rendered whenever it changes; plain text only, never a dialog. *@
 
 <section class="page settings-panel" aria-label="Settings">
     <div class="panel-bar">
@@ -248,6 +250,25 @@
         <ConfirmDialog Question="@DesktopText.ProRemoveQuestion" ConfirmLabel="Remove" Busy="busy"
                        OnConfirm="RemoveProConfirmed" OnCancel="CancelDialog" />
     }
+    <h3 id="version-heading">Version</h3>
+    <p class="app-version">Version @StartupUpdate.ShownVersion(StartupUpdate.CurrentVersion)</p>
+    @if (updates is null)
+    {
+        <p class="update-mode grey">@UpdateUnknownText</p>
+    }
+    else
+    {
+        (string modeText, string modeClass) = UpdateModeLine(updates.Installed, updates.Last);
+        <p class="update-mode @modeClass">@modeText</p>
+        @if (updates.Last is { } last)
+        {
+            <p class="update-last @(last.Kind == UpdateResultKind.Failed ? "red" : string.Empty)" role="status">@LastCheckText(last)</p>
+        }
+        else
+        {
+            <p class="update-last grey" role="status">@NoCheckYetText</p>
+        }
+    }
 </section>
 
 @code {
@@ -271,6 +292,13 @@
     public const string ScreenshotMissingText = "Folder not found.";
     public const string ScreenshotNotSetText = "No screenshot folder set. Once one is set, images saved into it are added to the inbox.";
     public const string RemoveQuestion = "Remove the calendar link? The downloaded calendar copy is deleted too.";
+
+    // Job 396: the Version section.
+    public const string UpdateUnknownText = "Update status unknown.";
+    public const string UpdateCheckingText = "Checking for updates…";
+    public const string UpdateUnsureText = "Couldn't tell whether this copy updates itself.";
+    public const string UpdateNotInstalledText = "This copy doesn't update itself (not installed by Setup.exe).";
+    public const string NoCheckYetText = "No update check yet.";
 
     // The theme buttons in order: the value, the button's class and its label.
     private static readonly (AppTheme Theme, string Css, string Label)[] ThemeOptions =
@@ -332,6 +360,12 @@
     private int proFocusSeen;
     private bool proFocusPending;
 
+    // Job 396: this start's update status; null when no such service is registered.
+    private UpdateStatus? updates;
+
+    [Inject]
+    internal IServiceProvider Services { get; set; } = null!;
+
     [Parameter]
     public EventCallback OnClose { get; set; }
 
@@ -342,6 +376,63 @@
     /// <summary>Raised once a theme was saved, so the page applies the saved theme.</summary>
     [Parameter]
     public EventCallback OnThemeChanged { get; set; }
+
+    /// <summary>The line about how this copy updates: the text and its theme class.</summary>
+    internal static (string Text, string Css) UpdateModeLine(bool? installed, UpdateOutcome? last) => installed switch
+    {
+        null when last is null => (UpdateCheckingText, "grey"),
+        null => (UpdateUnsureText, "grey"),
+        false => (UpdateNotInstalledText, "grey"),
+        true => (UpdateChannelText(StartupUpdate.CurrentVersion), string.Empty),
+    };
+
+    /// <summary>The line for an installed copy of <paramref name="version"/>: the develop or the stable channel.</summary>
+    internal static string UpdateChannelText(string? version) =>
+        $"Updates itself from the {(StartupUpdate.IncludePrereleases(version) ? "develop" : "stable")} channel.";
+
+    // The last check's local time in the state's zone and its outcome, on one line.
+    private string LastCheckText(UpdateOutcome last)
+    {
+        DateTime local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(last.Utc, DateTimeKind.Utc), State.Zone);
+        return DesktopText.OneLine(
+            "Last check " + local.ToString(TimeFormat, CultureInfo.InvariantCulture) + ": " + last.Text);
+    }
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        updates = Services.GetService(typeof(UpdateStatus)) as UpdateStatus;
+        if (updates is not null)
+        {
+            updates.Changed += OnUpdateChanged;
+        }
+    }
+
+    protected override void OnDisposing()
+    {
+        if (updates is not null)
+        {
+            updates.Changed -= OnUpdateChanged;
+        }
+    }
+
+    // Raised on the update's pool thread: the re-render is dispatched to the renderer. A panel that closed meanwhile
+    // can't render; that failure is observed here, so it never reaches the crash log as an unobserved task.
+    private void OnUpdateChanged()
+    {
+        try
+        {
+            _ = InvokeAsync(StateHasChanged).ContinueWith(
+                static t => _ = t.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+        catch (Exception)
+        {
+            // The panel is gone; nothing to show.
+        }
+    }
 
     protected override Task OnInitializedAsync()
     {

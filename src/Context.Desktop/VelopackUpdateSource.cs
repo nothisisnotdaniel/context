@@ -37,6 +37,8 @@ internal sealed class VelopackUpdateSource : IUpdateSource
         }
     }
 
+    public string? FoundVersion => found?.TargetFullRelease.Version.ToString();
+
     public async Task<bool> CheckAsync()
     {
         found = await Manager().CheckForUpdatesAsync().ConfigureAwait(false);

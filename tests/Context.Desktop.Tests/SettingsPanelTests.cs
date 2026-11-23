@@ -2,6 +2,7 @@ using AngleSharp.Dom;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Context.Tests;
 
@@ -47,7 +48,7 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.Equal("Close", close.GetAttribute("aria-label"));
         Assert.Equal("Close", close.GetAttribute("title"));
         Assert.NotNull(close.QuerySelector("svg"));
-        Assert.Equal(["Appearance", "Exchange calendar", "Outlook", "Pasting", "Screenshots", "Command bar", "Repository folders", "Sensitive notes", "Suite Pro"], cut.FindAll("h3").Select(h => h.TextContent).ToArray());
+        Assert.Equal(["Appearance", "Exchange calendar", "Outlook", "Pasting", "Screenshots", "Command bar", "Repository folders", "Sensitive notes", "Suite Pro", "Version"], cut.FindAll("h3").Select(h => h.TextContent).ToArray());
         IElement line = cut.Find(".calendar-link-state");
         Assert.Equal("No calendar link set.", line.TextContent);
         Assert.True(line.ClassList.Contains("grey"));
@@ -1192,6 +1193,136 @@ public sealed class SettingsPanelTests : IDisposable
             () => Assert.Equal("Type the folder's full path.", cut.Find(".screenshot-result").TextContent), Wait);
         Assert.Contains("red", cut.Find(".screenshot-result").ClassList);
         Assert.False(File.Exists(Path.Combine(data.Root, SettingsStore.FileName)));
+    }
+
+    // 396 AC-7, AC-10: without an UpdateStatus service the Version section shows the version and "Update status
+    // unknown."; it is the last section, plain text only.
+    [Fact]
+    public async Task Version_NoUpdateStatus_ShowsVersionAndUnknown()
+    {
+        IRenderedComponent<SettingsPanel> cut = await Show();
+
+        Assert.Equal("Version", cut.FindAll("h3")[^1].TextContent);
+        Assert.Equal("Version", cut.Find("h3#version-heading").TextContent);
+        string version = cut.Find("p.app-version").TextContent;
+        Assert.Equal("Version " + StartupUpdate.ShownVersion(StartupUpdate.CurrentVersion), version);
+        Assert.DoesNotContain('+', version);
+        IElement mode = cut.Find("p.update-mode");
+        Assert.Equal("Update status unknown.", mode.TextContent);
+        Assert.True(mode.ClassList.Contains("grey"));
+        Assert.Empty(cut.FindAll("p.update-last"));
+        Assert.Empty(cut.FindAll("[role=dialog], [role=alertdialog], dialog"));
+    }
+
+    // 396 AC-8, AC-9: before the check: grey "Checking for updates…" and "No update check yet."; then the outcome
+    // arrives while the panel is open and it re-renders without a reload.
+    [Fact]
+    public async Task Version_OutcomeArrivesAfterRender_ReRenders()
+    {
+        UpdateStatus status = new UpdateStatus();
+        IRenderedComponent<SettingsPanel> cut = await Show(status);
+
+        IElement mode = cut.Find("p.update-mode");
+        Assert.Equal("Checking for updates…", mode.TextContent);
+        Assert.True(mode.ClassList.Contains("grey"));
+        IElement last = cut.Find("p.update-last");
+        Assert.Equal("No update check yet.", last.TextContent);
+        Assert.True(last.ClassList.Contains("grey"));
+        Assert.Equal("status", last.GetAttribute("role"));
+
+        // Set from another thread, as the update's pool thread does.
+        await Task.Run(() =>
+        {
+            status.Installed = true;
+            status.Last = new UpdateOutcome(
+                new DateTime(2026, 11, 23, 8, 15, 30, DateTimeKind.Utc), "1.0.0", UpdateResultKind.Downloaded, "1.2.3", null);
+        });
+
+        string channel = StartupUpdate.IncludePrereleases(StartupUpdate.CurrentVersion) ? "develop" : "stable";
+        cut.WaitForAssertion(
+            () =>
+            {
+                Assert.Equal("Last check 2026-11-23 09:15: downloaded 1.2.3, applies on exit", cut.Find("p.update-last").TextContent);
+                Assert.Equal($"Updates itself from the {channel} channel.", cut.Find("p.update-mode").TextContent);
+            },
+            Wait);
+        Assert.DoesNotContain("Checking for updates…", cut.Markup, StringComparison.Ordinal);
+        Assert.False(cut.Find("p.update-last").ClassList.Contains("red"));
+        Assert.False(cut.Find("p.update-last").ClassList.Contains("grey"));
+        Assert.Empty(cut.FindAll("[role=dialog], [role=alertdialog], dialog"));
+    }
+
+    // 396 AC-8, AC-9: a copy not installed by Setup.exe, set before render.
+    [Fact]
+    public async Task Version_NotInstalled_GreyLines()
+    {
+        UpdateStatus status = new UpdateStatus
+        {
+            Installed = false,
+            Last = new UpdateOutcome(new DateTime(2026, 11, 23, 22, 59, 0, DateTimeKind.Utc), "1.0.0", UpdateResultKind.NotInstalled, null, null),
+        };
+
+        IRenderedComponent<SettingsPanel> cut = await Show(status);
+
+        IElement mode = cut.Find("p.update-mode");
+        Assert.Equal("This copy doesn't update itself (not installed by Setup.exe).", mode.TextContent);
+        Assert.True(mode.ClassList.Contains("grey"));
+        Assert.Equal("Last check 2026-11-23 23:59: not installed", cut.Find("p.update-last").TextContent);
+    }
+
+    // 396 AC-3, AC-8, AC-9: IsInstalled threw: Installed stays null, Last is Failed; "Couldn't tell…" replaces
+    // "Checking for updates…" and the failure is red, on one line.
+    [Fact]
+    public async Task Version_InstalledUnknownAndFailed_CouldntTellAndRed()
+    {
+        UpdateStatus status = new UpdateStatus();
+        IRenderedComponent<SettingsPanel> cut = await Show(status);
+        Assert.Equal("Checking for updates…", cut.Find("p.update-mode").TextContent);
+
+        await Task.Run(() => status.Last = UpdateOutcome.Failure(
+            new DateTime(2026, 11, 23, 8, 15, 30, DateTimeKind.Utc), "1.0.0", new IOException("disk\nbroken")));
+
+        cut.WaitForAssertion(
+            () => Assert.Equal("Last check 2026-11-23 09:15: failed: IOException: disk broken", cut.Find("p.update-last").TextContent),
+            Wait);
+        Assert.Null(status.Installed);
+        IElement mode = cut.Find("p.update-mode");
+        Assert.Equal("Couldn't tell whether this copy updates itself.", mode.TextContent);
+        Assert.True(mode.ClassList.Contains("grey"));
+        Assert.DoesNotContain("Checking for updates…", cut.Markup, StringComparison.Ordinal);
+        Assert.True(cut.Find("p.update-last").ClassList.Contains("red"));
+    }
+
+    // 396 AC-8: the channel follows the version's prerelease label.
+    [Theory]
+    [InlineData("0.3.1-develop.12+abc", "Updates itself from the develop channel.")]
+    [InlineData("1.0.0+abc", "Updates itself from the stable channel.")]
+    [InlineData("", "Updates itself from the stable channel.")]
+    public void Version_ChannelText(string version, string expected)
+    {
+        Assert.Equal(expected, SettingsPanel.UpdateChannelText(version));
+    }
+
+    // 396 AC-9: closing the panel stops listening; a later change raises nothing on it.
+    [Fact]
+    public async Task Version_Disposed_Unsubscribes()
+    {
+        UpdateStatus status = new UpdateStatus();
+        IRenderedComponent<SettingsPanel> cut = await Show(status);
+        System.Reflection.FieldInfo changed = typeof(UpdateStatus).GetField(
+            "Changed", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        Assert.NotNull(changed.GetValue(status));
+
+        cut.Instance.Dispose();
+
+        Assert.Null(changed.GetValue(status));
+        status.Installed = true;
+    }
+
+    private async Task<IRenderedComponent<SettingsPanel>> Show(UpdateStatus status)
+    {
+        data.Bunit.Services.AddSingleton(status);
+        return await Show();
     }
 
     private async Task<IRenderedComponent<SettingsPanel>> Show()
