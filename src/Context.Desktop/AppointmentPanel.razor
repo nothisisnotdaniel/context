@@ -3,8 +3,8 @@
    (DesktopState.AppointmentPage: meeting prep with no cap, over the title and the union of their attendees). A note
    opens through OnOpen. Below them (or alone, with none) a link asks Main for the meeting note of the first such
    appointment; once that note exists (job 395) the link opens a title field instead, which creates the note under the
-   appointment page Meetings/<title part> (job 397, DesktopActions.CreateAppointmentNote) and hands its name to OnCreated. It reloads whenever the state
-   changes, keeping the shown rows. Above the notes, the open topics for the next 1:1 with
+   appointment page Meetings/<title part> (job 397, DesktopActions.CreateAppointmentNote) and hands its name to
+   OnCreated. It reloads whenever the state changes, keeping the shown rows. Above the notes, the open topics for the next 1:1 with
    the attendees (job 253) each have a checkbox that ticks the topic off in its note after a confirmation. Below them, the
    todos tied to these appointments (job 287, MeetingTodosPanel). *@
 
@@ -106,6 +106,8 @@
     private ElementReference titleField;
     // The title field's text while it is open (job 395), else null; its red refusal text; a create running.
     private string? newTitle;
+    // The appointment whose page the note goes under, fixed when the field opens (job 397).
+    private Appointment? newFor;
     private string? createFailed;
     private bool creating;
     private bool checkingLink;
@@ -219,7 +221,8 @@
             return;
         }
 
-        newTitle = MeetingNote.TitlePartFor(first ?? StandIn());
+        newFor = first ?? StandIn();
+        newTitle = MeetingNote.TitlePartFor(newFor);
         createFailed = null;
         focusField = true;
     }
@@ -273,7 +276,7 @@
         ActionResult made;
         try
         {
-            made = await Actions.CreateAppointmentNote(view?.First ?? StandIn(), title);
+            made = await Actions.CreateAppointmentNote(newFor ?? StandIn(), title);
         }
         finally
         {
