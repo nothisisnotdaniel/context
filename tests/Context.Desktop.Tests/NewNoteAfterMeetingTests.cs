@@ -109,8 +109,9 @@ public sealed class NewNoteAfterMeetingTests : IDisposable
         await cut.InvokeAsync(() => cut.Find(".appointment-page input.create-note-title").InputAsync(new ChangeEventArgs { Value = "Fresh" }));
         await cut.InvokeAsync(() => cut.Find(".appointment-page input.create-note-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" }));
 
-        cut.WaitForAssertion(() => Assert.Equal("Created Fresh", cut.Find(".main-status").TextContent), Wait);
-        AssertOpened(cut, js, mounts, "Fresh");
+        cut.WaitForAssertion(() => Assert.Equal("Created Meetings/Budget/Fresh", cut.Find(".main-status").TextContent), Wait);
+        AssertOpened(cut, js, mounts, "Meetings/Budget/Fresh");
+        Assert.False(File.Exists(Path.Combine(data.Root, "Fresh.md")));
     }
 
     // Makes the Budget meeting note and waits until the editor shows it, mounted and ready; a booking offer is declined.
@@ -183,7 +184,7 @@ public sealed class NewNoteAfterMeetingTests : IDisposable
     // The new note is on disk, open in a new editor, and listed in the sidebar.
     private void AssertOpened(IRenderedComponent<Main> cut, EditorJs js, int mounts, string name)
     {
-        Assert.True(File.Exists(Path.Combine(data.Root, name + ".md")));
+        Assert.True(File.Exists(Path.Combine([data.Root, .. (name + ".md").Split('/')])));
         cut.WaitForAssertion(() => Assert.Equal(name, cut.Find(".note-title").GetAttribute("title")), Wait);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
         cut.WaitForAssertion(() => Assert.Contains(

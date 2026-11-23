@@ -494,7 +494,7 @@ public sealed class AppointmentPanelTests : IDisposable
     }
 
     // 395 AC-3: the meeting note exists: the link opens the title field (prefilled, focused) and writes nothing;
-    // Create note makes the note, opens it and shows Created.
+    // Create note makes the note, opens it and shows Created. 397 AC-1: the note goes under Meetings/Budget.
     [Fact]
     public async Task MeetingNoteExists_CreateLink_ShowsField_CreateMakesAndOpensNote()
     {
@@ -523,12 +523,13 @@ public sealed class AppointmentPanelTests : IDisposable
 
         await Click(cut, () => cut.Find(".create-note-entry button.create-note-confirm"));
 
-        WaitForCreated(cut, js, 0, "Budget");
-        Assert.Equal("# Budget\n", File.ReadAllText(Path.Combine(data.Root, "Budget.md")));
+        WaitForCreated(cut, js, 0, "Meetings/Budget/Budget");
+        Assert.Equal("# Budget\n", File.ReadAllText(Path.Combine(data.Root, "Meetings", "Budget", "Budget.md")));
+        Assert.False(File.Exists(Path.Combine(data.Root, "Budget.md")));
         Assert.Empty(cut.FindAll(".appointment-page"));
     }
 
-    // 395 AC-3: Enter in the field creates the typed title.
+    // 395 AC-3: Enter in the field creates the typed title; 397 AC-1: under Meetings/Budget, not at the top level.
     [Fact]
     public async Task MeetingNoteExists_EnterCreatesTypedTitle()
     {
@@ -541,8 +542,71 @@ public sealed class AppointmentPanelTests : IDisposable
 
         await TypeTitle(cut, "Budget follow-up", "Enter");
 
-        WaitForCreated(cut, js, 0, "Budget follow-up");
-        Assert.True(File.Exists(Path.Combine(data.Root, "Budget follow-up.md")));
+        WaitForCreated(cut, js, 0, "Meetings/Budget/Budget follow-up");
+        Assert.Equal(
+            "# Budget follow-up\n",
+            File.ReadAllText(Path.Combine(data.Root, "Meetings", "Budget", "Budget follow-up.md")));
+        Assert.False(File.Exists(Path.Combine(data.Root, "Budget follow-up.md")));
+    }
+
+    // 397 AC-2: with only the legacy top-level meeting note, Meetings and Meetings/Budget are created first and the
+    // note goes under them.
+    [Fact]
+    public async Task LegacyMeetingNoteOnly_CreatesParentsThenNote()
+    {
+        WriteDay();
+        data.WriteNote("2026-10-29 Budget", "# 2026-10-29 Budget\n\n#meeting\n");
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await BudgetPage();
+        await Click(cut, () => cut.Find(".appointment-page button.create-note-link"));
+        await WaitForTitleField(cut);
+
+        await TypeTitle(cut, "Plan", "Enter");
+
+        WaitForCreated(cut, js, 0, "Meetings/Budget/Plan");
+        Assert.Equal("# Meetings\n", File.ReadAllText(Path.Combine(data.Root, "Meetings.md")));
+        Assert.Equal("# Budget\n", File.ReadAllText(Path.Combine(data.Root, "Meetings", "Budget.md")));
+        Assert.Equal("# Plan\n", File.ReadAllText(Path.Combine(data.Root, "Meetings", "Budget", "Plan.md")));
+        Assert.False(File.Exists(Path.Combine(data.Root, "Plan.md")));
+    }
+
+    // 397 AC-2: with no appointment of the title on the day, the page title names the parent.
+    [Fact]
+    public async Task NoAppointment_CreatesUnderPageOfTheTitle()
+    {
+        WriteDay();
+        data.WriteNote("Nothing much", "# Nothing\n");
+        await data.RefreshAsync();
+        IRenderedComponent<AppointmentPanel> cut = data.Bunit.Render<AppointmentPanel>(p => p
+            .Add(c => c.Title, "Nothing")
+            .Add(c => c.Day, new DateOnly(2026, 10, 29)));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".appointment-page .note-button")), Wait);
+
+        await cut.InvokeAsync(() => cut.Find(".appointment-page button.create-note-link").ClickAsync(new MouseEventArgs()));
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".appointment-page input.create-note-title")), Wait);
+        await cut.InvokeAsync(() => cut.Find(".appointment-page input.create-note-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" }));
+
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".appointment-page .create-note-entry")), Wait);
+        Assert.Equal("# Nothing\n", File.ReadAllText(Path.Combine(data.Root, "Meetings", "Nothing", "Nothing.md")));
+        Assert.False(File.Exists(Path.Combine(data.Root, "Nothing.md")));
+    }
+
+    // 397 AC-5: a top-level note with the same title doesn't block the note under the page.
+    [Fact]
+    public async Task MeetingNoteExists_TopLevelSameTitle_CreatedUnderPage()
+    {
+        WriteDay();
+        WriteNotes();
+        WriteBudgetMeeting();
+        EditorJs js = new EditorJs(data.Bunit);
+        IRenderedComponent<Main> cut = await BudgetPage();
+        await Click(cut, () => cut.Find(".appointment-page button.create-note-link"));
+        await WaitForTitleField(cut);
+
+        await TypeTitle(cut, "Budget 2027", "Enter");
+
+        WaitForCreated(cut, js, 0, "Meetings/Budget/Budget 2027");
+        Assert.Equal("# Budget\n", File.ReadAllText(Path.Combine(data.Root, "Budget 2027.md")));
     }
 
     // 395 AC-3: Esc and Cancel close the field, write nothing and give the focus back to the link.
@@ -568,15 +632,18 @@ public sealed class AppointmentPanelTests : IDisposable
         Assert.Equal(before, FileSnapshot.Take(data.Root, ".desktop"));
     }
 
-    // 395 AC-3: a taken name or an invalid title shows the refusal in red and keeps the field and its text.
+    // 395 AC-3, 397 AC-3: a sibling under Meetings/Budget (any case, the dated meeting note too), an invalid title or a
+    // too-long full name shows the refusal in red and keeps the field and its text.
     [Theory]
-    [InlineData("Budget 2027", "Note Budget 2027 already exists.")]
+    [InlineData("2026-10-29", "Note Meetings/Budget/2026-10-29 already exists.")]
+    [InlineData("SIBLING", "Note Meetings/Budget/SIBLING already exists.")]
     [InlineData("a/b", null)]
     public async Task MeetingNoteExists_Refused_RedLineFieldKept(string title, string? text)
     {
         WriteDay();
         WriteNotes();
         WriteBudgetMeeting();
+        data.WriteFile(Path.Combine("Meetings", "Budget", "Sibling.md"), "# Sibling\n");
         IRenderedComponent<Main> cut = await BudgetPage();
         await Click(cut, () => cut.Find(".appointment-page button.create-note-link"));
         await WaitForTitleField(cut);
@@ -612,10 +679,10 @@ public sealed class AppointmentPanelTests : IDisposable
         await TypeTitle(cut, "Fresh", "Enter");
 
         cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
-        Assert.True(File.Exists(Path.Combine(data.Root, "Fresh.md")));
+        Assert.True(File.Exists(Path.Combine(data.Root, "Meetings", "Budget", "Fresh.md")));
         int mounts = js.Calls("ContextEditor.mount").Count;
         await Click(cut, () => cut.Find("[role=dialog] button.confirm"));
-        cut.WaitForAssertion(() => Assert.Equal("Fresh", cut.Find(".note-title").GetAttribute("title")), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Meetings/Budget/Fresh", cut.Find(".note-title").GetAttribute("title")), Wait);
         cut.WaitForAssertion(() => Assert.Equal(mounts + 1, js.Calls("ContextEditor.mount").Count), Wait);
     }
 
