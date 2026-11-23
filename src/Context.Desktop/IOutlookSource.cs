@@ -59,7 +59,7 @@ internal interface IOutlookSource
     /// <summary>Whether classic Outlook can be read here; reads no calendar data.</summary>
     public OutlookAvailability Availability();
 
-    OutlookRead<DateOnly> Oldest(DateOnly today, TimeZoneInfo zone);
+    public OutlookRead<DateOnly> Oldest(DateOnly today, TimeZoneInfo zone);
 
     /// <summary>The appointments touching <paramref name="day"/>, with times in <paramref name="zone"/>.</summary>
     public OutlookRead<Appointment> Appointments(DateOnly day, TimeZoneInfo zone);

@@ -79,16 +79,15 @@ internal sealed class EditorInterop
     private DotNetObjectReference<EditorInterop>? self;
     private ElementReference? host;
 
+    private DotNetObjectReference<EditorInterop> CallbackReference => self ??= DotNetObjectReference.Create(this);
+
     public event Func<Task>? JournalBottom;
 
     [JSInvokable]
     public Task OnJournalBottom() => JournalBottom?.Invoke() ?? Task.CompletedTask;
 
-    public ValueTask WatchJournal(ElementReference marker)
-    {
-        self ??= DotNetObjectReference.Create(this);
-        return js.InvokeVoidAsync("ContextJournal.watch", marker, self, marker.Id);
-    }
+    public ValueTask WatchJournal(ElementReference marker) =>
+        js.InvokeVoidAsync("ContextJournal.watch", marker, CallbackReference, marker.Id);
 
     public async ValueTask StopJournal(ElementReference marker)
     {
@@ -176,9 +175,8 @@ internal sealed class EditorInterop
     /// </summary>
     public async Task MountAsync(ElementReference element, string markdown, IReadOnlyList<InlineImage> images, string name)
     {
-        self ??= DotNetObjectReference.Create(this);
         host = element;
-        await js.InvokeVoidAsync("ContextEditor.mount", element, markdown, self, images, name);
+        await js.InvokeVoidAsync("ContextEditor.mount", element, markdown, CallbackReference, images, name);
     }
 
     /// <summary>

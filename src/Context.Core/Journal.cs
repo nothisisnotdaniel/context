@@ -103,7 +103,7 @@ internal sealed class Journal
     {
         try
         {
-            return notes.Read(note);
+            return notes.ReadPlainFile(note);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {

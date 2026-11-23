@@ -15,6 +15,7 @@ internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
     private int oldestCalls;
 
     public int OldestCalls => Volatile.Read(ref oldestCalls);
+    public TaskCompletionSource OldestEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public OutlookAvailability Available { get; set; } = OutlookAvailability.Available;
 
@@ -96,6 +97,7 @@ internal sealed class FakeOutlookSource : IOutlookSource, IDisposable
     public OutlookRead<DateOnly> Oldest(DateOnly today, TimeZoneInfo zone)
     {
         Interlocked.Increment(ref oldestCalls);
+        OldestEntered.TrySetResult();
         open.Wait();
         return new OutlookRead<DateOnly>(AppointmentKind, Days.Where(pair => pair.Key <= today && pair.Value.Count > 0)
             .Select(pair => pair.Key).Order().Take(1).ToList());

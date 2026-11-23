@@ -119,4 +119,41 @@ public sealed class JournalTests : IDisposable
         Assert.Null(entry.Daily);
         Assert.Equal([name + " Standup"], entry.Meetings);
     }
+
+    [Fact]
+    public void DailyReplacedBetweenBatches_LeavesOnlyMeetingAndAppointment()
+    {
+        NoteStore notes = new(Path.Combine(root, "notes"));
+        notes.CreateWithText("2026-10-29", "First batch");
+        DateOnly date = Today.AddDays(-14);
+        string name = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        NoteInfo daily = notes.CreateWithText(name, "Older daily note");
+        notes.CreateWithText(name + " Standup", "#meeting");
+        DateTime start = date.ToDateTime(new TimeOnly(9, 0));
+        Appointment appointment = new("Standup", null, start, start.AddHours(1), false);
+        Journal journal = new(notes, Today, date, day => day == date ? [appointment] : []);
+        Assert.Equal("First batch", Assert.Single(journal.ReadBatch()).Body);
+        Assert.False(journal.Exhausted);
+
+        string target = Path.Combine(root, "fixture.txt");
+        File.WriteAllText(target, "Outside the test notes folder");
+        File.Delete(daily.Path);
+        try
+        {
+            File.CreateSymbolicLink(daily.Path, target);
+        }
+        catch (IOException ex) when (OperatingSystem.IsWindows() && (ex.HResult & 0xffff) == 1314)
+        {
+            // Windows without permission to create file links still exercises a replaced, ineligible entry.
+            Directory.CreateDirectory(daily.Path);
+        }
+
+        JournalDay entry = Assert.Single(journal.ReadBatch());
+        Assert.Equal(date, entry.Date);
+        Assert.Null(entry.Daily);
+        Assert.Null(entry.Body);
+        Assert.Equal([name + " Standup"], entry.Meetings);
+        Assert.Same(appointment, Assert.Single(entry.Appointments));
+        Assert.True(journal.Exhausted);
+    }
 }

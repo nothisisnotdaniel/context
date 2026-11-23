@@ -590,6 +590,10 @@ internal sealed class NoteStore
     /// </summary>
     public string Read(NoteInfo note) => DecodeText(BoundedFile.Read(note.Path, MaxNoteBytes));
 
+    /// <summary>Reads a previously listed note, checking its current file and location when opening it.</summary>
+    public string ReadPlainFile(NoteInfo note) => DecodeText(BoundedFile.Read(note.Path, MaxNoteBytes,
+        file => IsPlainFile(file) && Contains(file.FullName)));
+
     /// <summary>
     /// Reads <paramref name="note"/> for editing: the text with <c>\r\n</c>
     /// turned into <c>\n</c> and the BOM dropped, plus the SHA-256 of the file's bytes and whether it had CRLF
@@ -1205,9 +1209,12 @@ internal sealed class NoteStore
     // ignoring case through NoteFileOptions; callers still check the exact extension (Path.GetExtension, ignoring case).
     private static List<string> Files(string folder, string extension) =>
         new DirectoryInfo(folder).EnumerateFiles("*" + extension, NoteFileOptions)
-            .Where(f => !IsLink(f) && (f.Attributes & (FileAttributes.Directory | FileAttributes.Device)) == 0)
+            .Where(IsPlainFile)
             .Select(f => f.FullName)
             .ToList();
+
+    private static bool IsPlainFile(FileInfo file) => file.Exists && !IsLink(file)
+        && (file.Attributes & (FileAttributes.Directory | FileAttributes.Device)) == 0;
 
     // The folders in a folder that can hold subpages: no link or reparse point, no name starting with '.', and at the
     // top level not the calendar folder. Sorted exactly by name so the case-insensitive match is the same every time.
