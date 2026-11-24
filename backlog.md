@@ -160,6 +160,14 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39) → 367-pro-licence-context
 - [x] [#454](backlog/454-fix-flaky-repository-settings-page-test.md) Fix flaky repository settings page test → 382-fix-flaky-settings-test
 - [ ] [#476](backlog/476-journal-view-of-the-days-with.md) Journal view of the days with content
+- [ ] [#511](backlog/511-keep-capture-visible-in-narrow-desktop.md) Keep Capture visible in narrow desktop windows
+- [ ] [#512](backlog/512-focus-the-editor-when-the-quick.md) Focus the editor when the quick switcher reselects the current note
+- [ ] [#513](backlog/513-raise-the-contrast-of-desktop-text.md) Raise the contrast of desktop text placeholders in dark mode
+- [ ] [#514](backlog/514-size-the-top-bar-day-picker.md) Size the top-bar day picker to its calendar grid
+- [ ] [#515](backlog/515-give-sidebar-outline-links-sufficient-contrast.md) Give sidebar outline links sufficient contrast on the panel
+- [ ] [#516](backlog/516-suppress-the-browser-menu-on-non.md) Suppress the browser menu on non-editable chips inside the note editor
+- [ ] [#517](backlog/517-serve-the-bundled-mermaid-renderer-script.md) Serve the bundled Mermaid renderer script to the Windows desktop frame
+- [ ] [#518](backlog/518-restore-and-raise-the-existing-windows.md) Restore and raise the existing Windows window on repeated desktop starts
 - [ ] [#89](backlog/089-call-to-meeting-note.md) Call to meeting note
 - [h] [#462](backlog/462-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on macOS
 - [h] [#463](backlog/463-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on Windows
@@ -206,10 +214,10 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [h] [#467](backlog/467-check-desktop-settings-key-details-on.md) Check desktop settings key details on Windows
 - [ ] [#151](backlog/151-clear-the-capture-status-line-on.md) Clear the capture status line on new input
 - [h] [#152](backlog/152-check-the-capture-row-at-the.md) Check the capture row at the minimum window size
-- [h] [#153](backlog/153-check-the-unsaved-changes-dot-in.md) Check the unsaved-changes dot in both themes
+- [x] [#153](backlog/153-check-the-unsaved-changes-dot-in.md) Check the unsaved-changes dot in both themes
 - [ ] [#154](backlog/154-ignore-held-enter-repeats-on-a.md) Ignore held Enter repeats on a focused chip
 - [h] [#468](backlog/468-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view on macOS
-- [h] [#469](backlog/469-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view on Windows
+- [x] [#469](backlog/469-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view on Windows
 - [ ] [#156](backlog/156-hide-the-empty-editor-box-when.md) Hide the empty editor box when the editor fails to start
 - [ ] [#226](backlog/226-cli-and-console-todo-hints.md) CLI and console todo hints
 - [ ] [#160](backlog/160-replace-the-console-text-parity-rule.md) Replace the console text-parity rule in CLAUDE.md
@@ -267,7 +275,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#260](backlog/260-return-focus-to-the-button-after.md) Return focus to the … button after a menu item or outside click
 - [?] [#261](backlog/261-check-context-db-in-the-todo.md) Check context.db in the todo done tests for note todos
 - [ ] [#263](backlog/263-show-the-error-when-saving-on.md) Show the error when saving on window close fails
-- [h] [#264](backlog/264-check-auto-save-by-hand-in.md) Check auto save by hand in the desktop app
+- [x] [#264](backlog/264-check-auto-save-by-hand-in.md) Check auto save by hand in the desktop app
 - [?] [#265](backlog/265-rename-ask-again-when-the-link.md) Rename: ask again when the link count changed before Confirm
 - [ ] [#266](backlog/266-tag-filters-decide-on-number-tags.md) Tag filters: work item numbers like #1234
 - [?] [#267](backlog/267-saved-searches-icon-for-the-remove.md) Saved searches: icon for the × remove button
@@ -373,7 +381,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [h] [#403](backlog/403-check-the-second-start-on-windows.md) Check the second start on Windows
 - [ ] [#408](backlog/408-tooltip-on-the-global-todo-marker.md) Tooltip on the global todo marker
 - [?] [#409](backlog/409-build-notehistory-after-the-todo-braces.md) Build NoteHistory after the todo-braces record check
-- [h] [#410](backlog/410-check-the-carry-over-arrow-box.md) Check the carry-over arrow box width in both themes
+- [x] [#410](backlog/410-check-the-carry-over-arrow-box.md) Check the carry-over arrow box width in both themes
 - [?] [#411](backlog/411-loading-state-and-group-counts-on.md) Loading state and group counts on the Todos page
 - [?] [#412](backlog/412-check-the-contrast-of-grey-source.md) Check the contrast of grey source buttons in dark mode
 - [?] [#413](backlog/413-tell-person-rows-apart-from-same.md) Tell person rows apart from same-named notes in search

@@ -15,3 +15,7 @@ Raised by the code review of job 364: after a pick that opens a note, the layout
 ## Notes
 
 Proposed by job 364-quick-switcher (`factory/jobs/364-quick-switcher/`).
+
+## Manual verification
+
+Windows WebView2 at `29b1b32`, 2026-11-24: all eight switches to another note accepted immediate typing. All four reselections of the open note, using Enter or the pointer, left focus on `.layout` and the test files unchanged. An editor click restored typing. Repeat the check after [#512](512-focus-the-editor-when-the-quick.md).

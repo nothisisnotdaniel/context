@@ -17,3 +17,7 @@ The UI review of job 330 noted the glyphs may have different widths in some font
 From 330 ui review.
 
 Proposed by job 330-carry-over-marker (`factory/jobs/330-carry-over-marker/`).
+
+## Windows verification, 2026-11-24
+
+Passed on develop `29b1b32c` in native Windows WebView2 158.0.4370.33 at 100% scale. In the dated 2026-10-13 fixture, an open, carry-over and completed item showed the same text. In both themes all three rendered markers occupied pixels x=269 through x=278, and the first letter stem began at x=287 for all three. The measured advances were 12.0625 px for both boxes and 12.078125 px for the arrow. That 1/64 CSS px difference produced no visible text shift.

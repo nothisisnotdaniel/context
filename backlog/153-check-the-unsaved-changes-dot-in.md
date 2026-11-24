@@ -15,3 +15,7 @@ Job 141: the page-side callback has no DOM test and reviewers noted the dot is s
 ## Notes
 
 Raised by job 141-editor-dirty-marker.
+
+## Manual verification
+
+On 2026-11-24 the Windows desktop at `29b1b32` showed an 8 × 8 pixel dot immediately after the title of an edited note. Its measured contrast was 4.59:1 in Light and 7.97:1 in Dark. In both themes Ctrl+S and the idle save cleared it, and reopening each note showed the saved edits. The delegated check used native WebView2 with private test notes.
