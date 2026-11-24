@@ -80,6 +80,51 @@ public sealed class JournalTests : IDisposable
     }
 
     [Fact]
+    public void CreatedVersion_RollbackKeepsLaterFileAtTheSameName()
+    {
+        NoteStore store = new(root);
+        const string Name = "2026-10-29 Review ";
+        string plain = Path.Combine(root, Name + ".md");
+        File.WriteAllText(plain, "Fixture");
+        NoteHistory history = new(store, () => new DateTime(2026, 10, 29, 9, 0, 0, DateTimeKind.Utc));
+        string id = Assert.IsType<string>(history.Keep(plain, "Earlier"u8.ToArray()));
+        string path = Path.Combine(NoteHistory.FolderFor(plain), id + "~" + Name + ".ctxs");
+        using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(root));
+        using JournalDirectory.CreatedFile copy = directory.WriteSealedCopy(path, "First fixture"u8.ToArray());
+        File.Move(path, path + ".old");
+        File.WriteAllText(path, "Later fixture");
+        copy.Rollback();
+        Assert.Equal("Later fixture", File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void VisibleBaseWithCancelledUid_ProvidesCalendarOnlyDay()
+    {
+        CalendarStore calendar = new(root, TimeZoneInfo.Utc);
+        Directory.CreateDirectory(calendar.Folder);
+        File.WriteAllText(Path.Combine(calendar.Folder, "shared.ics"), """
+            BEGIN:VCALENDAR
+            BEGIN:VEVENT
+            UID:fixture
+            DTSTART:20261027T090000Z
+            SUMMARY:Visible fixture
+            END:VEVENT
+            BEGIN:VEVENT
+            UID:fixture
+            DTSTART:20261026T090000Z
+            STATUS:CANCELLED
+            SUMMARY:Cancelled fixture
+            END:VEVENT
+            END:VCALENDAR
+            """);
+        using Journal journal = Open(new NoteStore(root), Oldest(calendar), date => calendar.Day(date).Appointments);
+        JournalDay visible = Assert.Single(journal.ReadBatch());
+        Assert.Equal(Today.AddDays(-2), visible.Date);
+        Assert.Equal("Visible fixture", Assert.Single(visible.Appointments).Title);
+        Assert.True(journal.Exhausted);
+    }
+
+    [Fact]
     public void HistoryProbeLimit_PreservesSurvivingAppointment()
     {
         CalendarStore calendar = new(root, TimeZoneInfo.Utc);
@@ -359,6 +404,7 @@ public sealed class JournalTests : IDisposable
         string target = changeRoot ? store.Root : Path.GetDirectoryName(selected.Path)!;
         NoteStore replacement = new(Path.Combine(root, "replacement"));
         replacement.CreateWithText("2001-01-01", "Other fixture");
+        replacement.CreateWithText(selected.Title, "Different file with the same date");
         using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(store.Root));
         int changes = 0;
         directory.BeforeEnumerate = path =>

@@ -88,12 +88,12 @@ internal sealed partial class NoteHistory
     /// Windows. The id comes from the clock; a taken id gets <c>-1</c>, <c>-2</c>, ... Writes nothing and returns
     /// <c>null</c> when the newest version of the same kind holds the same bytes. Then removes the oldest versions until
     /// the caps hold, never the one just written. Throws <see cref="ArgumentException"/> for a
-    /// <paramref name="sealedTitle"/> that fails <see cref="NoteStore.ValidateTitle"/> (nothing written) and
+    /// <paramref name="sealedTitle"/> that is not a stored file stem (nothing written) and
     /// <see cref="NoteHistoryException"/> when the version can't be written.
     /// </summary>
     public string? Keep(string notePath, byte[] bytes, string? sealedTitle = null)
     {
-        if (sealedTitle is not null && NoteStore.ValidateTitle(sealedTitle) is not null)
+        if (sealedTitle is not null && !IsStoredTitle(sealedTitle))
         {
             throw new ArgumentException("Not a valid sealed title.", nameof(sealedTitle));
         }
@@ -153,9 +153,9 @@ internal sealed partial class NoteHistory
     /// returns its path; no pruning. Used when a note is marked sensitive and its plain versions are sealed. Throws
     /// <see cref="ArgumentException"/> for an invalid id or title and <see cref="NoteHistoryException"/> when it can't write.
     /// </summary>
-    public string KeepSealedCopy(string notePath, string id, string sealedTitle, byte[] bytes)
+    public string KeepSealedCopy(string notePath, string id, string sealedTitle, byte[] bytes, Action<string, byte[]>? write = null)
     {
-        if (NoteStore.ValidateTitle(sealedTitle) is not null || ParseId(id) is null)
+        if (!IsStoredTitle(sealedTitle) || ParseId(id) is null)
         {
             throw new ArgumentException("Not a valid version.", nameof(id));
         }
@@ -167,8 +167,10 @@ internal sealed partial class NoteHistory
                 throw new NoteHistoryException();
             }
 
-            string path = Path.Combine(PrepareFolder(notePath), FileName(id, sealedTitle));
-            PrivateFile.Write(path, bytes);
+            // During conversion the plain version already has a directory. Its verified writer
+            // opens that directory and owns the sealed copy until conversion commits.
+            string path = Path.Combine(write is null ? PrepareFolder(notePath) : FolderFor(notePath), FileName(id, sealedTitle));
+            (write ?? PrivateFile.Write)(path, bytes);
             return path;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException && e is not NoteHistoryException)
@@ -180,7 +182,7 @@ internal sealed partial class NoteHistory
     /// <summary>
     /// The versions of <paramref name="note"/> of its own kind (<c>.md</c> versions for a plain note, sealed ones for a
     /// <c>.ctxs</c>), newest first. Only regular files with a valid version name count (a sealed one also needs a
-    /// title that passes <see cref="NoteStore.ValidateTitle"/>). A missing history is empty; a <c>.history</c> or note
+    /// stored file stem). A missing history is empty; a <c>.history</c> or note
     /// folder that is a file, a link or a reparse point, or that can't be read, throws <see cref="NoteHistoryException"/>.
     /// </summary>
     public IReadOnlyList<NoteVersion> Versions(NoteInfo note)
@@ -228,7 +230,7 @@ internal sealed partial class NoteHistory
     /// Reads the version <paramref name="id"/> of <paramref name="note"/> (found like <see cref="Versions"/>, never
     /// through a link, at most <see cref="MaxVersionBytes"/>). False when there is no such version or it can't be read.
     /// </summary>
-    public bool TryRead(NoteInfo note, string id, out byte[]? bytes)
+    public bool TryRead(NoteInfo note, string id, out byte[]? bytes, Func<string, FileStream>? open = null)
     {
         bytes = null;
         try
@@ -240,7 +242,15 @@ internal sealed partial class NoteHistory
                 return false;
             }
 
-            bytes = BoundedFile.Read(match.File.FullName, MaxVersionBytes);
+            if (open is null)
+            {
+                bytes = BoundedFile.Read(match.File.FullName, MaxVersionBytes);
+            }
+            else
+            {
+                using FileStream version = open(match.File.FullName);
+                bytes = BoundedFile.Read(version, MaxVersionBytes);
+            }
             return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -259,11 +269,20 @@ internal sealed partial class NoteHistory
     public void RemoveHistory(string notePath, string? extension = null) => Remove(notePath, extension);
 
     // The history folder of the note at notePath: <its folder>/.history/<its file stem>.
-    internal static string FolderFor(string notePath) =>
-        Path.Combine(Path.GetDirectoryName(notePath) ?? string.Empty, FolderName, Path.GetFileNameWithoutExtension(notePath));
+    internal static string FolderFor(string notePath)
+    {
+        string stem = Path.GetFileNameWithoutExtension(notePath);
+        string folder = Path.Combine(Path.GetDirectoryName(notePath) ?? string.Empty, FolderName, stem);
+        // Win32 normally strips a trailing space or dot on a directory component. Address the
+        // exact stored stem so two different Markdown files can keep independent histories.
+        return OperatingSystem.IsWindows() && (stem.EndsWith(' ') || stem.EndsWith('.')) ? ExtendedWindowsPath(folder) : folder;
+    }
+
+    internal static string ExtendedWindowsPath(string path) => path.StartsWith(@"\\?\", StringComparison.Ordinal) ? path
+        : path.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + path[2..] : @"\\?\" + path;
 
     // See RemoveHistory.
-    internal static void Remove(string notePath, string? extension)
+    internal static void Remove(string notePath, string? extension, Action<string, bool>? remove = null)
     {
         string parent = Path.Combine(Path.GetDirectoryName(notePath) ?? string.Empty, FolderName);
         string folder = FolderFor(notePath);
@@ -278,12 +297,12 @@ internal sealed partial class NoteHistory
         {
             if (Parse(file, extension) is not null)
             {
-                file.Delete();
+                NoteStore.RemoveFile(file.FullName, remove);
             }
         }
 
-        RemoveIfEmpty(folder);
-        RemoveIfEmpty(parent);
+        NoteStore.RemoveIfEmpty(folder, remove);
+        NoteStore.RemoveIfEmpty(parent, remove);
     }
 
     // Moves the history of the note at from to the note at to (their folders may differ). False, moving nothing, when
@@ -292,8 +311,14 @@ internal sealed partial class NoteHistory
     internal static bool MoveHistory(string from, string to, bool caseOnly)
     {
         string source = FolderFor(from);
-        string sourceParent = Path.GetDirectoryName(source) ?? string.Empty;
         string target = FolderFor(to);
+        if (OperatingSystem.IsWindows() && (source.StartsWith(@"\\?\", StringComparison.Ordinal) || target.StartsWith(@"\\?\", StringComparison.Ordinal)))
+        {
+            // Directory.Move compares the two volume roots, including their namespace prefix.
+            source = ExtendedWindowsPath(source);
+            target = ExtendedWindowsPath(target);
+        }
+        string sourceParent = Path.GetDirectoryName(source) ?? string.Empty;
         string targetParent = Path.GetDirectoryName(target) ?? string.Empty;
         if (!caseOnly && (Directory.Exists(target) || File.Exists(target) || new FileInfo(target).LinkTarget is not null))
         {
@@ -310,27 +335,10 @@ internal sealed partial class NoteHistory
         Directory.Move(source, target);
         if (!string.Equals(sourceParent, targetParent, StringComparison.Ordinal))
         {
-            RemoveIfEmpty(sourceParent);
+            NoteStore.RemoveIfEmpty(sourceParent);
         }
 
         return true;
-    }
-
-    // Removes a folder only when it is empty; never follows a link and never throws.
-    internal static void RemoveIfEmpty(string folder)
-    {
-        try
-        {
-            DirectoryInfo info = new DirectoryInfo(folder);
-            if (info.Exists && !NoteStore.IsLink(info) && !info.EnumerateFileSystemInfos().Any())
-            {
-                info.Delete(recursive: false);
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // Left in place.
-        }
     }
 
     private static string KindOf(string notePath) =>
@@ -424,13 +432,18 @@ internal sealed partial class NoteHistory
             string id = name[..tilde];
             string rest = name[(tilde + 1)..];
             string title = rest[..^NoteStore.SensitiveExtension.Length];
-            return ParseId(id) is { } parsed && NoteStore.ValidateTitle(title) is null
+            return ParseId(id) is { } parsed && IsStoredTitle(title)
                 ? new Entry(file, new NoteVersion(id, parsed.Utc, file.Length, title), parsed.Sequence, NoteStore.SensitiveExtension)
                 : null;
         }
 
         return null;
     }
+
+    // A sealed title is embedded between a validated id and an extension. Existing top-level
+    // file stems can include a final space or dot; the exact spelling authenticates the version.
+    private static bool IsStoredTitle(string title) => title.Length > 0 && !title.StartsWith('.')
+        && title.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 && Path.GetFileName(title) == title;
 
     // The time and the -n counter of a valid id, else null.
     private static (DateTime Utc, int Sequence)? ParseId(string id)

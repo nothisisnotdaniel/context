@@ -75,9 +75,10 @@ internal sealed record LinksView
     /// Syncs the index and finds the note called <paramref name="argument"/> (as typed, then without one trailing
     /// <c>.md</c>) and the notes linked to it by shared tags or <c>[[note links]]</c> (<see cref="TagIndex.Links"/>).
     /// </summary>
-    public static LinksView Build(TagIndex index, NoteStore store, string argument)
+    public static LinksView Build(TagIndex index, NoteStore store, NoteReference argument)
     {
-        string wanted = argument.Trim();
+        bool stored = argument.Sensitive.HasValue;
+        string wanted = stored ? argument.Name : argument.Name.Trim();
         if (wanted.Length == 0)
         {
             return new LinksView(LinksViewKind.MissingArgument, wanted, null, []);
@@ -85,9 +86,14 @@ internal sealed record LinksView
 
         try
         {
+            NoteInfo? selected = null;
+            if (stored && !store.TryFind(argument, out selected))
+            {
+                return new LinksView(LinksViewKind.NoSuchNote, wanted, null, []);
+            }
             index.Sync(store);
-            string? note = index.FindNote(wanted);
-            if (note is null && wanted.EndsWith(".md", StringComparison.OrdinalIgnoreCase) && wanted.Length > 3)
+            string? note = index.FindNote(wanted, storedName: stored);
+            if (!stored && note is null && wanted.EndsWith(".md", StringComparison.OrdinalIgnoreCase) && wanted.Length > 3)
             {
                 note = index.FindNote(wanted[..^3]);
             }
@@ -97,7 +103,11 @@ internal sealed record LinksView
                 return new LinksView(LinksViewKind.NoSuchNote, wanted, null, []);
             }
 
-            IReadOnlyList<NoteLink> links = index.Links(note);
+            IReadOnlyList<NoteLink> links = index.Links(note, storedName: true);
+            if (selected is not null && !argument.Matches(selected))
+            {
+                return new LinksView(LinksViewKind.NoSuchNote, wanted, null, []);
+            }
             LinksViewKind kind = links.Count == 0 ? LinksViewKind.NoLinks : LinksViewKind.Links;
             return new LinksView(kind, wanted, note, links);
         }

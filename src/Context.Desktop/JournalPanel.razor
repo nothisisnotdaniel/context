@@ -22,6 +22,7 @@
             @if (entry.Daily is { } daily)
             {
                 <button type="button" class="journal-open" aria-label="Open @daily" @onclick="() => OpenNote(entry.Date, daily)">Open</button>
+                @ReadError(daily)
                 @if (entry.Body is { } body)
                 {
                     <div class="journal-body">@body</div>
@@ -30,6 +31,7 @@
             @foreach (string meeting in entry.Meetings)
             {
                 <button type="button" class="journal-meeting" @onclick="() => OpenNote(entry.Date, meeting)">@DesktopText.OneLine(meeting)</button>
+                @ReadError(meeting)
             }
             @foreach (Appointment item in entry.Appointments)
             {
@@ -65,6 +67,20 @@
     private bool exhausted;
     private bool watch;
     private bool disposed;
+    private string? refused;
+
+    internal void ShowReadError(string name)
+    {
+        refused = name;
+        StateHasChanged();
+    }
+
+    private RenderFragment ReadError(string name) => @<text>
+        @if (name == refused)
+        {
+            <p class="red" role="status">@DesktopText.OneLine(DesktopActions.CantReadText(name))</p>
+        }
+    </text>;
 
     protected override async Task OnInitializedAsync()
     {
@@ -85,7 +101,11 @@
 
     private Task SignalBottom() => InvokeAsync(Load);
 
-    private Task OpenNote(DateOnly date, string name) => OnOpen.InvokeAsync(files!.Link(journal!.NoteFor(date, name)));
+    private Task OpenNote(DateOnly date, string name)
+    {
+        refused = null;
+        return OnOpen.InvokeAsync(files!.Link(journal!.NoteFor(date, name)));
+    }
 
     private async Task Load()
     {

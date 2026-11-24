@@ -410,6 +410,7 @@ internal sealed class NoteStore
         string target = Path.Combine(folder, title + Extension);
         try
         {
+            name.RememberDestination(new NoteInfo(newName, source.Note.Modified, target));
             MoveTree(source, target, Path.Combine(folder, title), newName, caseOnly: false);
         }
         catch (Exception) when (created)
@@ -450,24 +451,25 @@ internal sealed class NoteStore
         }
 
         List<Entry> subtree = entries.Where(e => ReferenceEquals(e, match) || IsBelow(e.Note.Name, match.Note.Name)).ToList();
+        BeforeDeleteFiles?.Invoke();
         foreach (Entry entry in subtree.OrderByDescending(e => e.Note.Name.Length))
         {
             if (removeHistory)
             {
-                NoteHistory.Remove(entry.Note.Path, null);
+                NoteHistory.Remove(entry.Note.Path, null, name.Remove);
             }
 
-            File.Delete(entry.Note.Path);
+            RemoveFile(entry.Note.Path, name.Remove);
         }
 
         foreach (string folder in subtree.Select(e => e.ChildFolder).OfType<string>().OrderByDescending(f => f.Length))
         {
             if (removeAttachments)
             {
-                RemoveAttachmentsFolder(Path.Combine(folder, NoteAttachments.FolderName));
+                RemoveAttachmentsFolder(Path.Combine(folder, NoteAttachments.FolderName), name.Remove);
             }
 
-            RemoveIfEmpty(folder);
+            RemoveIfEmpty(folder, name.Remove);
         }
 
         return true;
@@ -1119,6 +1121,8 @@ internal sealed class NoteStore
     /// <summary>Test hook: runs in <see cref="Save"/> just before the temp file is moved, so a test can make a note appear.</summary>
     internal Action? BeforeSaveMove { get; set; }
 
+    internal Action? BeforeDeleteFiles { get; set; }
+
     // Every listed note with the folder holding its subpages (null when there is none).
     private List<Entry> ListEntries()
     {
@@ -1432,14 +1436,30 @@ internal sealed class NoteStore
 
     // Removes a child folder's .attachments with everything in it, only when it is a real folder (not a link or
     // reparse point); a file inside is deleted, never followed. Never throws: what can't be removed stays.
-    private static void RemoveAttachmentsFolder(string folder)
+    private static void RemoveAttachmentsFolder(string folder, Action<string, bool>? remove)
     {
         try
         {
             DirectoryInfo info = new DirectoryInfo(folder);
             if (info.Exists && !IsLink(info))
             {
-                info.Delete(recursive: true);
+                if (remove is null)
+                {
+                    info.Delete(recursive: true);
+                    return;
+                }
+                foreach (FileSystemInfo entry in info.EnumerateFileSystemInfos())
+                {
+                    if (entry is DirectoryInfo && !IsLink(entry))
+                    {
+                        RemoveAttachmentsFolder(entry.FullName, remove);
+                    }
+                    else
+                    {
+                        remove(entry.FullName, entry is DirectoryInfo);
+                    }
+                }
+                remove(folder, true);
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -1449,19 +1469,38 @@ internal sealed class NoteStore
     }
 
     // Removes a folder only when it is empty; never follows a link and never throws.
-    internal static void RemoveIfEmpty(string folder)
+    internal static void RemoveIfEmpty(string folder, Action<string, bool>? remove = null)
     {
         try
         {
             DirectoryInfo info = new DirectoryInfo(folder);
             if (info.Exists && !IsLink(info) && !info.EnumerateFileSystemInfos().Any())
             {
-                info.Delete(recursive: false);
+                if (remove is null)
+                {
+                    info.Delete(recursive: false);
+                }
+                else
+                {
+                    remove(folder, true);
+                }
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Left in place.
+        }
+    }
+
+    internal static void RemoveFile(string path, Action<string, bool>? remove)
+    {
+        if (remove is null)
+        {
+            File.Delete(path);
+        }
+        else
+        {
+            remove(path, false);
         }
     }
 

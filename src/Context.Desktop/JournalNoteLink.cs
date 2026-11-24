@@ -14,15 +14,14 @@ public sealed class JournalNoteLink : IDisposable
     }
 
     internal string Name => note.Name;
-    internal NoteReference Target => NoteReference.Stored(Name, path: note.Path, open: OpenPlain);
-    private FileStream OpenPlain() => directory?.OpenNote(note) ?? throw new IOException("Note folder unavailable.");
+    internal NoteReference Target => NoteReference.Bound(note, directory ?? throw new IOException("Note folder unavailable."));
 
     // After any discard prompt, check the selected file and acquire the editor's directory handle.
     internal Task<bool> Bind() => Task.Run(() =>
     {
         try
         {
-            directory = source?.Retain();
+            directory = source?.Retain(note);
             return Target.Matches(note);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -30,6 +29,8 @@ public sealed class JournalNoteLink : IDisposable
             return false;
         }
     });
+
+    internal JournalNoteLink Relocated(NoteInfo moved) => new(moved, directory);
 
     internal Task<EditableNote?> ReadForEdit() => Task.Run(() =>
     {

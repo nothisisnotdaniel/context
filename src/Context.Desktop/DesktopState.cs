@@ -717,7 +717,7 @@ internal sealed class DesktopState
     /// (<see cref="LinksView.Build"/>) after syncing the index, off the calling thread. Never throws: any failure
     /// gives the <see cref="LinksViewKind.IndexUnreadable"/> view.
     /// </summary>
-    public Task<LinksView> Links(string name) => Task.Run(() =>
+    public Task<LinksView> Links(NoteReference name) => Task.Run(() =>
     {
         try
         {

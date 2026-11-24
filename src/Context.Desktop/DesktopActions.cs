@@ -97,6 +97,8 @@ internal sealed record ActionResult
     /// <summary>For <see cref="DesktopActions.RenameNote"/> when done: the note's new full name; else <c>null</c>.</summary>
     public string? Name { get; }
 
+    internal NoteInfo? RelocatedNote { get; init; }
+
     /// <summary>
     /// For a <see cref="DesktopActions.SaveNote"/> that numbered or removed <c>#!d</c> markers (job 343): the edits, whose
     /// <see cref="DecisionEdits.Text"/> is what was saved; else <c>null</c>.
@@ -791,6 +793,8 @@ internal sealed class DesktopActions
 
     /// <summary>Test hook: runs in <see cref="MarkSensitive"/> after the plain versions were sealed, before the note is.</summary>
     internal Action? AfterHistorySealed { get; set; }
+
+    internal Action? AfterNoteSealed { get; set; }
 
     /// <summary>
     /// Appends <paramref name="text"/> as one dated line (<c>- yyyy-MM-dd HH:mm &lt;text&gt;</c>, local time) to the
@@ -3376,6 +3380,7 @@ internal sealed class DesktopActions
             }
 
             string renamedName;
+            NoteInfo? relocated = null;
             if (plain)
             {
                 NoteInfo? renamed = notes.Rename(selected, title);
@@ -3385,6 +3390,7 @@ internal sealed class DesktopActions
                 }
 
                 renamedName = renamed.Name;
+                relocated = renamed;
             }
             else
             {
@@ -3405,7 +3411,7 @@ internal sealed class DesktopActions
                 state.MoveDecisionOwners(oldName, renamedName);
             }
 
-            return UpdateLinks(plan, renamedName, plain ? source.Name : null);
+            return UpdateLinks(plan, renamedName, plain ? source.Name : null) with { RelocatedNote = relocated };
         }
         catch (NoteExistsException e)
         {
@@ -4153,7 +4159,7 @@ internal sealed class DesktopActions
                 state.MoveDecisionOwners(oldName, moved.Name);
             }
 
-            return new ActionResult(ActionKind.Done, ActionReason.None, moved.Name);
+            return new ActionResult(ActionKind.Done, ActionReason.None, moved.Name) { RelocatedNote = moved };
         }
         catch (NoteExistsException e)
         {
@@ -4190,7 +4196,7 @@ internal sealed class DesktopActions
             if (plain is not null && notes.Delete(selected, removeHistory: true, removeAttachments: true))
             {
                 // A file the cleanup can't remove stays and the delete is still done.
-                attachments.RemoveUnlinked(plain, linked);
+                attachments.RemoveUnlinked(plain, linked, selected.Remove);
                 ChangeRecent(list => RecentNotes.Removed(list, plain.Name));
                 ChangePinned(list => PinnedNotes.Removed(list, plain.Name));
 
@@ -4748,7 +4754,11 @@ internal sealed class DesktopActions
                 return Refused(ActionReason.Invalid, ChildSensitiveText);
             }
 
-            NoteReference selected = reference.Resolved(source);
+            // A Journal editor lends its original directory to the conversion. Keep an
+            // independent handle through publication, plain-file removal and rollback.
+            using JournalDirectory directory = reference.Source is JournalDirectory bound
+                ? bound.Retain(source) : JournalDirectory.Bind(notes.Root) ?? throw new IOException();
+            NoteReference selected = NoteReference.Bound(source, directory);
             if (notes.Descendants(selected) > 0)
             {
                 return Refused(ActionReason.Invalid, ParentSensitiveText);
@@ -4791,56 +4801,43 @@ internal sealed class DesktopActions
             string target = Path.Combine(notes.Root, source.Name + NoteStore.SensitiveExtension);
 
             // The plain versions are sealed first, each under the id it has, so the history never stays readable.
-            List<string> sealedVersions = [];
-            if (!SealHistory(source, recipients, sealedVersions))
-            {
-                RemoveAll(sealedVersions);
-                return Failed(ActionReason.WriteFailed, SealHistoryFailedText(source.Name));
-            }
-
-            bool written;
+            List<JournalDirectory.CreatedFile> copies = [];
+            void WriteCopy(string path, byte[] bytes) => copies.Add(directory.WriteSealedCopy(path, bytes));
+            bool committed = false;
             try
             {
-                AfterHistorySealed?.Invoke();
-                written = WriteThroughTemp(
-                    target,
-                    TempName(source.Name, NoteStore.SensitiveExtension),
-                    file,
-                    overwrite: false,
-                    () => IsVersion(source.Path, MaxNoteBytes, version, selected));
-            }
-            catch (Exception)
-            {
-                RemoveAll(sealedVersions);
-                throw;
-            }
-
-            if (!written)
-            {
-                RemoveAll(sealedVersions);
-                return Refused(ActionReason.ChangedOnDisk, ChangedText(source.Name));
-            }
-
-            try
-            {
-                if (!IsVersion(source.Path, MaxNoteBytes, version, selected) || !notes.Delete(selected))
+                if (!SealHistory(source, recipients, directory, WriteCopy))
                 {
-                    notes.DeleteSensitive(NoteReference.Stored(source.Name, sensitive: true, target));
-                    RemoveAll(sealedVersions);
+                    return Failed(ActionReason.WriteFailed, SealHistoryFailedText(source.Name));
+                }
+                AfterHistorySealed?.Invoke();
+                if (!IsVersion(source.Path, MaxNoteBytes, version, selected))
+                {
                     return Refused(ActionReason.ChangedOnDisk, ChangedText(source.Name));
                 }
+                WriteCopy(target, file);
+                AfterNoteSealed?.Invoke();
+                if (!IsVersion(source.Path, MaxNoteBytes, version, selected) || !notes.Delete(selected))
+                {
+                    return Refused(ActionReason.ChangedOnDisk, ChangedText(source.Name));
+                }
+                committed = true;
             }
-            catch (Exception)
+            finally
             {
-                // The plain file could not be removed: take the sealed copies away again, so there is one note.
-                notes.DeleteSensitive(NoteReference.Stored(source.Name, sensitive: true, target));
-                RemoveAll(sealedVersions);
-                throw;
+                foreach (JournalDirectory.CreatedFile copy in copies)
+                {
+                    if (!committed)
+                    {
+                        copy.Rollback();
+                    }
+                    copy.Dispose();
+                }
             }
 
             // Only now the plain versions go; when that fails the sealed ones and the rest stay, and the user is told,
             // since readable copies of a note now sealed are still on disk.
-            if (!RemoveHistoryQuietly(source.Path, ".md"))
+            if (!RemoveHistoryQuietly(source.Path, ".md", selected.Remove))
             {
                 return new ActionResult(ActionKind.Done, ActionReason.PlainHistoryLeft, source.Name);
             }
@@ -5011,21 +5008,21 @@ internal sealed class DesktopActions
     }
 
     // Seals every plain version of source (the newest MaxVersionsPerNote, no key call) as <id>~<title>.ctxs next to
-    // it, adding each written path to written. False when a version can't be read, isn't UTF-8 or can't be written.
-    private bool SealHistory(NoteInfo source, SealedRecipient[] recipients, List<string> written)
+    // it. The caller owns each successful write until conversion commits.
+    private bool SealHistory(NoteInfo source, SealedRecipient[] recipients, JournalDirectory directory, Action<string, byte[]> write)
     {
         NoteHistory history = state.HistoryStore;
         try
         {
             foreach (NoteVersion kept in history.Versions(source).Take(NoteHistory.MaxVersionsPerNote))
             {
-                if (!history.TryRead(source, kept.Id, out byte[]? bytes) || bytes is null)
+                if (!history.TryRead(source, kept.Id, out byte[]? bytes, directory.OpenVersion) || bytes is null)
                 {
                     return false;
                 }
 
                 string text = new System.Text.UTF8Encoding(false, throwOnInvalidBytes: true).GetString(bytes);
-                written.Add(history.KeepSealedCopy(source.Path, kept.Id, source.Name, SealedNote.Seal(source.Name, text, recipients)));
+                history.KeepSealedCopy(source.Path, kept.Id, source.Name, SealedNote.Seal(source.Name, text, recipients), write);
             }
 
             return true;
@@ -5036,20 +5033,12 @@ internal sealed class DesktopActions
         }
     }
 
-    private static void RemoveAll(List<string> paths)
-    {
-        foreach (string path in paths)
-        {
-            Remove(path);
-        }
-    }
-
     // Removes the versions of one kind; a failure leaves them (the note itself is already done) and gives false.
-    private bool RemoveHistoryQuietly(string notePath, string extension)
+    private static bool RemoveHistoryQuietly(string notePath, string extension, Action<string, bool>? remove = null)
     {
         try
         {
-            state.HistoryStore.RemoveHistory(notePath, extension);
+            NoteHistory.Remove(notePath, extension, remove);
             return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)

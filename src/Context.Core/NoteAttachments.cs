@@ -760,7 +760,7 @@ internal sealed class NoteAttachments
     /// folder when it is empty. Returns how many files went. Never throws: a file it can't remove stays. More than
     /// <see cref="MaxLinkedNames"/> names remove nothing.
     /// </summary>
-    public int RemoveUnlinked(NoteInfo deleted, IReadOnlyList<string> names)
+    public int RemoveUnlinked(NoteInfo deleted, IReadOnlyList<string> names, Action<string, bool>? remove = null)
     {
         try
         {
@@ -781,13 +781,13 @@ internal sealed class NoteAttachments
             int removed = 0;
             foreach (string name in names.Where(n => !kept.Contains(n)))
             {
-                if (DeleteStored(folder, name))
+                if (DeleteStored(folder, name, remove))
                 {
                     removed++;
                 }
             }
 
-            NoteStore.RemoveIfEmpty(folder);
+            NoteStore.RemoveIfEmpty(folder, remove);
             return removed;
         }
         catch (Exception)
@@ -939,7 +939,7 @@ internal sealed class NoteAttachments
 
     // Deletes <folder>/<name> only when the name has the stored shape and it is a regular file (no link, reparse
     // point or folder). Never throws.
-    private static bool DeleteStored(string folder, string name)
+    private static bool DeleteStored(string folder, string name, Action<string, bool>? remove = null)
     {
         try
         {
@@ -954,7 +954,7 @@ internal sealed class NoteAttachments
                 return false;
             }
 
-            file.Delete();
+            NoteStore.RemoveFile(file.FullName, remove);
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

@@ -572,6 +572,8 @@ Every factory agent reads this file before working on Context. Keep it short and
   nothing when the bytes equal the newest version, then prunes the oldest to at most `MaxVersionsPerNote` (50) and
   `MaxBytesPerNote` (25 MB), never the new one; any failure is `NoteHistoryException`. `Versions`/`TryRead` never
   follow a link or reparse point and list only regular files with a valid name (newest first, `NoteVersion`).
+  History uses the exact stored file stem, including a final space before the extension of a legacy note.
+  A conversion holds the files it creates and their parent directories until it either commits or rolls back.
   `NoteStore.SaveIfUnchanged(..., history)` keeps the previous bytes after the version check, before the move; only
   `DesktopActions.SaveNote` and the link rewrites of `DesktopActions.RenameNote` (job 206, always a version, no
   `KeptWithin` gap) pass one, and (job 351) every decision-numbering write after a write that was not a save

@@ -6,13 +6,14 @@ using Microsoft.Win32.SafeHandles;
 namespace Context;
 
 /// <summary>A journal source directory. Its original handle keeps the directory identity alive through paging.</summary>
-internal sealed partial class JournalDirectory : IDisposable
+internal sealed partial class JournalDirectory : INoteFileSource, IDisposable
 {
     private readonly string root;
     private readonly JournalDirectory? parent;
     private readonly SafeFileHandle original;
     private readonly FileId id;
     private readonly string resolvedRoot;
+    private readonly Dictionary<string, (FileId Id, SafeFileHandle Handle)> folders = new(StringComparer.Ordinal);
 
     private JournalDirectory(string root, JournalDirectory? parent, SafeFileHandle original)
     {
@@ -41,7 +42,20 @@ internal sealed partial class JournalDirectory : IDisposable
     }
 
     // An editor may outlive its journal panel. Take its own handle to the same verified directory.
-    public JournalDirectory Retain() => Own(root, parent, OpenCurrent(shareDelete: true));
+    public JournalDirectory Retain(NoteInfo note)
+    {
+        JournalDirectory retained = Own(root, parent, OpenCurrent(shareDelete: true));
+        try
+        {
+            WithNoteParent(note, (_, _) => true, retain: retained);
+            return retained;
+        }
+        catch
+        {
+            retained.Dispose();
+            throw;
+        }
+    }
 
     private static JournalDirectory Own(string root, JournalDirectory? parent, SafeFileHandle handle)
     {
@@ -60,6 +74,11 @@ internal sealed partial class JournalDirectory : IDisposable
     {
         lock (original)
         {
+            foreach ((_, SafeFileHandle handle) in folders.Values)
+            {
+                handle.Dispose();
+            }
+            folders.Clear();
             original.Dispose();
         }
     }
@@ -110,7 +129,7 @@ internal sealed partial class JournalDirectory : IDisposable
             try
             {
                 using SafeFileHandle folder = OpenHandle(child, directory: true, directory, shareDelete: true, enumerate: true);
-                _ = DirectoryId(folder);
+                KeepFolder(Path.Combine(path, child), child, directory, DirectoryId(folder));
                 subpages = NotesAtLevel(folder, Path.Combine(path, child), name).ToArray();
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -158,8 +177,15 @@ internal sealed partial class JournalDirectory : IDisposable
 
     public FileStream OpenNote(NoteInfo note) => OpenNote(note, null);
 
+    public void RememberParent(NoteInfo note) => WithNoteParent(note, (_, _) => true);
+
     internal FileStream OpenNote(NoteInfo note, Func<SafeFileHandle>? openFile,
-        Func<SafeFileHandle, FileAttributes>? readDirectoryAttributes = null)
+        Func<SafeFileHandle, FileAttributes>? readDirectoryAttributes = null) =>
+        WithNoteParent(note, (folder, component) => CheckedStream(openFile?.Invoke() ?? OpenHandle(component, false, folder),
+            Path.Join(resolvedRoot, Path.GetRelativePath(root, note.Path))), readDirectoryAttributes);
+
+    private T WithNoteParent<T>(NoteInfo note, Func<SafeFileHandle, string, T> action,
+        Func<SafeFileHandle, FileAttributes>? readDirectoryAttributes = null, JournalDirectory? retain = null)
     {
         string relative = Path.GetRelativePath(root, note.Path);
         if (Path.IsPathRooted(relative) || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
@@ -170,14 +196,14 @@ internal sealed partial class JournalDirectory : IDisposable
 
         string[] parts = relative.Split(Path.DirectorySeparatorChar);
         using SafeFileHandle directory = OpenCurrent(enumerate: parts.Length > 1);
-        return CheckedStream(OpenBelow(directory, root, null, 0), Path.Join(resolvedRoot, relative));
+        return OpenBelow(directory, root, null, 0);
 
-        SafeFileHandle OpenBelow(SafeFileHandle folder, string path, string? parentName, int depth)
+        T OpenBelow(SafeFileHandle folder, string path, string? parentName, int depth)
         {
             string component = parts[depth];
             if (depth == parts.Length - 1)
             {
-                return openFile?.Invoke() ?? OpenHandle(component, directory: false, folder);
+                return action(folder, component);
             }
 
             // A dated file can outlive its series page. Recheck who owns each folder using
@@ -197,7 +223,46 @@ internal sealed partial class JournalDirectory : IDisposable
             {
                 CheckWindowsType(child, (readDirectoryAttributes ?? File.GetAttributes)(child), directory: true);
             }
-            return OpenBelow(child, Path.Combine(path, component), name, depth + 1);
+            string childPath = Path.Combine(path, component);
+            FileId identity = DirectoryId(child);
+            KeepFolder(childPath, component, folder, identity);
+            retain?.KeepFolder(childPath, component, folder, identity);
+            return OpenBelow(child, childPath, name, depth + 1);
+        }
+    }
+
+    // Keep one handle per containing folder so its file ID cannot be recycled. A mounted editor
+    // takes independent handles for just the chain leading to its selected file.
+    private void KeepFolder(string path, string component, SafeFileHandle parentHandle, FileId identity)
+    {
+        lock (original)
+        {
+            if (original.IsClosed)
+            {
+                throw Ineligible();
+            }
+            if (folders.TryGetValue(path, out (FileId Id, SafeFileHandle Handle) known))
+            {
+                if (known.Id != identity)
+                {
+                    throw Ineligible();
+                }
+                return;
+            }
+            SafeFileHandle handle = OpenHandle(component, true, parentHandle, shareDelete: true);
+            try
+            {
+                if (DirectoryId(handle) != identity)
+                {
+                    throw Ineligible();
+                }
+                folders.Add(path, (identity, handle));
+            }
+            catch
+            {
+                handle.Dispose();
+                throw;
+            }
         }
     }
 
@@ -286,7 +351,8 @@ internal sealed partial class JournalDirectory : IDisposable
 
     private static FileShare Share(bool delete) => delete ? FileShare.ReadWrite | FileShare.Delete : FileShare.ReadWrite;
 
-    private static SafeFileHandle WindowsOpenAt(SafeFileHandle parent, string component, bool directory, bool shareDelete, bool enumerate)
+    private static SafeFileHandle WindowsOpenAt(SafeFileHandle parent, string component, bool directory, bool shareDelete, bool enumerate,
+        bool deleteAccess = false)
     {
         const uint ReadData = 1, Traverse = 0x20, ReadAttributes = 0x80, Synchronize = 0x100000;
         const uint DirectoryFile = 1, NonDirectoryFile = 0x40, SynchronousIo = 0x20, OpenReparsePoint = 0x00200000;
@@ -305,7 +371,8 @@ internal sealed partial class JournalDirectory : IDisposable
                 ObjectName = name.AddrOfPinnedObject(),
                 Attributes = DontReparse | CaseInsensitive,
             };
-            uint access = directory ? Traverse | (enumerate ? ListDirectory : 0) : ReadData;
+            const uint Delete = 0x10000;
+            uint access = deleteAccess ? Delete : directory ? Traverse | (enumerate ? ListDirectory : 0) : ReadData;
             int status = NtOpenFile(out SafeFileHandle child, ReadAttributes | Synchronize | access,
                 ref attributes, out _, Share(shareDelete), SynchronousIo | OpenReparsePoint | (directory ? DirectoryFile : NonDirectoryFile));
             if (status != 0)
@@ -392,7 +459,9 @@ internal sealed partial class JournalDirectory : IDisposable
         }
     }
 
-    private static FileId DirectoryId(SafeFileHandle handle)
+    private static FileId DirectoryId(SafeFileHandle handle) => Identity(handle, directory: true);
+
+    private static FileId Identity(SafeFileHandle handle, bool directory)
     {
         if (handle.IsInvalid)
         {
@@ -400,7 +469,7 @@ internal sealed partial class JournalDirectory : IDisposable
         }
         if (OperatingSystem.IsWindows())
         {
-            CheckWindowsType(handle, File.GetAttributes(handle), directory: true);
+            CheckWindowsType(handle, File.GetAttributes(handle), directory);
             const int FileIdInfo = 18;
             return GetFileInformationByHandleEx(handle, FileIdInfo, out FileId id, (uint)Marshal.SizeOf<FileId>()) ? id : throw Ineligible();
         }
@@ -410,13 +479,13 @@ internal sealed partial class JournalDirectory : IDisposable
             MacAttributes attributes = new() { Count = 5, Common = 0x4 | 0x8 | 0x02000000 };
             byte[] result = new byte[24];
             if (FGetAttrList(handle, ref attributes, result, (nuint)result.Length, 0) != 0
-                || BitConverter.ToUInt32(result) != result.Length || BitConverter.ToUInt32(result, 12) != 2)
+                || BitConverter.ToUInt32(result) != result.Length || BitConverter.ToUInt32(result, 12) != (directory ? 2 : 1))
             {
                 throw Ineligible();
             }
             return new FileId(BitConverter.ToUInt64(result, 4), BitConverter.ToUInt64(result, 16), 0);
         }
-        LinuxStat stat = LinuxInfo(handle, directory: true);
+        LinuxStat stat = LinuxInfo(handle, directory);
         return new FileId(((ulong)stat.DeviceMajor << 32) | stat.DeviceMinor, stat.Inode, 0);
     }
 
@@ -511,6 +580,30 @@ internal sealed partial class JournalDirectory : IDisposable
 
     [DllImport("libc", EntryPoint = "openat")]
     private static extern int UnixOpenAt(SafeFileHandle parent, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, int flags);
+
+    [DllImport("libc", EntryPoint = "openat")]
+    private static extern int UnixCreateAt(SafeFileHandle parent, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, int flags, uint mode);
+
+    // Darwin arm64 passes openat's variadic mode on the stack; its first three arguments are fixed.
+    [DllImport("libc", EntryPoint = "openat")]
+    private static extern int MacArmCreateAt(SafeFileHandle parent, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, int flags,
+        nint unused3, nint unused4, nint unused5, nint unused6, nint unused7, uint mode);
+
+    private static int CreateAt(SafeFileHandle parent, string name, int flags, uint mode) =>
+        OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64
+            ? MacArmCreateAt(parent, name, flags, 0, 0, 0, 0, 0, mode) : UnixCreateAt(parent, name, flags, mode);
+
+    [DllImport("libc", EntryPoint = "unlinkat")]
+    private static extern int UnixUnlinkAt(SafeFileHandle parent, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, int flags);
+
+    [DllImport("libc", EntryPoint = "renameat2")]
+    private static extern int LinuxRenameAt(SafeFileHandle from, string source, SafeFileHandle to, string target, uint flags);
+
+    [DllImport("libc", EntryPoint = "renameatx_np")]
+    private static extern int MacRenameAt(SafeFileHandle from, string source, SafeFileHandle to, string target, uint flags);
+
+    [DllImport("kernel32.dll", ExactSpelling = true)]
+    private static extern bool SetFileInformationByHandle(SafeFileHandle file, int infoClass, ref int value, uint size);
 
     [DllImport("libc", EntryPoint = "statx")]
     private static extern int Statx(SafeFileHandle file, string path, int flags, uint mask, out LinuxStat stat);

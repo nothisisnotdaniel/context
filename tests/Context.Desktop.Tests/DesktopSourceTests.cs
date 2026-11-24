@@ -69,6 +69,7 @@ public sealed class DesktopSourceTests
 
     // The only Desktop file allowed to call the writing methods.
     private const string ActionsFile = "src/Context.Desktop/DesktopActions.cs";
+    private const string JournalFile = "src/Context.Desktop/JournalDirectory.cs";
 
     // 094: the only Desktop file that may use JavaScript interop (IJSRuntime, [JSInvokable]).
     private const string InteropFile = "src/Context.Desktop/EditorInterop.cs";
@@ -963,6 +964,20 @@ public sealed class DesktopSourceTests
                 text = text.Replace(CrashLogDelete, string.Empty, StringComparison.Ordinal);
             }
 
+            // The directory adapter tracks its handles in memory. Its Windows publisher moves
+            // one private temporary file, without overwrite, inside the directory held for the move.
+            string[] fileOperations = file switch
+            {
+                JournalFile => ["folders.Clear();", "folders.Add(path, (identity, handle));"],
+                "src/Context.Desktop/JournalDirectory.Mutations.cs" =>
+                    ["File.Move(Path.Combine(windowsPath, temp), Path.Combine(windowsPath, name), overwrite: false);"],
+                _ => [],
+            };
+            foreach (string operation in fileOperations)
+            {
+                Assert.Single(Regex.Matches(text, Regex.Escape(operation)));
+                text = text.Replace(operation, string.Empty, StringComparison.Ordinal);
+            }
             found.AddRange(Writes.Matches(text).Select(m => $"{file}: {m.Value}"));
         }
 
@@ -2218,12 +2233,11 @@ public sealed class DesktopSourceTests
             RepoFiles.Sources(root, "tests/Context.Desktop.Tests", ".cs"));
     }
 
-    // Native calls stay in the desktop platform adapters. Journal reads need a regular-file check on the open handle.
+    // Journal reads verify the open handle; editor removals and sealed copies use the verified directory.
     [Fact]
     public void Sources_HaveNativeCallsOnlyInTheMacStore()
     {
         string root = RepoFiles.Root();
-        const string JournalFile = "src/Context.Desktop/JournalDirectory.cs";
         string[] native = ["DllImport", "LibraryImport", "extern "];
         List<string> found = RepoFiles.Sources(root, "src", ".cs", ".razor")
             .Where(f => native.Any(n => File.ReadAllText(Path.Combine(root, f)).Contains(n, StringComparison.Ordinal)))
@@ -2237,7 +2251,9 @@ public sealed class DesktopSourceTests
             }.Order(StringComparer.Ordinal),
             found.Order(StringComparer.Ordinal));
         string journal = File.ReadAllText(Path.Combine(root, JournalFile));
-        Assert.Equal(["CreateFileW", "FGetAttrList", "GetAttrListBulk", "GetDirectoryInformation", "GetFileInformationByHandleEx", "GetFileType", "GetFinalPathNameByHandleW", "NtOpenFile", "Statx", "UnixOpen", "UnixOpenAt"],
+        Assert.Equal(["CreateFileW", "FGetAttrList", "GetAttrListBulk", "GetDirectoryInformation", "GetFileInformationByHandleEx",
+            "GetFileType", "GetFinalPathNameByHandleW", "LinuxRenameAt", "MacArmCreateAt", "MacRenameAt", "NtOpenFile",
+            "SetFileInformationByHandle", "Statx", "UnixCreateAt", "UnixOpen", "UnixOpenAt", "UnixUnlinkAt"],
             Regex.Matches(journal, @"\bextern\s+\w+\s+(\w+)\(").Select(match => match.Groups[1].Value).Order(StringComparer.Ordinal));
     }
 

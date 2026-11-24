@@ -35,7 +35,7 @@
                 }
                 @if (page == Page.Journal)
                 {
-                    <JournalPanel OnOpen="OpenFromJournal" OnAppointment="OpenAppointment" OnClose="CloseJournal" />
+                    <JournalPanel @ref="journalPanel" OnOpen="OpenFromJournal" OnAppointment="OpenAppointment" OnClose="CloseJournal" />
                 }
                 @if (page == Page.Done)
                 {
@@ -191,7 +191,7 @@
                         {
                             <ItemPanel Item="item" OnOpen="RequestOpen" OnPerson="OpenMention" />
                         }
-                        <LinksPanel Name="@name" Sensitive="openSensitive" OnOpen="RequestOpen" OnTag="ShowTag" />
+                        <LinksPanel Name="@name" Sensitive="openSensitive" JournalLink="journalNote" OnOpen="RequestOpen" OnTag="ShowTag" />
                     }
                     else
                     {
@@ -317,6 +317,7 @@ else
     private bool pendingClose;
     private (string? Name, JournalNoteLink? Link) pendingNote;
     private JournalNoteLink? journalNote;
+    private JournalPanel? journalPanel;
     private bool disposed;
     private string? pendingHeading;
     // The heading a [[Note#Heading]] link opened the note at; the new editor jumps there once, after its mount.
@@ -1119,7 +1120,7 @@ else
             link.Dispose();
             if (!disposed && page == Page.Journal)
             {
-                ShowStatus(DesktopText.OneLine(DesktopActions.CantReadText(link.Name)), "red");
+                journalPanel?.ShowReadError(link.Name);
             }
             return;
         }
@@ -2237,6 +2238,7 @@ else
             return;
         }
 
+        JournalNoteLink? origin = journalNote;
         NoteReference selected = StoredTarget(name);
         int count = await State.LinkUpdateCount(selected, renameText);
         if (count > 0)
@@ -2258,7 +2260,7 @@ else
             running = false;
         }
 
-        RenameEnded(renamed);
+        await RenameEnded(renamed, origin);
     }
 
     // Confirmed in the rename question: renames and updates the links.
@@ -2269,6 +2271,7 @@ else
             return;
         }
 
+        JournalNoteLink? origin = journalNote;
         running = true;
         ActionResult renamed;
         try
@@ -2281,7 +2284,7 @@ else
             renameAsk = null;
         }
 
-        RenameEnded(renamed);
+        await RenameEnded(renamed, origin);
     }
 
     // Cancel or Esc in the rename question: nothing is written and the name field keeps its text.
@@ -2294,7 +2297,7 @@ else
     }
 
     // A refusal keeps the name field; Done opens the note under its new name, the text accent (red when links were left).
-    private void RenameEnded(ActionResult renamed)
+    private async Task RenameEnded(ActionResult renamed, JournalNoteLink? origin)
     {
         if (renamed.Kind != ActionKind.Done)
         {
@@ -2309,8 +2312,36 @@ else
             return;
         }
 
-        ShowNote(renamed.Name ?? renamed.Text, record: false);
-        ShowStatus(DesktopText.OneLine(renamed.Text), renamed.Reason == ActionReason.LinksLeft ? "red" : "accent");
+        if (await ShowRelocated(renamed, origin))
+        {
+            ShowStatus(DesktopText.OneLine(renamed.Text), renamed.Reason == ActionReason.LinksLeft ? "red" : "accent");
+        }
+    }
+
+    private async Task<bool> ShowRelocated(ActionResult result, JournalNoteLink? origin)
+    {
+        if (disposed || journalNote != origin)
+        {
+            return false;
+        }
+        string name = result.Name ?? result.Text;
+        JournalNoteLink? link = null;
+        if (origin is not null)
+        {
+            link = result.RelocatedNote is { } moved ? origin.Relocated(moved) : null;
+            if (link is null || !await link.Bind() || disposed || origin != journalNote)
+            {
+                link?.Dispose();
+                if (!disposed && origin == journalNote)
+                {
+                    ShowNote(null);
+                    ShowStatus(DesktopText.OneLine(DesktopActions.CantReadText(name)), "red");
+                }
+                return false;
+            }
+        }
+        ShowNote(name, record: false, link: link);
+        return true;
     }
 
     private void AskDelete()
@@ -2487,6 +2518,7 @@ else
             return;
         }
 
+        JournalNoteLink? origin = journalNote;
         running = true;
         ActionResult moved;
         try
@@ -2511,8 +2543,10 @@ else
             return;
         }
 
-        ShowNote(moved.Text, record: false);
-        ShowStatus($"Moved to {DesktopText.OneLine(moved.Text)}", "accent");
+        if (await ShowRelocated(moved, origin))
+        {
+            ShowStatus($"Moved to {DesktopText.OneLine(moved.Text)}", "accent");
+        }
     }
 
     private void CancelDelete()

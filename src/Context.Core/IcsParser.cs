@@ -138,9 +138,7 @@ internal static class IcsParser
         {
             if (builder.RecurrenceId is not null)
             {
-                Appointment? single = builder.Uid is not null && hiddenSeries.Contains(builder.Uid)
-                    ? null
-                    : builder.Build(local);
+                Appointment? single = VisibleOverride(builder, local, hiddenSeries);
                 if (single is not null && CalendarStore.Overlaps(single, from, to))
                 {
                     result.Add(single);
@@ -286,14 +284,12 @@ internal static class IcsParser
         List<Appointment> result = [];
         foreach (EventBuilder item in events)
         {
-            if ((item.Uid is not null && hidden.Contains(item.Uid)) || item.Build(local) is not { } first)
-            {
-                continue;
-            }
-
             if (item.RecurrenceId is not null)
             {
-                result.Add(first);
+                if (VisibleOverride(item, local, hidden) is { } single)
+                {
+                    result.Add(single);
+                }
                 continue;
             }
 
@@ -306,6 +302,9 @@ internal static class IcsParser
         }
         return result;
     }
+
+    private static Appointment? VisibleOverride(EventBuilder item, TimeZoneInfo local, HashSet<string> hiddenSeries) =>
+        item.Uid is not null && hiddenSeries.Contains(item.Uid) ? null : item.Build(local);
 
     private static void AddRecurrenceDates(EventBuilder builder, TimeZoneInfo local, SourceTime source,
         List<DateTime> starts, HashSet<DateTime> seen)
