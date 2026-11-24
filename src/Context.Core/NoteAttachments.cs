@@ -395,7 +395,7 @@ internal sealed class NoteAttachments
     /// link) of at most <see cref="MaxBytes"/> whose bytes pass <see cref="Sniff"/>. <c>null</c> for anything else,
     /// and when it can't be read. Never writes.
     /// </summary>
-    public ResolvedAttachment? TryResolve(NoteReference note, string src)
+    public ResolvedAttachment? TryResolve(NoteReference note, string src, NoteFileEdit? edit = null)
     {
         if (!src.StartsWith(SrcPrefix, StringComparison.Ordinal))
         {
@@ -416,13 +416,21 @@ internal sealed class NoteAttachments
             }
 
             string folder = Folder(found);
+            string path = Path.Combine(folder, name);
+            using NoteFileEdit? own = edit is null ? note.BeginEdit() : null;
+            if ((edit ?? own) is { } selected)
+            {
+                byte[] content = selected.Read(path, MaxBytes);
+                own?.Verify();
+                AttachmentType kind = Sniff(name, content);
+                return kind == AttachmentType.Unsupported ? null : new ResolvedAttachment(path, kind, content);
+            }
             DirectoryInfo directory = new DirectoryInfo(folder);
             if (!directory.Exists || NoteStore.IsLink(directory))
             {
                 return null;
             }
 
-            string path = Path.Combine(folder, name);
             FileInfo file = new FileInfo(path);
             if (!file.Exists || NoteStore.IsLink(file)
                 || (file.Attributes & (FileAttributes.Directory | FileAttributes.Device)) != 0
@@ -571,7 +579,7 @@ internal sealed class NoteAttachments
     /// <see cref="LinkedNames"/> of the saved file of <paramref name="note"/> (a name in <see cref="NoteStore.List"/>);
     /// empty when it names no note or can't be read (then no attachment is touched).
     /// </summary>
-    public IReadOnlyList<string> LinkedNamesOf(NoteReference note)
+    public IReadOnlyList<string> LinkedNamesOf(NoteReference note, NoteFileEdit? edit = null)
     {
         try
         {
@@ -580,7 +588,7 @@ internal sealed class NoteAttachments
                 return [];
             }
 
-            return LinkedNames(DecodeText(note.ReadBytes(found.Path, NoteStore.MaxEditBytes)));
+            return LinkedNames(DecodeText(edit?.Read(found.Path, NoteStore.MaxEditBytes) ?? note.ReadBytes(found.Path, NoteStore.MaxEditBytes)));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -617,6 +625,12 @@ internal sealed class NoteAttachments
         if (string.Equals(owner?.Name, source.Parent, StringComparison.Ordinal))
         {
             return notes.Move(name, newParent);
+        }
+
+        using NoteFileEdit? edit = name.BeginEdit();
+        if (edit is not null)
+        {
+            return MoveSelected(source, name, owner, edit);
         }
 
         byte[] original;
@@ -753,6 +767,108 @@ internal sealed class NoteAttachments
         return moved;
     }
 
+    private NoteInfo? MoveSelected(NoteInfo source, NoteReference selected, NoteInfo? owner, NoteFileEdit edit)
+    {
+        if (owner is not null)
+        {
+            edit.Expect(owner.Path);
+        }
+        string level = notes.LevelFolder(owner?.Name);
+        edit.EnsureFolder(level);
+        string destination = Path.Combine(level, FolderName);
+        byte[] original = edit.Read(source.Path, NoteStore.MaxEditBytes);
+        IReadOnlyList<string> names = LinkedNames(DecodeText(original));
+        if (names.Count > MaxLinkedNames)
+        {
+            throw new AttachmentMoveException(new IOException("Too many attachments."));
+        }
+        Dictionary<string, string> renamed = new(StringComparer.Ordinal);
+        List<string> copied = [];
+        foreach (string name in names)
+        {
+            if (TryResolve(selected, SrcPrefix + name, edit) is not { } attachment)
+            {
+                continue;
+            }
+            edit.EnsureFolder(destination);
+            BeforeMoveStep?.Invoke("copy");
+            string stored = AvailableName(destination, name, edit);
+            edit.WriteNew(Path.Combine(destination, stored), attachment.Bytes);
+            copied.Add(name);
+            if (stored != name)
+            {
+                renamed[name] = stored;
+            }
+        }
+
+        IReadOnlyList<string> unlinked = UnlinkedInSelection(source, copied, edit);
+        BeforeMoveStep?.Invoke("move");
+        NoteInfo? moved = notes.Move(selected, owner?.Name, edit);
+        if (moved is null)
+        {
+            return null;
+        }
+        BeforeMoveStep?.Invoke("rewrite");
+        if (renamed.Count != 0)
+        {
+            edit.Discard(moved.Path);
+            edit.WriteNew(moved.Path, RewriteLinks(original, renamed));
+        }
+        BeforeMoveStep?.Invoke("cleanup");
+        foreach (string path in unlinked)
+        {
+            edit.Discard(path);
+        }
+        edit.Commit();
+        edit.RemoveEmpty(Folder(source));
+        edit.RemoveEmpty(Path.GetDirectoryName(NoteHistory.FolderFor(source.Path))!);
+        return moved;
+    }
+
+    private static string AvailableName(string folder, string name, NoteFileEdit edit)
+    {
+        int dot = name.IndexOf('.');
+        for (int n = 1; n <= MaxClash; n++)
+        {
+            string candidate = ClashName(name[..dot], n) + name[dot..];
+            if (!edit.Exists(Path.Combine(folder, candidate)))
+            {
+                return candidate;
+            }
+        }
+        throw new IOException("Attachment names are already in use.");
+    }
+
+    internal static IReadOnlyList<string> UnlinkedInSelection(NoteInfo note, IReadOnlyList<string> names, NoteFileEdit edit)
+    {
+        if (names.Count == 0 || names.Count > MaxLinkedNames)
+        {
+            return [];
+        }
+        string level = Path.GetDirectoryName(note.Path)!;
+        HashSet<string> candidates = new(names, StringComparer.Ordinal);
+        foreach (NoteFileEntry entry in edit.List(level).Where(e => !e.Directory))
+        {
+            if (note.Parent is null && entry.Name.EndsWith(NoteStore.SensitiveExtension, StringComparison.OrdinalIgnoreCase))
+            {
+                return [];
+            }
+            if (entry.Name != Path.GetFileName(note.Path) && entry.Name.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    string text = DecodeText(edit.Read(Path.Combine(level, entry.Name), NoteStore.MaxEditBytes));
+                    candidates.RemoveWhere(name => text.Contains(name, StringComparison.OrdinalIgnoreCase));
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    return [];
+                }
+            }
+        }
+        return candidates.Select(n => Path.Combine(Folder(note), n)).Where(p => edit.Exists(p)).ToArray();
+    }
+
     /// <summary>
     /// After the note <paramref name="deleted"/> is gone: deletes from its level's <c>.attachments</c> each of
     /// <paramref name="names"/> (taken from its text before the delete) that no remaining sibling links (see
@@ -760,7 +876,7 @@ internal sealed class NoteAttachments
     /// folder when it is empty. Returns how many files went. Never throws: a file it can't remove stays. More than
     /// <see cref="MaxLinkedNames"/> names remove nothing.
     /// </summary>
-    public int RemoveUnlinked(NoteInfo deleted, IReadOnlyList<string> names, Action<string, bool>? remove = null)
+    public int RemoveUnlinked(NoteInfo deleted, IReadOnlyList<string> names)
     {
         try
         {
@@ -781,13 +897,13 @@ internal sealed class NoteAttachments
             int removed = 0;
             foreach (string name in names.Where(n => !kept.Contains(n)))
             {
-                if (DeleteStored(folder, name, remove))
+                if (DeleteStored(folder, name))
                 {
                     removed++;
                 }
             }
 
-            NoteStore.RemoveIfEmpty(folder, remove);
+            NoteStore.RemoveIfEmpty(folder);
             return removed;
         }
         catch (Exception)
@@ -886,6 +1002,28 @@ internal sealed class NoteAttachments
     private static void Rewrite(string path, IReadOnlyDictionary<string, string> renamed)
     {
         byte[] bytes = BoundedFile.Read(path, NoteStore.MaxEditBytes);
+        byte[] rewritten = RewriteLinks(bytes, renamed);
+        string temp = Path.Combine(Path.GetDirectoryName(path) ?? string.Empty, $".{Guid.NewGuid():N}.tmp");
+        try
+        {
+            using (FileStream stream = PrivateFile.OpenNew(temp))
+            {
+                stream.Write(rewritten);
+            }
+
+            File.Move(temp, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temp))
+            {
+                File.Delete(temp);
+            }
+        }
+    }
+
+    private static byte[] RewriteLinks(byte[] bytes, IReadOnlyDictionary<string, string> renamed)
+    {
         byte[] marker = Encoding.ASCII.GetBytes(LinkMarker);
         List<KeyValuePair<byte[], byte[]>> pairs = renamed
             .Select(p => new KeyValuePair<byte[], byte[]>(Encoding.ASCII.GetBytes(p.Key), Encoding.ASCII.GetBytes(p.Value)))
@@ -918,28 +1056,12 @@ internal sealed class NoteAttachments
         }
 
         output.AddRange(bytes.AsSpan(at));
-        string temp = Path.Combine(Path.GetDirectoryName(path) ?? string.Empty, $".{Guid.NewGuid():N}.tmp");
-        try
-        {
-            using (FileStream stream = PrivateFile.OpenNew(temp))
-            {
-                stream.Write(output.ToArray());
-            }
-
-            File.Move(temp, path, overwrite: true);
-        }
-        finally
-        {
-            if (File.Exists(temp))
-            {
-                File.Delete(temp);
-            }
-        }
+        return output.ToArray();
     }
 
     // Deletes <folder>/<name> only when the name has the stored shape and it is a regular file (no link, reparse
     // point or folder). Never throws.
-    private static bool DeleteStored(string folder, string name, Action<string, bool>? remove = null)
+    private static bool DeleteStored(string folder, string name)
     {
         try
         {
@@ -954,7 +1076,7 @@ internal sealed class NoteAttachments
                 return false;
             }
 
-            NoteStore.RemoveFile(file.FullName, remove);
+            file.Delete();
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

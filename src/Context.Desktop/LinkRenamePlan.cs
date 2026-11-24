@@ -80,7 +80,7 @@ internal sealed class LinkRenamePlan
 
         NameLookup before = new(names);
         NameLookup after = NoteLinkRewriter.Renamed(names, oldName, newName);
-        List<(string Name, bool Valid)> changed = Changed(notes, plain, before, after, oldName, newName).ToList();
+        List<(string Name, bool Valid)> changed = Changed(notes, plain, before, after, oldName, newName, name.Source).ToList();
         bool invalid = changed.Any(c => !c.Valid);
         return new LinkRenamePlan(
             oldName, newName, before, after, changed.Select(c => c.Name).ToList(), invalid);
@@ -117,14 +117,15 @@ internal sealed class LinkRenamePlan
 
     // The plain notes whose links change, with false when their rewrite fails the check; unreadable notes are left out.
     private static IEnumerable<(string Name, bool Valid)> Changed(
-        NoteStore notes, IReadOnlyList<NoteInfo> plain, NameLookup before, NameLookup after, string oldName, string newName)
+        NoteStore notes, IReadOnlyList<NoteInfo> plain, NameLookup before, NameLookup after, string oldName, string newName,
+        INoteFileSource? source = null)
     {
         foreach (NoteInfo note in plain)
         {
             EditableNote opened;
             try
             {
-                opened = notes.ReadForEdit(note);
+                opened = source is null ? notes.ReadForEdit(note) : NoteStore.ReadSelectedForEdit(note, NoteReference.Bound(note, source));
             }
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
             {

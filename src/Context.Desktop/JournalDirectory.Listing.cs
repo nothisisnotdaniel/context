@@ -9,10 +9,10 @@ internal sealed partial class JournalDirectory
     // Called after this directory is open and verified, immediately before enumerating its handle.
     internal Action<string>? BeforeEnumerate { get; set; }
 
-    private Listing ListDirectory(SafeFileHandle directory, string path)
+    private Listing ListDirectory(SafeFileHandle directory, string path, bool strict = false)
     {
         BeforeEnumerate?.Invoke(path);
-        Listing listing = new();
+        Listing listing = new(strict);
         if (OperatingSystem.IsWindows())
         {
             ListWindows(directory, listing);
@@ -28,27 +28,36 @@ internal sealed partial class JournalDirectory
         return listing;
     }
 
-    private sealed class Listing
+    private sealed class Listing(bool strict)
     {
-        private readonly Dictionary<string, (FileAttributes Attributes, DateTime Modified)> entries = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, (FileAttributes Attributes, DateTime Modified, long Length)> entries = new(StringComparer.Ordinal);
 
-        private IEnumerable<string> Files => entries.Where(e => (e.Value.Attributes & FileAttributes.Directory) == 0).Select(e => e.Key);
-        private IEnumerable<string> Folders => entries.Where(e => (e.Value.Attributes & FileAttributes.Directory) != 0).Select(e => e.Key);
+        public IEnumerable<string> Files => entries.Where(e => (e.Value.Attributes & FileAttributes.Directory) == 0).Select(e => e.Key);
+        public IEnumerable<string> Folders => entries.Where(e => (e.Value.Attributes & FileAttributes.Directory) != 0).Select(e => e.Key);
         public IEnumerable<(string Name, string Path, string? Child)> Pages(string? parent) =>
             NoteStore.PagesAtLevel(parent, Files, () => Folders);
         public IEnumerable<string> Calendars => entries.Where(e =>
             (e.Value.Attributes & (FileAttributes.Directory | FileAttributes.Hidden | FileAttributes.System)) == 0
             && Path.GetExtension(e.Key).Equals(".ics", StringComparison.OrdinalIgnoreCase)).Select(e => e.Key);
         public DateTime Modified(string file) => entries[file].Modified;
+        public long Length(string file) => entries[file].Length;
 
-        public void RecordEntry(string name, FileAttributes attributes, DateTime modified)
+        public void UnreadableEntry()
+        {
+            if (strict)
+            {
+                throw Ineligible();
+            }
+        }
+
+        public void RecordEntry(string name, FileAttributes attributes, DateTime modified, long length)
         {
             if (name is "" or "." or ".." || name != Path.GetFileName(name)
                 || (attributes & (FileAttributes.Device | FileAttributes.ReparsePoint)) != 0)
             {
                 return;
             }
-            entries.TryAdd(name, (attributes, modified));
+            entries.TryAdd(name, (attributes, modified, length));
         }
     }
 
@@ -77,7 +86,7 @@ internal sealed partial class JournalDirectory
                 string name = Encoding.Unicode.GetString(entry.Slice(NameOffset, length));
                 FileAttributes attributes = (FileAttributes)BitConverter.ToUInt32(entry[56..]);
                 long modified = Math.Clamp(BitConverter.ToInt64(entry[24..]), 0, DateTime.MaxValue.ToFileTimeUtc());
-                listing.RecordEntry(name, attributes, DateTime.FromFileTime(modified));
+                listing.RecordEntry(name, attributes, DateTime.FromFileTime(modified), BitConverter.ToInt64(entry[40..]));
                 if (next == 0)
                 {
                     break;
@@ -95,7 +104,8 @@ internal sealed partial class JournalDirectory
     {
         const uint Name = 1, ObjectType = 8, Modified = 0x400, Flags = 0x40000, ReturnedAttributes = 0x80000000;
         const ulong PackInvalidAttributes = 8;
-        MacAttributes request = new() { Count = 5, Common = ReturnedAttributes | Name | ObjectType | Modified | Flags };
+        const uint DataLength = 0x200;
+        MacAttributes request = new() { Count = 5, Common = ReturnedAttributes | Name | ObjectType | Modified | Flags, File = DataLength };
         byte[] buffer = new byte[16 * 1024];
         int count;
         while ((count = GetAttrListBulk(directory, ref request, buffer, (nuint)buffer.Length, PackInvalidAttributes)) > 0)
@@ -119,6 +129,7 @@ internal sealed partial class JournalDirectory
                 uint returned = BitConverter.ToUInt32(entry[4..]);
                 if ((returned & (Name | ObjectType)) != (Name | ObjectType) || size < 56)
                 {
+                    listing.UnreadableEntry();
                     continue;
                 }
                 uint type = BitConverter.ToUInt32(entry[32..]);
@@ -140,7 +151,13 @@ internal sealed partial class JournalDirectory
                 {
                     attributes |= FileAttributes.Hidden;
                 }
-                listing.RecordEntry(name, attributes, UnixModified(BitConverter.ToInt64(entry[36..]), BitConverter.ToInt64(entry[44..])));
+                bool hasLength = size >= 64 && (BitConverter.ToUInt32(entry[16..]) & DataLength) != 0;
+                if (type == 1 && !hasLength)
+                {
+                    listing.UnreadableEntry();
+                }
+                long dataLength = type == 1 && hasLength ? BitConverter.ToInt64(entry[56..]) : 0;
+                listing.RecordEntry(name, attributes, UnixModified(BitConverter.ToInt64(entry[36..]), BitConverter.ToInt64(entry[44..])), dataLength);
             }
         }
         if (count < 0)
@@ -151,20 +168,25 @@ internal sealed partial class JournalDirectory
 
     private static void ListLinux(SafeFileHandle directory, Listing listing)
     {
-        const int AtSymlinkNoFollow = 0x100, TypeAndModified = 0x41;
+        const int AtSymlinkNoFollow = 0x100, TypeModifiedAndSize = 0x241;
         foreach (string entry in Directory.EnumerateFileSystemEntries(DescriptorPath(directory)))
         {
             string name = Path.GetFileName(entry);
-            if (Statx(directory, name, AtSymlinkNoFollow, TypeAndModified, out LinuxStat stat) != 0 || (stat.Mask & 1) == 0)
+            if (Statx(directory, name, AtSymlinkNoFollow, TypeModifiedAndSize, out LinuxStat stat) != 0 || (stat.Mask & 1) == 0)
             {
+                listing.UnreadableEntry();
                 continue;
             }
             int type = stat.Mode & 0xf000;
             if (type is 0x4000 or 0x8000)
             {
+                if (type == 0x8000 && (stat.Mask & 0x200) == 0)
+                {
+                    listing.UnreadableEntry();
+                }
                 FileAttributes attributes = type == 0x4000 ? FileAttributes.Directory : FileAttributes.Normal;
                 listing.RecordEntry(name, name.StartsWith('.') ? attributes | FileAttributes.Hidden : attributes,
-                    UnixModified(stat.ModifiedSeconds, stat.ModifiedNanoseconds));
+                    UnixModified(stat.ModifiedSeconds, stat.ModifiedNanoseconds), stat.Size);
             }
         }
     }

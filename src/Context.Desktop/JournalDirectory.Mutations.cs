@@ -4,16 +4,6 @@ namespace Context;
 
 internal sealed partial class JournalDirectory
 {
-    // Resolve the selected page's parent chain first. Every removal, including a kept version
-    // or an attachment, then uses a single component in the actual directory we opened.
-    public void Remove(NoteInfo note, string path, bool directory) =>
-        WithNoteParent(note, (parentHandle, _) => InContainingFolder(parentHandle, Path.GetDirectoryName(note.Path)!, path,
-            (folder, leaf) =>
-            {
-                RemoveAt(folder, leaf, directory);
-                return true;
-            }));
-
     private static T InContainingFolder<T>(SafeFileHandle parentHandle, string parentPath, string path, Func<SafeFileHandle, string, T> action)
     {
         if (OperatingSystem.IsWindows() && path.StartsWith(@"\\?\", StringComparison.Ordinal))
@@ -40,13 +30,13 @@ internal sealed partial class JournalDirectory
         }
     }
 
-    private static void RemoveAt(SafeFileHandle parentHandle, string leaf, bool directory, SafeFileHandle? created = null)
+    private static void RemoveAt(SafeFileHandle parentHandle, string leaf, bool directory, SafeFileHandle created)
     {
         if (OperatingSystem.IsWindows())
         {
             using SafeFileHandle file = WindowsOpenAt(parentHandle, leaf, directory, shareDelete: true, enumerate: false, deleteAccess: true);
             FileId id = Identity(file, directory);
-            if (created is not null && Identity(created, directory) != id)
+            if (Identity(created, directory) != id)
             {
                 throw Ineligible();
             }
@@ -59,36 +49,28 @@ internal sealed partial class JournalDirectory
             return;
         }
 
-        if (created is not null)
+        using SafeFileHandle current = OpenHandle(leaf, directory, parentHandle);
+        if (Identity(current, directory) != Identity(created, directory))
         {
-            using SafeFileHandle current = OpenHandle(leaf, false, parentHandle);
-            if (Identity(current, false) != Identity(created, false))
+            throw Ineligible();
+        }
+        // Claim the entry, check the claimed object, and unlink only that object.
+        string claimed = TempName();
+        RenameNew(parentHandle, leaf, parentHandle, claimed, directory);
+        int removeDirectory = OperatingSystem.IsMacOS() ? 0x80 : 0x200;
+        try
+        {
+            using SafeFileHandle claimedFile = OpenHandle(claimed, directory, parentHandle);
+            if (Identity(claimedFile, directory) != Identity(created, directory)
+                || UnixUnlinkAt(parentHandle, claimed, directory ? removeDirectory : 0) != 0)
             {
                 throw Ineligible();
             }
-            // Unix unlinks by name. Claim the entry with a no-replace rename and check the
-            // claimed file before unlinking it. If the name changed hands, put it back.
-            string claimed = TempName();
-            RenameNew(parentHandle, leaf, claimed);
-            try
-            {
-                using SafeFileHandle claimedFile = OpenHandle(claimed, false, parentHandle);
-                if (Identity(claimedFile, false) != Identity(created, false) || UnixUnlinkAt(parentHandle, claimed, 0) != 0)
-                {
-                    throw Ineligible();
-                }
-            }
-            catch
-            {
-                RenameNew(parentHandle, claimed, leaf);
-                throw;
-            }
-            return;
         }
-        int removeDirectory = OperatingSystem.IsMacOS() ? 0x80 : 0x200;
-        if (UnixUnlinkAt(parentHandle, leaf, directory ? removeDirectory : 0) != 0)
+        catch
         {
-            throw Ineligible();
+            RenameNew(parentHandle, claimed, parentHandle, leaf, directory);
+            throw;
         }
     }
 
@@ -100,37 +82,21 @@ internal sealed partial class JournalDirectory
         return InContainingFolder(directory, root, path, (folder, leaf) => WriteNew(folder, leaf, bytes));
     }
 
-    internal FileStream OpenVersion(string path)
-    {
-        using SafeFileHandle directory = OpenCurrent();
-        return InContainingFolder(directory, root, path, (folder, leaf) => OpenChildFile(folder, leaf, CheckedPath(folder, true)));
-    }
+    private static CreatedFile WriteNew(SafeFileHandle folder, string name, byte[] bytes) =>
+        WriteNew(folder, name, stream => stream.Write(bytes));
 
-    private static CreatedFile WriteNew(SafeFileHandle folder, string name, byte[] bytes)
+    private static CreatedFile WriteNew(SafeFileHandle folder, string name, Action<FileStream> write)
     {
         string temp = TempName();
         string? windowsPath = OperatingSystem.IsWindows() ? CheckedPath(folder, true) : null;
-        FileStream stream = windowsPath is null ? CreateUnixTemp(folder, temp) : PrivateFile.OpenNew(Path.Combine(windowsPath, temp), FileShare.Delete);
+        FileStream stream = windowsPath is null ? CreateUnixTemp(folder, temp) : PrivateFile.OpenNew(Path.Combine(windowsPath, temp), FileShare.Read | FileShare.Delete);
         SafeFileHandle? ownedParent = null;
         try
         {
-            stream.Write(bytes);
+            write(stream);
             stream.Flush();
-            ownedParent = windowsPath is not null ? OpenHandle(windowsPath, true, shareDelete: true) : OpenHandle(".", true, folder);
-            if (DirectoryId(ownedParent) != DirectoryId(folder))
-            {
-                throw Ineligible();
-            }
-            // The retained parent shares delete. The working Windows folder denies renames
-            // through this move; the Unix calls take both names relative to the same fd.
-            if (windowsPath is not null)
-            {
-                File.Move(Path.Combine(windowsPath, temp), Path.Combine(windowsPath, name), overwrite: false);
-            }
-            else
-            {
-                RenameNew(folder, temp, name);
-            }
+            ownedParent = ReopenFolder(folder);
+            MoveOwned(folder, temp, folder, name, false, stream.SafeFileHandle);
             return new CreatedFile(ownedParent, name, stream);
         }
         catch
@@ -150,11 +116,73 @@ internal sealed partial class JournalDirectory
 
     private static string TempName() => "." + Guid.NewGuid().ToString("N") + ".tmp";
 
-    private static void RenameNew(SafeFileHandle folder, string from, string to)
+    private static void MoveOwned(SafeFileHandle source, string from, SafeFileHandle destination, string to,
+        bool directory, SafeFileHandle original)
     {
+        // Claim and check the actual object before publishing it in another directory.
+        // Every move, including recovery, requires a free destination name.
+        FileId expected = Identity(original, directory);
+        string claimed = TempName();
+        RenameNew(source, from, source, claimed, directory);
+        try
+        {
+            using SafeFileHandle item = OpenHandle(claimed, directory, source, shareDelete: true);
+            if (Identity(item, directory) != expected)
+            {
+                throw Ineligible();
+            }
+            RenameNew(source, claimed, destination, to, directory);
+        }
+        catch
+        {
+            RenameNew(source, claimed, source, from, directory);
+            throw;
+        }
+        using SafeFileHandle published = OpenHandle(to, directory, destination, shareDelete: true);
+        if (Identity(published, directory) != expected)
+        {
+            throw Ineligible();
+        }
+    }
+
+    private static SafeFileHandle ReopenFolder(SafeFileHandle folder, bool shareDelete = true, bool enumerate = false)
+    {
+        SafeFileHandle reopened = OperatingSystem.IsWindows()
+            ? OpenHandle(CheckedPath(folder, true), true, shareDelete: shareDelete, enumerate: enumerate)
+            : OpenHandle(".", true, folder, enumerate: enumerate);
+        try
+        {
+            return DirectoryId(reopened) == DirectoryId(folder) ? reopened : throw Ineligible();
+        }
+        catch
+        {
+            reopened.Dispose();
+            throw;
+        }
+    }
+
+    private static void RenameNew(SafeFileHandle source, string from, SafeFileHandle target, string to, bool directory)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            // Deny directory renames for the duration of the managed no-overwrite move.
+            using SafeFileHandle sourceFolder = ReopenFolder(source, shareDelete: false);
+            using SafeFileHandle targetFolder = ReopenFolder(target, shareDelete: false);
+            string oldPath = Path.Combine(CheckedPath(sourceFolder, true), from);
+            string newPath = Path.Combine(CheckedPath(targetFolder, true), to);
+            if (directory)
+            {
+                Directory.Move(oldPath, newPath);
+            }
+            else
+            {
+                File.Move(oldPath, newPath, overwrite: false);
+            }
+            return;
+        }
         const uint MacRenameExclusive = 4, LinuxRenameNoReplace = 1;
-        if ((OperatingSystem.IsMacOS() ? MacRenameAt(folder, from, folder, to, MacRenameExclusive)
-            : LinuxRenameAt(folder, from, folder, to, LinuxRenameNoReplace)) != 0)
+        if ((OperatingSystem.IsMacOS() ? MacRenameAt(source, from, target, to, MacRenameExclusive)
+            : LinuxRenameAt(source, from, target, to, LinuxRenameNoReplace)) != 0)
         {
             throw Ineligible();
         }
@@ -190,6 +218,9 @@ internal sealed partial class JournalDirectory
                 // The name may already be gone or belong to another file.
             }
         }
+
+        internal bool Matches(SafeFileHandle folder, SafeFileHandle current) =>
+            DirectoryId(folder) == DirectoryId(parentHandle) && Identity(current, false) == Identity(file.SafeFileHandle, false);
 
         public void Dispose()
         {

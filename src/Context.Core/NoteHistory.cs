@@ -91,7 +91,7 @@ internal sealed partial class NoteHistory
     /// <paramref name="sealedTitle"/> that is not a stored file stem (nothing written) and
     /// <see cref="NoteHistoryException"/> when the version can't be written.
     /// </summary>
-    public string? Keep(string notePath, byte[] bytes, string? sealedTitle = null)
+    public string? Keep(string notePath, byte[] bytes, string? sealedTitle = null, NoteFileEdit? edit = null)
     {
         if (sealedTitle is not null && !IsStoredTitle(sealedTitle))
         {
@@ -101,16 +101,17 @@ internal sealed partial class NoteHistory
         string extension = sealedTitle is null ? PlainExtension : NoteStore.SensitiveExtension;
         try
         {
-            if (!store.Contains(notePath))
+            if (edit is null && !store.Contains(notePath))
             {
                 throw new NoteHistoryException();
             }
 
-            string folder = PrepareFolder(notePath);
-            List<Entry> existing = ListFolder(folder, null);
+            string folder = edit is null ? PrepareFolder(notePath) : FolderFor(notePath);
+            edit?.EnsureFolder(folder);
+            List<Entry> existing = ListFolder(folder, null, edit);
             Entry? newest = existing.Where(e => e.Extension == extension).OrderByDescending(e => e, ByAge).FirstOrDefault();
-            if (newest is not null && newest.File.Length == bytes.Length
-                && BoundedFile.Read(newest.File.FullName, MaxVersionBytes).AsSpan().SequenceEqual(bytes))
+            if (newest is not null && newest.Version.Length == bytes.Length
+                && (edit?.Read(newest.Path, MaxVersionBytes) ?? BoundedFile.Read(newest.Path, MaxVersionBytes)).AsSpan().SequenceEqual(bytes))
             {
                 return null;
             }
@@ -128,14 +129,21 @@ internal sealed partial class NoteHistory
                 string path = Path.Combine(folder, FileName(id, sealedTitle));
                 try
                 {
-                    PrivateFile.Write(path, bytes);
+                    if (edit is null)
+                    {
+                        PrivateFile.Write(path, bytes);
+                    }
+                    else
+                    {
+                        edit.WriteNew(path, bytes);
+                    }
                 }
-                catch (IOException) when (File.Exists(path))
+                catch (IOException) when (edit is null && File.Exists(path))
                 {
                     continue;
                 }
 
-                Prune(folder, id);
+                Prune(folder, id, edit);
                 return id;
             }
 
@@ -153,7 +161,7 @@ internal sealed partial class NoteHistory
     /// returns its path; no pruning. Used when a note is marked sensitive and its plain versions are sealed. Throws
     /// <see cref="ArgumentException"/> for an invalid id or title and <see cref="NoteHistoryException"/> when it can't write.
     /// </summary>
-    public string KeepSealedCopy(string notePath, string id, string sealedTitle, byte[] bytes, Action<string, byte[]>? write = null)
+    public string KeepSealedCopy(string notePath, string id, string sealedTitle, byte[] bytes, NoteFileEdit? edit = null)
     {
         if (!IsStoredTitle(sealedTitle) || ParseId(id) is null)
         {
@@ -162,15 +170,20 @@ internal sealed partial class NoteHistory
 
         try
         {
-            if (!store.Contains(notePath))
+            if (edit is null && !store.Contains(notePath))
             {
                 throw new NoteHistoryException();
             }
 
-            // During conversion the plain version already has a directory. Its verified writer
-            // opens that directory and owns the sealed copy until conversion commits.
-            string path = Path.Combine(write is null ? PrepareFolder(notePath) : FolderFor(notePath), FileName(id, sealedTitle));
-            (write ?? PrivateFile.Write)(path, bytes);
+            string path = Path.Combine(edit is null ? PrepareFolder(notePath) : FolderFor(notePath), FileName(id, sealedTitle));
+            if (edit is null)
+            {
+                PrivateFile.Write(path, bytes);
+            }
+            else
+            {
+                edit.WriteNew(path, bytes);
+            }
             return path;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException && e is not NoteHistoryException)
@@ -185,12 +198,14 @@ internal sealed partial class NoteHistory
     /// stored file stem). A missing history is empty; a <c>.history</c> or note
     /// folder that is a file, a link or a reparse point, or that can't be read, throws <see cref="NoteHistoryException"/>.
     /// </summary>
-    public IReadOnlyList<NoteVersion> Versions(NoteInfo note)
+    public IReadOnlyList<NoteVersion> Versions(NoteInfo note, NoteFileEdit? edit = null) =>
+        ListVersions(note.Path, edit, KindOf(note.Path));
+
+    internal static IReadOnlyList<NoteVersion> ListVersions(string notePath, NoteFileEdit? edit, string? extension)
     {
-        string extension = KindOf(note.Path);
         try
         {
-            return ListFolder(FolderFor(note.Path), extension)
+            return ListFolder(FolderFor(notePath), extension, edit)
                 .OrderByDescending(e => e, ByAge)
                 .Select(e => e.Version)
                 .ToList();
@@ -207,11 +222,11 @@ internal sealed partial class NoteHistory
     /// version, and for a newest version from the future. Throws <see cref="NoteHistoryException"/> like
     /// <see cref="Versions"/>.
     /// </summary>
-    public bool KeptWithin(string notePath, TimeSpan gap)
+    public bool KeptWithin(string notePath, TimeSpan gap, NoteFileEdit? edit = null)
     {
         try
         {
-            Entry? newest = ListFolder(FolderFor(notePath), KindOf(notePath)).OrderByDescending(e => e, ByAge).FirstOrDefault();
+            Entry? newest = ListFolder(FolderFor(notePath), KindOf(notePath), edit).OrderByDescending(e => e, ByAge).FirstOrDefault();
             if (newest is null)
             {
                 return false;
@@ -230,27 +245,20 @@ internal sealed partial class NoteHistory
     /// Reads the version <paramref name="id"/> of <paramref name="note"/> (found like <see cref="Versions"/>, never
     /// through a link, at most <see cref="MaxVersionBytes"/>). False when there is no such version or it can't be read.
     /// </summary>
-    public bool TryRead(NoteInfo note, string id, out byte[]? bytes, Func<string, FileStream>? open = null)
+    public bool TryRead(NoteInfo note, string id, out byte[]? bytes, NoteFileEdit? edit = null)
     {
         bytes = null;
         try
         {
-            Entry? match = ListFolder(FolderFor(note.Path), KindOf(note.Path))
+            Entry? match = ListFolder(FolderFor(note.Path), KindOf(note.Path), edit)
                 .FirstOrDefault(e => string.Equals(e.Version.Id, id, StringComparison.Ordinal));
             if (match is null)
             {
                 return false;
             }
 
-            if (open is null)
-            {
-                bytes = BoundedFile.Read(match.File.FullName, MaxVersionBytes);
-            }
-            else
-            {
-                using FileStream version = open(match.File.FullName);
-                bytes = BoundedFile.Read(version, MaxVersionBytes);
-            }
+            bytes = edit?.Read(match.Path, MaxVersionBytes) ?? BoundedFile.Read(match.Path, MaxVersionBytes);
+            edit?.Verify();
             return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -282,7 +290,7 @@ internal sealed partial class NoteHistory
         : path.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + path[2..] : @"\\?\" + path;
 
     // See RemoveHistory.
-    internal static void Remove(string notePath, string? extension, Action<string, bool>? remove = null)
+    internal static void Remove(string notePath, string? extension)
     {
         string parent = Path.Combine(Path.GetDirectoryName(notePath) ?? string.Empty, FolderName);
         string folder = FolderFor(notePath);
@@ -297,12 +305,12 @@ internal sealed partial class NoteHistory
         {
             if (Parse(file, extension) is not null)
             {
-                NoteStore.RemoveFile(file.FullName, remove);
+                file.Delete();
             }
         }
 
-        NoteStore.RemoveIfEmpty(folder, remove);
-        NoteStore.RemoveIfEmpty(parent, remove);
+        NoteStore.RemoveIfEmpty(folder);
+        NoteStore.RemoveIfEmpty(parent);
     }
 
     // Moves the history of the note at from to the note at to (their folders may differ). False, moving nothing, when
@@ -346,7 +354,7 @@ internal sealed partial class NoteHistory
             ? NoteStore.SensitiveExtension
             : PlainExtension;
 
-    private static string FileName(string id, string? sealedTitle) =>
+    internal static string FileName(string id, string? sealedTitle) =>
         sealedTitle is null ? id + PlainExtension : id + "~" + sealedTitle + NoteStore.SensitiveExtension;
 
     // Creates .history and the note's folder in it when missing; refuses a place that is a file, a link or a reparse point.
@@ -376,8 +384,13 @@ internal sealed partial class NoteHistory
 
     // The valid versions in a note's history folder (of one kind when extension is set). Missing: empty. A .history or
     // note folder that is a file, a link or a reparse point throws.
-    private static List<Entry> ListFolder(string folder, string? extension)
+    private static List<Entry> ListFolder(string folder, string? extension, NoteFileEdit? edit = null)
     {
+        if (edit is not null)
+        {
+            return edit.List(folder).Where(f => !f.Directory)
+                .Select(f => ParseName(Path.Combine(folder, f.Name), f.Length, extension)).OfType<Entry>().ToList();
+        }
         string parent = Path.GetDirectoryName(folder) ?? string.Empty;
         foreach (string place in new[] { parent, folder })
         {
@@ -407,7 +420,12 @@ internal sealed partial class NoteHistory
             return null;
         }
 
-        string name = file.Name;
+        return ParseName(file.FullName, file.Length, extension);
+    }
+
+    private static Entry? ParseName(string path, long length, string? extension)
+    {
+        string name = Path.GetFileName(path);
         if (name.EndsWith(PlainExtension, StringComparison.Ordinal) && !name.Contains('~', StringComparison.Ordinal))
         {
             if (extension is not null && extension != PlainExtension)
@@ -417,7 +435,7 @@ internal sealed partial class NoteHistory
 
             string id = name[..^PlainExtension.Length];
             return ParseId(id) is { } parsed
-                ? new Entry(file, new NoteVersion(id, parsed.Utc, file.Length, null), parsed.Sequence, PlainExtension)
+                ? new Entry(path, new NoteVersion(id, parsed.Utc, length, null), parsed.Sequence, PlainExtension)
                 : null;
         }
 
@@ -433,7 +451,7 @@ internal sealed partial class NoteHistory
             string rest = name[(tilde + 1)..];
             string title = rest[..^NoteStore.SensitiveExtension.Length];
             return ParseId(id) is { } parsed && IsStoredTitle(title)
-                ? new Entry(file, new NoteVersion(id, parsed.Utc, file.Length, title), parsed.Sequence, NoteStore.SensitiveExtension)
+                ? new Entry(path, new NoteVersion(id, parsed.Utc, length, title), parsed.Sequence, NoteStore.SensitiveExtension)
                 : null;
         }
 
@@ -469,11 +487,11 @@ internal sealed partial class NoteHistory
 
     // Removes the oldest versions until at most MaxVersionsPerNote are left and they take at most MaxBytesPerNote;
     // the version kept is never removed.
-    private static void Prune(string folder, string kept)
+    private static void Prune(string folder, string kept, NoteFileEdit? edit)
     {
-        List<Entry> oldestFirst = ListFolder(folder, null).OrderBy(e => e, ByAge).ToList();
+        List<Entry> oldestFirst = ListFolder(folder, null, edit).OrderBy(e => e, ByAge).ToList();
         int count = oldestFirst.Count;
-        long total = oldestFirst.Sum(e => e.File.Length);
+        long total = oldestFirst.Sum(e => e.Version.Length);
         foreach (Entry entry in oldestFirst)
         {
             if (count <= MaxVersionsPerNote && total <= MaxBytesPerNote)
@@ -486,29 +504,19 @@ internal sealed partial class NoteHistory
                 continue;
             }
 
-            long length = entry.File.Length;
-            entry.File.Delete();
+            long length = entry.Version.Length;
+            if (edit is null)
+            {
+                File.Delete(entry.Path);
+            }
+            else
+            {
+                edit.Discard(entry.Path);
+            }
             count--;
             total -= length;
         }
     }
 
-    private sealed class Entry
-    {
-        public Entry(FileInfo file, NoteVersion version, int sequence, string extension)
-        {
-            File = file;
-            Version = version;
-            Sequence = sequence;
-            Extension = extension;
-        }
-
-        public FileInfo File { get; }
-
-        public NoteVersion Version { get; }
-
-        public int Sequence { get; }
-
-        public string Extension { get; }
-    }
+    private sealed record Entry(string Path, NoteVersion Version, int Sequence, string Extension);
 }

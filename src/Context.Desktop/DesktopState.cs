@@ -577,7 +577,10 @@ internal sealed class DesktopState
             if (notes.TryFind(name, out NoteInfo? plain) && plain is not null)
             {
                 string text = NoteStore.ReadSelectedForEdit(plain, name.Resolved(plain)).Text;
-                return new HistoryView(HistoryKind.Shown, HistoryStore.Versions(plain), text);
+                using NoteFileEdit? files = name.BeginEdit();
+                IReadOnlyList<NoteVersion> versions = HistoryStore.Versions(plain, files);
+                files?.Verify();
+                return new HistoryView(HistoryKind.Shown, versions, text);
             }
 
             if (notes.TryFindSensitive(name, out NoteInfo? found) && found is not null
@@ -612,7 +615,8 @@ internal sealed class DesktopState
         {
             if (notes.TryFind(name, out NoteInfo? plain) && plain is not null)
             {
-                return HistoryStore.TryRead(plain, id, out byte[]? bytes) && bytes is not null
+                using NoteFileEdit? files = name.BeginEdit();
+                return HistoryStore.TryRead(plain, id, out byte[]? bytes, files) && bytes is not null
                     ? NoteStore.DecodeText(bytes).Replace("\r\n", "\n", StringComparison.Ordinal)
                     : null;
             }

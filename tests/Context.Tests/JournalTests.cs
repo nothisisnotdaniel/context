@@ -30,6 +30,65 @@ public sealed class JournalTests : IDisposable
     }
 
     [Fact]
+    public void ManySeries_CloseEachDirectoryAndKeepTheLastMeetingAndCalendar()
+    {
+        NoteStore store = new(root);
+        store.Create("Meetings");
+        string meetings = Directory.CreateDirectory(Path.Combine(root, "Meetings")).FullName;
+        for (int i = 0; i < 64; i++)
+        {
+            string series = "Series-" + i.ToString("D2", CultureInfo.InvariantCulture);
+            File.WriteAllText(Path.Combine(meetings, series + ".md"), "Series page");
+            string folder = Directory.CreateDirectory(Path.Combine(meetings, series)).FullName;
+            File.WriteAllText(Path.Combine(folder, i == 63 ? "2026-10-29.md" : "Agenda.md"), "Meeting page");
+        }
+        CalendarStore calendar = new(root, TimeZoneInfo.Utc);
+        Directory.CreateDirectory(calendar.Folder);
+        File.WriteAllText(Path.Combine(calendar.Folder, "local.ics"),
+            "BEGIN:VCALENDAR\nBEGIN:VEVENT\nSUMMARY:Independent\nDTSTART:20261029T090000Z\nEND:VEVENT\nEND:VCALENDAR");
+        using JournalDirectory notes = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(root));
+        using JournalDirectory calendars = Assert.IsType<JournalDirectory>(notes.BindCalendar());
+        List<SafeFileHandle> active = [];
+        int peak = 0;
+        notes.FolderOpened = handle =>
+        {
+            active.RemoveAll(h => h.IsClosed);
+            active.Add(handle);
+            peak = Math.Max(peak, active.Count);
+            if (active.Count > 2)
+            {
+                throw new IOException("Fixture series-handle budget reached.");
+            }
+        };
+        using Journal journal = new(notes.ListNotes, notes.OpenNote, Today, Oldest(calendar),
+            day => calendar.Day(day, [], calendars.ReadCalendars()).Appointments);
+        JournalDay entry = Assert.Single(journal.ReadBatch());
+        Assert.Equal("Meetings/Series-63/2026-10-29", Assert.Single(entry.Meetings));
+        Assert.Equal("Independent", Assert.Single(entry.Appointments).Title);
+        Assert.Equal(2, peak);
+        Assert.All(active, handle => Assert.True(handle.IsClosed));
+    }
+
+    [Fact]
+    public void SelectedRename_CarriesTheExactHistoryDirectory()
+    {
+        const string Name = "2026-10-29 Review ";
+        NoteStore store = new(root);
+        string path = Path.Combine(root, Name + ".md");
+        File.WriteAllText(path, "#meeting\r\nFields:: original");
+        string folder = NoteHistory.FolderFor(path);
+        NoteHistory history = new(store, () => new DateTime(2026, 10, 29, 9, 0, 0, DateTimeKind.Utc));
+        string id = Assert.IsType<string>(history.Keep(path, "Original version"u8.ToArray()));
+        using JournalDirectory source = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(root));
+        NoteInfo note = Assert.Single(source.ListNotes());
+        NoteInfo moved = Assert.IsType<NoteInfo>(store.Rename(NoteReference.Bound(note, source), "Renamed"));
+        Assert.False(Directory.Exists(folder));
+        Assert.Equal("#meeting\r\nFields:: original", File.ReadAllText(moved.Path));
+        Assert.True(history.TryRead(moved, id, out byte[]? version));
+        Assert.Equal("Original version"u8.ToArray(), version);
+    }
+
+    [Fact]
     public void LowercaseMeetingsRoot_QualifiesWithoutCalendar()
     {
         NoteStore notes = new(root);

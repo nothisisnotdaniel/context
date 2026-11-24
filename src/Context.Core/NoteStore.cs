@@ -348,8 +348,10 @@ internal sealed class NoteStore
         string folder = Path.GetDirectoryName(source.Note.Path) ?? root;
         string target = Path.Combine(folder, title + Extension);
         bool caseOnly = string.Equals(source.Note.Title, title, StringComparison.OrdinalIgnoreCase);
-        MoveTree(source, target, Path.Combine(folder, title), newName, caseOnly);
-        return new NoteInfo(newName, File.GetLastWriteTime(target), target);
+        using NoteFileEdit? edit = name.BeginEdit();
+        MoveTree(source, target, Path.Combine(folder, title), newName, caseOnly, edit);
+        edit?.Commit();
+        return new NoteInfo(newName, edit is null ? File.GetLastWriteTime(target) : source.Note.Modified, target);
     }
 
     /// <summary>
@@ -364,6 +366,17 @@ internal sealed class NoteStore
     /// <paramref name="name"/> names no note.
     /// </summary>
     public NoteInfo? Move(NoteReference name, string? newParent)
+    {
+        using NoteFileEdit? edit = name.BeginEdit();
+        NoteInfo? result = Move(name, newParent, edit);
+        if (result is not null)
+        {
+            edit?.Commit();
+        }
+        return result;
+    }
+
+    internal NoteInfo? Move(NoteReference name, string? newParent, NoteFileEdit? edit)
     {
         List<Entry> entries = ListEntries();
         Entry? source = FindEntry(entries, name);
@@ -405,13 +418,22 @@ internal sealed class NoteStore
         }
 
         string folder = owner is null ? root : ChildFolderFor(owner);
+        string target = Path.Combine(folder, title + Extension);
+        if (edit is not null)
+        {
+            if (owner is not null)
+            {
+                edit.Expect(owner.Note.Path);
+            }
+            edit.EnsureFolder(folder);
+            MoveTree(source, target, Path.Combine(folder, title), newName, false, edit);
+            return new NoteInfo(newName, source.Note.Modified, target);
+        }
         bool created = !Directory.Exists(folder);
         PrivateFile.CreateFolder(folder);
-        string target = Path.Combine(folder, title + Extension);
         try
         {
-            name.RememberDestination(new NoteInfo(newName, source.Note.Modified, target));
-            MoveTree(source, target, Path.Combine(folder, title), newName, caseOnly: false);
+            MoveTree(source, target, Path.Combine(folder, title), newName, caseOnly: false, null);
         }
         catch (Exception) when (created)
         {
@@ -443,6 +465,13 @@ internal sealed class NoteStore
     /// </summary>
     public bool Delete(NoteReference name, bool removeHistory = false, bool removeAttachments = false)
     {
+        using NoteFileEdit? edit = name.BeginEdit();
+        return Delete(name, removeHistory, removeAttachments, edit);
+    }
+
+    internal bool Delete(NoteReference name, bool removeHistory, bool removeAttachments, NoteFileEdit? edit,
+        IReadOnlyList<string>? unlinked = null)
+    {
         List<Entry> entries = ListEntries();
         Entry? match = FindEntry(entries, name);
         if (match is null)
@@ -451,28 +480,119 @@ internal sealed class NoteStore
         }
 
         List<Entry> subtree = entries.Where(e => ReferenceEquals(e, match) || IsBelow(e.Note.Name, match.Note.Name)).ToList();
+        if (edit is not null)
+        {
+            DeleteSelected(subtree, removeHistory, removeAttachments, edit, unlinked ?? []);
+            return true;
+        }
         BeforeDeleteFiles?.Invoke();
         foreach (Entry entry in subtree.OrderByDescending(e => e.Note.Name.Length))
         {
             if (removeHistory)
             {
-                NoteHistory.Remove(entry.Note.Path, null, name.Remove);
+                NoteHistory.Remove(entry.Note.Path, null);
             }
 
-            RemoveFile(entry.Note.Path, name.Remove);
+            File.Delete(entry.Note.Path);
         }
 
         foreach (string folder in subtree.Select(e => e.ChildFolder).OfType<string>().OrderByDescending(f => f.Length))
         {
             if (removeAttachments)
             {
-                RemoveAttachmentsFolder(Path.Combine(folder, NoteAttachments.FolderName), name.Remove);
+                RemoveAttachmentsFolder(Path.Combine(folder, NoteAttachments.FolderName));
             }
 
-            RemoveIfEmpty(folder, name.Remove);
+            RemoveIfEmpty(folder);
         }
 
         return true;
+    }
+
+    private void DeleteSelected(List<Entry> subtree, bool history, bool attachments, NoteFileEdit edit, IReadOnlyList<string> unlinked)
+    {
+        List<string> files = [];
+        Dictionary<string, IReadOnlyList<NoteVersion>> histories = new(StringComparer.Ordinal);
+        HashSet<string> folders = new(StringComparer.Ordinal);
+        foreach (Entry entry in subtree)
+        {
+            files.Add(entry.Note.Path);
+            if (history)
+            {
+                string folder = NoteHistory.FolderFor(entry.Note.Path);
+                histories[entry.Note.Path] = NoteHistory.ListVersions(entry.Note.Path, edit, null);
+                foreach (NoteVersion version in histories[entry.Note.Path])
+                {
+                    files.Add(Path.Combine(folder, NoteHistory.FileName(version.Id, version.SealedTitle)));
+                }
+                folders.Add(folder);
+                folders.Add(Path.GetDirectoryName(folder)!);
+            }
+            if (entry.ChildFolder is { } children)
+            {
+                edit.Expect(children, true);
+                folders.Add(children);
+                if (attachments)
+                {
+                    CollectAttachments(Path.Combine(children, NoteAttachments.FolderName));
+                }
+            }
+        }
+        foreach (string path in unlinked)
+        {
+            files.Add(path);
+            folders.Add(Path.GetDirectoryName(path)!);
+        }
+        foreach (string path in files)
+        {
+            edit.Expect(path);
+        }
+        BeforeDeleteFiles?.Invoke();
+        edit.Verify();
+        foreach ((string path, IReadOnlyList<NoteVersion> kept) in histories)
+        {
+            if (!NoteHistory.ListVersions(path, edit, null).SequenceEqual(kept))
+            {
+                throw new NoteHistoryException();
+            }
+        }
+        foreach (string path in files)
+        {
+            edit.Discard(path);
+        }
+        foreach (string path in histories.Keys)
+        {
+            if (NoteHistory.ListVersions(path, edit, null).Count != 0)
+            {
+                throw new NoteHistoryException();
+            }
+        }
+        edit.Commit();
+        foreach (string folder in folders.OrderByDescending(f => f.Length))
+        {
+            edit.RemoveEmpty(folder);
+        }
+
+        void CollectAttachments(string folder)
+        {
+            if (!edit.Exists(folder, true))
+            {
+                return;
+            }
+            folders.Add(folder);
+            foreach (NoteFileEntry item in edit.List(folder))
+            {
+                string path = Path.Combine(folder, item.Name);
+                if (item.Directory)
+                {
+                    CollectAttachments(path);
+                }
+                else
+                {
+                    files.Add(path);
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -660,6 +780,40 @@ internal sealed class NoteStore
             return NoteSaveResult.TooLarge;
         }
 
+        using NoteFileEdit? edit = opened.Target.BeginEdit();
+        if (edit is not null)
+        {
+            byte[] previous = edit.Read(opened.Path, MaxEditBytes);
+            if (EditableNote.Hash(previous) != opened.Version)
+            {
+                return NoteSaveResult.ChangedOnDisk;
+            }
+            history?.Keep(opened.Path, previous, edit: edit);
+            BeforeEditPublish?.Invoke();
+            edit.Verify();
+            edit.Discard(opened.Path);
+            edit.WriteNew(opened.Path, plain);
+            edit.Commit();
+        }
+        else
+        {
+            check = SavePlain(opened, history, plain);
+            if (check != NoteSaveResult.Saved)
+            {
+                return check;
+            }
+        }
+
+        (_, bool savedCrlf, IReadOnlyList<bool>? savedLines) = LineEndings.Read(onDisk);
+        saved = new EditableNote(opened.Name, opened.Path, plainText, EditableNote.Hash(plain), savedCrlf, opened.HadBom, savedLines)
+        {
+            Target = opened.Target,
+        };
+        return NoteSaveResult.Saved;
+    }
+
+    private NoteSaveResult SavePlain(EditableNote opened, NoteHistory? history, byte[] plain)
+    {
         string folder = Path.GetDirectoryName(opened.Path) ?? root;
         // Named after the last segment: a subpage's name holds a '/', its file name doesn't.
         string title = opened.Name[(opened.Name.LastIndexOf('/') + 1)..];
@@ -671,7 +825,7 @@ internal sealed class NoteStore
                 stream.Write(plain);
             }
 
-            check = CheckVersion(opened, out byte[]? previous);
+            NoteSaveResult check = CheckVersion(opened, out byte[]? previous);
             if (check != NoteSaveResult.Saved)
             {
                 return check;
@@ -692,11 +846,6 @@ internal sealed class NoteStore
             }
         }
 
-        (_, bool savedCrlf, IReadOnlyList<bool>? savedLines) = LineEndings.Read(onDisk);
-        saved = new EditableNote(opened.Name, opened.Path, plainText, EditableNote.Hash(plain), savedCrlf, opened.HadBom, savedLines)
-        {
-            Target = opened.Target,
-        };
         return NoteSaveResult.Saved;
     }
 
@@ -1122,6 +1271,7 @@ internal sealed class NoteStore
     internal Action? BeforeSaveMove { get; set; }
 
     internal Action? BeforeDeleteFiles { get; set; }
+    internal Action? BeforeEditPublish { get; set; }
 
     // Every listed note with the folder holding its subpages (null when there is none).
     private List<Entry> ListEntries()
@@ -1365,8 +1515,38 @@ internal sealed class NoteStore
 
     // Moves a note's history, then its file, then its child folder, never over anything. When a later step fails the
     // earlier ones are moved back.
-    private void MoveTree(Entry source, string target, string folderTarget, string newName, bool caseOnly)
+    private void MoveTree(Entry source, string target, string folderTarget, string newName, bool caseOnly, NoteFileEdit? edit)
     {
+        if (edit is not null)
+        {
+            string oldHistory = NoteHistory.FolderFor(source.Note.Path), newHistory = NoteHistory.FolderFor(target);
+            if (!caseOnly && edit.Exists(newHistory, true))
+            {
+                throw new IOException($"{newName} already has a history.");
+            }
+            if (source.ChildFolder is not null)
+            {
+                edit.Expect(source.ChildFolder, true);
+            }
+            if (edit.Exists(oldHistory, true))
+            {
+                foreach (NoteVersion v in NoteHistory.ListVersions(source.Note.Path, edit, null))
+                {
+                    edit.Expect(Path.Combine(oldHistory, NoteHistory.FileName(v.Id, v.SealedTitle)));
+                }
+                edit.EnsureFolder(Path.GetDirectoryName(newHistory)!);
+                edit.Relocate(oldHistory, newHistory, true);
+            }
+            BeforeEditPublish?.Invoke();
+            edit.Verify();
+            edit.Relocate(source.Note.Path, target);
+            if (source.ChildFolder is not null)
+            {
+                BeforeFolderMove?.Invoke();
+                edit.Relocate(source.ChildFolder, folderTarget, true);
+            }
+            return;
+        }
         if (!NoteHistory.MoveHistory(source.Note.Path, target, caseOnly))
         {
             throw new IOException($"{newName} already has a history.");
@@ -1436,30 +1616,14 @@ internal sealed class NoteStore
 
     // Removes a child folder's .attachments with everything in it, only when it is a real folder (not a link or
     // reparse point); a file inside is deleted, never followed. Never throws: what can't be removed stays.
-    private static void RemoveAttachmentsFolder(string folder, Action<string, bool>? remove)
+    private static void RemoveAttachmentsFolder(string folder)
     {
         try
         {
             DirectoryInfo info = new DirectoryInfo(folder);
             if (info.Exists && !IsLink(info))
             {
-                if (remove is null)
-                {
-                    info.Delete(recursive: true);
-                    return;
-                }
-                foreach (FileSystemInfo entry in info.EnumerateFileSystemInfos())
-                {
-                    if (entry is DirectoryInfo && !IsLink(entry))
-                    {
-                        RemoveAttachmentsFolder(entry.FullName, remove);
-                    }
-                    else
-                    {
-                        remove(entry.FullName, entry is DirectoryInfo);
-                    }
-                }
-                remove(folder, true);
+                info.Delete(recursive: true);
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -1469,38 +1633,19 @@ internal sealed class NoteStore
     }
 
     // Removes a folder only when it is empty; never follows a link and never throws.
-    internal static void RemoveIfEmpty(string folder, Action<string, bool>? remove = null)
+    internal static void RemoveIfEmpty(string folder)
     {
         try
         {
             DirectoryInfo info = new DirectoryInfo(folder);
             if (info.Exists && !IsLink(info) && !info.EnumerateFileSystemInfos().Any())
             {
-                if (remove is null)
-                {
-                    info.Delete(recursive: false);
-                }
-                else
-                {
-                    remove(folder, true);
-                }
+                info.Delete(recursive: false);
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Left in place.
-        }
-    }
-
-    internal static void RemoveFile(string path, Action<string, bool>? remove)
-    {
-        if (remove is null)
-        {
-            File.Delete(path);
-        }
-        else
-        {
-            remove(path, false);
         }
     }
 

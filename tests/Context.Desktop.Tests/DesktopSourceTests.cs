@@ -964,13 +964,15 @@ public sealed class DesktopSourceTests
                 text = text.Replace(CrashLogDelete, string.Empty, StringComparison.Ordinal);
             }
 
-            // The directory adapter tracks its handles in memory. Its Windows publisher moves
-            // one private temporary file, without overwrite, inside the directory held for the move.
+            // The adapter records undo steps in memory. Its two managed moves use verified,
+            // held Windows directories and never overwrite an occupied destination.
             string[] fileOperations = file switch
             {
-                JournalFile => ["folders.Clear();", "folders.Add(path, (identity, handle));"],
                 "src/Context.Desktop/JournalDirectory.Mutations.cs" =>
-                    ["File.Move(Path.Combine(windowsPath, temp), Path.Combine(windowsPath, name), overwrite: false);"],
+                    ["Directory.Move(oldPath, newPath);", "File.Move(oldPath, newPath, overwrite: false);"],
+                "src/Context.Desktop/JournalDirectory.Edit.cs" =>
+                    ["changes.Add(new(() => RemoveOwned", "changes.Add(new(created.Rollback", "changes.Add(new(Undo,", "changes.Clear();",
+                        "absent.Add(path);", "absent.Add(to + child[from.Length..]);", "absent.Add(from);"],
                 _ => [],
             };
             foreach (string operation in fileOperations)
@@ -2251,9 +2253,9 @@ public sealed class DesktopSourceTests
             }.Order(StringComparer.Ordinal),
             found.Order(StringComparer.Ordinal));
         string journal = File.ReadAllText(Path.Combine(root, JournalFile));
-        Assert.Equal(["CreateFileW", "FGetAttrList", "GetAttrListBulk", "GetDirectoryInformation", "GetFileInformationByHandleEx",
+        Assert.Equal(["CreateDirectoryW", "CreateFileW", "FGetAttrList", "GetAttrListBulk", "GetDirectoryInformation", "GetFileInformationByHandleEx",
             "GetFileType", "GetFinalPathNameByHandleW", "LinuxRenameAt", "MacArmCreateAt", "MacRenameAt", "NtOpenFile",
-            "SetFileInformationByHandle", "Statx", "UnixCreateAt", "UnixOpen", "UnixOpenAt", "UnixUnlinkAt"],
+            "SetFileInformationByHandle", "Statx", "UnixCreateAt", "UnixMakeDirectoryAt", "UnixOpen", "UnixOpenAt", "UnixUnlinkAt"],
             Regex.Matches(journal, @"\bextern\s+\w+\s+(\w+)\(").Select(match => match.Groups[1].Value).Order(StringComparer.Ordinal));
     }
 

@@ -13,7 +13,10 @@ internal sealed partial class JournalDirectory : INoteFileSource, IDisposable
     private readonly SafeFileHandle original;
     private readonly FileId id;
     private readonly string resolvedRoot;
-    private readonly Dictionary<string, (FileId Id, SafeFileHandle Handle)> folders = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, EntryIdentity> observed = new(StringComparer.Ordinal);
+    // Functional storage seams. The observer sees the actual folder handle and its lifetime.
+    internal Action<SafeFileHandle>? FolderOpened { get; set; }
+    internal Func<string, bool>? EntryAvailable { get; set; }
 
     private JournalDirectory(string root, JournalDirectory? parent, SafeFileHandle original)
     {
@@ -47,7 +50,13 @@ internal sealed partial class JournalDirectory : INoteFileSource, IDisposable
         JournalDirectory retained = Own(root, parent, OpenCurrent(shareDelete: true));
         try
         {
-            WithNoteParent(note, (_, _) => true, retain: retained);
+            using FileStream file = OpenNote(note);
+            retained.EntryAvailable = EntryAvailable;
+            WithNoteParent(note, (_, _) =>
+            {
+                retained.Remember(note.Path, Stamp(file.SafeFileHandle, false));
+                return true;
+            }, retain: retained);
             return retained;
         }
         catch
@@ -74,11 +83,6 @@ internal sealed partial class JournalDirectory : INoteFileSource, IDisposable
     {
         lock (original)
         {
-            foreach ((_, SafeFileHandle handle) in folders.Values)
-            {
-                handle.Dispose();
-            }
-            folders.Clear();
             original.Dispose();
         }
     }
@@ -129,7 +133,8 @@ internal sealed partial class JournalDirectory : INoteFileSource, IDisposable
             try
             {
                 using SafeFileHandle folder = OpenHandle(child, directory: true, directory, shareDelete: true, enumerate: true);
-                KeepFolder(Path.Combine(path, child), child, directory, DirectoryId(folder));
+                FolderOpened?.Invoke(folder);
+                Remember(Path.Combine(path, child), Stamp(folder, true));
                 subpages = NotesAtLevel(folder, Path.Combine(path, child), name).ToArray();
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -177,12 +182,23 @@ internal sealed partial class JournalDirectory : INoteFileSource, IDisposable
 
     public FileStream OpenNote(NoteInfo note) => OpenNote(note, null);
 
-    public void RememberParent(NoteInfo note) => WithNoteParent(note, (_, _) => true);
-
     internal FileStream OpenNote(NoteInfo note, Func<SafeFileHandle>? openFile,
         Func<SafeFileHandle, FileAttributes>? readDirectoryAttributes = null) =>
-        WithNoteParent(note, (folder, component) => CheckedStream(openFile?.Invoke() ?? OpenHandle(component, false, folder),
-            Path.Join(resolvedRoot, Path.GetRelativePath(root, note.Path))), readDirectoryAttributes);
+        WithNoteParent(note, (folder, component) =>
+        {
+            FileStream file = CheckedStream(openFile?.Invoke() ?? OpenHandle(component, false, folder),
+                Path.Join(resolvedRoot, Path.GetRelativePath(root, note.Path)));
+            try
+            {
+                Remember(note.Path, Stamp(file.SafeFileHandle, false));
+                return file;
+            }
+            catch
+            {
+                file.Dispose();
+                throw;
+            }
+        }, readDirectoryAttributes);
 
     private T WithNoteParent<T>(NoteInfo note, Func<SafeFileHandle, string, T> action,
         Func<SafeFileHandle, FileAttributes>? readDirectoryAttributes = null, JournalDirectory? retain = null)
@@ -224,45 +240,26 @@ internal sealed partial class JournalDirectory : INoteFileSource, IDisposable
                 CheckWindowsType(child, (readDirectoryAttributes ?? File.GetAttributes)(child), directory: true);
             }
             string childPath = Path.Combine(path, component);
-            FileId identity = DirectoryId(child);
-            KeepFolder(childPath, component, folder, identity);
-            retain?.KeepFolder(childPath, component, folder, identity);
+            FolderOpened?.Invoke(child);
+            EntryIdentity identity = Stamp(child, true);
+            Remember(childPath, identity);
+            retain?.Remember(childPath, identity);
             return OpenBelow(child, childPath, name, depth + 1);
         }
     }
 
-    // Keep one handle per containing folder so its file ID cannot be recycled. A mounted editor
-    // takes independent handles for just the chain leading to its selected file.
-    private void KeepFolder(string path, string component, SafeFileHandle parentHandle, FileId identity)
+    // Pair the volume/file ID with the object's creation time so series can be closed
+    // immediately after listing. Edits only advance identities for their own publications.
+    private void Remember(string path, EntryIdentity identity)
     {
         lock (original)
         {
-            if (original.IsClosed)
+            if (original.IsClosed || EntryAvailable?.Invoke(path) == false
+                || (observed.TryGetValue(path, out EntryIdentity known) && known != identity))
             {
                 throw Ineligible();
             }
-            if (folders.TryGetValue(path, out (FileId Id, SafeFileHandle Handle) known))
-            {
-                if (known.Id != identity)
-                {
-                    throw Ineligible();
-                }
-                return;
-            }
-            SafeFileHandle handle = OpenHandle(component, true, parentHandle, shareDelete: true);
-            try
-            {
-                if (DirectoryId(handle) != identity)
-                {
-                    throw Ineligible();
-                }
-                folders.Add(path, (identity, handle));
-            }
-            catch
-            {
-                handle.Dispose();
-                throw;
-            }
+            observed[path] = identity;
         }
     }
 
@@ -346,6 +343,10 @@ internal sealed partial class JournalDirectory : INoteFileSource, IDisposable
         }
         flags |= noFollow | (directory ? directoryFlag : 0);
         int fd = parent is null ? UnixOpen(path, flags) : UnixOpenAt(parent, path, flags);
+        if (fd == -1 && Marshal.GetLastPInvokeError() == 2)
+        {
+            throw new FileNotFoundException();
+        }
         return new SafeFileHandle((IntPtr)fd, ownsHandle: true);
     }
 
@@ -378,6 +379,10 @@ internal sealed partial class JournalDirectory : INoteFileSource, IDisposable
             if (status != 0)
             {
                 child.Dispose();
+                if (status is unchecked((int)0xc0000034) or unchecked((int)0xc000003a))
+                {
+                    throw new FileNotFoundException();
+                }
                 throw Ineligible();
             }
             return child;
@@ -461,6 +466,29 @@ internal sealed partial class JournalDirectory : INoteFileSource, IDisposable
 
     private static FileId DirectoryId(SafeFileHandle handle) => Identity(handle, directory: true);
 
+    private readonly record struct EntryIdentity(FileId Id, long SecondsOrTicks, uint Nanoseconds, bool ChangeTime = false);
+
+    private static EntryIdentity Stamp(SafeFileHandle handle, bool directory)
+    {
+        FileId fileId = Identity(handle, directory);
+        if (OperatingSystem.IsLinux())
+        {
+            // Older volumes may only supply ctime. A later metadata change there
+            // invalidates the observation conservatively.
+            const uint Birth = 0x800, Change = 0x80;
+            if (Statx(handle, "", 0x1000, (int)(Birth | Change), out LinuxStat stat) != 0)
+            {
+                throw Ineligible();
+            }
+            if ((stat.Mask & Birth) != 0)
+            {
+                return new(fileId, stat.BirthSeconds, stat.BirthNanoseconds);
+            }
+            return (stat.Mask & Change) != 0 ? new(fileId, stat.ChangeSeconds, stat.ChangeNanoseconds, true) : throw Ineligible();
+        }
+        return new(fileId, File.GetCreationTimeUtc(handle).Ticks, 0);
+    }
+
     private static FileId Identity(SafeFileHandle handle, bool directory)
     {
         if (handle.IsInvalid)
@@ -515,6 +543,7 @@ internal sealed partial class JournalDirectory : INoteFileSource, IDisposable
     {
         [FieldOffset(0)] public ushort Count;
         [FieldOffset(4)] public uint Common;
+        [FieldOffset(16)] public uint File;
     }
 
     [StructLayout(LayoutKind.Explicit, Size = 256)]
@@ -523,6 +552,11 @@ internal sealed partial class JournalDirectory : INoteFileSource, IDisposable
         [FieldOffset(0)] public uint Mask;
         [FieldOffset(28)] public ushort Mode;
         [FieldOffset(32)] public ulong Inode;
+        [FieldOffset(40)] public long Size;
+        [FieldOffset(80)] public long BirthSeconds;
+        [FieldOffset(88)] public uint BirthNanoseconds;
+        [FieldOffset(96)] public long ChangeSeconds;
+        [FieldOffset(104)] public uint ChangeNanoseconds;
         [FieldOffset(112)] public long ModifiedSeconds;
         [FieldOffset(120)] public uint ModifiedNanoseconds;
         [FieldOffset(136)] public uint DeviceMajor;
@@ -575,11 +609,17 @@ internal sealed partial class JournalDirectory : INoteFileSource, IDisposable
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern uint GetFinalPathNameByHandleW(SafeFileHandle file, StringBuilder path, uint size, uint flags);
 
-    [DllImport("libc", EntryPoint = "open")]
+    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
     private static extern int UnixOpen([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
 
-    [DllImport("libc", EntryPoint = "openat")]
+    [DllImport("libc", EntryPoint = "openat", SetLastError = true)]
     private static extern int UnixOpenAt(SafeFileHandle parent, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, int flags);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern bool CreateDirectoryW(string path, IntPtr securityAttributes);
+
+    [DllImport("libc", EntryPoint = "mkdirat", SetLastError = true)]
+    private static extern int UnixMakeDirectoryAt(SafeFileHandle parent, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, uint mode);
 
     [DllImport("libc", EntryPoint = "openat")]
     private static extern int UnixCreateAt(SafeFileHandle parent, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, int flags, uint mode);

@@ -795,6 +795,7 @@ internal sealed class DesktopActions
     internal Action? AfterHistorySealed { get; set; }
 
     internal Action? AfterNoteSealed { get; set; }
+    internal Action? BeforePlainHistoryCleanup { get; set; }
 
     /// <summary>
     /// Appends <paramref name="text"/> as one dated line (<c>- yyyy-MM-dd HH:mm &lt;text&gt;</c>, local time) to the
@@ -3411,7 +3412,7 @@ internal sealed class DesktopActions
                 state.MoveDecisionOwners(oldName, renamedName);
             }
 
-            return UpdateLinks(plan, renamedName, plain ? source.Name : null) with { RelocatedNote = relocated };
+            return UpdateLinks(plan, renamedName, plain ? source.Name : null, selected.Source) with { RelocatedNote = relocated };
         }
         catch (NoteExistsException e)
         {
@@ -3434,7 +3435,7 @@ internal sealed class DesktopActions
     // (the plain note's name before the rename, job 353), the renamed note's matching "# <old name>" line is rewritten
     // in the same save as its own links, or in one save of its own when it links nowhere to itself; that save never
     // counts as a link update, and a failed one leaves the old line (the rename stays done).
-    private ActionResult UpdateLinks(LinkRenamePlan plan, string renamedName, string? titleFrom)
+    private ActionResult UpdateLinks(LinkRenamePlan plan, string renamedName, string? titleFrom, INoteFileSource? source)
     {
         int updated = 0;
         List<string> left = [];
@@ -3442,14 +3443,14 @@ internal sealed class DesktopActions
             && !plan.Notes.Any(planned => string.Equals(
                 NoteLinkRewriter.Moved(planned, plan.OldName, plan.NewName) ?? planned, renamedName, StringComparison.Ordinal)))
         {
-            _ = UpdateLinksIn(plan, renamedName, links: false, titleFrom, renamedName);
+            _ = UpdateLinksIn(plan, renamedName, links: false, titleFrom, renamedName, source);
         }
 
         foreach (string planned in plan.Notes)
         {
             string current = NoteLinkRewriter.Moved(planned, plan.OldName, plan.NewName) ?? planned;
             bool self = titleFrom is not null && string.Equals(current, renamedName, StringComparison.Ordinal);
-            switch (UpdateLinksIn(plan, current, links: true, self ? titleFrom : null, renamedName))
+            switch (UpdateLinksIn(plan, current, links: true, self ? titleFrom : null, renamedName, source))
             {
                 case NoteSaveResult.Saved:
                     updated++;
@@ -3651,7 +3652,7 @@ internal sealed class DesktopActions
         UpdateLinksIn(plan, current, links: true, null, null);
 
     private NoteSaveResult UpdateLinksIn(
-        LinkRenamePlan plan, string current, bool links, string? titleFrom, string? titleTo)
+        LinkRenamePlan plan, string current, bool links, string? titleFrom, string? titleTo, INoteFileSource? source = null)
     {
         try
         {
@@ -3662,7 +3663,8 @@ internal sealed class DesktopActions
                     return NoteSaveResult.Missing;
                 }
 
-                EditableNote opened = notes.ReadForEdit(found);
+                EditableNote opened = source is null ? notes.ReadForEdit(found)
+                    : NoteStore.ReadSelectedForEdit(found, NoteReference.Bound(found, source));
                 string rewritten = opened.Text;
                 if (links && !NoteLinkRewriter.TryRewrite(
                     opened.Text, plan.Before, plan.After, plan.OldName, plan.NewName, out rewritten))
@@ -4192,11 +4194,16 @@ internal sealed class DesktopActions
             // The names the note links are read before it goes; an unreadable note removes no attachment.
             notes.TryFind(reference, out NoteInfo? plain);
             NoteReference selected = plain is null ? reference : reference.Resolved(plain);
-            IReadOnlyList<string> linked = plain is null ? [] : attachments.LinkedNamesOf(selected);
-            if (plain is not null && notes.Delete(selected, removeHistory: true, removeAttachments: true))
+            using NoteFileEdit? edit = plain is null ? null : selected.BeginEdit();
+            IReadOnlyList<string> linked = plain is null ? [] : attachments.LinkedNamesOf(selected, edit);
+            IReadOnlyList<string>? unlinked = edit is null ? null : NoteAttachments.UnlinkedInSelection(plain!, linked, edit);
+            if (plain is not null && notes.Delete(selected, removeHistory: true, removeAttachments: true, edit, unlinked))
             {
                 // A file the cleanup can't remove stays and the delete is still done.
-                attachments.RemoveUnlinked(plain, linked, selected.Remove);
+                if (edit is null)
+                {
+                    attachments.RemoveUnlinked(plain, linked);
+                }
                 ChangeRecent(list => RecentNotes.Removed(list, plain.Name));
                 ChangePinned(list => PinnedNotes.Removed(list, plain.Name));
 
@@ -4563,9 +4570,9 @@ internal sealed class DesktopActions
 
     // Reads a plain note's saved text like the console's File.ReadAllText (UTF-8 unless a byte order mark says
     // otherwise), but bounded.
-    private static string ReadPlainCopy(NoteReference selected, NoteInfo note)
+    private static string ReadPlainCopy(NoteReference selected, NoteInfo note, NoteFileEdit? edit = null)
     {
-        byte[] bytes = selected.ReadBytes(note.Path, MaxNoteBytes);
+        byte[] bytes = edit?.Read(note.Path, MaxNoteBytes) ?? selected.ReadBytes(note.Path, MaxNoteBytes);
         using MemoryStream stream = new MemoryStream(bytes, writable: false);
         using StreamReader reader = new StreamReader(stream, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         return reader.ReadToEnd();
@@ -4606,7 +4613,9 @@ internal sealed class DesktopActions
         {
             NoteInfo found = note;
             NoteReference selected = reference.Resolved(found);
-            html = NoteHtml.Render(found.Title, ReadPlainCopy(selected, found), src => attachments.TryResolve(selected, src), leaveOutPrivate);
+            using NoteFileEdit? edit = selected.BeginEdit();
+            html = NoteHtml.Render(found.Title, ReadPlainCopy(selected, found, edit), src => attachments.TryResolve(selected, src, edit), leaveOutPrivate);
+            edit?.Verify();
         }
         catch (Exception)
         {
@@ -4774,9 +4783,13 @@ internal sealed class DesktopActions
                 return Refused(ActionReason.NoKeys, NoRecoveryText);
             }
 
-            if (new FileInfo(source.Path).Length > MaxNoteBytes)
+            using JournalDirectory.Edit edit = new(directory, source);
+            using (FileStream check = directory.OpenNote(source))
             {
-                return Refused(ActionReason.Invalid, TooLargeToSealText(source.Name));
+                if (check.Length > MaxNoteBytes)
+                {
+                    return Refused(ActionReason.Invalid, TooLargeToSealText(source.Name));
+                }
             }
 
             if (notes.ListSensitive().Any(n => string.Equals(n.Name, source.Name, StringComparison.OrdinalIgnoreCase)))
@@ -4785,7 +4798,7 @@ internal sealed class DesktopActions
             }
 
             // The text exactly as the file holds it (a byte order mark stays, as U+FEFF); only UTF-8 is sealed.
-            byte[] plain = selected.ReadBytes(source.Path, MaxNoteBytes);
+            byte[] plain = edit.Read(source.Path, MaxNoteBytes);
             string version = EditableNote.Hash(plain);
             string text;
             try
@@ -4801,43 +4814,29 @@ internal sealed class DesktopActions
             string target = Path.Combine(notes.Root, source.Name + NoteStore.SensitiveExtension);
 
             // The plain versions are sealed first, each under the id it has, so the history never stays readable.
-            List<JournalDirectory.CreatedFile> copies = [];
-            void WriteCopy(string path, byte[] bytes) => copies.Add(directory.WriteSealedCopy(path, bytes));
-            bool committed = false;
-            try
+            List<string> versions = [];
+            if (!SealHistory(source, recipients, edit, versions))
             {
-                if (!SealHistory(source, recipients, directory, WriteCopy))
-                {
-                    return Failed(ActionReason.WriteFailed, SealHistoryFailedText(source.Name));
-                }
-                AfterHistorySealed?.Invoke();
-                if (!IsVersion(source.Path, MaxNoteBytes, version, selected))
-                {
-                    return Refused(ActionReason.ChangedOnDisk, ChangedText(source.Name));
-                }
-                WriteCopy(target, file);
-                AfterNoteSealed?.Invoke();
-                if (!IsVersion(source.Path, MaxNoteBytes, version, selected) || !notes.Delete(selected))
-                {
-                    return Refused(ActionReason.ChangedOnDisk, ChangedText(source.Name));
-                }
-                committed = true;
+                return Failed(ActionReason.WriteFailed, SealHistoryFailedText(source.Name));
             }
-            finally
+            AfterHistorySealed?.Invoke();
+            if (!IsVersion(source.Path, MaxNoteBytes, version, selected))
             {
-                foreach (JournalDirectory.CreatedFile copy in copies)
-                {
-                    if (!committed)
-                    {
-                        copy.Rollback();
-                    }
-                    copy.Dispose();
-                }
+                return Refused(ActionReason.ChangedOnDisk, ChangedText(source.Name));
             }
-
-            // Only now the plain versions go; when that fails the sealed ones and the rest stay, and the user is told,
-            // since readable copies of a note now sealed are still on disk.
-            if (!RemoveHistoryQuietly(source.Path, ".md", selected.Remove))
+            edit.WriteNew(target, file);
+            AfterNoteSealed?.Invoke();
+            if (!IsVersion(source.Path, MaxNoteBytes, version, selected))
+            {
+                return Refused(ActionReason.ChangedOnDisk, ChangedText(source.Name));
+            }
+            edit.Verify();
+            string folder = NoteHistory.FolderFor(source.Path);
+            if (!state.HistoryStore.Versions(source, edit).Select(v => Path.Combine(folder, v.Id + ".md")).SequenceEqual(versions))
+            {
+                return Failed(ActionReason.WriteFailed, SealHistoryFailedText(source.Name));
+            }
+            if (!edit.FinishConversion(source.Path, versions, BeforePlainHistoryCleanup))
             {
                 return new ActionResult(ActionKind.Done, ActionReason.PlainHistoryLeft, source.Name);
             }
@@ -4854,8 +4853,15 @@ internal sealed class DesktopActions
     // True when a save keeps the previous bytes as a version: always for an explicit save; for an automatic one only
     // when the newest version is at least AutoVersionGap old (or there is none). Throws NoteHistoryException like
     // NoteHistory.Versions.
-    private bool KeepsVersion(EditableNote opened, bool auto) =>
-        !auto || !state.HistoryStore.KeptWithin(opened.Path, AutoVersionGap);
+    private bool KeepsVersion(EditableNote opened, bool auto)
+    {
+        if (!auto)
+        {
+            return true;
+        }
+        using NoteFileEdit? files = opened.Target.BeginEdit();
+        return !state.HistoryStore.KeptWithin(opened.Path, AutoVersionGap, files);
+    }
 
     private ActionResult SaveSensitiveNow(EditableNote opened, string text, bool auto)
     {
@@ -5009,20 +5015,24 @@ internal sealed class DesktopActions
 
     // Seals every plain version of source (the newest MaxVersionsPerNote, no key call) as <id>~<title>.ctxs next to
     // it. The caller owns each successful write until conversion commits.
-    private bool SealHistory(NoteInfo source, SealedRecipient[] recipients, JournalDirectory directory, Action<string, byte[]> write)
+    private bool SealHistory(NoteInfo source, SealedRecipient[] recipients, NoteFileEdit edit, List<string> versions)
     {
         NoteHistory history = state.HistoryStore;
         try
         {
-            foreach (NoteVersion kept in history.Versions(source).Take(NoteHistory.MaxVersionsPerNote))
+            IReadOnlyList<NoteVersion> keptVersions = history.Versions(source, edit);
+            if (keptVersions.Count > NoteHistory.MaxVersionsPerNote)
             {
-                if (!history.TryRead(source, kept.Id, out byte[]? bytes, directory.OpenVersion) || bytes is null)
-                {
-                    return false;
-                }
-
+                return false;
+            }
+            string folder = NoteHistory.FolderFor(source.Path);
+            foreach (NoteVersion kept in keptVersions)
+            {
+                string path = Path.Combine(folder, NoteHistory.FileName(kept.Id, null));
+                byte[] bytes = edit.Read(path, NoteHistory.MaxVersionBytes);
                 string text = new System.Text.UTF8Encoding(false, throwOnInvalidBytes: true).GetString(bytes);
-                history.KeepSealedCopy(source.Path, kept.Id, source.Name, SealedNote.Seal(source.Name, text, recipients), write);
+                history.KeepSealedCopy(source.Path, kept.Id, source.Name, SealedNote.Seal(source.Name, text, recipients), edit);
+                versions.Add(path);
             }
 
             return true;
@@ -5034,11 +5044,11 @@ internal sealed class DesktopActions
     }
 
     // Removes the versions of one kind; a failure leaves them (the note itself is already done) and gives false.
-    private static bool RemoveHistoryQuietly(string notePath, string extension, Action<string, bool>? remove = null)
+    private static bool RemoveHistoryQuietly(string notePath, string extension)
     {
         try
         {
-            NoteHistory.Remove(notePath, extension, remove);
+            NoteHistory.Remove(notePath, extension);
             return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)

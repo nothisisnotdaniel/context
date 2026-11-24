@@ -3,8 +3,7 @@ namespace Context;
 internal interface INoteFileSource
 {
     public FileStream OpenNote(NoteInfo note);
-    public void Remove(NoteInfo note, string path, bool directory);
-    public void RememberParent(NoteInfo note);
+    public NoteFileEdit BeginEdit(NoteInfo note);
 }
 
 /// <summary>A typed lookup, or a file selected from the store with its exact name, kind and optional listed path.</summary>
@@ -20,22 +19,18 @@ internal readonly struct NoteReference
         this.path = path;
         this.boundNote = boundNote;
         Source = source;
-        Remove = boundNote is not null && source is not null ? (child, folder) => source.Remove(boundNote, child, folder) : null;
     }
 
     public string Name { get; }
     public bool? Sensitive { get; }
     public INoteFileSource? Source { get; }
-    // A selected Journal file removes entries relative to its verified containing directory.
-    public Action<string, bool>? Remove { get; }
+    public NoteFileEdit? BeginEdit() => Source?.BeginEdit(boundNote!);
 
     public static implicit operator NoteReference(string typed) => new(typed, null, null, null, null);
 
     public static NoteReference Stored(string name, bool sensitive = false, string? path = null) => new(name, sensitive, path, null, null);
 
     public static NoteReference Bound(NoteInfo note, INoteFileSource source) => new(note.Name, false, note.Path, note, source);
-
-    public void RememberDestination(NoteInfo note) => Source?.RememberParent(note);
 
     public static NoteReference ForFile(string name, string path) =>
         Stored(name, string.Equals(Path.GetExtension(path), NoteStore.SensitiveExtension, StringComparison.OrdinalIgnoreCase), path);
