@@ -159,6 +159,103 @@ public sealed class JournalPanelTests : IDisposable
     }
 
     private static string SiblingName => Date(0) + " Review";
+
+    private async Task<IRenderedComponent<Main>> OpenDailyEditor()
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        await Open(cut);
+        cut.WaitForElement(".journal-open", Wait);
+        await StaleClick.ClickAsync(cut, ".journal-open");
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("Current parent", editor.MountedText());
+            Assert.DoesNotContain("Loading", cut.Find(".links-panel").TextContent);
+        }, Wait);
+        return cut;
+    }
+
+    [Theory]
+    [InlineData("first subpage")]
+    [InlineData("editor save")]
+    [InlineData("in-place edit")]
+    public async Task DeleteQuestion_ProtectsTheDisplayedSubtreeAndItsHistories(string change)
+    {
+        string name = Date(0);
+        NoteStore otherEditor = new(data.Root);
+        NoteInfo parent = otherEditor.CreateWithText(name, "Current parent");
+        NoteHistory history = new(otherEditor, () => data.UtcNow);
+        string parentId = Assert.IsType<string>(history.Keep(parent.Path, "Earlier parent"u8.ToArray()));
+        NoteInfo? child = change == "first subpage" ? null : otherEditor.CreateChild(parent.Reference, "First", "Initial child");
+        if (child is not null)
+        {
+            history.Keep(child.Path, File.ReadAllBytes(child.Path));
+        }
+        IRenderedComponent<Main> cut = await OpenDailyEditor();
+        await MainTests.ChooseAsync(cut, "delete");
+        string question = child is null ? $"Delete {name}? This can't be undone." : $"Delete {name} and its 1 subpage? This can't be undone.";
+        Assert.Equal(question, cut.Find(".dialog .question").TextContent);
+        child ??= otherEditor.CreateChild(parent.Reference, "First", "Initial child");
+        string saved = "Child saved with the question open";
+        if (change == "in-place edit")
+        {
+            File.WriteAllText(child.Path, saved);
+        }
+        else
+        {
+            Assert.Equal(NoteSaveResult.Saved, otherEditor.SaveIfUnchanged(otherEditor.ReadForEdit(child), saved, out _, history));
+        }
+        string childId = Assert.Single(history.Versions(child)).Id;
+        await data.State!.Refresh().WaitAsync(Wait);
+        Assert.Equal(question, cut.Find(".dialog .question").TextContent);
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Equal(DesktopActions.DeleteFailedText(name), cut.Find(".main-status").TextContent), Wait);
+        Assert.Equal("Current parent", editor.MountedText());
+        Assert.Equal("Earlier parent", await data.State.ReadVersion(parent.Reference, parentId).WaitAsync(Wait));
+        Assert.Equal(saved, (await data.State.ReadForEdit(child.Name).WaitAsync(Wait))?.Text);
+        Assert.Equal("# First\nInitial child", await data.State.ReadVersion(child.Reference, childId).WaitAsync(Wait));
+    }
+
+    [Fact]
+    public async Task CleanupAndRecoveryRefused_WarningIdentifiesTheReadableVersion()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        string name = Date(0);
+        data.WriteNote(name, "Current parent");
+        IRenderedComponent<Main> cut = await OpenDailyEditor();
+        NoteReference target = cut.FindComponent<NoteEditor>().Instance.OpenedTarget!.Value;
+        JournalDirectory directory = Assert.IsType<JournalDirectory>(target.Source);
+        string path = target.SelectedPath!;
+        string history = NoteHistory.FolderFor(path);
+        string id = Assert.IsType<string>(data.State!.HistoryStore.Keep(path, "Earlier readable version"u8.ToArray()));
+        string plain = Path.Combine(history, id + ".md");
+        List<string> refused = [];
+        bool Available(string file, string operation)
+        {
+            if (file != plain)
+            {
+                return true;
+            }
+            refused.Add(operation);
+            return false;
+        }
+        directory.RemovalAvailable = file => Available(file, "remove");
+        directory.RecoveryAvailable = file => Available(file, "restore");
+        await MainTests.ChooseAsync(cut, "mark-sensitive");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Contains("readable history may remain", cut.Find(".main-status.red").TextContent), Wait);
+        Assert.Equal(["remove", "restore"], refused);
+        string remaining = Assert.Single(Directory.GetFiles(history, "*.md"));
+        Assert.Equal("Earlier readable version", File.ReadAllText(remaining));
+        string warning = cut.Find(".main-status.red").TextContent;
+        Assert.Contains(".history/" + name, warning);
+        Assert.Contains(Path.GetFileName(remaining), warning);
+        Assert.Contains("Keep the .ctxs files", warning);
+        Assert.False(File.Exists(path));
+        NoteReference sensitive = NoteReference.Stored(name, sensitive: true);
+        Assert.Equal("Current parent", (await data.State.ReadSensitive(sensitive).WaitAsync(Wait))?.Text);
+        Assert.Equal("Earlier readable version", await data.State.ReadVersion(sensitive, id).WaitAsync(Wait));
+    }
     private static string LegacyName => SiblingName + " ";
     private const string LegacyBody = "#meeting\nSpace-suffixed fixture";
     private const string SiblingBody = "Trimmed sibling fixture";

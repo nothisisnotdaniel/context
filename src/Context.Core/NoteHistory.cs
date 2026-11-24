@@ -105,6 +105,11 @@ internal sealed partial class NoteHistory
             {
                 throw new NoteHistoryException();
             }
+            if (extension == PlainExtension)
+            {
+                RequirePlainOwner(notePath, edit);
+                edit?.BeforeCommit(() => RequirePlainOwner(notePath, edit));
+            }
 
             string folder = edit is null ? PrepareFolder(notePath) : FolderFor(notePath);
             edit?.EnsureFolder(folder);
@@ -216,6 +221,10 @@ internal sealed partial class NoteHistory
     {
         try
         {
+            if (extension == PlainExtension)
+            {
+                RequirePlainOwner(notePath, edit);
+            }
             return ListFolder(FolderFor(notePath), extension, edit)
                 .OrderByDescending(e => e, ByAge)
                 .Select(e => e.Version)
@@ -237,6 +246,10 @@ internal sealed partial class NoteHistory
     {
         try
         {
+            if (KindOf(notePath) == PlainExtension)
+            {
+                RequirePlainOwner(notePath, edit);
+            }
             Entry? newest = ListFolder(FolderFor(notePath), KindOf(notePath), edit).OrderByDescending(e => e, ByAge).FirstOrDefault();
             if (newest is null)
             {
@@ -261,6 +274,10 @@ internal sealed partial class NoteHistory
         bytes = null;
         try
         {
+            if (KindOf(note.Path) == PlainExtension)
+            {
+                RequirePlainOwner(note.Path, edit);
+            }
             Entry? match = ListFolder(FolderFor(note.Path), KindOf(note.Path), edit)
                 .FirstOrDefault(e => string.Equals(e.Version.Id, id, StringComparison.Ordinal));
             if (match is null)
@@ -270,6 +287,10 @@ internal sealed partial class NoteHistory
 
             bytes = edit?.Read(match.Path, MaxVersionBytes) ?? BoundedFile.Read(match.Path, MaxVersionBytes);
             edit?.Verify();
+            if (KindOf(note.Path) == PlainExtension)
+            {
+                RequirePlainOwner(note.Path, edit);
+            }
             return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -303,6 +324,10 @@ internal sealed partial class NoteHistory
     // See RemoveHistory.
     internal static void Remove(string notePath, string? extension)
     {
+        if (extension != NoteStore.SensitiveExtension)
+        {
+            RequirePlainOwner(notePath, null);
+        }
         string parent = Path.Combine(Path.GetDirectoryName(notePath) ?? string.Empty, FolderName);
         string folder = FolderFor(notePath);
         DirectoryInfo parentInfo = new DirectoryInfo(parent);
@@ -329,6 +354,11 @@ internal sealed partial class NoteHistory
     // nothing to move. Throws IOException when the target's .history is a file or a link, or the move fails.
     internal static bool MoveHistory(string from, string to, bool caseOnly)
     {
+        if (KindOf(from) == PlainExtension)
+        {
+            RequirePlainOwner(from, null);
+            RequirePlainOwner(to, null);
+        }
         string source = FolderFor(from);
         string target = FolderFor(to);
         if (OperatingSystem.IsWindows() && (source.StartsWith(@"\\?\", StringComparison.Ordinal) || target.StartsWith(@"\\?\", StringComparison.Ordinal)))
@@ -369,6 +399,23 @@ internal sealed partial class NoteHistory
         string.Equals(Path.GetExtension(notePath), NoteStore.SensitiveExtension, StringComparison.OrdinalIgnoreCase)
             ? NoteStore.SensitiveExtension
             : PlainExtension;
+
+    // Plain versions carry the exact stem but no record of the original extension spelling.
+    // An absent source is legitimate during an edit. A different plain owner is never legitimate.
+    internal static void RequirePlainOwner(string notePath, NoteFileEdit? edit)
+    {
+        string level = Path.GetDirectoryName(notePath)!;
+        IEnumerable<string> names = edit is null
+            ? new DirectoryInfo(level).EnumerateFiles().Where(NoteStore.IsPlainFile).Select(file => file.Name)
+            : edit.List(level).Where(entry => !entry.Directory).Select(entry => entry.Name);
+        string leaf = Path.GetFileName(notePath);
+        string stem = Path.GetFileNameWithoutExtension(leaf);
+        if (names.Any(name => name != leaf && Path.GetExtension(name).Equals(PlainExtension, StringComparison.OrdinalIgnoreCase)
+            && Path.GetFileNameWithoutExtension(name) == stem))
+        {
+            throw new NoteHistoryException();
+        }
+    }
 
     internal static string FileName(string id, string? sealedTitle) =>
         sealedTitle is null ? id + PlainExtension : id + "~" + sealedTitle + NoteStore.SensitiveExtension;

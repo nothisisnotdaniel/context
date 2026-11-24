@@ -381,7 +381,7 @@ internal sealed class NoteStore
         return result;
     }
 
-    internal NoteInfo? Move(NoteReference name, NoteReference? newParent, NoteFileEdit? edit)
+    internal NoteInfo? Move(NoteReference name, NoteReference? newParent, NoteFileEdit? edit, byte[]? rewritten = null)
     {
         List<Entry> entries = ListEntries();
         Entry? source = FindEntry(entries, name);
@@ -431,7 +431,7 @@ internal sealed class NoteStore
                 edit.Expect(owner.Note.Path);
             }
             edit.EnsureFolder(folder);
-            MoveTree(source, target, Path.Combine(folder, title), newName, false, edit);
+            MoveTree(source, target, Path.Combine(folder, title), newName, false, edit, rewritten);
             return new NoteInfo(newName, source.Note.Modified, target);
         }
         bool created = !Directory.Exists(folder);
@@ -475,7 +475,7 @@ internal sealed class NoteStore
     }
 
     internal bool Delete(NoteReference name, bool removeHistory, bool removeAttachments, NoteFileEdit? edit,
-        IReadOnlyList<string>? linked = null)
+        IReadOnlyList<string>? linked = null, IReadOnlySet<string>? confirmedPages = null)
     {
         List<Entry> entries = ListEntries();
         Entry? match = FindEntry(entries, name);
@@ -485,10 +485,21 @@ internal sealed class NoteStore
         }
 
         List<Entry> subtree = entries.Where(e => ReferenceEquals(e, match) || IsBelow(e.Note.Name, match.Note.Name)).ToList();
+        if (confirmedPages is not null && !confirmedPages.SetEquals(subtree.Select(e => e.Note.Path)))
+        {
+            throw new IOException("The subpages changed.");
+        }
         if (edit is not null)
         {
             DeleteSelected(subtree, match.Note, removeHistory, removeAttachments, edit, linked ?? []);
             return true;
+        }
+        if (removeHistory)
+        {
+            foreach (Entry entry in subtree)
+            {
+                NoteHistory.RequirePlainOwner(entry.Note.Path, null);
+            }
         }
         BeforeDeleteFiles?.Invoke();
         foreach (Entry entry in subtree.OrderByDescending(e => e.Note.Name.Length))
@@ -520,6 +531,7 @@ internal sealed class NoteStore
         Dictionary<string, IReadOnlyList<NoteVersion>> histories = new(StringComparer.Ordinal);
         HashSet<string> folders = new(StringComparer.Ordinal);
         HashSet<string> confirmed = subtree.Select(entry => entry.Note.Path).ToHashSet(StringComparer.Ordinal);
+        ILookup<string?, string> childrenByParent = subtree.ToLookup(e => e.Note.Parent, e => e.Note.Path, StringComparer.Ordinal);
         foreach (Entry entry in subtree)
         {
             files.Add(entry.Note.Path);
@@ -557,6 +569,7 @@ internal sealed class NoteStore
         }
         BeforeDeleteFiles?.Invoke();
         edit.Verify();
+        CheckSubpages(staged: false);
         foreach (string path in files)
         {
             edit.Discard(path);
@@ -571,6 +584,7 @@ internal sealed class NoteStore
                 }
             }, () => RetirePlainVersions(path, kept, edit));
         }
+        edit.BeforeCommit(() => CheckSubpages(staged: true));
         NoteAttachments.DiscardUnlinked(selected, linked, edit);
         edit.Commit();
         edit.RemoveEmpty(Path.Combine(Path.GetDirectoryName(selected.Path)!, NoteAttachments.FolderName));
@@ -582,6 +596,26 @@ internal sealed class NoteStore
         bool HasOtherPage(string level) => edit.List(level).Any(e => !e.Directory
             && (e.Name.EndsWith(Extension, StringComparison.OrdinalIgnoreCase) || e.Name.EndsWith(SensitiveExtension, StringComparison.OrdinalIgnoreCase))
             && !confirmed.Contains(Path.Combine(level, e.Name)));
+
+        void CheckSubpages(bool staged)
+        {
+            foreach (Entry entry in subtree)
+            {
+                string? folder = SelectedChildFolder(entry.Note, edit);
+                if (folder != entry.ChildFolder)
+                {
+                    throw new IOException("The subpage folder changed.");
+                }
+                if (folder is not null)
+                {
+                    HashSet<string> pages = PagesIn(folder, entry.Note.Name, edit).Select(p => p.Path).ToHashSet(StringComparer.Ordinal);
+                    if (staged ? pages.Count != 0 : !pages.SetEquals(childrenByParent[entry.Note.Name]))
+                    {
+                        throw new IOException("The subpages changed.");
+                    }
+                }
+            }
+        }
 
         void CollectAttachments(string folder)
         {
@@ -1399,7 +1433,7 @@ internal sealed class NoteStore
             .Select(f => f.FullName)
             .ToList();
 
-    private static bool IsPlainFile(FileInfo file) => file.Exists && !IsLink(file)
+    internal static bool IsPlainFile(FileInfo file) => file.Exists && !IsLink(file)
         && (file.Attributes & (FileAttributes.Directory | FileAttributes.Device)) == 0;
 
     private static List<string> SubFolders(string folder)
@@ -1525,24 +1559,86 @@ internal sealed class NoteStore
 
     // Moves a note's history, then its file, then its child folder, never over anything. When a later step fails the
     // earlier ones are moved back.
-    private void MoveTree(Entry source, string target, string folderTarget, string newName, bool caseOnly, NoteFileEdit? edit)
+    private static IEnumerable<(string Name, string Path, string? Child)> PagesIn(
+        string folder, string? parent, NoteFileEdit edit, string? include = null)
+    {
+        IReadOnlyList<NoteFileEntry> listed = edit.List(folder);
+        IEnumerable<string> files = listed.Where(e => !e.Directory).Select(e => Path.Combine(folder, e.Name));
+        // The parent note can already be staged privately. Reconstruct only its membership
+        // so the normal exact-spelling and legacy folder-pairing rules still apply.
+        if (include is not null)
+        {
+            files = files.Append(include).Distinct(StringComparer.Ordinal);
+        }
+        return PagesAtLevel(parent, files, () => listed.Where(e => e.Directory).Select(e => Path.Combine(folder, e.Name)));
+    }
+
+    private static string? SelectedChildFolder(NoteInfo note, NoteFileEdit edit) =>
+        PagesIn(Path.GetDirectoryName(note.Path)!, note.Parent, edit, note.Path).First(p => p.Path == note.Path).Child;
+
+    internal static bool HasSelectedSubpages(NoteInfo note, NoteFileEdit edit) =>
+        SelectedChildFolder(note, edit) is { } folder && PagesIn(folder, note.Name, edit).Any();
+
+    private static HashSet<string> SubpageTree(string? folder, string parentName, NoteFileEdit edit)
+    {
+        HashSet<string> tree = new(StringComparer.Ordinal);
+        if (folder is not null)
+        {
+            Visit(folder, parentName);
+        }
+        return tree;
+
+        void Visit(string level, string parent)
+        {
+            edit.Expect(level, true);
+            foreach ((string name, string path, string? child) in PagesIn(level, parent, edit))
+            {
+                edit.Expect(path);
+                tree.Add(path[(folder!.Length + 1)..]);
+                if (child is not null)
+                {
+                    tree.Add(child[(folder.Length + 1)..]);
+                    Visit(child, name);
+                }
+            }
+        }
+    }
+
+    private void MoveTree(Entry source, string target, string folderTarget, string newName, bool caseOnly,
+        NoteFileEdit? edit, byte[]? rewritten = null)
     {
         if (edit is not null)
         {
-            if (source.ChildFolder is not null)
-            {
-                edit.Expect(source.ChildFolder, true);
-            }
+            string? originalFolder = source.ChildFolder;
+            HashSet<string> originalTree = SubpageTree(originalFolder, source.Note.Name, edit);
             StagePlainHistory(source.Note, target, newName, caseOnly, edit);
             BeforeEditPublish?.Invoke();
             edit.Verify();
-            edit.Relocate(source.Note.Path, target);
-            if (source.ChildFolder is not null)
+            CheckTree(source.Note, originalFolder);
+            edit.PublishNote(source.Note.Path, target, rewritten);
+            if (originalFolder is not null)
             {
                 BeforeFolderMove?.Invoke();
-                edit.Relocate(source.ChildFolder, folderTarget, true);
+                edit.Relocate(originalFolder, folderTarget, true);
             }
+            edit.BeforeCommit(() =>
+            {
+                CheckTree(new NoteInfo(newName, source.Note.Modified, target), originalFolder is null ? null : folderTarget);
+                if (!caseOnly && SelectedChildFolder(source.Note, edit) is not null)
+                {
+                    throw new IOException("The original subpage folder changed.");
+                }
+            });
             return;
+
+            void CheckTree(NoteInfo page, string? expected)
+            {
+                string? folder = SelectedChildFolder(page, edit);
+                if (folder != expected || !originalTree.SetEquals(SubpageTree(folder, page.Name, edit)))
+                {
+                    throw new IOException("The subpages changed.");
+                }
+            }
         }
         if (!NoteHistory.MoveHistory(source.Note.Path, target, caseOnly))
         {

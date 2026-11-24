@@ -597,6 +597,25 @@ internal sealed class DesktopState
         }
     });
 
+    internal Task<JournalDirectory.Edit.DeleteSelection?> CaptureDelete(NoteReference target, IReadOnlyList<NoteInfo> below) =>
+        Task.Run(() =>
+        {
+            try
+            {
+                if (!notes.TryFind(target, out NoteInfo? page) || page is null)
+                {
+                    return null;
+                }
+                using JournalDirectory? owned = target.Source is null ? JournalDirectory.Bind(notes.Root) : null;
+                using JournalDirectory.Edit edit = new(target.Source as JournalDirectory ?? owned ?? throw new IOException(), page);
+                return new JournalDirectory.Edit.DeleteSelection(edit, below.Prepend(page));
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
+        });
+
     /// <summary>
     /// The text of version <paramref name="id"/> of the note <paramref name="name"/>, as the editor would hold it, off
     /// the calling thread (see <see cref="ReadVersionText"/>).

@@ -43,6 +43,7 @@ internal abstract class NoteFileEdit : IDisposable
     public abstract byte[] Read(string path, long limit);
     public abstract void EnsureFolder(string path);
     public abstract void WriteNew(string path, byte[] bytes);
+    public abstract void PublishNote(string from, string to, byte[]? rewritten);
     public abstract void Relocate(string from, string to, bool directory = false);
     public abstract void Discard(string path);
     public abstract void Verify();

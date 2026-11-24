@@ -30,7 +30,7 @@ internal sealed partial class JournalDirectory
         }
     }
 
-    private static void RemoveAt(SafeFileHandle parentHandle, string leaf, bool directory, SafeFileHandle created)
+    private static void RemoveAt(SafeFileHandle parentHandle, string leaf, bool directory, SafeFileHandle created, bool plainHistory = false)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -55,7 +55,7 @@ internal sealed partial class JournalDirectory
             throw Ineligible();
         }
         // Claim the entry, check the claimed object, and unlink only that object.
-        string claimed = TempName();
+        string claimed = TempName(plainHistory);
         RenameNew(parentHandle, leaf, parentHandle, claimed, directory);
         int removeDirectory = OperatingSystem.IsMacOS() ? 0x80 : 0x200;
         try
@@ -85,9 +85,10 @@ internal sealed partial class JournalDirectory
     private static CreatedFile WriteNew(SafeFileHandle folder, string name, byte[] bytes, Action? beforeCheck = null) =>
         WriteNew(folder, name, stream => stream.Write(bytes), beforeCheck);
 
-    private static CreatedFile WriteNew(SafeFileHandle folder, string name, Action<FileStream> write, Action? beforeCheck = null)
+    private static CreatedFile WriteNew(SafeFileHandle folder, string name, Action<FileStream> write, Action? beforeCheck = null,
+        bool plainHistory = false)
     {
-        string temp = TempName();
+        string temp = TempName(plainHistory);
         string? windowsPath = OperatingSystem.IsWindows() ? CheckedPath(folder, true) : null;
         FileStream stream = windowsPath is null ? CreateUnixTemp(folder, temp) : PrivateFile.OpenNew(Path.Combine(windowsPath, temp), FileShare.Read | FileShare.Delete);
         SafeFileHandle? ownedParent = null;
@@ -97,7 +98,7 @@ internal sealed partial class JournalDirectory
             write(stream);
             stream.Flush();
             ownedParent = ReopenFolder(folder);
-            MoveOwned(folder, temp, folder, name, false, stream.SafeFileHandle);
+            MoveOwned(folder, temp, folder, name, false, stream.SafeFileHandle, plainHistory);
             ownedName = name;
             beforeCheck?.Invoke();
             VerifyOwned(ownedParent, name, false, stream.SafeFileHandle);
@@ -107,7 +108,7 @@ internal sealed partial class JournalDirectory
         {
             try
             {
-                RemoveAt(folder, ownedName, false, stream.SafeFileHandle);
+                RemoveAt(folder, ownedName, false, stream.SafeFileHandle, plainHistory);
             }
             finally
             {
@@ -118,7 +119,8 @@ internal sealed partial class JournalDirectory
         }
     }
 
-    private static string TempName() => "." + Guid.NewGuid().ToString("N") + ".tmp";
+    private static string TempName(bool plainHistory = false) =>
+        "." + Guid.NewGuid().ToString("N") + (plainHistory ? ".tmp.md" : ".tmp");
 
     private static void VerifyOwned(SafeFileHandle parent, string name, bool directory, SafeFileHandle expected)
     {
@@ -130,12 +132,12 @@ internal sealed partial class JournalDirectory
     }
 
     private static void MoveOwned(SafeFileHandle source, string from, SafeFileHandle destination, string to,
-        bool directory, SafeFileHandle original)
+        bool directory, SafeFileHandle original, bool plainHistory = false)
     {
         // Claim and check the actual object before publishing it in another directory.
         // Every move, including recovery, requires a free destination name.
         FileId expected = Identity(original, directory);
-        string claimed = TempName();
+        string claimed = TempName(plainHistory);
         RenameNew(source, from, source, claimed, directory);
         try
         {

@@ -831,17 +831,12 @@ internal sealed class NoteAttachments
             }
         });
         BeforeMoveStep?.Invoke("move");
-        NoteInfo? moved = notes.Move(selected, owner?.Reference, edit);
+        NoteInfo? moved = notes.Move(selected, owner?.Reference, edit, renamed.Count == 0 ? null : rewritten);
         if (moved is null)
         {
             return null;
         }
         BeforeMoveStep?.Invoke("rewrite");
-        if (renamed.Count != 0)
-        {
-            edit.Discard(moved.Path);
-            edit.WriteNew(moved.Path, rewritten);
-        }
         BeforeMoveStep?.Invoke("cleanup");
         DiscardUnlinked(source, names, edit);
         edit.Commit();

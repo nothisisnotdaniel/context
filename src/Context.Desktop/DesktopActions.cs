@@ -98,6 +98,7 @@ internal sealed record ActionResult
     public string? Name { get; }
 
     internal NoteInfo? RelocatedNote { get; init; }
+    internal IReadOnlyList<string> RecoveryFiles { get; init; } = [];
 
     /// <summary>
     /// For a <see cref="DesktopActions.SaveNote"/> that numbered or removed <c>#!d</c> markers (job 343): the edits, whose
@@ -538,8 +539,9 @@ internal sealed class DesktopActions
     public static string SealHistoryFailedText(string name) => $"Can't seal the history of {name}. Nothing was changed.";
 
     /// <summary>The red line when a note was marked sensitive but its old plain versions are still on disk.</summary>
-    public static string PlainHistoryLeftText(string name) =>
-        $"Marked {name} sensitive, but readable history may remain in .history/{name} in the data folder. Secure any versions you need, then delete only the .md files. Keep the .ctxs files.";
+    public static string PlainHistoryLeftText(string name, IReadOnlyList<string>? recoveryFiles = null) =>
+        $"Marked {name} sensitive, but readable history may remain in .history/{name} in the data folder. Secure any versions you need, then delete only the .md files. Keep the .ctxs files."
+        + (recoveryFiles is { Count: > 0 } ? $" Show hidden files to find the remaining readable copies ({string.Join(", ", recoveryFiles)})." : "");
 
     /// <summary>The red line when a sensitive note must be open for the action.</summary>
     public static string UnlockFirstText(string name) => $"Unlock {name} first.";
@@ -1373,7 +1375,8 @@ internal sealed class DesktopActions
     /// but only when the user <paramref name="confirmed"/> it. There is no undo. The result's text is the name when
     /// done.
     /// </summary>
-    public Task<ActionResult> DeleteNote(NoteReference name, Confirmation? confirmed) => Run(() => DeleteNoteNow(name, confirmed));
+    public Task<ActionResult> DeleteNote(NoteReference name, Confirmation? confirmed, JournalDirectory.Edit.DeleteSelection? selection = null) =>
+        Run(() => DeleteNoteNow(name, confirmed, selection));
 
     /// <summary>
     /// Records that the note <paramref name="name"/> (a full name) was opened (job 240): it moves to the front of
@@ -3426,7 +3429,7 @@ internal sealed class DesktopActions
         }
         catch (Exception)
         {
-            return Failed(ActionReason.WriteFailed, RenameFailedText(reference.Name));
+            return Failed(ActionReason.WriteFailed, reference.Source is null ? RenameFailedText(reference.Name) : $"Can't rename {reference.Name}.");
         }
     }
 
@@ -4174,15 +4177,15 @@ internal sealed class DesktopActions
         }
         catch (AttachmentMoveException)
         {
-            return Failed(ActionReason.WriteFailed, AttachmentsMoveFailedText(reference.Name));
+            return Failed(ActionReason.WriteFailed, reference.Source is null ? AttachmentsMoveFailedText(reference.Name) : $"Can't move the attachments of {reference.Name}.");
         }
         catch (Exception)
         {
-            return Failed(ActionReason.WriteFailed, MoveFailedText(reference.Name));
+            return Failed(ActionReason.WriteFailed, reference.Source is null ? MoveFailedText(reference.Name) : $"Can't move {reference.Name}.");
         }
     }
 
-    private ActionResult DeleteNoteNow(NoteReference reference, Confirmation? confirmed)
+    private ActionResult DeleteNoteNow(NoteReference reference, Confirmation? confirmed, JournalDirectory.Edit.DeleteSelection? selection)
     {
         if (confirmed is null)
         {
@@ -4194,9 +4197,19 @@ internal sealed class DesktopActions
             // The names the note links are read before it goes; an unreadable note removes no attachment.
             notes.TryFind(reference, out NoteInfo? plain);
             NoteReference selected = plain is null ? reference : reference.Resolved(plain);
+            using JournalDirectory? directory = selection is not null && reference.Source is null
+                ? JournalDirectory.Bind(notes.Root) ?? throw new IOException() : null;
+            if (directory is not null && plain is not null)
+            {
+                selected = NoteReference.Bound(plain, directory);
+            }
             using NoteFileEdit? edit = plain is null ? null : selected.BeginEdit();
+            if (selection is not null)
+            {
+                selection.Verify(edit as JournalDirectory.Edit ?? throw new IOException());
+            }
             IReadOnlyList<string> linked = plain is null ? [] : attachments.LinkedNamesOf(selected, edit);
-            if (plain is not null && notes.Delete(selected, removeHistory: true, removeAttachments: true, edit, linked))
+            if (plain is not null && notes.Delete(selected, removeHistory: true, removeAttachments: true, edit, linked, selection?.Pages))
             {
                 // A file the cleanup can't remove stays and the delete is still done.
                 if (edit is null)
@@ -4835,9 +4848,13 @@ internal sealed class DesktopActions
             {
                 return Failed(ActionReason.WriteFailed, SealHistoryFailedText(source.Name));
             }
-            if (!edit.FinishConversion(source.Path, versions, BeforePlainHistoryCleanup))
+            if (NoteStore.HasSelectedSubpages(source, edit))
             {
-                return new ActionResult(ActionKind.Done, ActionReason.PlainHistoryLeft, source.Name);
+                return Refused(ActionReason.Invalid, ParentSensitiveText);
+            }
+            if (!edit.FinishConversion(source, versions, BeforePlainHistoryCleanup, out IReadOnlyList<string> recoveryFiles))
+            {
+                return new ActionResult(ActionKind.Done, ActionReason.PlainHistoryLeft, source.Name) { RecoveryFiles = recoveryFiles };
             }
 
             return new ActionResult(ActionKind.Done, ActionReason.None, source.Name);
@@ -5036,7 +5053,7 @@ internal sealed class DesktopActions
 
             return true;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or SealedNoteException)
         {
             return false;
         }

@@ -146,6 +146,8 @@ public sealed class JournalEditorIntegrityTests : IDisposable
     [InlineData("save note")]
     [InlineData("rename")]
     [InlineData("move")]
+    [InlineData("rename sustained")]
+    [InlineData("move sustained")]
     public async Task FirstReadOfPublishedFileFails_RestoresOriginalFiles(string operation)
     {
         (NoteInfo note, string id) = Prepare(data, Body, "Earlier selected", 1);
@@ -158,13 +160,13 @@ public sealed class JournalEditorIntegrityTests : IDisposable
         {
             "save history" => VersionPath(note, id + "-1"),
             "save note" => note.Path,
-            "rename" => Path.Combine(data.Root, "Renamed.md"),
+            "rename" or "rename sustained" => Path.Combine(data.Root, "Renamed.md"),
             _ => Path.Combine(data.Root, "Destination", Name + ".md"),
         };
         bool checkSave = false, refused = false;
         directory.EntryAvailable = path =>
         {
-            if (!refused && path == publication && File.Exists(publication)
+            if ((!refused || operation.EndsWith("sustained", StringComparison.Ordinal)) && path == publication && File.Exists(publication)
                 && (operation != "save note" || (checkSave && PublishedEdit())))
             {
                 refused = true;
@@ -185,17 +187,188 @@ public sealed class JournalEditorIntegrityTests : IDisposable
         checkSave = true;
         ActionResult result = operation switch
         {
-            "rename" => await data.Actions.RenameNote(link.Target, "Renamed", new Confirmation()).WaitAsync(Wait),
-            "move" => await data.Actions.MoveNote(link.Target, "Destination").WaitAsync(Wait),
+            "rename" or "rename sustained" => await data.Actions.RenameNote(link.Target, "Renamed", new Confirmation()).WaitAsync(Wait),
+            "move" or "move sustained" => await data.Actions.MoveNote(link.Target, "Destination").WaitAsync(Wait),
             _ => await data.Actions.SaveNote(opened, "Edited").WaitAsync(Wait),
         };
         Assert.True(refused);
         Assert.NotEqual(ActionKind.Done, result.Kind);
         Assert.Equal(before, Files());
+        Assert.Equal(opened.Text, (await link.ReadForEdit().WaitAsync(Wait))?.Text);
         Assert.Equal("Earlier selected", await data.State.ReadVersion(link.Target, id).WaitAsync(Wait));
     }
 
+    [Fact]
+    public async Task LaterRemovalRefused_CollisionMoveReopensTheOriginalNoteHistoryAndImage()
+    {
+        (NoteInfo note, string id) = Prepare(data, Body, "Earlier selected", 3);
+        await data.RefreshAsync().WaitAsync(Wait);
+        Assert.Equal(AttachmentAddKind.Added, data.Actions!.Attachments.Add("Destination/Existing", "photo.png", Image(4)).Kind);
+        using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(data.Root));
+        List<string> removals = [];
+        directory.RemovalAvailable = path =>
+        {
+            removals.Add(path);
+            return path != VersionPath(note, id);
+        };
+        using JournalNoteLink link = new(note, directory);
+        Assert.True(await link.Bind().WaitAsync(Wait));
+        SortedDictionary<string, string> before = Files();
+        Assert.NotEqual(ActionKind.Done, (await data.Actions.MoveNote(link.Target, "Destination").WaitAsync(Wait)).Kind);
+        Assert.Equal([Path.Combine(data.Root, ".attachments", "photo.png"), VersionPath(note, id)], removals);
+        Assert.Equal(before, Files());
+        EditableNote opened = Assert.IsType<EditableNote>(await link.ReadForEdit().WaitAsync(Wait));
+        Assert.True(opened.HadBom);
+        Assert.Equal(Body.Replace("\r\n", "\n", StringComparison.Ordinal), opened.Text);
+        Assert.Equal("Earlier selected", await data.State!.ReadVersion(link.Target, id).WaitAsync(Wait));
+        await AssertSharedImage(link, "original.html", 3, 4);
+    }
+
+    [Theory]
+    [InlineData("delete")]
+    [InlineData("rename")]
+    [InlineData("move")]
+    [InlineData("mark sensitive")]
+    public async Task FirstSubpageDuringPublication_PreservesTheReachableNotesAndVersions(string operation)
+    {
+        data.Keys = FakeKeyStore.Ready();
+        (NoteInfo note, string id) = Prepare(data, Body, "Earlier parent", 5);
+        await data.RefreshAsync().WaitAsync(Wait);
+        using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(data.Root));
+        using JournalNoteLink link = new(note, directory);
+        Assert.True(await link.Bind().WaitAsync(Wait));
+        NoteStore otherEditor = new(data.Root);
+        NoteHistory history = new(otherEditor, () => data.UtcNow);
+        string? childId = null;
+        void CreateFirstChild()
+        {
+            NoteInfo child = otherEditor.CreateChild(note.Reference, "First", "owner:: Child");
+            childId = history.Keep(child.Path, "Earlier child"u8.ToArray());
+        }
+        data.Notes!.BeforeDeleteFiles = CreateFirstChild;
+        data.Notes.BeforeEditPublish = CreateFirstChild;
+        data.Actions!.AfterNoteSealed = CreateFirstChild;
+        ActionResult result = operation switch
+        {
+            "delete" => await data.Actions.DeleteNote(link.Target, new Confirmation()).WaitAsync(Wait),
+            "rename" => await data.Actions.RenameNote(link.Target, "Renamed", new Confirmation()).WaitAsync(Wait),
+            "move" => await data.Actions.MoveNote(link.Target, "Destination").WaitAsync(Wait),
+            _ => await data.Actions.MarkSensitive(link.Target, new Confirmation()).WaitAsync(Wait),
+        };
+        Assert.NotEqual(ActionKind.Done, result.Kind);
+        Assert.Equal(Body.Replace("\r\n", "\n", StringComparison.Ordinal), (await link.ReadForEdit().WaitAsync(Wait))?.Text);
+        Assert.Equal("Earlier parent", await data.State!.ReadVersion(link.Target, id).WaitAsync(Wait));
+        Assert.Equal("# First\nowner:: Child", (await data.State.ReadForEdit(Name + "/First").WaitAsync(Wait))?.Text);
+        Assert.Equal("Earlier child", await data.State.ReadVersion(Name + "/First", Assert.IsType<string>(childId)).WaitAsync(Wait));
+        Assert.False(File.Exists(Path.ChangeExtension(note.Path, ".ctxs")));
+        Assert.Equal([VersionPath(note, id)], Directory.GetFiles(NoteHistory.FolderFor(note.Path)));
+        Assert.False(File.Exists(Path.Combine(data.Root, "Destination", Name + ".md")));
+        Assert.False(File.Exists(Path.Combine(data.Root, "Renamed.md")));
+    }
+
+    [Fact]
+    public async Task PlainVersionAtReaderLimit_RefusesAnUnreadableSealedPublication()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        (NoteInfo note, string first) = Prepare(data, Body, "Earlier", 8);
+        await data.RefreshAsync().WaitAsync(Wait);
+        string large = new('a', (int)NoteHistory.MaxVersionBytes);
+        string id = Assert.IsType<string>(data.State!.HistoryStore.Keep(note.Path, Encoding.UTF8.GetBytes(large)));
+        using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(data.Root));
+        using JournalNoteLink link = new(note, directory);
+        Assert.True(await link.Bind().WaitAsync(Wait));
+        Assert.Equal(large.Length, (await data.State.ReadVersion(link.Target, id).WaitAsync(Wait))?.Length);
+        SortedDictionary<string, string> before = Files();
+        ActionResult marked = await data.Actions!.MarkSensitive(link.Target, new Confirmation()).WaitAsync(Wait);
+        Assert.Equal(ActionKind.Failed, marked.Kind);
+        Assert.Equal(before, Files());
+        Assert.Equal(Body.Replace("\r\n", "\n", StringComparison.Ordinal), (await link.ReadForEdit().WaitAsync(Wait))?.Text);
+        Assert.Equal("Earlier", await data.State.ReadVersion(link.Target, first).WaitAsync(Wait));
+        Assert.True(large == await data.State.ReadVersion(link.Target, id).WaitAsync(Wait));
+    }
+
     private SortedDictionary<string, string> Files() => FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName);
+
+    [Fact]
+    public async Task DuplicateExtensionOwners_RefuseHistoryAndPreserveBothNotes()
+    {
+        (NoteInfo note, string id) = Prepare(data, Body, "Version from before the second note", 6);
+        string sibling = Path.ChangeExtension(note.Path, ".MD");
+        bool simulated = File.Exists(sibling);
+        if (simulated)
+        {
+            sibling = Path.Combine(other.Root, Path.GetFileName(sibling));
+            Directory.CreateDirectory(other.Root);
+        }
+        File.WriteAllText(sibling, "Independent body");
+        await data.RefreshAsync().WaitAsync(Wait);
+        using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(data.Root));
+        using JournalNoteLink link = new(note, directory);
+        Assert.True(await link.Bind().WaitAsync(Wait));
+        NoteReference target = simulated ? NoteReference.Bound(note, new AdditionalListing(directory, data.Root, new FileInfo(sibling))) : link.Target;
+        SortedDictionary<string, string> before = Files();
+        Assert.Equal(HistoryKind.Unreadable, (await data.State!.History(target).WaitAsync(Wait)).Kind);
+        Assert.Null(await data.State.ReadVersion(target, id).WaitAsync(Wait));
+        EditableNote opened = NoteStore.ReadSelectedForEdit(note, target);
+        Assert.NotEqual(ActionKind.Done, (await data.Actions!.SaveNote(opened, "Edited").WaitAsync(Wait)).Kind);
+        Assert.NotEqual(ActionKind.Done, (await data.Actions.DeleteNote(target, new Confirmation()).WaitAsync(Wait)).Kind);
+        Assert.NotEqual(ActionKind.Done, (await data.Actions.RenameNote(target, "Renamed", new Confirmation()).WaitAsync(Wait)).Kind);
+        Assert.NotEqual(ActionKind.Done, (await data.Actions.MoveNote(target, "Destination").WaitAsync(Wait)).Kind);
+        Assert.Equal(before, Files());
+        Assert.Equal("Independent body", File.ReadAllText(sibling));
+        Assert.Equal("Version from before the second note", File.ReadAllText(VersionPath(note, id)));
+    }
+
+    // Case-insensitive directories use the independent fixture's real file as one additional
+    // directory entry. All file reads, writes, verification and undo still use the ordinary edit.
+    private sealed class AdditionalListing : INoteFileSource
+    {
+        private readonly JournalDirectory directory;
+        private readonly string level;
+        private readonly NoteFileEntry extra;
+
+        public AdditionalListing(JournalDirectory directory, string level, FileInfo extra)
+        {
+            this.directory = directory;
+            this.level = level;
+            this.extra = new NoteFileEntry(extra.Name, false, extra.Length);
+        }
+
+        public FileStream OpenNote(NoteInfo note) => directory.OpenNote(note);
+        public NoteFileEdit BeginEdit(NoteInfo note) => new ListedEdit(directory.BeginEdit(note), level, extra);
+
+        private sealed class ListedEdit : NoteFileEdit
+        {
+            private readonly NoteFileEdit files;
+            private readonly string level;
+            private readonly NoteFileEntry extra;
+
+            public ListedEdit(NoteFileEdit files, string level, NoteFileEntry extra)
+            {
+                this.files = files;
+                this.level = level;
+                this.extra = extra;
+            }
+
+            public override IReadOnlyList<NoteFileEntry> List(string folder) =>
+                folder == level ? [.. files.List(folder), extra] : files.List(folder);
+            public override void Expect(string path, bool directory = false) => files.Expect(path, directory);
+            public override byte[] Read(string path, long limit) => files.Read(path, limit);
+            public override void EnsureFolder(string path) => files.EnsureFolder(path);
+            public override void WriteNew(string path, byte[] bytes) => files.WriteNew(path, bytes);
+            public override void PublishNote(string from, string to, byte[]? rewritten) => files.PublishNote(from, to, rewritten);
+            public override void Relocate(string from, string to, bool directory = false) => files.Relocate(from, to, directory);
+            public override void Discard(string path) => files.Discard(path);
+            public override void Verify() => files.Verify();
+            public override void Commit()
+            {
+                PrepareCommit();
+                files.Commit();
+            }
+            public override void RemoveEmpty(string folder) => files.RemoveEmpty(folder);
+            public override void Dispose() => files.Dispose();
+        }
+    }
 
     [Theory]
     [InlineData("rename")]
@@ -504,6 +677,7 @@ public sealed class JournalEditorIntegrityTests : IDisposable
 
     [Theory]
     [InlineData("sealed note")]
+    [InlineData("sealed note at final removal")]
     [InlineData("sealed version")]
     [InlineData("plain history")]
     [InlineData("new version")]
@@ -518,6 +692,14 @@ public sealed class JournalEditorIntegrityTests : IDisposable
         string sealedVersion = Path.Combine(NoteHistory.FolderFor(note.Path), NoteHistory.FileName(id, Name));
         string? unavailable = null, later = null;
         directory.EntryAvailable = path => path != unavailable;
+        directory.RemovalAvailable = path =>
+        {
+            if (change == "sealed note at final removal" && path == note.Path)
+            {
+                unavailable = sealedNote;
+            }
+            return true;
+        };
         using JournalNoteLink link = new(note, directory);
         Assert.True(await link.Bind().WaitAsync(Wait));
         bool cleanupEntered = false;
@@ -538,6 +720,7 @@ public sealed class JournalEditorIntegrityTests : IDisposable
             Assert.NotEqual(ActionKind.Done, result.Kind);
             Assert.Equal(Body, File.ReadAllText(note.Path));
             Assert.Equal("Readable version", File.ReadAllText(plain));
+            Assert.Equal("Readable version", await data.State!.ReadVersion(note.Reference, id).WaitAsync(Wait));
             Assert.False(File.Exists(sealedNote));
             Assert.False(File.Exists(sealedVersion));
         }

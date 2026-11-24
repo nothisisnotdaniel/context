@@ -217,7 +217,7 @@
         }
         @if (deleteTarget is { } doomed)
         {
-            <ConfirmDialog Question="@DeleteQuestion(doomed.Name)" ConfirmLabel="Delete"
+            <ConfirmDialog Question="@DeleteQuestion(doomed.Target.Name, doomed.Below)" ConfirmLabel="Delete"
                            Busy="running" OnConfirm="DeleteConfirmed" OnCancel="CancelDelete" />
         }
         @if (renameAsk is { } ask && openName is { } renamingName)
@@ -352,7 +352,7 @@ else
     private bool focusRename;
     // While set, the rename question is open: the new full name and how many notes' links change.
     private (string NewName, int Count)? renameAsk;
-    private NoteReference? deleteTarget;
+    private (NoteReference Target, int Below, JournalDirectory.Edit.DeleteSelection? Selection)? deleteTarget;
     private bool deleting => deleteTarget.HasValue;
 
     private NoteReference StoredTarget(string name) =>
@@ -2344,14 +2344,35 @@ else
         return true;
     }
 
-    private void AskDelete()
+    private async Task AskDelete()
     {
-        if (openName is not null && !running)
+        if (openName is not { } name || running)
         {
-            renaming = false;
-            subpaging = false;
-            moving = false;
-            deleteTarget = StoredTarget(openName);
+            return;
+        }
+        renaming = false;
+        subpaging = false;
+        moving = false;
+        NoteReference target = StoredTarget(name);
+        if (openSensitive)
+        {
+            deleteTarget = (target, 0, null);
+            return;
+        }
+        NoteInfo[] below = Snapshot?.Notes.Where(n => n.Name.StartsWith(name + "/", StringComparison.Ordinal)).ToArray() ?? [];
+        int generation = editorGeneration;
+        running = true;
+        try
+        {
+            JournalDirectory.Edit.DeleteSelection? selection = await State.CaptureDelete(target, below);
+            if (!disposed && generation == editorGeneration && openName == name)
+            {
+                deleteTarget = (target, below.Length, selection);
+            }
+        }
+        finally
+        {
+            running = false;
         }
     }
 
@@ -2384,10 +2405,8 @@ else
     }
 
     // The delete question: a note with subpages names how many go with it.
-    private string DeleteQuestion(string name)
+    private static string DeleteQuestion(string name, int below)
     {
-        string prefix = name + "/";
-        int below = Snapshot?.Notes.Count(n => n.Name.StartsWith(prefix, StringComparison.Ordinal)) ?? 0;
         string shown = DesktopText.OneLine(name);
         return below switch
         {
@@ -2564,12 +2583,18 @@ else
         {
             return;
         }
+        if (name.Target.Sensitive != true && name.Selection is null)
+        {
+            deleteTarget = null;
+            ShowStatus(DesktopText.OneLine(DesktopActions.DeleteFailedText(name.Target.Name)), "red");
+            return;
+        }
 
         running = true;
         ActionResult deleted;
         try
         {
-            deleted = await Actions.DeleteNote(name, confirmed);
+            deleted = await Actions.DeleteNote(name.Target, confirmed, name.Selection);
         }
         finally
         {
@@ -2723,7 +2748,7 @@ else
         if (marked.Kind == ActionKind.Done && marked.Reason == ActionReason.PlainHistoryLeft)
         {
             ShowNote(null);
-            ShowStatus(DesktopText.OneLine(DesktopActions.PlainHistoryLeftText(marked.Text)), "red");
+            ShowStatus(DesktopText.OneLine(DesktopActions.PlainHistoryLeftText(marked.Text, marked.RecoveryFiles)), "red");
         }
         else if (marked.Kind == ActionKind.Done)
         {
@@ -2940,7 +2965,7 @@ else
                 await StartRename();
                 break;
             case "delete":
-                AskDelete();
+                await AskDelete();
                 break;
             case "history":
                 ToggleHistory();

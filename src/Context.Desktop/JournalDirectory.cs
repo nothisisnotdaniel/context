@@ -17,6 +17,8 @@ internal sealed partial class JournalDirectory : INoteFileSource, IDisposable
     // Functional storage seams. The observer sees the actual folder handle and its lifetime.
     internal Action<SafeFileHandle>? FolderOpened { get; set; }
     internal Func<string, bool>? EntryAvailable { get; set; }
+    internal Func<string, bool>? RemovalAvailable { get; set; }
+    internal Func<string, bool>? RecoveryAvailable { get; set; }
 
     private JournalDirectory(string root, JournalDirectory? parent, SafeFileHandle original)
     {
@@ -52,6 +54,8 @@ internal sealed partial class JournalDirectory : INoteFileSource, IDisposable
         {
             using FileStream file = OpenNote(note);
             retained.EntryAvailable = EntryAvailable;
+            retained.RemovalAvailable = RemovalAvailable;
+            retained.RecoveryAvailable = RecoveryAvailable;
             WithNoteParent(note, (_, _) =>
             {
                 retained.Remember(note.Path, Stamp(file.SafeFileHandle, false));
