@@ -18,11 +18,13 @@ public sealed class JournalEditorIntegrityTests : IDisposable
 
     private static byte[] Image(byte marker) => [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, marker];
 
-    private static (NoteInfo Note, string Version) Prepare(DesktopFixture fixture, string body, string version, byte image)
+    private static (NoteInfo Note, string Version) Prepare(DesktopFixture fixture, string body, string version, byte image,
+        string extension = ".md")
     {
         NoteStore store = new(fixture.Root);
-        NoteInfo note = store.CreateWithText(Name, body);
-        File.WriteAllBytes(note.Path, [0xef, 0xbb, 0xbf, .. Encoding.UTF8.GetBytes(body)]);
+        Directory.CreateDirectory(store.Root);
+        File.WriteAllBytes(Path.Combine(store.Root, Name + extension), [0xef, 0xbb, 0xbf, .. Encoding.UTF8.GetBytes(body)]);
+        NoteInfo note = Assert.Single(store.List(), n => n.Name == Name);
         store.Create("Destination");
         store.CreateChild("Destination", "Existing");
         Assert.Equal(AttachmentAddKind.Added, new NoteAttachments(store).Add(note.Reference, "photo.png", Image(image)).Kind);
@@ -324,6 +326,76 @@ public sealed class JournalEditorIntegrityTests : IDisposable
         Assert.Equal("owner:: Updated", (await link.ReadForEdit().WaitAsync(Wait))?.Text);
     }
 
+    [Fact]
+    public async Task FirstNestedSave_RollbackBindsTheEditorAfterRemovingNewHistoryFolders()
+    {
+        NoteStore store = new(data.Root);
+        store.Create("Meetings");
+        NoteInfo note = store.CreateChild("Meetings", Name, "owner:: Original");
+        await data.RefreshAsync().WaitAsync(Wait);
+        using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(data.Root));
+        string history = Path.GetDirectoryName(NoteHistory.FolderFor(note.Path))!;
+        bool created = false;
+        directory.FolderChangeTime = _ =>
+        {
+            if (Directory.Exists(history))
+            {
+                created = true;
+                return 2;
+            }
+            return created ? 3 : 1;
+        };
+        bool refuse = true;
+        directory.RemovalAvailable = path => path != note.Path || !refuse;
+        using JournalNoteLink link = new(note, directory);
+        Assert.True(await link.Bind().WaitAsync(Wait));
+        EditableNote opened = Assert.IsType<EditableNote>(await link.ReadForEdit().WaitAsync(Wait));
+        ActionResult result = await data.Actions!.SaveNote(opened, "owner:: Changed").WaitAsync(Wait);
+        Assert.Equal(ActionKind.Failed, result.Kind);
+        Assert.False(result.HasRecoveryDetails);
+        Assert.True(created);
+        Assert.False(Directory.Exists(history));
+        Assert.Equal(opened.Text, (await link.ReadForEdit().WaitAsync(Wait))?.Text);
+        Assert.Empty((await data.State!.History(link.Target).WaitAsync(Wait)).Versions);
+        refuse = false;
+        Assert.Equal(ActionKind.Done, (await data.Actions.SaveNote(opened, "owner:: Retried").WaitAsync(Wait)).Kind);
+        Assert.Equal("owner:: Retried", (await link.ReadForEdit().WaitAsync(Wait))?.Text);
+        NoteVersion prior = Assert.Single((await data.State.History(link.Target).WaitAsync(Wait)).Versions);
+        Assert.Equal(opened.Text, await data.State.ReadVersion(link.Target, prior.Id).WaitAsync(Wait));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnavailableAttachmentFolder_ReportsTheOriginalImageInTheBoundStore(bool duringMove)
+    {
+        (NoteInfo note, string id) = Prepare(data, Body, "owner:: Earlier", 7);
+        await data.RefreshAsync().WaitAsync(Wait);
+        using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(data.Root));
+        string assets = NoteAttachments.Folder(note);
+        bool unavailable = false;
+        directory.EntryAvailable = path => !unavailable || path != assets;
+        directory.RemovalAvailable = path => { unavailable |= !duringMove && path == note.Path; return true; };
+        data.Actions!.Attachments.BeforeMoveStep = step => unavailable |= duringMove && step == "move";
+        using JournalNoteLink link = new(note, directory);
+        Assert.True(await link.Bind().WaitAsync(Wait));
+        EditableNote opened = Assert.IsType<EditableNote>(await link.ReadForEdit().WaitAsync(Wait));
+        ActionResult result = duringMove ? await data.Actions.MoveNote(link.Target, "Destination").WaitAsync(Wait)
+            : await data.Actions.SaveNote(opened, "owner:: Edited").WaitAsync(Wait);
+        Assert.True(unavailable);
+        Assert.Equal(ActionKind.Failed, result.Kind);
+        Assert.Contains("Recovery is incomplete", result.Text);
+        string recoveredImage = Assert.Single(result.RecoveryFiles, path => File.ReadAllBytes(path).SequenceEqual(Image(7)));
+        Assert.Equal(Path.GetFileName(recoveredImage), Path.GetFileName(Assert.Single(Directory.GetFiles(data.Root, ".*.tmp"))));
+        Assert.Contains(recoveredImage, result.Text);
+        Assert.Equal(opened.Text, (await link.ReadForEdit().WaitAsync(Wait))?.Text);
+        Assert.Equal("owner:: Earlier", await data.State!.ReadVersion(link.Target, id).WaitAsync(Wait));
+        Assert.IsType<JournalDirectory>(link.Target.Source).RemovalAvailable = null;
+        unavailable = false;
+        await AssertSharedImage(link.Target, "recovered-image.html", 7, 1);
+        Assert.Equal(ActionKind.Done, (await data.Actions.SaveNote(opened, "owner:: Available").WaitAsync(Wait)).Kind);
+    }
+
     [Theory]
     [InlineData(false, false, false)]
     [InlineData(true, false, false)]
@@ -332,7 +404,7 @@ public sealed class JournalEditorIntegrityTests : IDisposable
     [InlineData(true, false, true)]
     public async Task Utf16MoveAndRestore_PreserveBytesAndImageOwners(bool bigEndian, bool historyClash, bool reopen)
     {
-        (NoteInfo note, string id) = Prepare(data, Body, "Earlier", 3);
+        (NoteInfo note, string id) = Prepare(data, Body, "Earlier", 3, bigEndian ? ".MD" : ".md");
         string current = Body.Replace("Example", "Émilie 文", StringComparison.Ordinal);
         const string Earlier = "owner:: Änne\nstatus:: 待機\r\n![earlier](.attachments/earlier.png)\n";
         Encoding encoding = bigEndian ? Encoding.BigEndianUnicode : Encoding.Unicode;
@@ -693,7 +765,7 @@ public sealed class JournalEditorIntegrityTests : IDisposable
                 folder == level ? [.. files.List(folder), extra] : files.List(folder);
             public override void Expect(string path, bool directory = false) => files.Expect(path, directory);
             public override byte[] Read(string path, long limit) => files.Read(path, limit);
-            public override byte[] ReadOriginal(string path, long limit) => files.ReadOriginal(path, limit);
+            public override byte[] ReadOriginal(string path, long limit, string? ownerPath = null) => files.ReadOriginal(path, limit, ownerPath);
             public override void RequireResolvedHistory(string folder) => files.RequireResolvedHistory(folder);
             public override void EnsureFolder(string path) => files.EnsureFolder(path);
             public override void WriteNew(string path, byte[] bytes) => files.WriteNew(path, bytes);

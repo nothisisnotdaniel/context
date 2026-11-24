@@ -451,16 +451,181 @@ public sealed class JournalPanelTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData("version")]
+    [InlineData("history directory")]
+    [InlineData("note before publication")]
+    public async Task MarkSensitive_OriginalBecomesUnreadableDuringStaging_KeepsRecoverableVersions(string refused)
+    {
+        data.Keys = FakeKeyStore.Ready();
+        string name = Date(0);
+        data.WriteNote(name, "owner:: Current");
+        IRenderedComponent<Main> cut = await OpenDailyEditor("owner:: Current");
+        NoteReference selected = cut.FindComponent<NoteEditor>().Instance.OpenedTarget!.Value;
+        JournalDirectory directory = Assert.IsType<JournalDirectory>(selected.Source);
+        string path = selected.SelectedPath!, history = NoteHistory.FolderFor(path);
+        string id = Assert.IsType<string>(data.State!.HistoryStore.Keep(path, "owner:: Earlier"u8.ToArray()));
+        string version = Path.Combine(history, id + ".md");
+        bool published = false;
+        bool early = refused == "note before publication";
+        data.Actions!.AfterHistorySealed = () => published = early;
+        data.Actions.AfterNoteSealed = () => published = true;
+        string unavailable = early ? path : refused == "history directory" ? history : version;
+        directory.EntryAvailable = entry => !published || entry != unavailable;
+        await MainTests.ChooseAsync(cut, "mark-sensitive");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Contains("Recovery is incomplete", cut.Find(".main-status.red").TextContent), Wait);
+        Assert.True(published);
+        string[] paths = cut.FindAll(".recovery-paths input").Select(e => e.GetAttribute("value")!).ToArray();
+        string sealedPath = Path.ChangeExtension(path, ".ctxs");
+        if (early)
+        {
+            Assert.False(File.Exists(sealedPath));
+            string noteCopy = Assert.Single(paths, file => File.ReadAllBytes(file).SequenceEqual("owner:: Current"u8.ToArray()));
+            Assert.NotEqual(Path.GetFileName(path), Path.GetFileName(noteCopy));
+        }
+        else
+        {
+            string sealedCopy = Assert.Single(paths, file => Path.GetFileName(file) == Path.GetFileName(sealedPath));
+            Assert.Equal(File.ReadAllBytes(sealedPath), File.ReadAllBytes(sealedCopy));
+            Assert.DoesNotContain(paths, file => Path.GetFileName(file) == Path.GetFileName(version));
+        }
+        if (refused == "history directory")
+        {
+            string fallback = Assert.Single(paths, file => File.ReadAllBytes(file).SequenceEqual("owner:: Earlier"u8.ToArray()));
+            Assert.Equal(Path.GetFileName(fallback), Path.GetFileName(Assert.Single(Directory.GetFiles(data.Root, ".*.tmp"))));
+        }
+        else
+        {
+            string leaf = NoteHistory.FileName(id, name);
+            string sealedVersion = Assert.Single(paths, file => Path.GetFileName(file) == leaf);
+            Assert.Equal(File.ReadAllBytes(Path.Combine(history, leaf)), File.ReadAllBytes(sealedVersion));
+        }
+        Assert.Equal("owner:: Current", editor.MountedText());
+        published = false;
+        Assert.Equal("owner:: Earlier", await data.State.ReadVersion(selected, id).WaitAsync(Wait));
+        if (early)
+        {
+            Assert.Equal("owner:: Earlier", SealedNote.Open(name, File.ReadAllBytes(Path.Combine(history, NoteHistory.FileName(id, name))),
+                data.Keys.MachinePublicKey()!, data.Keys.Agree));
+        }
+        else
+        {
+            NoteReference sensitive = NoteReference.Stored(name, sensitive: true);
+            Assert.Equal("owner:: Current", (await data.State.ReadSensitive(sensitive).WaitAsync(Wait))?.Text);
+            Assert.Equal("owner:: Earlier", await data.State.ReadVersion(sensitive, id).WaitAsync(Wait));
+        }
+    }
+
     [Fact]
-    public async Task RestoreAfterReopeningFromWorkspace_UsesTheVersionEncodingAndImage()
+    public async Task EarlierNoteRecovery_SurvivesLaterSaveAndIsReportedAndCopiedExactlyWhenSealed()
+    {
+        using DesktopFixture fixture = new(OperatingSystem.IsWindows() ? "Journal\u0085store" : "Journal\tstore");
+        fixture.Keys = FakeKeyStore.Ready();
+        string name = Date(0);
+        fixture.WriteNote(name, "owner:: Original");
+        fixture.WriteNote("Other", "Independent note");
+        await fixture.RefreshAsync().WaitAsync(Wait);
+        NoteInfo note = Assert.Single(fixture.Notes!.List(), n => n.Name == name);
+        string id = Assert.IsType<string>(fixture.State!.HistoryStore.Keep(note.Path, "owner:: Earlier"u8.ToArray()));
+        using JournalDirectory source = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(fixture.Root));
+        bool refused = false;
+        source.EntryAvailable = path => !refused || path != note.Path;
+        using JournalNoteLink link = new(note, source);
+        Assert.True(await link.Bind().WaitAsync(Wait));
+        EditableNote opened = Assert.IsType<EditableNote>(await link.ReadForEdit().WaitAsync(Wait));
+        fixture.Notes.BeforeEditPublish = () => refused = true;
+        ActionResult failed = await fixture.Actions!.SaveNote(opened, "owner:: Draft").WaitAsync(Wait);
+        Assert.Equal(ActionKind.Failed, failed.Kind);
+        string recovery = Assert.Single(failed.RecoveryFiles, file => File.ReadAllBytes(file).SequenceEqual("owner:: Original"u8.ToArray()));
+        Assert.Equal(Path.GetFileName(recovery), Path.GetFileName(Assert.Single(Directory.GetFiles(fixture.Root, ".*.tmp"))));
+        refused = false;
+        fixture.Notes.BeforeEditPublish = null;
+        Assert.Equal(ActionKind.Done, (await fixture.Actions.SaveNote(opened, "owner:: Current").WaitAsync(Wait)).Kind);
+        Assert.Equal("owner:: Current", (await link.ReadForEdit().WaitAsync(Wait))?.Text);
+        string unrelated = Path.Combine(fixture.Root, "draft.tmp");
+        File.WriteAllText(unrelated, "Independent bytes");
+        Assert.Equal(ActionReason.None, (await fixture.Actions.MarkSensitive("Other", new Confirmation()).WaitAsync(Wait)).Reason);
+        ActionResult rename = await fixture.Actions.RenameNote(note.Reference, "New title", new Confirmation()).WaitAsync(Wait);
+        Assert.Equal(ActionKind.Failed, rename.Kind);
+        Assert.Contains(recovery, rename.RecoveryFiles);
+        ActionResult marked = await fixture.Actions.MarkSensitive(link.Target, new Confirmation()).WaitAsync(Wait);
+        Assert.Equal((ActionKind.Done, ActionReason.PlainHistoryLeft), (marked.Kind, marked.Reason));
+        Assert.Equal([recovery], marked.RecoveryFiles);
+        Assert.Equal("owner:: Original", File.ReadAllText(recovery));
+        Assert.Equal("Independent bytes", File.ReadAllText(unrelated));
+        NoteReference sensitive = NoteReference.Stored(name, sensitive: true);
+        Assert.Equal("owner:: Current", (await fixture.State.ReadSensitive(sensitive).WaitAsync(Wait))?.Text);
+        Assert.Equal("owner:: Earlier", await fixture.State.ReadVersion(sensitive, id).WaitAsync(Wait));
+
+        fixture.Bunit.JSInterop.Setup<string>("ContextEditor.copyToClipboard", _ => true).SetResult("Copied");
+        IRenderedComponent<RecoveryPaths> disclosure = fixture.Bunit.Render<RecoveryPaths>(p => p.Add(c => c.Paths, marked.RecoveryPaths));
+        Assert.Equal(DesktopText.OneLine(recovery), disclosure.Find(".recovery-path-label").TextContent);
+        Assert.Empty(disclosure.FindAll("input"));
+        await disclosure.Find("button").ClickAsync(new MouseEventArgs());
+        Assert.Equal("Copied.", disclosure.Find("[role=status]").TextContent);
+        Assert.Equal(recovery, Assert.Single(fixture.Bunit.JSInterop.Invocations["ContextEditor.copyToClipboard"]).Arguments[0]);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RenameFollowupSave_ShowsTheNewNameAndNamesTheRecoverableVersion(bool updateLink)
+    {
+        string name = Date(0), title = "Archive";
+        string body = "# " + name + "\nowner:: Current" + (updateLink ? "\n[[" + name + "]]" : "");
+        data.WriteNote(name, body);
+        IRenderedComponent<Main> cut = await OpenDailyEditor(body);
+        NoteReference selected = cut.FindComponent<NoteEditor>().Instance.OpenedTarget!.Value;
+        JournalDirectory directory = Assert.IsType<JournalDirectory>(selected.Source);
+        string id = Assert.IsType<string>(data.State!.HistoryStore.Keep(selected.SelectedPath!, "owner:: Earlier"u8.ToArray()));
+        string renamed = Path.Combine(data.Root, title + ".md");
+        string version = Path.Combine(NoteHistory.FolderFor(renamed), id + ".md");
+        bool followup = false;
+        directory.RemovalAvailable = path => { followup |= path == renamed; return true; };
+        directory.EntryAvailable = path => !followup || path != version;
+        await MainTests.ChooseAsync(cut, "rename");
+        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = title });
+        await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        if (updateLink)
+        {
+            await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        }
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal(title, editor.MountedName());
+            Assert.Equal(body, editor.MountedText());
+            Assert.Contains("Recovery is incomplete", cut.Find(".main-status.red").TextContent);
+            Assert.DoesNotContain("Loading", cut.Find(".links-panel").TextContent);
+        }, Wait);
+        Assert.True(followup);
+        Assert.False(File.Exists(selected.SelectedPath));
+        string fallback = Assert.Single(cut.FindAll(".recovery-paths input").Select(e => e.GetAttribute("value")!),
+            file => File.ReadAllBytes(file).SequenceEqual("owner:: Earlier"u8.ToArray()));
+        Assert.Contains(fallback, cut.Find(".main-status.red").TextContent);
+        NoteReference actual = cut.FindComponent<NoteEditor>().Instance.OpenedTarget!.Value;
+        Assert.Equal(renamed, actual.SelectedPath);
+        Assert.Null(await data.State.ReadVersion(actual, id).WaitAsync(Wait));
+        followup = false;
+        await MainTests.ChooseAsync(cut, "history");
+        cut.WaitForElement(".history-row button", Wait);
+        await StaleClick.ClickAsync(cut, ".history-row button");
+        cut.WaitForAssertion(() => Assert.Contains("owner:: Earlier", cut.Find(".diff-lines").TextContent), Wait);
+    }
+
+    [Theory]
+    [InlineData("copy")]
+    [InlineData("reuse")]
+    [InlineData("conflict")]
+    public async Task RestoreAfterReopeningFromWorkspace_UsesTheVersionEncodingAndImage(string nextMove)
     {
         string name = Date(0), moved = "Destination/" + name;
         const string First = "owner:: Zoë\nstatus:: Open\n";
         const string Prior = "owner:: 前\r\n![figure](.attachments/figure.png)\n";
-        data.WriteNote(name, First);
+        data.Keys = FakeKeyStore.Ready();
         data.WriteNote("Destination", "Archive");
         NoteStore store = new(data.Root);
-        string original = Path.Combine(data.Root, name + ".md");
+        string original = Path.Combine(data.Root, name + ".MD");
         byte[] current = [.. Encoding.Unicode.Preamble, .. Encoding.Unicode.GetBytes(First)];
         byte[] kept = [.. Encoding.BigEndianUnicode.Preamble, .. Encoding.BigEndianUnicode.GetBytes(Prior)];
         byte[] image = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x75];
@@ -478,11 +643,38 @@ public sealed class JournalPanelTests : IDisposable
             Assert.DoesNotContain("Loading", cut.Find(".links-panel").TextContent);
         }
         cut.WaitForAssertion(() => Mounted(moved, First), Wait);
+        NoteInfo firstMove = Assert.Single(store.List(), n => n.Name == moved);
+        Assert.Equal(name + ".md", Path.GetFileName(firstMove.Path));
+        Assert.Equal(current, File.ReadAllBytes(firstMove.Path));
+        Assert.Equal(kept, File.ReadAllBytes(Path.Combine(NoteHistory.FolderFor(firstMove.Path), id + ".md")));
         await NoteOpener.OpenAsync(cut, "Destination");
         cut.WaitForAssertion(() => Mounted("Destination", "Archive"), Wait);
         await NoteOpener.OpenAsync(cut, moved);
         cut.WaitForAssertion(() => Mounted(moved, First), Wait);
         Assert.Null(cut.FindComponent<NoteEditor>().Instance.JournalLink);
+        // The workspace editor moves the same note again while only its kept version references the image.
+        byte[] siblingImage = nextMove == "reuse" ? image : [.. image[..^1], 0x42];
+        string siblingName = nextMove == "copy" ? "other.png" : "figure.png";
+        NoteInfo sibling = store.CreateWithText("Neighbor", $"![neighbor](.attachments/{siblingName})");
+        Assert.Equal(AttachmentAddKind.Added, new NoteAttachments(store).Add(sibling.Reference, siblingName, siblingImage).Kind);
+        if (nextMove == "reuse")
+        {
+            data.WriteSensitive("Separate", "Independent sealed page");
+        }
+        await MainTests.ChooseAsync(cut, "move");
+        await cut.Find(".move-parent").InputAsync(new ChangeEventArgs { Value = "" });
+        await cut.Find(".move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        if (nextMove == "conflict")
+        {
+            cut.WaitForElement(".main-status.red", Wait);
+            Assert.False(File.Exists(Path.Combine(data.Root, name + ".md")));
+            await cut.Find(".move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        }
+        else
+        {
+            moved = name;
+        }
+        cut.WaitForAssertion(() => Mounted(moved, First), Wait);
         await MainTests.ChooseAsync(cut, "history");
         cut.WaitForElement(".history-row button", Wait);
         await StaleClick.ClickAsync(cut, ".history-row button");
@@ -498,6 +690,10 @@ public sealed class JournalPanelTests : IDisposable
         await MainTests.ChooseAsync(cut, "share");
         await StaleClick.ClickAsync(cut, ".dialog .confirm");
         Assert.Contains(Convert.ToBase64String(image), File.ReadAllText(data.Dialog.SharePath));
+        string neighborShare = data.Outside("neighbor-share.html");
+        Assert.Equal(ActionKind.Done, (await data.Actions!.ShareNote(sibling.Reference, neighborShare, false).WaitAsync(Wait)).Kind);
+        Assert.Contains(Convert.ToBase64String(siblingImage), File.ReadAllText(neighborShare));
+        Assert.Equal(siblingImage, File.ReadAllBytes(Path.Combine(NoteAttachments.Folder(sibling), siblingName)));
     }
 
     private void AssertRecoveryStatus(IRenderedComponent<Main> cut)

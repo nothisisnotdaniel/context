@@ -545,15 +545,17 @@ internal sealed class DesktopActions
     public static string PlainHistoryLeftText(ActionResult result) =>
         $"Marked {result.Text} sensitive, but readable history may remain. "
         + (result.RecoveryFolder is { } folder ? $"Check the original folder {folder}, including hidden files. "
-            : "The original history folder could not be reopened. ")
-        + (result.RecoveryFiles.Count > 0 ? $"Verified plaintext remains at {string.Join(", ", result.RecoveryFiles)}. " : string.Empty)
-        + "Secure your plaintext versions before removing them. Keep the .ctxs files.";
+            : "Some recovery locations in the original store could not be verified. ")
+        + (result.RecoveryFiles.Count > 0 ? $"Readable recovery files remain at {string.Join(", ", result.RecoveryFiles)}. " : string.Empty)
+        + "Secure your plaintext files before removing them. Keep the .ctxs files.";
 
     private static ActionResult RecoveryFailed(string operation, JournalDirectory.Edit.RecoveryFailure recovery) =>
         Failed(ActionReason.WriteFailed, $"Couldn't {operation}. " + (recovery.EarlierHistory
             ? "An earlier history recovery is still pending." : "Recovery is incomplete.")
-            + (recovery.Locations.Count > 0 ? $" Check {string.Join(", ", recovery.Locations)}."
-                : " No recovery location could be verified.")) with { HasRecoveryDetails = true, RecoveryFiles = recovery.Locations };
+            + RecoveryLocationText(recovery.Locations)) with { HasRecoveryDetails = true, RecoveryFiles = recovery.Locations };
+
+    private static string RecoveryLocationText(IReadOnlyList<string> paths) =>
+        paths.Count > 0 ? $" Check {string.Join(", ", paths.Distinct(StringComparer.Ordinal))}." : " No recovery location could be verified.";
 
     /// <summary>The red line when a sensitive note must be open for the action.</summary>
     public static string UnlockFirstText(string name) => $"Unlock {name} first.";
@@ -3419,7 +3421,9 @@ internal sealed class DesktopActions
                 return new ActionResult(ActionKind.Done, ActionReason.Unchanged, source.Name);
             }
 
-            NoteReference selected = reference.Resolved(source);
+            using JournalDirectory? workspace = plain && reference.Source is null
+                ? JournalDirectory.Bind(notes.Root) ?? throw new IOException() : null;
+            NoteReference selected = workspace is null ? reference.Resolved(source) : NoteReference.Bound(source, workspace);
             LinkRenamePlan plan = LinkRenamePlan.For(notes, selected, title);
             if (plan.Invalid)
             {
@@ -3489,23 +3493,25 @@ internal sealed class DesktopActions
     // a note that can't be updated is named in the LinksLeft text and the others are still updated. With titleFrom
     // (the plain note's name before the rename, job 353), the renamed note's matching "# <old name>" line is rewritten
     // in the same save as its own links, or in one save of its own when it links nowhere to itself; that save never
-    // counts as a link update, and a failed one leaves the old line (the rename stays done).
+    // counts as a link update. A failure after relocation reports the actual name and any recovery locations.
     private ActionResult UpdateLinks(LinkRenamePlan plan, string renamedName, string? titleFrom, INoteFileSource? source)
     {
         int updated = 0;
         List<string> left = [];
+        List<string> recoveryFiles = [];
+        bool incomplete = false, headingLeft = false;
         if (titleFrom is not null
             && !plan.Notes.Any(planned => string.Equals(
                 NoteLinkRewriter.Moved(planned, plan.OldName, plan.NewName) ?? planned, renamedName, StringComparison.Ordinal)))
         {
-            _ = UpdateLinksIn(plan, renamedName, links: false, titleFrom, renamedName, source);
+            headingLeft = SaveRewrite(renamedName, links: false, titleFrom) is not (NoteSaveResult.Saved or NoteSaveResult.Unchanged);
         }
 
         foreach (string planned in plan.Notes)
         {
             string current = NoteLinkRewriter.Moved(planned, plan.OldName, plan.NewName) ?? planned;
             bool self = titleFrom is not null && string.Equals(current, renamedName, StringComparison.Ordinal);
-            switch (UpdateLinksIn(plan, current, links: true, self ? titleFrom : null, renamedName, source))
+            switch (SaveRewrite(current, links: true, self ? titleFrom : null))
             {
                 case NoteSaveResult.Saved:
                     updated++;
@@ -3518,14 +3524,39 @@ internal sealed class DesktopActions
             }
         }
 
-        if (left.Count > 0)
+        if (headingLeft || incomplete || left.Count > 0)
         {
-            return new ActionResult(
-                ActionKind.Done, ActionReason.LinksLeft, LinksLeftText(renamedName, left), name: renamedName);
+            string warning = left.Count > 0 ? LinksLeftText(renamedName, left) : RenamedText(renamedName);
+            if (headingLeft)
+            {
+                warning += " Couldn't update its heading.";
+            }
+            if (incomplete)
+            {
+                warning += " Recovery is incomplete." + RecoveryLocationText(recoveryFiles);
+            }
+            return new ActionResult(ActionKind.Done, ActionReason.LinksLeft, warning, name: renamedName)
+            {
+                HasRecoveryDetails = incomplete, RecoveryFiles = recoveryFiles.Distinct(StringComparer.Ordinal).ToArray(),
+            };
         }
 
         string text = updated == 0 ? RenamedText(renamedName) : RenamedLinksText(renamedName, updated);
         return new ActionResult(ActionKind.Done, ActionReason.None, text, name: renamedName);
+
+        NoteSaveResult SaveRewrite(string name, bool links, string? oldTitle)
+        {
+            try
+            {
+                return UpdateLinksIn(plan, name, links, oldTitle, renamedName, source);
+            }
+            catch (JournalDirectory.Edit.RecoveryFailure failure)
+            {
+                incomplete = true;
+                recoveryFiles.AddRange(failure.Locations);
+                return NoteSaveResult.Missing;
+            }
+        }
     }
 
     private ActionResult MergeNotesNow(string target, string source, Confirmation? confirmed)
@@ -3752,7 +3783,7 @@ internal sealed class DesktopActions
 
             return NoteSaveResult.ChangedOnDisk;
         }
-        catch (Exception)
+        catch (Exception e) when (e is not JournalDirectory.Edit.RecoveryFailure)
         {
             return NoteSaveResult.Missing;
         }
@@ -4202,7 +4233,10 @@ internal sealed class DesktopActions
                 return new ActionResult(ActionKind.Done, ActionReason.Unchanged, source.Name);
             }
 
-            NoteInfo? moved = attachments.MoveWithNote(reference.Resolved(source), owner?.Reference);
+            using JournalDirectory? workspace = reference.Source is null
+                ? JournalDirectory.Bind(notes.Root) ?? throw new IOException() : null;
+            NoteReference selected = workspace is null ? reference.Resolved(source) : NoteReference.Bound(source, workspace);
+            NoteInfo? moved = attachments.MoveWithNote(selected, owner?.Reference);
             if (moved is null)
             {
                 return Refused(ActionReason.Missing, NoteMissingText(reference.Name));
@@ -4869,7 +4903,6 @@ internal sealed class DesktopActions
 
             // The text exactly as the file holds it (a byte order mark stays, as U+FEFF); only UTF-8 is sealed.
             byte[] plain = edit.ReadOriginal(source.Path, MaxNoteBytes);
-            string version = EditableNote.Hash(plain);
             string text;
             try
             {
@@ -4890,13 +4923,13 @@ internal sealed class DesktopActions
                 return Failed(ActionReason.WriteFailed, SealHistoryFailedText(source.Name));
             }
             AfterHistorySealed?.Invoke();
-            if (!IsVersion(source.Path, MaxNoteBytes, version, selected))
+            if (!edit.PlainNoteUnchanged())
             {
                 return Refused(ActionReason.ChangedOnDisk, ChangedText(source.Name));
             }
             edit.WriteNew(target, file);
             AfterNoteSealed?.Invoke();
-            if (!IsVersion(source.Path, MaxNoteBytes, version, selected))
+            if (!edit.PlainNoteUnchanged())
             {
                 return Refused(ActionReason.ChangedOnDisk, ChangedText(source.Name));
             }
@@ -5108,13 +5141,24 @@ internal sealed class DesktopActions
         {
             IReadOnlyList<NoteVersion> keptVersions = NoteHistory.BoundedPlainVersions(source.Path, edit);
             string folder = NoteHistory.FolderFor(source.Path);
+            edit.OnRollback(() =>
+            {
+                if (keptVersions.Except(NoteHistory.ListVersions(source.Path, edit, ".md")).Any())
+                {
+                    throw new NoteHistoryException();
+                }
+            });
             foreach (NoteVersion kept in keptVersions)
             {
                 string path = Path.Combine(folder, NoteHistory.FileName(kept.Id, null));
+                _ = edit.ReadOriginal(path, NoteHistory.MaxVersionBytes);
+                versions.Add(path);
+            }
+            foreach (string path in versions)
+            {
                 byte[] bytes = edit.ReadOriginal(path, NoteHistory.MaxVersionBytes);
                 string text = new System.Text.UTF8Encoding(false, throwOnInvalidBytes: true).GetString(bytes);
-                history.KeepSealedCopy(source.Path, kept.Id, source.Name, SealedNote.Seal(source.Name, text, recipients), edit);
-                versions.Add(path);
+                history.KeepSealedCopy(source.Path, Path.GetFileNameWithoutExtension(path), source.Name, SealedNote.Seal(source.Name, text, recipients), edit);
             }
 
             return true;

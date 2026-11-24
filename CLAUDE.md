@@ -585,11 +585,15 @@ Every factory agent reads this file before working on Context. Keep it short and
   copies the old sealed file byte for byte (zero `Agree`); a rename seals the new file, moves the history (a clash
   removes the new file: Refused `Exists`), then `DeleteSensitive`. `MarkSensitive` seals each plain version (up to
   50, public keys only) before the note. It verifies the sealed copies through plaintext removal. An incomplete
-  rollback preserves sealed copies until the original note and versions reopen. Journal Save, Rename and Move check
+  rollback verifies the original data from the first staged write and keeps sealed copies needed for recovery.
+  Journal Save, Rename and Move check
   the published pages, kept versions and linked files through retirement, including those carried by a subpage.
-  An unresolved history recovery file keeps the note at its original location. Done/`PlainHistoryLeft` shows a red
-  warning with the absolute original history folder and verified plaintext paths. Recovery paths wrap and can be
-  selected individually with the keyboard. The user can secure plaintext versions
+  A recovery snapshot uses the exact note's history key in its filename. If a version or image directory is
+  unavailable, the snapshot can be kept at the bound store root. Unresolved recovery files keep the note at
+  its original location. Rollback refreshes the open editor after temporary directories have been removed.
+  Both editor entry points check attachment ownership against current notes and kept versions on Move.
+  Done/`PlainHistoryLeft` shows a red warning with the verified folder and readable recovery paths.
+  Each path wraps and its Copy button copies the exact filesystem spelling. The user can secure plaintext files
   and keep the `.ctxs` files. During reversible version removal an empty `.<id>.reserved` file keeps that ID
   occupied for other editors until the operation finishes. `MakePlain` (question ends `Its history will be
   removed.`) removes the sealed ones. `DesktopState.History(name)` (`HistoryView`) and `ReadVersion(name, id)` (a

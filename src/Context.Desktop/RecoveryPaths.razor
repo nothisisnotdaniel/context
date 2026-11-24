@@ -1,10 +1,25 @@
+@inject EditorInterop Interop
+
 @if (Paths is { Count: > 0 })
 {
     <details class="recovery-paths">
         <summary>Copy recovery paths</summary>
         @foreach (string path in Paths)
         {
-            <input type="text" readonly aria-label="Recovery path to copy" value="@DesktopText.OneLine(path)" />
+            string label = DesktopText.OneLine(path);
+            @if (label == path)
+            {
+                <input type="text" readonly aria-label="Recovery path to copy" value="@label" />
+            }
+            else
+            {
+                <span class="recovery-path-label">@label</span>
+            }
+            <button type="button" @onclick="() => Copy(path)">Copy exact path</button>
+            @if (copiedPath == path)
+            {
+                <span role="status">@copyStatus</span>
+            }
         }
     </details>
 }
@@ -12,4 +27,22 @@
 @code {
     [Parameter]
     public IReadOnlyList<string>? Paths { get; set; }
+
+    private string? copiedPath;
+    private string? copyStatus;
+
+    private async Task Copy(string path)
+    {
+        bool copied;
+        try
+        {
+            copied = await Interop.CopyTextAsync(path);
+        }
+        catch (Exception e) when (e is Microsoft.JSInterop.JSException or OperationCanceledException)
+        {
+            copied = false;
+        }
+        copiedPath = path;
+        copyStatus = copied ? "Copied." : "Couldn't copy the path.";
+    }
 }

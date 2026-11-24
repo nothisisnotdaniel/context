@@ -381,7 +381,8 @@ internal sealed class NoteStore
         return result;
     }
 
-    internal NoteInfo? Move(NoteReference name, NoteReference? newParent, NoteFileEdit? edit, byte[]? rewritten = null)
+    internal NoteInfo? Move(NoteReference name, NoteReference? newParent, NoteFileEdit? edit, byte[]? rewritten = null,
+        IReadOnlyList<NoteVersion>? preservedVersions = null)
     {
         List<Entry> entries = ListEntries();
         Entry? source = FindEntry(entries, name);
@@ -431,7 +432,7 @@ internal sealed class NoteStore
                 edit.Expect(owner.Note.Path);
             }
             edit.EnsureFolder(folder);
-            MoveTree(source, target, Path.Combine(folder, title), newName, false, edit, rewritten);
+            MoveTree(source, target, Path.Combine(folder, title), newName, false, edit, rewritten, preservedVersions);
             return new NoteInfo(newName, source.Note.Modified, target);
         }
         bool created = !Directory.Exists(folder);
@@ -537,14 +538,14 @@ internal sealed class NoteStore
         foreach (Entry entry in subtree)
         {
             files.Add(entry.Note.Path);
-            _ = edit.ReadOriginal(entry.Note.Path, MaxEditBytes);
+            _ = edit.ReadOriginal(entry.Note.Path, MaxEditBytes, entry.Note.Path);
             if (history)
             {
                 string folder = NoteHistory.FolderFor(entry.Note.Path);
                 histories[entry.Note.Path] = confirmedHistories?[entry.Note.Path] ?? NoteHistory.ListVersions(entry.Note.Path, edit, Extension);
                 foreach (NoteVersion version in histories[entry.Note.Path])
                 {
-                    _ = edit.ReadOriginal(Path.Combine(folder, NoteHistory.FileName(version.Id, null)), NoteHistory.MaxVersionBytes);
+                    _ = edit.ReadOriginal(Path.Combine(folder, NoteHistory.FileName(version.Id, null)), NoteHistory.MaxVersionBytes, entry.Note.Path);
                 }
                 folders.Add(folder);
                 folders.Add(Path.GetDirectoryName(folder)!);
@@ -1615,14 +1616,14 @@ internal sealed class NoteStore
     internal static bool HasSelectedSubpages(NoteInfo note, NoteFileEdit edit) =>
         SelectedChildFolder(note, edit) is { } folder && PagesIn(folder, note.Name, edit).Any();
 
-    private static IReadOnlyList<NoteVersion> PreservePage(string path, NoteFileEdit edit)
+    internal static IReadOnlyList<NoteVersion> PreservePage(string path, NoteFileEdit edit)
     {
-        NoteAttachments.ObserveLinkedFiles(path, edit.ReadOriginal(path, MaxEditBytes), edit, original: true);
+        NoteAttachments.ObserveLinkedFiles(path, edit.ReadOriginal(path, MaxEditBytes, path), edit, original: true);
         IReadOnlyList<NoteVersion> versions = NoteHistory.BoundedPlainVersions(path, edit);
         foreach (NoteVersion version in versions)
         {
             string kept = Path.Combine(NoteHistory.FolderFor(path), NoteHistory.FileName(version.Id, null));
-            NoteAttachments.ObserveLinkedFiles(path, edit.ReadOriginal(kept, NoteHistory.MaxVersionBytes), edit, original: true);
+            NoteAttachments.ObserveLinkedFiles(path, edit.ReadOriginal(kept, NoteHistory.MaxVersionBytes, path), edit, original: true);
         }
         edit.OnRollback(() =>
         {
@@ -1651,6 +1652,10 @@ internal sealed class NoteStore
             {
                 string relative = path[(folder!.Length + 1)..];
                 tree.Add((relative, null));
+                if (preserve)
+                {
+                    edit.RequireResolvedHistory(NoteHistory.FolderFor(path));
+                }
                 IReadOnlyList<NoteVersion> versions = preserve ? PreservePage(path, edit) : NoteHistory.BoundedPlainVersions(path, edit);
                 foreach (NoteVersion version in versions)
                 {
@@ -1666,13 +1671,13 @@ internal sealed class NoteStore
     }
 
     private void MoveTree(Entry source, string target, string folderTarget, string newName, bool caseOnly,
-        NoteFileEdit? edit, byte[]? rewritten = null)
+        NoteFileEdit? edit, byte[]? rewritten = null, IReadOnlyList<NoteVersion>? preservedVersions = null)
     {
         if (edit is not null)
         {
             string? originalFolder = source.ChildFolder;
             HashSet<(string Path, string? Version)> originalTree = SubpageTree(originalFolder, source.Note.Name, edit, preserve: true);
-            IReadOnlyList<NoteVersion> versions = PreservePage(source.Note.Path, edit);
+            IReadOnlyList<NoteVersion> versions = preservedVersions ?? PreservePage(source.Note.Path, edit);
             StagePlainHistory(source.Note, target, newName, caseOnly, edit, versions);
             BeforeEditPublish?.Invoke();
             edit.Verify();

@@ -2317,7 +2317,7 @@ else
 
         if (await ShowRelocated(renamed, origin))
         {
-            ShowStatus(DesktopText.OneLine(renamed.Text), renamed.Reason == ActionReason.LinksLeft ? "red" : "accent");
+            ShowStatus(DesktopText.OneLine(renamed.Text), renamed.Reason == ActionReason.LinksLeft ? "red" : "accent", renamed);
         }
     }
 
@@ -2338,7 +2338,8 @@ else
                 if (!disposed && origin == journalNote)
                 {
                     ShowNote(null);
-                    ShowStatus(DesktopText.OneLine(DesktopActions.CantReadText(name)), "red");
+                    string failure = DesktopActions.CantReadText(name);
+                    ShowStatus(DesktopText.OneLine(result.Reason == ActionReason.LinksLeft ? result.Text + " " + failure : failure), "red", result);
                 }
                 return false;
             }
