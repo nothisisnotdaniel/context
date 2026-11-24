@@ -26,3 +26,7 @@ Category: bug
 - #135: Proposed by job 137-desktop-tags-links (`factory/jobs/137-desktop-tags-links/`).
 - #136: Proposed by job 137-desktop-tags-links (`factory/jobs/137-desktop-tags-links/`).
 - #137: Proposed by job 137-desktop-tags-links (`factory/jobs/137-desktop-tags-links/`).
+
+## Long selected-tag heading from #138
+
+Keep the selected tag's result heading readable within the main pane and separate from the Board and Close buttons. Wrap a single valid 50-character tag or truncate it with access to its full name. Avoid horizontal scrolling of the whole pane for this heading and keep both actions usable. On Windows develop `29b1b32c`, the 691.36 px tag extended 151.36 px outside the pane at a 1084 px client and 415.36 px at 820 px. The two controls covered 110 px of its text in both Light and Dark. Repeat #138 at both widths using a short and a long tag.
