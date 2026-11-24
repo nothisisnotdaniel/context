@@ -20,4 +20,4 @@ Proposed by job 210-outline-right-sidebar (`factory/jobs/210-outline-right-sideb
 
 ## Windows verification, 2026-11-24
 
-On develop `29b1b32c`, actual screenshot pixels on three 14 px outline buttons measured 4.2149:1 in Light (#1e78c8 on #f5f5f7), below 4.5:1. Dark passed at 7.2533:1 (#63b8ff on #242426). Clicking the final link scrolled its heading into view in both themes. A scoped light outline color of #1a6db7 reaches 4.9261:1 on the same panel. Repeat after [#507](507-give-sidebar-outline-links-sufficient-contrast.md).
+On develop `29b1b32c`, actual screenshot pixels on three 14 px outline buttons measured 4.2149:1 in Light (#1e78c8 on #f5f5f7), below 4.5:1. Dark passed at 7.2533:1 (#63b8ff on #242426). Clicking the final link scrolled its heading into view in both themes. A scoped light outline color of #1a6db7 reaches 4.9261:1 on the same panel. Repeat after [#515](515-give-sidebar-outline-links-sufficient-contrast.md).

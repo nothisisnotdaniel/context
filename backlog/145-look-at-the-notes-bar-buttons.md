@@ -20,4 +20,4 @@ Proposed by job 138-desktop-settings (`factory/jobs/138-desktop-settings/`).
 
 #247 replaced the visible Notes heading with a logo. #252 subsequently removed the logo and kept that space for icons. On develop `29b1b32c`, the 240 px sidebar displays five 30 × 30 px buttons and the list retains the accessible name Recent notes. The Tags and Settings buttons opened their pages by click and by Tab/Enter in both themes across nine client widths from 120 to 1084 px. At 400 px both buttons were fully visible, but their page headings had zero visible pixels. Both complete headings were visible at 800 and 1084 px. At the native minimum the content area measured 120 × 0 px.
 
-Leave this check open until #503's narrow-window layout fix displays the opened page. Keep the current icon-only bar.
+Leave this check open until #511's narrow-window layout fix displays the opened page. Keep the current icon-only bar.

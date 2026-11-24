@@ -160,14 +160,14 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39) → 367-pro-licence-context
 - [x] [#454](backlog/454-fix-flaky-repository-settings-page-test.md) Fix flaky repository settings page test → 382-fix-flaky-settings-test
 - [ ] [#476](backlog/476-journal-view-of-the-days-with.md) Journal view of the days with content
-- [ ] [#503](backlog/503-keep-capture-visible-in-narrow-desktop.md) Keep Capture visible in narrow desktop windows
-- [ ] [#504](backlog/504-focus-the-editor-when-the-quick.md) Focus the editor when the quick switcher reselects the current note
-- [ ] [#505](backlog/505-raise-the-contrast-of-desktop-text.md) Raise the contrast of desktop text placeholders in dark mode
-- [ ] [#506](backlog/506-size-the-top-bar-day-picker.md) Size the top-bar day picker to its calendar grid
-- [ ] [#507](backlog/507-give-sidebar-outline-links-sufficient-contrast.md) Give sidebar outline links sufficient contrast on the panel
-- [ ] [#508](backlog/508-suppress-the-browser-menu-on-non.md) Suppress the browser menu on non-editable chips inside the note editor
-- [ ] [#509](backlog/509-serve-the-bundled-mermaid-renderer-script.md) Serve the bundled Mermaid renderer script to the Windows desktop frame
-- [ ] [#510](backlog/510-restore-and-raise-the-existing-windows.md) Restore and raise the existing Windows window on repeated desktop starts
+- [ ] [#511](backlog/511-keep-capture-visible-in-narrow-desktop.md) Keep Capture visible in narrow desktop windows
+- [ ] [#512](backlog/512-focus-the-editor-when-the-quick.md) Focus the editor when the quick switcher reselects the current note
+- [ ] [#513](backlog/513-raise-the-contrast-of-desktop-text.md) Raise the contrast of desktop text placeholders in dark mode
+- [ ] [#514](backlog/514-size-the-top-bar-day-picker.md) Size the top-bar day picker to its calendar grid
+- [ ] [#515](backlog/515-give-sidebar-outline-links-sufficient-contrast.md) Give sidebar outline links sufficient contrast on the panel
+- [ ] [#516](backlog/516-suppress-the-browser-menu-on-non.md) Suppress the browser menu on non-editable chips inside the note editor
+- [ ] [#517](backlog/517-serve-the-bundled-mermaid-renderer-script.md) Serve the bundled Mermaid renderer script to the Windows desktop frame
+- [ ] [#518](backlog/518-restore-and-raise-the-existing-windows.md) Restore and raise the existing Windows window on repeated desktop starts
 - [ ] [#89](backlog/089-call-to-meeting-note.md) Call to meeting note
 - [h] [#462](backlog/462-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on macOS
 - [h] [#463](backlog/463-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on Windows

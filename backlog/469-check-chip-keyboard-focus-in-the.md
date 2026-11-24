@@ -15,7 +15,7 @@ Run the checklist below on Windows in the desktop app and tick each step.
 - [x] The focus ring is visible in light and in dark mode.
 - [x] Enter on a focused chip opens it; a click still opens it.
 - [x] With a chip focused, Ctrl+S saves and Ctrl+K opens the palette.
-- [ ] If any step fails, add a fix item that names the step and what you saw.
+- [x] If any step fails, add a fix item that names the step and what you saw.
 
 ## Why
 
