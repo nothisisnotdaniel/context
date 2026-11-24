@@ -17,3 +17,9 @@ The UI and UX reviewers of job 226 noted that bunit has no layout engine, so the
 Proposed by job 226-narrow-day-pick.
 
 Proposed by job 226-narrow-day-pick (`factory/jobs/226-narrow-day-pick/`).
+
+## Windows verification, 2026-11-24
+
+On develop `29b1b32c`, the actual Windows desktop top-bar calendar measured 1,000,018 px wide at both 1084 and 800 CSS px in Light and Dark. None of the six ISO week labels or 42 day targets was visible. Clicking the visible grid hit an empty cell. The current and selected metadata were correct, the arrow and month keys moved to the expected dates, and Enter opened the correct daily note. The default-width sidebar calendar displayed all 42 dates in a 229 px grid. Repeat the visual and pointer checks after [#506](506-size-the-top-bar-day-picker.md).
+
+On the long fixture note, ArrowDown scrolled the page behind the calendar by 40 px and PageDown transiently by 622 px in both themes. That separate defect is tracked in [#277](277-arrow-and-page-keys-in-the.md).
