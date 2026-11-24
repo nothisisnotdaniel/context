@@ -183,6 +183,52 @@ public sealed class JournalTests : IDisposable
         Assert.True(journal.Exhausted);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void MeetingLinks_UseTheEditorByteLimitWhenTheirBatchArrives(int extraBytes)
+    {
+        const string Date = "2026-10-15";
+        NoteStore notes = new(root);
+        notes.CreateWithText("2026-10-29", "First batch");
+        notes.CreateWithText(Date, "Local day");
+        notes.Create("Meetings");
+        notes.CreateChild("Meetings", "Series");
+        NoteInfo nested = notes.CreateChild("Meetings/Series", Date);
+        NoteInfo legacy = notes.CreateWithText(Date + " Scheduled", "No tag");
+        DateOnly older = Today.AddDays(-14);
+        DateTime start = older.ToDateTime(new TimeOnly(9, 0));
+        Appointment appointment = new("Scheduled", null, start, start.AddHours(1), false);
+        using Journal journal = Open(notes, older, day => day == older ? [appointment] : []);
+        Assert.Equal("First batch", Assert.Single(journal.ReadBatch()).Body);
+
+        int bytes = checked((int)NoteStore.MaxEditBytes + extraBytes);
+        foreach (NoteInfo meeting in new[] { nested, legacy })
+        {
+            File.WriteAllText(meeting.Path, meeting.Name.PadRight(bytes));
+        }
+
+        JournalDay entry = Assert.Single(journal.ReadBatch());
+        Assert.Equal(Date, entry.Daily);
+        Assert.Equal("Local day", entry.Body);
+        Assert.Same(appointment, Assert.Single(entry.Appointments));
+        Assert.Equal(extraBytes == 0 ? new[] { legacy.Name, nested.Name } : [], entry.Meetings);
+        foreach (NoteInfo meeting in new[] { nested, legacy })
+        {
+            Assert.True(notes.TryFind(meeting.Name, out NoteInfo? found));
+            if (extraBytes == 0)
+            {
+                EditableNote editor = notes.ReadForEdit(found!);
+                Assert.Equal(bytes, editor.Text.Length);
+                Assert.Equal(meeting.Name, editor.Text.TrimEnd());
+            }
+            else
+            {
+                Assert.Throws<FileTooLargeException>(() => notes.ReadForEdit(found!));
+            }
+        }
+    }
+
     [Fact]
     public void ExplicitDateBeforeSeriesStart_SetsCalendarHistoryBound()
     {

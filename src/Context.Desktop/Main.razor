@@ -728,6 +728,7 @@ else
     // going back to the note, ends Back to search.
     private void OpenPage(Page next)
     {
+        CloseJournal();
         if (page == Page.Tags && next != Page.Tags)
         {
             tagShown = null;

@@ -432,18 +432,24 @@ internal sealed class DesktopState
 
     /// <summary>
     /// Reads the note called <paramref name="name"/> for editing (<see cref="NoteStore.ReadForEdit"/>) off the
-    /// calling thread. <c>null</c> when there is no such note, or it can't be read.
+    /// calling thread. A stored name must still match the plain-note listing exactly.
+    /// <c>null</c> when there is no such note, or it can't be read.
     /// </summary>
-    public Task<EditableNote?> ReadForEdit(string name) => Task.Run(() =>
+    public Task<EditableNote?> ReadForEdit(string name, bool storedName = false) => Task.Run(() =>
     {
         try
         {
-            if (!notes.TryFind(name, out NoteInfo? found) || found is null)
+            NoteInfo? found;
+            if (storedName)
             {
-                return null;
+                found = notes.List().FirstOrDefault(n => string.Equals(n.Name, name, StringComparison.Ordinal));
+            }
+            else
+            {
+                notes.TryFind(name, out found);
             }
 
-            return notes.ReadForEdit(found);
+            return found is null ? null : notes.ReadForEdit(found);
         }
         catch (Exception)
         {
@@ -1078,7 +1084,7 @@ internal sealed class DesktopState
                 outlookHistory = (day, call);
             }
         }
-        return Finish(call);
+        return Finish(call, consent);
     }
 
     // A later journal, even on a different date, shares the outstanding-call limit until Outlook returns.
@@ -1351,7 +1357,7 @@ internal sealed class DesktopState
             {
                 lastJournalDay = call;
             }
-            return Finish(call);
+            return Finish(call, journalConsent);
         }
         catch (Exception)
         {
@@ -1380,9 +1386,15 @@ internal sealed class DesktopState
             OutlookScheduler));
 
     // Waits for the call at most OutlookTimeout; the call itself keeps running and stays cached while it does.
-    private (OutlookStatus Status, IReadOnlyList<T> Items) Finish<T>(OutlookCall<T> call)
+    private (OutlookStatus Status, IReadOnlyList<T> Items) Finish<T>(OutlookCall<T> call, Func<bool>? journalConsent = null)
     {
-        if (!call.Read.Wait(OutlookTimeout))
+        bool completed = call.Read.Wait(OutlookTimeout);
+        // A source call may have been running when the user turned Outlook off.
+        if (journalConsent is not null && !journalConsent())
+        {
+            return (OutlookStatus.Off, []);
+        }
+        if (!completed)
         {
             return (OutlookStatus.TimedOut, []);
         }

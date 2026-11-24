@@ -15,6 +15,7 @@ public sealed class JournalPanelTests : IDisposable
 {
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
     private readonly DesktopFixture data = new();
+    private readonly EditorJs editor;
     private readonly Engine browser = new();
     private readonly ITestOutputHelper output;
     private string? markerId;
@@ -23,7 +24,7 @@ public sealed class JournalPanelTests : IDisposable
     public JournalPanelTests(ITestOutputHelper output)
     {
         this.output = output;
-        _ = new EditorJs(data.Bunit);
+        editor = new EditorJs(data.Bunit);
         browser.Execute("""
             const window = globalThis;
             const region = {scrollTop: 0, clientHeight: 120, scrollTo(x,y) { this.scrollTop = y; }};
@@ -95,6 +96,69 @@ public sealed class JournalPanelTests : IDisposable
 
     private static Task Bottom(IRenderedComponent<Main> cut) =>
         cut.InvokeAsync(cut.FindComponent<JournalPanel>().Instance.Bridge.OnJournalBottom);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SettingsFromSelectedTag_ClearsResultsIncludingThroughJournal(bool throughJournal)
+    {
+        data.WriteNote("Tagged note", "#work");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        await RunPalette(cut, "/tags");
+        const string Tag = ".tags-panel .tag-button[title='#work']";
+        cut.WaitForElement(Tag, Wait);
+        await StaleClick.ClickAsync(cut, Tag);
+        void AssertSelection()
+        {
+            Assert.Equal("true", cut.Find(Tag).GetAttribute("aria-pressed"));
+            Assert.Equal("Tagged note", cut.Find(".tag-panel .note-button").TextContent);
+        }
+        cut.WaitForAssertion(AssertSelection, Wait);
+        if (throughJournal)
+        {
+            await Open(cut);
+            cut.WaitForAssertion(() => Assert.Contains("No journal entries.", cut.Find(".journal-panel").TextContent), Wait);
+            await StaleClick.ClickAsync(cut, ".journal-panel .close");
+            cut.WaitForAssertion(AssertSelection, Wait);
+            await Open(cut);
+            cut.WaitForAssertion(() => Assert.Contains("No journal entries.", cut.Find(".journal-panel").TextContent), Wait);
+        }
+        await RunPalette(cut, "/settings");
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("Settings", cut.Find(".settings-panel h2").TextContent);
+            Assert.DoesNotContain("Loading…", cut.Find(".settings-panel").TextContent);
+            Assert.Empty(cut.FindAll(".tags-panel, .tag-panel, .journal-panel"));
+        }, Wait);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LegacyMeetingButton_OpensItsExactStoredName(bool hasSibling)
+    {
+        string sibling = Date(0) + " Review";
+        string stored = sibling + " ";
+        const string Body = "#meeting\nSpace-suffixed fixture";
+        data.WriteNote(stored, Body);
+        if (hasSibling)
+        {
+            data.WriteNote(sibling, "Trimmed sibling fixture");
+        }
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        Assert.Equal(hasSibling ? sibling : null, data.State.ResolveNote(stored));
+        await Open(cut);
+        cut.WaitForAssertion(() => Assert.Equal(stored, Assert.Single(cut.FindAll(".journal-meeting")).TextContent), Wait);
+        await StaleClick.ClickAsync(cut, ".journal-meeting");
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal(stored, cut.Find(".note-title").GetAttribute("title"));
+            Assert.Equal(Body, editor.MountedText());
+            Assert.DoesNotContain("Loading", cut.Find(".links-panel").TextContent);
+        }, Wait);
+    }
 
     private int Measure(IRenderedComponent<Main> cut, string heading)
     {
@@ -341,6 +405,57 @@ public sealed class JournalPanelTests : IDisposable
         using Journal reopened = (await state.OpenJournal().WaitAsync(Wait)).Journal;
         Assert.Equal("Outlook fixture", Assert.Single(Assert.Single(reopened.ReadBatch()).Appointments).Title);
         Assert.Equal(1, data.Outlook.AppointmentCalls);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task OptOutDuringDayRead_DiscardsOutlookAndKeepsLocalEntries(bool desktopOptOut, bool enableAgain)
+    {
+        data.OutlookTimeout = Wait;
+        SettingsStore settings = new(data.Root);
+        settings.SaveOutlook(true);
+        data.WriteNote(Date(0), "Local daily fixture");
+        data.WriteCalendar("local.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("Local appointment", "20261029T110000", "20261029T113000")));
+        AddOutlookAppointment(0);
+        DesktopState state = data.CreateState();
+        (Journal opened, JournalOutlook outlook) = await state.OpenJournal().WaitAsync(Wait);
+        using Journal journal = opened;
+        Assert.Equal(OutlookStatus.Ok, outlook.Status);
+        data.Outlook.BlockAppointments();
+        Task<IReadOnlyList<JournalDay>> batch = Task.Run(journal.ReadBatch);
+        try
+        {
+            await data.Outlook.AppointmentsEntered.Task.WaitAsync(Wait);
+            if (desktopOptOut)
+            {
+                ActionResult off = await data.Actions!.SetOutlookEnabled(false).WaitAsync(Wait);
+                Assert.Equal(ActionKind.Done, off.Kind);
+                Assert.Equal(DesktopActions.OutlookOffText, off.Text);
+            }
+            else
+            {
+                settings.SaveOutlook(false);
+            }
+            if (enableAgain)
+            {
+                // The old journal still belongs to the generation before the confirmed opt-out.
+                settings.SaveOutlook(true);
+            }
+        }
+        finally
+        {
+            data.Outlook.Release();
+        }
+        JournalDay day = Assert.Single(await batch.WaitAsync(Wait));
+        Assert.Equal(OutlookStatus.Off, outlook.Status);
+        Assert.Equal(Date(0), day.Daily);
+        Assert.Equal("Local daily fixture", day.Body);
+        Assert.Equal("Local appointment", Assert.Single(day.Appointments).Title);
+        Assert.Equal(1, data.Outlook.OldestCalls);
+        Assert.Equal(DesktopFixture.Today, Assert.Single(data.Outlook.AppointmentArguments).Day);
     }
 
     [Fact]

@@ -109,8 +109,7 @@ internal sealed class Journal : IDisposable
                 }
                 else if (note.Parent is not null || items.Any(a => MeetingNote.IsNoteOf(a, note.Name)))
                 {
-                    using FileStream? plain = TryOpen(note);
-                    if (plain is not null)
+                    if (CanOpenForEdit(note))
                     {
                         meetings.Add(note.Name);
                     }
@@ -132,24 +131,25 @@ internal sealed class Journal : IDisposable
     private bool HasMeetingTag(NoteInfo note) =>
         Read(note) is { } text && TagParser.Parse(text).Contains(MeetingNote.Tag);
 
-    private FileStream? TryOpen(NoteInfo note)
+    private bool CanOpenForEdit(NoteInfo note)
     {
         try
         {
-            return openPlain(note);
+            using FileStream plain = openPlain(note);
+            return plain.CanSeek && plain.Length <= NoteStore.MaxEditBytes;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            return null;
+            return false;
         }
     }
 
     private string? Read(NoteInfo note)
     {
-        using FileStream? plain = TryOpen(note);
         try
         {
-            return plain is null ? null : NoteStore.DecodeText(BoundedFile.Read(plain, NoteStore.MaxNoteBytes));
+            using FileStream plain = openPlain(note);
+            return NoteStore.DecodeText(BoundedFile.Read(plain, NoteStore.MaxNoteBytes));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {

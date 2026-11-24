@@ -416,7 +416,7 @@
         CancelPause();
         CancelTitleFetches();
 
-        EditableNote? note = await State.ReadForEdit(Name);
+        EditableNote? note = await State.ReadForEdit(Name, storedName: true);
         if (note is null)
         {
             return;
@@ -517,7 +517,7 @@
             State.Session.IdleReached += SessionIdle;
         }
 
-        EditableNote? note = Sensitive ? await State.ReadSensitive(Name) : await State.ReadForEdit(Name);
+        EditableNote? note = Sensitive ? await State.ReadSensitive(Name) : await State.ReadForEdit(Name, storedName: true);
         if (note is null)
         {
             unreadable = true;
