@@ -35,6 +35,157 @@ public sealed class JournalEditorIntegrityTests : IDisposable
     private static string VersionPath(NoteInfo note, string id) => Path.Combine(NoteHistory.FolderFor(note.Path), id + ".md");
 
     [Theory]
+    [InlineData("absent")]
+    [InlineData("occupied destination")]
+    [InlineData("unreadable source")]
+    public async Task MoveWithMissingRelativeImage_PreservesTheNoteVersionAndImageOwnership(string imageState)
+    {
+        NoteStore store = new(data.Root);
+        NoteInfo note = store.Create(Name);
+        store.Create("Destination");
+        NoteInfo neighbor = store.CreateChild("Destination", "Neighbor", "owner:: Neighbor");
+        const string Current = "owner:: Zoë\r\n![photo](.attachments/photo.png)\n";
+        const string Previous = "owner:: 前\n![old](.attachments/photo.png)\r\n";
+        byte[] body = [.. Encoding.Unicode.Preamble, .. Encoding.Unicode.GetBytes(Current)];
+        byte[] kept = [.. Encoding.BigEndianUnicode.Preamble, .. Encoding.BigEndianUnicode.GetBytes(Previous)];
+        File.WriteAllBytes(note.Path, body);
+        string id = Assert.IsType<string>(new NoteHistory(store, () => data.UtcNow).Keep(note.Path, kept));
+        NoteAttachments images = new(store);
+        if (imageState == "occupied destination")
+        {
+            images.Add(neighbor.Reference, "photo.png", Image(8));
+        }
+        if (imageState == "unreadable source")
+        {
+            images.Add(note.Reference, "photo.png", Image(3));
+        }
+        await data.RefreshAsync().WaitAsync(Wait);
+        EditableNote opened = Assert.IsType<EditableNote>(await data.State!.ReadForEdit(Name).WaitAsync(Wait));
+        Assert.Null(opened.Target.Source);
+        using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(data.Root));
+        directory.EntryAvailable = path => path != Path.Combine(NoteAttachments.Folder(note), "photo.png");
+        NoteReference target = imageState == "unreadable source" ? NoteReference.Bound(note, directory) : opened.Target;
+        ActionResult result = await data.Actions!.MoveNote(target, "Destination").WaitAsync(Wait);
+        if (imageState != "absent")
+        {
+            Assert.Equal(ActionKind.Failed, result.Kind);
+            Assert.Equal(body, File.ReadAllBytes(note.Path));
+            Assert.Equal(kept, File.ReadAllBytes(VersionPath(note, id)));
+            Assert.Equal(imageState == "unreadable source" ? Image(3) : Image(8),
+                images.TryResolve(imageState == "unreadable source" ? note.Reference : neighbor.Reference, ".attachments/photo.png")?.Bytes);
+            Assert.False(File.Exists(Path.Combine(data.Root, "Destination", Name + ".md")));
+            return;
+        }
+        Assert.Equal(ActionKind.Done, result.Kind);
+        NoteInfo moved = Assert.IsType<NoteInfo>(result.RelocatedNote);
+        Assert.Equal(body, File.ReadAllBytes(moved.Path));
+        Assert.Equal(kept, File.ReadAllBytes(VersionPath(moved, id)));
+        Assert.False(File.Exists(note.Path));
+        EditableNote reopened = Assert.IsType<EditableNote>(await data.State.ReadForEdit(moved.Name).WaitAsync(Wait));
+        Assert.Equal(Current.Replace("\r\n", "\n", StringComparison.Ordinal), reopened.Text);
+        Assert.False(File.Exists(Path.Combine(NoteAttachments.Folder(moved), "photo.png")));
+        Assert.Null(images.TryResolve(reopened.Target, ".attachments/photo.png"));
+        Assert.Equal(ActionKind.Done, (await data.Actions.RestoreVersion(moved.Name, id, reopened, new Confirmation()).WaitAsync(Wait)).Kind);
+        Assert.Equal(kept, File.ReadAllBytes(moved.Path));
+        Assert.Null(images.TryResolve(reopened.Target, ".attachments/photo.png"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NestedMove_OpensTheExactNoteAndVersionAfterPruningTheSourceFolders(bool changeTimeOnly)
+    {
+        NoteStore store = new(data.Root);
+        store.Create("Meetings");
+        store.CreateChild("Meetings", "Series");
+        store.CreateChild("Meetings/Series", "Archive");
+        NoteInfo note = store.CreateChild("Meetings/Series", Name);
+        File.WriteAllText(note.Path, Body);
+        new NoteAttachments(store).Add(note.Reference, "photo.png", Image(3));
+        byte[] original = File.ReadAllBytes(note.Path);
+        const string Earlier = "owner:: 前\r\n![photo](.attachments/photo.png)\n";
+        byte[] kept = [.. Encoding.Unicode.Preamble, .. Encoding.Unicode.GetBytes(Earlier)];
+        string id = Assert.IsType<string>(new NoteHistory(store, () => data.UtcNow).Keep(note.Path, kept));
+        await data.RefreshAsync().WaitAsync(Wait);
+        using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(data.Root));
+        string images = NoteAttachments.Folder(note);
+        bool clockAdvanced = false;
+        if (changeTimeOnly)
+        {
+            directory.FolderChangeTime = handle =>
+            {
+                if (Path.GetFileName(JournalDirectory.CheckedPath(handle, true)) == "Series" && !Directory.Exists(images))
+                {
+                    clockAdvanced = true;
+                    return 2;
+                }
+                return 1;
+            };
+        }
+        using JournalNoteLink link = new(note, directory);
+        Assert.True(await link.Bind().WaitAsync(Wait));
+        EditableNote opened = Assert.IsType<EditableNote>(await link.ReadForEdit().WaitAsync(Wait));
+        ActionResult result = await data.Actions!.MoveNote(link.Target, "Meetings/Series/Archive").WaitAsync(Wait);
+        Assert.Equal(ActionKind.Done, result.Kind);
+        NoteInfo moved = Assert.IsType<NoteInfo>(result.RelocatedNote);
+        Assert.False(Directory.Exists(images));
+        Assert.False(Directory.Exists(Path.GetDirectoryName(NoteHistory.FolderFor(note.Path))));
+        using JournalNoteLink relocated = link.Relocated(moved);
+        Assert.True(await relocated.Bind().WaitAsync(Wait));
+        Assert.Equal(changeTimeOnly, clockAdvanced);
+        EditableNote current = Assert.IsType<EditableNote>(await relocated.ReadForEdit().WaitAsync(Wait));
+        Assert.Equal("Meetings/Series/Archive/" + Name, current.Name);
+        Assert.Equal(opened.Text, current.Text);
+        Assert.Equal(original, File.ReadAllBytes(moved.Path));
+        Assert.Equal(kept, File.ReadAllBytes(VersionPath(moved, id)));
+        Assert.Equal(id, Assert.Single((await data.State!.History(relocated.Target).WaitAsync(Wait)).Versions).Id);
+        Assert.Equal(ActionKind.Done, (await data.Actions.RestoreVersion(moved.Name, id, current, new Confirmation()).WaitAsync(Wait)).Kind);
+        Assert.Equal(kept, File.ReadAllBytes(moved.Path));
+        await AssertSharedImage(relocated.Target, "moved-meeting.html", 3, 8);
+        EditableNote restored = Assert.IsType<EditableNote>(await relocated.ReadForEdit().WaitAsync(Wait));
+        Assert.Equal(ActionKind.Done, (await data.Actions.SaveNote(restored, "owner:: Retried").WaitAsync(Wait)).Kind);
+        Assert.Equal("owner:: Retried", (await relocated.ReadForEdit().WaitAsync(Wait))?.Text);
+    }
+
+    [Fact]
+    public async Task SaveRollback_FinalEditorReadRefusalReportsTheReadableOriginalAndKeptVersion()
+    {
+        NoteStore store = new(data.Root);
+        store.Create("Meetings");
+        store.CreateChild("Meetings", "Series");
+        NoteInfo note = store.CreateChild("Meetings/Series", Name);
+        byte[] original = [.. Encoding.Unicode.Preamble, .. Encoding.Unicode.GetBytes(Body)];
+        File.WriteAllBytes(note.Path, original);
+        byte[] kept = "owner:: Earlier\r\n"u8.ToArray();
+        string id = Assert.IsType<string>(new NoteHistory(store, () => data.UtcNow).Keep(note.Path, kept));
+        await data.RefreshAsync().WaitAsync(Wait);
+        using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(data.Root));
+        using JournalNoteLink link = new(note, directory);
+        Assert.True(await link.Bind().WaitAsync(Wait));
+        EditableNote opened = Assert.IsType<EditableNote>(await link.ReadForEdit().WaitAsync(Wait));
+        JournalDirectory editor = Assert.IsType<JournalDirectory>(link.Target.Source);
+        bool retiring = false, finalEditorRead = false;
+        editor.RemovalAvailable = path =>
+        {
+            retiring |= path == note.Path;
+            return path != note.Path;
+        };
+        // Traversal of the selected note's editor parent follows the transaction's own storage checks.
+        editor.FolderOpened = _ => finalEditorRead |= retiring;
+        editor.EntryAvailable = path => !finalEditorRead || path != note.Path;
+        ActionResult failed = await data.Actions!.SaveNote(opened, "owner:: Updated").WaitAsync(Wait);
+        Assert.True(finalEditorRead);
+        Assert.Equal(ActionKind.Failed, failed.Kind);
+        Assert.Null(await link.ReadForEdit().WaitAsync(Wait));
+        string copy = Assert.Single(failed.RecoveryFiles, p => File.ReadAllBytes(p).SequenceEqual(original));
+        Assert.NotEqual(Path.GetFileName(note.Path), Path.GetFileName(copy));
+        Assert.Contains(copy, failed.Text);
+        Assert.Contains(failed.RecoveryFiles, p => Path.GetFileName(p) == id + ".md" && File.ReadAllBytes(p).SequenceEqual(kept));
+        Assert.Equal(original, File.ReadAllBytes(note.Path));
+        Assert.Equal(kept, File.ReadAllBytes(VersionPath(note, id)));
+    }
+
+    [Theory]
     [InlineData("save")]
     [InlineData("rename")]
     [InlineData("move-source")]

@@ -1675,6 +1675,7 @@ internal sealed class NoteStore
     {
         if (edit is not null)
         {
+            edit.RelocationTarget = target;
             string? originalFolder = source.ChildFolder;
             HashSet<(string Path, string? Version)> originalTree = SubpageTree(originalFolder, source.Note.Name, edit, preserve: true);
             IReadOnlyList<NoteVersion> versions = preservedVersions ?? PreservePage(source.Note.Path, edit);

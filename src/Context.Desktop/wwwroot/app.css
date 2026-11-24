@@ -756,11 +756,6 @@ p.decision-clash button {
     width: 100%;
 }
 
-.recovery-path-label {
-    display: block;
-    overflow-wrap: anywhere;
-}
-
 .main-status:empty,
 .note-editor .status:empty {
     display: none;

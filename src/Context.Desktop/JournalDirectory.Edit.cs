@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.Json;
 using Microsoft.Win32.SafeHandles;
 
 namespace Context;
@@ -15,7 +16,7 @@ internal sealed partial class JournalDirectory
             (long Length, DateTime Written)? Confirmed = null);
         private sealed record Change(Action Undo, Action Release, Action? Finish = null, bool FinishLast = false,
             Action? VerifyRetired = null, string? From = null, string? StagedPath = null,
-            string? CreatedPath = null, Func<RecoveryLocation?>? Location = null);
+            string? CreatedPath = null, Func<RecoveryLocation?>? Location = null, Action? RecordPublication = null);
         private sealed class Original
         {
             public Original(byte[] bytes, Observation expected, string ownerPath)
@@ -40,6 +41,10 @@ internal sealed partial class JournalDirectory
             public string? Hash { get; init; }
             public long Limit { get; init; }
         }
+
+        // Only a failed relocation can leave an ordinary destination note or kept version
+        // belonging to this source. Keep its relative name and proof of the published bytes.
+        private sealed record RetainedPublication(string RelativePath, string FolderId, string FileId, string Hash);
         private readonly JournalDirectory source;
         private readonly JournalDirectory editor;
         private readonly NoteInfo originalNote;
@@ -435,7 +440,8 @@ internal sealed partial class JournalDirectory
                     ReleaseWitness(id);
                 }
             }, CreatedPath: reservation ? null : key,
-                Location: () => NamedLocation(key, created.Parent, leaf, false, created.Handle, hash, bytes.LongLength)));
+                Location: () => NamedLocation(key, created.Parent, leaf, false, created.Handle, hash, bytes.LongLength),
+                RecordPublication: () => RememberRetainedPublication(key, created, hash)));
             using SafeFileHandle current = OpenHandle(leaf, false, folder, shareDelete: true);
             if (!created.Matches(folder, current))
             {
@@ -802,9 +808,22 @@ internal sealed partial class JournalDirectory
                 {
                     return;
                 }
-                using SafeFileHandle parent = OpenEntry(Path.GetDirectoryName(key)!, true);
+                string parentPath = Path.GetDirectoryName(key)!;
+                using SafeFileHandle parent = OpenEntry(parentPath, true);
                 RemoveOwned(parent, Path.GetFileName(key), known);
                 entries.Remove(key);
+                ReleaseWitness(known.Identity.Id);
+                // Removing this child can change the clock of an ancestor of the moved note.
+                // Advance only that same, still-open directory in the editor's binding.
+                lock (source.original)
+                {
+                    if (selected != originalPath && selected.StartsWith(parentPath + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                        && source.observed.TryGetValue(parentPath, out EntryIdentity bound) && bound.ChangeTime
+                        && bound.Id == DirectoryId(parent))
+                    {
+                        source.observed[parentPath] = source.Stamp(parent, true);
+                    }
+                }
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
@@ -938,7 +957,30 @@ internal sealed partial class JournalDirectory
             {
                 try
                 {
-                    string[] names = List(key).Where(e => !e.Directory && MatchesRecovery(e.Name)
+                    IReadOnlyList<NoteFileEntry> listed = List(key);
+                    if (key == source.root)
+                    {
+                        foreach (NoteFileEntry entry in listed.Where(e => !e.Directory && OwnedRecord(e.Name, ".location")))
+                        {
+                            try
+                            {
+                                if (CollectRetainedPublication(Path.Combine(key, entry.Name), readable))
+                                {
+                                    clean = false;
+                                    RecoveryFolder ??= VerifiedFolder(source.original);
+                                }
+                            }
+                            catch (FileNotFoundException)
+                            {
+                                // The earlier publication is already gone.
+                            }
+                            catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
+                            {
+                                clean = false;
+                            }
+                        }
+                    }
+                    string[] names = listed.Where(e => !e.Directory && MatchesRecovery(e.Name)
                         && !changes.Any(c => c.StagedPath == Path.Combine(key, e.Name))).Select(e => e.Name).ToArray();
                     if (names.Length == 0)
                     {
@@ -968,13 +1010,15 @@ internal sealed partial class JournalDirectory
                     }
                 }
 
-                bool MatchesRecovery(string name) =>
-                    (name.StartsWith(prefix, StringComparison.Ordinal) && name.EndsWith(".tmp", StringComparison.Ordinal)
-                        && Guid.TryParseExact(name.AsSpan(prefix.Length, name.Length - prefix.Length - 4), "N", out _))
+                bool MatchesRecovery(string name) => OwnedRecord(name, ".tmp")
                     || ((key == level || key == history || key == attachments) && IsRecoveryName(name))
                     || (conversion && key == history && name.EndsWith(".md", StringComparison.OrdinalIgnoreCase));
             }
             return clean;
+
+            bool OwnedRecord(string name, string suffix) => name.Length == prefix.Length + 32 + suffix.Length
+                && name.StartsWith(prefix, StringComparison.Ordinal) && name.EndsWith(suffix, StringComparison.Ordinal)
+                && Guid.TryParseExact(name.AsSpan(prefix.Length, 32), "N", out _);
         }
 
         private static string VerifiedFolder(SafeFileHandle folder)
@@ -982,6 +1026,67 @@ internal sealed partial class JournalDirectory
             string path = CheckedPath(folder, true);
             using SafeFileHandle named = OpenHandle(path, true, shareDelete: true);
             return DirectoryId(named) == DirectoryId(folder) ? path : throw Ineligible();
+        }
+
+        private void RememberRetainedPublication(string key, CreatedFile created, string hash)
+        {
+            if (RelocationTarget is not { } target || (key != Key(target) && !(key.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
+                && Path.GetDirectoryName(key) == Key(NoteHistory.FolderFor(target)))))
+            {
+                return;
+            }
+            RetainedPublication publication = new(Path.GetRelativePath(source.root, key),
+                DirectoryId(created.Parent).ToString(), Identity(created.Handle, false).ToString(), hash);
+            string name = RecoveryPrefix(NoteHistory.FolderFor(originalPath)) + Guid.NewGuid().ToString("N") + ".location";
+            try
+            {
+                using SafeFileHandle root = ReopenFolder(source.original, shareDelete: false);
+                using CreatedFile receipt = JournalDirectory.WriteNew(root, name, JsonSerializer.SerializeToUtf8Bytes(publication));
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // Without a record, retire the verified duplicate if the source is independently readable.
+                string from = key == Key(target) ? originalPath : Key(Path.Combine(NoteHistory.FolderFor(originalPath), Path.GetFileName(key)));
+                if (recoveryLocations.TryGetValue(from, out RecoveryLocation? original) && CanReopen(original)
+                    && NamedLocation(key, created.Parent, Path.GetFileName(key), false, created.Handle, hash, NoteHistory.MaxVersionBytes) is not null)
+                {
+                    created.RollbackChecked();
+                }
+            }
+        }
+
+        private bool CollectRetainedPublication(string receipt, List<string> readable)
+        {
+            // A record is advisory. Only report a regular file reached from this bound root
+            // whose parent, file identity and bytes match what the operation left there.
+            const int MaxLocationBytes = 256 * 1024; // Includes JSON escaping of the relative filename.
+            RetainedPublication? known = JsonSerializer.Deserialize<RetainedPublication>(Read(receipt, MaxLocationBytes));
+            if (string.IsNullOrEmpty(known?.RelativePath) || known.RelativePath.Contains('\0') || Path.IsPathRooted(known.RelativePath)
+                || !known.RelativePath.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+            {
+                throw Ineligible();
+            }
+            string key = Key(Path.Combine(source.root, known.RelativePath));
+            using SafeFileHandle folder = OpenEntry(Path.GetDirectoryName(key)!, true);
+            if (DirectoryId(folder).ToString() != known.FolderId)
+            {
+                return false;
+            }
+            string leaf = Path.GetFileName(key);
+            CheckAvailable(key);
+            using SafeFileHandle file = OpenHandle(leaf, false, folder, shareDelete: true);
+            if (Identity(file, false).ToString() != known.FileId || CopyAndHash(file, NoteHistory.MaxVersionBytes) != known.Hash)
+            {
+                return false;
+            }
+            CollectVerifiedFile(readable, key, folder, file, known.Hash, NoteHistory.MaxVersionBytes);
+            return true;
+        }
+
+        private void CollectVerifiedFile(List<string> readable, string key, SafeFileHandle folder, SafeFileHandle file, string hash, long limit)
+        {
+            RecoveryLocation location = NamedLocation(key, folder, Path.GetFileName(key), false, file, hash, limit) ?? throw Ineligible();
+            readable.Add(location.Path);
         }
 
         private IReadOnlyList<string> ReadableRecovery(SafeFileHandle folder, string key, IEnumerable<string> names)
@@ -994,10 +1099,7 @@ internal sealed partial class JournalDirectory
                     CheckAvailable(Path.Combine(key, name));
                     using SafeFileHandle file = OpenHandle(name, false, folder, shareDelete: true);
                     string hash = CopyAndHash(file, NoteAttachments.MaxBytes);
-                    if (NamedLocation(Path.Combine(key, name), folder, name, false, file, hash, NoteAttachments.MaxBytes) is { } location)
-                    {
-                        readable.Add(location.Path);
-                    }
+                    CollectVerifiedFile(readable, Path.Combine(key, name), folder, file, hash, NoteAttachments.MaxBytes);
                 }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException)
                 {
@@ -1071,6 +1173,7 @@ internal sealed partial class JournalDirectory
                 // If the entire store was moved before retirement, all originals can
                 // still be independently verified at their actual names in that store.
                 keepSealed |= restoreNames.Count > 0;
+                CheckOriginals();
             }
             foreach (Change change in deferred.Where(SealedFile))
             {
@@ -1131,21 +1234,25 @@ internal sealed partial class JournalDirectory
                 {
                     if (!keep)
                     {
-                        change.Undo();
+                        try
+                        {
+                            change.Undo();
+                            return;
+                        }
+                        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                        {
+                            incomplete = keepPublications = true;
+                        }
                     }
-                    else if (change.Location?.Invoke() is { } location)
-                    {
-                        recoveryLocations[location.Path] = location;
-                    }
-                }
-                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-                {
-                    incomplete = true;
-                    keepPublications = true;
                     if (change.Location?.Invoke() is { } location)
                     {
                         recoveryLocations[location.Path] = location;
                     }
+                    change.RecordPublication?.Invoke();
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    incomplete = true;
                 }
                 finally
                 {

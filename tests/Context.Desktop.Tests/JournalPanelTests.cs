@@ -517,10 +517,80 @@ public sealed class JournalPanelTests : IDisposable
         }
     }
 
-    [Fact]
-    public async Task EarlierNoteRecovery_SurvivesLaterSaveAndIsReportedAndCopiedExactlyWhenSealed()
+    [Theory]
+    [InlineData("move", false)]
+    [InlineData("rename", false)]
+    [InlineData("move", true)]
+    public async Task MarkSensitive_ReportsOnlyRemainingPublicationsFromTheEarlierRelocation(string operation, bool editDestination)
     {
-        using DesktopFixture fixture = new(OperatingSystem.IsWindows() ? "Journal\u0085store" : "Journal\tstore");
+        const string Body = "owner:: Zoë\n![photo](.attachments/photo.png)";
+        const string Earlier = "owner:: Earlier\r\nstatus:: Open";
+        data.Keys = FakeKeyStore.Ready();
+        NoteStore store = new(data.Root);
+        NoteInfo note = store.CreateWithText(Date(0), Body);
+        store.Create("Destination");
+        NoteInfo other = store.CreateChild("Destination", "Independent");
+        byte[] prior = Encoding.UTF8.GetBytes(Earlier);
+        File.WriteAllBytes(other.Path, prior);
+        NoteHistory history = new(store, () => data.UtcNow);
+        string id = Assert.IsType<string>(history.Keep(note.Path, prior));
+        string otherId = Assert.IsType<string>(history.Keep(other.Path, prior));
+        byte[] image = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7];
+        new NoteAttachments(store).Add(note.Reference, "photo.png", image);
+        string destination = operation == "move" ? Path.Combine(data.Root, "Destination", note.Title + ".md")
+            : Path.Combine(data.Root, "Renamed.md");
+        string version = Path.Combine(NoteHistory.FolderFor(destination), id + ".md");
+        string reportedNote, reportedVersion;
+        // The conversion opens in a fresh app over the same disposable store.
+        using (DesktopFixture firstApp = new(data))
+        {
+            await firstApp.RefreshAsync().WaitAsync(Wait);
+            using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(data.Root));
+            string refused = Path.Combine(NoteAttachments.Folder(note), "photo.png");
+            if (operation == "rename")
+            {
+                string second = Assert.IsType<string>(history.Keep(note.Path, "owner:: Second"u8.ToArray()));
+                refused = Path.Combine(NoteHistory.FolderFor(note.Path), second + ".md");
+            }
+            directory.RemovalAvailable = path => path != Path.Combine(NoteHistory.FolderFor(note.Path), id + ".md");
+            directory.RecoveryAvailable = path => path != refused;
+            using JournalNoteLink link = new(note, directory);
+            Assert.True(await link.Bind().WaitAsync(Wait));
+            ActionResult failed = operation == "move"
+                ? await firstApp.Actions!.MoveNote(link.Target, "Destination").WaitAsync(Wait)
+                : await firstApp.Actions!.RenameNote(link.Target, "Renamed", new Confirmation()).WaitAsync(Wait);
+            Assert.Equal(ActionKind.Failed, failed.Kind);
+            reportedNote = Assert.Single(failed.RecoveryFiles, p => p.EndsWith(destination, StringComparison.Ordinal));
+            reportedVersion = Assert.Single(failed.RecoveryFiles, p => p.EndsWith(version, StringComparison.Ordinal));
+            Assert.Equal(Body, File.ReadAllText(reportedNote));
+            Assert.Equal(prior, File.ReadAllBytes(reportedVersion));
+            if (editDestination)
+            {
+                EditableNote open = Assert.IsType<EditableNote>(await firstApp.State!.ReadForEdit("Destination/" + note.Title).WaitAsync(Wait));
+                Assert.Equal(ActionKind.Done, (await firstApp.Actions.SaveNote(open, "owner:: Later edit").WaitAsync(Wait)).Kind);
+            }
+        }
+        IRenderedComponent<Main> cut = await OpenDailyEditor(Body);
+        await MainTests.ChooseAsync(cut, "mark-sensitive");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Contains("readable history may remain", cut.Find(".main-status.red").TextContent), Wait);
+        string[] paths = cut.FindAll(".recovery-paths input[readonly]").Select(input => input.GetAttribute("value")!).ToArray();
+        Assert.Equal(!editDestination, paths.Contains(reportedNote, StringComparer.Ordinal));
+        Assert.Contains(reportedVersion, paths);
+        Assert.DoesNotContain(paths, p => p.Contains("Independent", StringComparison.Ordinal));
+        Assert.Equal(editDestination ? "owner:: Later edit" : Body, File.ReadAllText(destination));
+        Assert.Equal(prior, File.ReadAllBytes(version));
+        Assert.Equal(prior, File.ReadAllBytes(other.Path));
+        Assert.Equal(prior, File.ReadAllBytes(Path.Combine(NoteHistory.FolderFor(other.Path), otherId + ".md")));
+        NoteReference sensitive = NoteReference.Stored(note.Name, sensitive: true);
+        Assert.Equal(Body, (await data.State!.ReadSensitive(sensitive).WaitAsync(Wait))?.Text);
+        Assert.Equal(Earlier.Replace("\r\n", "\n", StringComparison.Ordinal), await data.State.ReadVersion(sensitive, id).WaitAsync(Wait));
+    }
+
+    [Fact]
+    public async Task EarlierNoteRecovery_SurvivesLaterSaveAndShowsItsUnambiguousPathWhenSealed()
+    {
+        using DesktopFixture fixture = new(OperatingSystem.IsWindows() ? "Journal\u0085store" : "Journal\rstore");
         fixture.Keys = FakeKeyStore.Ready();
         string name = Date(0);
         fixture.WriteNote(name, "owner:: Original");
@@ -558,13 +628,12 @@ public sealed class JournalPanelTests : IDisposable
         Assert.Equal("owner:: Current", (await fixture.State.ReadSensitive(sensitive).WaitAsync(Wait))?.Text);
         Assert.Equal("owner:: Earlier", await fixture.State.ReadVersion(sensitive, id).WaitAsync(Wait));
 
-        fixture.Bunit.JSInterop.Setup<string>("ContextEditor.copyToClipboard", _ => true).SetResult("Copied");
         IRenderedComponent<RecoveryPaths> disclosure = fixture.Bunit.Render<RecoveryPaths>(p => p.Add(c => c.Paths, marked.RecoveryPaths));
-        Assert.Equal(DesktopText.OneLine(recovery), disclosure.Find(".recovery-path-label").TextContent);
-        Assert.Empty(disclosure.FindAll("input"));
-        await disclosure.Find("button").ClickAsync(new MouseEventArgs());
-        Assert.Equal("Copied.", disclosure.Find("[role=status]").TextContent);
-        Assert.Equal(recovery, Assert.Single(fixture.Bunit.JSInterop.Invocations["ContextEditor.copyToClipboard"]).Arguments[0]);
+        Assert.Contains("JSON string", disclosure.Find("label").TextContent);
+        string displayed = disclosure.Find("label input[readonly]").GetAttribute("value")!;
+        Assert.Equal(displayed, DesktopText.OneLine(displayed));
+        Assert.Equal(recovery, System.Text.Json.JsonSerializer.Deserialize<string>(displayed));
+        Assert.Empty(disclosure.FindAll("button"));
     }
 
     [Theory]
@@ -702,7 +771,7 @@ public sealed class JournalPanelTests : IDisposable
         Assert.Equal("0", status.GetAttribute("tabindex"));
         Assert.DoesNotContain("cut", status.ClassList);
         IElement paths = cut.Find("details.recovery-paths");
-        Assert.Equal("Copy recovery paths", paths.QuerySelector("summary")!.TextContent);
+        Assert.Equal("Recovery paths", paths.QuerySelector("summary")!.TextContent);
         Assert.NotEmpty(paths.QuerySelectorAll("input[readonly]"));
         Assert.All(paths.QuerySelectorAll("input"), input => Assert.Contains(input.GetAttribute("value")!, status.TextContent));
         output.WriteLine("Recovery markup " + status.OuterHtml + paths.OuterHtml);

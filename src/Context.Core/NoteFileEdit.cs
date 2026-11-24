@@ -10,6 +10,7 @@ internal abstract class NoteFileEdit : IDisposable
     private Action? finishStaging;
     private Action? checkFinalState;
     private Action? checkOriginalHistory;
+    internal string? RelocationTarget { get; set; }
 
     // Keep originals readable until publication and all caller-side staging have finished.
     public void BeforeCommit(Action check, Action? apply = null)

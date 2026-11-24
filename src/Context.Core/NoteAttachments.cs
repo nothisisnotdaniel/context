@@ -808,13 +808,27 @@ internal sealed class NoteAttachments
         List<string> copied = [];
         foreach (string name in names)
         {
+            string exact = Path.Combine(destination, name);
+            if (!edit.Exists(Path.Combine(Folder(source), name)))
+            {
+                // An unresolved link in the note or its history must stay unresolved after Move.
+                void RequireMissing()
+                {
+                    if (edit.Exists(exact))
+                    {
+                        throw new AttachmentMoveException(new IOException("The missing image has a destination owner."));
+                    }
+                }
+                RequireMissing();
+                edit.AfterRetirement(RequireMissing);
+                continue;
+            }
             if (TryResolve(selected, SrcPrefix + name, edit) is not { } attachment)
             {
                 throw new AttachmentMoveException(new IOException("Can't verify the linked attachment."));
             }
             edit.EnsureFolder(destination);
             BeginStep("copy");
-            string exact = Path.Combine(destination, name);
             if (edit.Exists(exact))
             {
                 // Restoring a version uses its original Markdown bytes. That exact

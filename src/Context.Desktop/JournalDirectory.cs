@@ -416,7 +416,7 @@ internal sealed partial class JournalDirectory : INoteFileSource, IDisposable
         }
     }
 
-    private static string CheckedPath(SafeFileHandle handle, bool directory)
+    internal static string CheckedPath(SafeFileHandle handle, bool directory)
     {
         if (handle.IsInvalid)
         {
@@ -470,6 +470,8 @@ internal sealed partial class JournalDirectory : INoteFileSource, IDisposable
             this.low = low;
             this.high = high;
         }
+
+        public override string ToString() => $"{volume:x16}{low:x16}{high:x16}";
     }
 
     private static FileId DirectoryId(SafeFileHandle handle) => Identity(handle, directory: true);

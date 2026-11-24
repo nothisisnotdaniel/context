@@ -592,8 +592,12 @@ Every factory agent reads this file before working on Context. Keep it short and
   unavailable, the snapshot can be kept at the bound store root. Unresolved recovery files keep the note at
   its original location. Rollback refreshes the open editor after temporary directories have been removed.
   Both editor entry points check attachment ownership against current notes and kept versions on Move.
+  A missing relative image can move unchanged when it also stays missing at the destination.
+  If rollback retains an ordinary destination note or version, its source owner's private location record
+  identifies the publication by its relative path, parent, file identity and content hash on later conversion.
   Done/`PlainHistoryLeft` shows a red warning with the verified folder and readable recovery paths.
-  Each path wraps and its Copy button copies the exact filesystem spelling. The user can secure plaintext files
+  The disclosure has selectable paths. Paths containing control characters use a labeled, reversible JSON string.
+  The user can secure plaintext files
   and keep the `.ctxs` files. During reversible version removal an empty `.<id>.reserved` file keeps that ID
   occupied for other editors until the operation finishes. `MakePlain` (question ends `Its history will be
   removed.`) removes the sealed ones. `DesktopState.History(name)` (`HistoryView`) and `ReadVersion(name, id)` (a
