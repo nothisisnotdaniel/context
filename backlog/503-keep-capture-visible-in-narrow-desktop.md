@@ -17,3 +17,7 @@ At 96 DPI on Windows, develop 29b1b32 accepts a 136 x 39 outer window, leaving a
 ## Notes
 
 Manual checks #152 and #259 remain open for verification after this fix. #250 retired the old capture row, and #253 introduced the current Capture icon and popover. Repeat against the actual native Windows window and the private inbox.
+
+## Sidebar regression from #145
+
+In the same fixed three-column layout, at a 400 px client width the tracks measure 240, 0 and 280 px. The 30 × 30 px Tags and Settings buttons are visible, and click or Enter opens either page, but zero pixels of the resulting heading are visible. At 800 and 1084 px both headings are readable. Also verify the two sidebar actions at 400 px and at the supported minimum after the shared layout and minimum-size changes. The selected destination and its content must be visible in either theme. This is the remaining check in #145.
