@@ -586,8 +586,8 @@ Every factory agent reads this file before working on Context. Keep it short and
   removes the new file: Refused `Exists`), then `DeleteSensitive`; `MarkSensitive` seals each plain version (at most
   50, public keys only) before the note, removes the sealed ones on any failure or rollback (`Can't seal the history of
   <name>. Nothing was changed.`) and the `.md` ones on success (when that fails: Done/`PlainHistoryLeft`, red
-  `Marked <name> sensitive, but its old readable versions couldn't be removed. Delete .history/<name> in the data
-  folder.`); `MakePlain` (question ends `Its history will be
+  `Marked <name> sensitive, but readable history may remain in .history/<name> in the data folder. Secure any versions you
+  need, then delete only the .md files. Keep the .ctxs files.`); `MakePlain` (question ends `Its history will be
   removed.`) removes the sealed ones. `DesktopState.History(name)` (`HistoryView`) and `ReadVersion(name, id)` (a
   sealed version only while the note is open, one `Agree` with its `<sealed title>` as AAD) read only.
   `TextDiff.Lines(old, current)` is a Myers line diff (`\n` split, trailing `\r` dropped) bounded at

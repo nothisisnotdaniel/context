@@ -539,7 +539,7 @@ internal sealed class DesktopActions
 
     /// <summary>The red line when a note was marked sensitive but its old plain versions are still on disk.</summary>
     public static string PlainHistoryLeftText(string name) =>
-        $"Marked {name} sensitive, but its old readable versions couldn't be removed. Delete .history/{name} in the data folder.";
+        $"Marked {name} sensitive, but readable history may remain in .history/{name} in the data folder. Secure any versions you need, then delete only the .md files. Keep the .ctxs files.";
 
     /// <summary>The red line when a sensitive note must be open for the action.</summary>
     public static string UnlockFirstText(string name) => $"Unlock {name} first.";
@@ -4147,7 +4147,7 @@ internal sealed class DesktopActions
                 return new ActionResult(ActionKind.Done, ActionReason.Unchanged, source.Name);
             }
 
-            NoteInfo? moved = attachments.MoveWithNote(reference.Resolved(source), owner?.Name);
+            NoteInfo? moved = attachments.MoveWithNote(reference.Resolved(source), owner?.Reference);
             if (moved is null)
             {
                 return Refused(ActionReason.Missing, NoteMissingText(reference.Name));
@@ -4196,8 +4196,7 @@ internal sealed class DesktopActions
             NoteReference selected = plain is null ? reference : reference.Resolved(plain);
             using NoteFileEdit? edit = plain is null ? null : selected.BeginEdit();
             IReadOnlyList<string> linked = plain is null ? [] : attachments.LinkedNamesOf(selected, edit);
-            IReadOnlyList<string>? unlinked = edit is null ? null : NoteAttachments.UnlinkedInSelection(plain!, linked, edit);
-            if (plain is not null && notes.Delete(selected, removeHistory: true, removeAttachments: true, edit, unlinked))
+            if (plain is not null && notes.Delete(selected, removeHistory: true, removeAttachments: true, edit, linked))
             {
                 // A file the cleanup can't remove stays and the delete is still done.
                 if (edit is null)

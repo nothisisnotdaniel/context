@@ -59,12 +59,17 @@ internal sealed partial class JournalDirectory
             return Path.Combine(source.root, relative);
         }
 
-        private SafeFileHandle OpenEntry(string path, bool directory, bool enumerate = false)
+        private void CheckAvailable(string path)
         {
             if (!(originalRoot && path == source.root) && source.EntryAvailable?.Invoke(path) == false)
             {
                 throw Ineligible();
             }
+        }
+
+        private SafeFileHandle OpenEntry(string path, bool directory, bool enumerate = false)
+        {
+            CheckAvailable(path);
             if (pinnedHistory && path == historyPath && historyFolder is not null)
             {
                 return ReopenFolder(historyFolder, enumerate: enumerate);
@@ -196,34 +201,44 @@ internal sealed partial class JournalDirectory
             string leaf = Path.GetFileName(key);
             using SafeFileHandle working = ReopenFolder(folder, shareDelete: false);
             string temp = TempName();
-            if (OperatingSystem.IsWindows())
+            SafeFileHandle held = ReopenFolder(working);
+            SafeFileHandle? created = null;
+            try
             {
-                if (!CreateDirectoryW(Path.Combine(CheckedPath(working, true), temp), IntPtr.Zero))
+                if (OperatingSystem.IsWindows())
+                {
+                    if (!CreateDirectoryW(Path.Combine(CheckedPath(working, true), temp), IntPtr.Zero))
+                    {
+                        throw Ineligible();
+                    }
+                }
+                else if (UnixMakeDirectoryAt(working, temp, (uint)PrivateFile.FolderBits) != 0)
                 {
                     throw Ineligible();
                 }
-            }
-            else if (UnixMakeDirectoryAt(working, temp, (uint)PrivateFile.FolderBits) != 0)
-            {
-                throw Ineligible();
-            }
-            using SafeFileHandle created = OpenHandle(temp, true, working, shareDelete: true);
-            SafeFileHandle held = ReopenFolder(working);
-            try
-            {
+                created = OpenHandle(temp, true, working, shareDelete: true);
                 MoveOwned(working, temp, working, leaf, true, created);
             }
             catch
             {
-                held.Dispose();
-                RemoveAt(working, temp, true, created);
+                try
+                {
+                    if (created is not null)
+                    {
+                        RemoveAt(working, temp, true, created);
+                    }
+                }
+                finally
+                {
+                    held.Dispose();
+                    created?.Dispose();
+                }
                 throw;
             }
-            // Record ownership in the original parent before looking up the new name again.
-            Observation identity = new(Stamp(created, true), true);
-            changes.Add(new(() => RemoveOwned(held, leaf, identity), held.Dispose, Creation: true));
+            changes.Add(new(() => RemoveAt(held, leaf, true, created),
+                () => { created.Dispose(); held.Dispose(); }, Creation: true));
             absent.Remove(key);
-            entries[key] = identity;
+            entries[key] = new(Stamp(created, true), true);
             Expect(key, true);
         }
 
@@ -234,7 +249,7 @@ internal sealed partial class JournalDirectory
             // Hold the Windows parent in place during private-file creation as well as publication.
             using SafeFileHandle working = ReopenFolder(folder, shareDelete: false);
             string leaf = Path.GetFileName(key);
-            CreatedFile created = JournalDirectory.WriteNew(working, leaf, bytes);
+            CreatedFile created = JournalDirectory.WriteNew(working, leaf, bytes, () => CheckAvailable(key));
             changes.Add(new(created.Rollback, created.Dispose, Creation: true));
             using SafeFileHandle current = OpenHandle(leaf, false, folder, shareDelete: true);
             if (!created.Matches(folder, current))
@@ -261,31 +276,30 @@ internal sealed partial class JournalDirectory
             string oldName = Path.GetFileName(from), newName = Path.GetFileName(to);
             SafeFileHandle sourceFolder = OpenEntry(Path.GetDirectoryName(from)!, true);
             SafeFileHandle? destination = null;
-            SafeFileHandle? backup = null;
+            SafeFileHandle? item = null;
             try
             {
                 destination = OpenEntry(Path.GetDirectoryName(to)!, true);
-                if (discard)
+                item = OpenHandle(oldName, directory, sourceFolder, shareDelete: true);
+                if (!Matches(expected.Identity, Stamp(item, directory)))
                 {
-                    backup = OpenHandle(oldName, false, sourceFolder, shareDelete: true);
-                    if (!Matches(expected.Identity, Stamp(backup, false)))
-                    {
-                        throw Ineligible();
-                    }
+                    throw Ineligible();
                 }
-                TransferOwned(sourceFolder, oldName, destination, newName, expected);
+                MoveOwned(sourceFolder, oldName, destination, newName, directory, item);
                 bool removed = false;
                 void Undo()
                 {
                     if (!removed)
                     {
-                        TransferOwned(destination, newName, sourceFolder, oldName, expected);
+                        VerifyOwned(destination, newName, directory, item);
+                        MoveOwned(destination, newName, sourceFolder, oldName, directory, item);
+                        VerifyOwned(sourceFolder, oldName, directory, item);
                         return;
                     }
                     // A later commit check failed after unlink. The retained file is
                     // still readable. Restore its bytes privately, without overwriting.
                     using SafeFileHandle folder = ReopenFolder(sourceFolder, shareDelete: false);
-                    using FileStream original = new(backup!, FileAccess.Read);
+                    using FileStream original = new(item, FileAccess.Read);
                     using CreatedFile restored = JournalDirectory.WriteNew(folder, oldName, stream =>
                     {
                         original.CopyTo(stream);
@@ -295,14 +309,14 @@ internal sealed partial class JournalDirectory
                 }
                 void Finish()
                 {
-                    RemoveAt(destination, newName, false, backup!);
+                    RemoveAt(destination, newName, false, item);
                     removed = true;
                 }
-                changes.Add(new(Undo, () => { backup?.Dispose(); sourceFolder.Dispose(); destination.Dispose(); }, discard ? Finish : null));
+                changes.Add(new(Undo, () => { item.Dispose(); sourceFolder.Dispose(); destination.Dispose(); }, discard ? Finish : null));
             }
             catch
             {
-                backup?.Dispose();
+                item?.Dispose();
                 sourceFolder.Dispose();
                 destination?.Dispose();
                 throw;
@@ -328,16 +342,8 @@ internal sealed partial class JournalDirectory
             {
                 selected = to;
             }
-        }
-
-        private void TransferOwned(SafeFileHandle from, string oldName, SafeFileHandle to, string newName, Observation expected)
-        {
-            using SafeFileHandle original = OpenHandle(oldName, expected.Directory, from, shareDelete: true);
-            if (!Matches(expected.Identity, Stamp(original, expected.Directory)))
-            {
-                throw Ineligible();
-            }
-            MoveOwned(from, oldName, to, newName, expected.Directory, original);
+            // The undo now owns both parent handles, even if the first reopen fails.
+            Expect(to, directory);
         }
 
         private void RemoveOwned(SafeFileHandle parent, string leaf, Observation expected)
@@ -386,6 +392,7 @@ internal sealed partial class JournalDirectory
 
         public override void Commit()
         {
+            PrepareCommit();
             Verify();
             foreach (Change change in changes)
             {

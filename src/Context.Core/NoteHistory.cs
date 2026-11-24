@@ -143,7 +143,7 @@ internal sealed partial class NoteHistory
                     continue;
                 }
 
-                Prune(folder, id, edit);
+                Prune(folder, id, edit, extension);
                 return id;
             }
 
@@ -200,6 +200,17 @@ internal sealed partial class NoteHistory
     /// </summary>
     public IReadOnlyList<NoteVersion> Versions(NoteInfo note, NoteFileEdit? edit = null) =>
         ListVersions(note.Path, edit, KindOf(note.Path));
+
+    internal static IReadOnlyList<NoteVersion> BoundedPlainVersions(string path, NoteFileEdit edit)
+    {
+        IReadOnlyList<NoteVersion> versions = ListVersions(path, edit, PlainExtension);
+        if (versions.Count > MaxVersionsPerNote || versions.Any(v => v.Length > MaxVersionBytes)
+            || versions.Sum(v => v.Length) > MaxBytesPerNote)
+        {
+            throw new NoteHistoryException();
+        }
+        return versions;
+    }
 
     internal static IReadOnlyList<NoteVersion> ListVersions(string notePath, NoteFileEdit? edit, string? extension)
     {
@@ -339,6 +350,11 @@ internal sealed partial class NoteHistory
             return true;
         }
 
+        string otherKind = KindOf(from) == PlainExtension ? NoteStore.SensitiveExtension : PlainExtension;
+        if (ListFolder(source, otherKind).Count != 0)
+        {
+            return false;
+        }
         EnsureFolder(targetParent);
         Directory.Move(source, target);
         if (!string.Equals(sourceParent, targetParent, StringComparison.Ordinal))
@@ -487,9 +503,9 @@ internal sealed partial class NoteHistory
 
     // Removes the oldest versions until at most MaxVersionsPerNote are left and they take at most MaxBytesPerNote;
     // the version kept is never removed.
-    private static void Prune(string folder, string kept, NoteFileEdit? edit)
+    private static void Prune(string folder, string kept, NoteFileEdit? edit, string extension)
     {
-        List<Entry> oldestFirst = ListFolder(folder, null, edit).OrderBy(e => e, ByAge).ToList();
+        List<Entry> oldestFirst = ListFolder(folder, extension, edit).OrderBy(e => e, ByAge).ToList();
         int count = oldestFirst.Count;
         long total = oldestFirst.Sum(e => e.Version.Length);
         foreach (Entry entry in oldestFirst)

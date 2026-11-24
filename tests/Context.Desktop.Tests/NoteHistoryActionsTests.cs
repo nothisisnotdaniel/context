@@ -273,7 +273,7 @@ public sealed class NoteHistoryActionsTests : IDisposable
         Assert.Equal(
             [".history/Plan/" + Id + ".md", ".history/Plan/" + Id + "~Plan.ctxs", "Plan.ctxs"], RootFiles());
         Assert.Equal(
-            "Marked Plan sensitive, but its old readable versions couldn't be removed. Delete .history/Plan in the data folder.",
+            "Marked Plan sensitive, but readable history may remain in .history/Plan in the data folder. Secure any versions you need, then delete only the .md files. Keep the .ctxs files.",
             DesktopActions.PlainHistoryLeftText("Plan"));
     }
 

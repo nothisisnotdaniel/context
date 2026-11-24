@@ -609,7 +609,7 @@ internal sealed class NoteAttachments
     /// touches no attachment. A move to another level of a note that links more than <see cref="MaxLinkedNames"/> names
     /// changes nothing and throws <see cref="AttachmentMoveException"/>, so a note never moves without its attachments.
     /// </summary>
-    public NoteInfo? MoveWithNote(NoteReference name, string? newParent)
+    public NoteInfo? MoveWithNote(NoteReference name, NoteReference? newParent)
     {
         if (!notes.TryFind(name, out NoteInfo? source) || source is null)
         {
@@ -617,7 +617,8 @@ internal sealed class NoteAttachments
         }
 
         NoteInfo? owner = null;
-        if (!string.IsNullOrWhiteSpace(newParent) && (!notes.TryFind(newParent.Trim(), out owner) || owner is null))
+        if (newParent is { } requested && !string.IsNullOrWhiteSpace(requested.Name)
+            && (!notes.TryFind(requested, out owner) || owner is null))
         {
             return notes.Move(name, newParent);
         }
@@ -681,7 +682,7 @@ internal sealed class NoteAttachments
             string level;
             try
             {
-                level = notes.LevelFolder(owner?.Name);
+                level = notes.LevelFolder(owner?.Reference);
             }
             catch (Exception ex) when (ex is ArgumentException or IOException)
             {
@@ -718,7 +719,7 @@ internal sealed class NoteAttachments
             BeforeMoveStep?.Invoke("move");
             try
             {
-                moved = notes.Move(name.Resolved(source), owner?.Name);
+                moved = notes.Move(name.Resolved(source), owner?.Reference);
             }
             catch (Exception ex) when (ex is NoteExistsException or ArgumentException)
             {
@@ -773,37 +774,64 @@ internal sealed class NoteAttachments
         {
             edit.Expect(owner.Path);
         }
-        string level = notes.LevelFolder(owner?.Name);
+        string level = notes.LevelFolder(owner?.Reference);
         edit.EnsureFolder(level);
         string destination = Path.Combine(level, FolderName);
         byte[] original = edit.Read(source.Path, NoteStore.MaxEditBytes);
-        IReadOnlyList<string> names = LinkedNames(DecodeText(original));
-        if (names.Count > MaxLinkedNames)
+        IReadOnlyList<NoteVersion> versions = NoteHistory.BoundedPlainVersions(source.Path, edit);
+        HashSet<string> historical = new(StringComparer.Ordinal);
+        foreach (NoteVersion version in versions)
+        {
+            string path = Path.Combine(NoteHistory.FolderFor(source.Path), NoteHistory.FileName(version.Id, null));
+            historical.UnionWith(LinkedNames(DecodeText(edit.Read(path, NoteHistory.MaxVersionBytes))));
+        }
+        string[] names = historical.Union(LinkedNames(DecodeText(original)), StringComparer.Ordinal).ToArray();
+        if (names.Length > MaxLinkedNames)
         {
             throw new AttachmentMoveException(new IOException("Too many attachments."));
         }
         Dictionary<string, string> renamed = new(StringComparer.Ordinal);
-        List<string> copied = [];
         foreach (string name in names)
         {
             if (TryResolve(selected, SrcPrefix + name, edit) is not { } attachment)
             {
-                continue;
+                throw new AttachmentMoveException(new IOException("Can't verify the linked attachment."));
             }
             edit.EnsureFolder(destination);
             BeforeMoveStep?.Invoke("copy");
+            string exact = Path.Combine(destination, name);
+            if (historical.Contains(name) && edit.Exists(exact))
+            {
+                // Restoring a version uses its original Markdown bytes. That exact
+                // relative name must lead to the same bytes in the new level.
+                if (!edit.Read(exact, MaxBytes).AsSpan().SequenceEqual(attachment.Bytes))
+                {
+                    throw new AttachmentMoveException(new IOException("A kept version links a different attachment here."));
+                }
+                continue;
+            }
             string stored = AvailableName(destination, name, edit);
             edit.WriteNew(Path.Combine(destination, stored), attachment.Bytes);
-            copied.Add(name);
             if (stored != name)
             {
                 renamed[name] = stored;
             }
         }
 
-        IReadOnlyList<string> unlinked = UnlinkedInSelection(source, copied, edit);
+        byte[] rewritten = renamed.Count == 0 ? original : RewriteLinks(original, renamed);
+        if (rewritten.Length > NoteStore.MaxEditBytes)
+        {
+            throw new AttachmentMoveException(new IOException("The rewritten note exceeds the editor limit."));
+        }
+        edit.BeforeCommit(() =>
+        {
+            if (!NoteHistory.ListVersions(source.Path, edit, ".md").SequenceEqual(versions))
+            {
+                throw new NoteHistoryException();
+            }
+        });
         BeforeMoveStep?.Invoke("move");
-        NoteInfo? moved = notes.Move(selected, owner?.Name, edit);
+        NoteInfo? moved = notes.Move(selected, owner?.Reference, edit);
         if (moved is null)
         {
             return null;
@@ -812,15 +840,13 @@ internal sealed class NoteAttachments
         if (renamed.Count != 0)
         {
             edit.Discard(moved.Path);
-            edit.WriteNew(moved.Path, RewriteLinks(original, renamed));
+            edit.WriteNew(moved.Path, rewritten);
         }
         BeforeMoveStep?.Invoke("cleanup");
-        foreach (string path in unlinked)
-        {
-            edit.Discard(path);
-        }
+        DiscardUnlinked(source, names, edit);
         edit.Commit();
         edit.RemoveEmpty(Folder(source));
+        edit.RemoveEmpty(NoteHistory.FolderFor(source.Path));
         edit.RemoveEmpty(Path.GetDirectoryName(NoteHistory.FolderFor(source.Path))!);
         return moved;
     }
@@ -839,12 +865,49 @@ internal sealed class NoteAttachments
         throw new IOException("Attachment names are already in use.");
     }
 
-    internal static IReadOnlyList<string> UnlinkedInSelection(NoteInfo note, IReadOnlyList<string> names, NoteFileEdit edit)
+    internal static void DiscardUnlinked(NoteInfo note, IReadOnlyList<string> names, NoteFileEdit edit)
     {
         if (names.Count == 0 || names.Count > MaxLinkedNames)
         {
-            return [];
+            return;
         }
+        IReadOnlySet<string> unlinked = Unreferenced();
+        List<string> discarded = [];
+        foreach (string name in unlinked)
+        {
+            string path = Path.Combine(Folder(note), name);
+            if (edit.Exists(path))
+            {
+                edit.Discard(path);
+                discarded.Add(name);
+            }
+        }
+        if (discarded.Count > 0)
+        {
+            edit.BeforeCommit(() =>
+            {
+                if (!Unreferenced().IsSupersetOf(discarded))
+                {
+                    throw new IOException("Attachment references changed.");
+                }
+            });
+        }
+
+        IReadOnlySet<string> Unreferenced()
+        {
+            try
+            {
+                return UnreferencedAtLevel(note, names, edit);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                return new HashSet<string>(StringComparer.Ordinal);
+            }
+        }
+    }
+
+    private static HashSet<string> UnreferencedAtLevel(NoteInfo note, IReadOnlyList<string> names, NoteFileEdit edit)
+    {
         string level = Path.GetDirectoryName(note.Path)!;
         HashSet<string> candidates = new(names, StringComparer.Ordinal);
         foreach (NoteFileEntry entry in edit.List(level).Where(e => !e.Directory))
@@ -853,20 +916,31 @@ internal sealed class NoteAttachments
             {
                 return [];
             }
-            if (entry.Name != Path.GetFileName(note.Path) && entry.Name.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+            if (entry.Name.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
             {
-                try
+                string sibling = Path.Combine(level, entry.Name);
+                KeepReferenced(edit.Read(sibling, NoteStore.MaxEditBytes));
+                if (candidates.Count > 0)
                 {
-                    string text = DecodeText(edit.Read(Path.Combine(level, entry.Name), NoteStore.MaxEditBytes));
-                    candidates.RemoveWhere(name => text.Contains(name, StringComparison.OrdinalIgnoreCase));
+                    foreach (NoteVersion version in NoteHistory.BoundedPlainVersions(sibling, edit))
+                    {
+                        string path = Path.Combine(NoteHistory.FolderFor(sibling), NoteHistory.FileName(version.Id, null));
+                        KeepReferenced(edit.Read(path, NoteHistory.MaxVersionBytes));
+                    }
                 }
-                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                if (candidates.Count == 0)
                 {
-                    return [];
+                    break;
                 }
             }
         }
-        return candidates.Select(n => Path.Combine(Folder(note), n)).Where(p => edit.Exists(p)).ToArray();
+        return candidates;
+
+        void KeepReferenced(byte[] bytes)
+        {
+            string text = DecodeText(bytes);
+            candidates.RemoveWhere(name => text.Contains(name, StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     /// <summary>
@@ -965,7 +1039,7 @@ internal sealed class NoteAttachments
         {
             try
             {
-                notes.Move(moved.Reference, source.Parent);
+                notes.Move(moved.Reference, source.Parent is { } parent ? NoteReference.Stored(parent) : (NoteReference?)null);
             }
             catch (Exception)
             {

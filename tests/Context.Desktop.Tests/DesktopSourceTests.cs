@@ -971,7 +971,7 @@ public sealed class DesktopSourceTests
                 "src/Context.Desktop/JournalDirectory.Mutations.cs" =>
                     ["Directory.Move(oldPath, newPath);", "File.Move(oldPath, newPath, overwrite: false);"],
                 "src/Context.Desktop/JournalDirectory.Edit.cs" =>
-                    ["changes.Add(new(() => RemoveOwned", "changes.Add(new(created.Rollback", "changes.Add(new(Undo,", "changes.Clear();",
+                    ["changes.Add(new(() => RemoveAt", "changes.Add(new(created.Rollback", "changes.Add(new(Undo,", "changes.Clear();",
                         "absent.Add(path);", "absent.Add(to + child[from.Length..]);", "absent.Add(from);"],
                 _ => [],
             };

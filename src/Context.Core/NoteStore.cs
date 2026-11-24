@@ -351,6 +351,7 @@ internal sealed class NoteStore
         using NoteFileEdit? edit = name.BeginEdit();
         MoveTree(source, target, Path.Combine(folder, title), newName, caseOnly, edit);
         edit?.Commit();
+        edit?.RemoveEmpty(NoteHistory.FolderFor(source.Note.Path));
         return new NoteInfo(newName, edit is null ? File.GetLastWriteTime(target) : source.Note.Modified, target);
     }
 
@@ -365,18 +366,22 @@ internal sealed class NoteStore
     /// Returns the moved note, the note itself when it is already there (nothing is written), or <c>null</c> when
     /// <paramref name="name"/> names no note.
     /// </summary>
-    public NoteInfo? Move(NoteReference name, string? newParent)
+    public NoteInfo? Move(NoteReference name, NoteReference? newParent)
     {
         using NoteFileEdit? edit = name.BeginEdit();
         NoteInfo? result = Move(name, newParent, edit);
         if (result is not null)
         {
             edit?.Commit();
+            if (name.SelectedPath is { } original && original != result.Path)
+            {
+                edit!.RemoveEmpty(NoteHistory.FolderFor(original));
+            }
         }
         return result;
     }
 
-    internal NoteInfo? Move(NoteReference name, string? newParent, NoteFileEdit? edit)
+    internal NoteInfo? Move(NoteReference name, NoteReference? newParent, NoteFileEdit? edit)
     {
         List<Entry> entries = ListEntries();
         Entry? source = FindEntry(entries, name);
@@ -386,10 +391,10 @@ internal sealed class NoteStore
         }
 
         Entry? owner = null;
-        if (!string.IsNullOrWhiteSpace(newParent))
+        if (newParent is { } requested && !string.IsNullOrWhiteSpace(requested.Name))
         {
-            owner = FindEntry(entries, newParent)
-                ?? throw new ArgumentException($"No note called {newParent.Trim()}.", nameof(newParent));
+            owner = FindEntry(entries, requested)
+                ?? throw new ArgumentException($"No note called {requested.Name.Trim()}.", nameof(newParent));
             if (ReferenceEquals(owner, source) || IsBelow(owner.Note.Name, source.Note.Name))
             {
                 throw new ArgumentException("A note can't move under itself or one of its subpages.", nameof(newParent));
@@ -470,7 +475,7 @@ internal sealed class NoteStore
     }
 
     internal bool Delete(NoteReference name, bool removeHistory, bool removeAttachments, NoteFileEdit? edit,
-        IReadOnlyList<string>? unlinked = null)
+        IReadOnlyList<string>? linked = null)
     {
         List<Entry> entries = ListEntries();
         Entry? match = FindEntry(entries, name);
@@ -482,7 +487,7 @@ internal sealed class NoteStore
         List<Entry> subtree = entries.Where(e => ReferenceEquals(e, match) || IsBelow(e.Note.Name, match.Note.Name)).ToList();
         if (edit is not null)
         {
-            DeleteSelected(subtree, removeHistory, removeAttachments, edit, unlinked ?? []);
+            DeleteSelected(subtree, match.Note, removeHistory, removeAttachments, edit, linked ?? []);
             return true;
         }
         BeforeDeleteFiles?.Invoke();
@@ -490,7 +495,7 @@ internal sealed class NoteStore
         {
             if (removeHistory)
             {
-                NoteHistory.Remove(entry.Note.Path, null);
+                NoteHistory.Remove(entry.Note.Path, Extension);
             }
 
             File.Delete(entry.Note.Path);
@@ -509,21 +514,22 @@ internal sealed class NoteStore
         return true;
     }
 
-    private void DeleteSelected(List<Entry> subtree, bool history, bool attachments, NoteFileEdit edit, IReadOnlyList<string> unlinked)
+    private void DeleteSelected(List<Entry> subtree, NoteInfo selected, bool history, bool attachments, NoteFileEdit edit, IReadOnlyList<string> linked)
     {
         List<string> files = [];
         Dictionary<string, IReadOnlyList<NoteVersion>> histories = new(StringComparer.Ordinal);
         HashSet<string> folders = new(StringComparer.Ordinal);
+        HashSet<string> confirmed = subtree.Select(entry => entry.Note.Path).ToHashSet(StringComparer.Ordinal);
         foreach (Entry entry in subtree)
         {
             files.Add(entry.Note.Path);
             if (history)
             {
                 string folder = NoteHistory.FolderFor(entry.Note.Path);
-                histories[entry.Note.Path] = NoteHistory.ListVersions(entry.Note.Path, edit, null);
+                histories[entry.Note.Path] = NoteHistory.ListVersions(entry.Note.Path, edit, Extension);
                 foreach (NoteVersion version in histories[entry.Note.Path])
                 {
-                    files.Add(Path.Combine(folder, NoteHistory.FileName(version.Id, version.SealedTitle)));
+                    edit.Expect(Path.Combine(folder, NoteHistory.FileName(version.Id, null)));
                 }
                 folders.Add(folder);
                 folders.Add(Path.GetDirectoryName(folder)!);
@@ -532,16 +538,18 @@ internal sealed class NoteStore
             {
                 edit.Expect(children, true);
                 folders.Add(children);
-                if (attachments)
+                if (attachments && !HasOtherPage(children))
                 {
                     CollectAttachments(Path.Combine(children, NoteAttachments.FolderName));
+                    edit.BeforeCommit(() =>
+                    {
+                        if (HasOtherPage(children))
+                        {
+                            throw new IOException("The subpages changed.");
+                        }
+                    });
                 }
             }
-        }
-        foreach (string path in unlinked)
-        {
-            files.Add(path);
-            folders.Add(Path.GetDirectoryName(path)!);
         }
         foreach (string path in files)
         {
@@ -549,29 +557,31 @@ internal sealed class NoteStore
         }
         BeforeDeleteFiles?.Invoke();
         edit.Verify();
-        foreach ((string path, IReadOnlyList<NoteVersion> kept) in histories)
-        {
-            if (!NoteHistory.ListVersions(path, edit, null).SequenceEqual(kept))
-            {
-                throw new NoteHistoryException();
-            }
-        }
         foreach (string path in files)
         {
             edit.Discard(path);
         }
-        foreach (string path in histories.Keys)
+        foreach ((string path, IReadOnlyList<NoteVersion> kept) in histories)
         {
-            if (NoteHistory.ListVersions(path, edit, null).Count != 0)
+            edit.BeforeCommit(() =>
             {
-                throw new NoteHistoryException();
-            }
+                if (!NoteHistory.ListVersions(path, edit, Extension).SequenceEqual(kept))
+                {
+                    throw new NoteHistoryException();
+                }
+            }, () => RetirePlainVersions(path, kept, edit));
         }
+        NoteAttachments.DiscardUnlinked(selected, linked, edit);
         edit.Commit();
+        edit.RemoveEmpty(Path.Combine(Path.GetDirectoryName(selected.Path)!, NoteAttachments.FolderName));
         foreach (string folder in folders.OrderByDescending(f => f.Length))
         {
             edit.RemoveEmpty(folder);
         }
+
+        bool HasOtherPage(string level) => edit.List(level).Any(e => !e.Directory
+            && (e.Name.EndsWith(Extension, StringComparison.OrdinalIgnoreCase) || e.Name.EndsWith(SensitiveExtension, StringComparison.OrdinalIgnoreCase))
+            && !confirmed.Contains(Path.Combine(level, e.Name)));
 
         void CollectAttachments(string folder)
         {
@@ -600,15 +610,15 @@ internal sealed class NoteStore
     /// the root for null or blank: where a note moved there is stored. Throws <see cref="ArgumentException"/> when
     /// <paramref name="parent"/> names no note or can't have subpages (like <see cref="Move"/>).
     /// </summary>
-    internal string LevelFolder(string? parent)
+    internal string LevelFolder(NoteReference? parent)
     {
-        if (string.IsNullOrWhiteSpace(parent))
+        if (parent is not { } requested || string.IsNullOrWhiteSpace(requested.Name))
         {
             return root;
         }
 
-        Entry owner = FindEntry(ListEntries(), parent)
-            ?? throw new ArgumentException($"No note called {parent.Trim()}.", nameof(parent));
+        Entry owner = FindEntry(ListEntries(), requested)
+            ?? throw new ArgumentException($"No note called {requested.Name.Trim()}.", nameof(parent));
         CheckCanHoldSubpages(owner);
         return ChildFolderFor(owner);
     }
@@ -681,7 +691,7 @@ internal sealed class NoteStore
 
         if (removeHistory)
         {
-            NoteHistory.Remove(match.Path, null);
+            NoteHistory.Remove(match.Path, SensitiveExtension);
         }
 
         File.Delete(match.Path);
@@ -1519,24 +1529,11 @@ internal sealed class NoteStore
     {
         if (edit is not null)
         {
-            string oldHistory = NoteHistory.FolderFor(source.Note.Path), newHistory = NoteHistory.FolderFor(target);
-            if (!caseOnly && edit.Exists(newHistory, true))
-            {
-                throw new IOException($"{newName} already has a history.");
-            }
             if (source.ChildFolder is not null)
             {
                 edit.Expect(source.ChildFolder, true);
             }
-            if (edit.Exists(oldHistory, true))
-            {
-                foreach (NoteVersion v in NoteHistory.ListVersions(source.Note.Path, edit, null))
-                {
-                    edit.Expect(Path.Combine(oldHistory, NoteHistory.FileName(v.Id, v.SealedTitle)));
-                }
-                edit.EnsureFolder(Path.GetDirectoryName(newHistory)!);
-                edit.Relocate(oldHistory, newHistory, true);
-            }
+            StagePlainHistory(source.Note, target, newName, caseOnly, edit);
             BeforeEditPublish?.Invoke();
             edit.Verify();
             edit.Relocate(source.Note.Path, target);
@@ -1568,6 +1565,76 @@ internal sealed class NoteStore
             }
 
             throw;
+        }
+    }
+
+    private static void StagePlainHistory(NoteInfo source, string target, string newName, bool caseOnly, NoteFileEdit edit)
+    {
+        string from = NoteHistory.FolderFor(source.Path);
+        string to = NoteHistory.FolderFor(target);
+        IReadOnlyList<NoteVersion> versions = NoteHistory.BoundedPlainVersions(source.Path, edit);
+        if (edit.Exists(to, true))
+        {
+            // On a case-insensitive volume the spelling of the history follows the
+            // note. Refuse a shared folder. Relocate also refuses a distinct target.
+            if (!caseOnly || !edit.Exists(from, true) || edit.List(from).Count != versions.Count)
+            {
+                throw new IOException($"{newName} already has a history.");
+            }
+            foreach (NoteVersion version in versions)
+            {
+                edit.Expect(Path.Combine(from, NoteHistory.FileName(version.Id, null)));
+            }
+            edit.BeforeCommit(() =>
+            {
+                CheckOriginals();
+                if (edit.List(from).Count != versions.Count)
+                {
+                    throw new NoteHistoryException();
+                }
+            }, () => edit.Relocate(from, to, true));
+            return;
+        }
+
+        if (versions.Count > 0)
+        {
+            edit.EnsureFolder(to);
+            foreach (NoteVersion version in versions)
+            {
+                string leaf = NoteHistory.FileName(version.Id, null);
+                edit.WriteNew(Path.Combine(to, leaf), edit.Read(Path.Combine(from, leaf), NoteHistory.MaxVersionBytes));
+            }
+        }
+        // A second editor may keep a version during publication. All original ids
+        // remain occupied and readable until both version sets have been verified.
+        edit.BeforeCommit(() =>
+        {
+            CheckOriginals();
+            if (!NoteHistory.ListVersions(target, edit, Extension).SequenceEqual(versions))
+            {
+                throw new NoteHistoryException();
+            }
+        }, () => RetirePlainVersions(source.Path, versions, edit));
+
+        void CheckOriginals()
+        {
+            if (!NoteHistory.ListVersions(source.Path, edit, Extension).SequenceEqual(versions))
+            {
+                throw new NoteHistoryException();
+            }
+        }
+    }
+
+    private static void RetirePlainVersions(string path, IReadOnlyList<NoteVersion> versions, NoteFileEdit edit)
+    {
+        string folder = NoteHistory.FolderFor(path);
+        foreach (NoteVersion version in versions)
+        {
+            edit.Discard(Path.Combine(folder, NoteHistory.FileName(version.Id, null)));
+        }
+        if (NoteHistory.ListVersions(path, edit, Extension).Count != 0)
+        {
+            throw new NoteHistoryException();
         }
     }
 

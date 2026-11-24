@@ -86,6 +86,10 @@ public sealed class JournalTests : IDisposable
         Assert.Equal("#meeting\r\nFields:: original", File.ReadAllText(moved.Path));
         Assert.True(history.TryRead(moved, id, out byte[]? version));
         Assert.Equal("Original version"u8.ToArray(), version);
+        NoteInfo upper = Assert.IsType<NoteInfo>(store.Rename(NoteReference.Bound(moved, source), "RENAMED"));
+        Assert.Equal("RENAMED", Path.GetFileName(Assert.Single(Directory.GetDirectories(Path.Combine(root, NoteHistory.FolderName)))));
+        Assert.True(history.TryRead(upper, id, out version));
+        Assert.Equal("Original version"u8.ToArray(), version);
     }
 
     [Fact]

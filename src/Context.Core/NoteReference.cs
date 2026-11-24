@@ -24,6 +24,7 @@ internal readonly struct NoteReference
     public string Name { get; }
     public bool? Sensitive { get; }
     public INoteFileSource? Source { get; }
+    public string? SelectedPath => boundNote?.Path;
     public NoteFileEdit? BeginEdit() => Source?.BeginEdit(boundNote!);
 
     public static implicit operator NoteReference(string typed) => new(typed, null, null, null, null);

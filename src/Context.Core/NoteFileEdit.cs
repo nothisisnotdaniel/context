@@ -6,6 +6,26 @@ internal sealed record NoteFileEntry(string Name, bool Directory, long Length);
 /// removals use the same observed entries. Disposing an uncommitted edit undoes its writes.</summary>
 internal abstract class NoteFileEdit : IDisposable
 {
+    private Action? checkCommit;
+    private Action? finishStaging;
+
+    // Keep originals readable until publication and all caller-side staging have finished.
+    public void BeforeCommit(Action check, Action? apply = null)
+    {
+        checkCommit += check;
+        finishStaging += apply;
+    }
+
+    protected void PrepareCommit()
+    {
+        if (checkCommit is not null)
+        {
+            Verify();
+            checkCommit();
+            finishStaging?.Invoke();
+        }
+    }
+
     public abstract IReadOnlyList<NoteFileEntry> List(string folder);
     public abstract void Expect(string path, bool directory = false);
     public bool Exists(string path, bool directory = false)

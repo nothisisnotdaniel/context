@@ -82,28 +82,32 @@ internal sealed partial class JournalDirectory
         return InContainingFolder(directory, root, path, (folder, leaf) => WriteNew(folder, leaf, bytes));
     }
 
-    private static CreatedFile WriteNew(SafeFileHandle folder, string name, byte[] bytes) =>
-        WriteNew(folder, name, stream => stream.Write(bytes));
+    private static CreatedFile WriteNew(SafeFileHandle folder, string name, byte[] bytes, Action? beforeCheck = null) =>
+        WriteNew(folder, name, stream => stream.Write(bytes), beforeCheck);
 
-    private static CreatedFile WriteNew(SafeFileHandle folder, string name, Action<FileStream> write)
+    private static CreatedFile WriteNew(SafeFileHandle folder, string name, Action<FileStream> write, Action? beforeCheck = null)
     {
         string temp = TempName();
         string? windowsPath = OperatingSystem.IsWindows() ? CheckedPath(folder, true) : null;
         FileStream stream = windowsPath is null ? CreateUnixTemp(folder, temp) : PrivateFile.OpenNew(Path.Combine(windowsPath, temp), FileShare.Read | FileShare.Delete);
         SafeFileHandle? ownedParent = null;
+        string ownedName = temp;
         try
         {
             write(stream);
             stream.Flush();
             ownedParent = ReopenFolder(folder);
             MoveOwned(folder, temp, folder, name, false, stream.SafeFileHandle);
+            ownedName = name;
+            beforeCheck?.Invoke();
+            VerifyOwned(ownedParent, name, false, stream.SafeFileHandle);
             return new CreatedFile(ownedParent, name, stream);
         }
         catch
         {
             try
             {
-                RemoveAt(folder, temp, false, stream.SafeFileHandle);
+                RemoveAt(folder, ownedName, false, stream.SafeFileHandle);
             }
             finally
             {
@@ -115,6 +119,15 @@ internal sealed partial class JournalDirectory
     }
 
     private static string TempName() => "." + Guid.NewGuid().ToString("N") + ".tmp";
+
+    private static void VerifyOwned(SafeFileHandle parent, string name, bool directory, SafeFileHandle expected)
+    {
+        using SafeFileHandle current = OpenHandle(name, directory, parent, shareDelete: true);
+        if (Identity(current, directory) != Identity(expected, directory))
+        {
+            throw Ineligible();
+        }
+    }
 
     private static void MoveOwned(SafeFileHandle source, string from, SafeFileHandle destination, string to,
         bool directory, SafeFileHandle original)
@@ -138,11 +151,8 @@ internal sealed partial class JournalDirectory
             RenameNew(source, claimed, source, from, directory);
             throw;
         }
-        using SafeFileHandle published = OpenHandle(to, directory, destination, shareDelete: true);
-        if (Identity(published, directory) != expected)
-        {
-            throw Ineligible();
-        }
+        // Publication transfers ownership to the caller. Its recovery record must
+        // name the destination before any further I/O, including a verification read.
     }
 
     private static SafeFileHandle ReopenFolder(SafeFileHandle folder, bool shareDelete = true, bool enumerate = false)

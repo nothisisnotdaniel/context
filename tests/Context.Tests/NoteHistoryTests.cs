@@ -307,4 +307,39 @@ public sealed class NoteHistoryTests : IDisposable
     }
 
     private NoteHistory History() => new NoteHistory(store, () => now);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SameStem_PrunesAndDeletesOnlyTheSelectedKind(bool deleteSealed)
+    {
+        NoteInfo plain = store.Create("Plan");
+        string sealedPath = Path.ChangeExtension(plain.Path, NoteStore.SensitiveExtension);
+        File.WriteAllBytes(sealedPath, [7]);
+        NoteInfo sensitive = Assert.Single(store.ListSensitive());
+        NoteHistory history = History();
+        string sealedId = Assert.IsType<string>(history.Keep(sealedPath, [8], plain.Name));
+        for (int i = 0; i <= NoteHistory.MaxVersionsPerNote; i++)
+        {
+            now = now.AddSeconds(1);
+            history.Keep(plain.Path, [(byte)i]);
+        }
+        Assert.Equal(NoteHistory.MaxVersionsPerNote, history.Versions(plain).Count);
+        Assert.True(history.TryRead(sensitive, sealedId, out byte[]? version));
+        Assert.Equal(new byte[] { 8 }, version);
+        Assert.Throws<IOException>(() => store.Rename(plain.Reference, "Other"));
+        if (deleteSealed)
+        {
+            Assert.True(store.DeleteSensitive(sensitive.Reference, removeHistory: true));
+            Assert.Equal(NoteHistory.MaxVersionsPerNote, history.Versions(plain).Count);
+            Assert.Empty(history.Versions(sensitive));
+        }
+        else
+        {
+            Assert.True(store.Delete(plain.Reference, removeHistory: true));
+            Assert.Empty(history.Versions(plain));
+            Assert.True(history.TryRead(sensitive, sealedId, out version));
+            Assert.Equal(new byte[] { 8 }, version);
+        }
+    }
 }
