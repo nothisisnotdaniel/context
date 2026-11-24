@@ -167,6 +167,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#507](backlog/507-give-sidebar-outline-links-sufficient-contrast.md) Give sidebar outline links sufficient contrast on the panel
 - [ ] [#508](backlog/508-suppress-the-browser-menu-on-non.md) Suppress the browser menu on non-editable chips inside the note editor
 - [ ] [#509](backlog/509-serve-the-bundled-mermaid-renderer-script.md) Serve the bundled Mermaid renderer script to the Windows desktop frame
+- [ ] [#510](backlog/510-restore-and-raise-the-existing-windows.md) Restore and raise the existing Windows window on repeated desktop starts
 - [ ] [#89](backlog/089-call-to-meeting-note.md) Call to meeting note
 - [h] [#462](backlog/462-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on macOS
 - [h] [#463](backlog/463-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on Windows
