@@ -588,7 +588,7 @@ internal sealed class NoteAttachments
                 return [];
             }
 
-            return LinkedNames(DecodeText(edit?.Read(found.Path, NoteStore.MaxEditBytes) ?? note.ReadBytes(found.Path, NoteStore.MaxEditBytes)));
+            return LinkedNames(NoteStore.DecodeText(edit?.Read(found.Path, NoteStore.MaxEditBytes) ?? note.ReadBytes(found.Path, NoteStore.MaxEditBytes)));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -640,7 +640,7 @@ internal sealed class NoteAttachments
         try
         {
             original = name.ReadBytes(source.Path, NoteStore.MaxEditBytes);
-            IReadOnlyList<string> names = LinkedNames(DecodeText(original));
+            IReadOnlyList<string> names = LinkedNames(NoteStore.DecodeText(original));
             tooMany = names.Count > MaxLinkedNames;
             foreach (string linkedName in names)
             {
@@ -783,9 +783,9 @@ internal sealed class NoteAttachments
         foreach (NoteVersion version in versions)
         {
             string path = Path.Combine(NoteHistory.FolderFor(source.Path), NoteHistory.FileName(version.Id, null));
-            historical.UnionWith(LinkedNames(DecodeText(edit.Read(path, NoteHistory.MaxVersionBytes))));
+            historical.UnionWith(LinkedNames(NoteStore.DecodeText(edit.Read(path, NoteHistory.MaxVersionBytes))));
         }
-        string[] names = historical.Union(LinkedNames(DecodeText(original)), StringComparer.Ordinal).ToArray();
+        string[] names = historical.Union(LinkedNames(NoteStore.DecodeText(original)), StringComparer.Ordinal).ToArray();
         if (names.Length > MaxLinkedNames)
         {
             throw new AttachmentMoveException(new IOException("Too many attachments."));
@@ -879,13 +879,15 @@ internal sealed class NoteAttachments
         }
         if (discarded.Count > 0)
         {
-            edit.BeforeCommit(() =>
+            edit.BeforeCommit(CheckReferences);
+            edit.AfterRetirement(CheckReferences);
+            void CheckReferences()
             {
                 if (!Unreferenced().IsSupersetOf(discarded))
                 {
                     throw new IOException("Attachment references changed.");
                 }
-            });
+            }
         }
 
         IReadOnlySet<string> Unreferenced()
@@ -933,7 +935,7 @@ internal sealed class NoteAttachments
 
         void KeepReferenced(byte[] bytes)
         {
-            string text = DecodeText(bytes);
+            string text = NoteStore.DecodeText(bytes);
             candidates.RemoveWhere(name => text.Contains(name, StringComparison.OrdinalIgnoreCase));
         }
     }
@@ -1007,7 +1009,7 @@ internal sealed class NoteAttachments
             string text;
             try
             {
-                text = DecodeText(BoundedFile.Read(sibling.Path, NoteStore.MaxEditBytes));
+                text = NoteStore.DecodeText(BoundedFile.Read(sibling.Path, NoteStore.MaxEditBytes));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -1066,8 +1068,7 @@ internal sealed class NoteAttachments
         }
     }
 
-    // Replaces the bytes "](.attachments/<old>" followed by ')' or ' ' with the new name; every other byte stays.
-    // The names are ASCII, so this works on the UTF-8 bytes. Temp file in the note's folder, then a move over it.
+    // Replace only a complete link's filename in the original encoding.
     private static void Rewrite(string path, IReadOnlyDictionary<string, string> renamed)
     {
         byte[] bytes = BoundedFile.Read(path, NoteStore.MaxEditBytes);
@@ -1093,9 +1094,11 @@ internal sealed class NoteAttachments
 
     private static byte[] RewriteLinks(byte[] bytes, IReadOnlyDictionary<string, string> renamed)
     {
-        byte[] marker = Encoding.ASCII.GetBytes(LinkMarker);
+        Encoding encoding = NoteStore.TextEncoding(bytes);
+        byte[] marker = encoding.GetBytes(LinkMarker);
+        byte[] closing = encoding.GetBytes(")"), space = encoding.GetBytes(" ");
         List<KeyValuePair<byte[], byte[]>> pairs = renamed
-            .Select(p => new KeyValuePair<byte[], byte[]>(Encoding.ASCII.GetBytes(p.Key), Encoding.ASCII.GetBytes(p.Value)))
+            .Select(p => new KeyValuePair<byte[], byte[]>(encoding.GetBytes(p.Key), encoding.GetBytes(p.Value)))
             .ToList();
         List<byte> output = new List<byte>(bytes.Length + 64);
         int at = 0;
@@ -1107,15 +1110,23 @@ internal sealed class NoteAttachments
                 break;
             }
 
-            int nameStart = at + found + marker.Length;
+            int start = at + found;
+            // ASCII punctuation occupies one UTF-8 byte or one whole UTF-16/32 code unit.
+            if (start % closing.Length != 0)
+            {
+                output.AddRange(bytes.AsSpan(at, found + 1));
+                at = start + 1;
+                continue;
+            }
+            int nameStart = start + marker.Length;
             output.AddRange(bytes.AsSpan(at, nameStart - at));
             at = nameStart;
             foreach (KeyValuePair<byte[], byte[]> pair in pairs)
             {
                 byte[] old = pair.Key;
                 int end = nameStart + old.Length;
-                if (end < bytes.Length && bytes.AsSpan(nameStart, old.Length).SequenceEqual(old)
-                    && (bytes[end] == (byte)')' || bytes[end] == (byte)' '))
+                if (bytes.AsSpan(nameStart).StartsWith(old)
+                    && (bytes.AsSpan(end).StartsWith(closing) || bytes.AsSpan(end).StartsWith(space)))
                 {
                     output.AddRange(pair.Value);
                     at = end;
@@ -1152,17 +1163,6 @@ internal sealed class NoteAttachments
         {
             return false;
         }
-    }
-
-    private static string DecodeText(byte[] bytes)
-    {
-        ReadOnlySpan<byte> span = bytes;
-        if (span.StartsWith((ReadOnlySpan<byte>)[0xEF, 0xBB, 0xBF]))
-        {
-            span = span[3..];
-        }
-
-        return Encoding.UTF8.GetString(span);
     }
 
     // What a failed move has to undo.

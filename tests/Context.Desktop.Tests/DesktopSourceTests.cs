@@ -964,20 +964,24 @@ public sealed class DesktopSourceTests
                 text = text.Replace(CrashLogDelete, string.Empty, StringComparison.Ordinal);
             }
 
-            // The adapter records undo steps in memory. Its two managed moves use verified,
-            // held Windows directories and never overwrite an occupied destination.
-            string[] fileOperations = file switch
+            // The adapter records observations, undo steps and recovery locations in memory.
+            // Its two managed moves use held Windows directories and require a free destination.
+            (string Call, int Count)[] fileOperations = file switch
             {
                 "src/Context.Desktop/JournalDirectory.Mutations.cs" =>
-                    ["Directory.Move(oldPath, newPath);", "File.Move(oldPath, newPath, overwrite: false);"],
+                    [("Directory.Move(oldPath, newPath);", 1), ("File.Move(oldPath, newPath, overwrite: false);", 1)],
                 "src/Context.Desktop/JournalDirectory.Edit.cs" =>
-                    ["changes.Add(new(() => RemoveAt", "changes.Add(new(created.Rollback", "changes.Add(new(Undo,", "changes.Clear();",
-                        "absent.Add(path);", "absent.Add(to + child[from.Length..]);", "absent.Add(from);"],
+                    [("changes.Add(new(() => RemoveAt", 1), ("changes.Add(new(() =>", 1), ("changes.Add(new(Undo,", 1), ("changes.Clear();", 2),
+                        ("absent.Add(path);", 1), ("absent.Add(to + child[from.Length..]);", 1), ("absent.Add(from);", 1),
+                        ("recoveryLocations.Add(location);", 1), ("recoveryLocations.Add(copy);", 1),
+                        ("recoveryLocations.Add(CheckedPath(restoredNote, false));", 2), ("recoveryLocations.Clear();", 1),
+                        ("readable.Add(path);", 1), ("readable.Add(entry.Name);", 1),
+                        ("entries.Clear();", 1), ("absent.Clear();", 1), ("entries.Add(path, original);", 1)],
                 _ => [],
             };
-            foreach (string operation in fileOperations)
+            foreach ((string operation, int count) in fileOperations)
             {
-                Assert.Single(Regex.Matches(text, Regex.Escape(operation)));
+                Assert.Equal(count, Regex.Matches(text, Regex.Escape(operation)).Count);
                 text = text.Replace(operation, string.Empty, StringComparison.Ordinal);
             }
             found.AddRange(Writes.Matches(text).Select(m => $"{file}: {m.Value}"));

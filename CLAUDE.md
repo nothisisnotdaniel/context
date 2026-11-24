@@ -583,11 +583,12 @@ Every factory agent reads this file before working on Context. Keep it short and
   move `.history/<Title>/` along (never over an existing one; moved back when the note move fails); only `DeleteNote`
   passes `removeHistory: true` to `Delete`/`DeleteSensitive`. `List()` drops top-level dot-files. Sensitive: a save
   copies the old sealed file byte for byte (zero `Agree`); a rename seals the new file, moves the history (a clash
-  removes the new file: Refused `Exists`), then `DeleteSensitive`; `MarkSensitive` seals each plain version (at most
-  50, public keys only) before the note, removes the sealed ones on any failure or rollback (`Can't seal the history of
-  <name>. Nothing was changed.`) and the `.md` ones on success (when that fails: Done/`PlainHistoryLeft`, red
-  `Marked <name> sensitive, but readable history may remain in .history/<name> in the data folder. Secure any versions you
-  need, then delete only the .md files. Keep the .ctxs files.`); `MakePlain` (question ends `Its history will be
+  removes the new file: Refused `Exists`), then `DeleteSensitive`. `MarkSensitive` seals each plain version (up to
+  50, public keys only) before the note. It verifies the sealed copies through plaintext removal. An incomplete
+  rollback preserves recovery copies and reports their verified locations. Done/`PlainHistoryLeft` shows a red
+  warning naming the original history folder and any readable recovery files. The user can secure plaintext versions
+  and keep the `.ctxs` files. During reversible version removal an empty `.<id>.reserved` file keeps that ID
+  occupied for other editors until the operation finishes. `MakePlain` (question ends `Its history will be
   removed.`) removes the sealed ones. `DesktopState.History(name)` (`HistoryView`) and `ReadVersion(name, id)` (a
   sealed version only while the note is open, one `Agree` with its `<sealed title>` as AAD) read only.
   `TextDiff.Lines(old, current)` is a Myers line diff (`\n` split, trailing `\r` dropped) bounded at

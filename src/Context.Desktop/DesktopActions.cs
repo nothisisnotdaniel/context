@@ -540,8 +540,15 @@ internal sealed class DesktopActions
 
     /// <summary>The red line when a note was marked sensitive but its old plain versions are still on disk.</summary>
     public static string PlainHistoryLeftText(string name, IReadOnlyList<string>? recoveryFiles = null) =>
-        $"Marked {name} sensitive, but readable history may remain in .history/{name} in the data folder. Secure any versions you need, then delete only the .md files. Keep the .ctxs files."
-        + (recoveryFiles is { Count: > 0 } ? $" Show hidden files to find the remaining readable copies ({string.Join(", ", recoveryFiles)})." : "");
+        $"Marked {name} sensitive, but readable history may remain in .history/{name} in the data folder. "
+        + (recoveryFiles is { Count: > 0 }
+            ? $"Show hidden files to review the possible recovery copies ({string.Join(", ", recoveryFiles)})."
+            : "Check that folder, including hidden files.") + " Secure your plaintext versions before removing them. Keep the .ctxs files.";
+
+    private static ActionResult RecoveryFailed(string operation, JournalDirectory.Edit.RecoveryFailure recovery) =>
+        Failed(ActionReason.WriteFailed, $"Couldn't {operation}. Recovery is incomplete."
+            + (recovery.Locations.Count > 0 ? $" Readable originals can be found at {string.Join(", ", recovery.Locations)}."
+                : " No recovery location could be verified."));
 
     /// <summary>The red line when a sensitive note must be open for the action.</summary>
     public static string UnlockFirstText(string name) => $"Unlock {name} first.";
@@ -2514,7 +2521,7 @@ internal sealed class DesktopActions
         };
     }
 
-    private ActionResult SaveNoteNow(EditableNote opened, string text, bool auto = false)
+    private ActionResult SaveNoteNow(EditableNote opened, string text, bool auto = false, (string Id, byte[] Bytes)? restore = null)
     {
         if (IsSealedPath(opened.Path))
         {
@@ -2549,7 +2556,7 @@ internal sealed class DesktopActions
 
             text = decisions?.Text ?? text;
             NoteHistory? history = KeepsVersion(opened, auto) ? state.HistoryStore : null;
-            NoteSaveResult saved = notes.SaveIfUnchanged(opened, text, out EditableNote? savedNote, history);
+            NoteSaveResult saved = notes.SaveIfUnchanged(opened, text, out EditableNote? savedNote, history, restore);
             return saved switch
             {
                 NoteSaveResult.Saved => new ActionResult(
@@ -2559,6 +2566,10 @@ internal sealed class DesktopActions
                 NoteSaveResult.TooLarge => Refused(ActionReason.Invalid, TooLargeText(opened.Name)),
                 _ => Refused(ActionReason.Missing, MissingText(opened.Name)),
             };
+        }
+        catch (JournalDirectory.Edit.RecoveryFailure recovery)
+        {
+            return RecoveryFailed($"save {opened.Name}", recovery);
         }
         catch (NoteHistoryException)
         {
@@ -2577,6 +2588,23 @@ internal sealed class DesktopActions
             return Refused(ActionReason.NotConfirmed, NotConfirmedText);
         }
 
+        if (name == opened.Name && opened.Target.Source is not null)
+        {
+            try
+            {
+                using NoteFileEdit? edit = opened.Target.BeginEdit();
+                if (notes.TryFind(opened.Target, out NoteInfo? note) && note is not null
+                    && state.HistoryStore.TryRead(note, id, out byte[]? bytes, edit) && bytes is not null)
+                {
+                    return SaveNoteNow(opened, NoteStore.DecodeText(bytes).Replace("\r\n", "\n", StringComparison.Ordinal), restore: (id, bytes));
+                }
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // The selected version must still be readable.
+            }
+            return Failed(ActionReason.Unreadable, VersionUnreadableText);
+        }
         string? text = string.Equals(name, opened.Name, StringComparison.Ordinal) ? state.ReadVersionText(opened.Target, id) : null;
         if (text is null)
         {
@@ -3427,6 +3455,10 @@ internal sealed class DesktopActions
             // top-level note with subpages would be called calendar.
             return Refused(ActionReason.Invalid, RenameFailedText(reference.Name));
         }
+        catch (JournalDirectory.Edit.RecoveryFailure recovery)
+        {
+            return RecoveryFailed($"rename {reference.Name}", recovery);
+        }
         catch (Exception)
         {
             return Failed(ActionReason.WriteFailed, reference.Source is null ? RenameFailedText(reference.Name) : $"Can't rename {reference.Name}.");
@@ -4175,6 +4207,10 @@ internal sealed class DesktopActions
             // Below the calendar note, or a full reference over NoteStore.MaxNameLength for the note or a subpage.
             return Refused(ActionReason.Invalid, CantMoveText(reference.Name, newParent.Trim()));
         }
+        catch (JournalDirectory.Edit.RecoveryFailure recovery)
+        {
+            return RecoveryFailed($"move {reference.Name}", recovery);
+        }
         catch (AttachmentMoveException)
         {
             return Failed(ActionReason.WriteFailed, reference.Source is null ? AttachmentsMoveFailedText(reference.Name) : $"Can't move the attachments of {reference.Name}.");
@@ -4209,7 +4245,7 @@ internal sealed class DesktopActions
                 selection.Verify(edit as JournalDirectory.Edit ?? throw new IOException());
             }
             IReadOnlyList<string> linked = plain is null ? [] : attachments.LinkedNamesOf(selected, edit);
-            if (plain is not null && notes.Delete(selected, removeHistory: true, removeAttachments: true, edit, linked, selection?.Pages))
+            if (plain is not null && notes.Delete(selected, removeHistory: true, removeAttachments: true, edit, linked, selection?.Histories))
             {
                 // A file the cleanup can't remove stays and the delete is still done.
                 if (edit is null)
@@ -4232,6 +4268,10 @@ internal sealed class DesktopActions
             }
 
             return Refused(ActionReason.Missing, NoteMissingText(reference.Name));
+        }
+        catch (JournalDirectory.Edit.RecoveryFailure recovery)
+        {
+            return RecoveryFailed($"delete {reference.Name}", recovery);
         }
         catch (Exception)
         {
@@ -4585,9 +4625,7 @@ internal sealed class DesktopActions
     private static string ReadPlainCopy(NoteReference selected, NoteInfo note, NoteFileEdit? edit = null)
     {
         byte[] bytes = edit?.Read(note.Path, MaxNoteBytes) ?? selected.ReadBytes(note.Path, MaxNoteBytes);
-        using MemoryStream stream = new MemoryStream(bytes, writable: false);
-        using StreamReader reader = new StreamReader(stream, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-        return reader.ReadToEnd();
+        return NoteStore.DecodeText(bytes);
     }
 
     // /share and the Share menu item, with the path from the OS save dialog, checked again here. A sensitive note is
@@ -4795,7 +4833,7 @@ internal sealed class DesktopActions
                 return Refused(ActionReason.NoKeys, NoRecoveryText);
             }
 
-            using JournalDirectory.Edit edit = new(directory, source);
+            using JournalDirectory.Edit edit = new(directory, source, reference.Source as JournalDirectory);
             using (FileStream check = directory.OpenNote(source))
             {
                 if (check.Length > MaxNoteBytes)
@@ -4852,12 +4890,21 @@ internal sealed class DesktopActions
             {
                 return Refused(ActionReason.Invalid, ParentSensitiveText);
             }
-            if (!edit.FinishConversion(source, versions, BeforePlainHistoryCleanup, out IReadOnlyList<string> recoveryFiles))
+            JournalDirectory.Edit.ConversionOutcome outcome = edit.FinishConversion(source, versions, BeforePlainHistoryCleanup,
+                out IReadOnlyList<string> recoveryFiles);
+            if (outcome == JournalDirectory.Edit.ConversionOutcome.Restored)
+            {
+                return Failed(ActionReason.WriteFailed, $"Couldn't mark {source.Name} sensitive. The original note and its history are available.");
+            }
+            if (outcome == JournalDirectory.Edit.ConversionOutcome.PlainHistoryLeft)
             {
                 return new ActionResult(ActionKind.Done, ActionReason.PlainHistoryLeft, source.Name) { RecoveryFiles = recoveryFiles };
             }
-
             return new ActionResult(ActionKind.Done, ActionReason.None, source.Name);
+        }
+        catch (JournalDirectory.Edit.RecoveryFailure recovery)
+        {
+            return RecoveryFailed($"mark {reference.Name} sensitive", recovery);
         }
         catch (Exception)
         {

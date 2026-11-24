@@ -216,6 +216,193 @@ public sealed class JournalPanelTests : IDisposable
         Assert.Equal("# First\nInitial child", await data.State.ReadVersion(child.Reference, childId).WaitAsync(Wait));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConfirmDelete_RequiresTheSameFieldBytesInPagesAndHistory(bool editVersion)
+    {
+        string name = Date(0);
+        NoteStore store = new(data.Root);
+        NoteHistory history = new(store, () => data.UtcNow);
+        NoteInfo parent = store.CreateWithText(name, "Current parent");
+        string parentId = Assert.IsType<string>(history.Keep(parent.Path, "Earlier parent"u8.ToArray()));
+        NoteInfo child = store.CreateChild(parent.Reference, "First", "owner:: Amber");
+        string childId = Assert.IsType<string>(history.Keep(child.Path, "owner:: Amber"u8.ToArray()));
+        string file = editVersion ? Path.Combine(NoteHistory.FolderFor(child.Path), childId + ".md") : child.Path;
+        File.SetLastWriteTimeUtc(file, data.UtcNow);
+        DateTime fixedTime = File.GetLastWriteTimeUtc(file);
+        IRenderedComponent<Main> cut = await OpenDailyEditor();
+        await MainTests.ChooseAsync(cut, "delete");
+        Assert.Contains("1 subpage", cut.Find(".dialog .question").TextContent);
+        long length = new FileInfo(file).Length;
+        File.WriteAllText(file, File.ReadAllText(file).Replace("Amber", "Azure", StringComparison.Ordinal));
+        File.SetLastWriteTimeUtc(file, fixedTime);
+        Assert.Equal((length, fixedTime), (new FileInfo(file).Length, File.GetLastWriteTimeUtc(file)));
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Equal(DesktopActions.DeleteFailedText(name), cut.Find(".main-status.red").TextContent), Wait);
+        Assert.Equal("Current parent", editor.MountedText());
+        Assert.Equal("Earlier parent", await data.State!.ReadVersion(parent.Reference, parentId).WaitAsync(Wait));
+        Assert.Equal(editVersion ? "# First\nowner:: Amber" : "# First\nowner:: Azure", (await data.State.ReadForEdit(child.Name).WaitAsync(Wait))?.Text);
+        Assert.Equal(editVersion ? "owner:: Azure" : "owner:: Amber", await data.State.ReadVersion(child.Reference, childId).WaitAsync(Wait));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConfirmDelete_KeepsAVersionAddedDuringPlanningOrRetirement(bool atRetirement)
+    {
+        string name = Date(0);
+        data.WriteNote(name, "Current parent");
+        IRenderedComponent<Main> cut = await OpenDailyEditor();
+        NoteReference target = cut.FindComponent<NoteEditor>().Instance.OpenedTarget!.Value;
+        JournalDirectory directory = Assert.IsType<JournalDirectory>(target.Source);
+        string path = target.SelectedPath!, folder = NoteHistory.FolderFor(path);
+        string first = Assert.IsType<string>(data.State!.HistoryStore.Keep(path, "Earlier"u8.ToArray()));
+        NoteHistory other = new(new NoteStore(data.Root), () => data.UtcNow);
+        await MainTests.ChooseAsync(cut, "delete");
+        Assert.Contains(name, cut.Find(".dialog .question").TextContent);
+        bool checkedHistory = false;
+        string? added = null;
+        directory.BeforeEnumerate = entry => checkedHistory |= entry == folder;
+        directory.EntryAvailable = entry =>
+        {
+            if (!atRetirement && checkedHistory && entry == path)
+            {
+                added ??= other.Keep(path, "Also kept"u8.ToArray());
+            }
+            return true;
+        };
+        directory.RemovalAvailable = entry =>
+        {
+            if (atRetirement && entry == path)
+            {
+                added ??= other.Keep(path, "Also kept"u8.ToArray());
+            }
+            return true;
+        };
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Equal(DesktopActions.DeleteFailedText(name), cut.Find(".main-status.red").TextContent), Wait);
+        Assert.Equal("Current parent", editor.MountedText());
+        Assert.Equal("Current parent", File.ReadAllText(path));
+        Assert.Equal("Earlier", await data.State.ReadVersion(target, first).WaitAsync(Wait));
+        Assert.Equal("Also kept", await data.State.ReadVersion(target, Assert.IsType<string>(added)).WaitAsync(Wait));
+        Assert.Equal(first + "-1", added);
+        Assert.Equal(2, (await data.State.History(target).WaitAsync(Wait)).Versions.Count);
+    }
+
+    [Fact]
+    public async Task MarkSensitive_AfterIncompleteDelete_IdentifiesPreviouslyStagedHistory()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        string name = Date(0);
+        data.WriteNote(name, "Current parent");
+        IRenderedComponent<Main> cut = await OpenDailyEditor();
+        NoteReference target = cut.FindComponent<NoteEditor>().Instance.OpenedTarget!.Value;
+        JournalDirectory directory = Assert.IsType<JournalDirectory>(target.Source);
+        string path = target.SelectedPath!, folder = NoteHistory.FolderFor(path);
+        string first = Assert.IsType<string>(data.State!.HistoryStore.Keep(path, "Earlier readable version"u8.ToArray()));
+        string second = Assert.IsType<string>(data.State.HistoryStore.Keep(path, "Kept version"u8.ToArray()));
+        string plain = Path.Combine(folder, first + ".md"), unrelated = Path.Combine(folder, "other.tmp");
+        File.WriteAllText(unrelated, "Independent fixture");
+        directory.RemovalAvailable = directory.RecoveryAvailable = file => file != plain;
+        await MainTests.ChooseAsync(cut, "delete");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Contains("Recovery is incomplete", cut.Find(".main-status.red").TextContent), Wait);
+        string recovery = Assert.Single(Directory.GetFiles(folder, ".*.tmp"));
+        Assert.Contains(Path.GetFileName(recovery), cut.Find(".main-status.red").TextContent);
+        Assert.Equal("Earlier readable version", File.ReadAllText(recovery));
+        Assert.Equal("Kept version", await data.State.ReadVersion(target, second).WaitAsync(Wait));
+        directory.RemovalAvailable = directory.RecoveryAvailable = null;
+        await MainTests.ChooseAsync(cut, "mark-sensitive");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Contains("readable history may remain", cut.Find(".main-status.red").TextContent), Wait);
+        string warning = cut.Find(".main-status.red").TextContent;
+        Assert.Contains(".history/" + name, warning);
+        Assert.Contains(Path.GetFileName(recovery), warning);
+        Assert.DoesNotContain("other.tmp", warning);
+        Assert.Equal("Independent fixture", File.ReadAllText(unrelated));
+        Assert.Equal("Earlier readable version", File.ReadAllText(recovery));
+        Assert.False(File.Exists(path));
+        NoteReference sensitive = NoteReference.Stored(name, sensitive: true);
+        Assert.Equal("Current parent", (await data.State.ReadSensitive(sensitive).WaitAsync(Wait))?.Text);
+        Assert.Equal("Kept version", await data.State.ReadVersion(sensitive, second).WaitAsync(Wait));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedConversion_ReportsRecoveryAndKeepsTheRestoredEditorUsable(bool refuseOriginalName)
+    {
+        data.Keys = FakeKeyStore.Ready();
+        string name = Date(0);
+        data.WriteNote(name, "Current parent");
+        IRenderedComponent<Main> cut = await OpenDailyEditor();
+        NoteReference target = cut.FindComponent<NoteEditor>().Instance.OpenedTarget!.Value;
+        JournalDirectory directory = Assert.IsType<JournalDirectory>(target.Source);
+        string path = target.SelectedPath!, sealedPath = Path.ChangeExtension(path, NoteStore.SensitiveExtension);
+        string id = Assert.IsType<string>(data.State!.HistoryStore.Keep(path, "Earlier parent"u8.ToArray()));
+        bool final = false;
+        directory.RemovalAvailable = entry => { final |= entry == path; return true; };
+        directory.EntryAvailable = entry => !final || entry != sealedPath;
+        directory.RecoveryAvailable = entry => !refuseOriginalName || entry != path;
+        await MainTests.ChooseAsync(cut, "mark-sensitive");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForElement(".main-status.red", Wait);
+        Assert.True(final);
+        if (refuseOriginalName)
+        {
+            string kept = Assert.Single(Directory.GetFiles(data.Root, ".*.tmp"));
+            string status = cut.Find(".main-status.red").TextContent;
+            Assert.Contains("Recovery is incomplete", status);
+            Assert.Contains(kept, status);
+            Assert.Equal("Current parent", File.ReadAllText(kept));
+            Assert.False(File.Exists(path));
+            NoteReference sensitive = NoteReference.Stored(name, sensitive: true);
+            Assert.Equal("Current parent", (await data.State.ReadSensitive(sensitive).WaitAsync(Wait))?.Text);
+            Assert.Equal("Earlier parent", await data.State.ReadVersion(sensitive, id).WaitAsync(Wait));
+            return;
+        }
+        Assert.Contains("original note and its history are available", cut.Find(".main-status.red").TextContent);
+        Assert.Equal("Current parent", editor.MountedText());
+        await MainTests.ChooseAsync(cut, "history");
+        cut.WaitForElement(".history-row button", Wait);
+        await StaleClick.ClickAsync(cut, ".history-row button");
+        cut.WaitForAssertion(() => Assert.Contains("Earlier parent", cut.Find(".diff-lines").TextContent), Wait);
+        await StaleClick.ClickAsync(cut, ".close-history");
+        editor.Edit("owner:: Updated");
+        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        cut.WaitForAssertion(() => Assert.Equal("owner:: Updated", File.ReadAllText(path)), Wait);
+        Assert.Equal("Earlier parent", await data.State.ReadVersion(target, id).WaitAsync(Wait));
+    }
+
+    [Fact]
+    public async Task MoveWithUnreadablePublishedHistory_ShowsFailureInTheOriginalEditor()
+    {
+        string name = Date(0);
+        data.WriteNote(name, "Current parent");
+        data.WriteNote("Destination", "Archive");
+        IRenderedComponent<Main> cut = await OpenDailyEditor();
+        NoteEditor open = cut.FindComponent<NoteEditor>().Instance;
+        NoteReference target = open.OpenedTarget!.Value;
+        JournalDirectory directory = Assert.IsType<JournalDirectory>(target.Source);
+        string path = target.SelectedPath!;
+        string id = Assert.IsType<string>(data.State!.HistoryStore.Keep(path, "Earlier parent"u8.ToArray()));
+        string destination = Path.Combine(data.Root, "Destination", name + ".md");
+        string version = Path.Combine(NoteHistory.FolderFor(destination), id + ".md");
+        bool cleanup = false;
+        directory.RemovalAvailable = entry => { cleanup |= entry == path; return true; };
+        directory.EntryAvailable = entry => !cleanup || entry != version;
+        await MainTests.ChooseAsync(cut, "move");
+        await cut.Find(".move-parent").InputAsync(new ChangeEventArgs { Value = "Destination" });
+        await cut.Find(".move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        cut.WaitForAssertion(() => Assert.Contains("Can't move", cut.Find(".main-status.red").TextContent), Wait);
+        Assert.True(cleanup);
+        Assert.Same(open, cut.FindComponent<NoteEditor>().Instance);
+        Assert.Equal("Current parent", editor.MountedText());
+        Assert.False(File.Exists(destination));
+        Assert.Equal("Earlier parent", await data.State.ReadVersion(target, id).WaitAsync(Wait));
+    }
+
     [Fact]
     public async Task CleanupAndRecoveryRefused_WarningIdentifiesTheReadableVersion()
     {

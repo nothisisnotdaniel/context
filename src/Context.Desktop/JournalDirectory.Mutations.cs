@@ -223,11 +223,27 @@ internal sealed partial class JournalDirectory
         {
             try
             {
-                RemoveAt(parentHandle, name, false, file.SafeFileHandle);
+                RollbackChecked();
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
                 // The name may already be gone or belong to another file.
+            }
+        }
+
+        internal void RollbackChecked()
+        {
+            try
+            {
+                using SafeFileHandle current = OpenHandle(name, false, parentHandle, shareDelete: true);
+                if (Matches(parentHandle, current))
+                {
+                    RemoveAt(parentHandle, name, false, current);
+                }
+            }
+            catch (FileNotFoundException)
+            {
+                // This creation is already gone.
             }
         }
 

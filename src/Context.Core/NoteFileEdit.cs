@@ -8,12 +8,22 @@ internal abstract class NoteFileEdit : IDisposable
 {
     private Action? checkCommit;
     private Action? finishStaging;
+    private Action? checkFinalState;
 
     // Keep originals readable until publication and all caller-side staging have finished.
     public void BeforeCommit(Action check, Action? apply = null)
     {
         checkCommit += check;
         finishStaging += apply;
+    }
+
+    // Membership checks whose expected state differs once the originals have been retired.
+    public void AfterRetirement(Action check) => checkFinalState += check;
+
+    protected void VerifyFinalState()
+    {
+        checkFinalState?.Invoke();
+        Verify();
     }
 
     protected void PrepareCommit()
@@ -43,6 +53,7 @@ internal abstract class NoteFileEdit : IDisposable
     public abstract byte[] Read(string path, long limit);
     public abstract void EnsureFolder(string path);
     public abstract void WriteNew(string path, byte[] bytes);
+    public abstract void Reserve(string path);
     public abstract void PublishNote(string from, string to, byte[]? rewritten);
     public abstract void Relocate(string from, string to, bool directory = false);
     public abstract void Discard(string path);

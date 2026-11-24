@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Microsoft.Win32.SafeHandles;
 
 namespace Context;
@@ -12,8 +13,14 @@ internal sealed partial class JournalDirectory
     {
         private sealed record Observation(EntryIdentity Identity, bool Directory, string? Hash = null, long Limit = 0,
             (long Length, DateTime Written)? Confirmed = null);
-        private sealed record Change(Action Undo, Action Release, Action? Finish = null, bool Creation = false, bool FinishLast = false);
+        private sealed record Change(Action Undo, Action Release, Action? Finish = null, bool Creation = false,
+            bool FinishLast = false, Action? VerifyRetired = null);
         private readonly JournalDirectory source;
+        private readonly JournalDirectory editor;
+        private readonly string originalPath;
+        private readonly Dictionary<string, Observation> selection;
+        private SafeFileHandle? restoredNote;
+        private readonly List<string> recoveryLocations = [];
         private readonly Dictionary<string, Observation> entries = new(StringComparer.Ordinal);
         private readonly Dictionary<FileId, SafeFileHandle> witnesses = [];
         private readonly HashSet<string> absent = new(StringComparer.Ordinal);
@@ -25,12 +32,13 @@ internal sealed partial class JournalDirectory
         private bool originalRoot;
         private bool pinnedHistory;
 
-        internal Edit(JournalDirectory source, NoteInfo note)
+        internal Edit(JournalDirectory source, NoteInfo note, JournalDirectory? editor = null)
         {
             this.source = source;
-            selected = note.Path;
+            this.editor = editor ?? source;
+            originalPath = selected = note.Path;
             using FileStream file = source.OpenNote(note);
-            entries[selected] = new(Stamp(file.SafeFileHandle, false), false);
+            entries[selected] = new(source.Stamp(file.SafeFileHandle, false), false);
             lock (source.original)
             {
                 for (string? path = Path.GetDirectoryName(selected); path != source.root; path = Path.GetDirectoryName(path!))
@@ -38,6 +46,7 @@ internal sealed partial class JournalDirectory
                     entries[path!] = new(source.observed[path!], true);
                 }
             }
+            selection = new(entries, StringComparer.Ordinal);
         }
 
         // The question carries values only. Neither a file nor a directory stays open
@@ -53,17 +62,17 @@ internal sealed partial class JournalDirectory
                 root = edit.source.id;
                 foreach (NoteInfo page in pages)
                 {
-                    CaptureFile(page.Path, page.Modified.ToUniversalTime());
-                    IReadOnlyList<NoteVersion> versions = NoteHistory.ListVersions(page.Path, edit, ".md");
+                    CaptureFile(page.Path, NoteStore.MaxEditBytes, page.Modified.ToUniversalTime());
+                    IReadOnlyList<NoteVersion> versions = NoteHistory.BoundedPlainVersions(page.Path, edit);
                     histories[page.Path] = versions;
                     foreach (NoteVersion version in versions)
                     {
-                        CaptureFile(Path.Combine(NoteHistory.FolderFor(page.Path), NoteHistory.FileName(version.Id, null)));
+                        CaptureFile(Path.Combine(NoteHistory.FolderFor(page.Path), NoteHistory.FileName(version.Id, null)), NoteHistory.MaxVersionBytes);
                     }
                 }
                 observed = new(edit.entries, StringComparer.Ordinal);
 
-                void CaptureFile(string path, DateTime? displayed = null)
+                void CaptureFile(string path, long limit, DateTime? displayed = null)
                 {
                     string key = edit.Key(path);
                     using SafeFileHandle file = edit.OpenEntry(key, false);
@@ -72,11 +81,11 @@ internal sealed partial class JournalDirectory
                     {
                         throw Ineligible();
                     }
-                    edit.entries[key] = edit.entries[key] with { Confirmed = (length, written) };
+                    edit.entries[key] = edit.entries[key] with { Confirmed = (length, written), Hash = CopyAndHash(file, limit), Limit = limit };
                 }
             }
 
-            internal IReadOnlySet<string> Pages => histories.Keys.ToHashSet(StringComparer.Ordinal);
+            internal IReadOnlyDictionary<string, IReadOnlyList<NoteVersion>> Histories => histories;
 
             internal void Verify(Edit edit)
             {
@@ -91,6 +100,10 @@ internal sealed partial class JournalDirectory
                     if (known.Identity != edit.entries[path].Identity)
                     {
                         throw Ineligible();
+                    }
+                    if (known.Hash is not null)
+                    {
+                        _ = edit.Read(path, known.Limit);
                     }
                 }
                 foreach ((string path, IReadOnlyList<NoteVersion> versions) in histories)
@@ -162,7 +175,7 @@ internal sealed partial class JournalDirectory
             }
             try
             {
-                EntryIdentity stamp = Stamp(handle, directory);
+                EntryIdentity stamp = source.Stamp(handle, directory);
                 if (absent.Contains(path))
                 {
                     throw Ineligible();
@@ -187,7 +200,7 @@ internal sealed partial class JournalDirectory
                     SafeFileHandle witness = OpenHandle(Path.GetFileName(path), directory, parent, shareDelete: true);
                     try
                     {
-                        if (Stamp(witness, directory) != stamp)
+                        if (source.Stamp(witness, directory) != stamp)
                         {
                             throw Ineligible();
                         }
@@ -306,13 +319,15 @@ internal sealed partial class JournalDirectory
             changes.Add(new(() => RemoveAt(held, leaf, true, created),
                 () => { created.Dispose(); held.Dispose(); }, Creation: true));
             absent.Remove(key);
-            entries[key] = new(Stamp(created, true), true);
+            entries[key] = new(source.Stamp(created, true), true);
             Expect(key, true);
         }
 
         public override void WriteNew(string path, byte[] bytes) => WriteNew(path, bytes, null);
 
-        private void WriteNew(string path, byte[] bytes, DateTime? modified)
+        public override void Reserve(string path) => WriteNew(path, [], null, reservation: true);
+
+        private void WriteNew(string path, byte[] bytes, DateTime? modified, bool reservation = false)
         {
             string key = Key(path);
             using SafeFileHandle folder = OpenEntry(Path.GetDirectoryName(key)!, true);
@@ -328,14 +343,34 @@ internal sealed partial class JournalDirectory
                     File.SetLastWriteTimeUtc(stream.SafeFileHandle, time);
                 }
             }, () => CheckAvailable(key));
-            changes.Add(new(created.Rollback, created.Dispose, Creation: true));
+            FileId? createdId = null;
+            changes.Add(new(() =>
+            {
+                if (!reservation)
+                {
+                    created.RollbackChecked();
+                }
+            }, () =>
+            {
+                if (reservation)
+                {
+                    created.Rollback();
+                    entries.Remove(key);
+                }
+                created.Dispose();
+                if (createdId is { } id && witnesses.Remove(id, out SafeFileHandle? witness))
+                {
+                    witness.Dispose();
+                }
+            }, Creation: true));
             using SafeFileHandle current = OpenHandle(leaf, false, folder, shareDelete: true);
             if (!created.Matches(folder, current))
             {
                 throw Ineligible();
             }
             absent.Remove(key);
-            entries[key] = new(Stamp(current, false), false, EditableNote.Hash(bytes), bytes.LongLength);
+            entries[key] = new(source.Stamp(current, false), false, EditableNote.Hash(bytes), bytes.LongLength);
+            createdId = entries[key].Identity.Id;
         }
 
         public override void PublishNote(string from, string to, byte[]? rewritten)
@@ -383,52 +418,12 @@ internal sealed partial class JournalDirectory
             {
                 destination = OpenEntry(Path.GetDirectoryName(to)!, true);
                 item = OpenHandle(oldName, directory, sourceFolder, shareDelete: true);
-                if (!Matches(expected.Identity, Stamp(item, directory)))
+                if (!Matches(expected.Identity, source.Stamp(item, directory)))
                 {
                     throw Ineligible();
                 }
                 MoveOwned(sourceFolder, oldName, destination, newName, directory, item, plainHistory);
-                bool removed = false, restoredName = false;
-                void Undo()
-                {
-                    if (restoredName)
-                    {
-                        return;
-                    }
-                    if (!removed)
-                    {
-                        if (source.RecoveryAvailable?.Invoke(from) == false)
-                        {
-                            throw Ineligible();
-                        }
-                        VerifyOwned(destination, newName, directory, item);
-                        MoveOwned(destination, newName, sourceFolder, oldName, directory, item, plainHistory);
-                        VerifyOwned(sourceFolder, oldName, directory, item);
-                        restoredName = true;
-                        return;
-                    }
-                    // A later commit check failed after unlink. The retained file is
-                    // still readable. Restore its bytes privately, without overwriting.
-                    using SafeFileHandle folder = ReopenFolder(sourceFolder, shareDelete: false);
-                    using FileStream original = new(item, FileAccess.Read);
-                    using CreatedFile restored = JournalDirectory.WriteNew(folder, oldName, stream =>
-                    {
-                        original.CopyTo(stream);
-                        stream.Flush();
-                        File.SetLastWriteTimeUtc(stream.SafeFileHandle, File.GetLastWriteTimeUtc(original.SafeFileHandle));
-                    }, plainHistory: plainHistory);
-                }
-                void Finish()
-                {
-                    if (source.RemovalAvailable?.Invoke(from) == false)
-                    {
-                        throw Ineligible();
-                    }
-                    RemoveAt(destination, newName, false, item, plainHistory);
-                    removed = true;
-                }
-                changes.Add(new(Undo, () => { item.Dispose(); sourceFolder.Dispose(); destination.Dispose(); },
-                    discard ? Finish : null, FinishLast: discard && from == selected));
+                TrackTransfer(from, to, expected, sourceFolder, destination, item, discard, plainHistory);
             }
             catch
             {
@@ -462,10 +457,163 @@ internal sealed partial class JournalDirectory
             Expect(to, directory);
         }
 
+        private void TrackTransfer(string from, string to, Observation expected, SafeFileHandle originalFolder,
+            SafeFileHandle destination, SafeFileHandle item, bool discard, bool plainHistory)
+        {
+            string oldName = Path.GetFileName(from), newName = Path.GetFileName(to);
+            bool removed = false, restored = false;
+            changes.Add(new(Undo, () => { item.Dispose(); originalFolder.Dispose(); destination.Dispose(); },
+                discard ? Finish : null, FinishLast: discard && from == selected, VerifyRetired: discard ? VerifyOriginal : null));
+
+            void VerifyOriginal()
+            {
+                if ((expected.Hash is not null && CopyAndHash(item, expected.Limit) != expected.Hash)
+                    || (expected.Confirmed is { } confirmed && FileVersion(item) != confirmed))
+                {
+                    throw Ineligible();
+                }
+            }
+
+            void Finish()
+            {
+                if (source.RemovalAvailable?.Invoke(from) == false)
+                {
+                    throw Ineligible();
+                }
+                VerifyOriginal();
+                RemoveAt(destination, newName, false, item, plainHistory);
+                removed = true;
+                entries.Remove(to);
+            }
+
+            void Undo()
+            {
+                if (restored)
+                {
+                    return;
+                }
+                try
+                {
+                    if (source.RecoveryAvailable?.Invoke(from) == false)
+                    {
+                        throw Ineligible();
+                    }
+                    EntryIdentity identity;
+                    if (removed)
+                    {
+                        identity = RestoreCopy(originalFolder, oldName, item, plainHistory, out _);
+                    }
+                    else
+                    {
+                        MoveOwned(destination, newName, originalFolder, oldName, expected.Directory, item, plainHistory);
+                        VerifyOwned(originalFolder, oldName, expected.Directory, item);
+                        identity = source.Stamp(item, expected.Directory);
+                    }
+                    restored = true;
+                    if (from == originalPath)
+                    {
+                        restoredNote = OpenHandle(oldName, false, originalFolder, shareDelete: true);
+                        if (source.Stamp(restoredNote, false) != identity)
+                        {
+                            restoredNote.Dispose();
+                            restoredNote = null;
+                            throw Ineligible();
+                        }
+                    }
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    // Keep a named, readable original even if the original name is occupied
+                    // or its staged file was unlinked before the final check failed.
+                    string? location = removed ? null : RecoveryLocation(destination, newName, expected.Directory, item);
+                    if (location is not null)
+                    {
+                        recoveryLocations.Add(location);
+                    }
+                    else if (!expected.Directory)
+                    {
+                        RestoreCopy(originalFolder, TempName(plainHistory), item, plainHistory, out string copy);
+                        recoveryLocations.Add(copy);
+                    }
+                    throw;
+                }
+            }
+
+        }
+
+        private static string? RecoveryLocation(SafeFileHandle folder, string name, bool directory, SafeFileHandle original)
+        {
+            try
+            {
+                using SafeFileHandle current = OpenHandle(name, directory, folder, shareDelete: true);
+                if (Identity(current, directory) != Identity(original, directory))
+                {
+                    return null;
+                }
+                if (!directory)
+                {
+                    _ = CopyAndHash(current, long.MaxValue);
+                }
+                return CheckedPath(current, directory);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
+        }
+
+        private EntryIdentity RestoreCopy(SafeFileHandle parent, string name, SafeFileHandle item, bool plainHistory, out string location)
+        {
+            using SafeFileHandle folder = ReopenFolder(parent, shareDelete: false);
+            string? digest = null;
+            using CreatedFile restored = JournalDirectory.WriteNew(folder, name, stream =>
+            {
+                digest = CopyAndHash(item, long.MaxValue, stream);
+                stream.Flush();
+                File.SetLastWriteTimeUtc(stream.SafeFileHandle, File.GetLastWriteTimeUtc(item));
+            }, plainHistory: plainHistory);
+            using SafeFileHandle readable = OpenHandle(name, false, folder, shareDelete: true);
+            if (!restored.Matches(folder, readable) || CopyAndHash(readable, long.MaxValue) != digest)
+            {
+                throw Ineligible();
+            }
+            location = CheckedPath(readable, false);
+            return source.Stamp(readable, false);
+        }
+
+        // Read from the retained handle without taking ownership of it or changing its position.
+        private static string CopyAndHash(SafeFileHandle file, long limit, Stream? copy = null)
+        {
+            long length = RandomAccess.GetLength(file);
+            if (length > limit)
+            {
+                throw new FileTooLargeException();
+            }
+            using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            byte[] buffer = new byte[(int)Math.Min(length, 81920)];
+            long offset = 0;
+            while (offset < length)
+            {
+                int count = RandomAccess.Read(file, buffer.AsSpan(0, (int)Math.Min(buffer.Length, length - offset)), offset);
+                if (count == 0)
+                {
+                    throw Ineligible();
+                }
+                hash.AppendData(buffer, 0, count);
+                copy?.Write(buffer, 0, count);
+                offset += count;
+            }
+            if (RandomAccess.GetLength(file) != length)
+            {
+                throw Ineligible();
+            }
+            return Convert.ToHexStringLower(hash.GetHashAndReset());
+        }
+
         private void RemoveOwned(SafeFileHandle parent, string leaf, Observation expected)
         {
             using SafeFileHandle current = OpenHandle(leaf, expected.Directory, parent, shareDelete: true);
-            if (!Matches(expected.Identity, Stamp(current, expected.Directory)))
+            if (!Matches(expected.Identity, source.Stamp(current, expected.Directory)))
             {
                 throw Ineligible();
             }
@@ -514,6 +662,11 @@ internal sealed partial class JournalDirectory
             {
                 change.Finish?.Invoke();
             }
+            foreach (Change change in changes)
+            {
+                change.VerifyRetired?.Invoke();
+            }
+            VerifyFinalState();
             committed = true;
             lock (source.original)
             {
@@ -550,7 +703,44 @@ internal sealed partial class JournalDirectory
 
         // Conversion keeps the original version directory through the deletion of the plain note.
         // A missing directory is rechecked against the original root during final enumeration.
-        internal bool FinishConversion(NoteInfo note, IReadOnlyList<string> versions, Action? beforeHistoryCleanup,
+        internal enum ConversionOutcome { Sealed, PlainHistoryLeft, Restored }
+
+        internal ConversionOutcome FinishConversion(NoteInfo note, IReadOnlyList<string> versions, Action? beforeHistoryCleanup,
+            out IReadOnlyList<string> recoveryFiles)
+        {
+            Dictionary<string, Observation> originals = versions.Prepend(note.Path).ToDictionary(Key, path => entries[Key(path)], StringComparer.Ordinal);
+            try
+            {
+                return RetirePlaintext(note, versions, beforeHistoryCleanup, out recoveryFiles)
+                    ? ConversionOutcome.Sealed : ConversionOutcome.PlainHistoryLeft;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                Rollback();
+                List<string> readable = [];
+                try
+                {
+                    using Edit restored = new(editor, note);
+                    foreach ((string path, Observation expected) in originals)
+                    {
+                        if (EditableNote.Hash(restored.Read(path, expected.Limit)) != expected.Hash)
+                        {
+                            throw Ineligible();
+                        }
+                        readable.Add(path);
+                    }
+                    restored.Verify();
+                }
+                catch (Exception check) when (check is IOException or UnauthorizedAccessException)
+                {
+                    throw new RecoveryFailure(readable);
+                }
+                recoveryFiles = [];
+                return ConversionOutcome.Restored;
+            }
+        }
+
+        private bool RetirePlaintext(NoteInfo note, IReadOnlyList<string> versions, Action? beforeHistoryCleanup,
             out IReadOnlyList<string> recoveryFiles)
         {
             string notePath = note.Path;
@@ -570,7 +760,6 @@ internal sealed partial class JournalDirectory
             originalRoot = true;
             VerifyPublication();
             bool clean = true;
-            HashSet<FileId> versionIds = versions.Select(path => entries[Key(path)].Identity.Id).ToHashSet();
             int firstVersion = changes.Count;
             pinnedHistory = true;
             try
@@ -617,22 +806,35 @@ internal sealed partial class JournalDirectory
             ReleaseChanges();
             try
             {
-                NoteFileEntry[] readable = List(historyPath).Where(v => !v.Directory && v.Name.EndsWith(".md", StringComparison.OrdinalIgnoreCase)).ToArray();
-                clean &= readable.Length == 0;
-                recoveryFiles = readable.Where(v => v.Name.EndsWith(".tmp.md", StringComparison.Ordinal)
-                    && IsOriginalVersion(v.Name)).Select(v => v.Name).Order(StringComparer.Ordinal).ToArray();
+                List<string> readable = [];
+                foreach (NoteFileEntry entry in List(historyPath).Where(e => !e.Directory))
+                {
+                    bool recovery = IsRecoveryName(entry.Name);
+                    if (recovery || entry.Name.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+                    {
+                        clean = false;
+                    }
+                    if (recovery)
+                    {
+                        try
+                        {
+                            using SafeFileHandle file = OpenEntry(Path.Combine(historyPath, entry.Name), false);
+                            _ = CopyAndHash(file, NoteHistory.MaxVersionBytes);
+                            readable.Add(entry.Name);
+                        }
+                        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                        {
+                            // Cleanup is unconfirmed. Only identify copies actually read.
+                        }
+                    }
+                }
+                recoveryFiles = readable.Order(StringComparer.Ordinal).ToArray();
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
                 clean = false;
             }
             return clean;
-
-            bool IsOriginalVersion(string name)
-            {
-                using SafeFileHandle file = OpenEntry(Path.Combine(historyPath, name), false);
-                return versionIds.Contains(Identity(file, false));
-            }
 
             void VerifyPublication()
             {
@@ -649,8 +851,20 @@ internal sealed partial class JournalDirectory
             }
         }
 
-        public override void Dispose()
+        // Earlier operations staged versions as .<guid>.tmp as well as .<guid>.tmp.md.
+        // Their ownership cannot be proven after restart. Leave them for the user.
+        private static bool IsRecoveryName(string name) => name.Length >= 37 && name[0] == '.'
+            && name[33..] is ".tmp" or ".tmp.md" && Guid.TryParseExact(name.AsSpan(1, 32), "N", out _);
+
+        internal sealed class RecoveryFailure : IOException
         {
+            internal IReadOnlyList<string> Locations { get; }
+            internal RecoveryFailure(IReadOnlyList<string> locations) => Locations = locations;
+        }
+
+        private void Rollback()
+        {
+            recoveryLocations.Clear();
             bool keepCreations = false;
             for (int index = changes.Count - 1; index >= 0; index--)
             {
@@ -672,10 +886,77 @@ internal sealed partial class JournalDirectory
                     change.Release();
                 }
             }
-            historyFolder?.Dispose();
-            foreach (SafeFileHandle witness in witnesses.Values)
+            changes.Clear();
+            if (restoredNote is not null || selection.Values.Any(entry => entry.Directory && entry.Identity.ChangeTime))
             {
-                witness.Dispose();
+                try
+                {
+                    RefreshBinding();
+                    if (keepCreations && restoredNote is not null)
+                    {
+                        recoveryLocations.Add(CheckedPath(restoredNote, false));
+                    }
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    keepCreations = true;
+                    if (restoredNote is not null)
+                    {
+                        recoveryLocations.Add(CheckedPath(restoredNote, false));
+                    }
+                }
+            }
+            if (keepCreations)
+            {
+                throw new RecoveryFailure(recoveryLocations.ToArray());
+            }
+        }
+
+        private void RefreshBinding()
+        {
+            entries.Clear();
+            absent.Clear();
+            foreach ((string path, Observation original) in selection)
+            {
+                entries.Add(path, original);
+            }
+            if (restoredNote is not null)
+            {
+                entries[originalPath] = new(source.Stamp(restoredNote, false), false);
+            }
+            originalRoot = pinnedHistory = false;
+            using SafeFileHandle current = OpenEntry(originalPath, false);
+            lock (editor.original)
+            {
+                if (editor.original.IsClosed || selection.Any(pair => !editor.observed.TryGetValue(pair.Key, out EntryIdentity known)
+                    || known != pair.Value.Identity))
+                {
+                    throw Ineligible();
+                }
+                foreach (string path in selection.Keys)
+                {
+                    editor.observed[path] = entries[path].Identity;
+                }
+            }
+        }
+
+        public override void Dispose()
+        {
+            try
+            {
+                if (!committed && changes.Count > 0)
+                {
+                    Rollback();
+                }
+            }
+            finally
+            {
+                restoredNote?.Dispose();
+                historyFolder?.Dispose();
+                foreach (SafeFileHandle witness in witnesses.Values)
+                {
+                    witness.Dispose();
+                }
             }
         }
 

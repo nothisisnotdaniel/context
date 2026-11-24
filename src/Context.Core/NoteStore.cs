@@ -475,7 +475,7 @@ internal sealed class NoteStore
     }
 
     internal bool Delete(NoteReference name, bool removeHistory, bool removeAttachments, NoteFileEdit? edit,
-        IReadOnlyList<string>? linked = null, IReadOnlySet<string>? confirmedPages = null)
+        IReadOnlyList<string>? linked = null, IReadOnlyDictionary<string, IReadOnlyList<NoteVersion>>? confirmedHistories = null)
     {
         List<Entry> entries = ListEntries();
         Entry? match = FindEntry(entries, name);
@@ -485,13 +485,14 @@ internal sealed class NoteStore
         }
 
         List<Entry> subtree = entries.Where(e => ReferenceEquals(e, match) || IsBelow(e.Note.Name, match.Note.Name)).ToList();
-        if (confirmedPages is not null && !confirmedPages.SetEquals(subtree.Select(e => e.Note.Path)))
+        if (confirmedHistories is not null && (confirmedHistories.Count != subtree.Count
+            || subtree.Any(e => !confirmedHistories.ContainsKey(e.Note.Path))))
         {
             throw new IOException("The subpages changed.");
         }
         if (edit is not null)
         {
-            DeleteSelected(subtree, match.Note, removeHistory, removeAttachments, edit, linked ?? []);
+            DeleteSelected(subtree, match.Note, removeHistory, removeAttachments, edit, linked ?? [], confirmedHistories);
             return true;
         }
         if (removeHistory)
@@ -525,7 +526,8 @@ internal sealed class NoteStore
         return true;
     }
 
-    private void DeleteSelected(List<Entry> subtree, NoteInfo selected, bool history, bool attachments, NoteFileEdit edit, IReadOnlyList<string> linked)
+    private void DeleteSelected(List<Entry> subtree, NoteInfo selected, bool history, bool attachments, NoteFileEdit edit,
+        IReadOnlyList<string> linked, IReadOnlyDictionary<string, IReadOnlyList<NoteVersion>>? confirmedHistories)
     {
         List<string> files = [];
         Dictionary<string, IReadOnlyList<NoteVersion>> histories = new(StringComparer.Ordinal);
@@ -538,7 +540,7 @@ internal sealed class NoteStore
             if (history)
             {
                 string folder = NoteHistory.FolderFor(entry.Note.Path);
-                histories[entry.Note.Path] = NoteHistory.ListVersions(entry.Note.Path, edit, Extension);
+                histories[entry.Note.Path] = confirmedHistories?[entry.Note.Path] ?? NoteHistory.ListVersions(entry.Note.Path, edit, Extension);
                 foreach (NoteVersion version in histories[entry.Note.Path])
                 {
                     edit.Expect(Path.Combine(folder, NoteHistory.FileName(version.Id, null)));
@@ -585,6 +587,7 @@ internal sealed class NoteStore
             }, () => RetirePlainVersions(path, kept, edit));
         }
         edit.BeforeCommit(() => CheckSubpages(staged: true));
+        edit.AfterRetirement(() => CheckSubpages(staged: true));
         NoteAttachments.DiscardUnlinked(selected, linked, edit);
         edit.Commit();
         edit.RemoveEmpty(Path.Combine(Path.GetDirectoryName(selected.Path)!, NoteAttachments.FolderName));
@@ -777,10 +780,15 @@ internal sealed class NoteStore
     internal static EditableNote ReadSelectedForEdit(NoteInfo note, NoteReference selected)
     {
         byte[] raw = selected.ReadBytes(note.Path, MaxEditBytes);
+        return EditableFromBytes(note.Name, note.Path, selected, raw);
+    }
+
+    private static EditableNote EditableFromBytes(string name, string path, NoteReference selected, byte[] raw)
+    {
         bool hadBom = raw.AsSpan().StartsWith(Utf8Bom);
         string text = DecodeText(raw);
         (string plain, bool hadCrlf, IReadOnlyList<bool>? lineCrlf) = LineEndings.Read(text);
-        return new EditableNote(note.Name, note.Path, plain, EditableNote.Hash(raw), hadCrlf, hadBom, lineCrlf) { Target = selected };
+        return new EditableNote(name, path, plain, EditableNote.Hash(raw), hadCrlf, hadBom, lineCrlf) { Target = selected };
     }
 
     /// <summary>
@@ -801,24 +809,27 @@ internal sealed class NoteStore
     /// before the move, so a save that writes nothing keeps nothing. When that throws
     /// (<see cref="NoteHistoryException"/>) the note is not changed.
     /// </summary>
-    public NoteSaveResult SaveIfUnchanged(EditableNote opened, string text, out EditableNote? saved, NoteHistory? history)
+    public NoteSaveResult SaveIfUnchanged(EditableNote opened, string text, out EditableNote? saved, NoteHistory? history,
+        (string Id, byte[] Bytes)? restore = null)
     {
         saved = null;
         string plainText = text.Replace("\r\n", "\n", StringComparison.Ordinal);
-        if (string.Equals(plainText, opened.Text, StringComparison.Ordinal))
+        if (string.Equals(plainText, opened.Text, StringComparison.Ordinal) && (restore is null || EditableNote.Hash(restore.Value.Bytes) == opened.Version))
         {
             return NoteSaveResult.Unchanged;
         }
 
-        NoteSaveResult check = CheckVersion(opened, out _);
+        NoteSaveResult check = CheckVersion(opened, out byte[]? current);
         if (check != NoteSaveResult.Saved)
         {
             return check;
         }
 
-        string onDisk = LineEndings.Apply(opened, plainText);
-        byte[] body = Utf8NoBom.GetBytes(onDisk);
-        byte[] plain = opened.HadBom ? [.. Utf8Bom, .. body] : body;
+        EditableNote format = restore is { } versionToRestore
+            ? EditableFromBytes(opened.Name, opened.Path, opened.Target, versionToRestore.Bytes) : opened;
+        Encoding encoding = TextEncoding(restore?.Bytes ?? current!);
+        byte[] plain = restore is { } exact && plainText == format.Text
+            ? exact.Bytes : [.. encoding.Preamble, .. encoding.GetBytes(LineEndings.Apply(format, plainText))];
         if (plain.Length > MaxEditBytes)
         {
             return NoteSaveResult.TooLarge;
@@ -832,7 +843,19 @@ internal sealed class NoteStore
             {
                 return NoteSaveResult.ChangedOnDisk;
             }
+            if (restore is { } requested && (history is null
+                || !history.TryRead(new NoteInfo(opened.Name, default, opened.Path), requested.Id, out byte[]? keptBytes, edit)
+                || keptBytes is null || !requested.Bytes.AsSpan().SequenceEqual(keptBytes)))
+            {
+                throw new NoteHistoryException();
+            }
             history?.Keep(opened.Path, previous, edit: edit);
+            IReadOnlyList<NoteVersion> kept = NoteHistory.BoundedPlainVersions(opened.Path, edit);
+            foreach (NoteVersion version in kept)
+            {
+                _ = edit.Read(Path.Combine(NoteHistory.FolderFor(opened.Path), NoteHistory.FileName(version.Id, null)), NoteHistory.MaxVersionBytes);
+            }
+            edit.AfterRetirement(() => RequireVersions(opened.Path, kept, edit));
             BeforeEditPublish?.Invoke();
             edit.Verify();
             edit.Discard(opened.Path);
@@ -848,11 +871,7 @@ internal sealed class NoteStore
             }
         }
 
-        (_, bool savedCrlf, IReadOnlyList<bool>? savedLines) = LineEndings.Read(onDisk);
-        saved = new EditableNote(opened.Name, opened.Path, plainText, EditableNote.Hash(plain), savedCrlf, opened.HadBom, savedLines)
-        {
-            Target = opened.Target,
-        };
+        saved = EditableFromBytes(opened.Name, opened.Path, opened.Target, plain);
         return NoteSaveResult.Saved;
     }
 
@@ -1060,6 +1079,14 @@ internal sealed class NoteStore
         using MemoryStream stream = new MemoryStream(bytes, writable: false);
         using StreamReader reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         return reader.ReadToEnd();
+    }
+
+    internal static Encoding TextEncoding(byte[] bytes)
+    {
+        using MemoryStream stream = new(bytes, writable: false);
+        using StreamReader reader = new(stream, Utf8NoBom, detectEncodingFromByteOrderMarks: true);
+        _ = reader.Peek();
+        return reader.CurrentEncoding;
     }
 
     /// <summary>
@@ -1621,15 +1648,18 @@ internal sealed class NoteStore
                 BeforeFolderMove?.Invoke();
                 edit.Relocate(originalFolder, folderTarget, true);
             }
-            edit.BeforeCommit(() =>
+            edit.BeforeCommit(CheckMovedTree);
+            edit.AfterRetirement(CheckMovedTree);
+            return;
+
+            void CheckMovedTree()
             {
                 CheckTree(new NoteInfo(newName, source.Note.Modified, target), originalFolder is null ? null : folderTarget);
                 if (!caseOnly && SelectedChildFolder(source.Note, edit) is not null)
                 {
                     throw new IOException("The original subpage folder changed.");
                 }
-            });
-            return;
+            }
 
             void CheckTree(NoteInfo page, string? expected)
             {
@@ -1669,6 +1699,7 @@ internal sealed class NoteStore
         string from = NoteHistory.FolderFor(source.Path);
         string to = NoteHistory.FolderFor(target);
         IReadOnlyList<NoteVersion> versions = NoteHistory.BoundedPlainVersions(source.Path, edit);
+        edit.AfterRetirement(() => RequireVersions(target, versions, edit));
         if (edit.Exists(to, true))
         {
             // On a case-insensitive volume the spelling of the history follows the
@@ -1679,7 +1710,7 @@ internal sealed class NoteStore
             }
             foreach (NoteVersion version in versions)
             {
-                edit.Expect(Path.Combine(from, NoteHistory.FileName(version.Id, null)));
+                _ = edit.Read(Path.Combine(from, NoteHistory.FileName(version.Id, null)), NoteHistory.MaxVersionBytes);
             }
             edit.BeforeCommit(() =>
             {
@@ -1726,9 +1757,16 @@ internal sealed class NoteStore
         string folder = NoteHistory.FolderFor(path);
         foreach (NoteVersion version in versions)
         {
+            edit.Reserve(NoteHistory.ReservationPath(folder, version.Id));
             edit.Discard(Path.Combine(folder, NoteHistory.FileName(version.Id, null)));
         }
-        if (NoteHistory.ListVersions(path, edit, Extension).Count != 0)
+        RequireVersions(path, [], edit);
+        edit.AfterRetirement(() => RequireVersions(path, [], edit));
+    }
+
+    private static void RequireVersions(string path, IReadOnlyList<NoteVersion> expected, NoteFileEdit edit)
+    {
+        if (!NoteHistory.ListVersions(path, edit, Extension).SequenceEqual(expected))
         {
             throw new NoteHistoryException();
         }

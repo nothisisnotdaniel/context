@@ -19,6 +19,7 @@ internal sealed partial class JournalDirectory : INoteFileSource, IDisposable
     internal Func<string, bool>? EntryAvailable { get; set; }
     internal Func<string, bool>? RemovalAvailable { get; set; }
     internal Func<string, bool>? RecoveryAvailable { get; set; }
+    internal Func<SafeFileHandle, long>? FileChangeTime { get; set; }
 
     private JournalDirectory(string root, JournalDirectory? parent, SafeFileHandle original)
     {
@@ -56,6 +57,7 @@ internal sealed partial class JournalDirectory : INoteFileSource, IDisposable
             retained.EntryAvailable = EntryAvailable;
             retained.RemovalAvailable = RemovalAvailable;
             retained.RecoveryAvailable = RecoveryAvailable;
+            retained.FileChangeTime = FileChangeTime;
             WithNoteParent(note, (_, _) =>
             {
                 retained.Remember(note.Path, Stamp(file.SafeFileHandle, false));
@@ -472,9 +474,13 @@ internal sealed partial class JournalDirectory : INoteFileSource, IDisposable
 
     private readonly record struct EntryIdentity(FileId Id, long SecondsOrTicks, uint Nanoseconds, bool ChangeTime = false);
 
-    private static EntryIdentity Stamp(SafeFileHandle handle, bool directory)
+    private EntryIdentity Stamp(SafeFileHandle handle, bool directory)
     {
         FileId fileId = Identity(handle, directory);
+        if (!directory && FileChangeTime is not null)
+        {
+            return new(fileId, FileChangeTime(handle), 0, ChangeTime: true);
+        }
         if (OperatingSystem.IsLinux())
         {
             // Older volumes may only supply ctime. A later metadata change there

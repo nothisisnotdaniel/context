@@ -126,7 +126,8 @@ internal sealed partial class NoteHistory
             for (int n = 0; n < MaxSameMillisecond; n++)
             {
                 string id = n == 0 ? baseId : baseId + "-" + n.ToString(CultureInfo.InvariantCulture);
-                if (taken.Contains(id))
+                string reservation = ReservationPath(folder, id);
+                if (taken.Contains(id) || (edit?.Exists(reservation) ?? File.Exists(reservation)))
                 {
                     continue;
                 }
@@ -420,6 +421,9 @@ internal sealed partial class NoteHistory
     internal static string FileName(string id, string? sealedTitle) =>
         sealedTitle is null ? id + PlainExtension : id + "~" + sealedTitle + NoteStore.SensitiveExtension;
 
+    // A reversible retirement keeps this ID occupied for other editors using the same clock tick.
+    internal static string ReservationPath(string folder, string id) => Path.Combine(folder, "." + id + ".reserved");
+
     // Creates .history and the note's folder in it when missing; refuses a place that is a file, a link or a reparse point.
     private static string PrepareFolder(string notePath)
     {
@@ -574,6 +578,7 @@ internal sealed partial class NoteHistory
             }
             else
             {
+                edit.Reserve(ReservationPath(folder, entry.Version.Id));
                 edit.Discard(entry.Path);
             }
             count--;

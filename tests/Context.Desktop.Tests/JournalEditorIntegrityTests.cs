@@ -125,20 +125,174 @@ public sealed class JournalEditorIntegrityTests : IDisposable
         Assert.True(await relocated.Bind().WaitAsync(Wait));
         EditableNote current = Assert.IsType<EditableNote>(await relocated.ReadForEdit().WaitAsync(Wait));
         Assert.Equal(expected.Replace("\r\n", "\n", StringComparison.Ordinal), current.Text);
-        await AssertSharedImage(relocated, "moved.html", 3, 4);
+        await AssertSharedImage(relocated.Target, "moved.html", 3, 4);
         Assert.Equal(ActionKind.Done,
             (await data.Actions.RestoreVersion(moved.Name, latest.Id, current, new Confirmation()).WaitAsync(Wait)).Kind);
-        await AssertSharedImage(relocated, "restored.html", 9, 4);
+        await AssertSharedImage(relocated.Target, "restored.html", 9, 4);
         Assert.Equal(Image(4), File.ReadAllBytes(Path.Combine(assets, "photo.png")));
     }
 
-    private async Task AssertSharedImage(JournalNoteLink link, string output, byte expected, byte otherImage)
+    private async Task AssertSharedImage(NoteReference target, string output, byte expected, byte otherImage)
     {
         string path = data.Outside(output);
-        Assert.Equal(ActionKind.Done, (await data.Actions!.ShareNote(link.Target, path, false).WaitAsync(Wait)).Kind);
+        Assert.Equal(ActionKind.Done, (await data.Actions!.ShareNote(target, path, false).WaitAsync(Wait)).Kind);
         string html = File.ReadAllText(path);
         Assert.Contains(Convert.ToBase64String(Image(expected)), html);
         Assert.DoesNotContain(Convert.ToBase64String(Image(otherImage)), html);
+    }
+
+    [Theory]
+    [InlineData("save", "note")]
+    [InlineData("save", "existing version")]
+    [InlineData("save", "new version")]
+    [InlineData("rename", "version")]
+    [InlineData("move", "note")]
+    [InlineData("move", "version")]
+    [InlineData("move", "image")]
+    public async Task PublicationUnavailableAtLastRemoval_SameEditorRecoversFieldsHistoryAndImage(string action, string file)
+    {
+        (NoteInfo note, string id) = Prepare(data, Body, "Earlier selected", 3);
+        await data.RefreshAsync().WaitAsync(Wait);
+        data.Actions!.Attachments.Add("Destination/Existing", "photo.png", Image(4));
+        using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(data.Root));
+        string destination = action switch
+        {
+            "save" => note.Path,
+            "rename" => Path.Combine(data.Root, "Renamed.md"),
+            _ => Path.Combine(data.Root, "Destination", Name + ".md"),
+        };
+        string affected = file switch
+        {
+            "note" => destination,
+            "image" => Path.Combine(data.Root, "Destination", ".attachments", "photo-2.png"),
+            _ => Path.Combine(NoteHistory.FolderFor(destination), (file == "new version" ? id + "-1" : id) + ".md"),
+        };
+        bool retiring = false, readRefused = false;
+        directory.RemovalAvailable = path =>
+        {
+            retiring |= path == note.Path;
+            return true;
+        };
+        directory.EntryAvailable = path =>
+        {
+            if (retiring && !readRefused && path == affected)
+            {
+                readRefused = true;
+                return false;
+            }
+            return true;
+        };
+        using JournalNoteLink link = new(note, directory);
+        Assert.True(await link.Bind().WaitAsync(Wait));
+        EditableNote opened = Assert.IsType<EditableNote>(await link.ReadForEdit().WaitAsync(Wait));
+        SortedDictionary<string, string> before = Files();
+        ActionResult result = action switch
+        {
+            "save" => await data.Actions.SaveNote(opened, "owner:: Edited").WaitAsync(Wait),
+            "rename" => await data.Actions.RenameNote(link.Target, "Renamed", new Confirmation()).WaitAsync(Wait),
+            _ => await data.Actions.MoveNote(link.Target, "Destination").WaitAsync(Wait),
+        };
+        Assert.True(readRefused);
+        Assert.NotEqual(ActionKind.Done, result.Kind);
+        Assert.Equal(before, Files());
+        Assert.Equal(opened.Text, (await link.ReadForEdit().WaitAsync(Wait))?.Text);
+        Assert.Equal(id, Assert.Single((await data.State!.History(link.Target).WaitAsync(Wait)).Versions).Id);
+        Assert.Equal("Earlier selected", await data.State.ReadVersion(link.Target, id).WaitAsync(Wait));
+        await AssertSharedImage(link.Target, "original.html", 3, 4);
+        Assert.Equal(ActionKind.Done, (await data.Actions.SaveNote(opened, "owner:: Recovered").WaitAsync(Wait)).Kind);
+        Assert.Equal("owner:: Recovered", (await link.ReadForEdit().WaitAsync(Wait))?.Text);
+    }
+
+    [Fact]
+    public async Task RestoredFileWithOnlyChangeTime_RemainsBoundToTheOpenEditor()
+    {
+        (NoteInfo note, string id) = Prepare(data, Body, "Earlier selected", 1);
+        await data.RefreshAsync().WaitAsync(Wait);
+        using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(data.Root));
+        long revision = 1;
+        directory.FileChangeTime = _ => revision;
+        directory.RemovalAvailable = path =>
+        {
+            if (path == note.Path && revision == 1)
+            {
+                revision = 2;
+                return false;
+            }
+            return true;
+        };
+        using JournalNoteLink link = new(note, directory);
+        Assert.True(await link.Bind().WaitAsync(Wait));
+        EditableNote opened = Assert.IsType<EditableNote>(await link.ReadForEdit().WaitAsync(Wait));
+        Assert.NotEqual(ActionKind.Done, (await data.Actions!.RenameNote(link.Target, "Renamed", new Confirmation()).WaitAsync(Wait)).Kind);
+        Assert.Equal(2, revision);
+        Assert.Equal(opened.Text, (await link.ReadForEdit().WaitAsync(Wait))?.Text);
+        Assert.Equal("Earlier selected", await data.State!.ReadVersion(link.Target, id).WaitAsync(Wait));
+        Assert.Equal(ActionKind.Done, (await data.Actions.SaveNote(opened, "owner:: Updated").WaitAsync(Wait)).Kind);
+        Assert.Equal("owner:: Updated", (await link.ReadForEdit().WaitAsync(Wait))?.Text);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Utf16MoveAndRestore_PreserveBytesAndImageOwners(bool bigEndian, bool historyClash)
+    {
+        (NoteInfo note, string id) = Prepare(data, Body, "Earlier", 3);
+        string current = Body.Replace("Example", "Émilie 文", StringComparison.Ordinal);
+        const string Earlier = "owner:: Änne\nstatus:: 待機\r\n![earlier](.attachments/earlier.png)\n";
+        Encoding encoding = bigEndian ? Encoding.BigEndianUnicode : Encoding.Unicode;
+        Encoding earlierEncoding = bigEndian ? Encoding.Unicode : Encoding.BigEndianUnicode;
+        byte[] WithBom(string value, Encoding format) => [.. format.Preamble, .. format.GetBytes(value)];
+        File.WriteAllBytes(note.Path, WithBom(current, encoding));
+        byte[] earlier = WithBom(Earlier, earlierEncoding);
+        File.WriteAllBytes(VersionPath(note, id), earlier);
+        NoteStore store = new(data.Root);
+        NoteInfo sibling = store.CreateWithText("Sibling", "Sibling");
+        NoteInfo neighbor = Assert.Single(store.List(), n => n.Name == "Destination/Existing");
+        File.WriteAllText(neighbor.Path, "![independent image](.attachments/photo.png)");
+        File.WriteAllBytes(sibling.Path, WithBom("![sibling](.attachments/photo.png)", earlierEncoding));
+        NoteHistory history = new(store, () => data.UtcNow);
+        history.Keep(sibling.Path, WithBom("![prior](.attachments/earlier.png)", encoding));
+        NoteAttachments assets = new(store);
+        assets.Add(note.Reference, "earlier.png", Image(9));
+        assets.Add("Destination/Existing", "photo.png", Image(4));
+        if (historyClash)
+        {
+            assets.Add("Destination/Existing", "earlier.png", Image(7));
+        }
+        await data.RefreshAsync().WaitAsync(Wait);
+        using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(data.Root));
+        using JournalNoteLink link = new(note, directory);
+        Assert.True(await link.Bind().WaitAsync(Wait));
+        SortedDictionary<string, string> before = Files();
+        ActionResult move = await data.Actions!.MoveNote(link.Target, "Destination").WaitAsync(Wait);
+        if (historyClash)
+        {
+            Assert.NotEqual(ActionKind.Done, move.Kind);
+            Assert.Equal(before, Files());
+            Assert.Equal(Earlier.Replace("\r\n", "\n", StringComparison.Ordinal), await data.State!.ReadVersion(link.Target, id).WaitAsync(Wait));
+            await AssertSharedImage(link.Target, "original.html", 3, 4);
+            return;
+        }
+        Assert.Equal(ActionKind.Done, move.Kind);
+        NoteInfo moved = Assert.IsType<NoteInfo>(move.RelocatedNote);
+        using JournalNoteLink relocated = link.Relocated(moved);
+        Assert.True(await relocated.Bind().WaitAsync(Wait));
+        EditableNote opened = Assert.IsType<EditableNote>(await relocated.ReadForEdit().WaitAsync(Wait));
+        Assert.Contains("owner:: Émilie 文", opened.Text);
+        byte[] rewritten = WithBom(current.Replace("photo.png", "photo-2.png", StringComparison.Ordinal), encoding);
+        Assert.Equal(rewritten, File.ReadAllBytes(moved.Path));
+        Assert.Equal(earlier, File.ReadAllBytes(VersionPath(moved, id)));
+        await AssertSharedImage(relocated.Target, "moved.html", 3, 4);
+        Assert.Equal(ActionKind.Done, (await data.Actions.RestoreVersion(moved.Name, id, opened, new Confirmation()).WaitAsync(Wait)).Kind);
+        Assert.Equal(earlier, File.ReadAllBytes(moved.Path));
+        Assert.Equal(rewritten, File.ReadAllBytes(VersionPath(moved, history.Versions(moved).First().Id)));
+        await AssertSharedImage(relocated.Target, "restored.html", 9, 4);
+        await AssertSharedImage(sibling.Reference, "sibling.html", 3, 4);
+        await AssertSharedImage(neighbor.Reference, "neighbor.html", 4, 3);
+        Assert.Equal(Image(3), File.ReadAllBytes(Path.Combine(data.Root, ".attachments", "photo.png")));
+        Assert.Equal(Image(9), File.ReadAllBytes(Path.Combine(data.Root, ".attachments", "earlier.png")));
+        Assert.Equal(Image(4), File.ReadAllBytes(Path.Combine(data.Root, "Destination", ".attachments", "photo.png")));
     }
 
     [Theory]
@@ -221,7 +375,7 @@ public sealed class JournalEditorIntegrityTests : IDisposable
         Assert.True(opened.HadBom);
         Assert.Equal(Body.Replace("\r\n", "\n", StringComparison.Ordinal), opened.Text);
         Assert.Equal("Earlier selected", await data.State!.ReadVersion(link.Target, id).WaitAsync(Wait));
-        await AssertSharedImage(link, "original.html", 3, 4);
+        await AssertSharedImage(link.Target, "original.html", 3, 4);
     }
 
     [Theory]
@@ -356,6 +510,7 @@ public sealed class JournalEditorIntegrityTests : IDisposable
             public override byte[] Read(string path, long limit) => files.Read(path, limit);
             public override void EnsureFolder(string path) => files.EnsureFolder(path);
             public override void WriteNew(string path, byte[] bytes) => files.WriteNew(path, bytes);
+            public override void Reserve(string path) => files.Reserve(path);
             public override void PublishNote(string from, string to, byte[]? rewritten) => files.PublishNote(from, to, rewritten);
             public override void Relocate(string from, string to, bool directory = false) => files.Relocate(from, to, directory);
             public override void Discard(string path) => files.Discard(path);
@@ -363,6 +518,7 @@ public sealed class JournalEditorIntegrityTests : IDisposable
             public override void Commit()
             {
                 PrepareCommit();
+                files.AfterRetirement(VerifyFinalState);
                 files.Commit();
             }
             public override void RemoveEmpty(string folder) => files.RemoveEmpty(folder);
@@ -395,7 +551,7 @@ public sealed class JournalEditorIntegrityTests : IDisposable
         string target = operation == "rename" ? Path.Combine(data.Root, "Renamed.md") : Path.Combine(data.Root, "Destination", Name + ".md");
         Assert.False(File.Exists(target));
         Assert.False(Directory.Exists(NoteHistory.FolderFor(target)));
-        await AssertSharedImage(link, "original.html", 1, 2);
+        await AssertSharedImage(link.Target, "original.html", 1, 2);
     }
 
     [Theory]
