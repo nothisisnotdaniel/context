@@ -268,7 +268,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#260](backlog/260-return-focus-to-the-button-after.md) Return focus to the … button after a menu item or outside click
 - [?] [#261](backlog/261-check-context-db-in-the-todo.md) Check context.db in the todo done tests for note todos
 - [ ] [#263](backlog/263-show-the-error-when-saving-on.md) Show the error when saving on window close fails
-- [h] [#264](backlog/264-check-auto-save-by-hand-in.md) Check auto save by hand in the desktop app
+- [x] [#264](backlog/264-check-auto-save-by-hand-in.md) Check auto save by hand in the desktop app
 - [?] [#265](backlog/265-rename-ask-again-when-the-link.md) Rename: ask again when the link count changed before Confirm
 - [ ] [#266](backlog/266-tag-filters-decide-on-number-tags.md) Tag filters: work item numbers like #1234
 - [?] [#267](backlog/267-saved-searches-icon-for-the-remove.md) Saved searches: icon for the × remove button
