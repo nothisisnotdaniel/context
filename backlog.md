@@ -163,6 +163,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#503](backlog/503-keep-capture-visible-in-narrow-desktop.md) Keep Capture visible in narrow desktop windows
 - [ ] [#504](backlog/504-focus-the-editor-when-the-quick.md) Focus the editor when the quick switcher reselects the current note
 - [ ] [#505](backlog/505-raise-the-contrast-of-desktop-text.md) Raise the contrast of desktop text placeholders in dark mode
+- [ ] [#506](backlog/506-size-the-top-bar-day-picker.md) Size the top-bar day picker to its calendar grid
 - [ ] [#89](backlog/089-call-to-meeting-note.md) Call to meeting note
 - [h] [#462](backlog/462-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on macOS
 - [h] [#463](backlog/463-check-suite-pro-licence-storage-by.md) Check Suite Pro licence storage by hand on Windows
