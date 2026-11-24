@@ -9,6 +9,7 @@ internal abstract class NoteFileEdit : IDisposable
     private Action? checkCommit;
     private Action? finishStaging;
     private Action? checkFinalState;
+    private Action? checkOriginalHistory;
 
     // Keep originals readable until publication and all caller-side staging have finished.
     public void BeforeCommit(Action check, Action? apply = null)
@@ -19,6 +20,9 @@ internal abstract class NoteFileEdit : IDisposable
 
     // Membership checks whose expected state differs once the originals have been retired.
     public void AfterRetirement(Action check) => checkFinalState += check;
+
+    public void OnRollback(Action check) => checkOriginalHistory += check;
+    protected void VerifyOriginalHistory() => checkOriginalHistory?.Invoke();
 
     protected void VerifyFinalState()
     {
@@ -51,6 +55,9 @@ internal abstract class NoteFileEdit : IDisposable
         }
     }
     public abstract byte[] Read(string path, long limit);
+    // Remember the original bytes separately from the names used during publication.
+    public abstract byte[] ReadOriginal(string path, long limit);
+    public abstract void RequireResolvedHistory(string folder);
     public abstract void EnsureFolder(string path);
     public abstract void WriteNew(string path, byte[] bytes);
     public abstract void Reserve(string path);

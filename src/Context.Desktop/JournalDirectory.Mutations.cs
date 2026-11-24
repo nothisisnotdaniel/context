@@ -211,6 +211,8 @@ internal sealed partial class JournalDirectory
         private readonly SafeFileHandle parentHandle;
         private readonly string name;
         private readonly FileStream file;
+        internal SafeFileHandle Parent => parentHandle;
+        internal SafeFileHandle Handle => file.SafeFileHandle;
 
         internal CreatedFile(SafeFileHandle parentHandle, string name, FileStream file)
         {

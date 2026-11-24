@@ -768,6 +768,19 @@ internal sealed class NoteAttachments
         return moved;
     }
 
+    internal static void ObserveLinkedFiles(string notePath, byte[] revision, NoteFileEdit edit, bool original)
+    {
+        string folder = Path.Combine(Path.GetDirectoryName(notePath)!, FolderName);
+        foreach (string name in LinkedNames(NoteStore.DecodeText(revision)))
+        {
+            string path = Path.Combine(folder, name);
+            if (edit.Exists(path))
+            {
+                _ = original ? edit.ReadOriginal(path, MaxBytes) : edit.Read(path, MaxBytes);
+            }
+        }
+    }
+
     private NoteInfo? MoveSelected(NoteInfo source, NoteReference selected, NoteInfo? owner, NoteFileEdit edit)
     {
         if (owner is not null)
@@ -791,6 +804,9 @@ internal sealed class NoteAttachments
             throw new AttachmentMoveException(new IOException("Too many attachments."));
         }
         Dictionary<string, string> renamed = new(StringComparer.Ordinal);
+        string movedPath = Path.Combine(level, Path.GetFileName(source.Path));
+        HashSet<string> reserved = names.Length == 0 ? [] : DestinationReferences(level, movedPath, edit);
+        List<string> copied = [];
         foreach (string name in names)
         {
             if (TryResolve(selected, SrcPrefix + name, edit) is not { } attachment)
@@ -810,8 +826,13 @@ internal sealed class NoteAttachments
                 }
                 continue;
             }
-            string stored = AvailableName(destination, name, edit);
+            string stored = AvailableName(destination, name, reserved, edit);
+            if (stored != name && historical.Contains(name))
+            {
+                throw new AttachmentMoveException(new IOException("A kept version needs an attachment name already in use."));
+            }
             edit.WriteNew(Path.Combine(destination, stored), attachment.Bytes);
+            copied.Add(stored);
             if (stored != name)
             {
                 renamed[name] = stored;
@@ -839,6 +860,16 @@ internal sealed class NoteAttachments
         BeforeMoveStep?.Invoke("rewrite");
         BeforeMoveStep?.Invoke("cleanup");
         DiscardUnlinked(source, names, edit);
+        if (copied.Count > 0)
+        {
+            edit.AfterRetirement(() =>
+            {
+                if (DestinationReferences(level, movedPath, edit).Overlaps(copied))
+                {
+                    throw new IOException("A destination attachment reference changed.");
+                }
+            });
+        }
         edit.Commit();
         edit.RemoveEmpty(Folder(source));
         edit.RemoveEmpty(NoteHistory.FolderFor(source.Path));
@@ -846,13 +877,37 @@ internal sealed class NoteAttachments
         return moved;
     }
 
-    private static string AvailableName(string folder, string name, NoteFileEdit edit)
+    private static HashSet<string> DestinationReferences(string level, string movedPath, NoteFileEdit edit)
+    {
+        HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
+        foreach (NoteFileEntry entry in edit.List(level).Where(e => !e.Directory))
+        {
+            if (entry.Name.EndsWith(NoteStore.SensitiveExtension, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException("Can't verify destination attachment ownership.");
+            }
+            string path = Path.Combine(level, entry.Name);
+            if (path == movedPath || !entry.Name.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            names.UnionWith(LinkedNames(NoteStore.DecodeText(edit.Read(path, NoteStore.MaxEditBytes))));
+            foreach (NoteVersion version in NoteHistory.BoundedPlainVersions(path, edit))
+            {
+                string kept = Path.Combine(NoteHistory.FolderFor(path), NoteHistory.FileName(version.Id, null));
+                names.UnionWith(LinkedNames(NoteStore.DecodeText(edit.Read(kept, NoteHistory.MaxVersionBytes))));
+            }
+        }
+        return names;
+    }
+
+    private static string AvailableName(string folder, string name, HashSet<string> reserved, NoteFileEdit edit)
     {
         int dot = name.IndexOf('.');
         for (int n = 1; n <= MaxClash; n++)
         {
             string candidate = ClashName(name[..dot], n) + name[dot..];
-            if (!edit.Exists(Path.Combine(folder, candidate)))
+            if (!reserved.Contains(candidate) && !edit.Exists(Path.Combine(folder, candidate)))
             {
                 return candidate;
             }

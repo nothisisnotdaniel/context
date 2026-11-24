@@ -97,7 +97,9 @@
                 {
                     <SimilarPanel OnOpen="RequestOpen" OnClose="CloseSimilar" Guard="MergeHeld" OnMerged="Merged" />
                 }
-                <p class="main-status cut @statusClass" role="status" title="@statusText">@statusText</p>
+                <p class="main-status @(recoveryDetails is null ? "cut" : "recovery-status") @statusClass" role="status"
+                   tabindex="@(recoveryDetails is null ? null : "0")" title="@(recoveryDetails is null ? statusText : null)">@statusText</p>
+                <RecoveryPaths Paths="recoveryDetails?.RecoveryPaths" />
                 <div class="note-area" hidden="@(page != Page.None)">
                     @if (openName is { } name)
                     {
@@ -346,6 +348,7 @@ else
     private bool running;
     private string statusText = string.Empty;
     private string statusClass = string.Empty;
+    private ActionResult? recoveryDetails;
     private bool renaming;
     private string renameText = string.Empty;
     private ElementReference renameField;
@@ -2301,7 +2304,7 @@ else
     {
         if (renamed.Kind != ActionKind.Done)
         {
-            ShowStatus(DesktopText.OneLine(renamed.Text), "red");
+            ShowStatus(DesktopText.OneLine(renamed.Text), "red", renamed);
             return;
         }
 
@@ -2551,7 +2554,7 @@ else
 
         if (moved.Kind != ActionKind.Done)
         {
-            ShowStatus(DesktopText.OneLine(moved.Text), "red");
+            ShowStatus(DesktopText.OneLine(moved.Text), "red", moved);
             return;
         }
 
@@ -2609,7 +2612,7 @@ else
         }
         else
         {
-            ShowStatus(DesktopText.OneLine(deleted.Text), "red");
+            ShowStatus(DesktopText.OneLine(deleted.Text), "red", deleted);
         }
     }
 
@@ -2676,7 +2679,7 @@ else
         }
         else
         {
-            ShowStatus(DesktopText.OneLine(restored.Text), "red");
+            ShowStatus(DesktopText.OneLine(restored.Text), "red", restored);
         }
     }
 
@@ -2748,7 +2751,7 @@ else
         if (marked.Kind == ActionKind.Done && marked.Reason == ActionReason.PlainHistoryLeft)
         {
             ShowNote(null);
-            ShowStatus(DesktopText.OneLine(DesktopActions.PlainHistoryLeftText(marked.Text, marked.RecoveryFiles)), "red");
+            ShowStatus(DesktopText.OneLine(DesktopActions.PlainHistoryLeftText(marked)), "red", marked);
         }
         else if (marked.Kind == ActionKind.Done)
         {
@@ -2757,7 +2760,7 @@ else
         }
         else
         {
-            ShowStatus(DesktopText.OneLine(marked.Text), "red");
+            ShowStatus(DesktopText.OneLine(marked.Text), "red", marked);
         }
     }
 
@@ -3326,9 +3329,10 @@ else
 
     private void CancelBooking() => bookingOffer = null;
 
-    private void ShowStatus(string text, string cssClass)
+    private void ShowStatus(string text, string cssClass, ActionResult? result = null)
     {
         statusText = text;
         statusClass = cssClass;
+        recoveryDetails = result is { HasRecoveryDetails: true } or { Reason: ActionReason.PlainHistoryLeft } ? result : null;
     }
 }

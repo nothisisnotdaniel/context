@@ -1,0 +1,15 @@
+@if (Paths is { Count: > 0 })
+{
+    <details class="recovery-paths">
+        <summary>Copy recovery paths</summary>
+        @foreach (string path in Paths)
+        {
+            <input type="text" readonly aria-label="Recovery path to copy" value="@DesktopText.OneLine(path)" />
+        }
+    </details>
+}
+
+@code {
+    [Parameter]
+    public IReadOnlyList<string>? Paths { get; set; }
+}

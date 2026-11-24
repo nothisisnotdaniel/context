@@ -272,9 +272,10 @@ public sealed class NoteHistoryActionsTests : IDisposable
         Assert.Equal((ActionKind.Done, ActionReason.PlainHistoryLeft, "Plan"), (result.Kind, result.Reason, result.Text));
         Assert.Equal(
             [".history/Plan/" + Id + ".md", ".history/Plan/" + Id + "~Plan.ctxs", "Plan.ctxs"], RootFiles());
-        Assert.Equal(
-            "Marked Plan sensitive, but readable history may remain in .history/Plan in the data folder. Check that folder, including hidden files. Secure your plaintext versions before removing them. Keep the .ctxs files.",
-            DesktopActions.PlainHistoryLeftText("Plan"));
+        string warning = DesktopActions.PlainHistoryLeftText(result);
+        Assert.Contains(folder, warning);
+        Assert.Contains(Path.Combine(folder, Id + ".md"), warning);
+        Assert.Contains("Keep the .ctxs files.", warning);
     }
 
     // AC-9: a version that isn't UTF-8 fails the mark; no sealed version is left and the plain ones stay byte for byte.

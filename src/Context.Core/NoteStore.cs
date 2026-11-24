@@ -537,13 +537,14 @@ internal sealed class NoteStore
         foreach (Entry entry in subtree)
         {
             files.Add(entry.Note.Path);
+            _ = edit.ReadOriginal(entry.Note.Path, MaxEditBytes);
             if (history)
             {
                 string folder = NoteHistory.FolderFor(entry.Note.Path);
                 histories[entry.Note.Path] = confirmedHistories?[entry.Note.Path] ?? NoteHistory.ListVersions(entry.Note.Path, edit, Extension);
                 foreach (NoteVersion version in histories[entry.Note.Path])
                 {
-                    edit.Expect(Path.Combine(folder, NoteHistory.FileName(version.Id, null)));
+                    _ = edit.ReadOriginal(Path.Combine(folder, NoteHistory.FileName(version.Id, null)), NoteHistory.MaxVersionBytes);
                 }
                 folders.Add(folder);
                 folders.Add(Path.GetDirectoryName(folder)!);
@@ -814,7 +815,7 @@ internal sealed class NoteStore
     {
         saved = null;
         string plainText = text.Replace("\r\n", "\n", StringComparison.Ordinal);
-        if (string.Equals(plainText, opened.Text, StringComparison.Ordinal) && (restore is null || EditableNote.Hash(restore.Value.Bytes) == opened.Version))
+        if (restore is null && string.Equals(plainText, opened.Text, StringComparison.Ordinal))
         {
             return NoteSaveResult.Unchanged;
         }
@@ -836,19 +837,27 @@ internal sealed class NoteStore
         }
 
         using NoteFileEdit? edit = opened.Target.BeginEdit();
-        if (edit is not null)
+        byte[] previous = edit?.ReadOriginal(opened.Path, MaxEditBytes) ?? current!;
+        if (edit is not null && EditableNote.Hash(previous) != opened.Version)
         {
-            byte[] previous = edit.Read(opened.Path, MaxEditBytes);
-            if (EditableNote.Hash(previous) != opened.Version)
-            {
-                return NoteSaveResult.ChangedOnDisk;
-            }
-            if (restore is { } requested && (history is null
-                || !history.TryRead(new NoteInfo(opened.Name, default, opened.Path), requested.Id, out byte[]? keptBytes, edit)
-                || keptBytes is null || !requested.Bytes.AsSpan().SequenceEqual(keptBytes)))
+            return NoteSaveResult.ChangedOnDisk;
+        }
+        if (restore is { } requested)
+        {
+            if (history is null || !history.TryRead(new NoteInfo(opened.Name, default, opened.Path), requested.Id, out byte[]? keptBytes, edit)
+                || keptBytes is null || !requested.Bytes.AsSpan().SequenceEqual(keptBytes))
             {
                 throw new NoteHistoryException();
             }
+            if (plain.AsSpan().SequenceEqual(previous))
+            {
+                return NoteSaveResult.Unchanged;
+            }
+        }
+        if (edit is not null)
+        {
+            PreservePage(opened.Path, edit);
+            NoteAttachments.ObserveLinkedFiles(opened.Path, plain, edit, original: false);
             history?.Keep(opened.Path, previous, edit: edit);
             IReadOnlyList<NoteVersion> kept = NoteHistory.BoundedPlainVersions(opened.Path, edit);
             foreach (NoteVersion version in kept)
@@ -1606,9 +1615,29 @@ internal sealed class NoteStore
     internal static bool HasSelectedSubpages(NoteInfo note, NoteFileEdit edit) =>
         SelectedChildFolder(note, edit) is { } folder && PagesIn(folder, note.Name, edit).Any();
 
-    private static HashSet<string> SubpageTree(string? folder, string parentName, NoteFileEdit edit)
+    private static IReadOnlyList<NoteVersion> PreservePage(string path, NoteFileEdit edit)
     {
-        HashSet<string> tree = new(StringComparer.Ordinal);
+        NoteAttachments.ObserveLinkedFiles(path, edit.ReadOriginal(path, MaxEditBytes), edit, original: true);
+        IReadOnlyList<NoteVersion> versions = NoteHistory.BoundedPlainVersions(path, edit);
+        foreach (NoteVersion version in versions)
+        {
+            string kept = Path.Combine(NoteHistory.FolderFor(path), NoteHistory.FileName(version.Id, null));
+            NoteAttachments.ObserveLinkedFiles(path, edit.ReadOriginal(kept, NoteHistory.MaxVersionBytes), edit, original: true);
+        }
+        edit.OnRollback(() =>
+        {
+            // A version kept by another editor during this operation must survive too.
+            if (versions.Except(NoteHistory.ListVersions(path, edit, Extension)).Any())
+            {
+                throw new NoteHistoryException();
+            }
+        });
+        return versions;
+    }
+
+    private static HashSet<(string Path, string? Version)> SubpageTree(string? folder, string parentName, NoteFileEdit edit, bool preserve = false)
+    {
+        HashSet<(string Path, string? Version)> tree = [];
         if (folder is not null)
         {
             Visit(folder, parentName);
@@ -1620,11 +1649,16 @@ internal sealed class NoteStore
             edit.Expect(level, true);
             foreach ((string name, string path, string? child) in PagesIn(level, parent, edit))
             {
-                edit.Expect(path);
-                tree.Add(path[(folder!.Length + 1)..]);
+                string relative = path[(folder!.Length + 1)..];
+                tree.Add((relative, null));
+                IReadOnlyList<NoteVersion> versions = preserve ? PreservePage(path, edit) : NoteHistory.BoundedPlainVersions(path, edit);
+                foreach (NoteVersion version in versions)
+                {
+                    tree.Add((relative, version.Id));
+                }
                 if (child is not null)
                 {
-                    tree.Add(child[(folder.Length + 1)..]);
+                    tree.Add((child[(folder.Length + 1)..], null));
                     Visit(child, name);
                 }
             }
@@ -1637,8 +1671,9 @@ internal sealed class NoteStore
         if (edit is not null)
         {
             string? originalFolder = source.ChildFolder;
-            HashSet<string> originalTree = SubpageTree(originalFolder, source.Note.Name, edit);
-            StagePlainHistory(source.Note, target, newName, caseOnly, edit);
+            HashSet<(string Path, string? Version)> originalTree = SubpageTree(originalFolder, source.Note.Name, edit, preserve: true);
+            IReadOnlyList<NoteVersion> versions = PreservePage(source.Note.Path, edit);
+            StagePlainHistory(source.Note, target, newName, caseOnly, edit, versions);
             BeforeEditPublish?.Invoke();
             edit.Verify();
             CheckTree(source.Note, originalFolder);
@@ -1694,11 +1729,12 @@ internal sealed class NoteStore
         }
     }
 
-    private static void StagePlainHistory(NoteInfo source, string target, string newName, bool caseOnly, NoteFileEdit edit)
+    private static void StagePlainHistory(NoteInfo source, string target, string newName, bool caseOnly, NoteFileEdit edit,
+        IReadOnlyList<NoteVersion> versions)
     {
         string from = NoteHistory.FolderFor(source.Path);
         string to = NoteHistory.FolderFor(target);
-        IReadOnlyList<NoteVersion> versions = NoteHistory.BoundedPlainVersions(source.Path, edit);
+        edit.RequireResolvedHistory(from);
         edit.AfterRetirement(() => RequireVersions(target, versions, edit));
         if (edit.Exists(to, true))
         {
@@ -1732,6 +1768,7 @@ internal sealed class NoteStore
                 edit.WriteNew(Path.Combine(to, leaf), edit.Read(Path.Combine(from, leaf), NoteHistory.MaxVersionBytes));
             }
         }
+        edit.AfterRetirement(() => edit.RequireResolvedHistory(from));
         // A second editor may keep a version during publication. All original ids
         // remain occupied and readable until both version sets have been verified.
         edit.BeforeCommit(() =>
@@ -1745,6 +1782,7 @@ internal sealed class NoteStore
 
         void CheckOriginals()
         {
+            edit.RequireResolvedHistory(from);
             if (!NoteHistory.ListVersions(source.Path, edit, Extension).SequenceEqual(versions))
             {
                 throw new NoteHistoryException();

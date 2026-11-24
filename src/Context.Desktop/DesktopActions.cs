@@ -99,6 +99,9 @@ internal sealed record ActionResult
 
     internal NoteInfo? RelocatedNote { get; init; }
     internal IReadOnlyList<string> RecoveryFiles { get; init; } = [];
+    internal string? RecoveryFolder { get; init; }
+    internal bool HasRecoveryDetails { get; init; }
+    internal IReadOnlyList<string> RecoveryPaths => RecoveryFiles.Count > 0 ? RecoveryFiles : RecoveryFolder is { } folder ? [folder] : [];
 
     /// <summary>
     /// For a <see cref="DesktopActions.SaveNote"/> that numbered or removed <c>#!d</c> markers (job 343): the edits, whose
@@ -116,7 +119,7 @@ internal sealed record ActionResult
     public string Text { get; }
 
     /// <summary>The note as saved (or as opened, when nothing changed); <c>null</c> for other actions.</summary>
-    public EditableNote? Note { get; }
+    public EditableNote? Note { get; init; }
 
     /// <summary>When a recurring todo was marked done: the due date of the new todo; <c>null</c> otherwise.</summary>
     public DateOnly? NextDue { get; }
@@ -539,16 +542,18 @@ internal sealed class DesktopActions
     public static string SealHistoryFailedText(string name) => $"Can't seal the history of {name}. Nothing was changed.";
 
     /// <summary>The red line when a note was marked sensitive but its old plain versions are still on disk.</summary>
-    public static string PlainHistoryLeftText(string name, IReadOnlyList<string>? recoveryFiles = null) =>
-        $"Marked {name} sensitive, but readable history may remain in .history/{name} in the data folder. "
-        + (recoveryFiles is { Count: > 0 }
-            ? $"Show hidden files to review the possible recovery copies ({string.Join(", ", recoveryFiles)})."
-            : "Check that folder, including hidden files.") + " Secure your plaintext versions before removing them. Keep the .ctxs files.";
+    public static string PlainHistoryLeftText(ActionResult result) =>
+        $"Marked {result.Text} sensitive, but readable history may remain. "
+        + (result.RecoveryFolder is { } folder ? $"Check the original folder {folder}, including hidden files. "
+            : "The original history folder could not be reopened. ")
+        + (result.RecoveryFiles.Count > 0 ? $"Verified plaintext remains at {string.Join(", ", result.RecoveryFiles)}. " : string.Empty)
+        + "Secure your plaintext versions before removing them. Keep the .ctxs files.";
 
     private static ActionResult RecoveryFailed(string operation, JournalDirectory.Edit.RecoveryFailure recovery) =>
-        Failed(ActionReason.WriteFailed, $"Couldn't {operation}. Recovery is incomplete."
-            + (recovery.Locations.Count > 0 ? $" Readable originals can be found at {string.Join(", ", recovery.Locations)}."
-                : " No recovery location could be verified."));
+        Failed(ActionReason.WriteFailed, $"Couldn't {operation}. " + (recovery.EarlierHistory
+            ? "An earlier history recovery is still pending." : "Recovery is incomplete.")
+            + (recovery.Locations.Count > 0 ? $" Check {string.Join(", ", recovery.Locations)}."
+                : " No recovery location could be verified.")) with { HasRecoveryDetails = true, RecoveryFiles = recovery.Locations };
 
     /// <summary>The red line when a sensitive note must be open for the action.</summary>
     public static string UnlockFirstText(string name) => $"Unlock {name} first.";
@@ -2539,7 +2544,7 @@ internal sealed class DesktopActions
             }
         }
 
-        if (System.Text.Encoding.UTF8.GetByteCount(text) > MaxNoteBytes)
+        if ((restore?.Bytes.LongLength ?? System.Text.Encoding.UTF8.GetByteCount(text)) > MaxNoteBytes)
         {
             return Refused(ActionReason.Invalid, TooLargeText(opened.Name));
         }
@@ -2549,14 +2554,18 @@ internal sealed class DesktopActions
             // Job 343: bare #!d markers get their numbers (reserved before the write, so a failed write only leaves a
             // gap) and markers owned by another note go; an unreadable index saves the text as typed.
             DecisionEdits? decisions = state.NumberDecisions(opened.Name, text);
-            if (decisions is not null && System.Text.Encoding.UTF8.GetByteCount(decisions.Text) > MaxNoteBytes)
+            if (restore is null && decisions is not null && System.Text.Encoding.UTF8.GetByteCount(decisions.Text) > MaxNoteBytes)
             {
                 decisions = null;
             }
 
-            text = decisions?.Text ?? text;
             NoteHistory? history = KeepsVersion(opened, auto) ? state.HistoryStore : null;
-            NoteSaveResult saved = notes.SaveIfUnchanged(opened, text, out EditableNote? savedNote, history, restore);
+            NoteSaveResult saved = notes.SaveIfUnchanged(opened, decisions?.Text ?? text, out EditableNote? savedNote, history, restore);
+            if (saved == NoteSaveResult.TooLarge && restore is not null && decisions is { Changed: true })
+            {
+                decisions = null;
+                saved = notes.SaveIfUnchanged(opened, text, out savedNote, history, restore);
+            }
             return saved switch
             {
                 NoteSaveResult.Saved => new ActionResult(
@@ -2588,15 +2597,26 @@ internal sealed class DesktopActions
             return Refused(ActionReason.NotConfirmed, NotConfirmedText);
         }
 
-        if (name == opened.Name && opened.Target.Source is not null)
+        if (name != opened.Name)
+        {
+            return Failed(ActionReason.Unreadable, VersionUnreadableText);
+        }
+        if (!IsSealedPath(opened.Path))
         {
             try
             {
-                using NoteFileEdit? edit = opened.Target.BeginEdit();
-                if (notes.TryFind(opened.Target, out NoteInfo? note) && note is not null
-                    && state.HistoryStore.TryRead(note, id, out byte[]? bytes, edit) && bytes is not null)
+                if (notes.TryFind(opened.Target, out NoteInfo? note) && note is not null)
                 {
-                    return SaveNoteNow(opened, NoteStore.DecodeText(bytes).Replace("\r\n", "\n", StringComparison.Ordinal), restore: (id, bytes));
+                    using JournalDirectory? binding = opened.Target.Source is null ? JournalDirectory.Bind(notes.Root) ?? throw new IOException() : null;
+                    NoteReference target = binding is null ? opened.Target : NoteReference.Bound(note, binding);
+                    using NoteFileEdit edit = target.BeginEdit()!;
+                    if (state.HistoryStore.TryRead(note, id, out byte[]? bytes, edit) && bytes is not null)
+                    {
+                        string plain = NoteStore.DecodeText(bytes).Replace("\r\n", "\n", StringComparison.Ordinal);
+                        ActionResult result = SaveNoteNow(opened with { Target = target }, plain, restore: (id, bytes));
+                        return binding is not null && result.Note is { } saved
+                            ? result with { Note = saved with { Target = opened.Target } } : result;
+                    }
                 }
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -2605,7 +2625,7 @@ internal sealed class DesktopActions
             }
             return Failed(ActionReason.Unreadable, VersionUnreadableText);
         }
-        string? text = string.Equals(name, opened.Name, StringComparison.Ordinal) ? state.ReadVersionText(opened.Target, id) : null;
+        string? text = state.ReadVersionText(opened.Target, id);
         if (text is null)
         {
             return Failed(ActionReason.Unreadable, VersionUnreadableText);
@@ -4848,7 +4868,7 @@ internal sealed class DesktopActions
             }
 
             // The text exactly as the file holds it (a byte order mark stays, as U+FEFF); only UTF-8 is sealed.
-            byte[] plain = edit.Read(source.Path, MaxNoteBytes);
+            byte[] plain = edit.ReadOriginal(source.Path, MaxNoteBytes);
             string version = EditableNote.Hash(plain);
             string text;
             try
@@ -4898,7 +4918,10 @@ internal sealed class DesktopActions
             }
             if (outcome == JournalDirectory.Edit.ConversionOutcome.PlainHistoryLeft)
             {
-                return new ActionResult(ActionKind.Done, ActionReason.PlainHistoryLeft, source.Name) { RecoveryFiles = recoveryFiles };
+                return new ActionResult(ActionKind.Done, ActionReason.PlainHistoryLeft, source.Name)
+                {
+                    RecoveryFolder = edit.RecoveryFolder, RecoveryFiles = recoveryFiles,
+                };
             }
             return new ActionResult(ActionKind.Done, ActionReason.None, source.Name);
         }
@@ -5083,16 +5106,12 @@ internal sealed class DesktopActions
         NoteHistory history = state.HistoryStore;
         try
         {
-            IReadOnlyList<NoteVersion> keptVersions = history.Versions(source, edit);
-            if (keptVersions.Count > NoteHistory.MaxVersionsPerNote)
-            {
-                return false;
-            }
+            IReadOnlyList<NoteVersion> keptVersions = NoteHistory.BoundedPlainVersions(source.Path, edit);
             string folder = NoteHistory.FolderFor(source.Path);
             foreach (NoteVersion kept in keptVersions)
             {
                 string path = Path.Combine(folder, NoteHistory.FileName(kept.Id, null));
-                byte[] bytes = edit.Read(path, NoteHistory.MaxVersionBytes);
+                byte[] bytes = edit.ReadOriginal(path, NoteHistory.MaxVersionBytes);
                 string text = new System.Text.UTF8Encoding(false, throwOnInvalidBytes: true).GetString(bytes);
                 history.KeepSealedCopy(source.Path, kept.Id, source.Name, SealedNote.Seal(source.Name, text, recipients), edit);
                 versions.Add(path);

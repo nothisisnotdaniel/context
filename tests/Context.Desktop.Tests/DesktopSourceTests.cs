@@ -973,10 +973,7 @@ public sealed class DesktopSourceTests
                 "src/Context.Desktop/JournalDirectory.Edit.cs" =>
                     [("changes.Add(new(() => RemoveAt", 1), ("changes.Add(new(() =>", 1), ("changes.Add(new(Undo,", 1), ("changes.Clear();", 2),
                         ("absent.Add(path);", 1), ("absent.Add(to + child[from.Length..]);", 1), ("absent.Add(from);", 1),
-                        ("recoveryLocations.Add(location);", 1), ("recoveryLocations.Add(copy);", 1),
-                        ("recoveryLocations.Add(CheckedPath(restoredNote, false));", 2), ("recoveryLocations.Clear();", 1),
-                        ("readable.Add(path);", 1), ("readable.Add(entry.Name);", 1),
-                        ("entries.Clear();", 1), ("absent.Clear();", 1), ("entries.Add(path, original);", 1)],
+                        ("readable.Add(location.Path);", 1), ("entries.Clear();", 1), ("absent.Clear();", 1)],
                 _ => [],
             };
             foreach ((string operation, int count) in fileOperations)

@@ -335,9 +335,9 @@ public sealed class SensitiveFlowTests : IDisposable
         await MainTests.ChooseAsync(cut, "mark-sensitive");
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal(
-            "Marked Plan sensitive, but readable history may remain in .history/Plan in the data folder. Check that folder, including hidden files. Secure your plaintext versions before removing them. Keep the .ctxs files.",
-            cut.Find(".main-status").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Contains("Marked Plan sensitive, but readable history may remain.", cut.Find(".main-status").TextContent), Wait);
+        Assert.Contains(Path.Combine(folder, Assert.IsType<string>(later) + ".md"), cut.Find(".main-status").TextContent);
+        Assert.Contains("Keep the .ctxs files.", cut.Find(".main-status").TextContent);
         Assert.Contains("red", cut.Find(".main-status").GetAttribute("class"), StringComparison.Ordinal);
         Assert.Contains("Plan.ctxs", RootFiles());
         Assert.Equal("Later readable version", File.ReadAllText(Path.Combine(folder, Assert.IsType<string>(later) + ".md")));

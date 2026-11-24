@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Text;
 using AngleSharp.Css.Dom;
 using AngleSharp.Css.Parser;
 using AngleSharp.Dom;
@@ -160,7 +161,7 @@ public sealed class JournalPanelTests : IDisposable
 
     private static string SiblingName => Date(0) + " Review";
 
-    private async Task<IRenderedComponent<Main>> OpenDailyEditor()
+    private async Task<IRenderedComponent<Main>> OpenDailyEditor(string body = "Current parent")
     {
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await data.State!.ReloadsSettled().WaitAsync(Wait);
@@ -169,7 +170,7 @@ public sealed class JournalPanelTests : IDisposable
         await StaleClick.ClickAsync(cut, ".journal-open");
         cut.WaitForAssertion(() =>
         {
-            Assert.Equal("Current parent", editor.MountedText());
+            Assert.Equal(body, editor.MountedText());
             Assert.DoesNotContain("Loading", cut.Find(".links-panel").TextContent);
         }, Wait);
         return cut;
@@ -313,12 +314,29 @@ public sealed class JournalPanelTests : IDisposable
         Assert.Equal("Earlier readable version", File.ReadAllText(recovery));
         Assert.Equal("Kept version", await data.State.ReadVersion(target, second).WaitAsync(Wait));
         directory.RemovalAvailable = directory.RecoveryAvailable = null;
+        await MainTests.ChooseAsync(cut, "rename");
+        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Renamed" });
+        await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        cut.WaitForAssertion(() => Assert.Contains("earlier history recovery", cut.Find(".main-status.red").TextContent), Wait);
+        Assert.Contains(recovery, cut.Find(".main-status.red").TextContent);
+        Assert.Equal(name, editor.MountedName());
+        Assert.False(File.Exists(Path.Combine(data.Root, "Renamed.md")));
+        await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        using DesktopFixture secondStore = new();
+        secondStore.WriteNote(name, "Independent note");
+        string configured = data.Root;
+        directory.EntryAvailable = file => file != data.Root || configured == data.Root;
+        data.Actions!.BeforePlainHistoryCleanup = () => configured = secondStore.Root;
         await MainTests.ChooseAsync(cut, "mark-sensitive");
         await StaleClick.ClickAsync(cut, ".dialog .confirm");
         cut.WaitForAssertion(() => Assert.Contains("readable history may remain", cut.Find(".main-status.red").TextContent), Wait);
         string warning = cut.Find(".main-status.red").TextContent;
-        Assert.Contains(".history/" + name, warning);
-        Assert.Contains(Path.GetFileName(recovery), warning);
+        Assert.Equal(secondStore.Root, configured);
+        Assert.Contains(folder, warning);
+        Assert.Contains(recovery, warning);
+        Assert.DoesNotContain(secondStore.Root, warning);
+        Assert.Equal("Independent note", File.ReadAllText(Path.Combine(secondStore.Root, name + ".md")));
+        AssertRecoveryStatus(cut);
         Assert.DoesNotContain("other.tmp", warning);
         Assert.Equal("Independent fixture", File.ReadAllText(unrelated));
         Assert.Equal("Earlier readable version", File.ReadAllText(recovery));
@@ -373,6 +391,129 @@ public sealed class JournalPanelTests : IDisposable
         await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
         cut.WaitForAssertion(() => Assert.Equal("owner:: Updated", File.ReadAllText(path)), Wait);
         Assert.Equal("Earlier parent", await data.State.ReadVersion(target, id).WaitAsync(Wait));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task ConversionWithARefusedReopen_IdentifiesReadableCopiesAndKeepsSealedHistory(bool refuseVersion, bool refuseAllFiles)
+    {
+        data.Keys = FakeKeyStore.Ready();
+        string name = Date(0);
+        data.WriteNote(name, "owner:: Example");
+        IRenderedComponent<Main> cut = await OpenDailyEditor("owner:: Example");
+        NoteReference target = cut.FindComponent<NoteEditor>().Instance.OpenedTarget!.Value;
+        JournalDirectory directory = Assert.IsType<JournalDirectory>(target.Source);
+        string path = target.SelectedPath!;
+        string id = Assert.IsType<string>(data.State!.HistoryStore.Keep(path, "owner:: Earlier"u8.ToArray()));
+        string version = Path.Combine(NoteHistory.FolderFor(path), id + ".md");
+        string refused = refuseVersion ? version : path;
+        string sealedPath = Path.ChangeExtension(path, ".ctxs");
+        bool retiring = false, rollback = false;
+        directory.RemovalAvailable = entry => { retiring |= entry == path; return true; };
+        directory.EntryAvailable = entry =>
+        {
+            if (retiring && !rollback && entry == sealedPath)
+            {
+                rollback = true;
+                return false;
+            }
+            return !rollback || (refuseAllFiles ? Directory.Exists(entry) : entry != refused);
+        };
+        await MainTests.ChooseAsync(cut, "mark-sensitive");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Contains("Recovery is incomplete", cut.Find(".main-status.red").TextContent), Wait);
+        Assert.True(rollback);
+        string status = cut.Find(".main-status.red").TextContent;
+        Assert.DoesNotContain(refused, status);
+        if (refuseAllFiles)
+        {
+            Assert.Contains("No recovery location could be verified.", status);
+            Assert.DoesNotContain(data.Root, status);
+            Assert.Empty(cut.FindAll(".recovery-paths"));
+        }
+        else
+        {
+            Assert.Contains(refuseVersion ? path : version, status);
+            Assert.Contains(sealedPath, status);
+            Assert.Contains(Path.Combine(NoteHistory.FolderFor(path), NoteHistory.FileName(id, name)), status);
+            AssertRecoveryStatus(cut);
+        }
+        NoteReference sensitive = NoteReference.Stored(name, sensitive: true);
+        Assert.Equal("owner:: Example", (await data.State.ReadSensitive(sensitive).WaitAsync(Wait))?.Text);
+        Assert.Equal("owner:: Earlier", await data.State.ReadVersion(sensitive, id).WaitAsync(Wait));
+        if (refuseVersion && !refuseAllFiles)
+        {
+            Assert.Null(await data.State.ReadVersion(target, id).WaitAsync(Wait));
+            Assert.Equal("owner:: Example", editor.MountedText());
+            Assert.Equal("owner:: Example", NoteStore.ReadSelectedForEdit(new NoteInfo(name, default, path), target).Text);
+        }
+    }
+
+    [Fact]
+    public async Task RestoreAfterReopeningFromWorkspace_UsesTheVersionEncodingAndImage()
+    {
+        string name = Date(0), moved = "Destination/" + name;
+        const string First = "owner:: Zoë\nstatus:: Open\n";
+        const string Prior = "owner:: 前\r\n![figure](.attachments/figure.png)\n";
+        data.WriteNote(name, First);
+        data.WriteNote("Destination", "Archive");
+        NoteStore store = new(data.Root);
+        string original = Path.Combine(data.Root, name + ".md");
+        byte[] current = [.. Encoding.Unicode.Preamble, .. Encoding.Unicode.GetBytes(First)];
+        byte[] kept = [.. Encoding.BigEndianUnicode.Preamble, .. Encoding.BigEndianUnicode.GetBytes(Prior)];
+        byte[] image = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x75];
+        File.WriteAllBytes(original, current);
+        string id = Assert.IsType<string>(new NoteHistory(store, () => data.UtcNow).Keep(original, kept));
+        Assert.Equal(AttachmentAddKind.Added, new NoteAttachments(store).Add(name, "figure.png", image).Kind);
+        IRenderedComponent<Main> cut = await OpenDailyEditor(First);
+        await MainTests.ChooseAsync(cut, "move");
+        await cut.Find(".move-parent").InputAsync(new ChangeEventArgs { Value = "Destination" });
+        await cut.Find(".move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        void Mounted(string title, string text)
+        {
+            Assert.Equal(title, editor.MountedName());
+            Assert.Equal(text, editor.MountedText());
+            Assert.DoesNotContain("Loading", cut.Find(".links-panel").TextContent);
+        }
+        cut.WaitForAssertion(() => Mounted(moved, First), Wait);
+        await NoteOpener.OpenAsync(cut, "Destination");
+        cut.WaitForAssertion(() => Mounted("Destination", "Archive"), Wait);
+        await NoteOpener.OpenAsync(cut, moved);
+        cut.WaitForAssertion(() => Mounted(moved, First), Wait);
+        Assert.Null(cut.FindComponent<NoteEditor>().Instance.JournalLink);
+        await MainTests.ChooseAsync(cut, "history");
+        cut.WaitForElement(".history-row button", Wait);
+        await StaleClick.ClickAsync(cut, ".history-row button");
+        cut.WaitForElement(".restore-version", Wait);
+        await StaleClick.ClickAsync(cut, ".restore-version");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Mounted(moved, Prior.Replace("\r\n", "\n", StringComparison.Ordinal)), Wait);
+        NoteInfo note = Assert.Single(store.List(), n => n.Name == moved);
+        Assert.Equal(kept, File.ReadAllBytes(note.Path));
+        Assert.Equal(kept, File.ReadAllBytes(Path.Combine(NoteHistory.FolderFor(note.Path), id + ".md")));
+        Assert.Equal(current, File.ReadAllBytes(Path.Combine(NoteHistory.FolderFor(note.Path), data.State!.HistoryStore.Versions(note)[0].Id + ".md")));
+        data.Dialog.SharePath = data.Outside("restored-share.html");
+        await MainTests.ChooseAsync(cut, "share");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        Assert.Contains(Convert.ToBase64String(image), File.ReadAllText(data.Dialog.SharePath));
+    }
+
+    private void AssertRecoveryStatus(IRenderedComponent<Main> cut)
+    {
+        IElement status = cut.Find(".main-status.red");
+        Assert.Equal("0", status.GetAttribute("tabindex"));
+        Assert.DoesNotContain("cut", status.ClassList);
+        IElement paths = cut.Find("details.recovery-paths");
+        Assert.Equal("Copy recovery paths", paths.QuerySelector("summary")!.TextContent);
+        Assert.NotEmpty(paths.QuerySelectorAll("input[readonly]"));
+        Assert.All(paths.QuerySelectorAll("input"), input => Assert.Contains(input.GetAttribute("value")!, status.TextContent));
+        output.WriteLine("Recovery markup " + status.OuterHtml + paths.OuterHtml);
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+        ICssStyleSheet sheet = new CssParser().ParseStyleSheet(css);
+        Assert.Contains(sheet.Rules.OfType<ICssStyleRule>(), rule => rule.Selector.Match(status)
+            && rule.Style.GetPropertyValue("white-space") == "normal");
     }
 
     [Fact]
@@ -435,7 +576,7 @@ public sealed class JournalPanelTests : IDisposable
         string remaining = Assert.Single(Directory.GetFiles(history, "*.md"));
         Assert.Equal("Earlier readable version", File.ReadAllText(remaining));
         string warning = cut.Find(".main-status.red").TextContent;
-        Assert.Contains(".history/" + name, warning);
+        Assert.Contains(history, warning);
         Assert.Contains(Path.GetFileName(remaining), warning);
         Assert.Contains("Keep the .ctxs files", warning);
         Assert.False(File.Exists(path));

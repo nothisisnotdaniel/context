@@ -68,7 +68,7 @@
     {
         <p class="red editor-failed" role="alert">The editor couldn't start. @DisplayName was not changed.</p>
     }
-    <p class="status @statusClass" role="status">
+    <p class="status @statusClass" role="status" tabindex="@(recoveryDetails is null ? null : "0")">
         @if (statusLines.Count > 0)
         {
             @foreach ((string text, string css) in statusLines)
@@ -81,6 +81,7 @@
             @statusText
         }
     </p>
+    <RecoveryPaths Paths="recoveryDetails?.RecoveryPaths" />
     <div class="editor-host" @ref="host"></div>
 </section>
 
@@ -99,6 +100,7 @@
     private bool dirty;
     private string statusText = string.Empty;
     private string statusClass = string.Empty;
+    private ActionResult? recoveryDetails;
     private List<(string Text, string Css)> statusLines = [];
     private readonly SemaphoreSlim saveGate = new(1, 1);
     private CancellationTokenSource? pause;
@@ -276,7 +278,7 @@
             }
 
             string text = edited ? await Interop.GetMarkdownAsync(host) : note.Text;
-            (string Text, string Css, List<(string Text, string Css)> Lines) before = (statusText, statusClass, statusLines);
+            (string Text, string Css, List<(string Text, string Css)> Lines, ActionResult? Recovery) before = (statusText, statusClass, statusLines, recoveryDetails);
             saving = true;
             ShowStatus("Saving…", "grey");
             StateHasChanged();
@@ -288,7 +290,7 @@
 
             if (auto && result.Kind == ActionKind.Refused && result.Reason == ActionReason.Busy)
             {
-                (statusText, statusClass, statusLines) = before;
+                (statusText, statusClass, statusLines, recoveryDetails) = before;
                 RestartPause();
             }
             else if (result.Kind == ActionKind.Done)
@@ -337,7 +339,7 @@
             }
             else
             {
-                ShowStatus(DesktopText.OneLine(result.Text), "red");
+                ShowStatus(DesktopText.OneLine(result.Text), "red", result);
             }
 
             return result;
@@ -404,6 +406,7 @@
         statusText = string.Empty;
         statusClass = string.Empty;
         statusLines = shown;
+        recoveryDetails = null;
         StateHasChanged();
     }
 
@@ -1341,10 +1344,11 @@
         titleFetches = new CancellationTokenSource();
     }
 
-    private void ShowStatus(string text, string cssClass)
+    private void ShowStatus(string text, string cssClass, ActionResult? result = null)
     {
         statusText = text;
         statusClass = cssClass;
         statusLines = [];
+        recoveryDetails = result is { HasRecoveryDetails: true } ? result : null;
     }
 }

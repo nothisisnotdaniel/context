@@ -585,8 +585,11 @@ Every factory agent reads this file before working on Context. Keep it short and
   copies the old sealed file byte for byte (zero `Agree`); a rename seals the new file, moves the history (a clash
   removes the new file: Refused `Exists`), then `DeleteSensitive`. `MarkSensitive` seals each plain version (up to
   50, public keys only) before the note. It verifies the sealed copies through plaintext removal. An incomplete
-  rollback preserves recovery copies and reports their verified locations. Done/`PlainHistoryLeft` shows a red
-  warning naming the original history folder and any readable recovery files. The user can secure plaintext versions
+  rollback preserves sealed copies until the original note and versions reopen. Journal Save, Rename and Move check
+  the published pages, kept versions and linked files through retirement, including those carried by a subpage.
+  An unresolved history recovery file keeps the note at its original location. Done/`PlainHistoryLeft` shows a red
+  warning with the absolute original history folder and verified plaintext paths. Recovery paths wrap and can be
+  selected individually with the keyboard. The user can secure plaintext versions
   and keep the `.ctxs` files. During reversible version removal an empty `.<id>.reserved` file keeps that ID
   occupied for other editors until the operation finishes. `MakePlain` (question ends `Its history will be
   removed.`) removes the sealed ones. `DesktopState.History(name)` (`HistoryView`) and `ReadVersion(name, id)` (a
@@ -596,7 +599,8 @@ Every factory agent reads this file before working on Context. Keep it short and
   lists versions in local `yyyy-MM-dd HH:mm:ss` and the chosen one's diff (`-` red, `+` accent, unchanged grey);
   `Restore this version` asks in `ConfirmDialog` (`Restore <name> to the version from <time>? The current text is kept
   as a version.`, dirty editor `Save <name> first.`) and `DesktopActions.RestoreVersion` saves through `SaveNote`, then
-  the editor reloads (`NoteEditor.ShowSavedAsync`) with accent `Restored <name> to <time>.` Known limits (README): the
+  the editor reloads (`NoteEditor.ShowSavedAsync`) with accent `Restored <name> to <time>.` Plain Restore uses the chosen
+  ID and stored bytes in the workspace and journal editors, including its BOM and line endings. Known limits (README): the
   old title of a renamed sensitive note stays in its version file names; ~130-character file names can hit the Windows
   path limit; a broken `.history` blocks saves at that level until the user removes it.
 - **How it runs:** two front ends over the same Core stores and the same data folder: the desktop app (a Photino
