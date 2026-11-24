@@ -87,6 +87,7 @@
 @code {
     private ElementReference host;
     private EditableNote? opened;
+    internal NoteReference? OpenedTarget => opened?.Target;
     private bool mounted;
     // True from the mount until what it loads (attributes, outline, decisions, glossary) is in and drawn.
     private bool loadingAfterMount;
@@ -134,6 +135,11 @@
     [Parameter]
     [EditorRequired]
     public string Name { get; set; } = string.Empty;
+
+    [Parameter]
+    public JournalNoteLink? JournalLink { get; set; }
+
+    private Task<EditableNote?> ReadPlain() => JournalLink?.ReadForEdit() ?? State.ReadForEdit(Name, storedName: true);
 
     /// <summary>Called with the tag (as found by TagParser) when a tag in the text is clicked.</summary>
     [Parameter]
@@ -416,7 +422,7 @@
         CancelPause();
         CancelTitleFetches();
 
-        EditableNote? note = await State.ReadForEdit(Name, storedName: true);
+        EditableNote? note = await ReadPlain();
         if (note is null)
         {
             return;
@@ -424,7 +430,7 @@
 
         try
         {
-            await Interop.MountAsync(host, note.Text, await State.InlineImages(Name, note.Text), Name);
+            await Interop.MountAsync(host, note.Text, await State.InlineImages(note.Target, note.Text), Name);
             opened = note;
             dirty = false;
             await LoadAttributesAsync();
@@ -456,7 +462,7 @@
         CancelTitleFetches();
         try
         {
-            await Interop.MountAsync(host, saved.Text, Sensitive ? [] : await State.InlineImages(Name, saved.Text), Name);
+            await Interop.MountAsync(host, saved.Text, Sensitive ? [] : await State.InlineImages(saved.Target, saved.Text), Name);
             opened = saved;
             dirty = false;
             ShowStatus(string.Empty, string.Empty);
@@ -517,7 +523,7 @@
             State.Session.IdleReached += SessionIdle;
         }
 
-        EditableNote? note = Sensitive ? await State.ReadSensitive(Name) : await State.ReadForEdit(Name, storedName: true);
+        EditableNote? note = Sensitive ? await State.ReadSensitive(NoteReference.Stored(Name, sensitive: true)) : await ReadPlain();
         if (note is null)
         {
             unreadable = true;
@@ -541,7 +547,7 @@
             Interop.Changed += EditorChanged;
 
             // A sensitive note shows no images: nothing next to it is read.
-            IReadOnlyList<InlineImage> images = Sensitive ? [] : await State.InlineImages(Name, note.Text);
+            IReadOnlyList<InlineImage> images = Sensitive ? [] : await State.InlineImages(note.Target, note.Text);
             await Interop.MountAsync(host, note.Text, images, Name);
             opened = note;
             mounted = true;

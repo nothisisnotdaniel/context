@@ -1014,7 +1014,7 @@ internal sealed class DesktopActions
     /// name, a plain note in the same history save as its own links (never counted as a link update), a sensitive one
     /// in memory before it is sealed.
     /// </summary>
-    public Task<ActionResult> RenameNote(string name, string newTitle, Confirmation? confirmed) =>
+    public Task<ActionResult> RenameNote(NoteReference name, string newTitle, Confirmation? confirmed) =>
         Run(() => RenameNoteNow(name, newTitle, confirmed));
 
     /// <summary>
@@ -1040,7 +1040,7 @@ internal sealed class DesktopActions
     /// <see cref="NoteStore.CreateChild"/>, with the <see cref="CreateNote"/> texts. The result's text is the new
     /// note's full name when done.
     /// </summary>
-    public Task<ActionResult> CreateSubpage(string parent, string title) => Run(() => CreateSubpageNow(parent, title));
+    public Task<ActionResult> CreateSubpage(NoteReference parent, string title) => Run(() => CreateSubpageNow(parent, title));
 
     /// <summary>
     /// Creates the note a clicked <c>[[link]]</c> to a missing note names. The name is the note part of
@@ -1361,14 +1361,14 @@ internal sealed class DesktopActions
     /// <see cref="NoteStore.Move"/>. Already there gives <see cref="ActionReason.Unchanged"/> (done, nothing written,
     /// no refresh). The result's text is the new full name when done.
     /// </summary>
-    public Task<ActionResult> MoveNote(string name, string newParent) => Run(() => MoveNoteNow(name, newParent));
+    public Task<ActionResult> MoveNote(NoteReference name, string newParent) => Run(() => MoveNoteNow(name, newParent));
 
     /// <summary>
     /// Deletes the note <paramref name="name"/> and every subpage below it through <see cref="NoteStore.Delete"/>,
     /// but only when the user <paramref name="confirmed"/> it. There is no undo. The result's text is the name when
     /// done.
     /// </summary>
-    public Task<ActionResult> DeleteNote(string name, Confirmation? confirmed) => Run(() => DeleteNoteNow(name, confirmed));
+    public Task<ActionResult> DeleteNote(NoteReference name, Confirmation? confirmed) => Run(() => DeleteNoteNow(name, confirmed));
 
     /// <summary>
     /// Records that the note <paramref name="name"/> (a full name) was opened (job 240): it moves to the front of
@@ -1543,7 +1543,7 @@ internal sealed class DesktopActions
     /// from the note list is launched, and only when it is inside the data folder, ends in <c>.md</c> and is a regular
     /// file (no link or reparse point, no folder, seekable). Never writes and never refreshes.
     /// </summary>
-    public Task<ActionResult> OpenExternally(string name) => Run(() => OpenExternallyNow(name), refresh: false);
+    public Task<ActionResult> OpenExternally(NoteReference name) => Run(() => OpenExternallyNow(name), refresh: false);
 
     /// <summary>
     /// Stores the files dropped onto the plain note <paramref name="name"/> through <see cref="NoteAttachments.Add"/>,
@@ -1552,7 +1552,7 @@ internal sealed class DesktopActions
     /// (<paramref name="count"/>, as the page counted them) are refused and nothing is written. Never touches the note
     /// file or <c>context.db</c> and never refreshes.
     /// </summary>
-    public Task<ActionResult> AttachFiles(string name, int count, IReadOnlyList<DroppedFile> files) =>
+    public Task<ActionResult> AttachFiles(NoteReference name, int count, IReadOnlyList<DroppedFile> files) =>
         Run(() => AttachFilesNow(name, count, files), refresh: false);
 
     /// <summary>
@@ -1562,7 +1562,7 @@ internal sealed class DesktopActions
     /// <see cref="NoteAttachments.DrawingSources"/>; anything else is Refused <c>Can't open &lt;name&gt;.</c> (Failed when
     /// the launcher throws). Never writes or refreshes.
     /// </summary>
-    public Task<ActionResult> OpenAttachment(string name, string src) =>
+    public Task<ActionResult> OpenAttachment(NoteReference name, string src) =>
         Run(() => OpenAttachmentNow(name, src), refresh: false);
 
     /// <summary>
@@ -1604,7 +1604,7 @@ internal sealed class DesktopActions
     /// the <c>.md</c>. Refused, with nothing written or deleted, for the inbox, without a recovery key, when the
     /// note is gone, changed, not UTF-8 or over <see cref="MaxNoteBytes"/>, and on an OS without a key store.
     /// </summary>
-    public Task<ActionResult> MarkSensitive(string name, Confirmation? confirmed) =>
+    public Task<ActionResult> MarkSensitive(NoteReference name, Confirmation? confirmed) =>
         Run(() => MarkSensitiveNow(name, confirmed));
 
     /// <summary>
@@ -1612,7 +1612,7 @@ internal sealed class DesktopActions
     /// <paramref name="confirmed"/> it: writes <c>&lt;name&gt;.md</c> from the open text (never overwriting), then
     /// removes the sealed file through <see cref="NoteStore.DeleteSensitive"/>. No private-key call.
     /// </summary>
-    public Task<ActionResult> MakePlain(string name, Confirmation? confirmed) => Run(() => MakePlainNow(name, confirmed));
+    public Task<ActionResult> MakePlain(NoteReference name, Confirmation? confirmed) => Run(() => MakePlainNow(name, confirmed));
 
     /// <summary>
     /// Sets up sensitive notes: creates this machine's key when there is none, makes the recovery key in memory,
@@ -1664,7 +1664,7 @@ internal sealed class DesktopActions
     /// <see cref="NoteStore.WritePlainCopy"/>, which never overwrites. A sensitive note is refused, locked or open,
     /// without a private-key call. Changes nothing in the data folder and never refreshes.
     /// </summary>
-    public Task<ActionResult> ExportNote(string name, string path) => Run(() => ExportNoteNow(name, path), refresh: false);
+    public Task<ActionResult> ExportNote(NoteReference name, string path) => Run(() => ExportNoteNow(name, path), refresh: false);
 
     /// <summary>
     /// Writes the note <paramref name="name"/> as a self-contained HTML page (<see cref="NoteHtml.Render"/>) to the new
@@ -1674,7 +1674,7 @@ internal sealed class DesktopActions
     /// open, with <see cref="ExportSensitiveText"/> and without a private-key call: it is never written as plain text.
     /// Changes nothing in the data folder and never refreshes.
     /// </summary>
-    public Task<ActionResult> ShareNote(string name, string path, bool leaveOutPrivate) =>
+    public Task<ActionResult> ShareNote(NoteReference name, string path, bool leaveOutPrivate) =>
         Run(() => ShareNoteNow(name, path, leaveOutPrivate), refresh: false);
 
     /// <summary>The Refused/<see cref="ActionReason.Exists"/> text of <see cref="SaveSearch"/> (raw name).</summary>
@@ -2569,7 +2569,7 @@ internal sealed class DesktopActions
             return Refused(ActionReason.NotConfirmed, NotConfirmedText);
         }
 
-        string? text = state.ReadVersionText(name, id);
+        string? text = string.Equals(name, opened.Name, StringComparison.Ordinal) ? state.ReadVersionText(opened.Target, id) : null;
         if (text is null)
         {
             return Failed(ActionReason.Unreadable, VersionUnreadableText);
@@ -3341,7 +3341,7 @@ internal sealed class DesktopActions
         }
     }
 
-    private ActionResult RenameNoteNow(string name, string newTitle, Confirmation? confirmed)
+    private ActionResult RenameNoteNow(NoteReference reference, string newTitle, Confirmation? confirmed)
     {
         string title = NoteStore.NormalizeTitle(newTitle);
         string? invalid = NoteStore.ValidateTitle(title);
@@ -3352,10 +3352,10 @@ internal sealed class DesktopActions
 
         try
         {
-            bool plain = notes.TryFind(name, out NoteInfo? source) && source is not null;
-            if (!plain && (!notes.TryFindSensitive(name, out source) || source is null))
+            bool plain = notes.TryFind(reference, out NoteInfo? source) && source is not null;
+            if (!plain && (!notes.TryFindSensitive(reference, out source) || source is null))
             {
-                return Refused(ActionReason.Missing, NoteMissingText(name));
+                return Refused(ActionReason.Missing, NoteMissingText(reference.Name));
             }
 
             if (string.Equals(source!.Title, title, StringComparison.Ordinal))
@@ -3363,7 +3363,8 @@ internal sealed class DesktopActions
                 return new ActionResult(ActionKind.Done, ActionReason.Unchanged, source.Name);
             }
 
-            LinkRenamePlan plan = LinkRenamePlan.For(notes, source.Name, title);
+            NoteReference selected = reference.Resolved(source);
+            LinkRenamePlan plan = LinkRenamePlan.For(notes, selected, title);
             if (plan.Invalid)
             {
                 return Refused(ActionReason.Invalid, LinksInvalidText(plan.OldName, plan.NewName));
@@ -3377,10 +3378,10 @@ internal sealed class DesktopActions
             string renamedName;
             if (plain)
             {
-                NoteInfo? renamed = notes.Rename(source.Name, title);
+                NoteInfo? renamed = notes.Rename(selected, title);
                 if (renamed is null)
                 {
-                    return Refused(ActionReason.Missing, NoteMissingText(name));
+                    return Refused(ActionReason.Missing, NoteMissingText(reference.Name));
                 }
 
                 renamedName = renamed.Name;
@@ -3412,13 +3413,13 @@ internal sealed class DesktopActions
         }
         catch (ArgumentException)
         {
-            // The title is valid (checked above), so the new full name of the note or a subpage is too long, or a
+            // The title is valid (checked above), so the new full reference of the note or a subpage is too long, or a
             // top-level note with subpages would be called calendar.
-            return Refused(ActionReason.Invalid, RenameFailedText(name));
+            return Refused(ActionReason.Invalid, RenameFailedText(reference.Name));
         }
         catch (Exception)
         {
-            return Failed(ActionReason.WriteFailed, RenameFailedText(name));
+            return Failed(ActionReason.WriteFailed, RenameFailedText(reference.Name));
         }
     }
 
@@ -3650,7 +3651,7 @@ internal sealed class DesktopActions
         {
             for (int attempt = 0; attempt < LinkUpdateTries; attempt++)
             {
-                if (!notes.TryFind(current, out NoteInfo? found) || found is null)
+                if (!notes.TryFind(NoteReference.Stored(current), out NoteInfo? found) || found is null)
                 {
                     return NoteSaveResult.Missing;
                 }
@@ -3694,7 +3695,7 @@ internal sealed class DesktopActions
         }
     }
 
-    private ActionResult CreateSubpageNow(string parent, string title)
+    private ActionResult CreateSubpageNow(NoteReference parent, string title)
     {
         string normalized = NoteStore.NormalizeTitle(title);
         string? invalid = NoteStore.ValidateTitle(normalized);
@@ -3707,7 +3708,7 @@ internal sealed class DesktopActions
         {
             if (!notes.TryFind(parent, out NoteInfo? owner) || owner is null)
             {
-                return Refused(ActionReason.Missing, NoteMissingText(parent));
+                return Refused(ActionReason.Missing, NoteMissingText(parent.Name));
             }
 
             if (owner.Name.Length + 1 + normalized.Length > NoteStore.MaxNameLength)
@@ -3715,7 +3716,7 @@ internal sealed class DesktopActions
                 return Refused(ActionReason.Invalid, NameTooLongText);
             }
 
-            NoteInfo created = notes.CreateChild(owner.Name, normalized);
+            NoteInfo created = notes.CreateChild(parent.Resolved(owner), normalized);
             return new ActionResult(ActionKind.Done, ActionReason.None, created.Name);
         }
         catch (NoteExistsException e)
@@ -3724,7 +3725,7 @@ internal sealed class DesktopActions
         }
         catch (ArgumentException)
         {
-            return Refused(ActionReason.Invalid, NoSubpagesText(parent));
+            return Refused(ActionReason.Invalid, NoSubpagesText(parent.Name));
         }
         catch (Exception)
         {
@@ -4107,13 +4108,13 @@ internal sealed class DesktopActions
         }
     }
 
-    private ActionResult MoveNoteNow(string name, string newParent)
+    private ActionResult MoveNoteNow(NoteReference reference, string newParent)
     {
         try
         {
-            if (!notes.TryFind(name, out NoteInfo? source) || source is null)
+            if (!notes.TryFind(reference, out NoteInfo? source) || source is null)
             {
-                return Refused(ActionReason.Missing, NoteMissingText(name));
+                return Refused(ActionReason.Missing, NoteMissingText(reference.Name));
             }
 
             NoteInfo? owner = null;
@@ -4138,10 +4139,10 @@ internal sealed class DesktopActions
                 return new ActionResult(ActionKind.Done, ActionReason.Unchanged, source.Name);
             }
 
-            NoteInfo? moved = attachments.MoveWithNote(source.Name, owner?.Name);
+            NoteInfo? moved = attachments.MoveWithNote(reference.Resolved(source), owner?.Name);
             if (moved is null)
             {
-                return Refused(ActionReason.Missing, NoteMissingText(name));
+                return Refused(ActionReason.Missing, NoteMissingText(reference.Name));
             }
 
             if (!string.Equals(source.Name, moved.Name, StringComparison.Ordinal))
@@ -4160,20 +4161,20 @@ internal sealed class DesktopActions
         }
         catch (ArgumentException)
         {
-            // Below the calendar note, or a full name over NoteStore.MaxNameLength for the note or a subpage.
-            return Refused(ActionReason.Invalid, CantMoveText(name, newParent.Trim()));
+            // Below the calendar note, or a full reference over NoteStore.MaxNameLength for the note or a subpage.
+            return Refused(ActionReason.Invalid, CantMoveText(reference.Name, newParent.Trim()));
         }
         catch (AttachmentMoveException)
         {
-            return Failed(ActionReason.WriteFailed, AttachmentsMoveFailedText(name));
+            return Failed(ActionReason.WriteFailed, AttachmentsMoveFailedText(reference.Name));
         }
         catch (Exception)
         {
-            return Failed(ActionReason.WriteFailed, MoveFailedText(name));
+            return Failed(ActionReason.WriteFailed, MoveFailedText(reference.Name));
         }
     }
 
-    private ActionResult DeleteNoteNow(string name, Confirmation? confirmed)
+    private ActionResult DeleteNoteNow(NoteReference reference, Confirmation? confirmed)
     {
         if (confirmed is null)
         {
@@ -4183,59 +4184,57 @@ internal sealed class DesktopActions
         try
         {
             // The names the note links are read before it goes; an unreadable note removes no attachment.
-            notes.TryFind(name, out NoteInfo? plain);
-            IReadOnlyList<string> linked = plain is null ? [] : attachments.LinkedNamesOf(plain.Name);
-            if (notes.Delete(name, removeHistory: true, removeAttachments: true))
+            notes.TryFind(reference, out NoteInfo? plain);
+            NoteReference selected = plain is null ? reference : reference.Resolved(plain);
+            IReadOnlyList<string> linked = plain is null ? [] : attachments.LinkedNamesOf(selected);
+            if (plain is not null && notes.Delete(selected, removeHistory: true, removeAttachments: true))
             {
-                if (plain is not null)
-                {
-                    // Never throws; a file it can't remove stays and the delete is still done.
-                    attachments.RemoveUnlinked(plain, linked);
-                    ChangeRecent(list => RecentNotes.Removed(list, plain.Name));
-                    ChangePinned(list => PinnedNotes.Removed(list, plain.Name));
-                }
+                // A file the cleanup can't remove stays and the delete is still done.
+                attachments.RemoveUnlinked(plain, linked);
+                ChangeRecent(list => RecentNotes.Removed(list, plain.Name));
+                ChangePinned(list => PinnedNotes.Removed(list, plain.Name));
 
-                return new ActionResult(ActionKind.Done, ActionReason.None, name);
+                return new ActionResult(ActionKind.Done, ActionReason.None, reference.Name);
             }
 
             // A sensitive note is deleted without being opened: no private-key call.
-            if (notes.TryFindSensitive(name, out NoteInfo? locked) && locked is not null && notes.DeleteSensitive(locked.Name, removeHistory: true))
+            if (notes.TryFindSensitive(reference, out NoteInfo? locked) && locked is not null && notes.DeleteSensitive(locked.Reference, removeHistory: true))
             {
                 state.Session.Close(locked.Name);
                 ChangeRecent(list => RecentNotes.Removed(list, locked.Name));
                 ChangePinned(list => PinnedNotes.Removed(list, locked.Name));
-                return new ActionResult(ActionKind.Done, ActionReason.None, name);
+                return new ActionResult(ActionKind.Done, ActionReason.None, reference.Name);
             }
 
-            return Refused(ActionReason.Missing, NoteMissingText(name));
+            return Refused(ActionReason.Missing, NoteMissingText(reference.Name));
         }
         catch (Exception)
         {
-            return Failed(ActionReason.WriteFailed, DeleteFailedText(name));
+            return Failed(ActionReason.WriteFailed, DeleteFailedText(reference.Name));
         }
     }
 
-    private ActionResult OpenExternallyNow(string name)
+    private ActionResult OpenExternallyNow(NoteReference reference)
     {
         NoteInfo? note;
         try
         {
-            if (!notes.TryFind(name, out note) || note is null)
+            if (!notes.TryFind(reference, out note) || note is null)
             {
                 // A sensitive note never leaves the app.
-                return notes.TryFindSensitive(name, out _)
-                    ? Refused(ActionReason.Invalid, OpenExternallyText(name))
-                    : Refused(ActionReason.Missing, NoteMissingText(name));
+                return notes.TryFindSensitive(reference, out _)
+                    ? Refused(ActionReason.Invalid, OpenExternallyText(reference.Name))
+                    : Refused(ActionReason.Missing, NoteMissingText(reference.Name));
             }
 
             if (!IsLaunchable(note.Path))
             {
-                return Refused(ActionReason.Invalid, OpenExternallyText(name));
+                return Refused(ActionReason.Invalid, OpenExternallyText(reference.Name));
             }
         }
         catch (Exception)
         {
-            return Refused(ActionReason.Invalid, OpenExternallyText(name));
+            return Refused(ActionReason.Invalid, OpenExternallyText(reference.Name));
         }
 
         try
@@ -4245,20 +4244,20 @@ internal sealed class DesktopActions
         }
         catch (Exception)
         {
-            return Failed(ActionReason.WriteFailed, OpenExternallyText(name));
+            return Failed(ActionReason.WriteFailed, OpenExternallyText(reference.Name));
         }
     }
 
-    private ActionResult AttachFilesNow(string name, int count, IReadOnlyList<DroppedFile> files)
+    private ActionResult AttachFilesNow(NoteReference reference, int count, IReadOnlyList<DroppedFile> files)
     {
         try
         {
-            if (!notes.TryFind(name, out NoteInfo? note) || note is null)
+            if (!notes.TryFind(reference, out NoteInfo? note) || note is null)
             {
-                // A sensitive note is only ever matched by name: no key-store call.
-                return notes.TryFindSensitive(name, out _)
+                // A sensitive note is only ever matched by reference: no key-store call.
+                return notes.TryFindSensitive(reference, out _)
                     ? Refused(ActionReason.Invalid, AttachSensitiveText)
-                    : Refused(ActionReason.Missing, NoteMissingText(name));
+                    : Refused(ActionReason.Missing, NoteMissingText(reference.Name));
             }
         }
         catch (Exception)
@@ -4274,14 +4273,14 @@ internal sealed class DesktopActions
         List<AttachmentLine> lines = [];
         foreach (DroppedFile file in files)
         {
-            lines.Add(AttachOne(name, file));
+            lines.Add(AttachOne(reference, file));
         }
 
         bool any = lines.Any(l => l.Kind == ActionKind.Done);
-        return new ActionResult(any ? ActionKind.Done : ActionKind.Refused, ActionReason.None, name, attached: lines);
+        return new ActionResult(any ? ActionKind.Done : ActionKind.Refused, ActionReason.None, reference.Name, attached: lines);
     }
 
-    private AttachmentLine AttachOne(string name, DroppedFile file)
+    private AttachmentLine AttachOne(NoteReference reference, DroppedFile file)
     {
         string shown = file.Name;
         if (file.Size > NoteAttachments.MaxBytes || file.Bytes is { LongLength: > NoteAttachments.MaxBytes })
@@ -4296,7 +4295,7 @@ internal sealed class DesktopActions
 
         try
         {
-            AttachmentAdd added = attachments.Add(name, file.Name, file.Bytes);
+            AttachmentAdd added = attachments.Add(reference, file.Name, file.Bytes);
             if (added is { Kind: AttachmentAddKind.Added, Type: AttachmentType.Excalidraw, Name: not null, Src: not null })
             {
                 // Job 384: a drawing that renders is inserted as an image of its SVG, else as a plain link.
@@ -4329,7 +4328,7 @@ internal sealed class DesktopActions
         }
     }
 
-    private ActionResult OpenAttachmentNow(string name, string src)
+    private ActionResult OpenAttachmentNow(NoteReference reference, string src)
     {
         int slash = src.LastIndexOfAny(['/', '\\']);
         string shown = src[(slash + 1)..];
@@ -4338,7 +4337,7 @@ internal sealed class DesktopActions
         try
         {
             // Job 384: a drawing opens only when the note's own text links it.
-            resolved = !drawing || LinksDrawing(name, src) ? attachments.TryResolve(name, src) : null;
+            resolved = !drawing || LinksDrawing(reference, src) ? attachments.TryResolve(reference, src) : null;
         }
         catch (Exception)
         {
@@ -4363,8 +4362,8 @@ internal sealed class DesktopActions
     }
 
     // True when the plain note's text holds src among its drawing sources; reads the note, never a sensitive one.
-    private bool LinksDrawing(string name, string src) =>
-        notes.TryFind(name, out NoteInfo? note) && note is not null
+    private bool LinksDrawing(NoteReference reference, string src) =>
+        notes.TryFind(reference, out NoteInfo? note) && note is not null
         && NoteAttachments.DrawingSources(notes.Read(note)).Contains(src, StringComparer.Ordinal);
 
     private ActionResult OpenWebLinkNow(string? href)
@@ -4476,7 +4475,7 @@ internal sealed class DesktopActions
     }
 
     // The console's /export with the path from the OS save dialog, checked again here.
-    private ActionResult ExportNoteNow(string name, string? path)
+    private ActionResult ExportNoteNow(NoteReference reference, string? path)
     {
         if (CopyTarget(path, out string target, out string shown) is { } refused)
         {
@@ -4486,12 +4485,12 @@ internal sealed class DesktopActions
         NoteInfo? note;
         try
         {
-            if (!notes.TryFind(name, out note) || note is null)
+            if (!notes.TryFind(reference, out note) || note is null)
             {
                 // A sensitive note is never written out as plain text, and never opened for it.
-                return notes.TryFindSensitive(name, out NoteInfo? locked) && locked is not null
+                return notes.TryFindSensitive(reference, out NoteInfo? locked) && locked is not null
                     ? Refused(ActionReason.Locked, ExportSensitiveText(locked.Name))
-                    : Refused(ActionReason.Missing, NoteMissingText(name));
+                    : Refused(ActionReason.Missing, NoteMissingText(reference.Name));
             }
 
             if (File.Exists(target) || Directory.Exists(target))
@@ -4501,13 +4500,13 @@ internal sealed class DesktopActions
         }
         catch (Exception)
         {
-            return Failed(ActionReason.Unreadable, CantReadText(name));
+            return Failed(ActionReason.Unreadable, CantReadText(reference.Name));
         }
 
         string text;
         try
         {
-            text = ReadPlainCopy(note);
+            text = ReadPlainCopy(reference, note);
         }
         catch (Exception)
         {
@@ -4558,9 +4557,9 @@ internal sealed class DesktopActions
 
     // Reads a plain note's saved text like the console's File.ReadAllText (UTF-8 unless a byte order mark says
     // otherwise), but bounded.
-    private static string ReadPlainCopy(NoteInfo note)
+    private static string ReadPlainCopy(NoteReference selected, NoteInfo note)
     {
-        byte[] bytes = BoundedFile.Read(note.Path, MaxNoteBytes);
+        byte[] bytes = selected.ReadBytes(note.Path, MaxNoteBytes);
         using MemoryStream stream = new MemoryStream(bytes, writable: false);
         using StreamReader reader = new StreamReader(stream, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         return reader.ReadToEnd();
@@ -4568,7 +4567,7 @@ internal sealed class DesktopActions
 
     // /share and the Share menu item, with the path from the OS save dialog, checked again here. A sensitive note is
     // the one deliberate plain copy of a sealed note: only its open session text, only after the dialog's warning.
-    private ActionResult ShareNoteNow(string name, string? path, bool leaveOutPrivate)
+    private ActionResult ShareNoteNow(NoteReference reference, string? path, bool leaveOutPrivate)
     {
         if (CopyTarget(path, out string target, out string shown) is { } refused)
         {
@@ -4578,12 +4577,12 @@ internal sealed class DesktopActions
         NoteInfo? note;
         try
         {
-            if (!notes.TryFind(name, out note) || note is null)
+            if (!notes.TryFind(reference, out note) || note is null)
             {
                 // As ExportNote: a sensitive note is never written out as plain text, and never opened for it.
-                return notes.TryFindSensitive(name, out NoteInfo? locked) && locked is not null
+                return notes.TryFindSensitive(reference, out NoteInfo? locked) && locked is not null
                     ? Refused(ActionReason.Locked, ExportSensitiveText(locked.Name))
-                    : Refused(ActionReason.Missing, NoteMissingText(name));
+                    : Refused(ActionReason.Missing, NoteMissingText(reference.Name));
             }
 
             if (File.Exists(target) || Directory.Exists(target))
@@ -4593,14 +4592,15 @@ internal sealed class DesktopActions
         }
         catch (Exception)
         {
-            return Failed(ActionReason.Unreadable, CantReadText(name));
+            return Failed(ActionReason.Unreadable, CantReadText(reference.Name));
         }
 
         string html;
         try
         {
             NoteInfo found = note;
-            html = NoteHtml.Render(found.Title, ReadPlainCopy(found), src => attachments.TryResolve(found.Name, src), leaveOutPrivate);
+            NoteReference selected = reference.Resolved(found);
+            html = NoteHtml.Render(found.Title, ReadPlainCopy(selected, found), src => attachments.TryResolve(selected, src), leaveOutPrivate);
         }
         catch (Exception)
         {
@@ -4657,11 +4657,12 @@ internal sealed class DesktopActions
     }
 
     // True when the file at path still hashes to version (read with the given bound).
-    private static bool IsVersion(string path, long maxBytes, string version)
+    private static bool IsVersion(string path, long maxBytes, string version, NoteReference? selected = null)
     {
         try
         {
-            return string.Equals(EditableNote.Hash(BoundedFile.Read(path, maxBytes)), version, StringComparison.Ordinal);
+            byte[] bytes = selected?.ReadBytes(path, maxBytes) ?? BoundedFile.Read(path, maxBytes);
+            return string.Equals(EditableNote.Hash(bytes), version, StringComparison.Ordinal);
         }
         catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
         {
@@ -4722,7 +4723,7 @@ internal sealed class DesktopActions
             : null;
     }
 
-    private ActionResult MarkSensitiveNow(string name, Confirmation? confirmed)
+    private ActionResult MarkSensitiveNow(NoteReference reference, Confirmation? confirmed)
     {
         if (confirmed is null)
         {
@@ -4736,18 +4737,19 @@ internal sealed class DesktopActions
 
         try
         {
-            if (!notes.TryFind(name, out NoteInfo? source) || source is null)
+            if (!notes.TryFind(reference, out NoteInfo? source) || source is null)
             {
-                return Refused(ActionReason.Missing, NoteMissingText(name));
+                return Refused(ActionReason.Missing, NoteMissingText(reference.Name));
             }
 
-            // Sensitive notes stay top-level: a sealed note's name is its file stem, and its file is never moved.
+            // Sensitive notes stay top-level: a sealed note's reference is its file stem, and its file is never moved.
             if (source.Parent is not null)
             {
                 return Refused(ActionReason.Invalid, ChildSensitiveText);
             }
 
-            if (notes.Descendants(source.Name) > 0)
+            NoteReference selected = reference.Resolved(source);
+            if (notes.Descendants(selected) > 0)
             {
                 return Refused(ActionReason.Invalid, ParentSensitiveText);
             }
@@ -4767,13 +4769,13 @@ internal sealed class DesktopActions
                 return Refused(ActionReason.Invalid, TooLargeToSealText(source.Name));
             }
 
-            if (notes.TryFindSensitive(source.Name, out _))
+            if (notes.ListSensitive().Any(n => string.Equals(n.Name, source.Name, StringComparison.OrdinalIgnoreCase)))
             {
                 return Refused(ActionReason.Exists, ExistsText(source.Name));
             }
 
             // The text exactly as the file holds it (a byte order mark stays, as U+FEFF); only UTF-8 is sealed.
-            byte[] plain = BoundedFile.Read(source.Path, MaxNoteBytes);
+            byte[] plain = selected.ReadBytes(source.Path, MaxNoteBytes);
             string version = EditableNote.Hash(plain);
             string text;
             try
@@ -4805,7 +4807,7 @@ internal sealed class DesktopActions
                     TempName(source.Name, NoteStore.SensitiveExtension),
                     file,
                     overwrite: false,
-                    () => IsVersion(source.Path, MaxNoteBytes, version));
+                    () => IsVersion(source.Path, MaxNoteBytes, version, selected));
             }
             catch (Exception)
             {
@@ -4821,9 +4823,9 @@ internal sealed class DesktopActions
 
             try
             {
-                if (!IsVersion(source.Path, MaxNoteBytes, version) || !notes.Delete(source.Name))
+                if (!IsVersion(source.Path, MaxNoteBytes, version, selected) || !notes.Delete(selected))
                 {
-                    notes.DeleteSensitive(source.Name);
+                    notes.DeleteSensitive(NoteReference.Stored(source.Name, sensitive: true, target));
                     RemoveAll(sealedVersions);
                     return Refused(ActionReason.ChangedOnDisk, ChangedText(source.Name));
                 }
@@ -4831,7 +4833,7 @@ internal sealed class DesktopActions
             catch (Exception)
             {
                 // The plain file could not be removed: take the sealed copies away again, so there is one note.
-                notes.DeleteSensitive(source.Name);
+                notes.DeleteSensitive(NoteReference.Stored(source.Name, sensitive: true, target));
                 RemoveAll(sealedVersions);
                 throw;
             }
@@ -4847,7 +4849,7 @@ internal sealed class DesktopActions
         }
         catch (Exception)
         {
-            return Failed(ActionReason.WriteFailed, MarkFailedText(name));
+            return Failed(ActionReason.WriteFailed, MarkFailedText(reference.Name));
         }
     }
 
@@ -4866,7 +4868,7 @@ internal sealed class DesktopActions
             return new ActionResult(ActionKind.Done, ActionReason.Unchanged, opened.Name, opened);
         }
 
-        if (!notes.TryFindSensitive(opened.Name, out NoteInfo? found)
+        if (!notes.TryFindSensitive(NoteReference.Stored(opened.Name, sensitive: true, opened.Path), out NoteInfo? found)
             || found is null
             || !string.Equals(found.Name, opened.Name, StringComparison.Ordinal))
         {
@@ -5003,7 +5005,7 @@ internal sealed class DesktopActions
             return Refused(ActionReason.Exists, ExistsText(title));
         }
 
-        notes.DeleteSensitive(source.Name);
+        notes.DeleteSensitive(source.Reference);
         state.Session.Open(new EditableNote(title, target, text, EditableNote.Hash(file), open.HadCrlf, open.HadBom, open.LineCrlf));
         return new ActionResult(ActionKind.Done, ActionReason.None, title);
     }
@@ -5057,7 +5059,7 @@ internal sealed class DesktopActions
         }
     }
 
-    private ActionResult MakePlainNow(string name, Confirmation? confirmed)
+    private ActionResult MakePlainNow(NoteReference reference, Confirmation? confirmed)
     {
         if (confirmed is null)
         {
@@ -5066,9 +5068,9 @@ internal sealed class DesktopActions
 
         try
         {
-            if (!notes.TryFindSensitive(name, out NoteInfo? source) || source is null)
+            if (!notes.TryFindSensitive(reference, out NoteInfo? source) || source is null)
             {
-                return Refused(ActionReason.Missing, NoteMissingText(name));
+                return Refused(ActionReason.Missing, NoteMissingText(reference.Name));
             }
 
             if (OpenSensitive(source) is not { } open)
@@ -5076,7 +5078,7 @@ internal sealed class DesktopActions
                 return Refused(ActionReason.Locked, UnlockFirstText(source.Name));
             }
 
-            if (notes.TryFind(source.Name, out _))
+            if (notes.List().Any(n => string.Equals(n.Name, source.Name, StringComparison.OrdinalIgnoreCase)))
             {
                 return Refused(ActionReason.Exists, ExistsText(source.Name));
             }
@@ -5099,7 +5101,7 @@ internal sealed class DesktopActions
 
             try
             {
-                notes.DeleteSensitive(source.Name);
+                notes.DeleteSensitive(source.Reference);
             }
             catch (Exception)
             {
@@ -5114,7 +5116,7 @@ internal sealed class DesktopActions
         }
         catch (Exception)
         {
-            return Failed(ActionReason.WriteFailed, MakePlainFailedText(name));
+            return Failed(ActionReason.WriteFailed, MakePlainFailedText(reference.Name));
         }
     }
 

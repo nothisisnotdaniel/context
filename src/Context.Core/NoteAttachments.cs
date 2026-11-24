@@ -288,7 +288,7 @@ internal sealed class NoteAttachments
     /// or reparse point. Throws <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> when it can't
     /// write, or when every clash name is taken.
     /// </summary>
-    public AttachmentAdd Add(string note, string fileName, byte[] bytes)
+    public AttachmentAdd Add(NoteReference note, string fileName, byte[] bytes)
     {
         if (bytes.LongLength > MaxBytes)
         {
@@ -395,7 +395,7 @@ internal sealed class NoteAttachments
     /// link) of at most <see cref="MaxBytes"/> whose bytes pass <see cref="Sniff"/>. <c>null</c> for anything else,
     /// and when it can't be read. Never writes.
     /// </summary>
-    public ResolvedAttachment? TryResolve(string note, string src)
+    public ResolvedAttachment? TryResolve(NoteReference note, string src)
     {
         if (!src.StartsWith(SrcPrefix, StringComparison.Ordinal))
         {
@@ -571,7 +571,7 @@ internal sealed class NoteAttachments
     /// <see cref="LinkedNames"/> of the saved file of <paramref name="note"/> (a name in <see cref="NoteStore.List"/>);
     /// empty when it names no note or can't be read (then no attachment is touched).
     /// </summary>
-    public IReadOnlyList<string> LinkedNamesOf(string note)
+    public IReadOnlyList<string> LinkedNamesOf(NoteReference note)
     {
         try
         {
@@ -580,7 +580,7 @@ internal sealed class NoteAttachments
                 return [];
             }
 
-            return LinkedNames(DecodeText(BoundedFile.Read(found.Path, NoteStore.MaxEditBytes)));
+            return LinkedNames(DecodeText(note.ReadBytes(found.Path, NoteStore.MaxEditBytes)));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -601,7 +601,7 @@ internal sealed class NoteAttachments
     /// touches no attachment. A move to another level of a note that links more than <see cref="MaxLinkedNames"/> names
     /// changes nothing and throws <see cref="AttachmentMoveException"/>, so a note never moves without its attachments.
     /// </summary>
-    public NoteInfo? MoveWithNote(string name, string? newParent)
+    public NoteInfo? MoveWithNote(NoteReference name, string? newParent)
     {
         if (!notes.TryFind(name, out NoteInfo? source) || source is null)
         {
@@ -624,7 +624,7 @@ internal sealed class NoteAttachments
         bool tooMany = false;
         try
         {
-            original = BoundedFile.Read(source.Path, NoteStore.MaxEditBytes);
+            original = name.ReadBytes(source.Path, NoteStore.MaxEditBytes);
             IReadOnlyList<string> names = LinkedNames(DecodeText(original));
             tooMany = names.Count > MaxLinkedNames;
             foreach (string linkedName in names)
@@ -635,7 +635,7 @@ internal sealed class NoteAttachments
                 }
 
 
-                ResolvedAttachment? resolved = TryResolve(source.Name, FolderName + "/" + linkedName);
+                ResolvedAttachment? resolved = TryResolve(source.Reference, FolderName + "/" + linkedName);
                 if (resolved is not null)
                 {
                     linked.Add(resolved);
@@ -704,7 +704,7 @@ internal sealed class NoteAttachments
             BeforeMoveStep?.Invoke("move");
             try
             {
-                moved = notes.Move(source.Name, owner?.Name);
+                moved = notes.Move(name.Resolved(source), owner?.Name);
             }
             catch (Exception ex) when (ex is NoteExistsException or ArgumentException)
             {
@@ -849,7 +849,7 @@ internal sealed class NoteAttachments
         {
             try
             {
-                notes.Move(moved.Name, source.Parent);
+                notes.Move(moved.Reference, source.Parent);
             }
             catch (Exception)
             {

@@ -46,7 +46,7 @@ internal sealed class LinkRenamePlan
     /// changes for an invalid title, a missing note, the same name or a case-only rename, or a new name another note
     /// already has (the rename itself refuses those). A note that can't be read is left out.
     /// </summary>
-    public static LinkRenamePlan For(NoteStore notes, string name, string newTitle)
+    public static LinkRenamePlan For(NoteStore notes, NoteReference name, string newTitle)
     {
         string title = NoteStore.NormalizeTitle(newTitle);
         if (NoteStore.ValidateTitle(title) is not null)

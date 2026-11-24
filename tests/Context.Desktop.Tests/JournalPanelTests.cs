@@ -138,26 +138,209 @@ public sealed class JournalPanelTests : IDisposable
     [InlineData(true)]
     public async Task LegacyMeetingButton_OpensItsExactStoredName(bool hasSibling)
     {
-        string sibling = Date(0) + " Review";
-        string stored = sibling + " ";
-        const string Body = "#meeting\nSpace-suffixed fixture";
-        data.WriteNote(stored, Body);
+        IRenderedComponent<Main> cut = await OpenLegacyMeeting(hasSibling);
+        data.Dialog.ExportPath = data.Outside("export.md");
+        await MainTests.ChooseAsync(cut, "export");
+        Assert.Equal(LegacyBody, File.ReadAllText(data.Dialog.ExportPath));
+
+        data.Dialog.SharePath = data.Outside("share.html");
+        await MainTests.ChooseAsync(cut, "share");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        string shared = File.ReadAllText(data.Dialog.SharePath);
+        Assert.Contains("Space-suffixed fixture", shared, StringComparison.Ordinal);
+        Assert.DoesNotContain(SiblingBody, shared, StringComparison.Ordinal);
+
+        await MainTests.ChooseAsync(cut, "delete");
+        Assert.Equal($"Delete {LegacyName}? This can't be undone.", cut.Find(".dialog .question").TextContent);
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Contains("Deleted", cut.Find(".main-status").TextContent), Wait);
+        Assert.False(File.Exists(PlainPath(LegacyName)));
+        AssertSibling(hasSibling);
+    }
+
+    private static string SiblingName => Date(0) + " Review";
+    private static string LegacyName => SiblingName + " ";
+    private const string LegacyBody = "#meeting\nSpace-suffixed fixture";
+    private const string SiblingBody = "Trimmed sibling fixture";
+    private string PlainPath(string name) => Path.Combine(data.Root, name + ".md");
+
+    private async Task<IRenderedComponent<Main>> OpenLegacyMeeting(bool hasSibling)
+    {
+        data.WriteNote(LegacyName, LegacyBody);
         if (hasSibling)
         {
-            data.WriteNote(sibling, "Trimmed sibling fixture");
+            data.WriteNote(SiblingName, SiblingBody);
         }
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
         await data.State!.ReloadsSettled().WaitAsync(Wait);
-        Assert.Equal(hasSibling ? sibling : null, data.State.ResolveNote(stored));
+        Assert.Equal(hasSibling ? SiblingName : null, data.State.ResolveNote(LegacyName));
         await Open(cut);
-        cut.WaitForAssertion(() => Assert.Equal(stored, Assert.Single(cut.FindAll(".journal-meeting")).TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal(LegacyName, Assert.Single(cut.FindAll(".journal-meeting")).TextContent), Wait);
         await StaleClick.ClickAsync(cut, ".journal-meeting");
         cut.WaitForAssertion(() =>
         {
-            Assert.Equal(stored, cut.Find(".note-title").GetAttribute("title"));
-            Assert.Equal(Body, editor.MountedText());
+            Assert.Equal(LegacyName, cut.Find(".note-title").GetAttribute("title"));
+            Assert.Equal(LegacyBody, editor.MountedText());
             Assert.DoesNotContain("Loading", cut.Find(".links-panel").TextContent);
         }, Wait);
+        return cut;
+    }
+
+    private void AssertSibling(bool present)
+    {
+        Assert.Equal(present, File.Exists(PlainPath(SiblingName)));
+        if (present)
+        {
+            Assert.Equal(SiblingBody, File.ReadAllText(PlainPath(SiblingName)));
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RenameLegacyMeeting_ChangesOnlyTheDisplayedFile(bool hasSibling)
+    {
+        string reference = $"[[{SiblingName}]]";
+        data.WriteNote("Reference", reference);
+        IRenderedComponent<Main> cut = await OpenLegacyMeeting(hasSibling);
+        await MainTests.ChooseAsync(cut, "rename");
+        Assert.Equal(LegacyName, cut.Find(".rename-title").GetAttribute("value"));
+        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Renamed meeting" });
+        await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("Renamed meeting", editor.MountedName());
+            Assert.Equal(LegacyBody, editor.MountedText());
+            Assert.DoesNotContain("Loading", cut.Find(".links-panel").TextContent);
+        }, Wait);
+        Assert.False(File.Exists(PlainPath(LegacyName)));
+        Assert.Equal(LegacyBody, File.ReadAllText(PlainPath("Renamed meeting")));
+        Assert.Equal(reference, File.ReadAllText(PlainPath("Reference")));
+        AssertSibling(hasSibling);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MarkLegacyMeetingSensitive_SealsOnlyTheDisplayedFile(bool hasSibling)
+    {
+        data.Keys = FakeKeyStore.Ready();
+        IRenderedComponent<Main> cut = await OpenLegacyMeeting(hasSibling);
+        await MainTests.ChooseAsync(cut, "mark-sensitive");
+        Assert.StartsWith($"Mark {LegacyName} sensitive?", cut.Find(".dialog .question").TextContent);
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Equal($"Marked {LegacyName} sensitive.", cut.Find(".main-status").TextContent), Wait);
+        Assert.False(File.Exists(PlainPath(LegacyName)));
+        Assert.False(File.Exists(Path.Combine(data.Root, SiblingName + NoteStore.SensitiveExtension)));
+        AssertSibling(hasSibling);
+        EditableNote? sealedNote = await data.State!.ReadSensitive(NoteReference.Stored(LegacyName, sensitive: true)).WaitAsync(Wait);
+        Assert.Equal(LegacyBody, sealedNote?.Text);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task SealedAfterRender_JournalLinkCannotOpenSensitiveNote(bool meeting, bool duringDiscard)
+    {
+        data.Keys = FakeKeyStore.Ready();
+        string name = meeting ? Date(0) + " Tagged" : Date(0);
+        string selector = meeting ? ".journal-meeting" : ".journal-open";
+        data.WriteNote(name, "#meeting\nDisplayed plain fixture");
+        data.WriteNote("Draft", "Draft fixture");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        if (duringDiscard)
+        {
+            await RunPalette(cut, "/open Draft");
+            cut.WaitForAssertion(() =>
+            {
+                Assert.Equal("Draft fixture", editor.MountedText());
+                Assert.DoesNotContain("Loading", cut.Find(".links-panel").TextContent);
+            }, Wait);
+            editor.EditUnsavable("Draft changes");
+        }
+        await Open(cut);
+        cut.WaitForElement(selector, Wait);
+        int mounts = editor.Calls("ContextEditor.mount").Count;
+        if (duringDiscard)
+        {
+            await StaleClick.ClickAsync(cut, selector);
+            Assert.Contains("Discard changes to Draft?", cut.Find(".dialog .question").TextContent);
+        }
+        data.WriteSensitive(name, "Sealed fixture");
+        File.Delete(PlainPath(name));
+        DesktopSnapshot snapshot = await data.RefreshAsync().WaitAsync(Wait);
+        Assert.Contains(snapshot.Sensitive, note => note.Name == name);
+        await data.State.ReloadsSettled().WaitAsync(Wait);
+        await StaleClick.ClickAsync(cut, duringDiscard ? ".dialog .confirm" : selector);
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal(DesktopActions.CantReadText(name), cut.Find(".main-status").TextContent);
+            Assert.NotEmpty(cut.FindAll(".journal-panel"));
+        }, Wait);
+        Assert.Equal(mounts, editor.Calls("ContextEditor.mount").Count);
+        Assert.Null(data.State.Session.Note);
+        Assert.Equal(0, data.Keys.Agrees);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReplacedStore_DisplayedLinkCannotOpenSameNamedNote(bool meeting)
+    {
+        string name = meeting ? Date(0) + " Review" : Date(0);
+        string selector = meeting ? ".journal-meeting" : ".journal-open";
+        data.WriteNote(name, "#meeting\nOriginal store");
+        string replacement = Directory.CreateDirectory(data.Outside("replacement")).FullName;
+        File.WriteAllText(Path.Combine(replacement, name + ".md"), "#meeting\nReplacement store");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        await Open(cut);
+        cut.WaitForElement(selector, Wait);
+        int mounts = editor.Calls("ContextEditor.mount").Count;
+        Directory.Move(data.Root, data.Outside("original"));
+        Directory.Move(replacement, data.Root);
+        await StaleClick.ClickAsync(cut, selector);
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal(DesktopActions.CantReadText(name), cut.Find(".main-status").TextContent);
+            Assert.NotEmpty(cut.FindAll(".journal-panel"));
+        }, Wait);
+        Assert.Equal(mounts, editor.Calls("ContextEditor.mount").Count);
+    }
+
+    [Fact]
+    public async Task JournalEditorReload_ReadsOnlyFromItsOriginalDirectory()
+    {
+        IRenderedComponent<Main> cut = await OpenLegacyMeeting(false);
+        data.WriteNote(LegacyName, "#meeting\nUpdated original");
+        NoteEditor mounted = cut.FindComponent<NoteEditor>().Instance;
+        await cut.InvokeAsync(mounted.ReloadAsync);
+        Assert.Equal("#meeting\nUpdated original", editor.MountedText());
+        string replacement = Directory.CreateDirectory(data.Outside("replacement")).FullName;
+        File.WriteAllText(Path.Combine(replacement, LegacyName + ".md"), "Replacement store");
+        Directory.Move(data.Root, data.Outside("original"));
+        Directory.Move(replacement, data.Root);
+        int mounts = editor.Calls("ContextEditor.mount").Count;
+        await cut.InvokeAsync(mounted.ReloadAsync);
+        Assert.Equal(mounts, editor.Calls("ContextEditor.mount").Count);
+        Assert.Equal("#meeting\nUpdated original", editor.MountedText());
+
+        data.Dialog.ExportPath = data.Outside("stale-export.md");
+        await MainTests.ChooseAsync(cut, "export");
+        Assert.False(File.Exists(data.Dialog.ExportPath));
+        await MainTests.ChooseAsync(cut, "delete");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        Assert.Equal("Replacement store", File.ReadAllText(PlainPath(LegacyName)));
+
+        // Even identical text in the replacement directory cannot satisfy the editor's save check.
+        data.WriteNote(LegacyName, editor.MountedText());
+        editor.Edit("Attempted edit");
+        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        cut.WaitForAssertion(() => Assert.Contains("changed on disk", cut.Find(".note-editor .status").TextContent), Wait);
+        Assert.Equal("#meeting\nUpdated original", File.ReadAllText(PlainPath(LegacyName)));
     }
 
     private int Measure(IRenderedComponent<Main> cut, string heading)

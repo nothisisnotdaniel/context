@@ -32,6 +32,8 @@ internal sealed record NoteInfo
 
     /// <summary>The full path of the file: directly inside the store's root, or inside its parent's child folder.</summary>
     public string Path { get; }
+
+    public NoteReference Reference => NoteReference.ForFile(Name, Path);
 }
 
 /// <summary>An opened note: its name and the file's text.</summary>
@@ -259,7 +261,9 @@ internal sealed class NoteStore
     /// Like <see cref="CreateChild(string, string)"/>, with <paramref name="body"/> written right after the
     /// <c># &lt;title&gt;\n</c> line (an empty body gives the plain heading).
     /// </summary>
-    public NoteInfo CreateChild(string parent, string title, string body)
+    public NoteInfo CreateChild(string parent, string title, string body) => CreateChild((NoteReference)parent, title, body);
+
+    internal NoteInfo CreateChild(NoteReference parent, string title, string body = "")
     {
         title = NormalizeTitle(title);
         string? error = ValidateTitle(title);
@@ -269,7 +273,7 @@ internal sealed class NoteStore
         }
 
         List<Entry> entries = ListEntries();
-        Entry owner = FindEntry(entries, parent) ?? throw new ArgumentException($"No note called {parent.Trim()}.", nameof(parent));
+        Entry owner = FindEntry(entries, parent) ?? throw new ArgumentException($"No note called {parent.Name.Trim()}.", nameof(parent));
         CheckCanHoldSubpages(owner);
         string name = owner.Note.Name + "/" + title;
         if (name.Length > MaxNameLength)
@@ -312,7 +316,7 @@ internal sealed class NoteStore
     /// Returns the renamed note, the note itself when the title is exactly its name (nothing is written), or
     /// <c>null</c> when <paramref name="name"/> names no note.
     /// </summary>
-    public NoteInfo? Rename(string name, string newTitle)
+    public NoteInfo? Rename(NoteReference name, string newTitle)
     {
         string title = NormalizeTitle(newTitle);
         string? error = ValidateTitle(title);
@@ -359,7 +363,7 @@ internal sealed class NoteStore
     /// Returns the moved note, the note itself when it is already there (nothing is written), or <c>null</c> when
     /// <paramref name="name"/> names no note.
     /// </summary>
-    public NoteInfo? Move(string name, string? newParent)
+    public NoteInfo? Move(NoteReference name, string? newParent)
     {
         List<Entry> entries = ListEntries();
         Entry? source = FindEntry(entries, name);
@@ -418,7 +422,7 @@ internal sealed class NoteStore
     }
 
     /// <summary>The number of notes below the note called <paramref name="name"/> (0 when it names no note).</summary>
-    public int Descendants(string name)
+    public int Descendants(NoteReference name)
     {
         List<Entry> entries = ListEntries();
         Entry? match = FindEntry(entries, name);
@@ -436,7 +440,7 @@ internal sealed class NoteStore
     /// link), so an emptied child folder is removed; the attachments of the note's own level are left to
     /// <see cref="NoteAttachments.RemoveUnlinked"/>.
     /// </summary>
-    public bool Delete(string name, bool removeHistory = false, bool removeAttachments = false)
+    public bool Delete(NoteReference name, bool removeHistory = false, bool removeAttachments = false)
     {
         List<Entry> entries = ListEntries();
         Entry? match = FindEntry(entries, name);
@@ -523,10 +527,15 @@ internal sealed class NoteStore
     /// Finds the sensitive note called <paramref name="name"/> (trimmed): an exact match in
     /// <see cref="ListSensitive"/> first, then one ignoring case. The name is never turned into a path.
     /// </summary>
-    public bool TryFindSensitive(string name, out NoteInfo? match)
+    public bool TryFindSensitive(NoteReference name, out NoteInfo? match)
     {
+        if (name.Sensitive is bool sensitive)
+        {
+            match = sensitive ? ListSensitive().FirstOrDefault(name.Matches) : null;
+            return match is not null;
+        }
         match = null;
-        string wanted = name.Trim();
+        string wanted = name.Name.Trim();
         if (wanted.Length == 0)
         {
             return false;
@@ -541,7 +550,7 @@ internal sealed class NoteStore
     /// or returns false and deletes nothing when there is none. Never deletes a <c>.md</c> file. With
     /// <paramref name="removeHistory"/> its kept versions (<c>.history/&lt;Title&gt;/</c>) go too; otherwise they stay.
     /// </summary>
-    public bool DeleteSensitive(string name, bool removeHistory = false)
+    public bool DeleteSensitive(NoteReference name, bool removeHistory = false)
     {
         if (!TryFindSensitive(name, out NoteInfo? match) || match is null)
         {
@@ -576,7 +585,7 @@ internal sealed class NoteStore
     }
 
     /// <summary>Finds the note called <paramref name="name"/> like <see cref="TryOpen"/>, without reading it.</summary>
-    public bool TryFind(string name, out NoteInfo? match)
+    public bool TryFind(NoteReference name, out NoteInfo? match)
     {
         match = FindEntry(ListEntries(), name)?.Note;
         return match is not null;
@@ -597,13 +606,15 @@ internal sealed class NoteStore
     /// <see cref="Read"/> when the file can't be read, and with an <see cref="IOException"/> when it is not a regular
     /// file or is larger than <see cref="MaxEditBytes"/>.
     /// </summary>
-    public EditableNote ReadForEdit(NoteInfo note)
+    public EditableNote ReadForEdit(NoteInfo note) => ReadSelectedForEdit(note, note.Reference);
+
+    internal static EditableNote ReadSelectedForEdit(NoteInfo note, NoteReference selected)
     {
-        byte[] raw = BoundedFile.Read(note.Path, MaxEditBytes);
+        byte[] raw = selected.ReadBytes(note.Path, MaxEditBytes);
         bool hadBom = raw.AsSpan().StartsWith(Utf8Bom);
         string text = DecodeText(raw);
         (string plain, bool hadCrlf, IReadOnlyList<bool>? lineCrlf) = LineEndings.Read(text);
-        return new EditableNote(note.Name, note.Path, plain, EditableNote.Hash(raw), hadCrlf, hadBom, lineCrlf);
+        return new EditableNote(note.Name, note.Path, plain, EditableNote.Hash(raw), hadCrlf, hadBom, lineCrlf) { Target = selected };
     }
 
     /// <summary>
@@ -680,7 +691,10 @@ internal sealed class NoteStore
         }
 
         (_, bool savedCrlf, IReadOnlyList<bool>? savedLines) = LineEndings.Read(onDisk);
-        saved = new EditableNote(opened.Name, opened.Path, plainText, EditableNote.Hash(plain), savedCrlf, opened.HadBom, savedLines);
+        saved = new EditableNote(opened.Name, opened.Path, plainText, EditableNote.Hash(plain), savedCrlf, opened.HadBom, savedLines)
+        {
+            Target = opened.Target,
+        };
         return NoteSaveResult.Saved;
     }
 
@@ -691,7 +705,7 @@ internal sealed class NoteStore
         current = null;
         try
         {
-            current = BoundedFile.Read(opened.Path, MaxEditBytes);
+            current = opened.Target.ReadBytes(opened.Path, MaxEditBytes);
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
@@ -1252,9 +1266,14 @@ internal sealed class NoteStore
     }
 
     // Finds a typed name like TryFind: as typed, then without one trailing .md; exact case first, then ignoring case.
-    private static Entry? FindEntry(List<Entry> entries, string name)
+    private static Entry? FindEntry(List<Entry> entries, NoteReference name)
     {
-        string wanted = name.Trim();
+        if (name.Sensitive is bool sensitive)
+        {
+            return sensitive ? null : entries.FirstOrDefault(e => name.Matches(e.Note));
+        }
+
+        string wanted = name.Name.Trim();
         if (wanted.Length == 0)
         {
             return null;

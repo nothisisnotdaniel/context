@@ -21,7 +21,7 @@
             <h3>@entry.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</h3>
             @if (entry.Daily is { } daily)
             {
-                <button type="button" class="journal-open" aria-label="Open @daily" @onclick="() => OnOpen.InvokeAsync(daily)">Open</button>
+                <button type="button" class="journal-open" aria-label="Open @daily" @onclick="() => OpenNote(entry.Date, daily)">Open</button>
                 @if (entry.Body is { } body)
                 {
                     <div class="journal-body">@body</div>
@@ -29,7 +29,7 @@
             }
             @foreach (string meeting in entry.Meetings)
             {
-                <button type="button" class="journal-meeting" @onclick="() => OnOpen.InvokeAsync(meeting)">@DesktopText.OneLine(meeting)</button>
+                <button type="button" class="journal-meeting" @onclick="() => OpenNote(entry.Date, meeting)">@DesktopText.OneLine(meeting)</button>
             }
             @foreach (Appointment item in entry.Appointments)
             {
@@ -48,7 +48,7 @@
 @code {
     [Inject] internal DesktopState State { get; set; } = null!;
     [Inject] internal EditorInterop Bridge { get; set; } = null!;
-    [Parameter] public EventCallback<string> OnOpen { get; set; }
+    [Parameter] public EventCallback<JournalNoteLink> OnOpen { get; set; }
     [Parameter] public EventCallback<(string Title, DateOnly Day)> OnAppointment { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
 
@@ -57,6 +57,7 @@
     private readonly List<JournalDay> entries = [];
     private ElementReference marker;
     private Journal? journal;
+    private JournalFiles? files;
     private JournalOutlook? outlook;
     private OutlookStatus status = OutlookStatus.Off;
     private int statusIndex;
@@ -68,7 +69,11 @@
     protected override async Task OnInitializedAsync()
     {
         Bridge.JournalBottom += SignalBottom;
-        (journal, outlook) = await State.OpenJournal();
+        (journal, outlook) = await Task.Run(() =>
+        {
+            files = State.BindJournalFiles();
+            return State.OpenJournal(files);
+        });
         if (disposed)
         {
             journal.Dispose();
@@ -79,6 +84,8 @@
     }
 
     private Task SignalBottom() => InvokeAsync(Load);
+
+    private Task OpenNote(DateOnly date, string name) => OnOpen.InvokeAsync(files!.Link(journal!.NoteFor(date, name)));
 
     private async Task Load()
     {

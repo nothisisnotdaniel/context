@@ -72,6 +72,9 @@ internal sealed class Journal : IDisposable
 
     public bool Exhausted => next is null;
 
+    // The rendered link identifies the file selected from this journal's original listing.
+    public NoteInfo NoteFor(DateOnly date, string name) => candidates[date].First(note => note.Name == name);
+
     public void Dispose() => sources?.Dispose();
 
     // A failed Outlook day read withdraws its bound. Notes and readable calendars keep their own bound.

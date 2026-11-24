@@ -32,20 +32,27 @@ internal sealed partial class JournalDirectory : IDisposable
         try
         {
             using SafeFileHandle? above = parent?.OpenCurrent();
-            SafeFileHandle handle = OpenHandle(above is null ? root : Path.GetFileName(root), directory: true, above, shareDelete: true);
-            try
-            {
-                return new JournalDirectory(root, parent, handle);
-            }
-            catch
-            {
-                handle.Dispose();
-                throw;
-            }
+            return Own(root, parent, OpenHandle(above is null ? root : Path.GetFileName(root), directory: true, above, shareDelete: true));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             return null;
+        }
+    }
+
+    // An editor may outlive its journal panel. Take its own handle to the same verified directory.
+    public JournalDirectory Retain() => Own(root, parent, OpenCurrent(shareDelete: true));
+
+    private static JournalDirectory Own(string root, JournalDirectory? parent, SafeFileHandle handle)
+    {
+        try
+        {
+            return new JournalDirectory(root, parent, handle);
+        }
+        catch
+        {
+            handle.Dispose();
+            throw;
         }
     }
 

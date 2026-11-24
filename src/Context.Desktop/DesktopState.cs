@@ -439,17 +439,8 @@ internal sealed class DesktopState
     {
         try
         {
-            NoteInfo? found;
-            if (storedName)
-            {
-                found = notes.List().FirstOrDefault(n => string.Equals(n.Name, name, StringComparison.Ordinal));
-            }
-            else
-            {
-                notes.TryFind(name, out found);
-            }
-
-            return found is null ? null : notes.ReadForEdit(found);
+            NoteReference target = storedName ? NoteReference.Stored(name) : (NoteReference)name;
+            return notes.TryFind(target, out NoteInfo? found) && found is not null ? notes.ReadForEdit(found) : null;
         }
         catch (Exception)
         {
@@ -463,7 +454,7 @@ internal sealed class DesktopState
     /// the calling thread. Reads only, writes nothing; 0 for the same name, a case-only rename, a title the rename
     /// refuses, and on any error.
     /// </summary>
-    public Task<int> LinkUpdateCount(string name, string newTitle) => Task.Run(() =>
+    public Task<int> LinkUpdateCount(NoteReference name, string newTitle) => Task.Run(() =>
     {
         try
         {
@@ -498,7 +489,7 @@ internal sealed class DesktopState
     /// <see cref="NoteAttachments.DrawingSources"/> that resolves to an Excalidraw drawing and renders through
     /// <see cref="ExcalidrawSvg.Render"/>, as <c>image/svg+xml</c> with the base64 of the SVG. Empty on any error. Reads only.
     /// </summary>
-    public Task<IReadOnlyList<InlineImage>> InlineImages(string name, string text) => Task.Run(() =>
+    public Task<IReadOnlyList<InlineImage>> InlineImages(NoteReference name, string text) => Task.Run(() =>
     {
         List<InlineImage> images = [];
         try
@@ -539,7 +530,7 @@ internal sealed class DesktopState
     /// without asking again. <c>null</c> when there is no such note or it can't be unlocked, whatever the reason.
     /// Nothing is written.
     /// </summary>
-    public Task<EditableNote?> ReadSensitive(string name) => Task.Run(() =>
+    public Task<EditableNote?> ReadSensitive(NoteReference name) => Task.Run(() =>
     {
         try
         {
@@ -579,13 +570,13 @@ internal sealed class DesktopState
     /// <see cref="Session"/> holds open), newest first, and its saved text, off the calling thread. Never asks the key
     /// store. <see cref="HistoryKind.Unreadable"/> when the note is gone, locked, or it or its history can't be read.
     /// </summary>
-    public Task<HistoryView> History(string name) => Task.Run(() =>
+    public Task<HistoryView> History(NoteReference name) => Task.Run(() =>
     {
         try
         {
             if (notes.TryFind(name, out NoteInfo? plain) && plain is not null)
             {
-                string text = notes.ReadForEdit(plain).Text;
+                string text = NoteStore.ReadSelectedForEdit(plain, name.Resolved(plain)).Text;
                 return new HistoryView(HistoryKind.Shown, HistoryStore.Versions(plain), text);
             }
 
@@ -607,7 +598,7 @@ internal sealed class DesktopState
     /// The text of version <paramref name="id"/> of the note <paramref name="name"/>, as the editor would hold it, off
     /// the calling thread (see <see cref="ReadVersionText"/>).
     /// </summary>
-    public Task<string?> ReadVersion(string name, string id) => Task.Run(() => ReadVersionText(name, id));
+    public Task<string?> ReadVersion(NoteReference name, string id) => Task.Run(() => ReadVersionText(name, id));
 
     /// <summary>
     /// The text of version <paramref name="id"/> of the note <paramref name="name"/> as the editor would hold it
@@ -615,7 +606,7 @@ internal sealed class DesktopState
     /// with <see cref="SealedNote.Open"/> under the title in its file name and one <see cref="IKeyStore.Agree"/>, only
     /// while the session holds the note open. <c>null</c> when there is no such version or it can't be read.
     /// </summary>
-    public string? ReadVersionText(string name, string id)
+    public string? ReadVersionText(NoteReference name, string id)
     {
         try
         {
@@ -1039,10 +1030,12 @@ internal sealed class DesktopState
 
     public Task<(Journal Journal, JournalOutlook Outlook)> OpenJournal() => Task.Run(() => OpenJournal(null));
 
+    internal JournalFiles BindJournalFiles() => new(notes, calendar, feed);
+
     internal (Journal Journal, JournalOutlook Outlook) OpenJournal(JournalFiles? boundFiles)
     {
         int optOutsAtOpen = Volatile.Read(ref outlookOptOuts);
-        JournalFiles files = boundFiles ?? new JournalFiles(notes, calendar, feed);
+        JournalFiles files = boundFiles ?? BindJournalFiles();
         // An explicit opt-out also applies to an open journal whose original store has since been moved.
         bool Consent() => files.ReadOutlook() && optOutsAtOpen == Volatile.Read(ref outlookOptOuts);
         try

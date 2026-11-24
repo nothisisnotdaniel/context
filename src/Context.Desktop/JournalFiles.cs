@@ -26,6 +26,7 @@ internal sealed class JournalFiles : IDisposable
     }
 
     public IReadOnlyList<NoteInfo> ListNotes() => notes?.ListNotes() ?? [];
+    public JournalNoteLink Link(NoteInfo note) => new(note, notes);
     public FileStream OpenNote(NoteInfo note) => notes?.OpenNote(note) ?? throw new IOException("Note folder unavailable.");
     public bool ReadOutlook()
     {
