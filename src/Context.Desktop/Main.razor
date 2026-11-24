@@ -14,7 +14,7 @@
             <aside class="notes-region">
                 <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" OnTriage="ShowTriage" OnPeople="ShowPeople" OnTodos="ShowTodos" OnSearch="ShowSearch" />
             </aside>
-            <main class="current-region">
+            <main class="current-region@(page == Page.Journal ? " journal-region" : null)">
                 <TopBar Today="@snapshot.Today" Selected="@SelectedDay()" OnToday="ShowToday" OnPick="PickDay" OnCapture="CaptureAsync" OnSearch="ShowSearch" PageActions="@PageActionsFor(snapshot)"
                         PageActionsDisabled="@(running || renaming || subpaging || moving)" OnPageAction="RunPageAction" />
                 @if (State.DecisionNumbersRanOut)
@@ -651,6 +651,7 @@ else
 
     private void ShowTag(string tag)
     {
+        CloseJournal();
         tagShown = TagIndex.NormalizeTag(tag);
     }
 
@@ -743,7 +744,11 @@ else
     }
 
     // The weekly review: shown at the top of the main region until closed or until a note opens.
-    private void ShowReview() => reviewShown = true;
+    private void ShowReview()
+    {
+        CloseJournal();
+        reviewShown = true;
+    }
 
     private void CloseReview() => reviewShown = false;
 
@@ -764,7 +769,13 @@ else
         }
     }
 
-    private void CloseJournal() => page = journalReturn;
+    private void CloseJournal()
+    {
+        if (page == Page.Journal)
+        {
+            page = journalReturn;
+        }
+    }
 
     private void CloseDone() => page = Page.None;
 
@@ -1512,6 +1523,7 @@ else
                 }
                 else
                 {
+                    CloseJournal();
                     findShown = (findKey, findValue);
                     ShowStatus(string.Empty, string.Empty);
                 }
@@ -1529,11 +1541,13 @@ else
             case "/decisions":
                 // Every note's #!d decisions, or those of the notes with a tag: /decisions #work. Read only;
                 // DecisionsPanel shows the usage line for an invalid tag.
+                CloseJournal();
                 decisionsShown = rest;
                 ShowStatus(string.Empty, string.Empty);
                 break;
             case "/similar":
                 // Pairs of notes that look like duplicates (job 268). Read only until a Keep button is confirmed.
+                CloseJournal();
                 similarShown = true;
                 ShowStatus(string.Empty, string.Empty);
                 break;

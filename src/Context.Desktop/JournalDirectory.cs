@@ -57,7 +57,7 @@ internal sealed partial class JournalDirectory : IDisposable
         }
     }
 
-    private SafeFileHandle OpenCurrent(bool enumerate = false)
+    private SafeFileHandle OpenCurrent(bool enumerate = false, bool shareDelete = false)
     {
         // Compare live directories, then traverse from the very handle that passed the comparison.
         using SafeFileHandle? above = parent?.OpenCurrent();
@@ -68,7 +68,7 @@ internal sealed partial class JournalDirectory : IDisposable
                 throw Ineligible();
             }
             SafeFileHandle current = OpenHandle(above is null ? root : Path.GetFileName(root), directory: true, above,
-                shareDelete: enumerate, enumerate: enumerate);
+                shareDelete: shareDelete, enumerate: enumerate);
             try
             {
                 return DirectoryId(current) == id ? current : throw Ineligible();
@@ -83,14 +83,14 @@ internal sealed partial class JournalDirectory : IDisposable
 
     public IReadOnlyList<NoteInfo> ListNotes()
     {
-        using SafeFileHandle directory = OpenCurrent(enumerate: true);
+        using SafeFileHandle directory = OpenCurrent(enumerate: true, shareDelete: true);
         return NotesAtLevel(directory, root, null).ToArray();
     }
 
     private IEnumerable<NoteInfo> NotesAtLevel(SafeFileHandle directory, string path, string? parentName)
     {
         Listing listing = ListDirectory(directory, path);
-        foreach ((string name, string file, string? child) in NoteStore.PagesAtLevel(parentName, listing.Files, () => listing.Folders))
+        foreach ((string name, string file, string? child) in listing.Pages(parentName))
         {
             yield return new NoteInfo(name, listing.Modified(file), Path.Combine(path, file));
             // Only Meetings/<series>/<date> can contribute a nested journal entry.
@@ -125,7 +125,7 @@ internal sealed partial class JournalDirectory : IDisposable
     {
         try
         {
-            using SafeFileHandle directory = OpenCurrent(enumerate: true);
+            using SafeFileHandle directory = OpenCurrent(enumerate: true, shareDelete: true);
             return ListDirectory(directory, root).Calendars.Order(StringComparer.OrdinalIgnoreCase).ToArray();
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -161,7 +161,37 @@ internal sealed partial class JournalDirectory : IDisposable
             throw Ineligible();
         }
 
-        return OpenFile(relative, openFile, readDirectoryAttributes);
+        string[] parts = relative.Split(Path.DirectorySeparatorChar);
+        using SafeFileHandle directory = OpenCurrent(enumerate: parts.Length > 1);
+        return CheckedStream(OpenBelow(directory, root, null, 0), Path.Join(resolvedRoot, relative));
+
+        SafeFileHandle OpenBelow(SafeFileHandle folder, string path, string? parentName, int depth)
+        {
+            string component = parts[depth];
+            if (depth == parts.Length - 1)
+            {
+                return openFile?.Invoke() ?? OpenHandle(component, directory: false, folder);
+            }
+
+            // A dated file can outlive its series page. Recheck who owns each folder using
+            // the editor's pairing rules and descend from the same directory we enumerated.
+            (string name, _, string? childFolder) = ListDirectory(folder, path).Pages(parentName).FirstOrDefault(page =>
+                page.Child == component && note.Name.StartsWith(page.Name + "/", StringComparison.Ordinal));
+            if (childFolder is null)
+            {
+                throw Ineligible();
+            }
+            using SafeFileHandle child = OpenHandle(component, directory: true, folder, enumerate: depth + 2 < parts.Length);
+            if (child.IsInvalid)
+            {
+                throw Ineligible();
+            }
+            if (OperatingSystem.IsWindows())
+            {
+                CheckWindowsType(child, (readDirectoryAttributes ?? File.GetAttributes)(child), directory: true);
+            }
+            return OpenBelow(child, Path.Combine(path, component), name, depth + 1);
+        }
     }
 
     public string? ReadCalendar(string name)
@@ -187,15 +217,6 @@ internal sealed partial class JournalDirectory : IDisposable
     private static FileStream OpenChildFile(SafeFileHandle folder, string name, string expectedDirectory) =>
         CheckedStream(OpenHandle(name, directory: false, folder), expectedDirectory, compareParent: true);
 
-    private FileStream OpenFile(string relative, Func<SafeFileHandle>? openFile = null,
-        Func<SafeFileHandle, FileAttributes>? readDirectoryAttributes = null)
-    {
-        using SafeFileHandle folder = OpenCurrent();
-        string expected = Path.Join(resolvedRoot, relative);
-        SafeFileHandle file = OpenBelow(folder, relative, openFile, readDirectoryAttributes ?? File.GetAttributes);
-        return CheckedStream(file, expected);
-    }
-
     private static FileStream CheckedStream(SafeFileHandle file, string expectedPath, bool compareParent = false)
     {
         try
@@ -215,27 +236,6 @@ internal sealed partial class JournalDirectory : IDisposable
     }
 
     private static IOException Ineligible() => new IOException("Journal source is unavailable.");
-
-    // Open one component at a time from its pinned parent. Never resolve a descendant through a directory link.
-    private static SafeFileHandle OpenBelow(SafeFileHandle parent, string relative, Func<SafeFileHandle>? openFile,
-        Func<SafeFileHandle, FileAttributes> readDirectoryAttributes)
-    {
-        int separator = relative.IndexOf(Path.DirectorySeparatorChar);
-        if (separator < 0)
-        {
-            return openFile?.Invoke() ?? OpenHandle(relative, directory: false, parent);
-        }
-        using SafeFileHandle child = OpenHandle(relative[..separator], directory: true, parent);
-        if (child.IsInvalid)
-        {
-            throw Ineligible();
-        }
-        if (OperatingSystem.IsWindows())
-        {
-            CheckWindowsType(child, readDirectoryAttributes(child), directory: true);
-        }
-        return OpenBelow(child, relative[(separator + 1)..], openFile, readDirectoryAttributes);
-    }
 
     private static SafeFileHandle OpenHandle(string path, bool directory, SafeFileHandle? parent = null,
         bool shareDelete = false, bool enumerate = false)

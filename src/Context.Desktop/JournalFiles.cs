@@ -27,7 +27,17 @@ internal sealed class JournalFiles : IDisposable
 
     public IReadOnlyList<NoteInfo> ListNotes() => notes?.ListNotes() ?? [];
     public FileStream OpenNote(NoteInfo note) => notes?.OpenNote(note) ?? throw new IOException("Note folder unavailable.");
-    public bool ReadOutlook() => notes?.ReadOutlook() == true;
+    public bool ReadOutlook()
+    {
+        try
+        {
+            return notes?.ReadOutlook() == true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
     public string? ReadCache() => cache?.ReadCalendar(CalendarFeed.CacheFileName);
 
     public IEnumerable<(string Name, string? Text)> ReadCalendars() => calendars?.ReadCalendars() ?? [];

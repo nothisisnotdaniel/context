@@ -206,6 +206,8 @@ internal sealed class DesktopState
     /// <summary>How long one Outlook source call may take before it counts as timed out.</summary>
     public TimeSpan OutlookTimeout { get; }
 
+    internal TaskScheduler OutlookScheduler { get; set; } = TaskScheduler.Default;
+
     /// <summary>The kept versions of the notes, with the same clock as this state.</summary>
     public NoteHistory HistoryStore { get; }
 
@@ -1036,12 +1038,12 @@ internal sealed class DesktopState
         int optOutsAtOpen = Volatile.Read(ref outlookOptOuts);
         JournalFiles files = boundFiles ?? new JournalFiles(notes, calendar, feed);
         // An explicit opt-out also applies to an open journal whose original store has since been moved.
-        bool Consent() => optOutsAtOpen == Volatile.Read(ref outlookOptOuts) && files.ReadOutlook();
+        bool Consent() => files.ReadOutlook() && optOutsAtOpen == Volatile.Read(ref outlookOptOuts);
         try
         {
             DateOnly day = today();
             DateOnly? localStart = calendar.Oldest(day, files.ReadCache(), files.ReadCalendars());
-            (OutlookStatus status, IReadOnlyList<DateOnly> dates) = OutlookOn(Consent) ? JournalHistory(day) : (OutlookStatus.Off, []);
+            (OutlookStatus status, IReadOnlyList<DateOnly> dates) = OutlookOn(Consent) ? JournalHistory(day, Consent) : (OutlookStatus.Off, []);
             JournalOutlook journalOutlook = new(status, dates.Count > 0 ? dates[0] : null, date => JournalOutlookDay(date, Consent));
             return (new Journal(files.ListNotes, files.OpenNote, day, localStart, date =>
             {
@@ -1056,7 +1058,7 @@ internal sealed class DesktopState
         }
     }
 
-    private (OutlookStatus Status, IReadOnlyList<DateOnly> Dates) JournalHistory(DateOnly day)
+    private (OutlookStatus Status, IReadOnlyList<DateOnly> Dates) JournalHistory(DateOnly day, Func<bool> consent)
     {
         OutlookCall<DateOnly> call;
         lock (outlookGate)
@@ -1072,7 +1074,7 @@ internal sealed class DesktopState
             }
             else
             {
-                call = Start(utcNow(), () => outlook.Oldest(day, calendar.Zone));
+                call = Start(utcNow(), () => outlook.Oldest(day, calendar.Zone), consent);
                 outlookHistory = (day, call);
             }
         }
@@ -1338,7 +1340,7 @@ internal sealed class DesktopState
             {
                 if (!outlookDays.TryGetValue(day, out OutlookCall<Appointment>? cached) || !cached.Usable(nowUtc))
                 {
-                    cached = Start(nowUtc, () => outlook.Appointments(day, zone));
+                    cached = Start(nowUtc, () => outlook.Appointments(day, zone), journalConsent);
                     outlookDays[day] = cached;
                 }
 
@@ -1359,13 +1361,14 @@ internal sealed class DesktopState
 
     // One source call on its own thread (it may block on Outlook or its security prompt for long, so it neither waits
     // for nor holds a pool thread); a call that throws reads as Failed.
-    private static OutlookCall<T> Start<T>(DateTime startedUtc, Func<OutlookRead<T>> read) =>
+    private OutlookCall<T> Start<T>(DateTime startedUtc, Func<OutlookRead<T>> read, Func<bool>? journalConsent = null) =>
         new(startedUtc, Task.Factory.StartNew(
             () =>
             {
                 try
                 {
-                    return read();
+                    // Consent can be withdrawn after this read is queued.
+                    return journalConsent is null || journalConsent() ? read() : new OutlookRead<T>(OutlookReadKind.Off);
                 }
                 catch (Exception)
                 {
@@ -1374,7 +1377,7 @@ internal sealed class DesktopState
             },
             CancellationToken.None,
             TaskCreationOptions.LongRunning,
-            TaskScheduler.Default));
+            OutlookScheduler));
 
     // Waits for the call at most OutlookTimeout; the call itself keeps running and stays cached while it does.
     private (OutlookStatus Status, IReadOnlyList<T> Items) Finish<T>(OutlookCall<T> call)
@@ -1387,6 +1390,7 @@ internal sealed class DesktopState
         OutlookRead<T> read = call.Read.Result;
         return read.Kind switch
         {
+            OutlookReadKind.Off => (OutlookStatus.Off, []),
             OutlookReadKind.Ok => (OutlookStatus.Ok, read.Items),
             OutlookReadKind.NotRunning => (OutlookStatus.NotRunning, []),
             OutlookReadKind.Denied => (OutlookStatus.Denied, []),
@@ -1424,7 +1428,7 @@ internal sealed class DesktopState
             }
 
             TimeSpan age = nowUtc - StartedUtc;
-            return age >= TimeSpan.Zero && age < OutlookCacheAge;
+            return Read.Result.Kind != OutlookReadKind.Off && age >= TimeSpan.Zero && age < OutlookCacheAge;
         }
     }
 

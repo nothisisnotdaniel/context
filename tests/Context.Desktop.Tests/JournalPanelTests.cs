@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using AngleSharp.Css.Dom;
+using AngleSharp.Css.Parser;
 using AngleSharp.Dom;
 using Bunit;
 using Jint;
@@ -60,10 +62,35 @@ public sealed class JournalPanelTests : IDisposable
 
     private static async Task Open(IRenderedComponent<Main> cut)
     {
-        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
-        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = "/journal" });
-        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        await RunPalette(cut, "/journal");
         cut.WaitForAssertion(() => Assert.Equal("Journal", cut.Find(".journal-panel h2").TextContent), Wait);
+    }
+
+    private static async Task RunPalette(IRenderedComponent<Main> cut, string command)
+    {
+        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
+        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = command });
+        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+    }
+
+    [Theory]
+    [InlineData("/review", ".review-panel", "No todos done.")]
+    [InlineData("/tags work", ".tag-panel", "No notes with this tag.")]
+    [InlineData("/find role writer", ".find-panel", "No notes have role:: writer.")]
+    [InlineData("/decisions", ".decisions-panel", "No decisions yet.")]
+    [InlineData("/similar", ".similar-panel", "No similar notes.")]
+    public async Task PalettePanelFromJournal_ShowsItsResults(string command, string panel, string result)
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        await Open(cut);
+        cut.WaitForAssertion(() => Assert.Contains("No journal entries.", cut.Find(".journal-panel").TextContent), Wait);
+        await RunPalette(cut, command);
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Empty(cut.FindAll(".journal-panel"));
+            Assert.Contains(result, cut.Find(panel).TextContent, StringComparison.Ordinal);
+        }, Wait);
     }
 
     private static Task Bottom(IRenderedComponent<Main> cut) =>
@@ -155,6 +182,59 @@ public sealed class JournalPanelTests : IDisposable
         Assert.Equal(Enumerable.Range(0, 15).Select(i => DesktopFixture.Today.AddDays(-i)), reads.ToArray());
     }
 
+    [Fact]
+    public async Task FirstOverflow_WithWrappingText_KeepsHeadingInClassicScrollbarViewport()
+    {
+        data.WriteNote(Date(0), new string('w', 39));
+        data.WriteNote(Date(1), "Anchor");
+        data.WriteNote(Date(14), "Older");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        await Open(cut);
+        cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll(".journal-panel article").Count), Wait);
+        Assert.True(await watching.WaitAsync(Wait));
+
+        const int ViewportWidth = 160, ViewportHeight = 120, ScrollbarWidth = 16;
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+        ICssStyleSheet sheet = new CssParser().ParseStyleSheet(css);
+        // Model classic scrollbars without scrollbar-gutter. The rendered region's overflow-y
+        // rule decides whether the scrollbar takes up space before the third row arrives.
+        (int Width, int Height, int Offset) Layout()
+        {
+            IElement region = cut.Find(".current-region");
+            SetRegion(region.QuerySelector(".journal-bottom")!.GetAttribute("blazor:elementReference"));
+            string? overflow = sheet.Rules.OfType<ICssStyleRule>().Where(rule => rule.Selector.Match(region))
+                .Select(rule => rule.Style.GetPropertyValue("overflow-y")).LastOrDefault(value => value.Length > 0);
+            IElement[] rows = region.QuerySelectorAll(".journal-panel article").ToArray();
+            int RowHeight(IElement row, int width)
+            {
+                int textWidth = row.QuerySelector(".journal-body")!.TextContent.Length * 8;
+                return 20 + 20 * ((textWidth + width - 1) / width);
+            }
+            bool scrollbar = overflow == "scroll" || rows.Sum(row => RowHeight(row, ViewportWidth)) > ViewportHeight;
+            int width = scrollbar ? ViewportWidth - ScrollbarWidth : ViewportWidth;
+            int anchor = Array.FindIndex(rows, row => row.QuerySelector("h3")!.TextContent == Date(1));
+            Assert.Equal(1, anchor);
+            int top = rows.Take(anchor).Sum(row => RowHeight(row, width));
+            return (width, rows.Sum(row => RowHeight(row, width)), top - (int)browser.Evaluate("region.scrollTop").AsNumber());
+        }
+
+        (int Width, int Height, int Offset) before = Layout();
+        Assert.InRange(before.Height, 1, ViewportHeight);
+        Assert.InRange(before.Offset, 0, ViewportHeight - 1);
+        await Bottom(cut);
+        cut.WaitForAssertion(() => Assert.Equal(Date(14), cut.FindAll(".journal-panel h3").Last().TextContent), Wait);
+        (int Width, int Height, int Offset) after = Layout();
+        Assert.True(after.Height > ViewportHeight);
+        Assert.InRange(Math.Abs(after.Offset - before.Offset), 0, 1);
+        Assert.Equal(before.Width, after.Width);
+        browser.Execute("region.scrollTop += 2");
+        int control = Layout().Offset;
+        Assert.Equal(after.Offset - 2, control);
+        output.WriteLine($"Heading {Date(1)}: before {before.Offset}px, after {after.Offset}px, control {control}px. "
+            + $"Content widths {before.Width}/{after.Width}px, heights {before.Height}/{after.Height}px.");
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -191,6 +271,76 @@ public sealed class JournalPanelTests : IDisposable
         DateOnly day = DesktopFixture.Today.AddDays(-daysAgo);
         DateTime start = day.ToDateTime(new TimeOnly(9, 0));
         data.Outlook.Days[day] = [new Appointment("Outlook fixture", null, start, start.AddHours(1), false)];
+    }
+
+    // Hold the scheduled source worker before its delegate starts, including on a loaded test host.
+    private sealed class HeldOutlookWorker : TaskScheduler
+    {
+        public TaskCompletionSource<Action> Queued { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        protected override void QueueTask(Task task) => Queued.SetResult(() => TryExecuteTask(task));
+        protected override bool TryExecuteTaskInline(Task task, bool taskWasPreviouslyQueued) => false;
+        protected override IEnumerable<Task> GetScheduledTasks() => [];
+    }
+
+    private async Task<T> OptOutWhileQueued<T>(DesktopState state, Func<Task<T>> start)
+    {
+        HeldOutlookWorker worker = new();
+        state.OutlookScheduler = worker;
+        Task<T> request = start();
+        Action run = await worker.Queued.Task.WaitAsync(Wait);
+        try
+        {
+            new SettingsStore(data.Root).SaveOutlook(false);
+        }
+        finally
+        {
+            state.OutlookScheduler = TaskScheduler.Default;
+            run();
+        }
+        return await request.WaitAsync(Wait);
+    }
+
+    [Fact]
+    public async Task OptOutWhileHistoryIsQueued_SkipsSourceAndKeepsLocalDay()
+    {
+        data.OutlookTimeout = Wait;
+        new SettingsStore(data.Root).SaveOutlook(true);
+        data.WriteNote(Date(0), "Local day");
+        AddOutlookAppointment(0);
+        DesktopState state = data.CreateState();
+        (Journal opened, JournalOutlook outlook) = await OptOutWhileQueued(state, state.OpenJournal);
+        using Journal journal = opened;
+        JournalDay day = Assert.Single(journal.ReadBatch());
+        Assert.Equal("Local day", day.Body);
+        Assert.Empty(day.Appointments);
+        Assert.Equal(OutlookStatus.Off, outlook.Status);
+        Assert.Equal(0, data.Outlook.OldestCalls);
+        Assert.Equal(0, data.Outlook.AppointmentCalls);
+    }
+
+    [Fact]
+    public async Task OptOutWhileDayIsQueued_SkipsSourceAndAllowsANewOptIn()
+    {
+        data.OutlookTimeout = Wait;
+        SettingsStore settings = new(data.Root);
+        settings.SaveOutlook(true);
+        data.WriteNote(Date(0), "Local day");
+        AddOutlookAppointment(0);
+        DesktopState state = data.CreateState();
+        (Journal opened, JournalOutlook outlook) = await state.OpenJournal().WaitAsync(Wait);
+        using Journal journal = opened;
+        Assert.Equal(OutlookStatus.Ok, outlook.Status);
+        JournalDay day = Assert.Single(await OptOutWhileQueued(state, () => Task.Run(journal.ReadBatch)));
+        Assert.Equal("Local day", day.Body);
+        Assert.Empty(day.Appointments);
+        Assert.Equal(OutlookStatus.Off, outlook.Status);
+        Assert.Equal(1, data.Outlook.OldestCalls);
+        Assert.Equal(0, data.Outlook.AppointmentCalls);
+
+        settings.SaveOutlook(true);
+        using Journal reopened = (await state.OpenJournal().WaitAsync(Wait)).Journal;
+        Assert.Equal("Outlook fixture", Assert.Single(Assert.Single(reopened.ReadBatch()).Appointments).Title);
+        Assert.Equal(1, data.Outlook.AppointmentCalls);
     }
 
     [Fact]

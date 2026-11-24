@@ -41,6 +41,44 @@ public sealed class JournalTests : IDisposable
         Assert.True(journal.Exhausted);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MissingMeetingParent_LeavesOnlyEditorReachableLinks(bool removeMeetingsPage)
+    {
+        NoteStore notes = new(root);
+        NoteInfo meetings = notes.Create("Meetings");
+        NoteInfo series = notes.CreateChild(meetings.Name, "Series");
+        notes.CreateChild(meetings.Name, "Sibling");
+        const string Date = "2026-10-15";
+        // This subfolder is owned by Series.md through the editor's case-insensitive fallback.
+        string folder = Directory.CreateDirectory(Path.Combine(root, "Meetings", "series")).FullName;
+        string datedFile = Path.Combine(folder, Date + ".md");
+        File.WriteAllText(datedFile, "Series fixture");
+        string target = series.Name + "/" + Date;
+        NoteInfo sibling = notes.CreateChild("Meetings/Sibling", Date);
+        NoteInfo legacy = notes.CreateWithText(Date + " Independent", "#meeting");
+        notes.CreateWithText("2026-10-29", "First batch");
+        Assert.True(notes.TryFind(target, out NoteInfo? editor));
+        Assert.Equal("Series fixture", notes.ReadForEdit(editor!).Text);
+        DateOnly older = Today.AddDays(-14);
+        DateTime start = older.ToDateTime(new TimeOnly(9, 0));
+        Appointment appointment = new("Scheduled", null, start, start.AddHours(1), false);
+        using Journal journal = Open(notes, older, day => day == older ? [appointment] : []);
+        Assert.Equal("First batch", Assert.Single(journal.ReadBatch()).Body);
+
+        File.Move(removeMeetingsPage ? meetings.Path : series.Path, Path.Combine(root, "Archived.md"));
+        Assert.True(File.Exists(datedFile));
+        Assert.False(notes.TryFind(target, out _));
+        Assert.Equal(!removeMeetingsPage, notes.TryFind(sibling.Name, out _));
+
+        JournalDay entry = Assert.Single(journal.ReadBatch());
+        Assert.Equal(older, entry.Date);
+        Assert.Equal(removeMeetingsPage ? [legacy.Name] : new[] { legacy.Name, sibling.Name }, entry.Meetings);
+        Assert.Same(appointment, Assert.Single(entry.Appointments));
+        Assert.True(journal.Exhausted);
+    }
+
     [Fact]
     public void HistoryProbeLimit_PreservesSurvivingAppointment()
     {

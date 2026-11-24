@@ -27,6 +27,9 @@ internal enum OutlookReadKind
 
     /// <summary>Any other error.</summary>
     Failed,
+
+    /// <summary>Consent was withdrawn before the source was called.</summary>
+    Off,
 }
 
 /// <summary>

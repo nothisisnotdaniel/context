@@ -3207,8 +3207,9 @@ nav.saved-searches ul {
     flex-wrap: wrap;
 }
 
-.current-region:has(.journal-panel) {
-    scrollbar-gutter: stable;
+.journal-region {
+    /* Reserve a classic scrollbar's width from the first batch, including in older WebViews. */
+    overflow-y: scroll;
     overflow-anchor: none;
 }
 

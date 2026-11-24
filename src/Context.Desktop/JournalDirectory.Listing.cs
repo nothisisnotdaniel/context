@@ -32,8 +32,10 @@ internal sealed partial class JournalDirectory
     {
         private readonly Dictionary<string, (FileAttributes Attributes, DateTime Modified)> entries = new(StringComparer.Ordinal);
 
-        public IEnumerable<string> Files => entries.Where(e => (e.Value.Attributes & FileAttributes.Directory) == 0).Select(e => e.Key);
-        public IEnumerable<string> Folders => entries.Where(e => (e.Value.Attributes & FileAttributes.Directory) != 0).Select(e => e.Key);
+        private IEnumerable<string> Files => entries.Where(e => (e.Value.Attributes & FileAttributes.Directory) == 0).Select(e => e.Key);
+        private IEnumerable<string> Folders => entries.Where(e => (e.Value.Attributes & FileAttributes.Directory) != 0).Select(e => e.Key);
+        public IEnumerable<(string Name, string Path, string? Child)> Pages(string? parent) =>
+            NoteStore.PagesAtLevel(parent, Files, () => Folders);
         public IEnumerable<string> Calendars => entries.Where(e =>
             (e.Value.Attributes & (FileAttributes.Directory | FileAttributes.Hidden | FileAttributes.System)) == 0
             && Path.GetExtension(e.Key).Equals(".ics", StringComparison.OrdinalIgnoreCase)).Select(e => e.Key);
