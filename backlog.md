@@ -206,7 +206,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [h] [#467](backlog/467-check-desktop-settings-key-details-on.md) Check desktop settings key details on Windows
 - [ ] [#151](backlog/151-clear-the-capture-status-line-on.md) Clear the capture status line on new input
 - [h] [#152](backlog/152-check-the-capture-row-at-the.md) Check the capture row at the minimum window size
-- [h] [#153](backlog/153-check-the-unsaved-changes-dot-in.md) Check the unsaved-changes dot in both themes
+- [x] [#153](backlog/153-check-the-unsaved-changes-dot-in.md) Check the unsaved-changes dot in both themes
 - [ ] [#154](backlog/154-ignore-held-enter-repeats-on-a.md) Ignore held Enter repeats on a focused chip
 - [h] [#468](backlog/468-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view on macOS
 - [h] [#469](backlog/469-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view on Windows
