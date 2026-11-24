@@ -212,7 +212,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#153](backlog/153-check-the-unsaved-changes-dot-in.md) Check the unsaved-changes dot in both themes
 - [ ] [#154](backlog/154-ignore-held-enter-repeats-on-a.md) Ignore held Enter repeats on a focused chip
 - [h] [#468](backlog/468-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view on macOS
-- [h] [#469](backlog/469-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view on Windows
+- [x] [#469](backlog/469-check-chip-keyboard-focus-in-the.md) Check chip keyboard focus in the desktop web view on Windows
 - [ ] [#156](backlog/156-hide-the-empty-editor-box-when.md) Hide the empty editor box when the editor fails to start
 - [ ] [#226](backlog/226-cli-and-console-todo-hints.md) CLI and console todo hints
 - [ ] [#160](backlog/160-replace-the-console-text-parity-rule.md) Replace the console text-parity rule in CLAUDE.md
