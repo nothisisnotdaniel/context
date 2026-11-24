@@ -64,11 +64,13 @@ internal sealed class CalendarStore
     /// Like <see cref="Day(DateOnly)"/>, but <paramref name="extra"/> events (for example from the published
     /// calendar link) are filtered and sorted together with the events from the files.
     /// </summary>
-    public CalendarDay Day(DateOnly day, IReadOnlyList<Appointment> extra)
+    public CalendarDay Day(DateOnly day, IReadOnlyList<Appointment> extra) => Day(day, extra, null);
+
+    internal CalendarDay Day(DateOnly day, IReadOnlyList<Appointment> extra, IEnumerable<(string Name, string? Text)>? sources)
     {
         DateTime from = day.ToDateTime(TimeOnly.MinValue);
         DateTime to = from.AddDays(1);
-        return Read(extra, a => Overlaps(a, from, to), text => IcsParser.Parse(text, local, day));
+        return Read(extra, a => Overlaps(a, from, to), text => IcsParser.Parse(text, local, day), sources);
     }
 
     /// <summary>
@@ -78,7 +80,7 @@ internal sealed class CalendarStore
     public CalendarDay All(IReadOnlyList<Appointment> extra) =>
         Read(extra, _ => true, text => IcsParser.Parse(text, local));
 
-    public DateOnly? Oldest(DateOnly through, string? cached)
+    public DateOnly? Oldest(DateOnly through, string? cached, IEnumerable<(string Name, string? Text)> sources)
     {
         DateOnly? unsearched = null;
         void IncludeUnsearched(DateOnly lower)
@@ -101,21 +103,21 @@ internal sealed class CalendarStore
                 // Readable calendar files still contribute when the cached copy is malformed.
             }
         }
-        return Read(feed, a => DateOnly.FromDateTime(a.Start) <= through, text => IcsParser.HistoryStarts(text, local, through, IncludeUnsearched))
+        return Read(feed, a => DateOnly.FromDateTime(a.Start) <= through,
+            text => IcsParser.HistoryStarts(text, local, through, IncludeUnsearched), sources)
             .Appointments.Select(a => (DateOnly?)DateOnly.FromDateTime(a.Start)).Append(unsearched).Min();
     }
 
     private CalendarDay Read(
         IReadOnlyList<Appointment> extra,
         Func<Appointment, bool> keep,
-        Func<string, IReadOnlyList<Appointment>> parse)
+        Func<string, IReadOnlyList<Appointment>> parse,
+        IEnumerable<(string Name, string? Text)>? sources = null)
     {
         List<Appointment> appointments = extra.Where(keep).ToList();
         List<string> unreadable = [];
-        foreach (string path in Files(unreadable))
+        foreach ((string name, string? text) in sources ?? Files(Folder, unreadable).Select(p => (Path.GetFileName(p), ReadText(p))))
         {
-            string name = Path.GetFileName(path);
-            string? text = ReadText(path);
             if (text is null)
             {
                 unreadable.Add(name);
@@ -166,9 +168,9 @@ internal sealed class CalendarStore
     }
 
     /// <summary>The top-level <c>*.ics</c> files, sorted by name; none when the folder doesn't exist.</summary>
-    private List<string> Files(List<string> unreadable)
+    internal static List<string> Files(string folder, List<string> unreadable)
     {
-        if (!Directory.Exists(Folder))
+        if (!Directory.Exists(folder))
         {
             return [];
         }
@@ -181,7 +183,7 @@ internal sealed class CalendarStore
         };
         try
         {
-            return Directory.EnumerateFiles(Folder, "*" + Extension, options)
+            return Directory.EnumerateFiles(folder, "*" + Extension, options)
                 .Where(p => p.EndsWith(Extension, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -201,13 +203,19 @@ internal sealed class CalendarStore
     {
         try
         {
-            byte[] bytes = BoundedFile.Read(path, MaxFileBytes);
-            string text = Utf8.GetString(bytes);
-            return text.Length > 0 && text[0] == '﻿' ? text[1..] : text;
+            return Decode(BoundedFile.Read(path, MaxFileBytes));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             return null;
         }
+    }
+
+    internal static string ReadText(FileStream file) => Decode(BoundedFile.Read(file, MaxFileBytes));
+
+    private static string Decode(byte[] bytes)
+    {
+        string text = Utf8.GetString(bytes);
+        return text.Length > 0 && text[0] == '\uFEFF' ? text[1..] : text;
     }
 }

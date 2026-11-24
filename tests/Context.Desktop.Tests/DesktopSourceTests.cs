@@ -2223,7 +2223,7 @@ public sealed class DesktopSourceTests
     public void Sources_HaveNativeCallsOnlyInTheMacStore()
     {
         string root = RepoFiles.Root();
-        const string JournalFile = "src/Context.Desktop/JournalNoteFile.cs";
+        const string JournalFile = "src/Context.Desktop/JournalDirectory.cs";
         string[] native = ["DllImport", "LibraryImport", "extern "];
         List<string> found = RepoFiles.Sources(root, "src", ".cs", ".razor")
             .Where(f => native.Any(n => File.ReadAllText(Path.Combine(root, f)).Contains(n, StringComparison.Ordinal)))
@@ -2237,7 +2237,7 @@ public sealed class DesktopSourceTests
             }.Order(StringComparer.Ordinal),
             found.Order(StringComparer.Ordinal));
         string journal = File.ReadAllText(Path.Combine(root, JournalFile));
-        Assert.Equal(["CreateFileW", "FGetAttrList", "GetFileType", "GetFinalPathNameByHandleW", "NtOpenFile", "Statx", "UnixOpen", "UnixOpenAt"],
+        Assert.Equal(["CreateFileW", "FGetAttrList", "GetFileInformationByHandleEx", "GetFileType", "GetFinalPathNameByHandleW", "NtOpenFile", "Statx", "UnixOpen", "UnixOpenAt"],
             Regex.Matches(journal, @"\bextern\s+\w+\s+(\w+)\(").Select(match => match.Groups[1].Value).Order(StringComparer.Ordinal));
     }
 

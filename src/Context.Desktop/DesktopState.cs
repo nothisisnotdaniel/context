@@ -1031,15 +1031,23 @@ internal sealed class DesktopState
     public Task<(Journal Journal, JournalOutlook Outlook)> OpenJournal() => Task.Run(() =>
     {
         DateOnly day = today();
-        string? cached = feed?.ReadCache();
-        DateOnly? localStart = calendar.Oldest(day, cached);
-        (OutlookStatus status, IReadOnlyList<DateOnly> dates) = OutlookOn() ? JournalHistory(day) : (OutlookStatus.Off, []);
-        JournalOutlook journalOutlook = new(status, JournalOutlookDay);
-        return (new Journal(notes.List, note => JournalNoteFile.Open(notes.Root, note), day, localStart, date =>
+        JournalFiles files = new(notes, calendar, feed);
+        try
         {
-            BeforeJournalDay?.Invoke(date);
-            return ReadDay(date, journalOutlook.Day(date), cached).Appointments;
-        }, () => journalOutlook.Status == OutlookStatus.Ok && dates.Count > 0 ? dates[0] : null), journalOutlook);
+            DateOnly? localStart = calendar.Oldest(day, files.ReadCache(), files.ReadCalendars());
+            (OutlookStatus status, IReadOnlyList<DateOnly> dates) = OutlookOn() ? JournalHistory(day) : (OutlookStatus.Off, []);
+            JournalOutlook journalOutlook = new(status, dates.Count > 0 ? dates[0] : null, JournalOutlookDay);
+            return (new Journal(files.ListNotes, files.OpenNote, day, localStart, date =>
+            {
+                BeforeJournalDay?.Invoke(date);
+                return ReadDay(date, journalOutlook.Day(date), files.ReadCache(), files.ReadCalendars()).Appointments;
+            }, () => journalOutlook.Oldest, files), journalOutlook);
+        }
+        catch
+        {
+            files.Dispose();
+            throw;
+        }
     });
 
     private (OutlookStatus Status, IReadOnlyList<DateOnly> Dates) JournalHistory(DateOnly day)
@@ -1079,12 +1087,13 @@ internal sealed class DesktopState
         ReadDay(day, fromOutlook, feed?.ReadCache());
 
     // ReadDay with the feed's cached text already read (null: no cache).
-    private CalendarDay ReadDay(DateOnly day, IReadOnlyList<Appointment> fromOutlook, string? cached)
+    private CalendarDay ReadDay(DateOnly day, IReadOnlyList<Appointment> fromOutlook, string? cached,
+        IEnumerable<(string Name, string? Text)>? sources = null)
     {
         IReadOnlyList<Appointment> fromFeed = cached is null
             ? []
             : CurrentView.FeedEvents(new CalendarFeedResult(CalendarFeedStatus.Stale, cached), calendar.Zone, day);
-        return calendar.Day(day, [.. fromFeed, .. fromOutlook]);
+        return calendar.Day(day, [.. fromFeed, .. fromOutlook], sources);
     }
 
     /// <summary>

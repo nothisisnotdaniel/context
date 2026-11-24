@@ -1,7 +1,10 @@
 @implements IAsyncDisposable
 
 <section class="page journal-panel" aria-label="Journal">
-    <div class="panel-bar"><h2>Journal</h2><button type="button" class="close" @onclick="OnClose">Close</button></div>
+    <div class="panel-bar">
+        <h2>Journal</h2>
+        <button type="button" class="close" aria-label="Close" title="Close" @onclick="OnClose"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" /></svg></button>
+    </div>
     @for (int index = 0; index <= entries.Count; index++)
     {
         if (index == statusIndex && OutlookStatusLine.Text(status) is { } line)
@@ -66,6 +69,11 @@
     {
         Bridge.JournalBottom += SignalBottom;
         (journal, outlook) = await State.OpenJournal();
+        if (disposed)
+        {
+            journal.Dispose();
+            return;
+        }
         status = outlook.Status;
         await Load();
     }
@@ -115,6 +123,7 @@
     {
         disposed = true;
         Bridge.JournalBottom -= SignalBottom;
+        journal?.Dispose();
         await Bridge.StopJournal(marker);
     }
 }

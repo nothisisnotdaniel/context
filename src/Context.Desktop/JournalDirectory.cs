@@ -5,10 +5,125 @@ using Microsoft.Win32.SafeHandles;
 
 namespace Context;
 
-/// <summary>Opens a listed Markdown file and verifies the type and location of the handle that will supply its bytes.</summary>
-internal static class JournalNoteFile
+/// <summary>A journal source directory. Its original handle keeps the directory identity alive through paging.</summary>
+internal sealed class JournalDirectory : IDisposable
 {
-    public static FileStream Open(string root, NoteInfo note, Func<SafeFileHandle>? openFile = null,
+    private readonly string root;
+    private readonly JournalDirectory? parent;
+    private readonly SafeFileHandle original;
+    private readonly FileId id;
+    private readonly string resolvedRoot;
+
+    private JournalDirectory(string root, JournalDirectory? parent, SafeFileHandle original)
+    {
+        this.root = root;
+        this.parent = parent;
+        this.original = original;
+        id = DirectoryId(original);
+        resolvedRoot = CheckedPath(original, directory: true);
+    }
+
+    public static JournalDirectory? Bind(string root) => Bind(Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)), null);
+
+    public JournalDirectory? BindCalendar() => Bind(Path.Combine(root, CalendarStore.FolderName), this);
+
+    private static JournalDirectory? Bind(string root, JournalDirectory? parent)
+    {
+        try
+        {
+            using SafeFileHandle? above = parent?.OpenCurrent();
+            SafeFileHandle handle = OpenHandle(above is null ? root : Path.GetFileName(root), directory: true, above, shareDelete: true);
+            try
+            {
+                return new JournalDirectory(root, parent, handle);
+            }
+            catch
+            {
+                handle.Dispose();
+                throw;
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    public void Dispose()
+    {
+        lock (original)
+        {
+            original.Dispose();
+        }
+    }
+
+    private SafeFileHandle OpenCurrent()
+    {
+        // Compare live directories, then traverse from the very handle that passed the comparison.
+        using SafeFileHandle? above = parent?.OpenCurrent();
+        lock (original)
+        {
+            if (original.IsClosed)
+            {
+                throw Ineligible();
+            }
+            SafeFileHandle current = OpenHandle(above is null ? root : Path.GetFileName(root), directory: true, above);
+            try
+            {
+                return DirectoryId(current) == id ? current : throw Ineligible();
+            }
+            catch
+            {
+                current.Dispose();
+                throw;
+            }
+        }
+    }
+
+    // Use the editor's listing rules in the directory we verified. Convert the temporary enumeration paths back
+    // to configured names while its handle is still open.
+    public IReadOnlyList<NoteInfo> ListNotes()
+    {
+        using SafeFileHandle directory = OpenCurrent();
+        string folder = ListingPath(directory);
+        return new NoteStore(folder).List().Select(note => new NoteInfo(note.Name, note.Modified,
+            Path.Combine(root, Path.GetRelativePath(folder, note.Path)))).ToArray();
+    }
+
+    public IEnumerable<(string Name, string? Text)> ReadCalendars() =>
+        CalendarNames().Select(name => (name, ReadCalendar(name)));
+
+    private IReadOnlyList<string> CalendarNames()
+    {
+        try
+        {
+            using SafeFileHandle directory = OpenCurrent();
+            return CalendarStore.Files(ListingPath(directory), []).Select(p => Path.GetFileName(p)).ToArray();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    private string ListingPath(SafeFileHandle directory)
+    {
+        if (OperatingSystem.IsLinux())
+        {
+            return DescriptorPath(directory);
+        }
+        if (OperatingSystem.IsMacOS())
+        {
+            // Darwin's volume-relative object path names the directory by filesystem and file ID.
+            return FormattableString.Invariant($"/.vol/{(uint)id.Volume}/{id.Low}");
+        }
+        // The Windows directory handle denies delete sharing for the duration of enumeration.
+        return CheckedPath(directory, directory: true);
+    }
+
+    public FileStream OpenNote(NoteInfo note) => OpenNote(note, null);
+
+    internal FileStream OpenNote(NoteInfo note, Func<SafeFileHandle>? openFile,
         Func<SafeFileHandle, FileAttributes>? readDirectoryAttributes = null)
     {
         string relative = Path.GetRelativePath(root, note.Path);
@@ -18,8 +133,31 @@ internal static class JournalNoteFile
             throw Ineligible();
         }
 
-        using SafeFileHandle folder = OpenHandle(root, directory: true);
-        string expected = Path.Join(CheckedPath(folder, directory: true), relative);
+        return OpenFile(relative, openFile, readDirectoryAttributes);
+    }
+
+    public string? ReadCalendar(string name)
+    {
+        if (name != Path.GetFileName(name) || !Path.GetExtension(name).Equals(".ics", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+        try
+        {
+            using FileStream file = OpenFile(name);
+            return CalendarStore.ReadText(file);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private FileStream OpenFile(string relative, Func<SafeFileHandle>? openFile = null,
+        Func<SafeFileHandle, FileAttributes>? readDirectoryAttributes = null)
+    {
+        using SafeFileHandle folder = OpenCurrent();
+        string expected = Path.Join(resolvedRoot, relative);
         SafeFileHandle file = OpenBelow(folder, relative, openFile, readDirectoryAttributes ?? File.GetAttributes);
         try
         {
@@ -37,7 +175,7 @@ internal static class JournalNoteFile
         }
     }
 
-    private static IOException Ineligible() => new IOException("Not a regular note file.");
+    private static IOException Ineligible() => new IOException("Journal source is unavailable.");
 
     // Open one component at a time from its pinned parent. Never resolve a descendant through a directory link.
     private static SafeFileHandle OpenBelow(SafeFileHandle parent, string relative, Func<SafeFileHandle>? openFile,
@@ -60,17 +198,18 @@ internal static class JournalNoteFile
         return OpenBelow(child, relative[(separator + 1)..], openFile, readDirectoryAttributes);
     }
 
-    private static SafeFileHandle OpenHandle(string path, bool directory, SafeFileHandle? parent = null)
+    private static SafeFileHandle OpenHandle(string path, bool directory, SafeFileHandle? parent = null, bool shareDelete = false)
     {
         if (OperatingSystem.IsWindows())
         {
             if (parent is not null)
             {
-                return WindowsOpenAt(parent, path, directory);
+                return WindowsOpenAt(parent, path, directory, shareDelete);
             }
             const uint Traverse = 0x20, ReadAttributes = 0x80, OpenExisting = 3, BackupSemantics = 0x02000000;
-            return CreateFileW(path, Traverse | ReadAttributes, FileShare.ReadWrite, IntPtr.Zero, OpenExisting,
-                BackupSemantics, IntPtr.Zero);
+            const uint OpenReparsePoint = 0x00200000;
+            return CreateFileW(path, Traverse | ReadAttributes, Share(shareDelete), IntPtr.Zero, OpenExisting,
+                BackupSemantics | OpenReparsePoint, IntPtr.Zero);
         }
 
         // Read-only, nonblocking (including FIFOs), no controlling terminal, close-on-exec.
@@ -92,12 +231,14 @@ internal static class JournalNoteFile
         {
             throw Ineligible();
         }
-        flags |= directory ? directoryFlag : 0;
-        int fd = parent is null ? UnixOpen(path, flags) : UnixOpenAt(parent, path, flags | noFollow);
+        flags |= noFollow | (directory ? directoryFlag : 0);
+        int fd = parent is null ? UnixOpen(path, flags) : UnixOpenAt(parent, path, flags);
         return new SafeFileHandle((IntPtr)fd, ownsHandle: true);
     }
 
-    private static SafeFileHandle WindowsOpenAt(SafeFileHandle parent, string component, bool directory)
+    private static FileShare Share(bool delete) => delete ? FileShare.ReadWrite | FileShare.Delete : FileShare.ReadWrite;
+
+    private static SafeFileHandle WindowsOpenAt(SafeFileHandle parent, string component, bool directory, bool shareDelete)
     {
         const uint ReadData = 1, Traverse = 0x20, ReadAttributes = 0x80, Synchronize = 0x100000;
         const uint DirectoryFile = 1, NonDirectoryFile = 0x40, SynchronousIo = 0x20, OpenReparsePoint = 0x00200000;
@@ -117,7 +258,7 @@ internal static class JournalNoteFile
                 Attributes = DontReparse,
             };
             int status = NtOpenFile(out SafeFileHandle child, ReadAttributes | Synchronize | (directory ? Traverse : ReadData),
-                ref attributes, out _, FileShare.ReadWrite, SynchronousIo | OpenReparsePoint | (directory ? DirectoryFile : NonDirectoryFile));
+                ref attributes, out _, Share(shareDelete), SynchronousIo | OpenReparsePoint | (directory ? DirectoryFile : NonDirectoryFile));
             if (status != 0)
             {
                 child.Dispose();
@@ -169,14 +310,53 @@ internal static class JournalNoteFile
         {
             return MacPath(handle, directory);
         }
-        const int AtEmptyPath = 0x1000, StatxType = 1;
-        if (Statx(handle, "", AtEmptyPath, StatxType, out LinuxStat stat) != 0 || (stat.Mask & StatxType) == 0
+        _ = LinuxInfo(handle, directory);
+        return new FileInfo(DescriptorPath(handle)).LinkTarget ?? throw Ineligible();
+    }
+
+    private static string DescriptorPath(SafeFileHandle handle) =>
+        "/proc/self/fd/" + handle.DangerousGetHandle().ToInt64().ToString(CultureInfo.InvariantCulture);
+
+    private static LinuxStat LinuxInfo(SafeFileHandle handle, bool directory)
+    {
+        const int AtEmptyPath = 0x1000, TypeAndInode = 0x101;
+        if (Statx(handle, "", AtEmptyPath, TypeAndInode, out LinuxStat stat) != 0 || (stat.Mask & TypeAndInode) != TypeAndInode
             || (stat.Mode & 0xf000) != (directory ? 0x4000 : 0x8000))
         {
             throw Ineligible();
         }
-        string fd = handle.DangerousGetHandle().ToInt64().ToString(CultureInfo.InvariantCulture);
-        return new FileInfo("/proc/self/fd/" + fd).LinkTarget ?? throw Ineligible();
+        return stat;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly record struct FileId(ulong Volume, ulong Low, ulong High);
+
+    private static FileId DirectoryId(SafeFileHandle handle)
+    {
+        if (handle.IsInvalid)
+        {
+            throw Ineligible();
+        }
+        if (OperatingSystem.IsWindows())
+        {
+            CheckWindowsType(handle, File.GetAttributes(handle), directory: true);
+            const int FileIdInfo = 18;
+            return GetFileInformationByHandleEx(handle, FileIdInfo, out FileId id, (uint)Marshal.SizeOf<FileId>()) ? id : throw Ineligible();
+        }
+        if (OperatingSystem.IsMacOS())
+        {
+            // ATTR_CMN_FSID (two 32-bit values), OBJTYPE, FILEID, in Darwin getattrlist order.
+            MacAttributes attributes = new() { Count = 5, Common = 0x4 | 0x8 | 0x02000000 };
+            byte[] result = new byte[24];
+            if (FGetAttrList(handle, ref attributes, result, (nuint)result.Length, 0) != 0
+                || BitConverter.ToUInt32(result) != result.Length || BitConverter.ToUInt32(result, 12) != 2)
+            {
+                throw Ineligible();
+            }
+            return new FileId(BitConverter.ToUInt64(result, 4), BitConverter.ToUInt64(result, 16), 0);
+        }
+        LinuxStat stat = LinuxInfo(handle, directory: true);
+        return new FileId(((ulong)stat.DeviceMajor << 32) | stat.DeviceMinor, stat.Inode, 0);
     }
 
     private static string MacPath(SafeFileHandle handle, bool directory)
@@ -212,6 +392,9 @@ internal static class JournalNoteFile
     {
         [FieldOffset(0)] public uint Mask;
         [FieldOffset(28)] public ushort Mode;
+        [FieldOffset(32)] public ulong Inode;
+        [FieldOffset(136)] public uint DeviceMajor;
+        [FieldOffset(140)] public uint DeviceMinor;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -250,6 +433,9 @@ internal static class JournalNoteFile
 
     [DllImport("kernel32.dll", ExactSpelling = true)]
     private static extern uint GetFileType(SafeFileHandle file);
+
+    [DllImport("kernel32.dll", ExactSpelling = true)]
+    private static extern bool GetFileInformationByHandleEx(SafeFileHandle file, int infoClass, out FileId info, uint size);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern uint GetFinalPathNameByHandleW(SafeFileHandle file, StringBuilder path, uint size, uint flags);

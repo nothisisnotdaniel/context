@@ -90,6 +90,10 @@ public sealed class JournalPanelTests : IDisposable
     public async Task AppendOnce_LeavesVisibleHeadingAtSameOffset(bool outlookFailsOnAppend)
     {
         new SettingsStore(data.Root).SaveOutlook(outlookFailsOnAppend);
+        if (outlookFailsOnAppend)
+        {
+            AddOutlookAppointment(14);
+        }
         for (int i = 0; i < 15; i++)
         {
             data.WriteNote(Date(i), "Text");
@@ -139,6 +143,7 @@ public sealed class JournalPanelTests : IDisposable
         if (outlookFailsOnAppend)
         {
             Assert.Contains("access denied", cut.Find(".journal-panel [role=status]").TextContent, StringComparison.Ordinal);
+            Assert.Single(data.Outlook.AppointmentArguments, call => call.Day == DesktopFixture.Today.AddDays(-14));
         }
         int after = Measure(cut, anchor);
         Assert.InRange(Math.Abs(after - before), 0, 1);
@@ -148,6 +153,44 @@ public sealed class JournalPanelTests : IDisposable
         output.WriteLine($"Heading {anchor}: before {before}px, after {after}px, control {control}px.");
         await Bottom(cut);
         Assert.Equal(Enumerable.Range(0, 15).Select(i => DesktopFixture.Today.AddDays(-i)), reads.ToArray());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OlderLocalNote_OnlyRequestsOutlookDaysInConfirmedHistory(bool populated)
+    {
+        new SettingsStore(data.Root).SaveOutlook(true);
+        data.WriteNote(Date(16), "Older local day");
+        if (populated)
+        {
+            AddOutlookAppointment(2);
+        }
+        DesktopState state = data.CreateState();
+        (Journal opened, JournalOutlook outlook) = await state.OpenJournal().WaitAsync(Wait);
+        using Journal journal = opened;
+        IReadOnlyList<JournalDay> first = journal.ReadBatch();
+        Assert.Equal(populated ? new[] { DesktopFixture.Today.AddDays(-2) } : [], first.Select(day => day.Date));
+        if (populated)
+        {
+            Assert.Equal("Outlook fixture", Assert.Single(first[0].Appointments).Title);
+        }
+        JournalDay second = Assert.Single(journal.ReadBatch());
+        Assert.Equal(DesktopFixture.Today.AddDays(-16), second.Date);
+        Assert.Equal("Older local day", second.Body);
+        Assert.True(journal.Exhausted);
+        Assert.Empty(journal.ReadBatch());
+        Assert.Equal(OutlookStatus.Ok, outlook.Status);
+        Assert.Equal(1, data.Outlook.OldestCalls);
+        Assert.Equal(Enumerable.Range(0, populated ? 3 : 0).Select(i => DesktopFixture.Today.AddDays(-i)),
+            data.Outlook.AppointmentArguments.Select(call => call.Day));
+    }
+
+    private void AddOutlookAppointment(int daysAgo)
+    {
+        DateOnly day = DesktopFixture.Today.AddDays(-daysAgo);
+        DateTime start = day.ToDateTime(new TimeOnly(9, 0));
+        data.Outlook.Days[day] = [new Appointment("Outlook fixture", null, start, start.AddHours(1), false)];
     }
 
     [Theory]
@@ -253,7 +296,7 @@ public sealed class JournalPanelTests : IDisposable
         }
         DesktopState state = data.CreateState();
         SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
-        (Journal journal, _) = await state.OpenJournal().WaitAsync(Wait);
+        using Journal journal = (await state.OpenJournal().WaitAsync(Wait)).Journal;
         IReadOnlyList<JournalDay> entries = journal.ReadBatch();
         Assert.True(journal.Exhausted);
         Assert.Equal(outlook ? new[] { 29, 28, 27, 26 } : [28, 27, 26], entries.Select(e => e.Date.Day));
@@ -287,6 +330,113 @@ public sealed class JournalPanelTests : IDisposable
     }
 
     [Theory]
+    [InlineData("folder")]
+    [InlineData("file")]
+    [InlineData("cache")]
+    public async Task ChangedCalendarSource_LeavesTheOtherEntriesOnTheDay(string changed)
+    {
+        static string Calendar(string title) => DesktopFixture.Calendar(DesktopFixture.Event(title, "20261015T090000", "20261015T093000"));
+        data.WriteNote(Date(0), "First batch");
+        data.WriteNote(Date(14), "Older daily");
+        data.WriteCalendar("local.ics", Calendar("Local"));
+        data.WriteCalendar("second.ICS", Calendar("Second"));
+        data.WriteCache(Calendar("Cached"), data.UtcNow);
+        data.SaveLink(FakeHttpHandler.Link);
+        DesktopState state = data.CreateState();
+        using Journal journal = (await state.OpenJournal().WaitAsync(Wait)).Journal;
+        Assert.Equal("First batch", Assert.Single(journal.ReadBatch()).Body);
+
+        string calendar = Path.Combine(data.Root, CalendarStore.FolderName);
+        if (changed == "folder")
+        {
+            Directory.Move(calendar, data.Outside("previous-calendar"));
+            data.WriteCalendar("local.ics", Calendar("Other folder"));
+        }
+        else
+        {
+            string path = changed == "file" ? Path.Combine(calendar, "local.ics") : Path.Combine(data.Root, CalendarFeed.CacheFileName);
+            string fixture = Path.Combine(Path.GetDirectoryName(path)!, "fixture.txt");
+            File.WriteAllText(fixture, Calendar("Alias"));
+            File.Delete(path);
+            try
+            {
+                File.CreateSymbolicLink(path, fixture);
+                output.WriteLine("Excluded a local file alias.");
+            }
+            catch (IOException e) when (OperatingSystem.IsWindows() && (e.HResult & 0xffff) == 1314)
+            {
+                Directory.CreateDirectory(path);
+                output.WriteLine("Excluded a directory at the file name. Windows file-link privilege was unavailable.");
+            }
+        }
+
+        JournalDay entry = Assert.Single(journal.ReadBatch());
+        Assert.Equal(DesktopFixture.Today.AddDays(-14), entry.Date);
+        Assert.Equal("Older daily", entry.Body);
+        string[] expected = changed switch { "folder" => ["Cached"], "file" => ["Cached", "Second"], _ => ["Local", "Second"] };
+        Assert.Equal(expected, entry.Appointments.Select(item => item.Title));
+        Assert.True(journal.Exhausted);
+        Assert.Equal(0, data.Http.Requests);
+    }
+
+    [Fact]
+    public async Task ReplacedStoreBetweenBatches_OnlyKeepsTheIndependentOutlookAppointment()
+    {
+        string replacement = Directory.CreateDirectory(data.Outside("replacement")).FullName;
+        foreach (string root in new[] { data.Root, replacement })
+        {
+            new SettingsStore(root).SaveOutlook(true);
+            NoteStore notes = new(root);
+            notes.CreateWithText(Date(0), "First batch");
+            notes.CreateWithText(Date(14), "Older daily");
+            notes.CreateWithText(Date(14) + " Standup", "#meeting");
+            string calendar = DesktopFixture.Calendar(DesktopFixture.Event("File appointment", "20261015T090000", "20261015T093000"));
+            string folder = Directory.CreateDirectory(Path.Combine(root, CalendarStore.FolderName)).FullName;
+            File.WriteAllText(Path.Combine(folder, "local.ics"), calendar);
+            File.WriteAllText(Path.Combine(root, CalendarFeed.CacheFileName), calendar);
+        }
+        AddOutlookAppointment(14);
+        using Journal journal = (await data.CreateState().OpenJournal().WaitAsync(Wait)).Journal;
+        Assert.Equal("First batch", Assert.Single(journal.ReadBatch()).Body);
+        // Windows allows moving the open calendar directory itself before moving its parent.
+        Directory.Move(Path.Combine(data.Root, CalendarStore.FolderName), data.Outside("previous-calendar"));
+        Directory.Move(data.Root, data.Outside("previous-store"));
+        Directory.Move(replacement, data.Root);
+
+        JournalDay day = Assert.Single(journal.ReadBatch());
+        Assert.Equal(DesktopFixture.Today.AddDays(-14), day.Date);
+        Assert.Null(day.Daily);
+        Assert.Null(day.Body);
+        Assert.Empty(day.Meetings);
+        Assert.Equal("Outlook fixture", Assert.Single(day.Appointments).Title);
+        Assert.True(journal.Exhausted);
+        Assert.Equal(0, data.Http.Requests);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task JournalCalendarByteLimit_AppliesToHistoryAndKeepsTheIndependentSource(bool oversizedCache)
+    {
+        string text = DesktopFixture.Calendar(DesktopFixture.Event("At limit", "20261028T090000", "20261028T100000"));
+        string exact = text.PadRight((int)CalendarStore.MaxFileBytes);
+        string over = DesktopFixture.Calendar(DesktopFixture.Event("Too large", "20261001T090000", "20261001T100000"))
+            .PadRight((int)CalendarStore.MaxFileBytes + 1);
+        data.WriteCalendar("local.ics", oversizedCache ? exact : over);
+        data.WriteCache(oversizedCache ? over : exact, data.UtcNow);
+        DesktopState state = data.CreateState();
+        List<DateOnly> reads = [];
+        state.BeforeJournalDay = reads.Add;
+        using Journal journal = (await state.OpenJournal().WaitAsync(Wait)).Journal;
+        JournalDay entry = Assert.Single(journal.ReadBatch());
+        Assert.Equal(DesktopFixture.Today.AddDays(-1), entry.Date);
+        Assert.Equal("At limit", Assert.Single(entry.Appointments).Title);
+        Assert.True(journal.Exhausted);
+        Assert.Equal(new[] { DesktopFixture.Today, entry.Date }, reads);
+        Assert.Equal(0, data.Http.Requests);
+    }
+
+    [Theory]
     [InlineData("EXDATE", false)]
     [InlineData("CLASS:PRIVATE", false)]
     [InlineData("STATUS:CANCELLED", false)]
@@ -304,7 +454,7 @@ public sealed class JournalPanelTests : IDisposable
         DesktopState state = data.CreateState();
         List<DateOnly> reads = [];
         state.BeforeJournalDay = reads.Add;
-        (Journal journal, _) = await state.OpenJournal().WaitAsync(Wait);
+        using Journal journal = (await state.OpenJournal().WaitAsync(Wait)).Journal;
         IReadOnlyList<JournalDay> entries = journal.ReadBatch();
         Assert.True(journal.Exhausted);
         Assert.Equal(repeats ? new[] { DesktopFixture.Today.AddDays(-2) } : [], entries.Select(entry => entry.Date));
@@ -336,8 +486,9 @@ public sealed class JournalPanelTests : IDisposable
 
         static void AssertLocalDay((Journal Journal, JournalOutlook Outlook) opened)
         {
+            using Journal journal = opened.Journal;
             Assert.Equal(OutlookStatus.TimedOut, opened.Outlook.Status);
-            Assert.Equal("Read locally", Assert.Single(opened.Journal.ReadBatch()).Body);
+            Assert.Equal("Read locally", Assert.Single(journal.ReadBatch()).Body);
         }
     }
 
@@ -358,7 +509,8 @@ public sealed class JournalPanelTests : IDisposable
         DesktopState state = data.CreateState();
         List<DateOnly> reads = [];
         state.BeforeJournalDay = reads.Add;
-        (Journal journal, JournalOutlook outlook) = await state.OpenJournal().WaitAsync(Wait);
+        (Journal opened, JournalOutlook outlook) = await state.OpenJournal().WaitAsync(Wait);
+        using Journal journal = opened;
         Assert.Equal(OutlookStatus.Ok, outlook.Status);
         data.Outlook.AppointmentKind = OutlookReadKind.Denied;
 
@@ -380,6 +532,7 @@ public sealed class JournalPanelTests : IDisposable
     public async Task TimedOutDay_ShowsStatusAndKeepsReadingLocalHistoryWithOneCall()
     {
         new SettingsStore(data.Root).SaveOutlook(true);
+        AddOutlookAppointment(0);
         data.OutlookTimeout = TimeSpan.FromSeconds(2);
         data.WriteNote(Date(0), "First local day");
         data.WriteCalendar("older.ics", DesktopFixture.Calendar(DesktopFixture.Event("", "20261015T090000", "20261015T093000")));
@@ -406,11 +559,12 @@ public sealed class JournalPanelTests : IDisposable
 
             // A new local date bypasses the per-day cache. A still-blocked journal read must also cover this open.
             data.Day = DesktopFixture.Today.AddDays(1);
-            (Journal journal, JournalOutlook outlook) = await state.OpenJournal().WaitAsync(Wait);
+            (Journal reopened, JournalOutlook outlook) = await state.OpenJournal().WaitAsync(Wait);
+            using Journal journal = reopened;
             Assert.Equal(OutlookStatus.Ok, outlook.Status);
             Assert.Equal("First local day", Assert.Single(journal.ReadBatch()).Body);
             Assert.Equal(OutlookStatus.TimedOut, outlook.Status);
-            Assert.Equal(1, data.Outlook.AppointmentCalls);
+            Assert.Equal(DesktopFixture.Today, Assert.Single(data.Outlook.AppointmentArguments).Day);
         }
         finally
         {
@@ -427,7 +581,7 @@ public sealed class JournalPanelTests : IDisposable
         data.WriteNote(meeting, "#meeting");
         data.WriteCalendar("older.ics", DesktopFixture.Calendar(DesktopFixture.Event("Scheduled", "20261015T090000", "20261015T093000")));
         DesktopState state = data.CreateState();
-        (Journal journal, _) = await state.OpenJournal().WaitAsync(Wait);
+        using Journal journal = (await state.OpenJournal().WaitAsync(Wait)).Journal;
         Assert.Equal("First batch", Assert.Single(journal.ReadBatch()).Body);
 
         data.WriteSensitive(meeting, "#meeting");
@@ -456,6 +610,10 @@ public sealed class JournalPanelTests : IDisposable
         await data.State!.ReloadsSettled().WaitAsync(Wait);
         await Open(cut);
         cut.WaitForAssertion(() => Assert.Contains("access denied", cut.Find(".journal-panel").TextContent), Wait);
+        IElement close = cut.Find(".journal-panel button.close");
+        Assert.Equal("Close", close.GetAttribute("aria-label"));
+        Assert.Equal("button", close.GetAttribute("type"));
+        Assert.NotNull(close.QuerySelector("svg[aria-hidden=true][focusable=false]"));
         await StaleClick.ClickAsync(cut, ".journal-panel .close");
         cut.WaitForAssertion(() => Assert.False(cut.Find(".note-area").HasAttribute("hidden")), Wait);
         foreach ((string selector, string name) in new[] { (".journal-open", Date(0)), (".journal-meeting", Date(0) + " Standup") })

@@ -24,7 +24,7 @@
 
   <ItemGroup>
     <Compile Include="..\Context.Desktop.Tests\FileSnapshot.cs" Link="FileSnapshot.cs" />
-    <Compile Include="..\..\src\Context.Desktop\JournalNoteFile.cs" Link="JournalNoteFile.cs" />
+    <Compile Include="..\..\src\Context.Desktop\JournalDirectory.cs" Link="JournalDirectory.cs" />
   </ItemGroup>
 
 </Project>

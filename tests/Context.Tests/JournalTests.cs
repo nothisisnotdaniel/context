@@ -17,8 +17,17 @@ public sealed class JournalTests : IDisposable
 
     public void Dispose() => Directory.Delete(root, true);
 
-    private static Journal Open(NoteStore notes, DateOnly? oldest, Func<DateOnly, IReadOnlyList<Appointment>> appointments) =>
-        new(notes.List, note => JournalNoteFile.Open(notes.Root, note), Today, oldest, appointments);
+    private static Journal Open(NoteStore notes, DateOnly? oldest, Func<DateOnly, IReadOnlyList<Appointment>> appointments)
+    {
+        JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(notes.Root));
+        return new Journal(directory.ListNotes, directory.OpenNote, Today, oldest, appointments, sources: directory);
+    }
+
+    private static DateOnly? Oldest(CalendarStore calendar)
+    {
+        using JournalDirectory folder = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(calendar.Folder));
+        return calendar.Oldest(Today, null, folder.ReadCalendars());
+    }
 
     [Fact]
     public void LowercaseMeetingsRoot_QualifiesWithoutCalendar()
@@ -27,7 +36,7 @@ public sealed class JournalTests : IDisposable
         notes.Create("meetings");
         notes.CreateChild("meetings", "Standup");
         notes.CreateChild("meetings/Standup", "2026-10-29");
-        Journal journal = Open(notes, null, _ => []);
+        using Journal journal = Open(notes, null, _ => []);
         Assert.Equal(["meetings/Standup/2026-10-29"], Assert.Single(journal.ReadBatch()).Meetings);
         Assert.True(journal.Exhausted);
     }
@@ -44,7 +53,7 @@ public sealed class JournalTests : IDisposable
         string text = "BEGIN:VCALENDAR\nBEGIN:VEVENT\nSUMMARY:Review\nDTSTART:" + Stamp(start)
             + "\nRRULE:FREQ=DAILY\nEXDATE:" + exclusions + "\nEND:VEVENT\nEND:VCALENDAR";
         File.WriteAllText(Path.Combine(calendar.Folder, "series.ics"), text);
-        Journal journal = Open(new NoteStore(root), calendar.Oldest(Today, null), date => calendar.Day(date).Appointments);
+        using Journal journal = Open(new NoteStore(root), Oldest(calendar), date => calendar.Day(date).Appointments);
         JournalDay day = Assert.Single(journal.ReadBatch());
         Assert.Equal(Today, day.Date);
         Assert.Equal("Review", Assert.Single(day.Appointments).Title);
@@ -70,7 +79,7 @@ public sealed class JournalTests : IDisposable
         DateTime start = appointmentDay.ToDateTime(new TimeOnly(9, 0));
         Appointment meeting = new("Review", null, start, start.AddHours(1), false);
         List<DateOnly> reads = [];
-        Journal journal = Open(notes, appointmentDay, day =>
+        using Journal journal = Open(notes, appointmentDay, day =>
         {
             reads.Add(day);
             return day == appointmentDay ? [meeting] : [];
@@ -96,7 +105,7 @@ public sealed class JournalTests : IDisposable
         NoteStore notes = new(root);
         notes.CreateWithText("2026-10-29", "# 2026-10-29\r\n  \r\t\n");
         notes.CreateWithText("2026-10-28", "#\t2026-10-28");
-        Journal journal = Open(notes, null, _ => []);
+        using Journal journal = Open(notes, null, _ => []);
 
         JournalDay day = Assert.Single(journal.ReadBatch());
         Assert.Equal(Today.AddDays(-1), day.Date);
@@ -115,9 +124,9 @@ public sealed class JournalTests : IDisposable
             + "BEGIN:VEVENT\nUID:hidden\nCLASS:PRIVATE\nDTSTART:20200101T090000Z\nEND:VEVENT\n"
             + "BEGIN:VEVENT\nUID:hidden\nRECURRENCE-ID:20200102T090000Z\nDTSTART:20200102T090000Z\nEND:VEVENT\nEND:VCALENDAR";
         File.WriteAllText(Path.Combine(calendar.Folder, "series.ics"), text);
-        DateOnly? oldest = calendar.Oldest(Today, null);
+        DateOnly? oldest = Oldest(calendar);
         Assert.Equal(Today.AddDays(-1), oldest);
-        Journal journal = Open(new NoteStore(root), oldest, date => calendar.Day(date).Appointments);
+        using Journal journal = Open(new NoteStore(root), oldest, date => calendar.Day(date).Appointments);
         JournalDay entry = Assert.Single(journal.ReadBatch());
         Assert.Equal(Today.AddDays(-1), entry.Date);
         Assert.Equal("Review", Assert.Single(entry.Appointments).Title);
@@ -132,7 +141,7 @@ public sealed class JournalTests : IDisposable
         string name = Today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         NoteInfo daily = notes.Create(name);
         notes.CreateWithText(name + " Standup", "#meeting");
-        Journal journal = Open(notes, null, _ => []);
+        using Journal journal = Open(notes, null, _ => []);
         if (oversized)
         {
             using FileStream file = File.OpenWrite(daily.Path);
@@ -158,7 +167,7 @@ public sealed class JournalTests : IDisposable
         notes.CreateWithText(name + " Standup", "#meeting");
         DateTime start = date.ToDateTime(new TimeOnly(9, 0));
         Appointment appointment = new("Standup", null, start, start.AddHours(1), false);
-        Journal journal = Open(notes, date, day => day == date ? [appointment] : []);
+        using Journal journal = Open(notes, date, day => day == date ? [appointment] : []);
         Assert.Equal("First batch", Assert.Single(journal.ReadBatch()).Body);
         Assert.False(journal.Exhausted);
 
@@ -187,6 +196,39 @@ public sealed class JournalTests : IDisposable
     }
 
     [Fact]
+    public void ReplacedNoteDirectory_RejectsItsListingAndNotesButKeepsTheAppointment()
+    {
+        NoteStore notes = new(Path.Combine(root, "notes"));
+        NoteStore other = new(Path.Combine(root, "other"));
+        DateOnly older = Today.AddDays(-14);
+        string name = older.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        notes.CreateWithText("2026-10-29", "First batch");
+        foreach (NoteStore store in new[] { notes, other })
+        {
+            store.CreateWithText(name, store == notes ? "Listed daily" : "Other daily");
+            store.CreateWithText(name + " Standup", "#meeting");
+        }
+        DateTime start = older.ToDateTime(new TimeOnly(9, 0));
+        Appointment appointment = new("Scheduled", null, start, start.AddHours(1), false);
+        using JournalDirectory original = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(notes.Root));
+        using Journal journal = new(original.ListNotes, original.OpenNote, Today, older, day => day == older ? [appointment] : []);
+        Assert.Equal("First batch", Assert.Single(journal.ReadBatch()).Body);
+
+        Directory.Move(notes.Root, Path.Combine(root, "previous"));
+        Directory.Move(other.Root, notes.Root);
+        using JournalDirectory replacement = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(notes.Root));
+        Assert.Contains(replacement.ListNotes(), note => note.Name == name);
+        Assert.ThrowsAny<IOException>(() => original.ListNotes());
+        JournalDay entry = Assert.Single(journal.ReadBatch());
+        Assert.Equal(older, entry.Date);
+        Assert.Null(entry.Daily);
+        Assert.Null(entry.Body);
+        Assert.Empty(entry.Meetings);
+        Assert.Same(appointment, Assert.Single(entry.Appointments));
+        Assert.True(journal.Exhausted);
+    }
+
+    [Fact]
     public void DifferentOpenedFile_LeavesDailyOutAndKeepsBothLinks()
     {
         NoteStore notes = new(Path.Combine(root, "notes"));
@@ -196,9 +238,10 @@ public sealed class JournalTests : IDisposable
         DateTime start = Today.ToDateTime(new TimeOnly(9, 0));
         Appointment item = new("Scheduled", null, start, start.AddHours(1), false);
         // The listed pathname is still eligible. Give its reader a different real file handle, without racing threads.
-        Journal journal = new(notes.List, note => note.Name == daily.Name
-            ? JournalNoteFile.Open(notes.Root, note, () => File.OpenHandle(other.Path))
-            : JournalNoteFile.Open(notes.Root, note), Today, Today, _ => [item]);
+        using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(notes.Root));
+        using Journal journal = new(directory.ListNotes, note => note.Name == daily.Name
+            ? directory.OpenNote(note, () => File.OpenHandle(other.Path))
+            : directory.OpenNote(note), Today, Today, _ => [item]);
 
         JournalDay day = Assert.Single(journal.ReadBatch());
         Assert.Null(day.Body);
@@ -214,7 +257,8 @@ public sealed class JournalTests : IDisposable
         notes.Create("Meetings");
         notes.CreateChild("Meetings", "Series");
         NoteInfo meeting = notes.CreateChild("Meetings/Series", "2026-10-29");
-        using (FileStream original = JournalNoteFile.Open(root, meeting))
+        using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(root));
+        using (FileStream original = directory.OpenNote(meeting))
         {
             Assert.True(original.CanRead);
         }
@@ -229,7 +273,7 @@ public sealed class JournalTests : IDisposable
         {
             Directory.CreateSymbolicLink(series, stored);
             Assert.True(File.GetAttributes(series).HasFlag(FileAttributes.ReparsePoint));
-            Assert.ThrowsAny<IOException>(() => JournalNoteFile.Open(root, meeting));
+            Assert.ThrowsAny<IOException>(() => directory.OpenNote(meeting));
             output.WriteLine("Read-time check used a local directory link.");
         }
         catch (IOException ex) when (OperatingSystem.IsWindows() && (ex.HResult & 0xffff) == 1314)
@@ -245,7 +289,7 @@ public sealed class JournalTests : IDisposable
             output.WriteLine("Windows denied directory-link creation (1314). The fixture supplied the Series handle's reparse bit.");
         }
 
-        Assert.ThrowsAny<IOException>(() => JournalNoteFile.Open(root, meeting,
+        Assert.ThrowsAny<IOException>(() => directory.OpenNote(meeting,
             () => throw new InvalidOperationException("The leaf open was reached."), readDirectoryAttributes));
         if (readDirectoryAttributes is not null)
         {
@@ -263,7 +307,8 @@ public sealed class JournalTests : IDisposable
         File.WriteAllText(Path.Combine(calendar.Folder, "local.ics"),
             "BEGIN:VCALENDAR\nBEGIN:VEVENT\nSUMMARY:Scheduled\nDTSTART:20261028T090000Z\nEND:VEVENT\nEND:VCALENDAR");
         IReadOnlyList<NoteInfo> List() => throw (denied ? new UnauthorizedAccessException() : new IOException());
-        Journal journal = new(List, note => JournalNoteFile.Open(root, note), Today, calendar.Oldest(Today, null),
+        using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(root));
+        using Journal journal = new(List, directory.OpenNote, Today, Oldest(calendar),
             date => calendar.Day(date).Appointments);
 
         JournalDay day = Assert.Single(journal.ReadBatch());
@@ -298,7 +343,8 @@ public sealed class JournalTests : IDisposable
         Assert.Equal(2, listed.Count);
         Assert.True(notes.TryFind(Name, out NoteInfo? editor));
         Assert.Equal(editor!.Path, listed[0].Path);
-        Journal journal = new(() => listed, note => JournalNoteFile.Open(root, note), Today, null, _ => []);
+        using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(root));
+        using Journal journal = new(() => listed, directory.OpenNote, Today, null, _ => []);
 
         JournalDay day = Assert.Single(journal.ReadBatch());
         Assert.Equal(Name, day.Daily);

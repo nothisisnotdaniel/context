@@ -11,7 +11,7 @@ internal sealed class JournalDay
     public required IReadOnlyList<Appointment> Appointments { get; init; }
 }
 
-internal sealed class Journal
+internal sealed class Journal : IDisposable
 {
     private readonly Func<NoteInfo, FileStream> openPlain;
     private readonly Func<DateOnly, IReadOnlyList<Appointment>> appointments;
@@ -19,15 +19,17 @@ internal sealed class Journal
     private readonly HashSet<string> tagged = new(StringComparer.Ordinal);
     private readonly DateOnly? oldestLocal;
     private readonly Func<DateOnly?>? outlookStart;
+    private readonly IDisposable? sources;
     private DateOnly? next;
 
     public Journal(Func<IReadOnlyList<NoteInfo>> listNotes, Func<NoteInfo, FileStream> openPlain,
         DateOnly today, DateOnly? calendarStart, Func<DateOnly, IReadOnlyList<Appointment>> appointments,
-        Func<DateOnly?>? outlookStart = null)
+        Func<DateOnly?>? outlookStart = null, IDisposable? sources = null)
     {
         this.openPlain = openPlain;
         this.appointments = appointments;
         this.outlookStart = outlookStart;
+        this.sources = sources;
         oldestLocal = calendarStart;
         IReadOnlyList<NoteInfo> notes;
         try
@@ -74,6 +76,8 @@ internal sealed class Journal
     }
 
     public bool Exhausted => next is null;
+
+    public void Dispose() => sources?.Dispose();
 
     // A failed Outlook day read withdraws its bound. Notes and readable calendars keep their own bound.
     private DateOnly? Oldest => outlookStart?.Invoke() is { } date && (oldestLocal is null || date < oldestLocal)
