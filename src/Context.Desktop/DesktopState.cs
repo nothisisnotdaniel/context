@@ -47,6 +47,7 @@ internal sealed class DesktopState
     private readonly object outlookGate = new();
     private readonly object journalDayGate = new();
     private OutlookCall<Appointment>? lastJournalDay;
+    private int outlookOptOuts;
     private (DateOnly Day, OutlookCall<DateOnly> Call)? outlookHistory;
     private Dictionary<DateOnly, OutlookCall<Appointment>> outlookDays = new();
 
@@ -1028,15 +1029,20 @@ internal sealed class DesktopState
 
     internal Action<DateOnly>? BeforeJournalDay { get; set; }
 
-    public Task<(Journal Journal, JournalOutlook Outlook)> OpenJournal() => Task.Run(() =>
+    public Task<(Journal Journal, JournalOutlook Outlook)> OpenJournal() => Task.Run(() => OpenJournal(null));
+
+    internal (Journal Journal, JournalOutlook Outlook) OpenJournal(JournalFiles? boundFiles)
     {
-        DateOnly day = today();
-        JournalFiles files = new(notes, calendar, feed);
+        int optOutsAtOpen = Volatile.Read(ref outlookOptOuts);
+        JournalFiles files = boundFiles ?? new JournalFiles(notes, calendar, feed);
+        // An explicit opt-out also applies to an open journal whose original store has since been moved.
+        bool Consent() => optOutsAtOpen == Volatile.Read(ref outlookOptOuts) && files.ReadOutlook();
         try
         {
+            DateOnly day = today();
             DateOnly? localStart = calendar.Oldest(day, files.ReadCache(), files.ReadCalendars());
-            (OutlookStatus status, IReadOnlyList<DateOnly> dates) = OutlookOn() ? JournalHistory(day) : (OutlookStatus.Off, []);
-            JournalOutlook journalOutlook = new(status, dates.Count > 0 ? dates[0] : null, JournalOutlookDay);
+            (OutlookStatus status, IReadOnlyList<DateOnly> dates) = OutlookOn(Consent) ? JournalHistory(day) : (OutlookStatus.Off, []);
+            JournalOutlook journalOutlook = new(status, dates.Count > 0 ? dates[0] : null, date => JournalOutlookDay(date, Consent));
             return (new Journal(files.ListNotes, files.OpenNote, day, localStart, date =>
             {
                 BeforeJournalDay?.Invoke(date);
@@ -1048,7 +1054,7 @@ internal sealed class DesktopState
             files.Dispose();
             throw;
         }
-    });
+    }
 
     private (OutlookStatus Status, IReadOnlyList<DateOnly> Dates) JournalHistory(DateOnly day)
     {
@@ -1074,11 +1080,11 @@ internal sealed class DesktopState
     }
 
     // A later journal, even on a different date, shares the outstanding-call limit until Outlook returns.
-    private (OutlookStatus Status, IReadOnlyList<Appointment> Items) JournalOutlookDay(DateOnly day)
+    private (OutlookStatus Status, IReadOnlyList<Appointment> Items) JournalOutlookDay(DateOnly day, Func<bool> consent)
     {
         lock (journalDayGate)
         {
-            return lastJournalDay?.Read.IsCompleted == false ? (OutlookStatus.TimedOut, []) : OutlookDay(day, journal: true);
+            return OutlookDay(day, consent);
         }
     }
 
@@ -1100,10 +1106,14 @@ internal sealed class DesktopState
     /// Forgets every cached Outlook read, so the next read asks the source again. Called when the Outlook setting
     /// changes.
     /// </summary>
-    public void ForgetOutlook()
+    public void ForgetOutlook(bool disabled)
     {
         lock (outlookGate)
         {
+            if (disabled)
+            {
+                Interlocked.Increment(ref outlookOptOuts);
+            }
             outlookDays = new Dictionary<DateOnly, OutlookCall<Appointment>>();
         }
     }
@@ -1294,11 +1304,12 @@ internal sealed class DesktopState
     }
 
     // Outlook is read only when the setting is on and the source can read it; an unreadable settings.json is off.
-    private bool OutlookOn()
+    private bool OutlookOn(Func<bool>? journalConsent = null)
     {
         try
         {
-            return new SettingsStore(notes.Root).ReadOutlook() && outlook.Availability() == OutlookAvailability.Available;
+            bool enabled = journalConsent?.Invoke() ?? new SettingsStore(notes.Root).ReadOutlook();
+            return enabled && outlook.Availability() == OutlookAvailability.Available;
         }
         catch (Exception)
         {
@@ -1307,13 +1318,17 @@ internal sealed class DesktopState
     }
 
     // Outlook's appointments of the day, through the cache; Off and nothing asked when Outlook is off. Never throws.
-    private (OutlookStatus Status, IReadOnlyList<Appointment> Items) OutlookDay(DateOnly day, bool journal = false)
+    private (OutlookStatus Status, IReadOnlyList<Appointment> Items) OutlookDay(DateOnly day, Func<bool>? journalConsent = null)
     {
         try
         {
-            if (!OutlookOn())
+            if (!OutlookOn(journalConsent))
             {
                 return (OutlookStatus.Off, []);
+            }
+            if (journalConsent is not null && lastJournalDay?.Read.IsCompleted == false)
+            {
+                return (OutlookStatus.TimedOut, []);
             }
 
             DateTime nowUtc = DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc);
@@ -1330,7 +1345,7 @@ internal sealed class DesktopState
                 call = cached;
             }
 
-            if (journal)
+            if (journalConsent is not null)
             {
                 lastJournalDay = call;
             }

@@ -1138,6 +1138,20 @@ internal sealed class NoteStore
             }
         }
 
+        foreach ((string name, string path, string? child) in PagesAtLevel(parent, files, () => SubFolders(folder)))
+        {
+            entries.Add(new Entry(new NoteInfo(name, File.GetLastWriteTime(path), path), child));
+            if (child is not null)
+            {
+                AddLevel(child, name, entries);
+            }
+        }
+    }
+
+    // Both the editor and the journal pair a page with its subfolder by exact spelling first.
+    internal static IEnumerable<(string Name, string Path, string? Child)> PagesAtLevel(string? parent,
+        IEnumerable<string> files, Func<IEnumerable<string>> directories)
+    {
         List<(string Title, string Path)> notes = files
             .Where(p => string.Equals(Path.GetExtension(p), Extension, StringComparison.OrdinalIgnoreCase))
             .Select(p => (Title: Path.GetFileNameWithoutExtension(p), Path: p))
@@ -1149,19 +1163,22 @@ internal sealed class NoteStore
             .ToList();
         if (notes.Count == 0)
         {
-            return;
+            yield break;
         }
 
-        List<DirectoryInfo> folders = SubFolders(folder, top: parent is null);
-        DirectoryInfo?[] childFolders = new DirectoryInfo?[notes.Count];
+        string[] folders = directories()
+            .Where(d => !Path.GetFileName(d).StartsWith('.') && !(parent is null &&
+                Path.GetFileName(d).Equals(CalendarStore.FolderName, StringComparison.OrdinalIgnoreCase)))
+            .OrderBy(d => Path.GetFileName(d), StringComparer.Ordinal).ToArray();
+        string?[] childFolders = new string?[notes.Count];
         HashSet<string> claimed = new(StringComparer.Ordinal);
         for (int i = 0; i < notes.Count; i++)
         {
-            DirectoryInfo? exact = folders.FirstOrDefault(d => string.Equals(d.Name, notes[i].Title, StringComparison.Ordinal));
+            string? exact = folders.FirstOrDefault(d => string.Equals(Path.GetFileName(d), notes[i].Title, StringComparison.Ordinal));
             if (exact is not null)
             {
                 childFolders[i] = exact;
-                claimed.Add(exact.Name);
+                claimed.Add(exact);
             }
         }
 
@@ -1169,12 +1186,12 @@ internal sealed class NoteStore
         {
             if (childFolders[i] is null)
             {
-                DirectoryInfo? other = folders.FirstOrDefault(d => !claimed.Contains(d.Name)
-                    && string.Equals(d.Name, notes[i].Title, StringComparison.OrdinalIgnoreCase));
+                string? other = folders.FirstOrDefault(d => !claimed.Contains(d)
+                    && string.Equals(Path.GetFileName(d), notes[i].Title, StringComparison.OrdinalIgnoreCase));
                 if (other is not null)
                 {
                     childFolders[i] = other;
-                    claimed.Add(other.Name);
+                    claimed.Add(other);
                 }
             }
         }
@@ -1182,12 +1199,7 @@ internal sealed class NoteStore
         for (int i = 0; i < notes.Count; i++)
         {
             string name = parent is null ? notes[i].Title : parent + "/" + notes[i].Title;
-            NoteInfo note = new NoteInfo(name, File.GetLastWriteTime(notes[i].Path), notes[i].Path);
-            entries.Add(new Entry(note, childFolders[i]?.FullName));
-            if (childFolders[i] is DirectoryInfo child)
-            {
-                AddLevel(child.FullName, name, entries);
-            }
+            yield return (name, notes[i].Path, childFolders[i]);
         }
     }
 
@@ -1212,16 +1224,12 @@ internal sealed class NoteStore
     private static bool IsPlainFile(FileInfo file) => file.Exists && !IsLink(file)
         && (file.Attributes & (FileAttributes.Directory | FileAttributes.Device)) == 0;
 
-    // The folders in a folder that can hold subpages: no link or reparse point, no name starting with '.', and at the
-    // top level not the calendar folder. Sorted exactly by name so the case-insensitive match is the same every time.
-    private static List<DirectoryInfo> SubFolders(string folder, bool top)
+    private static List<string> SubFolders(string folder)
     {
         try
         {
             return new DirectoryInfo(folder).EnumerateDirectories()
-                .Where(d => !d.Name.StartsWith('.') && !IsLink(d)
-                    && !(top && string.Equals(d.Name, CalendarStore.FolderName, StringComparison.OrdinalIgnoreCase)))
-                .OrderBy(d => d.Name, StringComparer.Ordinal)
+                .Where(d => !IsLink(d)).Select(d => d.FullName)
                 .ToList();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

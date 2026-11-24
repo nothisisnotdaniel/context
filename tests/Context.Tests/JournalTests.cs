@@ -115,6 +115,37 @@ public sealed class JournalTests : IDisposable
     }
 
     [Fact]
+    public void LegacyMeetingTag_IsReadAgainWhenItsBatchArrives()
+    {
+        NoteStore notes = new(root);
+        notes.CreateWithText("2026-10-29", "First batch");
+        const string Prefix = "2026-10-15 ";
+        NoteInfo removed = notes.CreateWithText(Prefix + "Removed", "#meeting");
+        NoteInfo oversized = notes.CreateWithText(Prefix + "Oversized", "#meeting");
+        NoteInfo newlyTagged = notes.CreateWithText(Prefix + "Added", "Ordinary text");
+        NoteInfo matched = notes.CreateWithText(Prefix + "Scheduled", "#meeting");
+        DateOnly older = Today.AddDays(-14);
+        DateTime start = older.ToDateTime(new TimeOnly(9, 0));
+        Appointment appointment = new("Scheduled", null, start, start.AddHours(1), false);
+        using Journal journal = Open(notes, older, day => day == older ? [appointment] : []);
+        Assert.Equal("First batch", Assert.Single(journal.ReadBatch()).Body);
+
+        File.WriteAllText(removed.Path, "Only an inline code sample: `#meeting`");
+        using (FileStream file = File.OpenWrite(oversized.Path))
+        {
+            file.SetLength(NoteStore.MaxNoteBytes + 1);
+        }
+        File.WriteAllText(newlyTagged.Path, "Now a #meeting");
+        File.WriteAllText(matched.Path, "Appointment match");
+
+        JournalDay day = Assert.Single(journal.ReadBatch());
+        Assert.Equal(older, day.Date);
+        Assert.Equal([newlyTagged.Name, matched.Name], day.Meetings);
+        Assert.Same(appointment, Assert.Single(day.Appointments));
+        Assert.True(journal.Exhausted);
+    }
+
+    [Fact]
     public void ExplicitDateBeforeSeriesStart_SetsCalendarHistoryBound()
     {
         CalendarStore calendar = new(root, TimeZoneInfo.Utc);
@@ -226,6 +257,73 @@ public sealed class JournalTests : IDisposable
         Assert.Empty(entry.Meetings);
         Assert.Same(appointment, Assert.Single(entry.Appointments));
         Assert.True(journal.Exhausted);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void VerifiedDirectory_ListsItsOwnNotesAndKeepsTheSibling(bool changeRoot)
+    {
+        NoteStore store = new(Path.Combine(root, "notes"));
+        store.Create("Meetings");
+        store.CreateChild("Meetings", "Selected");
+        store.CreateChild("Meetings", "Sibling");
+        NoteInfo selected = store.CreateChild("Meetings/Selected", "2026-10-28");
+        NoteInfo sibling = store.CreateChild("Meetings/Sibling", "2026-10-29");
+        DateTime modified = new(2026, 10, 1, 8, 0, 0, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(selected.Path, modified);
+        string target = changeRoot ? store.Root : Path.GetDirectoryName(selected.Path)!;
+        NoteStore replacement = new(Path.Combine(root, "replacement"));
+        replacement.CreateWithText("2001-01-01", "Other fixture");
+        using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(store.Root));
+        int changes = 0;
+        directory.BeforeEnumerate = path =>
+        {
+            if (path == target)
+            {
+                Directory.Move(target, Path.Combine(root, "previous"));
+                Directory.Move(replacement.Root, target);
+                changes++;
+            }
+        };
+
+        IReadOnlyList<NoteInfo> listed = directory.ListNotes();
+        Assert.Equal(1, changes);
+        Assert.Equal(modified, Assert.Single(listed, n => n.Name == selected.Name).Modified.ToUniversalTime());
+        Assert.Contains(listed, n => n.Name == sibling.Name);
+        Assert.DoesNotContain(listed, n => n.Title == "2001-01-01");
+        List<DateOnly> reads = [];
+        using Journal journal = new(() => listed, directory.OpenNote, Today, null, date => { reads.Add(date); return []; });
+        IReadOnlyList<JournalDay> batch = journal.ReadBatch();
+        if (changeRoot)
+        {
+            Assert.Empty(batch);
+        }
+        else
+        {
+            Assert.Equal([sibling.Name], Assert.Single(batch).Meetings);
+        }
+        Assert.Equal([Today, Today.AddDays(-1)], reads);
+        Assert.True(journal.Exhausted);
+    }
+
+    [Fact]
+    public void VerifiedCalendarDirectory_ListsOnlyItsOriginalNames()
+    {
+        string calendar = Directory.CreateDirectory(Path.Combine(root, "calendar")).FullName;
+        string replacement = Directory.CreateDirectory(Path.Combine(root, "replacement")).FullName;
+        File.WriteAllText(Path.Combine(calendar, "listed.ics"), "Original fixture");
+        File.WriteAllText(Path.Combine(replacement, "other.ics"), "Other fixture");
+        using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(calendar));
+        directory.BeforeEnumerate = path =>
+        {
+            Directory.Move(path, Path.Combine(root, "previous"));
+            Directory.Move(replacement, path);
+        };
+
+        (string name, string? text) = Assert.Single(directory.ReadCalendars());
+        Assert.Equal("listed.ics", name);
+        Assert.Null(text);
     }
 
     [Fact]

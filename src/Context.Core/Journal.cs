@@ -16,7 +16,6 @@ internal sealed class Journal : IDisposable
     private readonly Func<NoteInfo, FileStream> openPlain;
     private readonly Func<DateOnly, IReadOnlyList<Appointment>> appointments;
     private readonly Dictionary<DateOnly, List<NoteInfo>> candidates = [];
-    private readonly HashSet<string> tagged = new(StringComparer.Ordinal);
     private readonly DateOnly? oldestLocal;
     private readonly Func<DateOnly?>? outlookStart;
     private readonly IDisposable? sources;
@@ -56,11 +55,7 @@ internal sealed class Journal : IDisposable
 
             // A legacy name alone is ambiguous. Only its tag extends the note history bound.
             // Untagged matches are already covered by the calendar's bound.
-            if (title.Length > 10 && Read(note) is { } legacy && TagParser.Parse(legacy).Contains(MeetingNote.Tag))
-            {
-                tagged.Add(note.Name);
-            }
-            if (title.Length == 10 || tagged.Contains(note.Name))
+            if (title.Length == 10 || HasMeetingTag(note))
             {
                 oldestLocal = oldestLocal is null || date < oldestLocal ? date : oldestLocal;
             }
@@ -112,13 +107,17 @@ internal sealed class Journal : IDisposable
                         }
                     }
                 }
-                else if (note.Parent is not null || items.Any(a => MeetingNote.IsNoteOf(a, note.Name)) || tagged.Contains(note.Name))
+                else if (note.Parent is not null || items.Any(a => MeetingNote.IsNoteOf(a, note.Name)))
                 {
                     using FileStream? plain = TryOpen(note);
                     if (plain is not null)
                     {
                         meetings.Add(note.Name);
                     }
+                }
+                else if (HasMeetingTag(note))
+                {
+                    meetings.Add(note.Name);
                 }
             }
             if (body is not null || meetings.Count > 0 || items.Count > 0)
@@ -129,6 +128,9 @@ internal sealed class Journal : IDisposable
         }
         return result;
     }
+
+    private bool HasMeetingTag(NoteInfo note) =>
+        Read(note) is { } text && TagParser.Parse(text).Contains(MeetingNote.Tag);
 
     private FileStream? TryOpen(NoteInfo note)
     {

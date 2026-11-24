@@ -1819,9 +1819,11 @@ internal sealed class DesktopActions
             return Refused(ActionReason.Invalid, OutlookUnavailableText);
         }
 
+        bool disabled = false;
         try
         {
             settings.SaveOutlook(on);
+            disabled = !on;
         }
         catch (SettingsTooLargeException)
         {
@@ -1837,7 +1839,7 @@ internal sealed class DesktopActions
         }
         finally
         {
-            state.ForgetOutlook();
+            state.ForgetOutlook(disabled);
         }
 
         return new ActionResult(ActionKind.Done, ActionReason.None, on ? OutlookOnText : OutlookOffText);

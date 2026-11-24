@@ -193,6 +193,94 @@ public sealed class JournalPanelTests : IDisposable
         data.Outlook.Days[day] = [new Appointment("Outlook fixture", null, start, start.AddHours(1), false)];
     }
 
+    [Fact]
+    public void ReplacementSettings_CannotEnableOutlookForTheBoundStore()
+    {
+        string replacement = data.Outside("replacement");
+        new SettingsStore(data.Root).SaveOutlook(false);
+        new SettingsStore(replacement).SaveOutlook(true);
+        AddOutlookAppointment(0);
+        DesktopState state = data.CreateState();
+        using JournalFiles sources = new(data.Notes!, new CalendarStore(data.Root, DesktopFixture.Zone), null);
+        Directory.Move(data.Root, data.Outside("original"));
+        Directory.Move(replacement, data.Root);
+        Assert.True(new SettingsStore(data.Root).ReadOutlook());
+
+        (Journal opened, JournalOutlook outlook) = state.OpenJournal(sources);
+        using Journal journal = opened;
+        Assert.Empty(journal.ReadBatch());
+        Assert.True(journal.Exhausted);
+        Assert.Equal(OutlookStatus.Off, outlook.Status);
+        Assert.Equal(0, data.Outlook.OldestCalls);
+        Assert.Equal(0, data.Outlook.AppointmentCalls);
+    }
+
+    [Theory]
+    [InlineData("limit", true)]
+    [InlineData("oversized", false)]
+    [InlineData("invalid", false)]
+    [InlineData("alias", false)]
+    public async Task JournalConsent_RequiresBoundedRegularSettings(string kind, bool enabled)
+    {
+        data.WriteNote(Date(0), "Local fixture");
+        AddOutlookAppointment(0);
+        string path = Path.Combine(data.Root, SettingsStore.FileName);
+        const string OptIn = """{"outlook":{"enabled":true}}""";
+        if (kind == "alias")
+        {
+            string fixture = data.Outside("fixture.json");
+            File.WriteAllText(fixture, OptIn);
+            try
+            {
+                File.CreateSymbolicLink(path, fixture);
+                output.WriteLine("Settings fixture is a file link.");
+            }
+            catch (IOException e) when (OperatingSystem.IsWindows() && (e.HResult & 0xffff) == 1314)
+            {
+                Directory.CreateDirectory(path);
+                output.WriteLine("Settings fixture is a directory. Windows denied file-link creation (1314).");
+            }
+        }
+        else
+        {
+            File.WriteAllText(path, kind == "invalid" ? """{"outlook":{"enabled":"true"}}"""
+                : OptIn.PadRight((int)SettingsStore.MaxBytes + (kind == "oversized" ? 1 : 0)));
+        }
+        (Journal opened, JournalOutlook outlook) = await data.CreateState().OpenJournal().WaitAsync(Wait);
+        using Journal journal = opened;
+        JournalDay day = Assert.Single(journal.ReadBatch());
+        Assert.Equal("Local fixture", day.Body);
+        Assert.Equal(enabled ? new[] { "Outlook fixture" } : [], day.Appointments.Select(a => a.Title));
+        Assert.Equal(enabled ? OutlookStatus.Ok : OutlookStatus.Off, outlook.Status);
+        Assert.Equal(enabled ? 1 : 0, data.Outlook.OldestCalls);
+        Assert.Equal(enabled ? 1 : 0, data.Outlook.AppointmentCalls);
+        Assert.True(journal.Exhausted);
+    }
+
+    [Fact]
+    public async Task OutlookTurnedOffBetweenBatches_StopsDayCallsAndKeepsLocalNotes()
+    {
+        SettingsStore settings = new(data.Root);
+        settings.SaveOutlook(true);
+        data.WriteNote(Date(0), "First batch");
+        data.WriteNote(Date(14), "Older local note");
+        AddOutlookAppointment(14);
+        (Journal opened, JournalOutlook outlook) = await data.CreateState().OpenJournal().WaitAsync(Wait);
+        using Journal journal = opened;
+        Assert.Equal("First batch", Assert.Single(journal.ReadBatch()).Body);
+        Assert.Equal(14, data.Outlook.AppointmentCalls);
+
+        settings.SaveOutlook(false);
+        JournalDay day = Assert.Single(journal.ReadBatch());
+        Assert.Equal(DesktopFixture.Today.AddDays(-14), day.Date);
+        Assert.Equal("Older local note", day.Body);
+        Assert.Empty(day.Appointments);
+        Assert.Equal(OutlookStatus.Off, outlook.Status);
+        Assert.Equal(1, data.Outlook.OldestCalls);
+        Assert.Equal(14, data.Outlook.AppointmentCalls);
+        Assert.True(journal.Exhausted);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -380,7 +468,40 @@ public sealed class JournalPanelTests : IDisposable
     }
 
     [Fact]
-    public async Task ReplacedStoreBetweenBatches_OnlyKeepsTheIndependentOutlookAppointment()
+    public async Task CacheSpelling_FollowsTheVolumesNameMatchingForHistoryAndDay()
+    {
+        Directory.CreateDirectory(data.Root);
+        string calendar = DesktopFixture.Calendar(DesktopFixture.Event("Cached fixture", "20261027T090000", "20261027T093000"));
+        File.WriteAllText(Path.Combine(data.Root, "Calendar-Link.ics"), calendar);
+        bool matches = File.Exists(Path.Combine(data.Root, CalendarFeed.CacheFileName));
+        CalendarFeed feed = new(data.Root, new CalendarLink(data.Root), data.Http, () => data.UtcNow);
+        Assert.Equal(matches ? calendar : null, feed.ReadCache());
+        DesktopState state = data.CreateState();
+        List<DateOnly> reads = [];
+        state.BeforeJournalDay = reads.Add;
+        using Journal journal = (await state.OpenJournal().WaitAsync(Wait)).Journal;
+        IReadOnlyList<JournalDay> batch = journal.ReadBatch();
+        if (matches)
+        {
+            JournalDay day = Assert.Single(batch);
+            Assert.Equal(DesktopFixture.Today.AddDays(-2), day.Date);
+            Assert.Equal("Cached fixture", Assert.Single(day.Appointments).Title);
+            Assert.Equal([DesktopFixture.Today, DesktopFixture.Today.AddDays(-1), day.Date], reads);
+        }
+        else
+        {
+            Assert.Empty(batch);
+            Assert.Empty(reads);
+        }
+        output.WriteLine("The fixed cache name matched the mixed-case fixture: " + matches);
+        Assert.True(journal.Exhausted);
+        Assert.Equal(0, data.Http.Requests);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReplacedStoreBetweenBatches_OnlyKeepsTheIndependentOutlookAppointment(bool turnOutlookOff)
     {
         string replacement = Directory.CreateDirectory(data.Outside("replacement")).FullName;
         foreach (string root in new[] { data.Root, replacement })
@@ -402,6 +523,19 @@ public sealed class JournalPanelTests : IDisposable
         Directory.Move(Path.Combine(data.Root, CalendarStore.FolderName), data.Outside("previous-calendar"));
         Directory.Move(data.Root, data.Outside("previous-store"));
         Directory.Move(replacement, data.Root);
+
+        if (turnOutlookOff)
+        {
+            int calls = data.Outlook.AppointmentCalls;
+            ActionResult result = await data.Actions!.SetOutlookEnabled(false).WaitAsync(Wait);
+            Assert.Equal(ActionKind.Done, result.Kind);
+            Assert.True(new SettingsStore(data.Outside("previous-store")).ReadOutlook());
+            Assert.Empty(journal.ReadBatch());
+            Assert.True(journal.Exhausted);
+            Assert.Equal(calls, data.Outlook.AppointmentCalls);
+            Assert.Equal(0, data.Http.Requests);
+            return;
+        }
 
         JournalDay day = Assert.Single(journal.ReadBatch());
         Assert.Equal(DesktopFixture.Today.AddDays(-14), day.Date);
