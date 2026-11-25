@@ -88,6 +88,11 @@
     [Parameter]
     public bool Sensitive { get; set; }
 
+    [Parameter]
+    public JournalNoteLink? JournalLink { get; set; }
+
+    private NoteReference Target => JournalLink?.Target ?? NoteReference.Stored(Name, Sensitive);
+
     /// <summary>Called with the shown version's id and time (UTC) when Restore this version is clicked.</summary>
     [Parameter]
     public EventCallback<(string Id, DateTime SavedUtc)> OnRestore { get; set; }
@@ -155,7 +160,7 @@
     {
         int mine = ++request;
         string name = Name;
-        HistoryView result = await State.History(name);
+        HistoryView result = await State.History(Target);
         if (mine != request || !string.Equals(name, Name, StringComparison.Ordinal))
         {
             return;
@@ -183,7 +188,7 @@
         selectedText = null;
         diff = null;
         versionUnreadable = false;
-        string? text = await State.ReadVersion(Name, version.Id);
+        string? text = await State.ReadVersion(Target, version.Id);
         if (mine != choice)
         {
             return;

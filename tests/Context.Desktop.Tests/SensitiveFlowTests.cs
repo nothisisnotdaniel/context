@@ -322,42 +322,27 @@ public sealed class SensitiveFlowTests : IDisposable
     [Fact]
     public async Task MarkSensitive_PlainVersionsLeft_RedStatus()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
         data.WriteNote("Plan", "# Plan\n");
         string folder = Path.Combine(data.Root, NoteHistory.FolderName, "Plan");
         Directory.CreateDirectory(folder);
         File.WriteAllText(Path.Combine(folder, "20261029T080000000Z.md"), "old\n");
-        UnixFileMode mode = File.GetUnixFileMode(folder);
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        data.Actions!.AfterHistorySealed = () =>
-        {
-            if (!OperatingSystem.IsWindows())
-            {
-                File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserExecute);
-            }
-        };
+        string? later = null;
+        data.Actions!.BeforePlainHistoryCleanup = () =>
+            later = data.State!.HistoryStore.Keep(Path.Combine(data.Root, "Plan.md"), "Later readable version"u8.ToArray());
         await Open(cut, js, "Plan");
-        try
-        {
-            await MainTests.ChooseAsync(cut, "mark-sensitive");
-            await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
+        await MainTests.ChooseAsync(cut, "mark-sensitive");
+        await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-            cut.WaitForAssertion(() => Assert.Equal(
-                "Marked Plan sensitive, but its old readable versions couldn't be removed. Delete .history/Plan in the data folder.",
-                cut.Find(".main-status").TextContent), Wait);
-        }
-        finally
-        {
-            File.SetUnixFileMode(folder, mode);
-        }
-
+        cut.WaitForAssertion(() => Assert.Contains("Marked Plan sensitive, but readable history may remain.", cut.Find(".main-status").TextContent), Wait);
+        Assert.Contains(Path.Combine(folder, Assert.IsType<string>(later) + ".md"), cut.Find(".main-status").TextContent);
+        Assert.Contains("Keep the .ctxs files.", cut.Find(".main-status").TextContent);
         Assert.Contains("red", cut.Find(".main-status").GetAttribute("class"), StringComparison.Ordinal);
         Assert.Contains("Plan.ctxs", RootFiles());
+        Assert.Equal("Later readable version", File.ReadAllText(Path.Combine(folder, Assert.IsType<string>(later) + ".md")));
+        byte[] sealedVersion = File.ReadAllBytes(Path.Combine(folder, "20261029T080000000Z~Plan.ctxs"));
+        Assert.Equal("old\n", SealedNote.Open("Plan", sealedVersion, data.Keys.MachinePublicKey()!, data.Keys.Agree));
     }
 
     // AC-3: Mark sensitive asks first; Cancel changes nothing, the confirm button seals the note and closes it.

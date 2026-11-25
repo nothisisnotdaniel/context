@@ -45,6 +45,10 @@ internal sealed class DesktopState
 
     // Guards the Outlook cache: one call per day (appointments), each with its start time.
     private readonly object outlookGate = new();
+    private readonly object journalDayGate = new();
+    private OutlookCall<Appointment>? lastJournalDay;
+    private int outlookOptOuts;
+    private (DateOnly Day, OutlookCall<DateOnly> Call)? outlookHistory;
     private Dictionary<DateOnly, OutlookCall<Appointment>> outlookDays = new();
 
     // The mail suggestions accepted or dismissed in this session (job 286); never written to disk.
@@ -201,6 +205,8 @@ internal sealed class DesktopState
 
     /// <summary>How long one Outlook source call may take before it counts as timed out.</summary>
     public TimeSpan OutlookTimeout { get; }
+
+    internal TaskScheduler OutlookScheduler { get; set; } = TaskScheduler.Default;
 
     /// <summary>The kept versions of the notes, with the same clock as this state.</summary>
     public NoteHistory HistoryStore { get; }
@@ -426,18 +432,15 @@ internal sealed class DesktopState
 
     /// <summary>
     /// Reads the note called <paramref name="name"/> for editing (<see cref="NoteStore.ReadForEdit"/>) off the
-    /// calling thread. <c>null</c> when there is no such note, or it can't be read.
+    /// calling thread. A stored name must still match the plain-note listing exactly.
+    /// <c>null</c> when there is no such note, or it can't be read.
     /// </summary>
-    public Task<EditableNote?> ReadForEdit(string name) => Task.Run(() =>
+    public Task<EditableNote?> ReadForEdit(string name, bool storedName = false) => Task.Run(() =>
     {
         try
         {
-            if (!notes.TryFind(name, out NoteInfo? found) || found is null)
-            {
-                return null;
-            }
-
-            return notes.ReadForEdit(found);
+            NoteReference target = storedName ? NoteReference.Stored(name) : (NoteReference)name;
+            return notes.TryFind(target, out NoteInfo? found) && found is not null ? notes.ReadForEdit(found) : null;
         }
         catch (Exception)
         {
@@ -451,7 +454,7 @@ internal sealed class DesktopState
     /// the calling thread. Reads only, writes nothing; 0 for the same name, a case-only rename, a title the rename
     /// refuses, and on any error.
     /// </summary>
-    public Task<int> LinkUpdateCount(string name, string newTitle) => Task.Run(() =>
+    public Task<int> LinkUpdateCount(NoteReference name, string newTitle) => Task.Run(() =>
     {
         try
         {
@@ -486,7 +489,7 @@ internal sealed class DesktopState
     /// <see cref="NoteAttachments.DrawingSources"/> that resolves to an Excalidraw drawing and renders through
     /// <see cref="ExcalidrawSvg.Render"/>, as <c>image/svg+xml</c> with the base64 of the SVG. Empty on any error. Reads only.
     /// </summary>
-    public Task<IReadOnlyList<InlineImage>> InlineImages(string name, string text) => Task.Run(() =>
+    public Task<IReadOnlyList<InlineImage>> InlineImages(NoteReference name, string text) => Task.Run(() =>
     {
         List<InlineImage> images = [];
         try
@@ -527,7 +530,7 @@ internal sealed class DesktopState
     /// without asking again. <c>null</c> when there is no such note or it can't be unlocked, whatever the reason.
     /// Nothing is written.
     /// </summary>
-    public Task<EditableNote?> ReadSensitive(string name) => Task.Run(() =>
+    public Task<EditableNote?> ReadSensitive(NoteReference name) => Task.Run(() =>
     {
         try
         {
@@ -567,14 +570,17 @@ internal sealed class DesktopState
     /// <see cref="Session"/> holds open), newest first, and its saved text, off the calling thread. Never asks the key
     /// store. <see cref="HistoryKind.Unreadable"/> when the note is gone, locked, or it or its history can't be read.
     /// </summary>
-    public Task<HistoryView> History(string name) => Task.Run(() =>
+    public Task<HistoryView> History(NoteReference name) => Task.Run(() =>
     {
         try
         {
             if (notes.TryFind(name, out NoteInfo? plain) && plain is not null)
             {
-                string text = notes.ReadForEdit(plain).Text;
-                return new HistoryView(HistoryKind.Shown, HistoryStore.Versions(plain), text);
+                string text = NoteStore.ReadSelectedForEdit(plain, name.Resolved(plain)).Text;
+                using NoteFileEdit? files = name.BeginEdit();
+                IReadOnlyList<NoteVersion> versions = HistoryStore.Versions(plain, files);
+                files?.Verify();
+                return new HistoryView(HistoryKind.Shown, versions, text);
             }
 
             if (notes.TryFindSensitive(name, out NoteInfo? found) && found is not null
@@ -591,11 +597,30 @@ internal sealed class DesktopState
         }
     });
 
+    internal Task<JournalDirectory.Edit.DeleteSelection?> CaptureDelete(NoteReference target, IReadOnlyList<NoteInfo> below) =>
+        Task.Run(() =>
+        {
+            try
+            {
+                if (!notes.TryFind(target, out NoteInfo? page) || page is null)
+                {
+                    return null;
+                }
+                using JournalDirectory? owned = target.Source is null ? JournalDirectory.Bind(notes.Root) : null;
+                using JournalDirectory.Edit edit = new(target.Source as JournalDirectory ?? owned ?? throw new IOException(), page);
+                return new JournalDirectory.Edit.DeleteSelection(edit, below.Prepend(page));
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
+        });
+
     /// <summary>
     /// The text of version <paramref name="id"/> of the note <paramref name="name"/>, as the editor would hold it, off
     /// the calling thread (see <see cref="ReadVersionText"/>).
     /// </summary>
-    public Task<string?> ReadVersion(string name, string id) => Task.Run(() => ReadVersionText(name, id));
+    public Task<string?> ReadVersion(NoteReference name, string id) => Task.Run(() => ReadVersionText(name, id));
 
     /// <summary>
     /// The text of version <paramref name="id"/> of the note <paramref name="name"/> as the editor would hold it
@@ -603,13 +628,14 @@ internal sealed class DesktopState
     /// with <see cref="SealedNote.Open"/> under the title in its file name and one <see cref="IKeyStore.Agree"/>, only
     /// while the session holds the note open. <c>null</c> when there is no such version or it can't be read.
     /// </summary>
-    public string? ReadVersionText(string name, string id)
+    public string? ReadVersionText(NoteReference name, string id)
     {
         try
         {
             if (notes.TryFind(name, out NoteInfo? plain) && plain is not null)
             {
-                return HistoryStore.TryRead(plain, id, out byte[]? bytes) && bytes is not null
+                using NoteFileEdit? files = name.BeginEdit();
+                return HistoryStore.TryRead(plain, id, out byte[]? bytes, files) && bytes is not null
                     ? NoteStore.DecodeText(bytes).Replace("\r\n", "\n", StringComparison.Ordinal)
                     : null;
             }
@@ -714,7 +740,7 @@ internal sealed class DesktopState
     /// (<see cref="LinksView.Build"/>) after syncing the index, off the calling thread. Never throws: any failure
     /// gives the <see cref="LinksViewKind.IndexUnreadable"/> view.
     /// </summary>
-    public Task<LinksView> Links(string name) => Task.Run(() =>
+    public Task<LinksView> Links(NoteReference name) => Task.Run(() =>
     {
         try
         {
@@ -1023,27 +1049,95 @@ internal sealed class DesktopState
     private DateTime LocalNow() =>
         TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc), calendar.Zone);
 
+    internal Action<DateOnly>? BeforeJournalDay { get; set; }
+
+    public Task<(Journal Journal, JournalOutlook Outlook)> OpenJournal() => Task.Run(() => OpenJournal(null));
+
+    internal JournalFiles BindJournalFiles() => new(notes, calendar, feed);
+
+    internal (Journal Journal, JournalOutlook Outlook) OpenJournal(JournalFiles? boundFiles)
+    {
+        int optOutsAtOpen = Volatile.Read(ref outlookOptOuts);
+        JournalFiles files = boundFiles ?? BindJournalFiles();
+        // An explicit opt-out also applies to an open journal whose original store has since been moved.
+        bool Consent() => files.ReadOutlook() && optOutsAtOpen == Volatile.Read(ref outlookOptOuts);
+        try
+        {
+            DateOnly day = today();
+            DateOnly? localStart = calendar.Oldest(day, files.ReadCache(), files.ReadCalendars());
+            (OutlookStatus status, IReadOnlyList<DateOnly> dates) = OutlookOn(Consent) ? JournalHistory(day, Consent) : (OutlookStatus.Off, []);
+            JournalOutlook journalOutlook = new(status, dates.Count > 0 ? dates[0] : null, date => JournalOutlookDay(date, Consent));
+            return (new Journal(files.ListNotes, files.OpenNote, day, localStart, date =>
+            {
+                BeforeJournalDay?.Invoke(date);
+                return ReadDay(date, journalOutlook.Day(date), files.ReadCache(), files.ReadCalendars()).Appointments;
+            }, () => journalOutlook.Oldest, files), journalOutlook);
+        }
+        catch
+        {
+            files.Dispose();
+            throw;
+        }
+    }
+
+    private (OutlookStatus Status, IReadOnlyList<DateOnly> Dates) JournalHistory(DateOnly day, Func<bool> consent)
+    {
+        OutlookCall<DateOnly> call;
+        lock (outlookGate)
+        {
+            if (outlookHistory is { } pending && !pending.Call.Read.IsCompleted)
+            {
+                // An earlier day's unfinished search cannot answer a new date or start another Outlook thread.
+                if (pending.Day != day)
+                {
+                    return (OutlookStatus.TimedOut, []);
+                }
+                call = pending.Call;
+            }
+            else
+            {
+                call = Start(utcNow(), () => outlook.Oldest(day, calendar.Zone), consent);
+                outlookHistory = (day, call);
+            }
+        }
+        return Finish(call, consent);
+    }
+
+    // A later journal, even on a different date, shares the outstanding-call limit until Outlook returns.
+    private (OutlookStatus Status, IReadOnlyList<Appointment> Items) JournalOutlookDay(DateOnly day, Func<bool> consent)
+    {
+        lock (journalDayGate)
+        {
+            return OutlookDay(day, consent);
+        }
+    }
+
     // The day's appointments from the calendar files, the feed's cached copy and Outlook's; never downloads.
     private CalendarDay ReadDay(DateOnly day, IReadOnlyList<Appointment> fromOutlook) =>
         ReadDay(day, fromOutlook, feed?.ReadCache());
 
     // ReadDay with the feed's cached text already read (null: no cache).
-    private CalendarDay ReadDay(DateOnly day, IReadOnlyList<Appointment> fromOutlook, string? cached)
+    private CalendarDay ReadDay(DateOnly day, IReadOnlyList<Appointment> fromOutlook, string? cached,
+        IEnumerable<(string Name, string? Text)>? sources = null)
     {
         IReadOnlyList<Appointment> fromFeed = cached is null
             ? []
             : CurrentView.FeedEvents(new CalendarFeedResult(CalendarFeedStatus.Stale, cached), calendar.Zone, day);
-        return calendar.Day(day, [.. fromFeed, .. fromOutlook]);
+        return calendar.Day(day, [.. fromFeed, .. fromOutlook], sources);
     }
 
     /// <summary>
     /// Forgets every cached Outlook read, so the next read asks the source again. Called when the Outlook setting
     /// changes.
     /// </summary>
-    public void ForgetOutlook()
+    public void ForgetOutlook(bool disabled)
     {
         lock (outlookGate)
         {
+            if (disabled)
+            {
+                Interlocked.Increment(ref outlookOptOuts);
+            }
             outlookDays = new Dictionary<DateOnly, OutlookCall<Appointment>>();
         }
     }
@@ -1234,11 +1328,12 @@ internal sealed class DesktopState
     }
 
     // Outlook is read only when the setting is on and the source can read it; an unreadable settings.json is off.
-    private bool OutlookOn()
+    private bool OutlookOn(Func<bool>? journalConsent = null)
     {
         try
         {
-            return new SettingsStore(notes.Root).ReadOutlook() && outlook.Availability() == OutlookAvailability.Available;
+            bool enabled = journalConsent?.Invoke() ?? new SettingsStore(notes.Root).ReadOutlook();
+            return enabled && outlook.Availability() == OutlookAvailability.Available;
         }
         catch (Exception)
         {
@@ -1247,13 +1342,17 @@ internal sealed class DesktopState
     }
 
     // Outlook's appointments of the day, through the cache; Off and nothing asked when Outlook is off. Never throws.
-    private (OutlookStatus Status, IReadOnlyList<Appointment> Items) OutlookDay(DateOnly day)
+    private (OutlookStatus Status, IReadOnlyList<Appointment> Items) OutlookDay(DateOnly day, Func<bool>? journalConsent = null)
     {
         try
         {
-            if (!OutlookOn())
+            if (!OutlookOn(journalConsent))
             {
                 return (OutlookStatus.Off, []);
+            }
+            if (journalConsent is not null && lastJournalDay?.Read.IsCompleted == false)
+            {
+                return (OutlookStatus.TimedOut, []);
             }
 
             DateTime nowUtc = DateTime.SpecifyKind(utcNow(), DateTimeKind.Utc);
@@ -1263,14 +1362,18 @@ internal sealed class DesktopState
             {
                 if (!outlookDays.TryGetValue(day, out OutlookCall<Appointment>? cached) || !cached.Usable(nowUtc))
                 {
-                    cached = Start(nowUtc, () => outlook.Appointments(day, zone));
+                    cached = Start(nowUtc, () => outlook.Appointments(day, zone), journalConsent);
                     outlookDays[day] = cached;
                 }
 
                 call = cached;
             }
 
-            return Finish(call);
+            if (journalConsent is not null)
+            {
+                lastJournalDay = call;
+            }
+            return Finish(call, journalConsent);
         }
         catch (Exception)
         {
@@ -1280,13 +1383,14 @@ internal sealed class DesktopState
 
     // One source call on its own thread (it may block on Outlook or its security prompt for long, so it neither waits
     // for nor holds a pool thread); a call that throws reads as Failed.
-    private static OutlookCall<T> Start<T>(DateTime startedUtc, Func<OutlookRead<T>> read) =>
+    private OutlookCall<T> Start<T>(DateTime startedUtc, Func<OutlookRead<T>> read, Func<bool>? journalConsent = null) =>
         new(startedUtc, Task.Factory.StartNew(
             () =>
             {
                 try
                 {
-                    return read();
+                    // Consent can be withdrawn after this read is queued.
+                    return journalConsent is null || journalConsent() ? read() : new OutlookRead<T>(OutlookReadKind.Off);
                 }
                 catch (Exception)
                 {
@@ -1295,12 +1399,18 @@ internal sealed class DesktopState
             },
             CancellationToken.None,
             TaskCreationOptions.LongRunning,
-            TaskScheduler.Default));
+            OutlookScheduler));
 
     // Waits for the call at most OutlookTimeout; the call itself keeps running and stays cached while it does.
-    private (OutlookStatus Status, IReadOnlyList<T> Items) Finish<T>(OutlookCall<T> call)
+    private (OutlookStatus Status, IReadOnlyList<T> Items) Finish<T>(OutlookCall<T> call, Func<bool>? journalConsent = null)
     {
-        if (!call.Read.Wait(OutlookTimeout))
+        bool completed = call.Read.Wait(OutlookTimeout);
+        // A source call may have been running when the user turned Outlook off.
+        if (journalConsent is not null && !journalConsent())
+        {
+            return (OutlookStatus.Off, []);
+        }
+        if (!completed)
         {
             return (OutlookStatus.TimedOut, []);
         }
@@ -1308,6 +1418,7 @@ internal sealed class DesktopState
         OutlookRead<T> read = call.Read.Result;
         return read.Kind switch
         {
+            OutlookReadKind.Off => (OutlookStatus.Off, []),
             OutlookReadKind.Ok => (OutlookStatus.Ok, read.Items),
             OutlookReadKind.NotRunning => (OutlookStatus.NotRunning, []),
             OutlookReadKind.Denied => (OutlookStatus.Denied, []),
@@ -1345,7 +1456,7 @@ internal sealed class DesktopState
             }
 
             TimeSpan age = nowUtc - StartedUtc;
-            return age >= TimeSpan.Zero && age < OutlookCacheAge;
+            return Read.Result.Kind != OutlookReadKind.Off && age >= TimeSpan.Zero && age < OutlookCacheAge;
         }
     }
 

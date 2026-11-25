@@ -48,7 +48,7 @@ internal sealed record SealedRecipient
 internal static class SealedNote
 {
     /// <summary>The largest sealed file that is read (8 MB).</summary>
-    public const long MaxFileBytes = 8L * 1024 * 1024;
+    public const long MaxFileBytes = NoteHistory.MaxVersionBytes;
 
     /// <summary>The most recipients one file can have.</summary>
     public const int MaxKeys = 8;
@@ -369,6 +369,10 @@ internal static class SealedNote
             json.WriteEndObject();
         }
 
+        if (stream.Length > MaxFileBytes)
+        {
+            throw new SealedNoteException();
+        }
         return stream.ToArray();
     }
 

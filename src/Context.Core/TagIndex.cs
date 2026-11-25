@@ -111,14 +111,14 @@ internal sealed class NameLookup
     }
 
     /// <summary>The note called <paramref name="wanted"/>: an exact match first, then one ignoring case.</summary>
-    public string? Match(string wanted)
+    public string? Match(string wanted, bool exactOnly = false)
     {
         if (exact.Contains(wanted))
         {
             return wanted;
         }
 
-        return folded.TryGetValue(wanted, out string? name) ? name : null;
+        return !exactOnly && folded.TryGetValue(wanted, out string? name) ? name : null;
     }
 
     /// <summary>
@@ -1396,9 +1396,9 @@ internal sealed class TagIndex
     /// The indexed note called <paramref name="name"/> (trimmed): an exact match first, then one ignoring
     /// case. <c>null</c> if there is none.
     /// </summary>
-    public string? FindNote(string name)
+    public string? FindNote(string name, bool storedName = false)
     {
-        return Run(connection => new NameLookup(NoteNames(connection)).Match(name.Trim()));
+        return Run(connection => new NameLookup(NoteNames(connection)).Match(storedName ? name : name.Trim(), exactOnly: storedName));
     }
 
     /// <summary>
@@ -1409,10 +1409,10 @@ internal sealed class TagIndex
     /// <see cref="NoteLink.Missing"/> row with the target as written. A note never links to itself. An
     /// unknown note has no links.
     /// </summary>
-    public IReadOnlyList<NoteLink> Links(string noteName) => Run(connection =>
+    public IReadOnlyList<NoteLink> Links(string noteName, bool storedName = false) => Run(connection =>
     {
         NameLookup names = new NameLookup(NoteNames(connection));
-        string? note = names.Match(noteName.Trim());
+        string? note = names.Match(storedName ? noteName : noteName.Trim(), exactOnly: storedName);
         if (note is null)
         {
             return (IReadOnlyList<NoteLink>)[];

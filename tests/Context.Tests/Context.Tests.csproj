@@ -24,6 +24,10 @@
 
   <ItemGroup>
     <Compile Include="..\Context.Desktop.Tests\FileSnapshot.cs" Link="FileSnapshot.cs" />
+    <Compile Include="..\..\src\Context.Desktop\JournalDirectory.cs" Link="JournalDirectory.cs" />
+    <Compile Include="..\..\src\Context.Desktop\JournalDirectory.Listing.cs" Link="JournalDirectory.Listing.cs" />
+    <Compile Include="..\..\src\Context.Desktop\JournalDirectory.Mutations.cs" Link="JournalDirectory.Mutations.cs" />
+    <Compile Include="..\..\src\Context.Desktop\JournalDirectory.Edit.cs" Link="JournalDirectory.Edit.cs" />
   </ItemGroup>
 
 </Project>

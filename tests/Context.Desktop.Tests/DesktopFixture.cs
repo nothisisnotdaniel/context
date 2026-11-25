@@ -23,10 +23,12 @@ internal sealed class DesktopFixture : IDisposable
     private readonly bool ownsFolder = true;
     private DateTime created = new(2026, 10, 1, 9, 0, 0, DateTimeKind.Utc);
 
-    public DesktopFixture()
+    public DesktopFixture() : this("Context") { }
+
+    public DesktopFixture(string rootName)
     {
         parent = Path.Combine(Path.GetTempPath(), "context-desktop-" + Guid.NewGuid().ToString("N"));
-        Root = Path.Combine(parent, "Context");
+        Root = Path.Combine(parent, rootName);
         Directory.CreateDirectory(parent);
         Bunit = new BunitContext();
         Guard = new CloseGuard(Close);
