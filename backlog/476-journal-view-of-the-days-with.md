@@ -15,3 +15,7 @@ Context has the daily note, the weekly review and the done log, but no way to re
 ## Notes
 
 Idea from Creacility/assistant PLAN.md (compared on 2026-11-22).
+
+## Known issue accepted on 25 November 2026
+
+The operator accepted the Journal implementation reviewed in round 20 at `dfc9b98a7b11`. When an earlier plaintext version remains after **Mark sensitive**, the red warning can display two adjacent spaces in a recovery path as one. Open **Recovery paths** to select the exact folder or filename. The operator considers this case unlikely and deferred the display correction to [Context #519](519-preserve-consecutive-spaces-in-recovery-warnings.md).

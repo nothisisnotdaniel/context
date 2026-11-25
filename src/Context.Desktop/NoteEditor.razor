@@ -68,7 +68,7 @@
     {
         <p class="red editor-failed" role="alert">The editor couldn't start. @DisplayName was not changed.</p>
     }
-    <p class="status @statusClass" role="status">
+    <p class="status @statusClass" role="status" tabindex="@(recoveryDetails is null ? null : "0")">
         @if (statusLines.Count > 0)
         {
             @foreach ((string text, string css) in statusLines)
@@ -81,12 +81,14 @@
             @statusText
         }
     </p>
+    <RecoveryPaths Paths="recoveryDetails?.RecoveryPaths" />
     <div class="editor-host" @ref="host"></div>
 </section>
 
 @code {
     private ElementReference host;
     private EditableNote? opened;
+    internal NoteReference? OpenedTarget => opened?.Target;
     private bool mounted;
     // True from the mount until what it loads (attributes, outline, decisions, glossary) is in and drawn.
     private bool loadingAfterMount;
@@ -98,6 +100,7 @@
     private bool dirty;
     private string statusText = string.Empty;
     private string statusClass = string.Empty;
+    private ActionResult? recoveryDetails;
     private List<(string Text, string Css)> statusLines = [];
     private readonly SemaphoreSlim saveGate = new(1, 1);
     private CancellationTokenSource? pause;
@@ -134,6 +137,11 @@
     [Parameter]
     [EditorRequired]
     public string Name { get; set; } = string.Empty;
+
+    [Parameter]
+    public JournalNoteLink? JournalLink { get; set; }
+
+    private Task<EditableNote?> ReadPlain() => JournalLink?.ReadForEdit() ?? State.ReadForEdit(Name, storedName: true);
 
     /// <summary>Called with the tag (as found by TagParser) when a tag in the text is clicked.</summary>
     [Parameter]
@@ -270,7 +278,7 @@
             }
 
             string text = edited ? await Interop.GetMarkdownAsync(host) : note.Text;
-            (string Text, string Css, List<(string Text, string Css)> Lines) before = (statusText, statusClass, statusLines);
+            (string Text, string Css, List<(string Text, string Css)> Lines, ActionResult? Recovery) before = (statusText, statusClass, statusLines, recoveryDetails);
             saving = true;
             ShowStatus("Saving…", "grey");
             StateHasChanged();
@@ -282,7 +290,7 @@
 
             if (auto && result.Kind == ActionKind.Refused && result.Reason == ActionReason.Busy)
             {
-                (statusText, statusClass, statusLines) = before;
+                (statusText, statusClass, statusLines, recoveryDetails) = before;
                 RestartPause();
             }
             else if (result.Kind == ActionKind.Done)
@@ -331,7 +339,7 @@
             }
             else
             {
-                ShowStatus(DesktopText.OneLine(result.Text), "red");
+                ShowStatus(DesktopText.OneLine(result.Text), "red", result);
             }
 
             return result;
@@ -398,6 +406,7 @@
         statusText = string.Empty;
         statusClass = string.Empty;
         statusLines = shown;
+        recoveryDetails = null;
         StateHasChanged();
     }
 
@@ -416,7 +425,7 @@
         CancelPause();
         CancelTitleFetches();
 
-        EditableNote? note = await State.ReadForEdit(Name);
+        EditableNote? note = await ReadPlain();
         if (note is null)
         {
             return;
@@ -424,7 +433,7 @@
 
         try
         {
-            await Interop.MountAsync(host, note.Text, await State.InlineImages(Name, note.Text), Name);
+            await Interop.MountAsync(host, note.Text, await State.InlineImages(note.Target, note.Text), Name);
             opened = note;
             dirty = false;
             await LoadAttributesAsync();
@@ -456,7 +465,7 @@
         CancelTitleFetches();
         try
         {
-            await Interop.MountAsync(host, saved.Text, Sensitive ? [] : await State.InlineImages(Name, saved.Text), Name);
+            await Interop.MountAsync(host, saved.Text, Sensitive ? [] : await State.InlineImages(saved.Target, saved.Text), Name);
             opened = saved;
             dirty = false;
             ShowStatus(string.Empty, string.Empty);
@@ -517,7 +526,7 @@
             State.Session.IdleReached += SessionIdle;
         }
 
-        EditableNote? note = Sensitive ? await State.ReadSensitive(Name) : await State.ReadForEdit(Name);
+        EditableNote? note = Sensitive ? await State.ReadSensitive(NoteReference.Stored(Name, sensitive: true)) : await ReadPlain();
         if (note is null)
         {
             unreadable = true;
@@ -541,7 +550,7 @@
             Interop.Changed += EditorChanged;
 
             // A sensitive note shows no images: nothing next to it is read.
-            IReadOnlyList<InlineImage> images = Sensitive ? [] : await State.InlineImages(Name, note.Text);
+            IReadOnlyList<InlineImage> images = Sensitive ? [] : await State.InlineImages(note.Target, note.Text);
             await Interop.MountAsync(host, note.Text, images, Name);
             opened = note;
             mounted = true;
@@ -1335,10 +1344,11 @@
         titleFetches = new CancellationTokenSource();
     }
 
-    private void ShowStatus(string text, string cssClass)
+    private void ShowStatus(string text, string cssClass, ActionResult? result = null)
     {
         statusText = text;
         statusClass = cssClass;
         statusLines = [];
+        recoveryDetails = result is { HasRecoveryDetails: true } ? result : null;
     }
 }

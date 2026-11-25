@@ -31,6 +31,11 @@ internal static class BoundedFile
         }
 
         using FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        return Read(stream, maxBytes);
+    }
+
+    internal static byte[] Read(FileStream stream, long maxBytes)
+    {
         if (!stream.CanSeek)
         {
             throw new IOException("Not a regular file.");

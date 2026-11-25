@@ -425,6 +425,8 @@ internal sealed class SettingsStore
     /// </summary>
     public bool ReadOutlook() => OutlookOf(ReadRoot()) ?? false;
 
+    internal static bool ReadOutlook(FileStream file) => OutlookOf(ParseRoot(BoundedFile.Read(file, MaxBytes))) ?? false;
+
     /// <summary>
     /// Writes <c>"outlook":{"enabled":<paramref name="enabled"/>}</c>, replacing whatever <c>outlook</c> held and
     /// keeping every other property, creating the root folder if needed. Reads the file again first and throws
@@ -695,9 +697,13 @@ internal sealed class SettingsStore
             throw new SettingsStoreException("Can't read settings.json.", ex);
         }
 
+        return ParseRoot(bytes);
+    }
+
+    private static JsonObject ParseRoot(ReadOnlySpan<byte> json)
+    {
         try
         {
-            ReadOnlySpan<byte> json = bytes;
             if (json.StartsWith((ReadOnlySpan<byte>)[0xEF, 0xBB, 0xBF]))
             {
                 json = json[3..];

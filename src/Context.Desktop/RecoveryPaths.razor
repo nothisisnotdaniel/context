@@ -1,0 +1,24 @@
+@if (Paths is { Count: > 0 })
+{
+    <details class="recovery-paths">
+        <summary>Recovery paths</summary>
+        @foreach (string path in Paths)
+        {
+            @if (DesktopText.OneLine(path) == path)
+            {
+                <input type="text" readonly aria-label="Recovery path" value="@path" />
+            }
+            else
+            {
+                <label>Path with special characters (JSON string)
+                    <input type="text" readonly value="@System.Text.Json.JsonSerializer.Serialize(path)" />
+                </label>
+            }
+        }
+    </details>
+}
+
+@code {
+    [Parameter]
+    public IReadOnlyList<string>? Paths { get; set; }
+}

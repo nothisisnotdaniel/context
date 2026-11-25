@@ -1,0 +1,2195 @@
+using System.Collections.Concurrent;
+using System.Globalization;
+using System.Text;
+using System.Text.Json;
+using AngleSharp.Css.Dom;
+using AngleSharp.Css.Parser;
+using AngleSharp.Dom;
+using AngleSharp.Html.Dom;
+using Bunit;
+using Jint;
+using Xunit.Abstractions;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
+using Microsoft.Win32.SafeHandles;
+
+namespace Context.Tests;
+
+public sealed class JournalPanelTests : IDisposable
+{
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
+    private readonly DesktopFixture data = new();
+    private readonly EditorJs editor;
+    private readonly Engine browser = new();
+    private readonly ITestOutputHelper output;
+    private string? markerId;
+    private readonly SemaphoreSlim watching = new(0);
+
+    public JournalPanelTests(ITestOutputHelper output)
+    {
+        this.output = output;
+        editor = new EditorJs(data.Bunit);
+        browser.Execute("""
+            const window = globalThis;
+            const region = {scrollTop: 0, clientHeight: 120, scrollTo(x,y) { this.scrollTop = y; }};
+            const marker = {closest: () => region};
+            class IntersectionObserver {
+                constructor(cb) { this.callback = cb; }
+                observe() { globalThis.observer = this; }
+                disconnect() {}
+            }
+            const bridge = {signal: null, invokeMethodAsync(method) { this.signal = method; }};
+            """);
+        browser.Execute(File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "journal.js")));
+        data.Bunit.JSInterop.SetupVoid("ContextJournal.watch", invocation =>
+        {
+            SetRegion(((ElementReference)invocation.Arguments[0]!).Id);
+            browser.Execute("ContextJournal.watch(marker, bridge, 1)");
+            watching.Release();
+            return true;
+        }).SetVoidResult();
+        data.Bunit.JSInterop.SetupVoid("ContextJournal.stop", _ => true).SetVoidResult();
+    }
+
+    public void Dispose() => data.Dispose();
+
+    private void SetRegion(string? reference)
+    {
+        // A new scrolling region also replaces its descendant marker's Blazor reference.
+        if (markerId != reference)
+        {
+            browser.Execute("region.scrollTop = 0");
+            markerId = reference;
+        }
+    }
+
+    private static string Date(int ago) => DesktopFixture.Today.AddDays(-ago).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+    private static async Task Open(IRenderedComponent<Main> cut)
+    {
+        await RunPalette(cut, "/journal");
+        cut.WaitForAssertion(() => Assert.Equal("Journal", cut.Find(".journal-panel h2").TextContent), Wait);
+    }
+
+    private static async Task RunPalette(IRenderedComponent<Main> cut, string command)
+    {
+        await cut.Find(".layout").KeyDownAsync(new KeyboardEventArgs { Key = "K", CtrlKey = true });
+        await cut.Find(".palette-input").InputAsync(new ChangeEventArgs { Value = command });
+        await cut.Find(".palette-input").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+    }
+
+    [Theory]
+    [InlineData("/review", ".review-panel", "No todos done.")]
+    [InlineData("/tags work", ".tag-panel", "No notes with this tag.")]
+    [InlineData("/find role writer", ".find-panel", "No notes have role:: writer.")]
+    [InlineData("/decisions", ".decisions-panel", "No decisions yet.")]
+    [InlineData("/similar", ".similar-panel", "No similar notes.")]
+    public async Task PalettePanelFromJournal_ShowsItsResults(string command, string panel, string result)
+    {
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        await Open(cut);
+        cut.WaitForAssertion(() => Assert.Contains("No journal entries.", cut.Find(".journal-panel").TextContent), Wait);
+        await RunPalette(cut, command);
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Empty(cut.FindAll(".journal-panel"));
+            Assert.Contains(result, cut.Find(panel).TextContent, StringComparison.Ordinal);
+        }, Wait);
+    }
+
+    private static Task Bottom(IRenderedComponent<Main> cut) =>
+        cut.InvokeAsync(cut.FindComponent<JournalPanel>().Instance.Bridge.OnJournalBottom);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SettingsFromSelectedTag_ClearsResultsIncludingThroughJournal(bool throughJournal)
+    {
+        data.WriteNote("Tagged note", "#work");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        await RunPalette(cut, "/tags");
+        const string Tag = ".tags-panel .tag-button[title='#work']";
+        cut.WaitForElement(Tag, Wait);
+        await StaleClick.ClickAsync(cut, Tag);
+        void AssertSelection()
+        {
+            Assert.Equal("true", cut.Find(Tag).GetAttribute("aria-pressed"));
+            Assert.Equal("Tagged note", cut.Find(".tag-panel .note-button").TextContent);
+        }
+        cut.WaitForAssertion(AssertSelection, Wait);
+        if (throughJournal)
+        {
+            await Open(cut);
+            cut.WaitForAssertion(() => Assert.Contains("No journal entries.", cut.Find(".journal-panel").TextContent), Wait);
+            await StaleClick.ClickAsync(cut, ".journal-panel .close");
+            cut.WaitForAssertion(AssertSelection, Wait);
+            await Open(cut);
+            cut.WaitForAssertion(() => Assert.Contains("No journal entries.", cut.Find(".journal-panel").TextContent), Wait);
+        }
+        await RunPalette(cut, "/settings");
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("Settings", cut.Find(".settings-panel h2").TextContent);
+            Assert.DoesNotContain("Loading…", cut.Find(".settings-panel").TextContent);
+            Assert.Empty(cut.FindAll(".tags-panel, .tag-panel, .journal-panel"));
+        }, Wait);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LegacyMeetingButton_OpensItsExactStoredName(bool hasSibling)
+    {
+        IRenderedComponent<Main> cut = await OpenLegacyMeeting(hasSibling);
+        data.Dialog.ExportPath = data.Outside("export.md");
+        await MainTests.ChooseAsync(cut, "export");
+        Assert.Equal(LegacyBody, File.ReadAllText(data.Dialog.ExportPath));
+
+        data.Dialog.SharePath = data.Outside("share.html");
+        await MainTests.ChooseAsync(cut, "share");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        string shared = File.ReadAllText(data.Dialog.SharePath);
+        Assert.Contains("Space-suffixed fixture", shared, StringComparison.Ordinal);
+        Assert.DoesNotContain(SiblingBody, shared, StringComparison.Ordinal);
+
+        await MainTests.ChooseAsync(cut, "delete");
+        Assert.Equal($"Delete {LegacyName}? This can't be undone.", cut.Find(".dialog .question").TextContent);
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Contains("Deleted", cut.Find(".main-status").TextContent), Wait);
+        Assert.False(File.Exists(PlainPath(LegacyName)));
+        AssertSibling(hasSibling);
+    }
+
+    private static string SiblingName => Date(0) + " Review";
+
+    private Task<IRenderedComponent<Main>> OpenDailyEditor(string body = "Current parent") =>
+        OpenDailyEditor(data, editor, body);
+
+    private static async Task<IRenderedComponent<Main>> OpenDailyEditor(DesktopFixture fixture, EditorJs editor, string body)
+    {
+        IRenderedComponent<Main> cut = await fixture.RenderAsync<Main>();
+        await fixture.State!.ReloadsSettled().WaitAsync(Wait);
+        await Open(cut);
+        cut.WaitForElement(".journal-open", Wait);
+        await StaleClick.ClickAsync(cut, ".journal-open");
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal(body, editor.MountedText());
+            Assert.DoesNotContain("Loading", cut.Find(".links-panel").TextContent);
+        }, Wait);
+        return cut;
+    }
+
+    [Theory]
+    [InlineData("first subpage")]
+    [InlineData("editor save")]
+    [InlineData("in-place edit")]
+    public async Task DeleteQuestion_ProtectsTheDisplayedSubtreeAndItsHistories(string change)
+    {
+        string name = Date(0);
+        NoteStore otherEditor = new(data.Root);
+        NoteInfo parent = otherEditor.CreateWithText(name, "Current parent");
+        NoteHistory history = new(otherEditor, () => data.UtcNow);
+        string parentId = Assert.IsType<string>(history.Keep(parent.Path, "Earlier parent"u8.ToArray()));
+        NoteInfo? child = change == "first subpage" ? null : otherEditor.CreateChild(parent.Reference, "First", "Initial child");
+        if (child is not null)
+        {
+            history.Keep(child.Path, File.ReadAllBytes(child.Path));
+        }
+        IRenderedComponent<Main> cut = await OpenDailyEditor();
+        await MainTests.ChooseAsync(cut, "delete");
+        string question = child is null ? $"Delete {name}? This can't be undone." : $"Delete {name} and its 1 subpage? This can't be undone.";
+        Assert.Equal(question, cut.Find(".dialog .question").TextContent);
+        child ??= otherEditor.CreateChild(parent.Reference, "First", "Initial child");
+        string saved = "Child saved with the question open";
+        if (change == "in-place edit")
+        {
+            File.WriteAllText(child.Path, saved);
+        }
+        else
+        {
+            Assert.Equal(NoteSaveResult.Saved, otherEditor.SaveIfUnchanged(otherEditor.ReadForEdit(child), saved, out _, history));
+        }
+        string childId = Assert.Single(history.Versions(child)).Id;
+        await data.State!.Refresh().WaitAsync(Wait);
+        Assert.Equal(question, cut.Find(".dialog .question").TextContent);
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Equal(DesktopActions.DeleteFailedText(name), cut.Find(".main-status").TextContent), Wait);
+        Assert.Equal("Current parent", editor.MountedText());
+        Assert.Equal("Earlier parent", await data.State.ReadVersion(parent.Reference, parentId).WaitAsync(Wait));
+        Assert.Equal(saved, (await data.State.ReadForEdit(child.Name).WaitAsync(Wait))?.Text);
+        Assert.Equal("# First\nInitial child", await data.State.ReadVersion(child.Reference, childId).WaitAsync(Wait));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConfirmDelete_RequiresTheSameFieldBytesInPagesAndHistory(bool editVersion)
+    {
+        string name = Date(0);
+        NoteStore store = new(data.Root);
+        NoteHistory history = new(store, () => data.UtcNow);
+        NoteInfo parent = store.CreateWithText(name, "Current parent");
+        string parentId = Assert.IsType<string>(history.Keep(parent.Path, "Earlier parent"u8.ToArray()));
+        NoteInfo child = store.CreateChild(parent.Reference, "First", "owner:: Amber");
+        string childId = Assert.IsType<string>(history.Keep(child.Path, "owner:: Amber"u8.ToArray()));
+        string file = editVersion ? Path.Combine(NoteHistory.FolderFor(child.Path), childId + ".md") : child.Path;
+        File.SetLastWriteTimeUtc(file, data.UtcNow);
+        DateTime fixedTime = File.GetLastWriteTimeUtc(file);
+        IRenderedComponent<Main> cut = await OpenDailyEditor();
+        await MainTests.ChooseAsync(cut, "delete");
+        Assert.Contains("1 subpage", cut.Find(".dialog .question").TextContent);
+        long length = new FileInfo(file).Length;
+        File.WriteAllText(file, File.ReadAllText(file).Replace("Amber", "Azure", StringComparison.Ordinal));
+        File.SetLastWriteTimeUtc(file, fixedTime);
+        Assert.Equal((length, fixedTime), (new FileInfo(file).Length, File.GetLastWriteTimeUtc(file)));
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Equal(DesktopActions.DeleteFailedText(name), cut.Find(".main-status.red").TextContent), Wait);
+        Assert.Equal("Current parent", editor.MountedText());
+        Assert.Equal("Earlier parent", await data.State!.ReadVersion(parent.Reference, parentId).WaitAsync(Wait));
+        Assert.Equal(editVersion ? "# First\nowner:: Amber" : "# First\nowner:: Azure", (await data.State.ReadForEdit(child.Name).WaitAsync(Wait))?.Text);
+        Assert.Equal(editVersion ? "owner:: Azure" : "owner:: Amber", await data.State.ReadVersion(child.Reference, childId).WaitAsync(Wait));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConfirmDelete_KeepsAVersionAddedDuringPlanningOrRetirement(bool atRetirement)
+    {
+        string name = Date(0);
+        data.WriteNote(name, "Current parent");
+        IRenderedComponent<Main> cut = await OpenDailyEditor();
+        NoteReference target = cut.FindComponent<NoteEditor>().Instance.OpenedTarget!.Value;
+        JournalDirectory directory = Assert.IsType<JournalDirectory>(target.Source);
+        string path = target.SelectedPath!, folder = NoteHistory.FolderFor(path);
+        string first = Assert.IsType<string>(data.State!.HistoryStore.Keep(path, "Earlier"u8.ToArray()));
+        NoteHistory other = new(new NoteStore(data.Root), () => data.UtcNow);
+        await MainTests.ChooseAsync(cut, "delete");
+        Assert.Contains(name, cut.Find(".dialog .question").TextContent);
+        bool checkedHistory = false;
+        string? added = null;
+        directory.BeforeEnumerate = entry => checkedHistory |= entry == folder;
+        directory.EntryAvailable = entry =>
+        {
+            if (!atRetirement && checkedHistory && entry == path)
+            {
+                added ??= other.Keep(path, "Also kept"u8.ToArray());
+            }
+            return true;
+        };
+        directory.RemovalAvailable = entry =>
+        {
+            if (atRetirement && entry == path)
+            {
+                added ??= other.Keep(path, "Also kept"u8.ToArray());
+            }
+            return true;
+        };
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Equal(DesktopActions.DeleteFailedText(name), cut.Find(".main-status.red").TextContent), Wait);
+        Assert.Equal("Current parent", editor.MountedText());
+        Assert.Equal("Current parent", File.ReadAllText(path));
+        Assert.Equal("Earlier", await data.State.ReadVersion(target, first).WaitAsync(Wait));
+        Assert.Equal("Also kept", await data.State.ReadVersion(target, Assert.IsType<string>(added)).WaitAsync(Wait));
+        Assert.Equal(first + "-1", added);
+        Assert.Equal(2, (await data.State.History(target).WaitAsync(Wait)).Versions.Count);
+    }
+
+    [Fact]
+    public async Task MarkSensitive_AfterIncompleteDelete_IdentifiesPreviouslyStagedHistory()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        string name = Date(0);
+        data.WriteNote(name, "Current parent");
+        IRenderedComponent<Main> cut = await OpenDailyEditor();
+        NoteReference target = cut.FindComponent<NoteEditor>().Instance.OpenedTarget!.Value;
+        JournalDirectory directory = Assert.IsType<JournalDirectory>(target.Source);
+        string path = target.SelectedPath!, folder = NoteHistory.FolderFor(path);
+        string first = Assert.IsType<string>(data.State!.HistoryStore.Keep(path, "Earlier readable version"u8.ToArray()));
+        string second = Assert.IsType<string>(data.State.HistoryStore.Keep(path, "Kept version"u8.ToArray()));
+        string plain = Path.Combine(folder, first + ".md"), unrelated = Path.Combine(folder, "other.tmp");
+        File.WriteAllText(unrelated, "Independent fixture");
+        directory.RemovalAvailable = directory.RecoveryAvailable = file => file != plain;
+        await MainTests.ChooseAsync(cut, "delete");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Contains("Recovery is incomplete", cut.Find(".main-status.red").TextContent), Wait);
+        string recovery = Assert.Single(Directory.GetFiles(folder, ".*.tmp"));
+        Assert.Contains(Path.GetFileName(recovery), cut.Find(".main-status.red").TextContent);
+        Assert.Equal("Earlier readable version", File.ReadAllText(recovery));
+        Assert.Equal("Kept version", await data.State.ReadVersion(target, second).WaitAsync(Wait));
+        directory.RemovalAvailable = directory.RecoveryAvailable = null;
+        await MainTests.ChooseAsync(cut, "rename");
+        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Renamed" });
+        await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        cut.WaitForAssertion(() => Assert.Contains("earlier history recovery", cut.Find(".main-status.red").TextContent), Wait);
+        Assert.Contains(recovery, cut.Find(".main-status.red").TextContent);
+        Assert.Equal(name, editor.MountedName());
+        Assert.False(File.Exists(Path.Combine(data.Root, "Renamed.md")));
+        await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        using DesktopFixture secondStore = new();
+        secondStore.WriteNote(name, "Independent note");
+        string configured = data.Root;
+        directory.EntryAvailable = file => file != data.Root || configured == data.Root;
+        data.Actions!.BeforePlainHistoryCleanup = () => configured = secondStore.Root;
+        await MainTests.ChooseAsync(cut, "mark-sensitive");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Contains("readable history may remain", cut.Find(".main-status.red").TextContent), Wait);
+        string warning = cut.Find(".main-status.red").TextContent;
+        Assert.Equal(secondStore.Root, configured);
+        Assert.Contains(folder, warning);
+        Assert.Contains(recovery, warning);
+        Assert.DoesNotContain(secondStore.Root, warning);
+        Assert.Equal("Independent note", File.ReadAllText(Path.Combine(secondStore.Root, name + ".md")));
+        AssertRecoveryStatus(cut);
+        Assert.DoesNotContain("other.tmp", warning);
+        Assert.Equal("Independent fixture", File.ReadAllText(unrelated));
+        Assert.Equal("Earlier readable version", File.ReadAllText(recovery));
+        Assert.False(File.Exists(path));
+        NoteReference sensitive = NoteReference.Stored(name, sensitive: true);
+        Assert.Equal("Current parent", (await data.State.ReadSensitive(sensitive).WaitAsync(Wait))?.Text);
+        Assert.Equal("Kept version", await data.State.ReadVersion(sensitive, second).WaitAsync(Wait));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedConversion_ReportsRecoveryAndKeepsTheRestoredEditorUsable(bool refuseOriginalName)
+    {
+        data.Keys = FakeKeyStore.Ready();
+        string name = Date(0);
+        data.WriteNote(name, "Current parent");
+        IRenderedComponent<Main> cut = await OpenDailyEditor();
+        NoteReference target = cut.FindComponent<NoteEditor>().Instance.OpenedTarget!.Value;
+        JournalDirectory directory = Assert.IsType<JournalDirectory>(target.Source);
+        string path = target.SelectedPath!, sealedPath = Path.ChangeExtension(path, NoteStore.SensitiveExtension);
+        string id = Assert.IsType<string>(data.State!.HistoryStore.Keep(path, "Earlier parent"u8.ToArray()));
+        bool final = false;
+        directory.RemovalAvailable = entry => { final |= entry == path; return true; };
+        directory.EntryAvailable = entry => !final || entry != sealedPath;
+        directory.RecoveryAvailable = entry => !refuseOriginalName || entry != path;
+        await MainTests.ChooseAsync(cut, "mark-sensitive");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForElement(".main-status.red", Wait);
+        Assert.True(final);
+        if (refuseOriginalName)
+        {
+            string kept = Assert.Single(Directory.GetFiles(data.Root, ".*.tmp"));
+            string status = cut.Find(".main-status.red").TextContent;
+            Assert.Contains("Recovery is incomplete", status);
+            Assert.Contains(kept, status);
+            Assert.Equal("Current parent", File.ReadAllText(kept));
+            Assert.False(File.Exists(path));
+            NoteReference sensitive = NoteReference.Stored(name, sensitive: true);
+            Assert.Equal("Current parent", (await data.State.ReadSensitive(sensitive).WaitAsync(Wait))?.Text);
+            Assert.Equal("Earlier parent", await data.State.ReadVersion(sensitive, id).WaitAsync(Wait));
+            return;
+        }
+        Assert.Contains("original note and its history are available", cut.Find(".main-status.red").TextContent);
+        Assert.Equal("Current parent", editor.MountedText());
+        await MainTests.ChooseAsync(cut, "history");
+        cut.WaitForElement(".history-row button", Wait);
+        await StaleClick.ClickAsync(cut, ".history-row button");
+        cut.WaitForAssertion(() => Assert.Contains("Earlier parent", cut.Find(".diff-lines").TextContent), Wait);
+        await StaleClick.ClickAsync(cut, ".close-history");
+        editor.Edit("owner:: Updated");
+        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        cut.WaitForAssertion(() => Assert.Equal("owner:: Updated", File.ReadAllText(path)), Wait);
+        Assert.Equal("Earlier parent", await data.State.ReadVersion(target, id).WaitAsync(Wait));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task ConversionWithARefusedReopen_IdentifiesReadableCopiesAndKeepsSealedHistory(bool refuseVersion, bool refuseAllFiles)
+    {
+        data.Keys = FakeKeyStore.Ready();
+        string name = Date(0);
+        data.WriteNote(name, "owner:: Example");
+        IRenderedComponent<Main> cut = await OpenDailyEditor("owner:: Example");
+        NoteReference target = cut.FindComponent<NoteEditor>().Instance.OpenedTarget!.Value;
+        JournalDirectory directory = Assert.IsType<JournalDirectory>(target.Source);
+        string path = target.SelectedPath!;
+        string id = Assert.IsType<string>(data.State!.HistoryStore.Keep(path, "owner:: Earlier"u8.ToArray()));
+        string version = Path.Combine(NoteHistory.FolderFor(path), id + ".md");
+        string refused = refuseVersion ? version : path;
+        string sealedPath = Path.ChangeExtension(path, ".ctxs");
+        bool retiring = false, rollback = false;
+        directory.RemovalAvailable = entry => { retiring |= entry == path; return true; };
+        directory.EntryAvailable = entry =>
+        {
+            if (retiring && !rollback && entry == sealedPath)
+            {
+                rollback = true;
+                return false;
+            }
+            return !rollback || (refuseAllFiles ? Directory.Exists(entry) : entry != refused);
+        };
+        await MainTests.ChooseAsync(cut, "mark-sensitive");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Contains("Recovery is incomplete", cut.Find(".main-status.red").TextContent), Wait);
+        Assert.True(rollback);
+        string status = cut.Find(".main-status.red").TextContent;
+        Assert.DoesNotContain(refused, status);
+        if (refuseAllFiles)
+        {
+            Assert.Contains("No recovery location could be verified.", status);
+            Assert.DoesNotContain(data.Root, status);
+            Assert.Empty(cut.FindAll(".recovery-paths"));
+        }
+        else
+        {
+            Assert.Contains(refuseVersion ? path : version, status);
+            Assert.Contains(sealedPath, status);
+            Assert.Contains(Path.Combine(NoteHistory.FolderFor(path), NoteHistory.FileName(id, name)), status);
+            AssertRecoveryStatus(cut);
+        }
+        NoteReference sensitive = NoteReference.Stored(name, sensitive: true);
+        Assert.Equal("owner:: Example", (await data.State.ReadSensitive(sensitive).WaitAsync(Wait))?.Text);
+        Assert.Equal("owner:: Earlier", await data.State.ReadVersion(sensitive, id).WaitAsync(Wait));
+        if (refuseVersion && !refuseAllFiles)
+        {
+            Assert.Null(await data.State.ReadVersion(target, id).WaitAsync(Wait));
+            Assert.Equal("owner:: Example", editor.MountedText());
+            Assert.Equal("owner:: Example", NoteStore.ReadSelectedForEdit(new NoteInfo(name, default, path), target).Text);
+        }
+    }
+
+    [Theory]
+    [InlineData("version")]
+    [InlineData("history directory")]
+    [InlineData("note before publication")]
+    public async Task MarkSensitive_OriginalBecomesUnreadableDuringStaging_KeepsRecoverableVersions(string refused)
+    {
+        data.Keys = FakeKeyStore.Ready();
+        string name = Date(0);
+        data.WriteNote(name, "owner:: Current");
+        IRenderedComponent<Main> cut = await OpenDailyEditor("owner:: Current");
+        NoteReference selected = cut.FindComponent<NoteEditor>().Instance.OpenedTarget!.Value;
+        JournalDirectory directory = Assert.IsType<JournalDirectory>(selected.Source);
+        string path = selected.SelectedPath!, history = NoteHistory.FolderFor(path);
+        string id = Assert.IsType<string>(data.State!.HistoryStore.Keep(path, "owner:: Earlier"u8.ToArray()));
+        string version = Path.Combine(history, id + ".md");
+        bool published = false;
+        bool early = refused == "note before publication";
+        data.Actions!.AfterHistorySealed = () => published = early;
+        data.Actions.AfterNoteSealed = () => published = true;
+        string unavailable = early ? path : refused == "history directory" ? history : version;
+        directory.EntryAvailable = entry => !published || entry != unavailable;
+        await MainTests.ChooseAsync(cut, "mark-sensitive");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Contains("Recovery is incomplete", cut.Find(".main-status.red").TextContent), Wait);
+        Assert.True(published);
+        string[] paths = cut.FindAll(".recovery-paths input").Select(e => e.GetAttribute("value")!).ToArray();
+        string sealedPath = Path.ChangeExtension(path, ".ctxs");
+        if (early)
+        {
+            Assert.False(File.Exists(sealedPath));
+            string noteCopy = Assert.Single(paths, file => File.ReadAllBytes(file).SequenceEqual("owner:: Current"u8.ToArray()));
+            Assert.NotEqual(Path.GetFileName(path), Path.GetFileName(noteCopy));
+        }
+        else
+        {
+            string sealedCopy = Assert.Single(paths, file => Path.GetFileName(file) == Path.GetFileName(sealedPath));
+            Assert.Equal(File.ReadAllBytes(sealedPath), File.ReadAllBytes(sealedCopy));
+            Assert.DoesNotContain(paths, file => Path.GetFileName(file) == Path.GetFileName(version));
+        }
+        if (refused == "history directory")
+        {
+            string fallback = Assert.Single(paths, file => File.ReadAllBytes(file).SequenceEqual("owner:: Earlier"u8.ToArray()));
+            Assert.Equal(Path.GetFileName(fallback), Path.GetFileName(Assert.Single(Directory.GetFiles(data.Root, ".*.tmp"))));
+        }
+        else
+        {
+            string leaf = NoteHistory.FileName(id, name);
+            string sealedVersion = Assert.Single(paths, file => Path.GetFileName(file) == leaf);
+            Assert.Equal(File.ReadAllBytes(Path.Combine(history, leaf)), File.ReadAllBytes(sealedVersion));
+        }
+        Assert.Equal("owner:: Current", editor.MountedText());
+        published = false;
+        Assert.Equal("owner:: Earlier", await data.State.ReadVersion(selected, id).WaitAsync(Wait));
+        if (early)
+        {
+            Assert.Equal("owner:: Earlier", SealedNote.Open(name, File.ReadAllBytes(Path.Combine(history, NoteHistory.FileName(id, name))),
+                data.Keys.MachinePublicKey()!, data.Keys.Agree));
+        }
+        else
+        {
+            NoteReference sensitive = NoteReference.Stored(name, sensitive: true);
+            Assert.Equal("owner:: Current", (await data.State.ReadSensitive(sensitive).WaitAsync(Wait))?.Text);
+            Assert.Equal("owner:: Earlier", await data.State.ReadVersion(sensitive, id).WaitAsync(Wait));
+        }
+    }
+
+    [Theory]
+    [InlineData("move", false)]
+    [InlineData("rename", false)]
+    [InlineData("move", true)]
+    public async Task MarkSensitive_ReportsOnlyRemainingPublicationsFromTheEarlierRelocation(string operation, bool editDestination)
+    {
+        const string Body = "owner:: Zoë\n![photo](.attachments/photo.png)";
+        const string Earlier = "owner:: Earlier\r\nstatus:: Open";
+        data.Keys = FakeKeyStore.Ready();
+        NoteStore store = new(data.Root);
+        NoteInfo note = store.CreateWithText(Date(0), Body);
+        store.Create("Destination");
+        NoteInfo other = store.CreateChild("Destination", "Independent");
+        byte[] prior = Encoding.UTF8.GetBytes(Earlier);
+        File.WriteAllBytes(other.Path, prior);
+        NoteHistory history = new(store, () => data.UtcNow);
+        string id = Assert.IsType<string>(history.Keep(note.Path, prior));
+        string otherId = Assert.IsType<string>(history.Keep(other.Path, prior));
+        byte[] image = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7];
+        new NoteAttachments(store).Add(note.Reference, "photo.png", image);
+        string destination = operation == "move" ? Path.Combine(data.Root, "Destination", note.Title + ".md")
+            : Path.Combine(data.Root, "Renamed.md");
+        string version = Path.Combine(NoteHistory.FolderFor(destination), id + ".md");
+        string reportedNote, reportedVersion;
+        // The conversion opens in a fresh app over the same disposable store.
+        using (DesktopFixture firstApp = new(data))
+        {
+            await firstApp.RefreshAsync().WaitAsync(Wait);
+            using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(data.Root));
+            string refused = Path.Combine(NoteAttachments.Folder(note), "photo.png");
+            if (operation == "rename")
+            {
+                string second = Assert.IsType<string>(history.Keep(note.Path, "owner:: Second"u8.ToArray()));
+                refused = Path.Combine(NoteHistory.FolderFor(note.Path), second + ".md");
+            }
+            directory.RemovalAvailable = path => path != Path.Combine(NoteHistory.FolderFor(note.Path), id + ".md");
+            directory.RecoveryAvailable = path => path != refused;
+            using JournalNoteLink link = new(note, directory);
+            Assert.True(await link.Bind().WaitAsync(Wait));
+            ActionResult failed = operation == "move"
+                ? await firstApp.Actions!.MoveNote(link.Target, "Destination").WaitAsync(Wait)
+                : await firstApp.Actions!.RenameNote(link.Target, "Renamed", new Confirmation()).WaitAsync(Wait);
+            Assert.Equal(ActionKind.Failed, failed.Kind);
+            reportedNote = Assert.Single(failed.RecoveryFiles, p => p.EndsWith(destination, StringComparison.Ordinal));
+            reportedVersion = Assert.Single(failed.RecoveryFiles, p => p.EndsWith(version, StringComparison.Ordinal));
+            Assert.Equal(Body, File.ReadAllText(reportedNote));
+            Assert.Equal(prior, File.ReadAllBytes(reportedVersion));
+            if (editDestination)
+            {
+                EditableNote open = Assert.IsType<EditableNote>(await firstApp.State!.ReadForEdit("Destination/" + note.Title).WaitAsync(Wait));
+                Assert.Equal(ActionKind.Done, (await firstApp.Actions.SaveNote(open, "owner:: Later edit").WaitAsync(Wait)).Kind);
+            }
+        }
+        IRenderedComponent<Main> cut = await OpenDailyEditor(Body);
+        await MainTests.ChooseAsync(cut, "mark-sensitive");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Contains("readable history may remain", cut.Find(".main-status.red").TextContent), Wait);
+        string[] paths = cut.FindAll(".recovery-paths input[readonly]").Select(input => input.GetAttribute("value")!).ToArray();
+        Assert.Equal(!editDestination, paths.Contains(reportedNote, StringComparer.Ordinal));
+        Assert.Contains(reportedVersion, paths);
+        Assert.DoesNotContain(paths, p => p.Contains("Independent", StringComparison.Ordinal));
+        Assert.Equal(editDestination ? "owner:: Later edit" : Body, File.ReadAllText(destination));
+        Assert.Equal(prior, File.ReadAllBytes(version));
+        Assert.Equal(prior, File.ReadAllBytes(other.Path));
+        Assert.Equal(prior, File.ReadAllBytes(Path.Combine(NoteHistory.FolderFor(other.Path), otherId + ".md")));
+        NoteReference sensitive = NoteReference.Stored(note.Name, sensitive: true);
+        Assert.Equal(Body, (await data.State!.ReadSensitive(sensitive).WaitAsync(Wait))?.Text);
+        Assert.Equal(Earlier.Replace("\r\n", "\n", StringComparison.Ordinal), await data.State.ReadVersion(sensitive, id).WaitAsync(Wait));
+    }
+
+    [Fact]
+    public async Task EarlierNoteRecovery_SurvivesLaterSaveAndShowsItsUnambiguousPathWhenSealed()
+    {
+        using DesktopFixture fixture = new(OperatingSystem.IsWindows() ? "Journal\u0085store" : "Journal\rstore");
+        fixture.Keys = FakeKeyStore.Ready();
+        string name = Date(0);
+        fixture.WriteNote(name, "owner:: Original");
+        fixture.WriteNote("Other", "Independent note");
+        await fixture.RefreshAsync().WaitAsync(Wait);
+        NoteInfo note = Assert.Single(fixture.Notes!.List(), n => n.Name == name);
+        string id = Assert.IsType<string>(fixture.State!.HistoryStore.Keep(note.Path, "owner:: Earlier"u8.ToArray()));
+        using JournalDirectory source = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(fixture.Root));
+        bool refused = false;
+        source.EntryAvailable = path => !refused || path != note.Path;
+        using JournalNoteLink link = new(note, source);
+        Assert.True(await link.Bind().WaitAsync(Wait));
+        EditableNote opened = Assert.IsType<EditableNote>(await link.ReadForEdit().WaitAsync(Wait));
+        fixture.Notes.BeforeEditPublish = () => refused = true;
+        ActionResult failed = await fixture.Actions!.SaveNote(opened, "owner:: Draft").WaitAsync(Wait);
+        Assert.Equal(ActionKind.Failed, failed.Kind);
+        string recovery = Assert.Single(failed.RecoveryFiles, file => File.ReadAllBytes(file).SequenceEqual("owner:: Original"u8.ToArray()));
+        Assert.Equal(Path.GetFileName(recovery), Path.GetFileName(Assert.Single(Directory.GetFiles(fixture.Root, ".*.tmp"))));
+        refused = false;
+        fixture.Notes.BeforeEditPublish = null;
+        Assert.Equal(ActionKind.Done, (await fixture.Actions.SaveNote(opened, "owner:: Current").WaitAsync(Wait)).Kind);
+        Assert.Equal("owner:: Current", (await link.ReadForEdit().WaitAsync(Wait))?.Text);
+        string unrelated = Path.Combine(fixture.Root, "draft.tmp");
+        File.WriteAllText(unrelated, "Independent bytes");
+        Assert.Equal(ActionReason.None, (await fixture.Actions.MarkSensitive("Other", new Confirmation()).WaitAsync(Wait)).Reason);
+        ActionResult rename = await fixture.Actions.RenameNote(note.Reference, "New title", new Confirmation()).WaitAsync(Wait);
+        Assert.Equal(ActionKind.Failed, rename.Kind);
+        Assert.Contains(recovery, rename.RecoveryFiles);
+        ActionResult marked = await fixture.Actions.MarkSensitive(link.Target, new Confirmation()).WaitAsync(Wait);
+        Assert.Equal((ActionKind.Done, ActionReason.PlainHistoryLeft), (marked.Kind, marked.Reason));
+        Assert.Equal([recovery], marked.RecoveryFiles);
+        Assert.Equal("owner:: Original", File.ReadAllText(recovery));
+        Assert.Equal("Independent bytes", File.ReadAllText(unrelated));
+        NoteReference sensitive = NoteReference.Stored(name, sensitive: true);
+        Assert.Equal("owner:: Current", (await fixture.State.ReadSensitive(sensitive).WaitAsync(Wait))?.Text);
+        Assert.Equal("owner:: Earlier", await fixture.State.ReadVersion(sensitive, id).WaitAsync(Wait));
+
+        IRenderedComponent<RecoveryPaths> disclosure = fixture.Bunit.Render<RecoveryPaths>(p => p.Add(c => c.Paths, marked.RecoveryPaths));
+        Assert.Contains("JSON string", disclosure.Find("label").TextContent);
+        string displayed = disclosure.Find("label input[readonly]").GetAttribute("value")!;
+        Assert.Equal(displayed, DesktopText.OneLine(displayed));
+        Assert.Equal(recovery, System.Text.Json.JsonSerializer.Deserialize<string>(displayed));
+        Assert.Empty(disclosure.FindAll("button"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RenameFollowupSave_ShowsTheNewNameAndNamesTheRecoverableVersion(bool updateLink)
+    {
+        string name = Date(0), title = "Archive";
+        string body = "# " + name + "\nowner:: Current" + (updateLink ? "\n[[" + name + "]]" : "");
+        data.WriteNote(name, body);
+        IRenderedComponent<Main> cut = await OpenDailyEditor(body);
+        NoteReference selected = cut.FindComponent<NoteEditor>().Instance.OpenedTarget!.Value;
+        JournalDirectory directory = Assert.IsType<JournalDirectory>(selected.Source);
+        string id = Assert.IsType<string>(data.State!.HistoryStore.Keep(selected.SelectedPath!, "owner:: Earlier"u8.ToArray()));
+        string renamed = Path.Combine(data.Root, title + ".md");
+        string version = Path.Combine(NoteHistory.FolderFor(renamed), id + ".md");
+        bool followup = false;
+        directory.RemovalAvailable = path => { followup |= path == renamed; return true; };
+        directory.EntryAvailable = path => !followup || path != version;
+        await MainTests.ChooseAsync(cut, "rename");
+        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = title });
+        await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        if (updateLink)
+        {
+            await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        }
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal(title, editor.MountedName());
+            Assert.Equal(body, editor.MountedText());
+            Assert.Contains("Recovery is incomplete", cut.Find(".main-status.red").TextContent);
+            Assert.DoesNotContain("Loading", cut.Find(".links-panel").TextContent);
+        }, Wait);
+        Assert.True(followup);
+        Assert.False(File.Exists(selected.SelectedPath));
+        string fallback = Assert.Single(cut.FindAll(".recovery-paths input").Select(e => e.GetAttribute("value")!),
+            file => File.ReadAllBytes(file).SequenceEqual("owner:: Earlier"u8.ToArray()));
+        Assert.Contains(fallback, cut.Find(".main-status.red").TextContent);
+        NoteReference actual = cut.FindComponent<NoteEditor>().Instance.OpenedTarget!.Value;
+        Assert.Equal(renamed, actual.SelectedPath);
+        Assert.Null(await data.State.ReadVersion(actual, id).WaitAsync(Wait));
+        followup = false;
+        await MainTests.ChooseAsync(cut, "history");
+        cut.WaitForElement(".history-row button", Wait);
+        await StaleClick.ClickAsync(cut, ".history-row button");
+        cut.WaitForAssertion(() => Assert.Contains("owner:: Earlier", cut.Find(".diff-lines").TextContent), Wait);
+    }
+
+    [Theory]
+    [InlineData("copy")]
+    [InlineData("reuse")]
+    [InlineData("conflict")]
+    public async Task RestoreAfterReopeningFromWorkspace_UsesTheVersionEncodingAndImage(string nextMove)
+    {
+        string name = Date(0), moved = "Destination/" + name;
+        const string First = "owner:: Zoë\nstatus:: Open\n";
+        const string Prior = "owner:: 前\r\n![figure](.attachments/figure.png)\n";
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteNote("Destination", "Archive");
+        NoteStore store = new(data.Root);
+        string original = Path.Combine(data.Root, name + ".MD");
+        byte[] current = [.. Encoding.Unicode.Preamble, .. Encoding.Unicode.GetBytes(First)];
+        byte[] kept = [.. Encoding.BigEndianUnicode.Preamble, .. Encoding.BigEndianUnicode.GetBytes(Prior)];
+        byte[] image = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x75];
+        File.WriteAllBytes(original, current);
+        string id = Assert.IsType<string>(new NoteHistory(store, () => data.UtcNow).Keep(original, kept));
+        Assert.Equal(AttachmentAddKind.Added, new NoteAttachments(store).Add(name, "figure.png", image).Kind);
+        IRenderedComponent<Main> cut = await OpenDailyEditor(First);
+        await MainTests.ChooseAsync(cut, "move");
+        await cut.Find(".move-parent").InputAsync(new ChangeEventArgs { Value = "Destination" });
+        await cut.Find(".move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        void Mounted(string title, string text)
+        {
+            Assert.Equal(title, editor.MountedName());
+            Assert.Equal(text, editor.MountedText());
+            Assert.DoesNotContain("Loading", cut.Find(".links-panel").TextContent);
+        }
+        cut.WaitForAssertion(() => Mounted(moved, First), Wait);
+        NoteInfo firstMove = Assert.Single(store.List(), n => n.Name == moved);
+        Assert.Equal(name + ".md", Path.GetFileName(firstMove.Path));
+        Assert.Equal(current, File.ReadAllBytes(firstMove.Path));
+        Assert.Equal(kept, File.ReadAllBytes(Path.Combine(NoteHistory.FolderFor(firstMove.Path), id + ".md")));
+        await NoteOpener.OpenAsync(cut, "Destination");
+        cut.WaitForAssertion(() => Mounted("Destination", "Archive"), Wait);
+        await NoteOpener.OpenAsync(cut, moved);
+        cut.WaitForAssertion(() => Mounted(moved, First), Wait);
+        Assert.Null(cut.FindComponent<NoteEditor>().Instance.JournalLink);
+        // The workspace editor moves the same note again while only its kept version references the image.
+        byte[] siblingImage = nextMove == "reuse" ? image : [.. image[..^1], 0x42];
+        string siblingName = nextMove == "copy" ? "other.png" : "figure.png";
+        NoteInfo sibling = store.CreateWithText("Neighbor", $"![neighbor](.attachments/{siblingName})");
+        Assert.Equal(AttachmentAddKind.Added, new NoteAttachments(store).Add(sibling.Reference, siblingName, siblingImage).Kind);
+        if (nextMove == "reuse")
+        {
+            data.WriteSensitive("Separate", "Independent sealed page");
+        }
+        await MainTests.ChooseAsync(cut, "move");
+        await cut.Find(".move-parent").InputAsync(new ChangeEventArgs { Value = "" });
+        await cut.Find(".move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        if (nextMove == "conflict")
+        {
+            cut.WaitForElement(".main-status.red", Wait);
+            Assert.False(File.Exists(Path.Combine(data.Root, name + ".md")));
+            await cut.Find(".move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        }
+        else
+        {
+            moved = name;
+        }
+        cut.WaitForAssertion(() => Mounted(moved, First), Wait);
+        await MainTests.ChooseAsync(cut, "history");
+        cut.WaitForElement(".history-row button", Wait);
+        await StaleClick.ClickAsync(cut, ".history-row button");
+        cut.WaitForElement(".restore-version", Wait);
+        await StaleClick.ClickAsync(cut, ".restore-version");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Mounted(moved, Prior.Replace("\r\n", "\n", StringComparison.Ordinal)), Wait);
+        NoteInfo note = Assert.Single(store.List(), n => n.Name == moved);
+        Assert.Equal(kept, File.ReadAllBytes(note.Path));
+        Assert.Equal(kept, File.ReadAllBytes(Path.Combine(NoteHistory.FolderFor(note.Path), id + ".md")));
+        Assert.Equal(current, File.ReadAllBytes(Path.Combine(NoteHistory.FolderFor(note.Path), data.State!.HistoryStore.Versions(note)[0].Id + ".md")));
+        data.Dialog.SharePath = data.Outside("restored-share.html");
+        await MainTests.ChooseAsync(cut, "share");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        Assert.Contains(Convert.ToBase64String(image), File.ReadAllText(data.Dialog.SharePath));
+        string neighborShare = data.Outside("neighbor-share.html");
+        Assert.Equal(ActionKind.Done, (await data.Actions!.ShareNote(sibling.Reference, neighborShare, false).WaitAsync(Wait)).Kind);
+        Assert.Contains(Convert.ToBase64String(siblingImage), File.ReadAllText(neighborShare));
+        Assert.Equal(siblingImage, File.ReadAllBytes(Path.Combine(NoteAttachments.Folder(sibling), siblingName)));
+    }
+
+    private void AssertRecoveryStatus(IRenderedComponent<Main> cut)
+    {
+        IElement status = cut.Find(".main-status.red");
+        Assert.Equal("0", status.GetAttribute("tabindex"));
+        Assert.DoesNotContain("cut", status.ClassList);
+        IElement paths = cut.Find("details.recovery-paths");
+        Assert.Equal("Recovery paths", paths.QuerySelector("summary")!.TextContent);
+        Assert.NotEmpty(paths.QuerySelectorAll("input[readonly]"));
+        Assert.All(paths.QuerySelectorAll("input"), input => Assert.Contains(input.GetAttribute("value")!, status.TextContent));
+        output.WriteLine("Recovery markup " + status.OuterHtml + paths.OuterHtml);
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+        ICssStyleSheet sheet = new CssParser().ParseStyleSheet(css);
+        Assert.Contains(sheet.Rules.OfType<ICssStyleRule>(), rule => rule.Selector.Match(status)
+            && rule.Style.GetPropertyValue("white-space") == "normal");
+    }
+
+    [Fact]
+    public async Task MoveWithUnreadablePublishedHistory_ShowsFailureInTheOriginalEditor()
+    {
+        string name = Date(0);
+        data.WriteNote(name, "Current parent");
+        data.WriteNote("Destination", "Archive");
+        IRenderedComponent<Main> cut = await OpenDailyEditor();
+        NoteEditor open = cut.FindComponent<NoteEditor>().Instance;
+        NoteReference target = open.OpenedTarget!.Value;
+        JournalDirectory directory = Assert.IsType<JournalDirectory>(target.Source);
+        string path = target.SelectedPath!;
+        string id = Assert.IsType<string>(data.State!.HistoryStore.Keep(path, "Earlier parent"u8.ToArray()));
+        string destination = Path.Combine(data.Root, "Destination", name + ".md");
+        string version = Path.Combine(NoteHistory.FolderFor(destination), id + ".md");
+        bool cleanup = false;
+        directory.RemovalAvailable = entry => { cleanup |= entry == path; return true; };
+        directory.EntryAvailable = entry => !cleanup || entry != version;
+        await MainTests.ChooseAsync(cut, "move");
+        await cut.Find(".move-parent").InputAsync(new ChangeEventArgs { Value = "Destination" });
+        await cut.Find(".move-parent").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        cut.WaitForAssertion(() => Assert.Contains("Can't move", cut.Find(".main-status.red").TextContent), Wait);
+        Assert.True(cleanup);
+        Assert.Same(open, cut.FindComponent<NoteEditor>().Instance);
+        Assert.Equal("Current parent", editor.MountedText());
+        Assert.False(File.Exists(destination));
+        Assert.Equal("Earlier parent", await data.State.ReadVersion(target, id).WaitAsync(Wait));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CleanupAndRecoveryRefused_WarningIdentifiesTheReadableVersion(bool specialPath)
+    {
+        const string Current = "Current parent";
+        const string Earlier = "Earlier readable version";
+        string rootName = specialPath ? (OperatingSystem.IsWindows() ? "Journal\u0085store" : "Journal\rstore") : "Journal store";
+        using DesktopFixture fixture = new(rootName) { Keys = FakeKeyStore.Ready() };
+        fixture.Bunit.JSInterop.SetupVoid("ContextJournal.stop", _ => true).SetVoidResult();
+        string name = Date(0);
+        fixture.WriteNote(name, Current);
+        IRenderedComponent<Main> cut = await OpenDailyEditor(fixture, new EditorJs(fixture.Bunit), Current);
+        NoteReference target = cut.FindComponent<NoteEditor>().Instance.OpenedTarget!.Value;
+        JournalDirectory directory = Assert.IsType<JournalDirectory>(target.Source);
+        string path = target.SelectedPath!;
+        string history = NoteHistory.FolderFor(path);
+        byte[] kept = Encoding.UTF8.GetBytes(Earlier);
+        string id = Assert.IsType<string>(fixture.State!.HistoryStore.Keep(path, kept));
+        string plain = Path.Combine(history, id + ".md");
+        List<string> refused = [];
+        bool Available(string file, string operation)
+        {
+            if (file != plain)
+            {
+                return true;
+            }
+            refused.Add(operation);
+            return false;
+        }
+        directory.RemovalAvailable = file => Available(file, "remove");
+        directory.RecoveryAvailable = file => Available(file, "restore");
+        await MainTests.ChooseAsync(cut, "mark-sensitive");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Contains("readable history may remain", cut.Find(".main-status.red").TextContent), Wait);
+        Assert.Equal(["remove", "restore"], refused);
+        string remaining = Assert.Single(Directory.GetFiles(history, "*.md"));
+        using SafeFileHandle file = File.OpenHandle(remaining);
+        string exactPath = JournalDirectory.CheckedPath(file, directory: false);
+        string exactFolder = Path.GetDirectoryName(exactPath)!;
+        string warning = cut.Find(".main-status.red").TextContent;
+        output.WriteLine(warning);
+        Assert.Contains("Secure your plaintext files before removing them. Keep the .ctxs files.", warning);
+        string location = exactPath;
+        if (specialPath)
+        {
+            Assert.Contains("Open Recovery paths", warning);
+            Assert.DoesNotContain(DesktopText.OneLine(exactFolder), warning);
+            Assert.Equal(warning, DesktopText.OneLine(warning));
+            IHtmlElement summary = Assert.IsAssignableFrom<IHtmlElement>(cut.Find("details.recovery-paths > summary"));
+            Assert.Equal("Recovery paths", summary.TextContent);
+            await summary.DoClickAsync();
+            string[] decoded = cut.FindAll("details.recovery-paths[open] label").Select(label =>
+            {
+                Assert.Equal("Path with special characters (JSON string)", label.TextContent.Trim());
+                IHtmlInputElement field = Assert.IsAssignableFrom<IHtmlInputElement>(label.QuerySelector("input[readonly]"));
+                Assert.Equal(field.Value, DesktopText.OneLine(field.Value));
+                output.WriteLine(field.Value);
+                return Assert.IsType<string>(JsonSerializer.Deserialize<string>(field.Value));
+            }).ToArray();
+            Assert.Contains(exactFolder, decoded);
+            location = Assert.Single(decoded, File.Exists);
+            Assert.Equal(exactPath, location);
+        }
+        else
+        {
+            Assert.Contains($"Check the original folder {exactFolder}, including hidden files.", warning);
+            Assert.Contains($"Readable recovery files remain at {exactPath}.", warning);
+        }
+        Assert.Equal(kept, File.ReadAllBytes(location));
+        Assert.False(File.Exists(path));
+        NoteReference sensitive = NoteReference.Stored(name, sensitive: true);
+        Assert.Equal(Current, (await fixture.State.ReadSensitive(sensitive).WaitAsync(Wait))?.Text);
+        Assert.Equal(Earlier, await fixture.State.ReadVersion(sensitive, id).WaitAsync(Wait));
+        output.WriteLine($"Read {kept.Length} plaintext bytes, reopened '{Current}' and version {id} ('{Earlier}').");
+    }
+    private static string LegacyName => SiblingName + " ";
+    private const string LegacyBody = "#meeting\nSpace-suffixed fixture";
+    private const string SiblingBody = "Trimmed sibling fixture";
+    private string PlainPath(string name) => Path.Combine(data.Root, name + ".md");
+
+    private async Task<IRenderedComponent<Main>> OpenLegacyMeeting(bool hasSibling)
+    {
+        data.WriteNote(LegacyName, LegacyBody);
+        if (hasSibling)
+        {
+            data.WriteNote(SiblingName, SiblingBody);
+        }
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        Assert.Equal(hasSibling ? SiblingName : null, data.State.ResolveNote(LegacyName));
+        await Open(cut);
+        cut.WaitForAssertion(() => Assert.Equal(LegacyName, Assert.Single(cut.FindAll(".journal-meeting")).TextContent), Wait);
+        await StaleClick.ClickAsync(cut, ".journal-meeting");
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal(LegacyName, cut.Find(".note-title").GetAttribute("title"));
+            Assert.Equal(LegacyBody, editor.MountedText());
+            Assert.DoesNotContain("Loading", cut.Find(".links-panel").TextContent);
+        }, Wait);
+        return cut;
+    }
+
+    private void AssertSibling(bool present)
+    {
+        Assert.Equal(present, File.Exists(PlainPath(SiblingName)));
+        if (present)
+        {
+            Assert.Equal(SiblingBody, File.ReadAllText(PlainPath(SiblingName)));
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LegacyMeetingLinks_ShowItsOwnBacklink(bool hasSibling)
+    {
+        data.WriteNote("Reference to selected", $"[[{LegacyName}.md]]");
+        data.WriteNote("Reference to sibling", $"[[{SiblingName}]]");
+        IRenderedComponent<Main> cut = await OpenLegacyMeeting(hasSibling);
+        IElement row = Assert.Single(cut.FindAll(".links-panel .link-row"));
+        Assert.Equal("Reference to selected", row.QuerySelector(".name")!.TextContent);
+        Assert.Equal("linked from", row.QuerySelector(".link-kind")!.TextContent);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RenameLegacyMeeting_ChangesOnlyTheDisplayedFile(bool hasSibling)
+    {
+        string reference = $"[[{SiblingName}]]";
+        data.WriteNote("Reference", reference);
+        IRenderedComponent<Main> cut = await OpenLegacyMeeting(hasSibling);
+        string kept = Assert.IsType<string>(data.State!.HistoryStore.Keep(PlainPath(LegacyName), "Selected history"u8.ToArray()));
+        await MainTests.ChooseAsync(cut, "rename");
+        Assert.Equal(LegacyName, cut.Find(".rename-title").GetAttribute("value"));
+        await cut.Find(".rename-title").InputAsync(new ChangeEventArgs { Value = "Renamed meeting" });
+        await cut.Find(".rename-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("Renamed meeting", editor.MountedName());
+            Assert.Equal(LegacyBody, editor.MountedText());
+            Assert.DoesNotContain("Loading", cut.Find(".links-panel").TextContent);
+        }, Wait);
+        Assert.False(File.Exists(PlainPath(LegacyName)));
+        Assert.Equal(LegacyBody, File.ReadAllText(PlainPath("Renamed meeting")));
+        Assert.Equal(reference, File.ReadAllText(PlainPath("Reference")));
+        Assert.Equal("Selected history", await data.State.ReadVersion("Renamed meeting", kept).WaitAsync(Wait));
+        AssertSibling(hasSibling);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MarkLegacyMeetingSensitive_SealsOnlyTheDisplayedFile(bool hasSibling)
+    {
+        data.Keys = FakeKeyStore.Ready();
+        IRenderedComponent<Main> cut = await OpenLegacyMeeting(hasSibling);
+        DesktopState state = data.State!;
+        string originalId = Assert.IsType<string>(state.HistoryStore.Keep(PlainPath(LegacyName), "Earlier selected"u8.ToArray()));
+        if (hasSibling)
+        {
+            state.HistoryStore.Keep(PlainPath(SiblingName), "Earlier sibling"u8.ToArray());
+        }
+        await MainTests.ChooseAsync(cut, "mark-sensitive");
+        Assert.StartsWith($"Mark {LegacyName} sensitive?", cut.Find(".dialog .question").TextContent);
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        cut.WaitForAssertion(() => Assert.Equal($"Marked {LegacyName} sensitive.", cut.Find(".main-status").TextContent), Wait);
+        Assert.False(File.Exists(PlainPath(LegacyName)));
+        Assert.False(File.Exists(Path.Combine(data.Root, SiblingName + NoteStore.SensitiveExtension)));
+        AssertSibling(hasSibling);
+        NoteReference selected = NoteReference.Stored(LegacyName, sensitive: true);
+        EditableNote sealedNote = Assert.IsType<EditableNote>(await state.ReadSensitive(selected).WaitAsync(Wait));
+        Assert.Equal(LegacyBody, sealedNote.Text);
+        Assert.Equal("Earlier selected", await state.ReadVersion(selected, originalId).WaitAsync(Wait));
+        ActionResult saved = await data.Actions!.SaveNote(sealedNote, "Edited selected fixture").WaitAsync(Wait);
+        Assert.Equal(ActionKind.Done, saved.Kind);
+        Assert.Equal("Edited selected fixture", (await state.ReadSensitive(selected).WaitAsync(Wait))?.Text);
+        HistoryView history = await state.History(selected).WaitAsync(Wait);
+        Assert.Equal(2, history.Versions.Count);
+        Assert.All(history.Versions, v => Assert.Equal(LegacyName, v.SealedTitle));
+        Assert.Equal(LegacyBody, await state.ReadVersion(selected, history.Versions[0].Id).WaitAsync(Wait));
+        Assert.Equal("Earlier selected", await state.ReadVersion(selected, originalId).WaitAsync(Wait));
+        AssertSibling(hasSibling);
+        if (hasSibling)
+        {
+            HistoryView sibling = await state.History(NoteReference.Stored(SiblingName)).WaitAsync(Wait);
+            Assert.Equal("Earlier sibling", await state.ReadVersion(SiblingName, Assert.Single(sibling.Versions).Id).WaitAsync(Wait));
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RelocatedEditor_KeepsItsOriginalStore(bool move)
+    {
+        string initial = Date(0);
+        string result = move ? "Destination/" + initial : "Renamed";
+        data.WriteNote(initial, "Original fixture");
+        data.WriteNote("Destination", "Folder owner");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        await Open(cut);
+        cut.WaitForElement(".journal-open", Wait);
+        await StaleClick.ClickAsync(cut, ".journal-open");
+        void Mounted(string expected)
+        {
+            Assert.Equal(expected, editor.MountedName());
+            Assert.Equal("Original fixture", editor.MountedText());
+            Assert.DoesNotContain("Loading", cut.Find(".links-panel").TextContent);
+        }
+        cut.WaitForAssertion(() => Mounted(initial), Wait);
+        await MainTests.ChooseAsync(cut, move ? "move" : "rename");
+        string field = move ? ".move-parent" : ".rename-title";
+        await cut.Find(field).InputAsync(new ChangeEventArgs { Value = move ? "Destination" : result });
+        await cut.Find(field).KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        cut.WaitForAssertion(() => Mounted(result), Wait);
+        await data.State.ReloadsSettled().WaitAsync(Wait);
+        data.WaitForRecentWrites();
+
+        NoteStore other = new(data.Outside("other"));
+        if (move)
+        {
+            other.Create("Destination");
+            File.WriteAllText(other.CreateChild("Destination", initial).Path, "Replacement fixture");
+        }
+        else
+        {
+            other.CreateWithText(result, "Replacement fixture");
+        }
+        // Windows permits moving an open child directory itself before moving its parent.
+        if (move)
+        {
+            Directory.Move(Path.Combine(data.Root, "Destination"), data.Outside("original-destination"));
+        }
+        ReplaceDirectory(data.Root, other.Root);
+        await AssertEditorRefusesReplacement(cut, PlainPath(result), "Replacement fixture");
+    }
+
+    private void ReplaceDirectory(string current, string replacement)
+    {
+        lock (DesktopFixture.RecentWriteGate(data.Actions!))
+        lock (DesktopFixture.IndexGate(data.State!))
+        {
+            Directory.Move(current, data.Outside("original"));
+            Directory.Move(replacement, current);
+        }
+    }
+
+    private async Task AssertEditorRefusesReplacement(IRenderedComponent<Main> cut, string replacement, string text)
+    {
+        data.Dialog.ExportPath = data.Outside("replacement-export.md");
+        await MainTests.ChooseAsync(cut, "export");
+        Assert.False(File.Exists(data.Dialog.ExportPath));
+        data.Dialog.SharePath = data.Outside("replacement-share.html");
+        await MainTests.ChooseAsync(cut, "share");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        Assert.False(File.Exists(data.Dialog.SharePath));
+        await MainTests.ChooseAsync(cut, "delete");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        Assert.Equal(text, File.ReadAllText(replacement));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReplacedSeries_CannotSupplyDisplayedMeetingOrEditorActions(bool mounted)
+    {
+        NoteStore notes = new(data.Root);
+        notes.Create("Meetings");
+        notes.CreateChild("Meetings", "Series");
+        NoteInfo meeting = notes.CreateChild("Meetings/Series", Date(0));
+        File.WriteAllText(meeting.Path, "Original series");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        await Open(cut);
+        cut.WaitForElement(".journal-meeting", Wait);
+        if (mounted)
+        {
+            await StaleClick.ClickAsync(cut, ".journal-meeting");
+            cut.WaitForAssertion(() =>
+            {
+                Assert.Equal("Original series", editor.MountedText());
+                Assert.DoesNotContain("Loading", cut.Find(".links-panel").TextContent);
+            }, Wait);
+        }
+        NoteStore other = new(data.Outside("other"));
+        other.CreateWithText(Date(0), "Replacement series");
+        ReplaceDirectory(Path.GetDirectoryName(meeting.Path)!, other.Root);
+        if (mounted)
+        {
+            await AssertEditorRefusesReplacement(cut, meeting.Path, "Replacement series");
+        }
+        else
+        {
+            int mounts = editor.Calls("ContextEditor.mount").Count;
+            await StaleClick.ClickAsync(cut, ".journal-meeting");
+            cut.WaitForAssertion(() => Assert.Equal(DesktopActions.CantReadText(meeting.Name),
+                cut.Find(".journal-meeting + [role=status]").TextContent), Wait);
+            Assert.Equal(mounts, editor.Calls("ContextEditor.mount").Count);
+        }
+        Assert.Equal("Replacement series", File.ReadAllText(meeting.Path));
+    }
+
+    [Fact]
+    public async Task ConfirmedDelete_SourceChangesBeforeRemovals_PreservesBothHistories()
+    {
+        IRenderedComponent<Main> cut = await OpenLegacyMeeting(false);
+        string id = Assert.IsType<string>(data.State!.HistoryStore.Keep(PlainPath(LegacyName), "Original version"u8.ToArray()));
+        NoteStore other = new(data.Outside("other"));
+        Directory.CreateDirectory(other.Root);
+        string otherPath = Path.Combine(other.Root, LegacyName + ".md");
+        File.WriteAllText(otherPath, "Replacement note");
+        new NoteHistory(other, () => data.UtcNow).Keep(otherPath, "Replacement version"u8.ToArray());
+        await MainTests.ChooseAsync(cut, "delete");
+        data.Notes!.BeforeDeleteFiles = () => ReplaceDirectory(data.Root, other.Root);
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        Assert.Equal("Replacement note", File.ReadAllText(PlainPath(LegacyName)));
+        string original = Path.Combine(data.Outside("original"), LegacyName + ".md");
+        Assert.Equal(LegacyBody, File.ReadAllText(original));
+        Assert.Equal("Replacement version", File.ReadAllText(Path.Combine(NoteHistory.FolderFor(PlainPath(LegacyName)), id + ".md")));
+        Assert.Equal("Original version", File.ReadAllText(Path.Combine(NoteHistory.FolderFor(original), id + ".md")));
+    }
+
+    [Fact]
+    public async Task InterruptedConversion_RemovesOnlyItsOwnSealedFiles()
+    {
+        string name = Date(0);
+        data.Keys = FakeKeyStore.Ready();
+        data.WriteNote(name, "Original daily");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        await Open(cut);
+        cut.WaitForElement(".journal-open", Wait);
+        await StaleClick.ClickAsync(cut, ".journal-open");
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("Original daily", editor.MountedText());
+            Assert.DoesNotContain("Loading", cut.Find(".links-panel").TextContent);
+        }, Wait);
+        string id = Assert.IsType<string>(data.State.HistoryStore.Keep(PlainPath(name), "Original version"u8.ToArray()));
+        using DesktopFixture other = new();
+        other.Keys = FakeKeyStore.Ready();
+        other.WriteSensitive(name, "Earlier replacement version");
+        string sealedName = name + NoteStore.SensitiveExtension;
+        string path = Path.Combine(other.Root, sealedName);
+        byte[] versionBytes = File.ReadAllBytes(path);
+        NoteHistory otherHistory = new(new NoteStore(other.Root), () => data.UtcNow);
+        Assert.Equal(id, otherHistory.Keep(path, versionBytes, name));
+        other.WriteSensitive(name, "Replacement sealed note");
+        byte[] sealedBytes = File.ReadAllBytes(path);
+        string versionName = id + "~" + sealedName;
+        string original = Path.Combine(data.Outside("original"), name + ".md");
+        string surviving = Path.Combine(data.Root, sealedName);
+        bool replaced = false;
+        void ChangeSource()
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                // Windows permits an open entry to move but holds its ancestors in place.
+                // Park the three open descendants, then restore them to the original tree.
+                string versions = NoteHistory.FolderFor(surviving);
+                File.Move(surviving, data.Outside("parked-note"));
+                File.Move(Path.Combine(versions, versionName), data.Outside("parked-version"));
+                Directory.Move(versions, data.Outside("parked-history"));
+                ReplaceDirectory(data.Root, other.Root);
+                Directory.Move(data.Outside("parked-history"), NoteHistory.FolderFor(original));
+                File.Move(data.Outside("parked-version"), Path.Combine(NoteHistory.FolderFor(original), versionName));
+                File.Move(data.Outside("parked-note"), Path.ChangeExtension(original, NoteStore.SensitiveExtension));
+            }
+            else
+            {
+                ReplaceDirectory(data.Root, other.Root);
+            }
+            replaced = true;
+        }
+        Exception? changeError = null;
+        data.Actions!.AfterNoteSealed = () => changeError = Record.Exception(ChangeSource);
+        await MainTests.ChooseAsync(cut, "mark-sensitive");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        Assert.Null(changeError);
+        Assert.True(replaced);
+        byte[] survivingNote = File.ReadAllBytes(surviving);
+        byte[] survivingVersion = File.ReadAllBytes(Path.Combine(NoteHistory.FolderFor(surviving), versionName));
+        Assert.Equal(sealedBytes, survivingNote);
+        Assert.Equal(versionBytes, survivingVersion);
+        byte[] machine = other.Keys.MachinePublicKey()!;
+        Assert.Equal("Replacement sealed note", SealedNote.Open(name, survivingNote, machine, other.Keys.Agree));
+        Assert.Equal("Earlier replacement version", SealedNote.Open(name, survivingVersion, machine, other.Keys.Agree));
+        Assert.Equal("Original daily", File.ReadAllText(original));
+        Assert.Equal("Original version", File.ReadAllText(Path.Combine(NoteHistory.FolderFor(original), id + ".md")));
+        Assert.False(File.Exists(Path.ChangeExtension(original, NoteStore.SensitiveExtension)));
+        Assert.False(File.Exists(Path.Combine(NoteHistory.FolderFor(original), versionName)));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task SealedAfterRender_JournalLinkCannotOpenSensitiveNote(bool meeting, bool duringDiscard)
+    {
+        data.Keys = FakeKeyStore.Ready();
+        string name = meeting ? Date(0) + " Tagged" : Date(0);
+        string selector = meeting ? ".journal-meeting" : ".journal-open";
+        data.WriteNote(name, "#meeting\nDisplayed plain fixture");
+        data.WriteNote("Draft", "Draft fixture");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        if (duringDiscard)
+        {
+            await RunPalette(cut, "/open Draft");
+            cut.WaitForAssertion(() =>
+            {
+                Assert.Equal("Draft fixture", editor.MountedText());
+                Assert.DoesNotContain("Loading", cut.Find(".links-panel").TextContent);
+            }, Wait);
+            editor.EditUnsavable("Draft changes");
+        }
+        await Open(cut);
+        cut.WaitForElement(selector, Wait);
+        int mounts = editor.Calls("ContextEditor.mount").Count;
+        if (duringDiscard)
+        {
+            await StaleClick.ClickAsync(cut, selector);
+            Assert.Contains("Discard changes to Draft?", cut.Find(".dialog .question").TextContent);
+        }
+        data.WriteSensitive(name, "Sealed fixture");
+        File.Delete(PlainPath(name));
+        DesktopSnapshot snapshot = await data.RefreshAsync().WaitAsync(Wait);
+        Assert.Contains(snapshot.Sensitive, note => note.Name == name);
+        await data.State.ReloadsSettled().WaitAsync(Wait);
+        await StaleClick.ClickAsync(cut, duringDiscard ? ".dialog .confirm" : selector);
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal(DesktopActions.CantReadText(name), cut.Find(selector + " + [role=status]").TextContent);
+            Assert.NotEmpty(cut.FindAll(".journal-panel"));
+        }, Wait);
+        Assert.Equal(mounts, editor.Calls("ContextEditor.mount").Count);
+        Assert.Null(data.State.Session.Note);
+        Assert.Equal(0, data.Keys.Agrees);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReplacedStore_DisplayedLinkCannotOpenSameNamedNote(bool meeting)
+    {
+        string name = meeting ? Date(0) + " Review" : Date(0);
+        string selector = meeting ? ".journal-meeting" : ".journal-open";
+        data.WriteNote(name, "#meeting\nOriginal store");
+        string replacement = Directory.CreateDirectory(data.Outside("replacement")).FullName;
+        File.WriteAllText(Path.Combine(replacement, name + ".md"), "#meeting\nReplacement store");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        await Open(cut);
+        cut.WaitForElement(selector, Wait);
+        int mounts = editor.Calls("ContextEditor.mount").Count;
+        Directory.Move(data.Root, data.Outside("original"));
+        Directory.Move(replacement, data.Root);
+        await StaleClick.ClickAsync(cut, selector);
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal(DesktopActions.CantReadText(name), cut.Find(selector + " + [role=status]").TextContent);
+            Assert.NotEmpty(cut.FindAll(".journal-panel"));
+        }, Wait);
+        Assert.Equal(mounts, editor.Calls("ContextEditor.mount").Count);
+    }
+
+    [Fact]
+    public async Task JournalEditorReload_ReadsOnlyFromItsOriginalDirectory()
+    {
+        IRenderedComponent<Main> cut = await OpenLegacyMeeting(false);
+        data.WriteNote(LegacyName, "#meeting\nUpdated original");
+        NoteEditor mounted = cut.FindComponent<NoteEditor>().Instance;
+        await cut.InvokeAsync(mounted.ReloadAsync);
+        Assert.Equal("#meeting\nUpdated original", editor.MountedText());
+        string replacement = Directory.CreateDirectory(data.Outside("replacement")).FullName;
+        File.WriteAllText(Path.Combine(replacement, LegacyName + ".md"), "Replacement store");
+        Directory.Move(data.Root, data.Outside("original"));
+        Directory.Move(replacement, data.Root);
+        int mounts = editor.Calls("ContextEditor.mount").Count;
+        await cut.InvokeAsync(mounted.ReloadAsync);
+        Assert.Equal(mounts, editor.Calls("ContextEditor.mount").Count);
+        Assert.Equal("#meeting\nUpdated original", editor.MountedText());
+
+        data.Dialog.ExportPath = data.Outside("stale-export.md");
+        await MainTests.ChooseAsync(cut, "export");
+        Assert.False(File.Exists(data.Dialog.ExportPath));
+        await MainTests.ChooseAsync(cut, "delete");
+        await StaleClick.ClickAsync(cut, ".dialog .confirm");
+        Assert.Equal("Replacement store", File.ReadAllText(PlainPath(LegacyName)));
+
+        // Even identical text in the replacement directory cannot satisfy the editor's save check.
+        data.WriteNote(LegacyName, editor.MountedText());
+        editor.Edit("Attempted edit");
+        await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
+        cut.WaitForAssertion(() => Assert.Contains("changed on disk", cut.Find(".note-editor .status").TextContent), Wait);
+        Assert.Equal("#meeting\nUpdated original", File.ReadAllText(PlainPath(LegacyName)));
+    }
+
+    private int Measure(IRenderedComponent<Main> cut, string heading)
+    {
+        SetRegion(cut.Find(".current-region .journal-bottom").GetAttribute("blazor:elementReference"));
+        int top = 0;
+        foreach (IElement row in cut.FindAll(".current-region .journal-panel > :is(article, [role=status])"))
+        {
+            if (row.QuerySelector("h3") is { } date && date.TextContent == heading)
+            {
+                return top - (int)browser.Evaluate("region.scrollTop").AsNumber();
+            }
+            top += row.LocalName == "article" ? 40 : 20;
+        }
+        throw new InvalidOperationException("Missing journal heading.");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AppendOnce_LeavesVisibleHeadingAtSameOffset(bool outlookFailsOnAppend)
+    {
+        new SettingsStore(data.Root).SaveOutlook(outlookFailsOnAppend);
+        if (outlookFailsOnAppend)
+        {
+            AddOutlookAppointment(14);
+        }
+        for (int i = 0; i < 15; i++)
+        {
+            data.WriteNote(Date(i), "Text");
+        }
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        ConcurrentQueue<DateOnly> reads = new();
+        TaskCompletionSource started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        data.State.BeforeJournalDay = day =>
+        {
+            reads.Enqueue(day);
+            if (day == DesktopFixture.Today.AddDays(-14))
+            {
+                started.TrySetResult();
+                release.Task.WaitAsync(Wait).GetAwaiter().GetResult();
+            }
+        };
+        await Open(cut);
+        cut.WaitForAssertion(() => Assert.Equal(14, cut.FindAll(".journal-panel h3").Count), Wait);
+        Assert.True(await watching.WaitAsync(Wait));
+        await cut.InvokeAsync(() => { });
+        SetRegion(cut.Find(".journal-bottom").GetAttribute("blazor:elementReference"));
+        browser.Execute("region.scrollTop = 14 * 40 - region.clientHeight");
+        string anchor = Date(12);
+        int before = Measure(cut, anchor);
+        Assert.InRange(before, 0, 119);
+        if (outlookFailsOnAppend)
+        {
+            data.Outlook.AppointmentKind = OutlookReadKind.Denied;
+        }
+        browser.Execute("observer.callback([{isIntersecting:true}])");
+        Assert.Equal("OnJournalBottom", browser.Evaluate("bridge.signal").AsString());
+        Task append = Bottom(cut);
+        try
+        {
+            await started.Task.WaitAsync(Wait);
+            await Bottom(cut).WaitAsync(Wait);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+        await append.WaitAsync(Wait);
+        cut.WaitForAssertion(() => Assert.Equal(Enumerable.Range(0, 15).Select(Date),
+            cut.FindAll(".journal-panel h3").Select(h => h.TextContent)), Wait);
+        if (outlookFailsOnAppend)
+        {
+            Assert.Contains("access denied", cut.Find(".journal-panel [role=status]").TextContent, StringComparison.Ordinal);
+            Assert.Single(data.Outlook.AppointmentArguments, call => call.Day == DesktopFixture.Today.AddDays(-14));
+        }
+        int after = Measure(cut, anchor);
+        Assert.InRange(Math.Abs(after - before), 0, 1);
+        browser.Execute("region.scrollTop += 2");
+        int control = Measure(cut, anchor);
+        Assert.Equal(after - 2, control);
+        output.WriteLine($"Heading {anchor}: before {before}px, after {after}px, control {control}px.");
+        await Bottom(cut);
+        Assert.Equal(Enumerable.Range(0, 15).Select(i => DesktopFixture.Today.AddDays(-i)), reads.ToArray());
+    }
+
+    [Fact]
+    public async Task FirstOverflow_WithWrappingText_KeepsHeadingInClassicScrollbarViewport()
+    {
+        data.WriteNote(Date(0), new string('w', 39));
+        data.WriteNote(Date(1), "Anchor");
+        data.WriteNote(Date(14), "Older");
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        await Open(cut);
+        cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll(".journal-panel article").Count), Wait);
+        Assert.True(await watching.WaitAsync(Wait));
+
+        const int ViewportWidth = 160, ViewportHeight = 120, ScrollbarWidth = 16;
+        string css = File.ReadAllText(Path.Combine(RepoFiles.Root(), RepoFiles.DesktopFolder, "wwwroot", "app.css"));
+        ICssStyleSheet sheet = new CssParser().ParseStyleSheet(css);
+        // Model classic scrollbars without scrollbar-gutter. The rendered region's overflow-y
+        // rule decides whether the scrollbar takes up space before the third row arrives.
+        (int Width, int Height, int Offset) Layout()
+        {
+            IElement region = cut.Find(".current-region");
+            SetRegion(region.QuerySelector(".journal-bottom")!.GetAttribute("blazor:elementReference"));
+            string? overflow = sheet.Rules.OfType<ICssStyleRule>().Where(rule => rule.Selector.Match(region))
+                .Select(rule => rule.Style.GetPropertyValue("overflow-y")).LastOrDefault(value => value.Length > 0);
+            IElement[] rows = region.QuerySelectorAll(".journal-panel article").ToArray();
+            int RowHeight(IElement row, int width)
+            {
+                int textWidth = row.QuerySelector(".journal-body")!.TextContent.Length * 8;
+                return 20 + 20 * ((textWidth + width - 1) / width);
+            }
+            bool scrollbar = overflow == "scroll" || rows.Sum(row => RowHeight(row, ViewportWidth)) > ViewportHeight;
+            int width = scrollbar ? ViewportWidth - ScrollbarWidth : ViewportWidth;
+            int anchor = Array.FindIndex(rows, row => row.QuerySelector("h3")!.TextContent == Date(1));
+            Assert.Equal(1, anchor);
+            int top = rows.Take(anchor).Sum(row => RowHeight(row, width));
+            return (width, rows.Sum(row => RowHeight(row, width)), top - (int)browser.Evaluate("region.scrollTop").AsNumber());
+        }
+
+        (int Width, int Height, int Offset) before = Layout();
+        Assert.InRange(before.Height, 1, ViewportHeight);
+        Assert.InRange(before.Offset, 0, ViewportHeight - 1);
+        await Bottom(cut);
+        cut.WaitForAssertion(() => Assert.Equal(Date(14), cut.FindAll(".journal-panel h3").Last().TextContent), Wait);
+        (int Width, int Height, int Offset) after = Layout();
+        Assert.True(after.Height > ViewportHeight);
+        Assert.InRange(Math.Abs(after.Offset - before.Offset), 0, 1);
+        Assert.Equal(before.Width, after.Width);
+        browser.Execute("region.scrollTop += 2");
+        int control = Layout().Offset;
+        Assert.Equal(after.Offset - 2, control);
+        output.WriteLine($"Heading {Date(1)}: before {before.Offset}px, after {after.Offset}px, control {control}px. "
+            + $"Content widths {before.Width}/{after.Width}px, heights {before.Height}/{after.Height}px.");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OlderLocalNote_OnlyRequestsOutlookDaysInConfirmedHistory(bool populated)
+    {
+        new SettingsStore(data.Root).SaveOutlook(true);
+        data.WriteNote(Date(16), "Older local day");
+        if (populated)
+        {
+            AddOutlookAppointment(2);
+        }
+        DesktopState state = data.CreateState();
+        (Journal opened, JournalOutlook outlook) = await state.OpenJournal().WaitAsync(Wait);
+        using Journal journal = opened;
+        IReadOnlyList<JournalDay> first = journal.ReadBatch();
+        Assert.Equal(populated ? new[] { DesktopFixture.Today.AddDays(-2) } : [], first.Select(day => day.Date));
+        if (populated)
+        {
+            Assert.Equal("Outlook fixture", Assert.Single(first[0].Appointments).Title);
+        }
+        JournalDay second = Assert.Single(journal.ReadBatch());
+        Assert.Equal(DesktopFixture.Today.AddDays(-16), second.Date);
+        Assert.Equal("Older local day", second.Body);
+        Assert.True(journal.Exhausted);
+        Assert.Empty(journal.ReadBatch());
+        Assert.Equal(OutlookStatus.Ok, outlook.Status);
+        Assert.Equal(1, data.Outlook.OldestCalls);
+        Assert.Equal(Enumerable.Range(0, populated ? 3 : 0).Select(i => DesktopFixture.Today.AddDays(-i)),
+            data.Outlook.AppointmentArguments.Select(call => call.Day));
+    }
+
+    private void AddOutlookAppointment(int daysAgo)
+    {
+        DateOnly day = DesktopFixture.Today.AddDays(-daysAgo);
+        DateTime start = day.ToDateTime(new TimeOnly(9, 0));
+        data.Outlook.Days[day] = [new Appointment("Outlook fixture", null, start, start.AddHours(1), false)];
+    }
+
+    // Hold the scheduled source worker before its delegate starts, including on a loaded test host.
+    private sealed class HeldOutlookWorker : TaskScheduler
+    {
+        public TaskCompletionSource<Action> Queued { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        protected override void QueueTask(Task task) => Queued.SetResult(() => TryExecuteTask(task));
+        protected override bool TryExecuteTaskInline(Task task, bool taskWasPreviouslyQueued) => false;
+        protected override IEnumerable<Task> GetScheduledTasks() => [];
+    }
+
+    private async Task<T> OptOutWhileQueued<T>(DesktopState state, Func<Task<T>> start)
+    {
+        HeldOutlookWorker worker = new();
+        state.OutlookScheduler = worker;
+        Task<T> request = start();
+        Action run = await worker.Queued.Task.WaitAsync(Wait);
+        try
+        {
+            new SettingsStore(data.Root).SaveOutlook(false);
+        }
+        finally
+        {
+            state.OutlookScheduler = TaskScheduler.Default;
+            run();
+        }
+        return await request.WaitAsync(Wait);
+    }
+
+    [Fact]
+    public async Task OptOutWhileHistoryIsQueued_SkipsSourceAndKeepsLocalDay()
+    {
+        data.OutlookTimeout = Wait;
+        new SettingsStore(data.Root).SaveOutlook(true);
+        data.WriteNote(Date(0), "Local day");
+        AddOutlookAppointment(0);
+        DesktopState state = data.CreateState();
+        (Journal opened, JournalOutlook outlook) = await OptOutWhileQueued(state, state.OpenJournal);
+        using Journal journal = opened;
+        JournalDay day = Assert.Single(journal.ReadBatch());
+        Assert.Equal("Local day", day.Body);
+        Assert.Empty(day.Appointments);
+        Assert.Equal(OutlookStatus.Off, outlook.Status);
+        Assert.Equal(0, data.Outlook.OldestCalls);
+        Assert.Equal(0, data.Outlook.AppointmentCalls);
+    }
+
+    [Fact]
+    public async Task OptOutWhileDayIsQueued_SkipsSourceAndAllowsANewOptIn()
+    {
+        data.OutlookTimeout = Wait;
+        SettingsStore settings = new(data.Root);
+        settings.SaveOutlook(true);
+        data.WriteNote(Date(0), "Local day");
+        AddOutlookAppointment(0);
+        DesktopState state = data.CreateState();
+        (Journal opened, JournalOutlook outlook) = await state.OpenJournal().WaitAsync(Wait);
+        using Journal journal = opened;
+        Assert.Equal(OutlookStatus.Ok, outlook.Status);
+        JournalDay day = Assert.Single(await OptOutWhileQueued(state, () => Task.Run(journal.ReadBatch)));
+        Assert.Equal("Local day", day.Body);
+        Assert.Empty(day.Appointments);
+        Assert.Equal(OutlookStatus.Off, outlook.Status);
+        Assert.Equal(1, data.Outlook.OldestCalls);
+        Assert.Equal(0, data.Outlook.AppointmentCalls);
+
+        settings.SaveOutlook(true);
+        using Journal reopened = (await state.OpenJournal().WaitAsync(Wait)).Journal;
+        Assert.Equal("Outlook fixture", Assert.Single(Assert.Single(reopened.ReadBatch()).Appointments).Title);
+        Assert.Equal(1, data.Outlook.AppointmentCalls);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task OptOutDuringDayRead_DiscardsOutlookAndKeepsLocalEntries(bool desktopOptOut, bool enableAgain)
+    {
+        data.OutlookTimeout = Wait;
+        SettingsStore settings = new(data.Root);
+        settings.SaveOutlook(true);
+        data.WriteNote(Date(0), "Local daily fixture");
+        data.WriteCalendar("local.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("Local appointment", "20261029T110000", "20261029T113000")));
+        AddOutlookAppointment(0);
+        DesktopState state = data.CreateState();
+        (Journal opened, JournalOutlook outlook) = await state.OpenJournal().WaitAsync(Wait);
+        using Journal journal = opened;
+        Assert.Equal(OutlookStatus.Ok, outlook.Status);
+        data.Outlook.BlockAppointments();
+        Task<IReadOnlyList<JournalDay>> batch = Task.Run(journal.ReadBatch);
+        try
+        {
+            await data.Outlook.AppointmentsEntered.Task.WaitAsync(Wait);
+            if (desktopOptOut)
+            {
+                ActionResult off = await data.Actions!.SetOutlookEnabled(false).WaitAsync(Wait);
+                Assert.Equal(ActionKind.Done, off.Kind);
+                Assert.Equal(DesktopActions.OutlookOffText, off.Text);
+            }
+            else
+            {
+                settings.SaveOutlook(false);
+            }
+            if (enableAgain)
+            {
+                // The old journal still belongs to the generation before the confirmed opt-out.
+                settings.SaveOutlook(true);
+            }
+        }
+        finally
+        {
+            data.Outlook.Release();
+        }
+        JournalDay day = Assert.Single(await batch.WaitAsync(Wait));
+        Assert.Equal(OutlookStatus.Off, outlook.Status);
+        Assert.Equal(Date(0), day.Daily);
+        Assert.Equal("Local daily fixture", day.Body);
+        Assert.Equal("Local appointment", Assert.Single(day.Appointments).Title);
+        Assert.Equal(1, data.Outlook.OldestCalls);
+        Assert.Equal(DesktopFixture.Today, Assert.Single(data.Outlook.AppointmentArguments).Day);
+    }
+
+    [Fact]
+    public void ReplacementSettings_CannotEnableOutlookForTheBoundStore()
+    {
+        string replacement = data.Outside("replacement");
+        new SettingsStore(data.Root).SaveOutlook(false);
+        new SettingsStore(replacement).SaveOutlook(true);
+        AddOutlookAppointment(0);
+        DesktopState state = data.CreateState();
+        using JournalFiles sources = new(data.Notes!, new CalendarStore(data.Root, DesktopFixture.Zone), null);
+        Directory.Move(data.Root, data.Outside("original"));
+        Directory.Move(replacement, data.Root);
+        Assert.True(new SettingsStore(data.Root).ReadOutlook());
+
+        (Journal opened, JournalOutlook outlook) = state.OpenJournal(sources);
+        using Journal journal = opened;
+        Assert.Empty(journal.ReadBatch());
+        Assert.True(journal.Exhausted);
+        Assert.Equal(OutlookStatus.Off, outlook.Status);
+        Assert.Equal(0, data.Outlook.OldestCalls);
+        Assert.Equal(0, data.Outlook.AppointmentCalls);
+    }
+
+    [Theory]
+    [InlineData("limit", true)]
+    [InlineData("oversized", false)]
+    [InlineData("invalid", false)]
+    [InlineData("alias", false)]
+    public async Task JournalConsent_RequiresBoundedRegularSettings(string kind, bool enabled)
+    {
+        data.WriteNote(Date(0), "Local fixture");
+        AddOutlookAppointment(0);
+        string path = Path.Combine(data.Root, SettingsStore.FileName);
+        const string OptIn = """{"outlook":{"enabled":true}}""";
+        if (kind == "alias")
+        {
+            string fixture = data.Outside("fixture.json");
+            File.WriteAllText(fixture, OptIn);
+            try
+            {
+                File.CreateSymbolicLink(path, fixture);
+                output.WriteLine("Settings fixture is a file link.");
+            }
+            catch (IOException e) when (OperatingSystem.IsWindows() && (e.HResult & 0xffff) == 1314)
+            {
+                Directory.CreateDirectory(path);
+                output.WriteLine("Settings fixture is a directory. Windows denied file-link creation (1314).");
+            }
+        }
+        else
+        {
+            File.WriteAllText(path, kind == "invalid" ? """{"outlook":{"enabled":"true"}}"""
+                : OptIn.PadRight((int)SettingsStore.MaxBytes + (kind == "oversized" ? 1 : 0)));
+        }
+        (Journal opened, JournalOutlook outlook) = await data.CreateState().OpenJournal().WaitAsync(Wait);
+        using Journal journal = opened;
+        JournalDay day = Assert.Single(journal.ReadBatch());
+        Assert.Equal("Local fixture", day.Body);
+        Assert.Equal(enabled ? new[] { "Outlook fixture" } : [], day.Appointments.Select(a => a.Title));
+        Assert.Equal(enabled ? OutlookStatus.Ok : OutlookStatus.Off, outlook.Status);
+        Assert.Equal(enabled ? 1 : 0, data.Outlook.OldestCalls);
+        Assert.Equal(enabled ? 1 : 0, data.Outlook.AppointmentCalls);
+        Assert.True(journal.Exhausted);
+    }
+
+    [Fact]
+    public async Task OutlookTurnedOffBetweenBatches_StopsDayCallsAndKeepsLocalNotes()
+    {
+        SettingsStore settings = new(data.Root);
+        settings.SaveOutlook(true);
+        data.WriteNote(Date(0), "First batch");
+        data.WriteNote(Date(14), "Older local note");
+        AddOutlookAppointment(14);
+        (Journal opened, JournalOutlook outlook) = await data.CreateState().OpenJournal().WaitAsync(Wait);
+        using Journal journal = opened;
+        Assert.Equal("First batch", Assert.Single(journal.ReadBatch()).Body);
+        Assert.Equal(14, data.Outlook.AppointmentCalls);
+
+        settings.SaveOutlook(false);
+        JournalDay day = Assert.Single(journal.ReadBatch());
+        Assert.Equal(DesktopFixture.Today.AddDays(-14), day.Date);
+        Assert.Equal("Older local note", day.Body);
+        Assert.Empty(day.Appointments);
+        Assert.Equal(OutlookStatus.Off, outlook.Status);
+        Assert.Equal(1, data.Outlook.OldestCalls);
+        Assert.Equal(14, data.Outlook.AppointmentCalls);
+        Assert.True(journal.Exhausted);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OutlookAlone_StopsAtItsOldestOrConfirmedEmpty(bool populated)
+    {
+        new SettingsStore(data.Root).SaveOutlook(true);
+        DateOnly oldest = DesktopFixture.Today.AddDays(-42);
+        if (populated)
+        {
+            DateTime start = oldest.ToDateTime(new TimeOnly(9, 0));
+            data.Outlook.Days[oldest] = [new Appointment("Outlook only", null, start, start.AddHours(1), false)];
+        }
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        ConcurrentQueue<DateOnly> reads = new();
+        data.State.BeforeJournalDay = reads.Enqueue;
+        await Open(cut);
+        if (populated)
+        {
+            for (int page = 1; page <= 3; page++)
+            {
+                Assert.True(await watching.WaitAsync(Wait));
+                Assert.Contains("Loading…", cut.Find(".journal-panel").TextContent, StringComparison.Ordinal);
+                Assert.DoesNotContain("No journal entries.", cut.Markup, StringComparison.Ordinal);
+                await Bottom(cut);
+            }
+            cut.WaitForAssertion(() => Assert.Equal(Date(42), cut.Find(".journal-panel h3").TextContent), Wait);
+        }
+        else
+        {
+            cut.WaitForAssertion(() => Assert.Contains("No journal entries.", cut.Find(".journal-panel").TextContent), Wait);
+        }
+        DateOnly[] expected = Enumerable.Range(0, populated ? 43 : 0).Select(i => DesktopFixture.Today.AddDays(-i)).ToArray();
+        Assert.Equal(expected, reads.ToArray());
+        await Bottom(cut);
+        Assert.Equal(expected, reads.ToArray());
+    }
+
+    [Fact]
+    public async Task FinalBatch_StaysLoadingThroughRenderUntilTheEntriesArrive()
+    {
+        data.WriteNote(Date(14), "Last day");
+        data.CreateState();
+        IRenderedComponent<JournalPanel> cut = data.Bunit.Render<JournalPanel>();
+        Assert.True(await watching.WaitAsync(Wait));
+        TaskCompletionSource<bool> finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Func<Journal, Task<IReadOnlyList<JournalDay>>> read = cut.Instance.ReadBatchAsync;
+        cut.Instance.ReadBatchAsync = async journal =>
+        {
+            IReadOnlyList<JournalDay> batch = await read(journal);
+            finished.TrySetResult(journal.Exhausted);
+            await release.Task.WaitAsync(Wait);
+            return batch;
+        };
+
+        Task append = cut.InvokeAsync(cut.Instance.Bridge.OnJournalBottom);
+        try
+        {
+            Assert.True(await finished.Task.WaitAsync(Wait));
+            cut.Render();
+            Assert.Empty(cut.FindAll("article"));
+            Assert.Equal("Loading…", cut.Find("[role=status]").TextContent);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+        await append.WaitAsync(Wait);
+        cut.WaitForAssertion(() => Assert.Equal(Date(14), cut.Find("h3").TextContent), Wait);
+        Assert.Equal("Last day", cut.Find(".journal-body").TextContent);
+        Assert.Equal("Open " + Date(14), cut.Find(".journal-open").GetAttribute("aria-label"));
+        Assert.Empty(cut.FindAll("[role=status]"));
+    }
+
+    [Theory]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, true)]
+    public async Task CalendarHistory_UsesOnlyReadableOccurrencesAndLeavesSourcesUntouched(bool local, bool cache, bool outlook)
+    {
+        data.SaveLink(FakeHttpHandler.Link);
+        string calendar = DesktopFixture.Calendar(
+            DesktopFixture.Event("Series", "20261026T080000", "20261026T090000").Replace("END:VEVENT", "RRULE:FREQ=DAILY;COUNT=3\r\nEND:VEVENT"),
+            DesktopFixture.Event("Overnight", "20261027T230000", "20261028T000000"),
+            DesktopFixture.Event("Private", "20261025T090000", "20261025T100000").Replace("END:VEVENT", "CLASS:PRIVATE\r\nEND:VEVENT"));
+        if (local)
+        {
+            data.WriteCalendar("local.ics", calendar);
+        }
+        if (cache)
+        {
+            data.WriteCache(calendar.Replace("Series", "Cached series"), data.UtcNow - CalendarFeed.CacheLifetime - TimeSpan.FromMinutes(1));
+        }
+        if (outlook)
+        {
+            data.WriteNote(Date(0), "Journal text");
+            new SettingsStore(data.Root).SaveOutlook(true);
+            DateTime start = DesktopFixture.Today.ToDateTime(new TimeOnly(7, 0));
+            data.Outlook.Days[DesktopFixture.Today] = [new Appointment("Past today", null, start, start.AddMinutes(30), false)];
+        }
+        DesktopState state = data.CreateState();
+        SortedDictionary<string, string> before = FileSnapshot.Take(data.Root);
+        using Journal journal = (await state.OpenJournal().WaitAsync(Wait)).Journal;
+        IReadOnlyList<JournalDay> entries = journal.ReadBatch();
+        Assert.True(journal.Exhausted);
+        Assert.Equal(outlook ? new[] { 29, 28, 27, 26 } : [28, 27, 26], entries.Select(e => e.Date.Day));
+        if (outlook)
+        {
+            Assert.Equal("Journal text", entries[0].Body);
+            Appointment past = Assert.Single(entries[0].Appointments);
+            Assert.Equal("Past today", past.Title);
+            Assert.Equal(DesktopFixture.Today.ToDateTime(new TimeOnly(7, 0)), past.Start);
+            Assert.Equal(DesktopFixture.Today.ToDateTime(new TimeOnly(7, 30)), past.End);
+        }
+        foreach (JournalDay day in entries.Where(e => e.Date.Day != 29))
+        {
+            List<string> titles = [];
+            if (cache)
+            {
+                titles.Add("Cached series");
+            }
+            if (local)
+            {
+                titles.Add("Series");
+            }
+            if (day.Date.Day == 27)
+            {
+                titles.AddRange(Enumerable.Repeat("Overnight", (local ? 1 : 0) + (cache ? 1 : 0)));
+            }
+            Assert.Equal(titles, day.Appointments.Select(a => a.Title));
+        }
+        Assert.Equal(before, FileSnapshot.Take(data.Root));
+        Assert.Equal(0, data.Http.Requests);
+    }
+
+    [Theory]
+    [InlineData("folder")]
+    [InlineData("file")]
+    [InlineData("cache")]
+    public async Task ChangedCalendarSource_LeavesTheOtherEntriesOnTheDay(string changed)
+    {
+        static string Calendar(string title) => DesktopFixture.Calendar(DesktopFixture.Event(title, "20261015T090000", "20261015T093000"));
+        data.WriteNote(Date(0), "First batch");
+        data.WriteNote(Date(14), "Older daily");
+        data.WriteCalendar("local.ics", Calendar("Local"));
+        data.WriteCalendar("second.ICS", Calendar("Second"));
+        data.WriteCache(Calendar("Cached"), data.UtcNow);
+        data.SaveLink(FakeHttpHandler.Link);
+        DesktopState state = data.CreateState();
+        using Journal journal = (await state.OpenJournal().WaitAsync(Wait)).Journal;
+        Assert.Equal("First batch", Assert.Single(journal.ReadBatch()).Body);
+
+        string calendar = Path.Combine(data.Root, CalendarStore.FolderName);
+        if (changed == "folder")
+        {
+            Directory.Move(calendar, data.Outside("previous-calendar"));
+            data.WriteCalendar("local.ics", Calendar("Other folder"));
+        }
+        else
+        {
+            string path = changed == "file" ? Path.Combine(calendar, "local.ics") : Path.Combine(data.Root, CalendarFeed.CacheFileName);
+            string fixture = Path.Combine(Path.GetDirectoryName(path)!, "fixture.txt");
+            File.WriteAllText(fixture, Calendar("Alias"));
+            File.Delete(path);
+            try
+            {
+                File.CreateSymbolicLink(path, fixture);
+                output.WriteLine("Excluded a local file alias.");
+            }
+            catch (IOException e) when (OperatingSystem.IsWindows() && (e.HResult & 0xffff) == 1314)
+            {
+                Directory.CreateDirectory(path);
+                output.WriteLine("Excluded a directory at the file name. Windows file-link privilege was unavailable.");
+            }
+        }
+
+        JournalDay entry = Assert.Single(journal.ReadBatch());
+        Assert.Equal(DesktopFixture.Today.AddDays(-14), entry.Date);
+        Assert.Equal("Older daily", entry.Body);
+        string[] expected = changed switch { "folder" => ["Cached"], "file" => ["Cached", "Second"], _ => ["Local", "Second"] };
+        Assert.Equal(expected, entry.Appointments.Select(item => item.Title));
+        Assert.True(journal.Exhausted);
+        Assert.Equal(0, data.Http.Requests);
+    }
+
+    [Fact]
+    public async Task CacheSpelling_FollowsTheVolumesNameMatchingForHistoryAndDay()
+    {
+        Directory.CreateDirectory(data.Root);
+        string calendar = DesktopFixture.Calendar(DesktopFixture.Event("Cached fixture", "20261027T090000", "20261027T093000"));
+        File.WriteAllText(Path.Combine(data.Root, "Calendar-Link.ics"), calendar);
+        bool matches = File.Exists(Path.Combine(data.Root, CalendarFeed.CacheFileName));
+        CalendarFeed feed = new(data.Root, new CalendarLink(data.Root), data.Http, () => data.UtcNow);
+        Assert.Equal(matches ? calendar : null, feed.ReadCache());
+        DesktopState state = data.CreateState();
+        List<DateOnly> reads = [];
+        state.BeforeJournalDay = reads.Add;
+        using Journal journal = (await state.OpenJournal().WaitAsync(Wait)).Journal;
+        IReadOnlyList<JournalDay> batch = journal.ReadBatch();
+        if (matches)
+        {
+            JournalDay day = Assert.Single(batch);
+            Assert.Equal(DesktopFixture.Today.AddDays(-2), day.Date);
+            Assert.Equal("Cached fixture", Assert.Single(day.Appointments).Title);
+            Assert.Equal([DesktopFixture.Today, DesktopFixture.Today.AddDays(-1), day.Date], reads);
+        }
+        else
+        {
+            Assert.Empty(batch);
+            Assert.Empty(reads);
+        }
+        output.WriteLine("The fixed cache name matched the mixed-case fixture: " + matches);
+        Assert.True(journal.Exhausted);
+        Assert.Equal(0, data.Http.Requests);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReplacedStoreBetweenBatches_OnlyKeepsTheIndependentOutlookAppointment(bool turnOutlookOff)
+    {
+        string replacement = Directory.CreateDirectory(data.Outside("replacement")).FullName;
+        foreach (string root in new[] { data.Root, replacement })
+        {
+            new SettingsStore(root).SaveOutlook(true);
+            NoteStore notes = new(root);
+            notes.CreateWithText(Date(0), "First batch");
+            notes.CreateWithText(Date(14), "Older daily");
+            notes.CreateWithText(Date(14) + " Standup", "#meeting");
+            string calendar = DesktopFixture.Calendar(DesktopFixture.Event("File appointment", "20261015T090000", "20261015T093000"));
+            string folder = Directory.CreateDirectory(Path.Combine(root, CalendarStore.FolderName)).FullName;
+            File.WriteAllText(Path.Combine(folder, "local.ics"), calendar);
+            File.WriteAllText(Path.Combine(root, CalendarFeed.CacheFileName), calendar);
+        }
+        AddOutlookAppointment(14);
+        using Journal journal = (await data.CreateState().OpenJournal().WaitAsync(Wait)).Journal;
+        Assert.Equal("First batch", Assert.Single(journal.ReadBatch()).Body);
+        // Windows allows moving the open calendar directory itself before moving its parent.
+        Directory.Move(Path.Combine(data.Root, CalendarStore.FolderName), data.Outside("previous-calendar"));
+        Directory.Move(data.Root, data.Outside("previous-store"));
+        Directory.Move(replacement, data.Root);
+
+        if (turnOutlookOff)
+        {
+            int calls = data.Outlook.AppointmentCalls;
+            ActionResult result = await data.Actions!.SetOutlookEnabled(false).WaitAsync(Wait);
+            Assert.Equal(ActionKind.Done, result.Kind);
+            Assert.True(new SettingsStore(data.Outside("previous-store")).ReadOutlook());
+            Assert.Empty(journal.ReadBatch());
+            Assert.True(journal.Exhausted);
+            Assert.Equal(calls, data.Outlook.AppointmentCalls);
+            Assert.Equal(0, data.Http.Requests);
+            return;
+        }
+
+        JournalDay day = Assert.Single(journal.ReadBatch());
+        Assert.Equal(DesktopFixture.Today.AddDays(-14), day.Date);
+        Assert.Null(day.Daily);
+        Assert.Null(day.Body);
+        Assert.Empty(day.Meetings);
+        Assert.Equal("Outlook fixture", Assert.Single(day.Appointments).Title);
+        Assert.True(journal.Exhausted);
+        Assert.Equal(0, data.Http.Requests);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task JournalCalendarByteLimit_AppliesToHistoryAndKeepsTheIndependentSource(bool oversizedCache)
+    {
+        string text = DesktopFixture.Calendar(DesktopFixture.Event("At limit", "20261028T090000", "20261028T100000"));
+        string exact = text.PadRight((int)CalendarStore.MaxFileBytes);
+        string over = DesktopFixture.Calendar(DesktopFixture.Event("Too large", "20261001T090000", "20261001T100000"))
+            .PadRight((int)CalendarStore.MaxFileBytes + 1);
+        data.WriteCalendar("local.ics", oversizedCache ? exact : over);
+        data.WriteCache(oversizedCache ? over : exact, data.UtcNow);
+        DesktopState state = data.CreateState();
+        List<DateOnly> reads = [];
+        state.BeforeJournalDay = reads.Add;
+        using Journal journal = (await state.OpenJournal().WaitAsync(Wait)).Journal;
+        JournalDay entry = Assert.Single(journal.ReadBatch());
+        Assert.Equal(DesktopFixture.Today.AddDays(-1), entry.Date);
+        Assert.Equal("At limit", Assert.Single(entry.Appointments).Title);
+        Assert.True(journal.Exhausted);
+        Assert.Equal(new[] { DesktopFixture.Today, entry.Date }, reads);
+        Assert.Equal(0, data.Http.Requests);
+    }
+
+    [Theory]
+    [InlineData("EXDATE", false)]
+    [InlineData("CLASS:PRIVATE", false)]
+    [InlineData("STATUS:CANCELLED", false)]
+    [InlineData("CLASS:PRIVATE", true)]
+    public async Task ExcludedHistory_StartsOnlyAtVisibleOccurrence(string exclusion, bool repeats)
+    {
+        string master = DesktopFixture.Event("Old", "20261026T080000", "20261026T090000")
+            .Replace("END:VEVENT", "UID:series\r\n"
+                + (exclusion == "EXDATE" ? "RDATE:20261025T080000\r\nEXDATE:20261025T080000,20261026T080000\r\n" : string.Empty)
+                + (repeats ? "RRULE:FREQ=DAILY;COUNT=2\r\n" : string.Empty) + "END:VEVENT");
+        string replacement = exclusion == "EXDATE" ? string.Empty
+            : DesktopFixture.Event("Hidden", "20261026T080000", "20261026T090000")
+                .Replace("END:VEVENT", "UID:series\r\nRECURRENCE-ID:20261026T080000\r\n" + exclusion + "\r\nEND:VEVENT");
+        data.WriteCalendar("series.ics", DesktopFixture.Calendar(master, replacement));
+        DesktopState state = data.CreateState();
+        List<DateOnly> reads = [];
+        state.BeforeJournalDay = reads.Add;
+        using Journal journal = (await state.OpenJournal().WaitAsync(Wait)).Journal;
+        IReadOnlyList<JournalDay> entries = journal.ReadBatch();
+        Assert.True(journal.Exhausted);
+        Assert.Equal(repeats ? new[] { DesktopFixture.Today.AddDays(-2) } : [], entries.Select(entry => entry.Date));
+        Assert.Equal(Enumerable.Range(0, repeats ? 3 : 0).Select(i => DesktopFixture.Today.AddDays(-i)), reads);
+    }
+
+    [Fact]
+    public async Task TimedOutHistory_LeavesLocalDayReadable()
+    {
+        data.OutlookTimeout = TimeSpan.FromMilliseconds(50);
+        new SettingsStore(data.Root).SaveOutlook(true);
+        data.WriteNote(Date(0), "Read locally");
+        data.Outlook.Block();
+        try
+        {
+            DesktopState state = data.CreateState();
+            Task<(Journal Journal, JournalOutlook Outlook)> first = state.OpenJournal();
+            await data.Outlook.OldestEntered.Task.WaitAsync(Wait);
+            AssertLocalDay(await first.WaitAsync(Wait));
+            AssertLocalDay(await state.OpenJournal().WaitAsync(Wait));
+            data.Day = DesktopFixture.Today.AddDays(1);
+            AssertLocalDay(await state.OpenJournal().WaitAsync(Wait));
+            Assert.Equal(1, data.Outlook.OldestCalls);
+        }
+        finally
+        {
+            data.Outlook.Release();
+        }
+
+        static void AssertLocalDay((Journal Journal, JournalOutlook Outlook) opened)
+        {
+            using Journal journal = opened.Journal;
+            Assert.Equal(OutlookStatus.TimedOut, opened.Outlook.Status);
+            Assert.Equal("Read locally", Assert.Single(journal.ReadBatch()).Body);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DeniedOutlookDay_StopsAtTheRemainingLocalHistory(bool local)
+    {
+        new SettingsStore(data.Root).SaveOutlook(true);
+        DateOnly oldest = DesktopFixture.Today.AddDays(-42);
+        DateTime start = oldest.ToDateTime(new TimeOnly(9, 0));
+        data.Outlook.Days[oldest] = [new Appointment("Older Outlook item", null, start, start.AddHours(1), false)];
+        if (local)
+        {
+            data.WriteNote(Date(1), "Local note");
+            data.WriteCalendar("local.ics", DesktopFixture.Calendar(DesktopFixture.Event("Local meeting", "20261027T090000", "20261027T100000")));
+        }
+        DesktopState state = data.CreateState();
+        List<DateOnly> reads = [];
+        state.BeforeJournalDay = reads.Add;
+        (Journal opened, JournalOutlook outlook) = await state.OpenJournal().WaitAsync(Wait);
+        using Journal journal = opened;
+        Assert.Equal(OutlookStatus.Ok, outlook.Status);
+        data.Outlook.AppointmentKind = OutlookReadKind.Denied;
+
+        IReadOnlyList<JournalDay> entries = journal.ReadBatch();
+        Assert.Equal(OutlookStatus.Denied, outlook.Status);
+        Assert.Equal(1, data.Outlook.AppointmentCalls);
+        Assert.Equal(local ? new[] { DesktopFixture.Today.AddDays(-1), DesktopFixture.Today.AddDays(-2) } : [], entries.Select(e => e.Date));
+        if (local)
+        {
+            Assert.Equal("Local note", entries[0].Body);
+            Assert.Equal("Local meeting", Assert.Single(entries[1].Appointments).Title);
+        }
+        Assert.True(journal.Exhausted);
+        Assert.Empty(journal.ReadBatch());
+        Assert.Equal(Enumerable.Range(0, local ? 3 : 1).Select(i => DesktopFixture.Today.AddDays(-i)), reads);
+    }
+
+    [Fact]
+    public async Task TimedOutDay_ShowsStatusAndKeepsReadingLocalHistoryWithOneCall()
+    {
+        new SettingsStore(data.Root).SaveOutlook(true);
+        AddOutlookAppointment(0);
+        data.OutlookTimeout = TimeSpan.FromSeconds(2);
+        data.WriteNote(Date(0), "First local day");
+        data.WriteCalendar("older.ics", DesktopFixture.Calendar(DesktopFixture.Event("", "20261015T090000", "20261015T093000")));
+        DesktopState state = data.CreateState();
+        data.Outlook.BlockAppointments();
+        try
+        {
+            (string Title, DateOnly Day)? opened = null;
+            IRenderedComponent<JournalPanel> cut = data.Bunit.Render<JournalPanel>(p =>
+                p.Add(c => c.OnAppointment, target => { opened = target; }));
+            await data.Outlook.AppointmentsEntered.Task.WaitAsync(Wait);
+            cut.WaitForAssertion(() =>
+            {
+                Assert.Contains("Outlook (timed out)", cut.Find("[role=status]").TextContent, StringComparison.Ordinal);
+                Assert.Equal("First local day", cut.Find(".journal-body").TextContent);
+            }, Wait);
+            Assert.Equal(1, data.Outlook.OldestCalls);
+            Assert.True(await watching.WaitAsync(Wait));
+            await cut.InvokeAsync(cut.Instance.Bridge.OnJournalBottom);
+            cut.WaitForAssertion(() => Assert.Equal("09:00-09:30 (no title)", cut.Find(".journal-appointment").TextContent.Trim()), Wait);
+            await cut.Find(".journal-appointment").ClickAsync(new MouseEventArgs());
+            Assert.Equal((string.Empty, DesktopFixture.Today.AddDays(-14)), opened);
+            Assert.Contains("timed out", cut.Find("[role=status]").TextContent, StringComparison.Ordinal);
+
+            // A new local date bypasses the per-day cache. A still-blocked journal read must also cover this open.
+            data.Day = DesktopFixture.Today.AddDays(1);
+            (Journal reopened, JournalOutlook outlook) = await state.OpenJournal().WaitAsync(Wait);
+            using Journal journal = reopened;
+            Assert.Equal(OutlookStatus.Ok, outlook.Status);
+            Assert.Equal("First local day", Assert.Single(journal.ReadBatch()).Body);
+            Assert.Equal(OutlookStatus.TimedOut, outlook.Status);
+            Assert.Equal(DesktopFixture.Today, Assert.Single(data.Outlook.AppointmentArguments).Day);
+        }
+        finally
+        {
+            data.Outlook.Release();
+        }
+    }
+
+    [Fact]
+    public async Task SealedMeetingBetweenBatches_LeavesOnlyTheAppointment()
+    {
+        data.Keys = FakeKeyStore.Ready();
+        string meeting = Date(14) + " Tagged";
+        data.WriteNote(Date(0), "First batch");
+        data.WriteNote(meeting, "#meeting");
+        data.WriteCalendar("older.ics", DesktopFixture.Calendar(DesktopFixture.Event("Scheduled", "20261015T090000", "20261015T093000")));
+        DesktopState state = data.CreateState();
+        using Journal journal = (await state.OpenJournal().WaitAsync(Wait)).Journal;
+        Assert.Equal("First batch", Assert.Single(journal.ReadBatch()).Body);
+
+        data.WriteSensitive(meeting, "#meeting");
+        string plain = Path.Combine(data.Root, meeting + ".md");
+        File.Delete(plain);
+        Assert.False(File.Exists(plain));
+        Assert.True(File.Exists(Path.Combine(data.Root, meeting + NoteStore.SensitiveExtension)));
+        JournalDay day = Assert.Single(journal.ReadBatch());
+        Assert.Equal(DesktopFixture.Today.AddDays(-14), day.Date);
+        Assert.Empty(day.Meetings);
+        Assert.Equal("Scheduled", Assert.Single(day.Appointments).Title);
+        Assert.True(journal.Exhausted);
+    }
+
+    [Fact]
+    public async Task DeniedHistory_StillOpensLinksAndRestoresWorkspace()
+    {
+        new SettingsStore(data.Root).SaveOutlook(true);
+        data.Outlook.AppointmentKind = OutlookReadKind.Denied;
+        data.WriteNote(Date(0), "Daily text");
+        data.WriteNote(Date(0) + " Standup", "#meeting");
+        data.WriteCalendar("one.ics", DesktopFixture.Calendar(
+            DesktopFixture.Event("Review", "20261029T090000", "20261029T093000"),
+            DesktopFixture.Event("Review", "20261028T140000", "20261028T143000")));
+        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
+        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        await Open(cut);
+        cut.WaitForAssertion(() => Assert.Contains("access denied", cut.Find(".journal-panel").TextContent), Wait);
+        IElement close = cut.Find(".journal-panel button.close");
+        Assert.Equal("Close", close.GetAttribute("aria-label"));
+        Assert.Equal("button", close.GetAttribute("type"));
+        Assert.NotNull(close.QuerySelector("svg[aria-hidden=true][focusable=false]"));
+        await StaleClick.ClickAsync(cut, ".journal-panel .close");
+        cut.WaitForAssertion(() => Assert.False(cut.Find(".note-area").HasAttribute("hidden")), Wait);
+        foreach ((string selector, string name) in new[] { (".journal-open", Date(0)), (".journal-meeting", Date(0) + " Standup") })
+        {
+            await Open(cut);
+            cut.WaitForElement(selector, Wait);
+            await StaleClick.ClickAsync(cut, selector);
+            cut.WaitForAssertion(() => Assert.Equal(name, cut.Find(".note-title").GetAttribute("title")), Wait);
+            cut.WaitForAssertion(() => Assert.DoesNotContain("Loading", cut.Find(".links-panel").TextContent), Wait);
+        }
+        await Open(cut);
+        cut.WaitForElement(".journal-appointment", Wait);
+        await StaleClick.ClickAsync(cut, ".journal-panel .close");
+        cut.WaitForAssertion(() => Assert.Equal(Date(0) + " Standup", cut.Find(".note-area:not([hidden]) .note-title").GetAttribute("title")), Wait);
+        await Open(cut);
+        cut.WaitForElement(".journal-appointment", Wait);
+        const string Older = ".journal-panel article:nth-of-type(2)";
+        Assert.Equal(Date(1), cut.Find(Older + " h3").TextContent);
+        Assert.Equal("14:00-14:30 Review", cut.Find(Older + " .journal-appointment").TextContent.Trim());
+        await StaleClick.ClickAsync(cut, Older + " .journal-appointment");
+        cut.WaitForAssertion(() => Assert.Equal("Review", cut.Find(".appointment-page h2").TextContent), Wait);
+        Assert.Equal(DesktopFixture.Today.AddDays(-1), cut.FindComponent<AppointmentPanel>().Instance.Day);
+    }
+}

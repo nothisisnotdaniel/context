@@ -27,6 +27,9 @@ internal enum OutlookReadKind
 
     /// <summary>Any other error.</summary>
     Failed,
+
+    /// <summary>Consent was withdrawn before the source was called.</summary>
+    Off,
 }
 
 /// <summary>
@@ -59,6 +62,8 @@ internal interface IOutlookSource
     /// <summary>Whether classic Outlook can be read here; reads no calendar data.</summary>
     public OutlookAvailability Availability();
 
+    public OutlookRead<DateOnly> Oldest(DateOnly today, TimeZoneInfo zone);
+
     /// <summary>The appointments touching <paramref name="day"/>, with times in <paramref name="zone"/>.</summary>
     public OutlookRead<Appointment> Appointments(DateOnly day, TimeZoneInfo zone);
 
@@ -73,6 +78,8 @@ internal interface IOutlookSource
 /// <summary>The Outlook source on an OS other than Windows: nothing can be read.</summary>
 internal sealed class UnsupportedOutlookSource : IOutlookSource
 {
+    public OutlookRead<DateOnly> Oldest(DateOnly today, TimeZoneInfo zone) => new(OutlookReadKind.Failed);
+
     public OutlookAvailability Availability() => OutlookAvailability.Unsupported;
 
     public OutlookRead<Appointment> Appointments(DateOnly day, TimeZoneInfo zone) => new(OutlookReadKind.Failed);
