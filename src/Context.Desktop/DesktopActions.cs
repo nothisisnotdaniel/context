@@ -101,7 +101,9 @@ internal sealed record ActionResult
     internal IReadOnlyList<string> RecoveryFiles { get; init; } = [];
     internal string? RecoveryFolder { get; init; }
     internal bool HasRecoveryDetails { get; init; }
-    internal IReadOnlyList<string> RecoveryPaths => RecoveryFiles.Count > 0 ? RecoveryFiles : RecoveryFolder is { } folder ? [folder] : [];
+    internal bool RecoveryFolderNeedsDisclosure => RecoveryFolder is { } folder && DesktopText.OneLine(folder) != folder;
+    internal IReadOnlyList<string> RecoveryPaths => RecoveryFolder is { } folder && (RecoveryFiles.Count == 0 || RecoveryFolderNeedsDisclosure)
+        ? [.. RecoveryFiles, folder] : RecoveryFiles;
 
     /// <summary>
     /// For a <see cref="DesktopActions.SaveNote"/> that numbered or removed <c>#!d</c> markers (job 343): the edits, whose
@@ -542,12 +544,21 @@ internal sealed class DesktopActions
     public static string SealHistoryFailedText(string name) => $"Can't seal the history of {name}. Nothing was changed.";
 
     /// <summary>The red line when a note was marked sensitive but its old plain versions are still on disk.</summary>
-    public static string PlainHistoryLeftText(ActionResult result) =>
-        $"Marked {result.Text} sensitive, but readable history may remain. "
-        + (result.RecoveryFolder is { } folder ? $"Check the original folder {folder}, including hidden files. "
-            : "Some recovery locations in the original store could not be verified. ")
-        + (result.RecoveryFiles.Count > 0 ? $"Readable recovery files remain at {string.Join(", ", result.RecoveryFiles)}. " : string.Empty)
-        + "Secure your plaintext files before removing them. Keep the .ctxs files.";
+    public static string PlainHistoryLeftText(ActionResult result)
+    {
+        string folderText = result.RecoveryFolder switch
+        {
+            null => "Some recovery locations in the original store could not be verified. ",
+            _ when result.RecoveryFolderNeedsDisclosure => "Check the original folder for hidden files. ",
+            string folder => $"Check the original folder {folder}, including hidden files. ",
+        };
+        string[] literalFiles = result.RecoveryFiles.Where(path => DesktopText.OneLine(path) == path).ToArray();
+        string filesText = literalFiles.Length > 0 ? $"Readable recovery files remain at {string.Join(", ", literalFiles)}. " : string.Empty;
+        string disclosure = result.RecoveryFolderNeedsDisclosure || literalFiles.Length < result.RecoveryFiles.Count
+            ? "Open Recovery paths for the exact locations. " : string.Empty;
+        return $"Marked {result.Text} sensitive, but readable history may remain. {folderText}{filesText}{disclosure}"
+            + "Secure your plaintext files before removing them. Keep the .ctxs files.";
+    }
 
     private static ActionResult RecoveryFailed(string operation, JournalDirectory.Edit.RecoveryFailure recovery) =>
         Failed(ActionReason.WriteFailed, $"Couldn't {operation}. " + (recovery.EarlierHistory

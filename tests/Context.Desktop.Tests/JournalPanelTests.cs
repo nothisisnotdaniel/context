@@ -1,14 +1,17 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using AngleSharp.Css.Dom;
 using AngleSharp.Css.Parser;
 using AngleSharp.Dom;
+using AngleSharp.Html.Dom;
 using Bunit;
 using Jint;
 using Xunit.Abstractions;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
+using Microsoft.Win32.SafeHandles;
 
 namespace Context.Tests;
 
@@ -161,10 +164,13 @@ public sealed class JournalPanelTests : IDisposable
 
     private static string SiblingName => Date(0) + " Review";
 
-    private async Task<IRenderedComponent<Main>> OpenDailyEditor(string body = "Current parent")
+    private Task<IRenderedComponent<Main>> OpenDailyEditor(string body = "Current parent") =>
+        OpenDailyEditor(data, editor, body);
+
+    private static async Task<IRenderedComponent<Main>> OpenDailyEditor(DesktopFixture fixture, EditorJs editor, string body)
     {
-        IRenderedComponent<Main> cut = await data.RenderAsync<Main>();
-        await data.State!.ReloadsSettled().WaitAsync(Wait);
+        IRenderedComponent<Main> cut = await fixture.RenderAsync<Main>();
+        await fixture.State!.ReloadsSettled().WaitAsync(Wait);
         await Open(cut);
         cut.WaitForElement(".journal-open", Wait);
         await StaleClick.ClickAsync(cut, ".journal-open");
@@ -809,18 +815,25 @@ public sealed class JournalPanelTests : IDisposable
         Assert.Equal("Earlier parent", await data.State.ReadVersion(target, id).WaitAsync(Wait));
     }
 
-    [Fact]
-    public async Task CleanupAndRecoveryRefused_WarningIdentifiesTheReadableVersion()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CleanupAndRecoveryRefused_WarningIdentifiesTheReadableVersion(bool specialPath)
     {
-        data.Keys = FakeKeyStore.Ready();
+        const string Current = "Current parent";
+        const string Earlier = "Earlier readable version";
+        string rootName = specialPath ? (OperatingSystem.IsWindows() ? "Journal\u0085store" : "Journal\rstore") : "Journal store";
+        using DesktopFixture fixture = new(rootName) { Keys = FakeKeyStore.Ready() };
+        fixture.Bunit.JSInterop.SetupVoid("ContextJournal.stop", _ => true).SetVoidResult();
         string name = Date(0);
-        data.WriteNote(name, "Current parent");
-        IRenderedComponent<Main> cut = await OpenDailyEditor();
+        fixture.WriteNote(name, Current);
+        IRenderedComponent<Main> cut = await OpenDailyEditor(fixture, new EditorJs(fixture.Bunit), Current);
         NoteReference target = cut.FindComponent<NoteEditor>().Instance.OpenedTarget!.Value;
         JournalDirectory directory = Assert.IsType<JournalDirectory>(target.Source);
         string path = target.SelectedPath!;
         string history = NoteHistory.FolderFor(path);
-        string id = Assert.IsType<string>(data.State!.HistoryStore.Keep(path, "Earlier readable version"u8.ToArray()));
+        byte[] kept = Encoding.UTF8.GetBytes(Earlier);
+        string id = Assert.IsType<string>(fixture.State!.HistoryStore.Keep(path, kept));
         string plain = Path.Combine(history, id + ".md");
         List<string> refused = [];
         bool Available(string file, string operation)
@@ -839,15 +852,44 @@ public sealed class JournalPanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Contains("readable history may remain", cut.Find(".main-status.red").TextContent), Wait);
         Assert.Equal(["remove", "restore"], refused);
         string remaining = Assert.Single(Directory.GetFiles(history, "*.md"));
-        Assert.Equal("Earlier readable version", File.ReadAllText(remaining));
+        using SafeFileHandle file = File.OpenHandle(remaining);
+        string exactPath = JournalDirectory.CheckedPath(file, directory: false);
+        string exactFolder = Path.GetDirectoryName(exactPath)!;
         string warning = cut.Find(".main-status.red").TextContent;
-        Assert.Contains(history, warning);
-        Assert.Contains(Path.GetFileName(remaining), warning);
-        Assert.Contains("Keep the .ctxs files", warning);
+        output.WriteLine(warning);
+        Assert.Contains("Secure your plaintext files before removing them. Keep the .ctxs files.", warning);
+        string location = exactPath;
+        if (specialPath)
+        {
+            Assert.Contains("Open Recovery paths", warning);
+            Assert.DoesNotContain(DesktopText.OneLine(exactFolder), warning);
+            Assert.Equal(warning, DesktopText.OneLine(warning));
+            IHtmlElement summary = Assert.IsAssignableFrom<IHtmlElement>(cut.Find("details.recovery-paths > summary"));
+            Assert.Equal("Recovery paths", summary.TextContent);
+            await summary.DoClickAsync();
+            string[] decoded = cut.FindAll("details.recovery-paths[open] label").Select(label =>
+            {
+                Assert.Equal("Path with special characters (JSON string)", label.TextContent.Trim());
+                IHtmlInputElement field = Assert.IsAssignableFrom<IHtmlInputElement>(label.QuerySelector("input[readonly]"));
+                Assert.Equal(field.Value, DesktopText.OneLine(field.Value));
+                output.WriteLine(field.Value);
+                return Assert.IsType<string>(JsonSerializer.Deserialize<string>(field.Value));
+            }).ToArray();
+            Assert.Contains(exactFolder, decoded);
+            location = Assert.Single(decoded, File.Exists);
+            Assert.Equal(exactPath, location);
+        }
+        else
+        {
+            Assert.Contains($"Check the original folder {exactFolder}, including hidden files.", warning);
+            Assert.Contains($"Readable recovery files remain at {exactPath}.", warning);
+        }
+        Assert.Equal(kept, File.ReadAllBytes(location));
         Assert.False(File.Exists(path));
         NoteReference sensitive = NoteReference.Stored(name, sensitive: true);
-        Assert.Equal("Current parent", (await data.State.ReadSensitive(sensitive).WaitAsync(Wait))?.Text);
-        Assert.Equal("Earlier readable version", await data.State.ReadVersion(sensitive, id).WaitAsync(Wait));
+        Assert.Equal(Current, (await fixture.State.ReadSensitive(sensitive).WaitAsync(Wait))?.Text);
+        Assert.Equal(Earlier, await fixture.State.ReadVersion(sensitive, id).WaitAsync(Wait));
+        output.WriteLine($"Read {kept.Length} plaintext bytes, reopened '{Current}' and version {id} ('{Earlier}').");
     }
     private static string LegacyName => SiblingName + " ";
     private const string LegacyBody = "#meeting\nSpace-suffixed fixture";
