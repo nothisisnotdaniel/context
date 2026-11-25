@@ -159,6 +159,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#77](backlog/077-quick-switcher.md) Quick switcher → 364-quick-switcher
 - [x] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39) → 367-pro-licence-context
 - [x] [#454](backlog/454-fix-flaky-repository-settings-page-test.md) Fix flaky repository settings page test → 382-fix-flaky-settings-test
+- [ ] [#508](backlog/508-wider-search-box-with-matches-while.md) Wider search box with matches while typing
 - [ ] [#509](backlog/509-paste-pictures-into-notes.md) Paste pictures into notes
 - [ ] [#510](backlog/510-sort-pinned-notes-by-drag-and.md) Sort pinned notes by drag and drop
 - [ ] [#476](backlog/476-journal-view-of-the-days-with.md) Journal view of the days with content
@@ -460,7 +461,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#505](backlog/505-tab-key-indents-in-code-blocks.md) Tab key indents in code blocks
 - [ ] [#506](backlog/506-always-visible-status-bar-for-feedback.md) Always-visible status bar for feedback messages
 - [ ] [#507](backlog/507-resizable-and-collapsible-sidebars.md) Resizable and collapsible sidebars
-- [ ] [#508](backlog/508-wider-search-box-with-matches-while.md) Wider search box with matches while typing
 
 ## Dropped with the terminal UI
 
