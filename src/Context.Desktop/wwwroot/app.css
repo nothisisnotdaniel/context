@@ -742,6 +742,20 @@ p.decision-clash button {
 }
 
 /* The main region's status line and the bars above the editor and the tag panel. */
+.recovery-status,
+.note-editor .status {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    user-select: text;
+}
+
+.recovery-paths input {
+    box-sizing: border-box;
+    display: block;
+    margin-top: 4px;
+    width: 100%;
+}
+
 .main-status:empty,
 .note-editor .status:empty {
     display: none;
@@ -3205,4 +3219,32 @@ nav.saved-searches ul {
     gap: 8px;
     align-items: center;
     flex-wrap: wrap;
+}
+
+.journal-region {
+    /* Reserve a classic scrollbar's width from the first batch, including in older WebViews. */
+    overflow-y: scroll;
+    overflow-anchor: none;
+}
+
+.journal-body {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.journal-panel article {
+    padding-block: 0.5rem;
+    border-bottom: 1px solid var(--line);
+}
+
+.journal-panel article button {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    display: block;
+}
+
+.journal-bottom {
+    height: 1px;
+    overflow-anchor: none;
 }

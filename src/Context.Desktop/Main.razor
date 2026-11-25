@@ -14,7 +14,7 @@
             <aside class="notes-region">
                 <NotesPanel @ref="notesPanel" OpenName="@openName" OnOpen="RequestOpen" OnTags="ShowTags" OnSettings="ShowSettings" OnTriage="ShowTriage" OnPeople="ShowPeople" OnTodos="ShowTodos" OnSearch="ShowSearch" />
             </aside>
-            <main class="current-region">
+            <main class="current-region@(page == Page.Journal ? " journal-region" : null)">
                 <TopBar Today="@snapshot.Today" Selected="@SelectedDay()" OnToday="ShowToday" OnPick="PickDay" OnCapture="CaptureAsync" OnSearch="ShowSearch" PageActions="@PageActionsFor(snapshot)"
                         PageActionsDisabled="@(running || renaming || subpaging || moving)" OnPageAction="RunPageAction" />
                 @if (State.DecisionNumbersRanOut)
@@ -32,6 +32,10 @@
                 @if (page == Page.Triage)
                 {
                     <TriagePanel Guard="TriageHeld" OnTriaged="Triaged" OnClose="CloseTriage" />
+                }
+                @if (page == Page.Journal)
+                {
+                    <JournalPanel @ref="journalPanel" OnOpen="OpenFromJournal" OnAppointment="OpenAppointment" OnClose="CloseJournal" />
                 }
                 @if (page == Page.Done)
                 {
@@ -53,7 +57,7 @@
                 {
                     <AppointmentPanel Title="@shownAppointment.Title" Day="@shownAppointment.Day" OnOpen="RequestOpen" OnCreate="CreateAppointmentNote" OnCreated="AppointmentNoteCreated" OnClose="CloseAppointment" />
                 }
-                @if (reviewShown)
+                @if (page != Page.Journal && reviewShown)
                 {
                     <ReviewPanel OnOpen="RequestOpen" OnClose="CloseReview" />
                 }
@@ -73,11 +77,11 @@
                 {
                     <TagsPanel Selected="@tagShown" OnTag="ShowTag" OnClose="CloseTags" />
                 }
-                @if (tagShown is { } tag)
+                @if (page != Page.Journal && tagShown is { } tag)
                 {
                     <TagPanel Tag="@tag" OnOpen="RequestOpen" OnBoard="ShowBoard" OnClose="CloseTag" />
                 }
-                @if (findShown is { } find)
+                @if (page != Page.Journal && findShown is { } find)
                 {
                     <FindPanel Key="@find.Key" Value="@find.Value" OnOpen="RequestOpen" OnClose="CloseFind" />
                 }
@@ -85,15 +89,17 @@
                 {
                     <SearchPanel Text="@search" Request="@searchRequest" Focus="@searchFocus" OnOpen="OpenFromSearch" OnClose="CloseSearch" />
                 }
-                @if (decisionsShown is { } decisionsTag)
+                @if (page != Page.Journal && decisionsShown is { } decisionsTag)
                 {
                     <DecisionsPanel Tag="@decisionsTag" OnOpen="RequestOpen" OnOpenDecision="OpenDecision" OnClose="CloseDecisions" />
                 }
-                @if (similarShown)
+                @if (page != Page.Journal && similarShown)
                 {
                     <SimilarPanel OnOpen="RequestOpen" OnClose="CloseSimilar" Guard="MergeHeld" OnMerged="Merged" />
                 }
-                <p class="main-status cut @statusClass" role="status" title="@statusText">@statusText</p>
+                <p class="main-status @(recoveryDetails is null ? "cut" : "recovery-status") @statusClass" role="status"
+                   tabindex="@(recoveryDetails is null ? null : "0")" title="@(recoveryDetails is null ? statusText : null)">@statusText</p>
+                <RecoveryPaths Paths="recoveryDetails?.RecoveryPaths" />
                 <div class="note-area" hidden="@(page != Page.None)">
                     @if (openName is { } name)
                     {
@@ -151,7 +157,7 @@
                             <MeetingTodosPanel @key="name" Day="meetingDay" NoteName="@name" />
                         }
                         int shownEditor = editorGeneration;
-                        <NoteEditor @key="(name, openSensitive)" @ref="editor" Name="@name" Sensitive="openSensitive"
+                        <NoteEditor @key="(name, openSensitive, journalNote)" @ref="editor" Name="@name" Sensitive="openSensitive" JournalLink="journalNote"
                                     OnTag="ShowTag" OnOpenNote="RequestOpen" OnOpenHeading="OpenHeading" OnCreateNote="CreateLinked" Heading="@openHeading" Decision="@openDecision" OnOpenDecision="OpenDecision" OnPerson="OpenMention" OnIdle="LockOpen" OnLocked="Locked"
                                     OnAttach="AttachDropped" OnOpenAttachment="OpenAttachment" OnOpenWebLink="OpenWebLink"
                                     OnOutline="OutlineReport(shownEditor)" />
@@ -177,7 +183,7 @@
                         }
                         @if (historyShown)
                         {
-                            <HistoryPanel Name="@name" Sensitive="openSensitive" OnRestore="AskRestore" OnClose="CloseHistory" />
+                            <HistoryPanel Name="@name" Sensitive="openSensitive" JournalLink="journalNote" OnRestore="AskRestore" OnClose="CloseHistory" />
                         }
                         @if (People.PersonOf(name) is { } person)
                         {
@@ -187,7 +193,7 @@
                         {
                             <ItemPanel Item="item" OnOpen="RequestOpen" OnPerson="OpenMention" />
                         }
-                        <LinksPanel Name="@name" Sensitive="openSensitive" OnOpen="RequestOpen" OnTag="ShowTag" />
+                        <LinksPanel Name="@name" Sensitive="openSensitive" JournalLink="journalNote" OnOpen="RequestOpen" OnTag="ShowTag" />
                     }
                     else
                     {
@@ -211,9 +217,9 @@
             <ConfirmDialog Question="@($"Discard changes to {DesktopText.OneLine(openName ?? string.Empty)}?")" ConfirmLabel="Discard"
                            OnConfirm="Discard" OnCancel="KeepEditing" />
         }
-        @if (deleting && openName is { } doomed)
+        @if (deleteTarget is { } doomed)
         {
-            <ConfirmDialog Question="@DeleteQuestion(doomed)" ConfirmLabel="Delete"
+            <ConfirmDialog Question="@DeleteQuestion(doomed.Target.Name, doomed.Below)" ConfirmLabel="Delete"
                            Busy="running" OnConfirm="DeleteConfirmed" OnCancel="CancelDelete" />
         }
         @if (renameAsk is { } ask && openName is { } renamingName)
@@ -277,6 +283,7 @@ else
     private readonly object outlineReceiver = new();
     private string? tagShown;
     private Page page;
+    private Page journalReturn;
     private bool reviewShown;
     private (string Key, string Value)? findShown;
     private string? searchShown;
@@ -298,7 +305,7 @@ else
     private string glossaryShown = string.Empty;
     private int glossaryRequest;
     private bool similarShown;
-    private enum Page { None, Triage, People, Tags, Settings, Appointment, Board, Search, MailDigest, Done, Todos, Glossary }
+    private enum Page { None, Triage, People, Tags, Settings, Appointment, Board, Search, MailDigest, Journal, Done, Todos, Glossary }
 
     // The board's tag (normalized) while Page.Board is shown (job 242).
     private string? boardShown;
@@ -310,7 +317,10 @@ else
     private (string Title, DateOnly Day)? pendingAppointment;
     private bool discarding;
     private bool pendingClose;
-    private string? pendingName;
+    private (string? Name, JournalNoteLink? Link) pendingNote;
+    private JournalNoteLink? journalNote;
+    private JournalPanel? journalPanel;
+    private bool disposed;
     private string? pendingHeading;
     // The heading a [[Note#Heading]] link opened the note at; the new editor jumps there once, after its mount.
     private string? openHeading;
@@ -338,13 +348,20 @@ else
     private bool running;
     private string statusText = string.Empty;
     private string statusClass = string.Empty;
+    private ActionResult? recoveryDetails;
     private bool renaming;
     private string renameText = string.Empty;
     private ElementReference renameField;
     private bool focusRename;
     // While set, the rename question is open: the new full name and how many notes' links change.
     private (string NewName, int Count)? renameAsk;
-    private bool deleting;
+    private (NoteReference Target, int Below, JournalDirectory.Edit.DeleteSelection? Selection)? deleteTarget;
+    private bool deleting => deleteTarget.HasValue;
+
+    private NoteReference StoredTarget(string name) =>
+        journalNote is { } link && link.Name == name ? link.Target
+        : editor?.OpenedTarget is { } target && target.Name == name && target.Sensitive == openSensitive ? target
+        : NoteReference.Stored(name, openSensitive);
     private bool openSensitive;
     private bool marking;
     private bool unsealing;
@@ -386,6 +403,8 @@ else
 
     public ValueTask DisposeAsync()
     {
+        disposed = true;
+        journalNote?.Dispose();
         Guard.Detach();
         if (barRunner is not null)
         {
@@ -646,6 +665,7 @@ else
 
     private void ShowTag(string tag)
     {
+        CloseJournal();
         tagShown = TagIndex.NormalizeTag(tag);
     }
 
@@ -722,6 +742,7 @@ else
     // going back to the note, ends Back to search.
     private void OpenPage(Page next)
     {
+        CloseJournal();
         if (page == Page.Tags && next != Page.Tags)
         {
             tagShown = null;
@@ -738,7 +759,11 @@ else
     }
 
     // The weekly review: shown at the top of the main region until closed or until a note opens.
-    private void ShowReview() => reviewShown = true;
+    private void ShowReview()
+    {
+        CloseJournal();
+        reviewShown = true;
+    }
 
     private void CloseReview() => reviewShown = false;
 
@@ -749,6 +774,23 @@ else
 
     // The done log (job 293): done.md grouped by week, a page in place of the note area.
     private void ShowDone() => OpenPage(Page.Done);
+
+    private void ShowJournal()
+    {
+        if (page != Page.Journal)
+        {
+            journalReturn = page;
+            page = Page.Journal;
+        }
+    }
+
+    private void CloseJournal()
+    {
+        if (page == Page.Journal)
+        {
+            page = journalReturn;
+        }
+    }
 
     private void CloseDone() => page = Page.None;
 
@@ -838,7 +880,7 @@ else
 
         if (await KeptUnsaved())
         {
-            pendingName = null;
+            pendingNote = default;
             pendingPerson = null;
             pendingLink = null;
             pendingToday = false;
@@ -887,7 +929,7 @@ else
             && !MeetingNote.IsNoteOf(first, openName)
             && await KeptUnsaved())
         {
-            pendingName = null;
+            pendingNote = default;
             pendingPerson = null;
             pendingLink = null;
             pendingToday = false;
@@ -941,7 +983,7 @@ else
             && !string.Equals(openName, Actions.DailyNoteName(), StringComparison.Ordinal)
             && await KeptUnsaved())
         {
-            pendingName = null;
+            pendingNote = default;
             pendingPerson = null;
             pendingLink = null;
             pendingToday = true;
@@ -988,7 +1030,7 @@ else
             && !string.Equals(openName, Actions.DailyNoteName(day), StringComparison.Ordinal)
             && await KeptUnsaved())
         {
-            pendingName = null;
+            pendingNote = default;
             pendingPerson = null;
             pendingLink = null;
             pendingToday = false;
@@ -1022,6 +1064,8 @@ else
     // Opens the note called name (null: no note), asking first when the open note has unsaved changes.
     private Task RequestOpen(string? name) => RequestOpen(name, null);
 
+    private Task OpenFromJournal(JournalNoteLink link) => RequestOpen(link.Name, null, null, link);
+
     // A [[Note#Heading]] link clicked in the editor: opens that note at the heading.
     private Task OpenHeading((string Name, string Heading) link) => RequestOpen(link.Name, link.Heading);
 
@@ -1033,9 +1077,9 @@ else
     private Task RequestOpen(string? name, string? heading) => RequestOpen(name, heading, null);
 
     // As above, or at decision (its marker token, jobs 343 and 349) when heading is null.
-    private async Task RequestOpen(string? name, string? heading, string? decision)
+    private async Task RequestOpen(string? name, string? heading, string? decision, JournalNoteLink? link = null)
     {
-        if (name is not null && string.Equals(name, openName, StringComparison.Ordinal))
+        if (link is null && name is not null && string.Equals(name, openName, StringComparison.Ordinal))
         {
             if (page == Page.Search)
             {
@@ -1059,7 +1103,7 @@ else
 
         if (await KeptUnsaved())
         {
-            pendingName = name;
+            pendingNote = (name, link);
             pendingHeading = heading;
             pendingDecision = decision;
             pendingPerson = null;
@@ -1069,7 +1113,21 @@ else
             return;
         }
 
-        ShowNote(name, heading, decision: decision);
+        await OpenRequestedNote(name, heading, decision, link);
+    }
+
+    private async Task OpenRequestedNote(string? name, string? heading, string? decision, JournalNoteLink? link)
+    {
+        if (link is not null && (!await link.Bind() || disposed || page != Page.Journal))
+        {
+            link.Dispose();
+            if (!disposed && page == Page.Journal)
+            {
+                journalPanel?.ShowReadError(link.Name);
+            }
+            return;
+        }
+        ShowNote(name, heading, decision: decision, link: link);
     }
 
     // Saves the open note first when it has unsaved changes (job 203). True when unsaved changes are left because that
@@ -1082,7 +1140,7 @@ else
     {
         if (await KeptUnsaved())
         {
-            pendingName = null;
+            pendingNote = default;
             pendingPerson = person;
             pendingLink = null;
             pendingAppointment = null;
@@ -1115,7 +1173,7 @@ else
     {
         if (await KeptUnsaved())
         {
-            pendingName = null;
+            pendingNote = default;
             pendingPerson = null;
             pendingLink = target;
             pendingAppointment = null;
@@ -1302,7 +1360,9 @@ else
 
         if (pendingPerson is not { } person)
         {
-            ShowNote(pendingName, pendingHeading, decision: pendingDecision);
+            (string? name, JournalNoteLink? linkToOpen) = pendingNote;
+            pendingNote = default;
+            await OpenRequestedNote(name, pendingHeading, pendingDecision, linkToOpen);
             return;
         }
 
@@ -1332,7 +1392,7 @@ else
         discarding = false;
         pendingClose = false;
         pendingPickedDay = null;
-        pendingName = null;
+        pendingNote = default;
         pendingHeading = null;
         pendingDecision = null;
         pendingPerson = null;
@@ -1386,9 +1446,11 @@ else
     }
 
     // record false: the open note was just renamed or moved, and the action already changed its recent entry in place.
-    private void ShowNote(string? name, string? heading = null, bool record = true, string? decision = null)
+    private void ShowNote(string? name, string? heading = null, bool record = true, string? decision = null, JournalNoteLink? link = null)
     {
-        (string? Name, bool Sensitive) before = (openName, openSensitive);
+        (string? Name, bool Sensitive, JournalNoteLink? Link) before = (openName, openSensitive, journalNote);
+        journalNote?.Dispose();
+        journalNote = link;
         if (record && name is not null && !string.Equals(name, openName, StringComparison.Ordinal))
         {
             // Never throws, never Busy; the sidebar lists the note first (job 240).
@@ -1400,16 +1462,16 @@ else
         openDecision = name is null || heading is not null ? null : decision;
         pendingHeading = null;
         pendingDecision = null;
-        openSensitive = name is not null
+        openSensitive = link is null && name is not null
             && Snapshot is { } snapshot
             && snapshot.Sensitive.Any(n => string.Equals(n.Name, name, StringComparison.Ordinal));
-        if (name is null || before != (openName, openSensitive))
+        if (name is null || before != (openName, openSensitive, journalNote))
         {
             // A new editor (or none): the old one's outline goes, and its later reports are ignored.
             editorGeneration++;
             outline = [];
         }
-        pendingName = null;
+        pendingNote = default;
         pendingPerson = null;
         pendingLink = null;
         pendingToday = false;
@@ -1433,7 +1495,7 @@ else
         renaming = false;
         subpaging = false;
         moving = false;
-        deleting = false;
+        deleteTarget = null;
         renameAsk = null;
         marking = false;
         unsealing = false;
@@ -1496,6 +1558,7 @@ else
                 }
                 else
                 {
+                    CloseJournal();
                     findShown = (findKey, findValue);
                     ShowStatus(string.Empty, string.Empty);
                 }
@@ -1513,11 +1576,13 @@ else
             case "/decisions":
                 // Every note's #!d decisions, or those of the notes with a tag: /decisions #work. Read only;
                 // DecisionsPanel shows the usage line for an invalid tag.
+                CloseJournal();
                 decisionsShown = rest;
                 ShowStatus(string.Empty, string.Empty);
                 break;
             case "/similar":
                 // Pairs of notes that look like duplicates (job 268). Read only until a Keep button is confirmed.
+                CloseJournal();
                 similarShown = true;
                 ShowStatus(string.Empty, string.Empty);
                 break;
@@ -1612,6 +1677,9 @@ else
             case "/settings":
                 ShowSettings();
                 break;
+            case "/journal":
+                ShowJournal();
+                break;
             case "/donelog":
                 // The argument is ignored.
                 ShowDone();
@@ -1644,7 +1712,7 @@ else
                     && !string.Equals(openName, Actions.BriefingName(), StringComparison.Ordinal)
                     && await KeptUnsaved())
                 {
-                    pendingName = null;
+                    pendingNote = default;
                     pendingPerson = null;
                     pendingLink = null;
                     pendingToday = false;
@@ -1740,7 +1808,7 @@ else
                     && !MeetingNote.IsNoteOf(appointment, openName)
                     && await KeptUnsaved())
                 {
-                    pendingName = null;
+                    pendingNote = default;
                     pendingPerson = null;
                     pendingLink = null;
                     pendingToday = false;
@@ -2173,7 +2241,9 @@ else
             return;
         }
 
-        int count = await State.LinkUpdateCount(name, renameText);
+        JournalNoteLink? origin = journalNote;
+        NoteReference selected = StoredTarget(name);
+        int count = await State.LinkUpdateCount(selected, renameText);
         if (count > 0)
         {
             string title = NoteStore.NormalizeTitle(renameText);
@@ -2186,14 +2256,14 @@ else
         ActionResult renamed;
         try
         {
-            renamed = await Actions.RenameNote(name, renameText, null);
+            renamed = await Actions.RenameNote(selected, renameText, null);
         }
         finally
         {
             running = false;
         }
 
-        RenameEnded(renamed);
+        await RenameEnded(renamed, origin);
     }
 
     // Confirmed in the rename question: renames and updates the links.
@@ -2204,11 +2274,12 @@ else
             return;
         }
 
+        JournalNoteLink? origin = journalNote;
         running = true;
         ActionResult renamed;
         try
         {
-            renamed = await Actions.RenameNote(name, renameText, confirmed);
+            renamed = await Actions.RenameNote(StoredTarget(name), renameText, confirmed);
         }
         finally
         {
@@ -2216,7 +2287,7 @@ else
             renameAsk = null;
         }
 
-        RenameEnded(renamed);
+        await RenameEnded(renamed, origin);
     }
 
     // Cancel or Esc in the rename question: nothing is written and the name field keeps its text.
@@ -2229,11 +2300,11 @@ else
     }
 
     // A refusal keeps the name field; Done opens the note under its new name, the text accent (red when links were left).
-    private void RenameEnded(ActionResult renamed)
+    private async Task RenameEnded(ActionResult renamed, JournalNoteLink? origin)
     {
         if (renamed.Kind != ActionKind.Done)
         {
-            ShowStatus(DesktopText.OneLine(renamed.Text), "red");
+            ShowStatus(DesktopText.OneLine(renamed.Text), "red", renamed);
             return;
         }
 
@@ -2244,18 +2315,68 @@ else
             return;
         }
 
-        ShowNote(renamed.Name ?? renamed.Text, record: false);
-        ShowStatus(DesktopText.OneLine(renamed.Text), renamed.Reason == ActionReason.LinksLeft ? "red" : "accent");
+        if (await ShowRelocated(renamed, origin))
+        {
+            ShowStatus(DesktopText.OneLine(renamed.Text), renamed.Reason == ActionReason.LinksLeft ? "red" : "accent", renamed);
+        }
     }
 
-    private void AskDelete()
+    private async Task<bool> ShowRelocated(ActionResult result, JournalNoteLink? origin)
     {
-        if (openName is not null && !running)
+        if (disposed || journalNote != origin)
         {
-            renaming = false;
-            subpaging = false;
-            moving = false;
-            deleting = true;
+            return false;
+        }
+        string name = result.Name ?? result.Text;
+        JournalNoteLink? link = null;
+        if (origin is not null)
+        {
+            link = result.RelocatedNote is { } moved ? origin.Relocated(moved) : null;
+            if (link is null || !await link.Bind() || disposed || origin != journalNote)
+            {
+                link?.Dispose();
+                if (!disposed && origin == journalNote)
+                {
+                    ShowNote(null);
+                    string failure = DesktopActions.CantReadText(name);
+                    ShowStatus(DesktopText.OneLine(result.Reason == ActionReason.LinksLeft ? result.Text + " " + failure : failure), "red", result);
+                }
+                return false;
+            }
+        }
+        ShowNote(name, record: false, link: link);
+        return true;
+    }
+
+    private async Task AskDelete()
+    {
+        if (openName is not { } name || running)
+        {
+            return;
+        }
+        renaming = false;
+        subpaging = false;
+        moving = false;
+        NoteReference target = StoredTarget(name);
+        if (openSensitive)
+        {
+            deleteTarget = (target, 0, null);
+            return;
+        }
+        NoteInfo[] below = Snapshot?.Notes.Where(n => n.Name.StartsWith(name + "/", StringComparison.Ordinal)).ToArray() ?? [];
+        int generation = editorGeneration;
+        running = true;
+        try
+        {
+            JournalDirectory.Edit.DeleteSelection? selection = await State.CaptureDelete(target, below);
+            if (!disposed && generation == editorGeneration && openName == name)
+            {
+                deleteTarget = (target, below.Length, selection);
+            }
+        }
+        finally
+        {
+            running = false;
         }
     }
 
@@ -2288,10 +2409,8 @@ else
     }
 
     // The delete question: a note with subpages names how many go with it.
-    private string DeleteQuestion(string name)
+    private static string DeleteQuestion(string name, int below)
     {
-        string prefix = name + "/";
-        int below = Snapshot?.Notes.Count(n => n.Name.StartsWith(prefix, StringComparison.Ordinal)) ?? 0;
         string shown = DesktopText.OneLine(name);
         return below switch
         {
@@ -2383,7 +2502,7 @@ else
         ActionResult made;
         try
         {
-            made = await Actions.CreateSubpage(name, subpageText);
+            made = await Actions.CreateSubpage(StoredTarget(name), subpageText);
         }
         finally
         {
@@ -2422,11 +2541,12 @@ else
             return;
         }
 
+        JournalNoteLink? origin = journalNote;
         running = true;
         ActionResult moved;
         try
         {
-            moved = await Actions.MoveNote(name, moveText);
+            moved = await Actions.MoveNote(StoredTarget(name), moveText);
         }
         finally
         {
@@ -2435,7 +2555,7 @@ else
 
         if (moved.Kind != ActionKind.Done)
         {
-            ShowStatus(DesktopText.OneLine(moved.Text), "red");
+            ShowStatus(DesktopText.OneLine(moved.Text), "red", moved);
             return;
         }
 
@@ -2446,23 +2566,31 @@ else
             return;
         }
 
-        ShowNote(moved.Text, record: false);
-        ShowStatus($"Moved to {DesktopText.OneLine(moved.Text)}", "accent");
+        if (await ShowRelocated(moved, origin))
+        {
+            ShowStatus($"Moved to {DesktopText.OneLine(moved.Text)}", "accent");
+        }
     }
 
     private void CancelDelete()
     {
         if (!running)
         {
-            deleting = false;
+            deleteTarget = null;
         }
     }
 
     // Confirmed in the dialog: deletes the open note; no note is open afterwards.
     private async Task DeleteConfirmed(Confirmation confirmed)
     {
-        if (openName is not { } name || running)
+        if (deleteTarget is not { } name || running)
         {
+            return;
+        }
+        if (name.Target.Sensitive != true && name.Selection is null)
+        {
+            deleteTarget = null;
+            ShowStatus(DesktopText.OneLine(DesktopActions.DeleteFailedText(name.Target.Name)), "red");
             return;
         }
 
@@ -2470,12 +2598,12 @@ else
         ActionResult deleted;
         try
         {
-            deleted = await Actions.DeleteNote(name, confirmed);
+            deleted = await Actions.DeleteNote(name.Target, confirmed, name.Selection);
         }
         finally
         {
             running = false;
-            deleting = false;
+            deleteTarget = null;
         }
 
         if (deleted.Kind == ActionKind.Done)
@@ -2485,7 +2613,7 @@ else
         }
         else
         {
-            ShowStatus(DesktopText.OneLine(deleted.Text), "red");
+            ShowStatus(DesktopText.OneLine(deleted.Text), "red", deleted);
         }
     }
 
@@ -2552,7 +2680,7 @@ else
         }
         else
         {
-            ShowStatus(DesktopText.OneLine(restored.Text), "red");
+            ShowStatus(DesktopText.OneLine(restored.Text), "red", restored);
         }
     }
 
@@ -2603,11 +2731,12 @@ else
     // Confirmed in the dialog: seals the open note and closes it; the note is then locked.
     private async Task MarkConfirmed(Confirmation confirmed)
     {
-        if (openName is not { } name || running)
+        if (openName is not { } shown || running)
         {
             return;
         }
 
+        NoteReference name = StoredTarget(shown);
         running = true;
         ActionResult marked;
         try
@@ -2623,7 +2752,7 @@ else
         if (marked.Kind == ActionKind.Done && marked.Reason == ActionReason.PlainHistoryLeft)
         {
             ShowNote(null);
-            ShowStatus(DesktopText.OneLine(DesktopActions.PlainHistoryLeftText(marked.Text)), "red");
+            ShowStatus(DesktopText.OneLine(DesktopActions.PlainHistoryLeftText(marked)), "red", marked);
         }
         else if (marked.Kind == ActionKind.Done)
         {
@@ -2632,18 +2761,19 @@ else
         }
         else
         {
-            ShowStatus(DesktopText.OneLine(marked.Text), "red");
+            ShowStatus(DesktopText.OneLine(marked.Text), "red", marked);
         }
     }
 
     // Confirmed in the dialog: writes the open sensitive note as a plain note and opens that.
     private async Task MakePlainConfirmed(Confirmation confirmed)
     {
-        if (openName is not { } name || running)
+        if (openName is not { } shown || running)
         {
             return;
         }
 
+        NoteReference name = StoredTarget(shown);
         running = true;
         ActionResult made;
         try
@@ -2740,7 +2870,7 @@ else
             return;
         }
 
-        ActionResult attached = await Actions.AttachFiles(name, dropped.Count, dropped.Files);
+        ActionResult attached = await Actions.AttachFiles(StoredTarget(name), dropped.Count, dropped.Files);
         if (editor is not null && string.Equals(openName, name, StringComparison.Ordinal))
         {
             await editor.ShowAttachedAsync(attached);
@@ -2755,7 +2885,7 @@ else
             return;
         }
 
-        ActionResult opened = await Actions.OpenAttachment(name, href);
+        ActionResult opened = await Actions.OpenAttachment(StoredTarget(name), href);
         if (!string.Equals(openName, name, StringComparison.Ordinal))
         {
             return;
@@ -2839,7 +2969,7 @@ else
                 await StartRename();
                 break;
             case "delete":
-                AskDelete();
+                await AskDelete();
                 break;
             case "history":
                 ToggleHistory();
@@ -2903,7 +3033,7 @@ else
                 ActionResult opened;
                 try
                 {
-                    opened = await Actions.OpenExternally(name);
+                    opened = await Actions.OpenExternally(StoredTarget(name));
                 }
                 finally
                 {
@@ -3033,7 +3163,7 @@ else
 
     // The open note and where to write it, or null (with the reason in the status line) when there is nothing to
     // write: no note open, a sensitive note, unsaved changes, or the dialog was cancelled.
-    private async Task<(string Name, string Target)?> ExportTarget()
+    private async Task<(NoteReference Name, string Target)?> ExportTarget()
     {
         if (openName is not { } name)
         {
@@ -3059,7 +3189,7 @@ else
         }
 
         string? target = Dialog.SaveExportFile(name[(name.LastIndexOf('/') + 1)..] + ".md");
-        return target is null ? null : (name, target);
+        return target is null ? null : (StoredTarget(name), target);
     }
 
     // Share: refused with no note open, for a sensitive note (as Export) or with unsaved changes, otherwise asked in
@@ -3121,7 +3251,7 @@ else
         running = true;
         try
         {
-            ShowExported(await Actions.ShareNote(name, target, leaveOutPrivate));
+            ShowExported(await Actions.ShareNote(StoredTarget(name), target, leaveOutPrivate));
         }
         finally
         {
@@ -3200,9 +3330,10 @@ else
 
     private void CancelBooking() => bookingOffer = null;
 
-    private void ShowStatus(string text, string cssClass)
+    private void ShowStatus(string text, string cssClass, ActionResult? result = null)
     {
         statusText = text;
         statusClass = cssClass;
+        recoveryDetails = result is { HasRecoveryDetails: true } or { Reason: ActionReason.PlainHistoryLeft } ? result : null;
     }
 }

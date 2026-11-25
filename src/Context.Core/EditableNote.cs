@@ -18,6 +18,7 @@ internal sealed record EditableNote
     {
         Name = name;
         Path = path;
+        Target = NoteReference.ForFile(name, path);
         Text = text;
         Version = version;
         HadCrlf = hadCrlf;
@@ -30,6 +31,8 @@ internal sealed record EditableNote
 
     /// <summary>The full path of the file.</summary>
     public string Path { get; }
+
+    internal NoteReference Target { get; init; }
 
     /// <summary>The text as read, with <c>\n</c> line endings and no BOM.</summary>
     public string Text { get; }

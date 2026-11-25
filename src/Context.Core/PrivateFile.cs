@@ -1,3 +1,5 @@
+using Microsoft.Win32.SafeHandles;
+
 namespace Context;
 
 /// <summary>
@@ -19,18 +21,30 @@ internal static class PrivateFile
 
     /// <summary>
     /// Opens a new file at <paramref name="path"/> for writing (<see cref="FileMode.CreateNew"/>, no
-    /// sharing, mode <c>0600</c> off Windows). Throws <see cref="IOException"/> when it exists.
+    /// sharing by default, mode <c>0600</c> off Windows). Throws <see cref="IOException"/> when it exists.
     /// </summary>
-    internal static FileStream OpenNew(string path) => OpenNew(path, FileMode.CreateNew, FileAccess.Write);
+    internal static FileStream OpenNew(string path, FileShare share = FileShare.None) => OpenNew(path, FileMode.CreateNew, FileAccess.Write, share);
+
+    // The journal adapter creates a new Unix file relative to an open directory.
+    internal static FileStream OpenNew(Func<UnixFileMode, SafeFileHandle> create)
+    {
+        SafeFileHandle file = create(FileBits);
+        if (file.IsInvalid)
+        {
+            file.Dispose();
+            throw new IOException("Can't create a private file.");
+        }
+        return new FileStream(file, FileAccess.Write);
+    }
 
     // The one unshared open behind OpenNew and OpenLock: a file this creates is 0600 off Windows.
-    private static FileStream OpenNew(string path, FileMode mode, FileAccess access)
+    private static FileStream OpenNew(string path, FileMode mode, FileAccess access, FileShare share = FileShare.None)
     {
         FileStreamOptions options = new FileStreamOptions
         {
             Mode = mode,
             Access = access,
-            Share = FileShare.None,
+            Share = share,
         };
         if (!OperatingSystem.IsWindows())
         {

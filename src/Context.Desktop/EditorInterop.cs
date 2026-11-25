@@ -79,6 +79,33 @@ internal sealed class EditorInterop
     private DotNetObjectReference<EditorInterop>? self;
     private ElementReference? host;
 
+    private DotNetObjectReference<EditorInterop> CallbackReference => self ??= DotNetObjectReference.Create(this);
+
+    public event Func<Task>? JournalBottom;
+
+    [JSInvokable]
+    public Task OnJournalBottom() => JournalBottom?.Invoke() ?? Task.CompletedTask;
+
+    public ValueTask WatchJournal(ElementReference marker) =>
+        js.InvokeVoidAsync("ContextJournal.watch", marker, CallbackReference, marker.Id);
+
+    public async ValueTask StopJournal(ElementReference marker)
+    {
+        try
+        {
+            await js.InvokeVoidAsync("ContextJournal.stop", marker.Id);
+        }
+        catch (Exception e) when (e is JSDisconnectedException or JSException or TaskCanceledException or InvalidOperationException)
+        {
+            // The window may already have closed.
+        }
+        finally
+        {
+            self?.Dispose();
+            self = null;
+        }
+    }
+
     public EditorInterop(IJSRuntime js)
     {
         this.js = js;
@@ -148,9 +175,8 @@ internal sealed class EditorInterop
     /// </summary>
     public async Task MountAsync(ElementReference element, string markdown, IReadOnlyList<InlineImage> images, string name)
     {
-        self ??= DotNetObjectReference.Create(this);
         host = element;
-        await js.InvokeVoidAsync("ContextEditor.mount", element, markdown, self, images, name);
+        await js.InvokeVoidAsync("ContextEditor.mount", element, markdown, CallbackReference, images, name);
     }
 
     /// <summary>

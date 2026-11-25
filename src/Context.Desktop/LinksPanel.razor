@@ -55,6 +55,7 @@
     private LinksView? view;
     private string? loaded;
     private bool loadedSensitive;
+    private JournalNoteLink? loadedLink;
     private int request;
 
     /// <summary>The open note's name.</summary>
@@ -66,6 +67,9 @@
     [Parameter]
     public bool Sensitive { get; set; }
 
+    [Parameter]
+    public JournalNoteLink? JournalLink { get; set; }
+
     /// <summary>Called with a linked note's name when it is clicked.</summary>
     [Parameter]
     public EventCallback<string> OnOpen { get; set; }
@@ -76,7 +80,7 @@
 
     protected override Task OnParametersSetAsync()
     {
-        if (string.Equals(loaded, Name, StringComparison.Ordinal) && loadedSensitive == Sensitive)
+        if (string.Equals(loaded, Name, StringComparison.Ordinal) && loadedSensitive == Sensitive && loadedLink == JournalLink)
         {
             return Task.CompletedTask;
         }
@@ -84,6 +88,7 @@
         // Another note: its rows are not known yet, so the old ones go.
         loaded = Name;
         loadedSensitive = Sensitive;
+        loadedLink = JournalLink;
         view = null;
         return Load();
     }
@@ -122,7 +127,7 @@
         }
 
         string name = Name;
-        LinksView result = await State.Links(name);
+        LinksView result = await State.Links(JournalLink?.Target ?? NoteReference.Stored(name));
         if (mine == request && !Sensitive && string.Equals(name, Name, StringComparison.Ordinal))
         {
             view = result;

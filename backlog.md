@@ -159,7 +159,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#77](backlog/077-quick-switcher.md) Quick switcher → 364-quick-switcher
 - [x] [#108](backlog/108-pro-licence-in-context.md) Pro licence in Context (after: Times#39) → 367-pro-licence-context
 - [x] [#454](backlog/454-fix-flaky-repository-settings-page-test.md) Fix flaky repository settings page test → 382-fix-flaky-settings-test
-- [ ] [#476](backlog/476-journal-view-of-the-days-with.md) Journal view of the days with content
+- [x] [#476](backlog/476-journal-view-of-the-days-with.md) Journal view of the days with content → 398-journal-view-of-the-days.c71256cffb364068ad89ae4a2b4a13da
 - [ ] [#511](backlog/511-keep-capture-visible-in-narrow-desktop.md) Keep Capture visible in narrow desktop windows
 - [ ] [#512](backlog/512-focus-the-editor-when-the-quick.md) Focus the editor when the quick switcher reselects the current note
 - [ ] [#513](backlog/513-raise-the-contrast-of-desktop-text.md) Raise the contrast of desktop text placeholders in dark mode
@@ -461,6 +461,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#508](backlog/508-wider-search-box-with-matches-while.md) Wider search box with matches while typing
 - [ ] [#509](backlog/509-paste-pictures-into-notes.md) Paste pictures into notes
 - [ ] [#510](backlog/510-sort-pinned-notes-by-drag-and.md) Sort pinned notes by drag and drop
+- [?] [#519](backlog/519-preserve-consecutive-spaces-in-recovery-warnings.md) Preserve consecutive spaces in recovery warnings
 
 ## Dropped with the terminal UI
 

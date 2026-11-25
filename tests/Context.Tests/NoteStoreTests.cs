@@ -1619,6 +1619,20 @@ public sealed class NoteStoreTests : IDisposable
         Assert.IsAssignableFrom<IOException>(ex);
     }
 
+    [Fact]
+    public void ReadPlainFile_OnlyReadsTheNoteInThisStore()
+    {
+        NoteStore notes = new(root);
+        NoteStore other = new(Path.Combine(parent, "other"));
+        NoteInfo local = notes.CreateWithText("2026-10-29", "Local fixture");
+        NoteInfo outside = other.CreateWithText("2026-10-29", "Other fixture");
+
+        using JournalDirectory directory = Assert.IsType<JournalDirectory>(JournalDirectory.Bind(notes.Root));
+        using FileStream plain = directory.OpenNote(local);
+        Assert.Equal("Local fixture", NoteStore.DecodeText(BoundedFile.Read(plain, NoteStore.MaxNoteBytes)));
+        Assert.ThrowsAny<IOException>(() => directory.OpenNote(outside));
+    }
+
     // 275 AC-4: a FIFO x.md reads as "" without blocking.
     [Fact(Timeout = HangTimeoutMs)]
     public async Task Read_Fifo_ReturnsEmptyWithoutBlocking()

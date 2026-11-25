@@ -572,6 +572,8 @@ Every factory agent reads this file before working on Context. Keep it short and
   nothing when the bytes equal the newest version, then prunes the oldest to at most `MaxVersionsPerNote` (50) and
   `MaxBytesPerNote` (25 MB), never the new one; any failure is `NoteHistoryException`. `Versions`/`TryRead` never
   follow a link or reparse point and list only regular files with a valid name (newest first, `NoteVersion`).
+  History uses the exact stored file stem, including a final space before the extension of a legacy note.
+  A conversion holds the files it creates and their parent directories until it either commits or rolls back.
   `NoteStore.SaveIfUnchanged(..., history)` keeps the previous bytes after the version check, before the move; only
   `DesktopActions.SaveNote` and the link rewrites of `DesktopActions.RenameNote` (job 206, always a version, no
   `KeptWithin` gap) pass one, and (job 351) every decision-numbering write after a write that was not a save
@@ -581,11 +583,23 @@ Every factory agent reads this file before working on Context. Keep it short and
   move `.history/<Title>/` along (never over an existing one; moved back when the note move fails); only `DeleteNote`
   passes `removeHistory: true` to `Delete`/`DeleteSensitive`. `List()` drops top-level dot-files. Sensitive: a save
   copies the old sealed file byte for byte (zero `Agree`); a rename seals the new file, moves the history (a clash
-  removes the new file: Refused `Exists`), then `DeleteSensitive`; `MarkSensitive` seals each plain version (at most
-  50, public keys only) before the note, removes the sealed ones on any failure or rollback (`Can't seal the history of
-  <name>. Nothing was changed.`) and the `.md` ones on success (when that fails: Done/`PlainHistoryLeft`, red
-  `Marked <name> sensitive, but its old readable versions couldn't be removed. Delete .history/<name> in the data
-  folder.`); `MakePlain` (question ends `Its history will be
+  removes the new file: Refused `Exists`), then `DeleteSensitive`. `MarkSensitive` seals each plain version (up to
+  50, public keys only) before the note. It verifies the sealed copies through plaintext removal. An incomplete
+  rollback verifies the original data from the first staged write and keeps sealed copies needed for recovery.
+  Journal Save, Rename and Move check
+  the published pages, kept versions and linked files through retirement, including those carried by a subpage.
+  A recovery snapshot uses the exact note's history key in its filename. If a version or image directory is
+  unavailable, the snapshot can be kept at the bound store root. Unresolved recovery files keep the note at
+  its original location. Rollback refreshes the open editor after temporary directories have been removed.
+  Both editor entry points check attachment ownership against current notes and kept versions on Move.
+  A missing relative image can move unchanged when it also stays missing at the destination.
+  If rollback retains an ordinary destination note or version, its source owner's private location record
+  identifies the publication by its relative path, parent, file identity and content hash on later conversion.
+  Done/`PlainHistoryLeft` shows a red warning with the verified folder and readable recovery paths.
+  The disclosure has selectable paths. Paths containing control characters use a labeled, reversible JSON string.
+  The user can secure plaintext files
+  and keep the `.ctxs` files. During reversible version removal an empty `.<id>.reserved` file keeps that ID
+  occupied for other editors until the operation finishes. `MakePlain` (question ends `Its history will be
   removed.`) removes the sealed ones. `DesktopState.History(name)` (`HistoryView`) and `ReadVersion(name, id)` (a
   sealed version only while the note is open, one `Agree` with its `<sealed title>` as AAD) read only.
   `TextDiff.Lines(old, current)` is a Myers line diff (`\n` split, trailing `\r` dropped) bounded at
@@ -593,7 +607,8 @@ Every factory agent reads this file before working on Context. Keep it short and
   lists versions in local `yyyy-MM-dd HH:mm:ss` and the chosen one's diff (`-` red, `+` accent, unchanged grey);
   `Restore this version` asks in `ConfirmDialog` (`Restore <name> to the version from <time>? The current text is kept
   as a version.`, dirty editor `Save <name> first.`) and `DesktopActions.RestoreVersion` saves through `SaveNote`, then
-  the editor reloads (`NoteEditor.ShowSavedAsync`) with accent `Restored <name> to <time>.` Known limits (README): the
+  the editor reloads (`NoteEditor.ShowSavedAsync`) with accent `Restored <name> to <time>.` Plain Restore uses the chosen
+  ID and stored bytes in the workspace and journal editors, including its BOM and line endings. Known limits (README): the
   old title of a renamed sensitive note stays in its version file names; ~130-character file names can hit the Windows
   path limit; a broken `.history` blocks saves at that level until the user removes it.
 - **How it runs:** two front ends over the same Core stores and the same data folder: the desktop app (a Photino

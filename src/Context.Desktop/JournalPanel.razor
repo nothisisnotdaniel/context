@@ -1,0 +1,156 @@
+@implements IAsyncDisposable
+
+<section class="page journal-panel" aria-label="Journal">
+    <div class="panel-bar">
+        <h2>Journal</h2>
+        <button type="button" class="close" aria-label="Close" title="Close" @onclick="OnClose"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none" /></svg></button>
+    </div>
+    @for (int index = 0; index <= entries.Count; index++)
+    {
+        if (index == statusIndex && OutlookStatusLine.Text(status) is { } line)
+        {
+            <p class="@OutlookStatusLine.Css(status)" role="status">@line</p>
+        }
+        if (index == entries.Count)
+        {
+            break;
+        }
+        JournalDay entry = entries[index];
+        DateTime start = entry.Date.ToDateTime(TimeOnly.MinValue);
+        <article @key="entry.Date">
+            <h3>@entry.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</h3>
+            @if (entry.Daily is { } daily)
+            {
+                <button type="button" class="journal-open" aria-label="Open @daily" @onclick="() => OpenNote(entry.Date, daily)">Open</button>
+                @ReadError(daily)
+                @if (entry.Body is { } body)
+                {
+                    <div class="journal-body">@body</div>
+                }
+            }
+            @foreach (string meeting in entry.Meetings)
+            {
+                <button type="button" class="journal-meeting" @onclick="() => OpenNote(entry.Date, meeting)">@DesktopText.OneLine(meeting)</button>
+                @ReadError(meeting)
+            }
+            @foreach (Appointment item in entry.Appointments)
+            {
+                string title = DesktopText.OneLine(item.Title.Length == 0 ? "(no title)" : item.Title);
+                <button type="button" class="journal-appointment" @onclick="() => OnAppointment.InvokeAsync((item.Title, entry.Date))">@CurrentView.Time(item, start, start.AddDays(1)) @title</button>
+            }
+        </article>
+    }
+    @if (entries.Count == 0)
+    {
+        <p class="grey" role="status">@(exhausted ? "No journal entries." : "Loading…")</p>
+    }
+    <div class="journal-bottom" @ref="marker"></div>
+</section>
+
+@code {
+    [Inject] internal DesktopState State { get; set; } = null!;
+    [Inject] internal EditorInterop Bridge { get; set; } = null!;
+    [Parameter] public EventCallback<JournalNoteLink> OnOpen { get; set; }
+    [Parameter] public EventCallback<(string Title, DateOnly Day)> OnAppointment { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    internal Func<Journal, Task<IReadOnlyList<JournalDay>>> ReadBatchAsync { get; set; } = journal => Task.Run(journal.ReadBatch);
+
+    private readonly List<JournalDay> entries = [];
+    private ElementReference marker;
+    private Journal? journal;
+    private JournalFiles? files;
+    private JournalOutlook? outlook;
+    private OutlookStatus status = OutlookStatus.Off;
+    private int statusIndex;
+    private bool loading;
+    private bool exhausted;
+    private bool watch;
+    private bool disposed;
+    private string? refused;
+
+    internal void ShowReadError(string name)
+    {
+        refused = name;
+        StateHasChanged();
+    }
+
+    private RenderFragment ReadError(string name) => @<text>
+        @if (name == refused)
+        {
+            <p class="red" role="status">@DesktopText.OneLine(DesktopActions.CantReadText(name))</p>
+        }
+    </text>;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Bridge.JournalBottom += SignalBottom;
+        (journal, outlook) = await Task.Run(() =>
+        {
+            files = State.BindJournalFiles();
+            return State.OpenJournal(files);
+        });
+        if (disposed)
+        {
+            journal.Dispose();
+            return;
+        }
+        status = outlook.Status;
+        await Load();
+    }
+
+    private Task SignalBottom() => InvokeAsync(Load);
+
+    private Task OpenNote(DateOnly date, string name)
+    {
+        refused = null;
+        return OnOpen.InvokeAsync(files!.Link(journal!.NoteFor(date, name)));
+    }
+
+    private async Task Load()
+    {
+        if (disposed || loading || journal is null || exhausted)
+        {
+            return;
+        }
+        loading = true;
+        try
+        {
+            IReadOnlyList<JournalDay> batch = await ReadBatchAsync(journal);
+            if (outlook!.Status != status)
+            {
+                // Put a new status with this batch so previously visible headings keep their positions.
+                statusIndex = entries.Count;
+                status = outlook.Status;
+            }
+            entries.AddRange(batch);
+            exhausted = journal.Exhausted;
+            watch = !exhausted;
+        }
+        finally
+        {
+            loading = false;
+        }
+        if (!disposed)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (watch && !disposed)
+        {
+            watch = false;
+            await Bridge.WatchJournal(marker);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        disposed = true;
+        Bridge.JournalBottom -= SignalBottom;
+        journal?.Dispose();
+        await Bridge.StopJournal(marker);
+    }
+}
