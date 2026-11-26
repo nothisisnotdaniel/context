@@ -412,7 +412,6 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [?] [#450](backlog/450-remove-unreachable-glossary-toolong-message.md) Remove unreachable glossary TooLong message
 - [?] [#451](backlog/451-pass-the-meeting-booking-name-to.md) Pass the meeting booking name to Times as one argument
 - [?] [#452](backlog/452-say-when-a-meeting-booking-loses.md) Say when a meeting booking loses its quicklist project
-- [?] [#453](backlog/453-explain-a-changed-meeting-booking-name.md) Explain a changed meeting booking name
 - [?] [#455](backlog/455-strip-leading-unicode-dashes-and-non.md) Strip leading Unicode dashes and non-breaking spaces from Times booking names
 - [?] [#457](backlog/457-clear-a-stale-times-result-line.md) Clear a stale Times result line when the booking form is cancelled
 - [?] [#458](backlog/458-readable-excalidraw-drawings-in-dark-mode.md) Readable Excalidraw drawings in dark mode
