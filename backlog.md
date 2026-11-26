@@ -161,11 +161,11 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [x] [#454](backlog/454-fix-flaky-repository-settings-page-test.md) Fix flaky repository settings page test → 382-fix-flaky-settings-test
 - [ ] [#503](backlog/503-middle-bar-stays-in-place-while.md) Middle bar stays in place while the note scrolls
 - [ ] [#504](backlog/504-long-lines-wrap-in-code-blocks.md) Long lines wrap in code blocks
+- [ ] [#509](backlog/509-paste-pictures-into-notes.md) Paste pictures into notes
 - [ ] [#505](backlog/505-tab-key-indents-in-code-blocks.md) Tab key indents in code blocks
 - [ ] [#506](backlog/506-always-visible-status-bar-for-feedback.md) Always-visible status bar for feedback messages
 - [ ] [#507](backlog/507-resizable-and-collapsible-sidebars.md) Resizable and collapsible sidebars
 - [ ] [#508](backlog/508-wider-search-box-with-matches-while.md) Wider search box with matches while typing
-- [ ] [#509](backlog/509-paste-pictures-into-notes.md) Paste pictures into notes
 - [ ] [#510](backlog/510-sort-pinned-notes-by-drag-and.md) Sort pinned notes by drag and drop
 - [ ] [#476](backlog/476-journal-view-of-the-days-with.md) Journal view of the days with content
 - [ ] [#511](backlog/511-keep-capture-visible-in-narrow-desktop.md) Keep Capture visible in narrow desktop windows
