@@ -445,7 +445,7 @@ The order of the lines is the priority. Add items with `python3 factory/tools/jo
 - [ ] [#502](backlog/502-hide-the-home-folder-in-the.md) Hide the home folder in the update log only at a path boundary
 - [?] [#519](backlog/519-check-code-block-wrapping-in-the.md) Check code block wrapping in the desktop app
 - [ ] [#521](backlog/521-caret-move-entry-in-the-editor.md) Caret-move entry in the editor test hook
-- [?] [#522](backlog/522-drag-cursor-and-drop-indicator-for.md) Drag cursor and drop indicator for pinned notes
+- [ ] [#522](backlog/522-drag-cursor-and-drop-indicator-for.md) Drag cursor and drop indicator for pinned notes
 - [?] [#523](backlog/523-keep-focus-on-a-pinned-row.md) Keep focus on a pinned row after Alt+Arrow
 - [?] [#524](backlog/524-clear-old-status-bar-messages.md) Clear old status bar messages (after: #506)
 - [?] [#525](backlog/525-make-timing-and-jint-bundle-tests.md) Make timing and Jint bundle tests reliable under load
