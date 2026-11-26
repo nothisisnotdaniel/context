@@ -983,7 +983,8 @@ Every factory agent reads this file before working on Context. Keep it short and
   item); the block input rules carry `inCodeMark = false`. `src/highlight.js` (DOM-free; `lowlight` 3.3.0 MIT and
   `highlight.js` 11.11.2 BSD-3, only the 11 languages of its `Languages` table, no auto-detection) gives `tokens(text,
   lang)`, drawn as class decorations by the `codeHighlight` plugin for the blocks `changedCodeBlocks` names (over
-  20,000 chars stay plain). Long lines in code blocks wrap at the block's edge (job 438: `pre > code` is `white-space: pre-wrap` with `overflow-wrap: anywhere`, also in `NoteHtml`'s page; display only, the text, the saved Markdown and Copy stay the original lines). The non-Mermaid code-block view has a header with `select.code-language` (replaces the first
+  20,000 chars stay plain). Long code lines wrap at the block's edge (job 438: `pre-wrap` +
+  `overflow-wrap: anywhere`, also in `NoteHtml`; display only, text, Markdown and Copy unchanged). The non-Mermaid code-block view has a header with `select.code-language` (replaces the first
   params word, one undo step) and `button.code-copy` (`copyText`: clipboard, else `execCommand("copy")`). Colours are
   the `--code-*` variables in the theme blocks of `app.css`. Theme (job 341, `src/theme.js`): `setTheme(name)` sets
   `data-theme` on `document.documentElement` for `light`/`dark` and removes it otherwise; `app.css` has
