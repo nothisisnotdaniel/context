@@ -11,3 +11,5 @@ Recognise `AB#<number>` (the Azure Boards convention) in notes and todos, index 
 ## Why
 
 Tags group by topic, but a developer's day is organised by work items. One reference format that Times, commits and notes share is the glue for the whole suite.
+
+Done by jobs 280-project-page-work-item (`context item`) and 381-meeting-flow (`AB#<n>`), found in the backlog audit, 2026-11-26.

@@ -17,3 +17,7 @@ On Windows WebView2 at develop 29b1b32, all eight switches to a different note a
 ## Notes
 
 Manual regression #433 remains open until this fix passes. #431 is about scrolling the selected row; #432 is about styling. Main.SwitchTo currently calls CloseSwitcher, which requests layout focus, and RequestOpen returns early when the current note was picked.
+
+## Folded in from #433 (backlog audit, 2026-11-26)
+
+Check focus after a quick switcher pick: Check by hand whether the focus request on .layout after a pick races with the editor taking focus. If it does, skip the layout focus when a note opens, and update Enter_OpensTheNote.

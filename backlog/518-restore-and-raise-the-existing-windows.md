@@ -16,3 +16,7 @@ At develop 29b1b32c a fresh Windows primary received six serial cmd.exe launches
 ## Notes
 
 Delegated Windows check #403 for original job #400 / 315. A separate private primary reproduced the difference. Real Start-menu acceptance is still open because Context was not registered on the test system. Opening a synthetic .lnk through the Windows shell was recorded separately.
+
+## Folded in from #403 (backlog audit, 2026-11-26)
+
+Check the second start on Windows: On Windows, with Context open, start it again (from the Start menu and from the command line). Check that no second window opens, the first window comes to the front without bad flicker, the second process exits, and no unclean-exit log appears in .logs/. Repeat with the first window minimised.

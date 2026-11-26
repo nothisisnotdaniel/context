@@ -29,3 +29,11 @@ Category: security
 - #210: Proposed by job 171-days-end-daily-note (review-security round 1, nit 2). Proposed by job 171-days-end-daily-note (`factory/jobs/171-days-end-daily-note/`). Duplicate #148 (Replace bidi and format characters in shown text, proposed by job 139-desktop-import-export) was merged into this item on 2026-11-15.
 - #213: Proposed by job 172-morning-briefing (review-security round 1, nit 2). Proposed by job 172-morning-briefing (`factory/jobs/172-morning-briefing/`).
 - #224: Proposed by job 179-inbox-triage (review-security round 1, nit 1). Proposed by job 179-inbox-triage (`factory/jobs/179-inbox-triage/`).
+
+## Folded in from #318 (backlog audit, 2026-11-26)
+
+Attribute values show bidi controls as placeholders: The value field in the Attributes box (NoteEditor.razor) shows DesktopText.OneLine(Value), which keeps bidi embedding, override and isolate controls (U+202A–U+202E, U+2066–U+2069). Show them as the placeholder, as DesktopText.NoteName does for the title since job 235, without changing the saved value unless the user edits it.
+
+## Folded in from #382 (backlog audit, 2026-11-26)
+
+Mail digest: strip Unicode format characters from suggestions: MailDigest.CleanText and TitleFor (src/Context.Core/MailDigest.cs) drop only char.IsControl characters. Also remove Unicode format characters (category Cf, such as U+202A-202E, U+2066-2069, U+200B-200F), and add tests with a bidi-override subject.

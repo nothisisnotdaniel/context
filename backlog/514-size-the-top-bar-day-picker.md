@@ -17,3 +17,7 @@ Windows WebView2 158.0.4370.33 on develop 29b1b32 rendered the upper popover 1,0
 ## Notes
 
 Manual #309 remains open for visual verification. #293 introduced the compact top-bar design. #390 covers a narrower-than-current sidebar and #277 covers background scrolling. Neither covers this normal-size top-bar sizing regression.
+
+## Folded in from #309 (backlog audit, 2026-11-26)
+
+Check the narrower Pick a day popover in light and dark mode: Manual check, left by job 226: open Pick a day in the desktop app in light and in dark mode. Expected: the popover is as wide as the month header and grid with week numbers, no empty space at the sides, day cells readable and easy to click, today and the selected day still clear, keyboard navigation works. If it fails, add a fix item.

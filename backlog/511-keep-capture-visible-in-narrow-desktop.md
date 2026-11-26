@@ -21,3 +21,11 @@ Manual checks #152 and #259 remain open for verification after this fix. #250 re
 ## Sidebar regression from #145
 
 In the same fixed three-column layout, at a 400 px client width the tracks measure 240, 0 and 280 px. The 30 × 30 px Tags and Settings buttons are visible, and click or Enter opens either page, but zero pixels of the resulting heading are visible. At 800 and 1084 px both headings are readable. Also verify the two sidebar actions at 400 px and at the supported minimum after the shared layout and minimum-size changes. The selected destination and its content must be visible in either theme. This is the remaining check in #145.
+
+## Folded in from #259 (backlog audit, 2026-11-26)
+
+Check the Capture popover in a narrow window: Open the desktop app in a narrow window (about 400px wide) and open the Capture popover from the top bar icon. The 320px input (anchored right: 8px, capped by max-width: calc(100vw - 48px)) must stay fully inside the window, in light and dark mode. Fix the popover position or width only if it overflows.
+
+## Folded in from #152 (backlog audit, 2026-11-26)
+
+Check the capture row at the minimum window size: Open the desktop app, shrink the window to its minimum size, and check that the capture row wraps cleanly and nothing is cut off; report anything wrong as a backlog item.
