@@ -814,6 +814,139 @@ const lineBreak = chainCommands(newlineInCode, (state, dispatch) => {
   return true;
 });
 
+// Tab in a code block (job 447). Tab indents by two spaces and Shift-Tab removes up to two spaces or one tab, on the
+// lines the selection touches. Esc in a code block lets the next Tab or Shift-Tab through to the browser (focus moves
+// on); any other key or a selection or text change takes that back.
+const escapeKey = new PluginKey("codeEscape");
+const IndentUnit = "  ";
+
+function escapePlugin() {
+  return new Plugin({
+    key: escapeKey,
+    state: {
+      init: () => false,
+      apply: (tr, value) => {
+        const meta = tr.getMeta(escapeKey);
+        if (meta !== undefined) {
+          return meta;
+        }
+        return tr.selectionSet || tr.docChanged ? false : value;
+      },
+    },
+    props: {
+      handleKeyDown(view, event) {
+        if (["Shift", "Control", "Alt", "Meta", "Tab"].includes(event.key)) {
+          return false;
+        }
+        noteKey(view.state, event.key === "Esc" ? "Escape" : event.key, tr => view.dispatch(tr));
+        return false;
+      },
+    },
+  });
+}
+
+function inCodeBlock(state) {
+  const { $from, $to } = state.selection;
+  return $from.parent.type === schema.nodes.code_block && $from.sameParent($to);
+}
+
+// Escape in a code block sets the flag; any other key (Tab and Shift-Tab clear it themselves) clears it.
+function noteKey(state, key, dispatch) {
+  const escaped = escapeKey.getState(state) === true;
+  if (key === "Escape" && inCodeBlock(state)) {
+    if (!escaped) {
+      dispatch(state.tr.setMeta(escapeKey, true));
+    }
+  } else if (escaped && key !== "Tab" && key !== "Shift-Tab") {
+    dispatch(state.tr.setMeta(escapeKey, false));
+  }
+}
+
+// Start offsets (in the block's text) of the lines the selection touches; a selection ending at a line start leaves
+// that line out.
+function touchedLines(state) {
+  const { $from, $to, empty } = state.selection;
+  const text = $from.parent.textContent;
+  const starts = [];
+  let at = 0;
+  for (const line of text.split("\n")) {
+    starts.push(at);
+    at += line.length + 1;
+  }
+  const from = $from.parentOffset;
+  const to = $to.parentOffset;
+  const result = [];
+  for (let i = 0; i < starts.length; i++) {
+    const end = i + 1 < starts.length ? starts[i + 1] - 1 : text.length;
+    const touched = empty ? from >= starts[i] && from <= end : starts[i] < to && end >= from && !(starts[i] === to);
+    if (touched) {
+      result.push(starts[i]);
+    }
+  }
+  return { text, starts: result, base: $from.start() };
+}
+
+function indentCode(state, dispatch) {
+  if (!inCodeBlock(state)) {
+    return false;
+  }
+  if (dispatch) {
+    const sel = state.selection;
+    if (sel.empty) {
+      dispatch(state.tr.insertText(IndentUnit).scrollIntoView());
+      return true;
+    }
+    const { starts, base } = touchedLines(state);
+    const tr = state.tr;
+    for (const start of starts.slice().reverse()) {
+      tr.insert(base + start, schema.text(IndentUnit));
+    }
+    const anchor = tr.mapping.map(sel.anchor, sel.anchor <= sel.head ? 1 : -1);
+    const head = tr.mapping.map(sel.head, sel.head < sel.anchor ? 1 : -1);
+    dispatch(tr.setSelection(TextSelection.create(tr.doc, anchor, head)).scrollIntoView());
+  }
+  return true;
+}
+
+function outdentCode(state, dispatch) {
+  if (!inCodeBlock(state)) {
+    return false;
+  }
+  if (dispatch) {
+    const { text, starts, base } = touchedLines(state);
+    const tr = state.tr;
+    for (const start of starts.slice().reverse()) {
+      let remove = 0;
+      if (text[start] === "\t") {
+        remove = 1;
+      } else {
+        while (remove < 2 && text[start + remove] === " ") {
+          remove++;
+        }
+      }
+      if (remove > 0) {
+        tr.delete(base + start, base + start + remove);
+      }
+    }
+    dispatch(tr.docChanged ? tr.scrollIntoView() : state.tr);
+  }
+  return true;
+}
+
+// Tab or Shift-Tab: after Esc in a code block the key is left to the browser (and the flag cleared).
+function tabCommand(codeCommand, listCommand) {
+  const chain = chainCommands(codeCommand, listCommand);
+  return (state, dispatch) => {
+    if (escapeKey.getState(state) === true) {
+      if (dispatch) {
+        dispatch(state.tr.setMeta(escapeKey, false));
+      }
+      return false;
+    }
+    return chain(state, dispatch);
+  };
+}
+
 // The editor's own key bindings, in front of baseKeymap. Enter in a code block is a newline first, so a code block in
 // a list item never splits the item; Mod-Enter (baseKeymap's exitCode) still leaves the block.
 function editorKeys() {
@@ -828,8 +961,8 @@ function editorKeys() {
     "Mod-Alt-c": toggleCodeBlock,
     "Mod-Alt-n": carryCommand,
     "Enter": chainCommands(newlineInCode, enterFence, splitItem),
-    "Tab": sinkListItem(schema.nodes.list_item),
-    "Shift-Tab": liftListItem(schema.nodes.list_item),
+    "Tab": tabCommand(indentCode, sinkListItem(schema.nodes.list_item)),
+    "Shift-Tab": tabCommand(outdentCode, liftListItem(schema.nodes.list_item)),
     "Shift-Ctrl-0": setBlockType(schema.nodes.paragraph),
     "Mod-s": swallow,
     "Mod-k": swallow,
@@ -1426,7 +1559,7 @@ function markedState(markdown) {
   const state = EditorState.create({
     doc,
     selection: TextSelection.create(doc, open, head),
-    plugins: [plugin, codeHighlight(), history(), keymap(editorKeys()), keymap(baseKeymap)],
+    plugins: [plugin, codeHighlight(), history(), escapePlugin(), keymap(editorKeys()), keymap(baseKeymap)],
   });
   return { state, plugin };
 }
@@ -1447,6 +1580,25 @@ export function commandMarkdown(markdown, key, typed, before) {
   chainCommands(...commands)(state, tr => { state = state.apply(tr); });
   state = typeText(state, marked.plugin, typed === undefined ? "" : typed);
   return serialize(state.doc);
+}
+
+/**
+ * Test hook (job 447): the keys applied in order on one state (history and the Esc flag included) of markdown with the
+ * ⟦ ⟧ selection. Returns { handled: [bool per key], markdown, undone } where undone is the markdown after a final Mod-z.
+ * DOM-free.
+ */
+export function keySequenceMarkdown(markdown, keys) {
+  let state = markedState(markdown).state;
+  const dispatch = tr => { state = state.apply(tr); };
+  const press = key => {
+    noteKey(state, key, dispatch);
+    const commands = [editorKeys()[key], baseKeymap[key]].filter(Boolean);
+    return commands.length > 0 && chainCommands(...commands)(state, dispatch);
+  };
+  const handled = Array.from(keys, key => press(String(key)));
+  const result = serialize(state.doc);
+  press("Mod-z");
+  return { handled, markdown: result, undone: serialize(state.doc) };
 }
 
 /**
@@ -1556,6 +1708,7 @@ export function mount(element, markdown, dotnet, images, name) {
       mermaidEditing(),
       history(),
       codeHighlight(),
+      escapePlugin(),
       keymap(editorKeys()),
       keymap(baseKeymap),
       decisionPlugin(editor),

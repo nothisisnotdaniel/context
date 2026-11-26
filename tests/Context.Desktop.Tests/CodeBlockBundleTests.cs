@@ -539,6 +539,123 @@ public sealed class CodeBlockBundleTests : IClassFixture<EditorBundle>
         throw new InvalidOperationException("Unclosed block " + start);
     }
 
+    // 447 AC-1, AC-2, AC-8: Tab indents by two spaces: at the caret, or at the start of each touched line.
+    [Theory]
+    [InlineData("```\nab⟦c\n```", "```\nab  c\n```")]
+    [InlineData("```\n⟦a\nb⟧\nc\n```", "```\n  a\n  b\nc\n```")]
+    [InlineData("```\na\n⟦b⟧\nc\n```", "```\na\n  b\nc\n```")]
+    [InlineData("```\na\nb⟦c\nd⟧e\n```", "```\na\n  bc\n  de\n```")]
+    [InlineData("```\n⟦a\n⟧b\n```", "```\n  a\nb\n```")]
+    [InlineData("```mermaid\ngraph TD\n⟦A-->B\n```", "```mermaid\ngraph TD\n  A-->B\n```")]
+    public void Tab_IndentsInCodeBlock(string markdown, string expected)
+    {
+        Assert.Equal(expected, Command(markdown, "Tab"));
+    }
+
+    // 447 AC-1: the caret ends after the inserted spaces.
+    [Fact]
+    public void Tab_CaretEndsAfterSpaces()
+    {
+        Assert.Equal("```\nab  Xc\n```", Command("```\nab⟦c\n```", "Tab", "X"));
+    }
+
+    // 447 AC-2: the selection stays over the same text.
+    [Fact]
+    public void Tab_KeepsSelectionOverSameText()
+    {
+        Assert.Equal("```\n  X\n```", Command("```\n⟦a\nb⟧\n```", "Tab", "X"));
+        Assert.Equal("```\na\nb\n```", Keys("```\n⟦a\nb⟧\n```", "Tab", "Shift-Tab").Markdown);
+    }
+
+    // 447 AC-3: Shift-Tab removes up to two spaces or one tab; unchanged lines stay, and the key is handled.
+    [Theory]
+    [InlineData("```\n    a⟦b\n```", "```\n  ab\n```")]
+    [InlineData("```\n a⟦b\n```", "```\nab\n```")]
+    [InlineData("```\n\t\ta⟦b\n```", "```\n\tab\n```")]
+    [InlineData("```\n  ⟦a\n    b⟧\nc\n```", "```\na\n  b\nc\n```")]
+    [InlineData("```\na⟦b\n```", "```\nab\n```")]
+    [InlineData("```mermaid\n  ⟦A\n```", "```mermaid\nA\n```")]
+    public void ShiftTab_OutdentsInCodeBlock(string markdown, string expected)
+    {
+        Assert.Equal(expected, Command(markdown, "Shift-Tab"));
+        Assert.True(Keys(markdown, "Shift-Tab").Handled[0]);
+    }
+
+    // 447 AC-4: in a list item's code block, Tab indents the code and does not sink the item.
+    [Fact]
+    public void Tab_InListCodeBlock_DoesNotSink()
+    {
+        const string Item = "- a\n\n  ```\n  x⟦y\n  ```";
+        Assert.Equal("- a\n\n  ```\n  x  y\n  ```", Command(Item, "Tab"));
+        Assert.Equal("- a\n\n  ```\n  xy\n  ```", Command("- a\n\n  ```\n    x⟦y\n  ```", "Shift-Tab"));
+        Assert.Equal("- a\n\n  ```\n  xy\n  ```", Command("- a\n\n  ```\n  ⟦xy\n  ```", "Shift-Tab"));
+        Assert.Equal([true], Keys(Item, "Tab").Handled);
+    }
+
+    // 447 AC-5: outside code blocks the list keys and the paragraph behaviour are unchanged.
+    [Fact]
+    public void Tab_OutsideCode_ListSinksAndLifts_ParagraphUnhandled()
+    {
+        Assert.Equal("- a\n  - b", Command("- a\n- ⟦b", "Tab"));
+        Assert.Equal("- a\n- b", Command("- a\n  - ⟦b", "Shift-Tab"));
+        Assert.Equal([false, false], Keys("⟦x", "Tab", "Shift-Tab").Handled);
+        Assert.Equal("x", Keys("⟦x", "Tab").Markdown);
+    }
+
+    // 447 AC-6: Esc, then Tab (or Shift-Tab) is left to the browser and changes nothing; the next Tab indents.
+    [Fact]
+    public void Escape_ThenTab_IsUnhandled_ThenIndentsAgain()
+    {
+        const string Md = "```\n⟦a\n```";
+        KeyResult one = Keys(Md, "Escape", "Tab");
+        Assert.Equal([false, false], one.Handled);
+        Assert.Equal("```\na\n```", one.Markdown);
+        KeyResult two = Keys(Md, "Escape", "Tab", "Tab");
+        Assert.Equal([false, false, true], two.Handled);
+        Assert.Equal("```\n  a\n```", two.Markdown);
+        KeyResult back = Keys("```\n  ⟦a\n```", "Escape", "Shift-Tab");
+        Assert.Equal([false, false], back.Handled);
+        Assert.Equal("```\n  a\n```", back.Markdown);
+    }
+
+    // 447 AC-6: any other key in between restores indenting; Esc outside a code block sets nothing.
+    [Fact]
+    public void Escape_ThenOtherKey_RestoresIndent()
+    {
+        KeyResult other = Keys("```\n⟦a\n```", "Escape", "Left", "Tab");
+        Assert.True(other.Handled[2]);
+        Assert.Equal("```\n  a\n```", other.Markdown);
+        Assert.True(Keys("p⟦", "Escape", "Tab").Handled[1] == false);
+        KeyResult list = Keys("- a\n- ⟦b", "Escape", "Tab");
+        Assert.True(list.Handled[1]);
+        KeyResult inList = Keys("- ```\n  ⟦a\n  ```", "Escape", "Tab");
+        Assert.False(inList.Handled[1]);
+    }
+
+    // 447 AC-7: one Tab is one undo step; the saved Markdown holds the spaces and round-trips.
+    [Fact]
+    public void Tab_IsOneUndoStep_AndRoundTrips()
+    {
+        const string Md = "```js\n⟦a\n```";
+        KeyResult result = Keys(Md, "Tab");
+        Assert.Equal("```js\n  a\n```", result.Markdown);
+        Assert.Equal("```js\na\n```", result.Undone);
+        Assert.Equal(result.Markdown, Command(result.Markdown.Replace("  a", "  ⟦a"), "Shift-Mod-z"));
+    }
+
+    private sealed record KeyResult(List<bool> Handled, string Markdown, string Undone);
+
+    private KeyResult Keys(string markdown, params string[] keys)
+    {
+        using JsonDocument doc = JsonDocument.Parse(bundle.Json(
+            $"ContextEditor.keySequenceMarkdown({Js(markdown)}, {JsonSerializer.Serialize(keys)})"));
+        JsonElement root = doc.RootElement;
+        return new KeyResult(
+            root.GetProperty("handled").EnumerateArray().Select(e => e.GetBoolean()).ToList(),
+            root.GetProperty("markdown").GetString()!,
+            root.GetProperty("undone").GetString()!);
+    }
+
     private string Command(string markdown, string key, string typed = "") =>
         JsonSerializer.Deserialize<string>(bundle.Json($"ContextEditor.commandMarkdown({Js(markdown)}, {Js(key)}, {Js(typed)})"))!;
 
