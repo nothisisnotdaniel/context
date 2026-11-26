@@ -267,8 +267,8 @@
         ShowMoved(await Actions.MovePinned(name, target));
     }
 
-    // Alt+ArrowUp/Down on a pinned row's name: swaps places with the visible pinned row above or below; nothing at
-    // either end and without Alt.
+    // Alt+ArrowUp/Down on a pinned row's name: moves the row past the visible pinned row above or below (to that row's
+    // place, so a hidden entry in between keeps its place relative to the rest); nothing at either end and without Alt.
     private async Task PinnedKey(KeyboardEventArgs e, string name)
     {
         if (!e.AltKey || e.CtrlKey || e.MetaKey || e.ShiftKey || Snapshot is not { } snapshot)
