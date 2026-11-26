@@ -123,7 +123,7 @@
   border-radius: 6px;
   color: var(--code-text);
   margin: 0 0 10px;
-  overflow-x: auto;
+  overflow-x: hidden;
   padding: 8px 10px;
 }
 
@@ -141,7 +141,9 @@
 }
 
 .note-editor-body pre > code {
-  white-space: pre;
+  /* 438: long lines wrap at the block's edge, indentation kept; display only, the text is unchanged. */
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 /* 283: a code block's header (language picker, Copy) sits on the block's top edge; the pre below keeps its look. */
