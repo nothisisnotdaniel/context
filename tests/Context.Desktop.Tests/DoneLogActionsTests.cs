@@ -10,6 +10,11 @@ public sealed class DoneLogActionsTests : IDisposable
 
     private readonly DesktopFixture data = new();
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     private string DonePath => Path.Combine(data.Root, "done.md");
@@ -95,11 +100,14 @@ public sealed class DoneLogActionsTests : IDisposable
         cut.Find("li.todo input[type=checkbox]").Change(true);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() =>
+        Bar.WaitForAssertion(() =>
         {
-            AngleSharp.Dom.IElement shown = cut.Find("p.result");
+            AngleSharp.Dom.IElement shown = Bar.Find(".main-status");
             Assert.Equal("Done, but it couldn't be added to the done log.", shown.TextContent);
             Assert.True(shown.ClassList.Contains("red"));
+        }, Wait);
+        cut.WaitForAssertion(() =>
+        {
             Assert.Empty(cut.FindAll("li.todo"));
         }, Wait);
         Assert.Equal(full, File.ReadAllBytes(DonePath));

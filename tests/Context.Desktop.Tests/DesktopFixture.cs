@@ -266,6 +266,9 @@ internal sealed class DesktopFixture : IDisposable
     /// <summary>The command bar's hook to Main (job 282), registered with <see cref="Bunit"/>.</summary>
     public CommandBarContext CommandBar { get; } = new CommandBarContext();
 
+    /// <summary>The window's status bar (job 455), registered with the state; every feedback message lands here.</summary>
+    public StatusBar StatusBar { get; } = new StatusBar();
+
     /// <summary>Builds the state and the actions (once) and registers both with <see cref="Bunit"/>.</summary>
     public DesktopState CreateState()
     {
@@ -316,6 +319,7 @@ internal sealed class DesktopFixture : IDisposable
         Bunit.Services.AddSingleton<IAutoSavePause>(AutoSave);
         Bunit.Services.AddSingleton(Guard);
         Bunit.Services.AddSingleton(CommandBar);
+        Bunit.Services.AddSingleton(StatusBar);
         return State;
     }
 

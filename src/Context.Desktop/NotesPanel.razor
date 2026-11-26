@@ -34,11 +34,6 @@
                 </ul>
             </nav>
         }
-        @if (removed is { } removedResult)
-        {
-            string removedText = DesktopText.OneLine(removedResult.Text);
-            <p class="saved-search-result cut @(removedResult.Kind == ActionKind.Done ? "grey" : "red")" role="status" title="@removedText">@removedText</p>
-        }
         @if (snapshot.NotesUnreadable)
         {
             <p class="red">Can't read the notes folder.</p>
@@ -50,11 +45,6 @@
         else
         {
             List<(NoteInfo Note, bool Locked)> pinnedRows = PinnedRows(snapshot);
-            @if (pinnedMoved is { } movedResult)
-            {
-                string movedText = DesktopText.OneLine(movedResult.Text);
-                <p class="pinned-result cut red" role="status" title="@movedText">@movedText</p>
-            }
             @if (pinnedRows.Count > 0)
             {
                 <ul class="note-list pinned-notes" aria-label="Pinned notes">
@@ -124,27 +114,10 @@
                 }
                 <button type="button" class="sensitive-restore-open" @onclick="OpenRestore">Restore from recovery file</button>
             </div>
-            @if (sensitiveDone.Length > 0)
-            {
-                <p class="sensitive-result accent" role="status" title="@sensitiveDone">@sensitiveDone</p>
-            }
         }
         @if (setupOpen)
         {
             <SensitiveSetup Restore="restoring" OnDone="SetupDone" OnCancel="CloseSetup" />
-        }
-        @if (created is { } shown)
-        {
-            @if (shown.Kind == ActionKind.Done)
-            {
-                string createdText = $"Created {DesktopText.OneLine(shown.Text)}";
-                <p class="note-entry-result accent" role="status" title="@createdText">@createdText</p>
-            }
-            else
-            {
-                string failedText = DesktopText.OneLine(shown.Text);
-                <p class="note-entry-result red" role="status" title="@failedText">@failedText</p>
-            }
         }
     }
 </section>
@@ -152,10 +125,12 @@
 @code {
     private string newTitle = string.Empty;
     private bool creating;
-    private ActionResult? created;
+    // Job 455: the ids of this panel's messages in the status bar (create, sensitive setup, pinned move).
+    private long createdId;
+    private long sensitiveId;
+    private long pinnedId;
     private bool setupOpen;
     private bool restoring;
-    private string sensitiveDone = string.Empty;
 
     /// <summary>The most files one import takes.</summary>
     public const int MaxImportFiles = 100;
@@ -201,10 +176,9 @@
     [Parameter]
     public EventCallback<string> OnSearch { get; set; }
 
-    private ActionResult? removed;
     private bool removing;
 
-    // Removes a saved search; its result line stays until the next removal.
+    // Removes a saved search; its result shows in the status bar (grey when removed, red otherwise).
     private async Task RemoveSearch(string name)
     {
         if (removing)
@@ -215,7 +189,8 @@
         removing = true;
         try
         {
-            removed = await Actions.RemoveSavedSearch(name);
+            ActionResult removed = await Actions.RemoveSavedSearch(name);
+            Bar.Show(DesktopText.OneLine(removed.Text), removed.Kind == ActionKind.Done ? "grey" : "red");
         }
         finally
         {
@@ -251,9 +226,6 @@
 
     // The pinned row being dragged (451); only names of rendered rows, nothing is read from the DataTransfer.
     private string? dragged;
-
-    // The last failed pinned move (451), shown red above the pinned list until the next move that succeeds.
-    private ActionResult? pinnedMoved;
 
     // A drop on a pinned row: the dragged row takes its place. A drop with nothing dragged does nothing.
     private async Task Dropped(string target)
@@ -298,8 +270,9 @@
         ShowMoved(await Actions.MovePinned(name, visible[other]));
     }
 
-    // A failed move stays shown until the next Done move clears it.
-    private void ShowMoved(ActionResult result) => pinnedMoved = result.Kind == ActionKind.Done ? null : result;
+    // A failed move (451) shows red in the status bar until the next Done move clears it (job 455).
+    private void ShowMoved(ActionResult result) =>
+        pinnedId = Bar.Update(pinnedId, result.Kind == ActionKind.Done ? string.Empty : DesktopText.OneLine(result.Text), "red");
 
     // Every plain and sensitive note by its exact full name, with whether it is sensitive. Nothing is read from disk.
     private static Dictionary<string, (NoteInfo Note, bool Locked)> KnownNotes(DesktopSnapshot snapshot)
@@ -348,14 +321,14 @@
     {
         restoring = false;
         setupOpen = true;
-        sensitiveDone = string.Empty;
+        Bar.Clear(sensitiveId);
     }
 
     private void OpenRestore()
     {
         restoring = true;
         setupOpen = true;
-        sensitiveDone = string.Empty;
+        Bar.Clear(sensitiveId);
     }
 
     private void CloseSetup() => setupOpen = false;
@@ -363,13 +336,13 @@
     private void SetupDone(string text)
     {
         setupOpen = false;
-        sensitiveDone = DesktopText.OneLine(text);
+        sensitiveId = Bar.Update(sensitiveId, text, "accent");
     }
 
     private void TitleTyped(ChangeEventArgs e)
     {
         newTitle = e.Value?.ToString() ?? string.Empty;
-        created = null;
+        Bar.Clear(createdId);
     }
 
     // Enter in the field or the New note button: creates the note, then opens it through OnOpen (Main asks first
@@ -386,7 +359,9 @@
         try
         {
             result = await Actions.CreateNote(newTitle);
-            created = result;
+            createdId = result.Kind == ActionKind.Done
+                ? Bar.Show($"Created {DesktopText.OneLine(result.Text)}", "accent")
+                : Bar.Show(DesktopText.OneLine(result.Text), "red");
         }
         finally
         {

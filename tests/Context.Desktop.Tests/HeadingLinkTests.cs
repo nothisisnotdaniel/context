@@ -18,6 +18,11 @@ public sealed class HeadingLinkTests : IDisposable
 
     private readonly DesktopFixture data = new();
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     // AC-6: a heading link to another note asks Main to open the resolved note at the heading.
@@ -71,7 +76,7 @@ public sealed class HeadingLinkTests : IDisposable
         IRenderedComponent<NoteEditor> cut = await Render("Plan", p => p.Add(e => e.Heading, " Next Goals"));
 
         cut.WaitForAssertion(() => Assert.Equal([1], js.Jumps()), Wait);
-        Assert.Equal(string.Empty, cut.Find(".status").TextContent.Trim());
+        Assert.Equal(string.Empty, data.StatusBar.Text.Trim());
     }
 
     // AC-7: a heading the note doesn't have: no jump, and the grey line says so.
@@ -84,8 +89,8 @@ public sealed class HeadingLinkTests : IDisposable
 
         IRenderedComponent<NoteEditor> cut = await Render("Plan", p => p.Add(e => e.Heading, "Goals\nnow"));
 
-        cut.WaitForAssertion(() => Assert.Equal("Plan has no heading Goals now.", cut.Find(".status").TextContent), Wait);
-        Assert.Equal(["status", "grey"], cut.Find(".status").ClassList.ToArray());
+        Bar.WaitForAssertion(() => Assert.Equal("Plan has no heading Goals now.", data.StatusBar.Text), Wait);
+        Assert.Equal("grey", data.StatusBar.Css);
         Assert.Empty(js.Jumps());
     }
 
@@ -100,8 +105,8 @@ public sealed class HeadingLinkTests : IDisposable
 
         await cut.InvokeAsync(() => js.Page().OnLink("[[Ghost#Goals]]"));
 
-        Assert.Equal("No note named Ghost#Goals.", cut.Find(".status").TextContent);
-        Assert.Equal(["status", "grey"], cut.Find(".status").ClassList.ToArray());
+        Assert.Equal("No note named Ghost#Goals.", data.StatusBar.Text);
+        Assert.Equal("grey", data.StatusBar.Css);
         Assert.Empty(js.Jumps());
     }
 
@@ -191,7 +196,7 @@ public sealed class HeadingLinkTests : IDisposable
 
         await cut.InvokeAsync(() => js.Page().OnLink("[[#Nope]]"));
 
-        Assert.Equal("Plan has no heading Nope.", cut.Find(".status").TextContent);
+        Assert.Equal("Plan has no heading Nope.", data.StatusBar.Text);
         Assert.Empty(js.Jumps());
     }
 
@@ -230,7 +235,7 @@ public sealed class HeadingLinkTests : IDisposable
 
         await cut.InvokeAsync(() => js.Page().OnLink("[[Plan#Goals]]"));
 
-        cut.WaitForAssertion(() => Assert.Equal("Plan has no heading Goals.", cut.Find(".note-editor .status").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Plan has no heading Goals.", cut.Find(".main-status").TextContent), Wait);
         Assert.Equal("Plan", cut.Find(".note-title").TextContent);
         Assert.Empty(js.Jumps());
     }
@@ -250,7 +255,7 @@ public sealed class HeadingLinkTests : IDisposable
 
         await cut.InvokeAsync(() => js.Page().OnLink("[[a/b/c#Goals]]"));
 
-        cut.WaitForAssertion(() => Assert.Equal("a/b/c has no heading Goals.", cut.Find(".note-editor .status").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("a/b/c has no heading Goals.", cut.Find(".main-status").TextContent), Wait);
         Assert.Equal("c", cut.Find(".note-title").TextContent);
         Assert.Equal("a/b/c", cut.Find(".note-title").GetAttribute("title"));
         Assert.Empty(js.Jumps());

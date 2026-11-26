@@ -33,10 +33,6 @@
     }
     else
     {
-        @if (copied is { } copiedText)
-        {
-            <p class="@(copiedOk ? "grey decision-copied" : "red")" role="status">@copiedText</p>
-        }
         <ul class="decision-rows">
             @foreach (Decision decision in view.Decisions.Take(MaxRows))
             {
@@ -118,10 +114,6 @@
     [Inject]
     private EditorInterop Interop { get; set; } = null!;
 
-    // The Copy reference line (grey Copied #!d<ref>., red when the clipboard refused).
-    private string? copied;
-    private bool copiedOk;
-
     [Parameter]
     public EventCallback OnClose { get; set; }
 
@@ -158,8 +150,8 @@
             ok = false;
         }
 
-        copiedOk = ok;
-        copied = ok ? $"Copied {text}." : $"Can't copy {text}.";
+        // Job 455: the Copy reference line goes to the status bar (grey Copied #!d<ref>., red when the clipboard refused).
+        Bar.Show(ok ? $"Copied {text}." : $"Can't copy {text}.", ok ? "grey" : "red");
     }
 
     private void Toggle((string Note, int Line) key)

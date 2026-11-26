@@ -15,6 +15,11 @@ public sealed class PersonPanelTests : IDisposable
 
     private readonly DesktopFixture data = new();
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     // AC-11: the mentioning notes are typed buttons that report the note; appointments show date, time text, one-line
@@ -382,6 +387,7 @@ public sealed class PersonPanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(["hiring|Plan"], TopicRows(cut)), Wait);
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Empty(cut.FindAll("p.topic-result"));
+        Assert.Equal(string.Empty, data.StatusBar.Text);
         Assert.Equal(
             "# Plan\r\n- [x] next: @[Ann Lee] budget\r\nnext: @[Ann] hiring\r\n",
             File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
@@ -401,7 +407,7 @@ public sealed class PersonPanelTests : IDisposable
         Assert.Empty(cut.FindAll(".topics-list"));
     }
 
-    // 253 AC-7: a topic whose line changed since the render shows the red line right under the list and writes nothing.
+    // 253 AC-7: a topic whose line changed since the render shows the red line in the status bar and writes nothing.
     [Fact]
     public async Task Tick_TopicChanged_RedLine()
     {
@@ -414,8 +420,8 @@ public sealed class PersonPanelTests : IDisposable
         cut.Find("li.topic input.done").Change(true);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.True(cut.Find("p.topic-result").ClassList.Contains("red")), Wait);
-        Assert.True(cut.Find("p.topic-result").PreviousElementSibling!.ClassList.Contains("topics-list"));
+        Bar.WaitForAssertion(() => Assert.Equal("red", data.StatusBar.Css), Wait);
+        Assert.Empty(cut.FindAll("p.topic-result"));
         Assert.Equal("next: @[Ann Lee] budget later\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
     }
 

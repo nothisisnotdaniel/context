@@ -183,11 +183,6 @@
             }
         </div>
     }
-    @if (saved is { } savedResult)
-    {
-        string savedText = DesktopText.OneLine(savedResult.Text);
-        <p class="search-save-result cut @(savedResult.Kind == ActionKind.Done ? "accent" : "red")" role="status" title="@savedText">@savedText</p>
-    }
 </section>
 
 @code {
@@ -227,7 +222,8 @@
     private bool saveOpen;
     private bool saving;
     private string saveName = string.Empty;
-    private ActionResult? saved;
+    // Job 455: the id of this panel's Save search result in the status bar.
+    private long savedId;
 
     /// <summary>The text to search first: as typed after <c>/search</c>, a saved search's query, or empty.</summary>
     [Parameter]
@@ -309,7 +305,7 @@
     {
         saveOpen = false;
         saveName = string.Empty;
-        saved = null;
+        Bar.Clear(savedId);
         return Start();
     }
 
@@ -344,7 +340,7 @@
         to = null;
         saveOpen = false;
         saveName = string.Empty;
-        saved = null;
+        Bar.Clear(savedId);
         focusNote = Focus;
         focusInput = Focus is null;
         return Start();
@@ -413,7 +409,7 @@
         current = typed;
         saveOpen = false;
         saveName = string.Empty;
-        saved = null;
+        Bar.Clear(savedId);
         await Start();
     }
 
@@ -445,9 +441,11 @@
         }
 
         saving = true;
+        ActionResult saved;
         try
         {
             saved = await Actions.SaveSearch(saveName, current.Trim());
+            savedId = Bar.Show(DesktopText.OneLine(saved.Text), saved.Kind == ActionKind.Done ? "accent" : "red");
         }
         finally
         {

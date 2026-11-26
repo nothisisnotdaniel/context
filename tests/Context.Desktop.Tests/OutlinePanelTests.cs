@@ -279,7 +279,7 @@ public sealed class OutlinePanelTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(1, data.AutoSave.Pending), Wait);
         data.AutoSave.Elapse();
 
-        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".note-editor .status").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".main-status").TextContent), Wait);
         cut.WaitForAssertion(() => Assert.Equal(
             ["Top", "<b>Goals</b>", "Deep line"],
             cut.FindAll("aside.todos-region nav.outline-panel button").Select(b => b.TextContent)), Wait);
@@ -300,7 +300,7 @@ public sealed class OutlinePanelTests : IDisposable
         await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         cut.WaitForAssertion(() => Assert.Equal(3, cut.FindAll("aside.todos-region nav.outline-panel button").Count), Wait);
-        Assert.Equal("Saved Plan.", cut.Find(".note-editor .status").TextContent);
+        Assert.Equal("Saved Plan.", cut.Find(".main-status").TextContent);
     }
 
     // 205 AC-10: a reload (the note written elsewhere) mounts again and reloads the outline.

@@ -17,6 +17,11 @@ public sealed class NewNoteAfterMeetingTests : IDisposable
 
     private readonly DesktopFixture data = new();
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     public enum Via
@@ -150,8 +155,8 @@ public sealed class NewNoteAfterMeetingTests : IDisposable
                 int mounts = js.Calls("ContextEditor.mount").Count;
                 await cut.InvokeAsync(() => cut.Find(".note-new-title").InputAsync(new ChangeEventArgs { Value = "Fresh" }));
                 await cut.InvokeAsync(() => cut.Find(".note-new-title").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" }));
-                cut.WaitForAssertion(() => Assert.Equal("Created Fresh", cut.Find(".note-entry-result").TextContent), Wait);
-                Assert.Contains("accent", cut.Find(".note-entry-result").ClassList);
+                Bar.WaitForAssertion(() => Assert.Equal("Created Fresh", data.StatusBar.Text), Wait);
+                Assert.Equal("accent", data.StatusBar.Css);
                 AssertOpened(cut, js, mounts, "Fresh");
                 break;
             }

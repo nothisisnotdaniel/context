@@ -59,10 +59,6 @@ else if (present && view is { } times)
                 <button type="button" class="times-cancel" disabled="@running" @onclick="CancelForm">Cancel</button>
             </div>
         }
-        @if (result is { } shown)
-        {
-            <p class="@(shown.Kind == ActionKind.Done ? "accent" : "red") times-result" role="status">@DesktopText.OneLine(shown.Text)</p>
-        }
     </section>
 }
 
@@ -78,7 +74,8 @@ else if (present && view is { } times)
     private int? position;
     private string checkpointName = string.Empty;
     private IReadOnlyList<(int WorkItem, string Title)> projects = [];
-    private ActionResult? result;
+    // Job 455: the id of this panel's latest booking result in the status bar.
+    private long resultId;
     private ElementReference checkpointButton;
     private ElementReference nameInput;
 
@@ -132,13 +129,13 @@ else if (present && view is { } times)
         }
 
         running = true;
-        result = null;
+        Bar.Clear(resultId);
         try
         {
             ActionResult booked = action == TimesAction.Checkpoint
                 ? await Actions.BookTimes(action, position, checkpointName)
                 : await Actions.BookTimes(action);
-            result = booked;
+            resultId = Bar.Show(DesktopText.OneLine(booked.Text), booked.Kind == ActionKind.Done ? "accent" : "red");
             if (booked.Kind == ActionKind.Done)
             {
                 formOpen = false;
@@ -164,7 +161,7 @@ else if (present && view is { } times)
 
         formOpen = true;
         focusName = true;
-        result = null;
+        Bar.Clear(resultId);
         projects = await State.TimesProjects();
     }
 

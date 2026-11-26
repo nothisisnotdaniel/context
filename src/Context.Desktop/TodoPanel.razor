@@ -46,32 +46,6 @@
             </section>
         }
     }
-    @if (result is { } shown)
-    {
-        @if (shown.Kind == ActionKind.Done && shown.Reason == ActionReason.DoneLogLeft)
-        {
-            <p class="result red" role="status">@DesktopActions.DoneLogLeftText</p>
-        }
-        else if (shown.Kind == ActionKind.Done)
-        {
-            @if (shown.NextDue is { } nextDue)
-            {
-                <p class="result accent" role="status">Done: @(DesktopText.OneLine(shown.Text)). Next due @(nextDue.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)).</p>
-            }
-            else
-            {
-                <p class="result accent" role="status">Done: @DesktopText.OneLine(shown.Text)</p>
-            }
-        }
-        else
-        {
-            <p class="result red" role="status">@shown.Text</p>
-        }
-    }
-    else
-    {
-        <p class="result" role="status"></p>
-    }
     @if (Snapshot is { } open)
     {
         DateOnly shownDue = due ?? open.Today;
@@ -86,17 +60,6 @@
             <button type="button" class="due-today" disabled="@entryOff" @onclick="() => due = open.Today">Today</button>
             <button type="button" class="due-tomorrow" disabled="@entryOff" @onclick="() => due = open.Today.AddDays(1)">Tomorrow</button>
         </div>
-        @if (added is { } addShown)
-        {
-            @if (addShown.Kind == ActionKind.Done)
-            {
-                <p class="add-result accent" role="status">Added: @DesktopText.OneLine(addShown.Text)</p>
-            }
-            else
-            {
-                <p class="add-result red" role="status">@addShown.Text</p>
-            }
-        }
     }
     @if (asking is { } todoAsked)
     {
@@ -124,12 +87,10 @@
     private NoteTodo? askingNote;
 
     private bool running;
-    private ActionResult? result;
     private string newText = string.Empty;
     private DateOnly? due;
     private TimeOnly? dueTime;
     private bool adding;
-    private ActionResult? added;
     private ElementReference textField;
     private bool refocus;
 
@@ -176,7 +137,8 @@
         adding = true;
         try
         {
-            added = await Actions.AddTodo(newText, due ?? snapshot.Today, null, dueTime);
+            ActionResult added = await Actions.AddTodo(newText, due ?? snapshot.Today, null, dueTime);
+            Bar.Show(added.Kind == ActionKind.Done ? $"Added: {DesktopText.OneLine(added.Text)}" : added.Text, added.Kind == ActionKind.Done ? "accent" : "red");
             if (added.Kind == ActionKind.Done)
             {
                 newText = string.Empty;
@@ -239,7 +201,7 @@
         running = true;
         try
         {
-            result = await Actions.CompleteNoteTodo(todoAsked, confirmed);
+            ShowDone(await Actions.CompleteNoteTodo(todoAsked, confirmed));
         }
         finally
         {
@@ -349,12 +311,40 @@
         running = true;
         try
         {
-            result = await Actions.CompleteTodo(todoAsked, confirmed);
+            ShowDone(await Actions.CompleteTodo(todoAsked, confirmed));
         }
         finally
         {
             running = false;
             asking = null;
         }
+    }
+
+    /// <summary>
+    /// The status bar line of a ticked todo (job 455): red when the done log was left out or the tick failed, else
+    /// accent <c>Done: …</c>, with the next due date of a recurring todo. Shared with <see cref="AllTodosPanel"/>.
+    /// </summary>
+    internal static (string Text, string Css) DoneLine(ActionResult result)
+    {
+        if (result.Kind == ActionKind.Done && result.Reason == ActionReason.DoneLogLeft)
+        {
+            return (DesktopActions.DoneLogLeftText, "red");
+        }
+
+        if (result.Kind != ActionKind.Done)
+        {
+            return (result.Text, "red");
+        }
+
+        string text = DesktopText.OneLine(result.Text);
+        return result.NextDue is { } nextDue
+            ? ($"Done: {text}. Next due {nextDue.ToString(DesktopText.DateFormat, CultureInfo.InvariantCulture)}.", "accent")
+            : ($"Done: {text}", "accent");
+    }
+
+    private void ShowDone(ActionResult result)
+    {
+        (string text, string css) = DoneLine(result);
+        Bar.Show(text, css);
     }
 }

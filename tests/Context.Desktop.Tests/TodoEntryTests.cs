@@ -12,6 +12,11 @@ public sealed class TodoEntryTests : IDisposable
 
     private readonly DesktopFixture data = new();
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     // The row: a text field (max 200), a date field defaulting to the injected today, Today/Tomorrow and no Add button.
@@ -50,7 +55,7 @@ public sealed class TodoEntryTests : IDisposable
         TodoItem added = Assert.Single(data.Todos!.List());
         Assert.Equal("Buy milk", added.Text);
         Assert.Equal(new DateOnly(2026, 10, 30), added.Due);
-        IElement result = cut.Find(".add-result");
+        IElement result = Bar.Find(".main-status");
         Assert.Equal("Added: Buy milk", result.TextContent);
         Assert.Equal("status", result.GetAttribute("role"));
         Assert.Equal(string.Empty, cut.Find("input.todo-text").GetAttribute("value"));
@@ -136,8 +141,8 @@ public sealed class TodoEntryTests : IDisposable
 
         await cut.Find(".todo-entry .todo-text").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
-        Assert.Equal("Write the todo first.", cut.Find(".add-result").TextContent);
-        Assert.True(cut.Find(".add-result").ClassList.Contains("red"));
+        Assert.Equal("Write the todo first.", data.StatusBar.Text);
+        Assert.Equal("red", data.StatusBar.Css);
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
@@ -172,7 +177,7 @@ public sealed class TodoEntryTests : IDisposable
         TodoItem added = Assert.Single(data.Todos!.List());
         Assert.Equal(new TimeOnly(14, 0), added.Time);
         Assert.Null(added.Notified);
-        Assert.Equal("Added: Call Anna", cut.Find(".add-result").TextContent);
+        Assert.Equal("Added: Call Anna", data.StatusBar.Text);
         Assert.Equal(string.Empty, cut.Find("input.todo-time").GetAttribute("value"));
         cut.WaitForAssertion(() => Assert.Equal("14:00", cut.Find("li.todo .time").TextContent), Wait);
     }

@@ -169,7 +169,7 @@ public sealed class SensitiveFlowTests : IDisposable
 
         await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
-        cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".note-editor .status").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".main-status").TextContent), Wait);
         Assert.Equal(1, data.Keys.Agrees);
         Assert.Equal("new text\n", Unsealed("Plan"));
         Assert.Equal([".history/Plan/20261029T090000000Z~Plan.ctxs", "Plan.ctxs"], RootFiles());
@@ -276,8 +276,8 @@ public sealed class SensitiveFlowTests : IDisposable
         data.Session!.Tick();
 
         cut.WaitForAssertion(() => Assert.Equal(
-            "Plan changed on disk since you opened it. Nothing was saved.", cut.Find(".note-editor .status").TextContent), Wait);
-        Assert.Contains("red", cut.Find(".note-editor .status").ClassList);
+            "Plan changed on disk since you opened it. Nothing was saved.", cut.Find(".main-status").TextContent), Wait);
+        Assert.Contains("red", cut.Find(".main-status").ClassList);
         Assert.Single(cut.FindAll(".note-editor"));
         Assert.Empty(js.Calls("ContextEditor.destroy"));
         Assert.NotNull(data.Session.Note);
@@ -563,13 +563,13 @@ public sealed class SensitiveFlowTests : IDisposable
         data.UtcNow = data.UtcNow.AddMinutes(4);
         await js.Change(cut, "auto one\n");
         data.AutoSave.Elapse();
-        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".note-editor .status").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".main-status").TextContent), Wait);
         data.UtcNow = data.UtcNow.AddMinutes(4);
         Assert.False(data.Session!.Tick());
         await js.Change(cut, "auto two\n");
         data.AutoSave.Elapse();
         cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.markCleanIf").Count), Wait);
-        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".note-editor .status").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".main-status").TextContent), Wait);
         data.UtcNow = data.UtcNow.AddMinutes(4);
 
         Assert.False(data.Session.Tick());

@@ -22,6 +22,11 @@ public sealed class BoardPanelTests : IDisposable
         data.WriteFile(SettingsStore.FileName, Board);
     }
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     private string PlanPath => Path.Combine(data.Root, "Plan.md");
@@ -141,7 +146,7 @@ public sealed class BoardPanelTests : IDisposable
         Assert.Equal("# Plan\n#launch #status/doing\n", File.ReadAllText(PlanPath));
         cut.WaitForAssertion(() => Assert.Equal(["Plan"], CardNames(cut, "doing")), Wait);
         Assert.Empty(CardNames(cut, "todo"));
-        Assert.Equal(string.Empty, cut.Find(".board-result").TextContent);
+        Assert.Equal(string.Empty, data.StatusBar.Text);
     }
 
     // AC-7: a move button moves a todo card by its own token (the keyboard path), leaving the note's token alone.
@@ -185,7 +190,7 @@ public sealed class BoardPanelTests : IDisposable
 
         await MoveButton(cut, "todo", 0, "Move to doing").ClickAsync(new MouseEventArgs());
 
-        IElement line = cut.Find(".board-result");
+        IElement line = Bar.Find(".main-status");
         Assert.Equal(text, line.TextContent);
         Assert.True(line.ClassList.Contains("red"));
         Assert.Equal(after is not null, File.Exists(PlanPath));
@@ -223,8 +228,8 @@ public sealed class BoardPanelTests : IDisposable
         }
 
         Assert.Equal(ActionKind.Done, (await first).Kind);
-        Assert.Equal(DesktopActions.BusyText, cut.Find(".board-result").TextContent);
-        Assert.True(cut.Find(".board-result").ClassList.Contains("red"));
+        Assert.Equal(DesktopActions.BusyText, data.StatusBar.Text);
+        Assert.Equal("red", data.StatusBar.Css);
         Assert.Equal("#launch #status/todo\n", File.ReadAllText(PlanPath));
     }
 

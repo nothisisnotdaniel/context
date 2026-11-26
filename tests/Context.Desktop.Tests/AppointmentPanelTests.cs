@@ -21,7 +21,12 @@ public sealed class AppointmentPanelTests : IDisposable
 
     private readonly DesktopFixture data = new();
 
+    private IRenderedComponent<StatusBarView>? bar;
+
     public void Dispose() => data.Dispose();
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
 
     private static string Event(string title, string start, string end, params string[] attendees) =>
         DesktopFixture.Event(title, start, end).Replace(
@@ -651,8 +656,9 @@ public sealed class AppointmentPanelTests : IDisposable
 
         await TypeTitle(cut, title, "Enter");
 
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".appointment-page p.red.create-note-result")), Wait);
-        IElement line = cut.Find(".appointment-page p.create-note-result");
+        cut.WaitForAssertion(() => Assert.True(cut.Find(".main-status").ClassList.Contains("red")), Wait);
+        Assert.Empty(cut.FindAll(".appointment-page p.create-note-result"));
+        IElement line = cut.Find(".main-status");
         Assert.Equal(text ?? NoteStore.ValidateTitle(title), line.TextContent);
         Assert.Equal(title, cut.Find(TitleField).GetAttribute("value"));
         Assert.Single(cut.FindAll(".appointment-page"));
@@ -758,6 +764,7 @@ public sealed class AppointmentPanelTests : IDisposable
             "- [x] next: @[Anna] budget\n- next: @[anna] hiring\nnext: @[Bob] travel\n",
             File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         Assert.Empty(cut.FindAll(".appointment-page p.topic-result"));
+        Assert.NotEqual("red", data.StatusBar.Css);
     }
 
     // 253 AC-8: an appointment without matching attendees has no section.topics.
@@ -1003,7 +1010,8 @@ public sealed class AppointmentPanelTests : IDisposable
 
         await Act(cut, () => cut.Find("button.push-todo").ClickAsync(new MouseEventArgs()));
 
-        cut.WaitForAssertion(() => Assert.Equal("Moved to 2026-11-05.", cut.Find(".meeting-todos p.accent").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Moved to 2026-11-05.", data.StatusBar.Text), Wait);
+        Assert.Equal("accent", data.StatusBar.Css);
         cut.WaitForAssertion(() => Assert.Empty(TiedRows(cut)), Wait);
         TodoItem moved = store.List().Single(t => t.Id == todo.Id);
         Assert.Equal(new DateOnly(2026, 11, 5), moved.Due);
@@ -1030,7 +1038,8 @@ public sealed class AppointmentPanelTests : IDisposable
 
         await Act(cut, () => cut.FindAll(".meeting-picker button.pick-meeting")[1].ClickAsync(new MouseEventArgs()));
 
-        cut.WaitForAssertion(() => Assert.Equal("Moved to 2026-11-05.", cut.Find(".meeting-todos p.accent").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Moved to 2026-11-05.", data.StatusBar.Text), Wait);
+        Assert.Equal("accent", data.StatusBar.Css);
         cut.WaitForAssertion(() => Assert.Empty(TiedRows(cut)), Wait);
         Assert.Empty(cut.FindAll(".meeting-picker"));
         TodoItem moved = store.List().Single(t => t.Id == todo.Id);
@@ -1069,8 +1078,8 @@ public sealed class AppointmentPanelTests : IDisposable
 
         await Act(cut, () => cut.Find("button.push-todo").ClickAsync(new MouseEventArgs()));
 
-        cut.WaitForAssertion(() => Assert.Equal(
-            "The todo list changed. Nothing was moved.", cut.Find(".meeting-todos p.red").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("The todo list changed. Nothing was moved.", data.StatusBar.Text), Wait);
+        Assert.Equal("red", data.StatusBar.Css);
         Assert.Equal(before, File.ReadAllBytes(TodosPath));
     }
 
@@ -1087,8 +1096,8 @@ public sealed class AppointmentPanelTests : IDisposable
 
         await Act(cut, () => cut.Find("select.tie-todo").ChangeAsync(new ChangeEventArgs { Value = todo.Id.ToString("D") }));
 
-        cut.WaitForAssertion(() => Assert.Equal(
-            "The todo list changed. Nothing was moved.", cut.Find(".meeting-todos p.red").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("The todo list changed. Nothing was moved.", data.StatusBar.Text), Wait);
+        Assert.Equal("red", data.StatusBar.Css);
         Assert.Equal(before, File.ReadAllBytes(TodosPath));
     }
 

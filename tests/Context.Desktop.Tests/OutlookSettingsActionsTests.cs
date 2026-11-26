@@ -12,6 +12,11 @@ public sealed class OutlookSettingsActionsTests : IDisposable
 
     private readonly DesktopFixture data = new();
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     private string SettingsPath => Path.Combine(data.Root, SettingsStore.FileName);
@@ -186,9 +191,12 @@ public sealed class OutlookSettingsActionsTests : IDisposable
 
         await cut.Find("input.mail-digest-enabled").ChangeAsync(new ChangeEventArgs { Value = true });
 
+        Bar.WaitForAssertion(() =>
+        {
+            Assert.Equal("Mail suggestions on.", data.StatusBar.Text);
+        }, Wait);
         cut.WaitForAssertion(() =>
         {
-            Assert.Equal("Mail suggestions on.", cut.Find(".outlook-result").TextContent);
             Assert.True(cut.Find("input.mail-digest-enabled").HasAttribute("checked"));
         }, Wait);
         Assert.True(new SettingsStore(data.Root).ReadMailDigest());

@@ -100,7 +100,6 @@
                 break;
         }
     }
-    <p class="triage-status cut @statusClass" role="status" title="@statusText">@statusText</p>
 </section>
 @if (dropping && formItem is { } doomed)
 {
@@ -125,8 +124,8 @@
     private bool focusField;
     private ElementReference panel;
     private ElementReference field;
-    private string statusText = string.Empty;
-    private string statusClass = string.Empty;
+    // The id of this panel's latest message in the status bar (job 455).
+    private long statusId;
 
     private enum TriageForm
     {
@@ -658,9 +657,5 @@
         await Load();
     }
 
-    private void ShowStatus(string text, string cssClass)
-    {
-        statusText = text;
-        statusClass = cssClass;
-    }
+    private void ShowStatus(string text, string cssClass) => statusId = Bar.Update(statusId, text, cssClass);
 }

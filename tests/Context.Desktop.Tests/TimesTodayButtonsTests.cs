@@ -50,6 +50,10 @@ public sealed class TimesTodayButtonsTests : IDisposable
         Directory.CreateDirectory(data.TimesFolder);
     }
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     private void WriteDay(string json) =>
@@ -67,8 +71,13 @@ public sealed class TimesTodayButtonsTests : IDisposable
     private static void WaitForButtons(IRenderedComponent<TimesTodayPanel> cut, params string[] buttons) =>
         cut.WaitForAssertion(() => Assert.Equal(buttons, Buttons(cut)), Wait);
 
-    private static IElement WaitForResult(IRenderedComponent<TimesTodayPanel> cut) =>
-        cut.WaitForElement("p.times-result", Wait);
+    // 455: the booking's result is in the status bar; the panel has no result line of its own.
+    private IElement WaitForResult(IRenderedComponent<TimesTodayPanel> cut)
+    {
+        Bar.WaitForAssertion(() => Assert.NotEqual(string.Empty, data.StatusBar.Text), Wait);
+        Assert.Empty(cut.FindAll("p.times-result"));
+        return Bar.Find(".main-status");
+    }
 
     private static async Task OpenForm(IRenderedComponent<TimesTodayPanel> cut)
     {
@@ -117,6 +126,7 @@ public sealed class TimesTodayButtonsTests : IDisposable
         Assert.Single(cut.FindAll("button.times-arrive"));
         Assert.Empty(cut.FindAll("p.times-line"));
         Assert.Empty(cut.FindAll("p.times-result"));
+        Assert.Equal(string.Empty, data.StatusBar.Text);
         Assert.Equal("button", cut.Find("button.times-arrive").GetAttribute("type"));
     }
 
@@ -259,6 +269,7 @@ public sealed class TimesTodayButtonsTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(checkpointId, LastFocusId()), Wait);
         Assert.Empty(data.TimesRunner.Calls);
         Assert.Empty(cut.FindAll("p.times-result"));
+        Assert.Equal(string.Empty, data.StatusBar.Text);
     }
 
     // AC-6, AC-7, AC-10: a chosen project and a name typed with option-like and project-like starts; Enter books one
@@ -307,6 +318,7 @@ public sealed class TimesTodayButtonsTests : IDisposable
         Assert.Empty(data.TimesRunner.Calls);
         Assert.Single(cut.FindAll("div.times-form"));
         Assert.Empty(cut.FindAll("p.times-result"));
+        Assert.Equal(string.Empty, data.StatusBar.Text);
     }
 
     // AC-6: the Book button books too.

@@ -93,7 +93,6 @@
                 {
                     <SimilarPanel OnOpen="RequestOpen" OnClose="CloseSimilar" Guard="MergeHeld" OnMerged="Merged" />
                 }
-                <p class="main-status cut @statusClass" role="status" title="@statusText">@statusText</p>
                 <div class="note-area" hidden="@(page != Page.None)">
                     @if (openName is { } name)
                     {
@@ -261,6 +260,7 @@ else
 {
     <p class="grey loading" role="status">Loading…</p>
 }
+<StatusBarView />
 
 @code {
     private string? openName;
@@ -336,8 +336,8 @@ else
     private ElementReference layout;
     private bool focusLayout;
     private bool running;
-    private string statusText = string.Empty;
-    private string statusClass = string.Empty;
+    // The id of Main's own latest message in the status bar (job 455), so clearing it never clears a panel's.
+    private long statusId;
     private bool renaming;
     private string renameText = string.Empty;
     private ElementReference renameField;
@@ -3215,9 +3215,6 @@ else
 
     private void CancelBooking() => bookingOffer = null;
 
-    private void ShowStatus(string text, string cssClass)
-    {
-        statusText = text;
-        statusClass = cssClass;
-    }
+    // Job 455: Main's messages go to the status bar; an empty text clears only Main's own latest message.
+    private void ShowStatus(string text, string cssClass) => statusId = Bar.Update(statusId, text, cssClass);
 }

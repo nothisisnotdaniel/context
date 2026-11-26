@@ -10,6 +10,11 @@ public sealed class TodoPanelTests : IDisposable
 
     private readonly DesktopFixture data = new();
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     // AC-3 / 080: every todo in TodoStore.List order as "<yyyy-MM-dd> <text>" with the date class, no number.
@@ -116,7 +121,7 @@ public sealed class TodoPanelTests : IDisposable
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.False(Box(cut, 1).HasAttribute("checked"));
         Assert.Equal(files, Files());
-        Assert.Equal(string.Empty, cut.Find("p.result").TextContent);
+        Assert.Equal(string.Empty, data.StatusBar.Text);
     }
 
     // AC-6: Esc closes the dialog with no change.
@@ -156,13 +161,16 @@ public sealed class TodoPanelTests : IDisposable
         release.Set();
         await confirm;
 
-        cut.WaitForAssertion(() =>
+        Bar.WaitForAssertion(() =>
         {
-            Assert.Empty(cut.FindAll("[role=dialog]"));
-            IElement result = cut.Find("p.result");
+            IElement result = Bar.Find(".main-status");
             Assert.Equal("Done: Second todo", result.TextContent);
             Assert.True(result.ClassList.Contains("accent"));
             Assert.Equal("status", result.GetAttribute("role"));
+        }, Wait);
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Empty(cut.FindAll("[role=dialog]"));
             Assert.Equal(["First todo", "Third todo"], cut.FindAll("li.todo .text").Select(t => t.TextContent).ToArray());
             Assert.All(cut.FindAll(".todo-list input, .todo-entry input, .todo-entry button"), b => Assert.False(b.HasAttribute("disabled")));
             Assert.All(cut.FindAll(".todo-list input"), b => Assert.False(b.HasAttribute("checked")));
@@ -180,7 +188,7 @@ public sealed class TodoPanelTests : IDisposable
         Box(cut, 1).Change(true);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Done: Second todo", cut.Find("p.result").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Done: Second todo", data.StatusBar.Text), Wait);
         Assert.Equal(["Sooner", "First todo", "Third todo"], data.Todos!.List().Select(t => t.Text).ToArray());
     }
 
@@ -195,9 +203,9 @@ public sealed class TodoPanelTests : IDisposable
         Box(cut, 1).Change(true);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() =>
+        Bar.WaitForAssertion(() =>
         {
-            IElement result = cut.Find("p.result");
+            IElement result = Bar.Find(".main-status");
             Assert.Equal("The todo list changed. Nothing was done.", result.TextContent);
             Assert.True(result.ClassList.Contains("red"));
         }, Wait);
@@ -395,12 +403,15 @@ public sealed class TodoPanelTests : IDisposable
         Assert.Equal("Mark this todo done? call Anna", cut.Find("[role=dialog] .question").TextContent);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
+        Bar.WaitForAssertion(() =>
+        {
+            IElement result = Bar.Find(".main-status");
+            Assert.Equal("Done: call Anna", result.TextContent);
+            Assert.True(result.ClassList.Contains("accent"));
+        }, Wait);
         cut.WaitForAssertion(() =>
         {
             Assert.Empty(cut.FindAll("[role=dialog]"));
-            IElement result = cut.Find("p.result");
-            Assert.Equal("Done: call Anna", result.TextContent);
-            Assert.True(result.ClassList.Contains("accent"));
             Assert.Equal(["Stored"], cut.FindAll("li.todo .text").Select(t => t.TextContent).ToArray());
         }, Wait);
         Assert.Equal(
@@ -448,9 +459,9 @@ public sealed class TodoPanelTests : IDisposable
         Box(cut, 0).Change(true);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() =>
+        Bar.WaitForAssertion(() =>
         {
-            IElement result = cut.Find("p.result");
+            IElement result = Bar.Find(".main-status");
             Assert.Equal(text, result.TextContent);
             Assert.True(result.ClassList.Contains("red"));
             Assert.Equal("status", result.GetAttribute("role"));
@@ -501,9 +512,12 @@ public sealed class TodoPanelTests : IDisposable
         Box(cut, 0).Change(true);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
+        Bar.WaitForAssertion(() =>
+        {
+            Assert.Equal("Done: call Anna", data.StatusBar.Text);
+        }, Wait);
         cut.WaitForAssertion(() =>
         {
-            Assert.Equal("Done: call Anna", cut.Find("p.result").TextContent);
             Assert.Empty(cut.FindAll("li.todo"));
         }, Wait);
         Assert.Equal("- {x} call Anna\n", File.ReadAllText(Path.Combine(data.Root, "Meeting.md")));
@@ -609,9 +623,12 @@ public sealed class TodoPanelTests : IDisposable
         Assert.Equal("Mark this todo done? waiting: @[Anna] slides", cut.Find("[role=dialog] .question").TextContent);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
+        Bar.WaitForAssertion(() =>
+        {
+            Assert.Equal("Done: waiting: @[Anna] slides", data.StatusBar.Text);
+        }, Wait);
         cut.WaitForAssertion(() =>
         {
-            Assert.Equal("Done: waiting: @[Anna] slides", cut.Find("p.result").TextContent);
             Assert.Empty(cut.FindAll("section.waiting-for"));
         }, Wait);
         Assert.Equal(["Plain"], data.Todos!.List().Select(t => t.Text).ToArray());
@@ -629,9 +646,12 @@ public sealed class TodoPanelTests : IDisposable
         Assert.Equal("Mark this todo done? waiting: @[Cleo] notes", cut.Find("[role=dialog] .question").TextContent);
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
+        Bar.WaitForAssertion(() =>
+        {
+            Assert.Equal("Done: waiting: @[Cleo] notes", data.StatusBar.Text);
+        }, Wait);
         cut.WaitForAssertion(() =>
         {
-            Assert.Equal("Done: waiting: @[Cleo] notes", cut.Find("p.result").TextContent);
             Assert.Empty(cut.FindAll("section.waiting-for"));
         }, Wait);
         Assert.Equal("- {x} waiting: @[Cleo] notes\n", File.ReadAllText(Path.Combine(data.Root, "Meeting.md")));

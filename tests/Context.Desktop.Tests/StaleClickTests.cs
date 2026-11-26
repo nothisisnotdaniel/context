@@ -13,6 +13,11 @@ public sealed class StaleClickTests : IDisposable
 
     private readonly DesktopFixture data = new();
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     // AC-1: a click on an element from before a render throws UnknownEventHandlerIdException; the helper finds the
@@ -41,7 +46,7 @@ public sealed class StaleClickTests : IDisposable
 
         await StaleClick.ClickAsync(cut, "button.theme-light");
 
-        cut.WaitForAssertion(() => Assert.Equal("Theme: Light.", cut.Find("p.theme-result").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Theme: Light.", data.StatusBar.Text), Wait);
         Assert.Equal(AppTheme.Light, new SettingsStore(data.Root).ReadTheme());
         Assert.Contains("\"light\"", File.ReadAllText(Path.Combine(data.Root, SettingsStore.FileName)), StringComparison.Ordinal);
         Assert.Equal(1, Volatile.Read(ref writes));

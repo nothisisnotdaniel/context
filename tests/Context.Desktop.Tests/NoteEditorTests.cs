@@ -15,6 +15,11 @@ public sealed class NoteEditorTests : IDisposable
 
     private readonly DesktopFixture data = new();
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: the editor's messages go to the status bar, which Main renders; tests render the bar next to the editor.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     // AC-7: the note's text (LF) is mounted and the editor gets focus; no lossy line for a lossless note.
@@ -53,7 +58,7 @@ public sealed class NoteEditorTests : IDisposable
         js.Edit("* star\n\n__b__ more\n");
         await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
-        Assert.Equal("Saved Plan.", cut.Find(".status").TextContent);
+        Assert.Equal("Saved Plan.", data.StatusBar.Text);
         Assert.Empty(cut.FindAll(".lossy"));
         Assert.Empty(js.Calls("ContextEditor.isLossless"));
     }
@@ -216,7 +221,7 @@ public sealed class NoteEditorTests : IDisposable
         Assert.DoesNotContain("boom-143", cut.Markup, StringComparison.Ordinal);
     }
 
-    // 177 review nit: an empty status line has no child nodes at all, so `.status:empty` hides it.
+    // 177 review nit, 455 AC-3: the editor has no status line of its own; the empty bar has no child nodes at all.
     [Fact]
     public async Task EmptyStatus_HasNoChildNodes()
     {
@@ -224,7 +229,8 @@ public sealed class NoteEditorTests : IDisposable
         EditorJs js = new EditorJs(data.Bunit);
         IRenderedComponent<NoteEditor> cut = await Render("Plan");
 
-        Assert.Equal(0, cut.Find(".status").ChildNodes.Length);
+        Assert.Empty(cut.FindAll("p.status"));
+        Assert.Equal(0, Bar.Find(".main-status").ChildNodes.Length);
     }
 
     // AC-8: an explicit save (Ctrl+S) saves the editor's Markdown and says so.
@@ -239,7 +245,7 @@ public sealed class NoteEditorTests : IDisposable
         await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         Assert.Equal("# Plan\n\nMore #new\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
-        IElement status = cut.Find(".status");
+        IElement status = Bar.Find(".main-status");
         Assert.Equal("Saved Plan.", status.TextContent);
         Assert.Equal("status", status.GetAttribute("role"));
         Assert.Single(js.Calls("ContextEditor.getMarkdown"));
@@ -265,8 +271,8 @@ public sealed class NoteEditorTests : IDisposable
         await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = ctrl, MetaKey = meta });
 
         Assert.Equal("# Plan\n\nSaved by key\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
-        Assert.Equal("Saved Plan.", cut.Find(".status").TextContent);
-        Assert.Contains("accent", cut.Find(".status").ClassList);
+        Assert.Equal("Saved Plan.", data.StatusBar.Text);
+        Assert.Equal("accent", data.StatusBar.Css);
     }
 
     // AC-5: saving without an edit writes nothing, even for a lossy CRLF + BOM note, and never asks for Markdown.
@@ -284,7 +290,7 @@ public sealed class NoteEditorTests : IDisposable
 
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
         Assert.Empty(js.Calls("ContextEditor.getMarkdown"));
-        Assert.Equal("Saved Plan.", cut.Find(".status").TextContent);
+        Assert.Equal("Saved Plan.", data.StatusBar.Text);
     }
 
     // AC-6: a note changed on disk is not overwritten; the red line names it and the editor keeps its text.
@@ -300,7 +306,7 @@ public sealed class NoteEditorTests : IDisposable
         await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         Assert.Equal("# Theirs\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
-        IElement status = cut.Find(".status");
+        IElement status = Bar.Find(".main-status");
         Assert.Equal("Plan changed on disk since you opened it. Nothing was saved.", status.TextContent);
         Assert.True(status.ClassList.Contains("red"));
         Assert.Single(js.Calls("ContextEditor.mount"));
@@ -321,7 +327,7 @@ public sealed class NoteEditorTests : IDisposable
         await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
         Assert.False(File.Exists(Path.Combine(data.Root, "Plan.md")));
-        Assert.Equal("Plan no longer exists. Nothing was saved.", cut.Find(".status").TextContent);
+        Assert.Equal("Plan no longer exists. Nothing was saved.", data.StatusBar.Text);
     }
 
     // AC-9: a link to a missing note shows the grey line.
@@ -334,7 +340,7 @@ public sealed class NoteEditorTests : IDisposable
 
         await cut.InvokeAsync(() => js.Page().OnLink("[[Ghost]]"));
 
-        IElement status = cut.Find(".status");
+        IElement status = Bar.Find(".main-status");
         Assert.Equal("No note named Ghost.", status.TextContent);
         Assert.True(status.ClassList.Contains("grey"));
     }
@@ -361,7 +367,7 @@ public sealed class NoteEditorTests : IDisposable
         if (raw == "[[Other|alias]]")
         {
             Assert.Empty(opened);
-            Assert.Equal("No note named Other|alias.", cut.Find(".status").TextContent);
+            Assert.Equal("No note named Other|alias.", data.StatusBar.Text);
         }
         else
         {
@@ -469,14 +475,14 @@ public sealed class NoteEditorTests : IDisposable
         };
         Task key = cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
         Assert.True(entered.Wait(Wait));
-        cut.WaitForAssertion(() => Assert.Equal("Saving…", cut.Find(".status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Saving…", data.StatusBar.Text), Wait);
 
         Assert.False(cut.Instance.IsReady);
 
         data.Actions.BeforeWrite = null;
         release.Set();
         await key;
-        cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Saved Plan.", data.StatusBar.Text), Wait);
         Assert.True(cut.Instance.IsReady);
     }
 
@@ -530,7 +536,7 @@ public sealed class NoteEditorTests : IDisposable
             await cut.InvokeAsync(() => cut.Instance.SaveAsync(false));
         }
 
-        Assert.Equal("Saved Plan.", cut.Find(".status").TextContent);
+        Assert.Equal("Saved Plan.", data.StatusBar.Text);
         Assert.Equal("# Plan\n\nMore\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         Assert.Empty(cut.FindAll(".dirty-dot"));
     }
@@ -557,7 +563,7 @@ public sealed class NoteEditorTests : IDisposable
 
         await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
-        IElement status = cut.Find(".status");
+        IElement status = Bar.Find(".main-status");
         Assert.Equal(expected, status.TextContent);
         Assert.True(status.ClassList.Contains("red"));
         Assert.Single(cut.FindAll(".dirty-dot"));
@@ -734,7 +740,7 @@ public sealed class NoteEditorTests : IDisposable
         js.Edit("# inbox\n- captured\n- more\n");
         await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
-        Assert.Equal("Saved inbox.", cut.Find(".status").TextContent);
+        Assert.Equal("Saved inbox.", data.StatusBar.Text);
         Assert.Equal("# inbox\n- captured\n- more\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
         Assert.Empty(js.Calls("ContextEditor.isLossless"));
     }
@@ -757,7 +763,7 @@ public sealed class NoteEditorTests : IDisposable
 
         await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
-        Assert.Equal("Saved Plan.", cut.Find(".status").TextContent);
+        Assert.Equal("Saved Plan.", data.StatusBar.Text);
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
     }
 
@@ -913,11 +919,11 @@ public sealed class NoteEditorTests : IDisposable
 
         data.AutoSave.Elapse();
 
-        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".status").TextContent), Wait);
-        Assert.Equal(["status", "grey"], cut.Find(".status").ClassList.ToArray());
+        Bar.WaitForAssertion(() => Assert.Equal("Saved.", data.StatusBar.Text), Wait);
+        Assert.Equal("grey", data.StatusBar.Css);
         Assert.Equal("# Plan\n\nTwo\n", File.ReadAllText(PlanPath));
         Assert.Single(js.Calls("ContextEditor.getMarkdown"));
-        Assert.Empty(cut.FindAll("span.dirty-dot"));
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("span.dirty-dot")), Wait);
         Assert.False(await cut.InvokeAsync(() => cut.Instance.IsDirtyAsync()));
         Assert.Equal(0, data.AutoSave.Pending);
     }
@@ -940,8 +946,8 @@ public sealed class NoteEditorTests : IDisposable
         await js.Change(cut, "# Plan\n\nAuto\n");
         data.AutoSave.Elapse();
         Assert.True(entered.Wait(Wait));
-        cut.WaitForAssertion(() => Assert.Equal("Saving…", cut.Find(".status").TextContent), Wait);
-        Assert.Equal(["status", "grey"], cut.Find(".status").ClassList.ToArray());
+        Bar.WaitForAssertion(() => Assert.Equal("Saving…", data.StatusBar.Text), Wait);
+        Assert.Equal("grey", data.StatusBar.Css);
         int asked = js.Calls("ContextEditor.isDirty").Count;
 
         Task key = cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
@@ -954,10 +960,10 @@ public sealed class NoteEditorTests : IDisposable
         release.Set();
         await key;
         Assert.True(await first);
-        cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Saved Plan.", data.StatusBar.Text), Wait);
         Assert.Equal("# Plan\n\nAuto\n", File.ReadAllText(PlanPath));
         Assert.Single(js.Calls("ContextEditor.getMarkdown"));
-        Assert.Empty(cut.FindAll(".status.red"));
+        Assert.NotEqual("red", data.StatusBar.Css);
     }
 
     // 203 AC-3: an edit typed while the save runs is not marked clean: the dot stays, and the next pause saves it.
@@ -981,7 +987,7 @@ public sealed class NoteEditorTests : IDisposable
         data.Actions.BeforeWrite = null;
         release.Set();
 
-        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Saved.", data.StatusBar.Text), Wait);
         Assert.Equal("# Plan\n\nA\n", File.ReadAllText(PlanPath));
         Assert.Equal("# Plan\n\nA\n", Assert.Single(js.Calls("ContextEditor.markCleanIf")).Arguments[1]);
         Assert.Single(cut.FindAll("span.dirty-dot"));
@@ -993,7 +999,7 @@ public sealed class NoteEditorTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.markCleanIf").Count), Wait);
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("span.dirty-dot")), Wait);
         Assert.Equal("# Plan\n\nAB\n", File.ReadAllText(PlanPath));
-        Assert.Equal("Saved.", cut.Find(".status").TextContent);
+        Assert.Equal("Saved.", data.StatusBar.Text);
     }
 
     // 203 AC-4: a refused auto save (changed on disk) shows its red text, keeps the editor's text without a remount,
@@ -1009,8 +1015,8 @@ public sealed class NoteEditorTests : IDisposable
 
         data.AutoSave.Elapse();
 
-        cut.WaitForAssertion(() => Assert.Equal(DesktopActions.ChangedOnDiskText("Plan"), cut.Find(".status").TextContent), Wait);
-        Assert.Equal(["status", "red"], cut.Find(".status").ClassList.ToArray());
+        Bar.WaitForAssertion(() => Assert.Equal(DesktopActions.ChangedOnDiskText("Plan"), data.StatusBar.Text), Wait);
+        Assert.Equal("red", data.StatusBar.Css);
         Assert.Equal("# Plan\n\nElsewhere\n", File.ReadAllText(PlanPath));
         Assert.Single(js.Calls("ContextEditor.mount"));
         Assert.Single(cut.FindAll("span.dirty-dot"));
@@ -1022,7 +1028,7 @@ public sealed class NoteEditorTests : IDisposable
         data.AutoSave.Elapse();
 
         cut.WaitForAssertion(() => Assert.Equal(2, js.Calls("ContextEditor.getMarkdown").Count), Wait);
-        cut.WaitForAssertion(() => Assert.Equal(DesktopActions.ChangedOnDiskText("Plan"), cut.Find(".status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal(DesktopActions.ChangedOnDiskText("Plan"), data.StatusBar.Text), Wait);
         Assert.Single(js.Calls("ContextEditor.mount"));
     }
 
@@ -1036,7 +1042,7 @@ public sealed class NoteEditorTests : IDisposable
         IRenderedComponent<NoteEditor> cut = await Render("Plan");
         js.Edit("# Plan\n\nFirst\n");
         await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
-        Assert.Equal("Saved Plan.", cut.Find(".status").TextContent);
+        Assert.Equal("Saved Plan.", data.StatusBar.Text);
         using ManualResetEventSlim entered = new ManualResetEventSlim();
         using ManualResetEventSlim release = new ManualResetEventSlim();
         data.Actions!.BeforeWrite = () =>
@@ -1051,8 +1057,8 @@ public sealed class NoteEditorTests : IDisposable
         data.AutoSave.Elapse();
 
         cut.WaitForAssertion(() => Assert.Equal((2, 1), (data.AutoSave.Started, data.AutoSave.Pending)), Wait);
-        cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".status").TextContent), Wait);
-        Assert.Equal(["status", "accent"], cut.Find(".status").ClassList.ToArray());
+        Bar.WaitForAssertion(() => Assert.Equal("Saved Plan.", data.StatusBar.Text), Wait);
+        Assert.Equal("accent", data.StatusBar.Css);
         Assert.DoesNotContain(DesktopActions.BusyText, cut.Markup, StringComparison.Ordinal);
         Assert.Equal("# Plan\n\nFirst\n", File.ReadAllText(PlanPath));
         data.Actions.BeforeWrite = null;
@@ -1061,9 +1067,9 @@ public sealed class NoteEditorTests : IDisposable
 
         data.AutoSave.Elapse();
 
-        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Saved.", data.StatusBar.Text), Wait);
         Assert.Equal("# Plan\n\nBusy\n", File.ReadAllText(PlanPath));
-        Assert.Empty(cut.FindAll("span.dirty-dot"));
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("span.dirty-dot")), Wait);
     }
 
     // 203 AC-6: an explicit SaveAsync (as /save), Ctrl+S and Cmd+S save at once with the accent text and cancel the pending pause, so
@@ -1089,15 +1095,15 @@ public sealed class NoteEditorTests : IDisposable
             await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = how == "ctrl", MetaKey = how == "meta" });
         }
 
-        Assert.Equal("Saved Plan.", cut.Find(".status").TextContent);
-        Assert.Equal(["status", "accent"], cut.Find(".status").ClassList.ToArray());
+        Assert.Equal("Saved Plan.", data.StatusBar.Text);
+        Assert.Equal("accent", data.StatusBar.Css);
         Assert.Equal("# Plan\n\nNow\n", File.ReadAllText(PlanPath));
         Assert.Equal((1, 0), (data.AutoSave.Started, data.AutoSave.Pending));
         data.AutoSave.Elapse();
         await cut.InvokeAsync(() => { });
         Assert.Single(js.Calls("ContextEditor.getMarkdown"));
         Assert.Single(js.Calls("ContextEditor.markCleanIf"));
-        Assert.Equal("Saved Plan.", cut.Find(".status").TextContent);
+        Assert.Equal("Saved Plan.", data.StatusBar.Text);
     }
 
     // 203 AC-12: a change report without an edit saves nothing when the pause elapses; the file's bytes stay.
@@ -1119,7 +1125,7 @@ public sealed class NoteEditorTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal(asked + 1, js.Calls("ContextEditor.isDirty").Count), Wait);
         Assert.Equal(before, File.ReadAllBytes(PlanPath));
         Assert.Empty(js.Calls("ContextEditor.getMarkdown"));
-        Assert.Equal(string.Empty, cut.Find(".status").TextContent);
+        Assert.Equal(string.Empty, data.StatusBar.Text);
         Assert.Equal(0, data.AutoSave.Pending);
     }
 
@@ -1292,9 +1298,9 @@ public sealed class NoteEditorTests : IDisposable
 
         data.AutoSave.Elapse();
 
-        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Saved.", data.StatusBar.Text), Wait);
         Assert.Equal("# Plan\n\naliases:: A, B\nRole:: lead dev\n", File.ReadAllText(PlanPath));
-        Assert.Empty(cut.FindAll("span.dirty-dot"));
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("span.dirty-dot")), Wait);
     }
 
     // 236 review nit: a value longer than the field allows is cut to 400 chars before it reaches the page.

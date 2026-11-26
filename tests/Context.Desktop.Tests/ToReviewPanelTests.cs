@@ -13,6 +13,11 @@ public sealed class ToReviewPanelTests : IDisposable
     private readonly List<string> opened = [];
     private readonly List<string> reviewed = [];
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     private string PathOf(string name) => Path.Combine(data.Root, name + ".md");
@@ -174,8 +179,9 @@ public sealed class ToReviewPanelTests : IDisposable
 
         await cut.Find("button.review-3m").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Single(cut.FindAll("p.review-result")), Wait);
-        IElement result = cut.Find("p.review-result");
+        Bar.WaitForAssertion(() => Assert.Equal("red", data.StatusBar.Css), Wait);
+        Assert.Empty(cut.FindAll("p.review-result"));
+        IElement result = Bar.Find(".main-status");
         Assert.Equal(NoteTodos.ChangedText("Plan"), result.TextContent);
         Assert.True(result.ClassList.Contains("red"));
         Assert.Equal("x\nreview:2026-10-01\n", File.ReadAllText(PathOf("Plan")));
@@ -197,7 +203,7 @@ public sealed class ToReviewPanelTests : IDisposable
 
         await cut.Find("button.review-1y").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Save Plan first.", cut.Find("p.review-result").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Save Plan first.", data.StatusBar.Text), Wait);
         Assert.Equal(["Plan"], asked);
         Assert.Equal("review:2026-10-01\n", File.ReadAllText(PathOf("Plan")));
     }
@@ -218,7 +224,7 @@ public sealed class ToReviewPanelTests : IDisposable
 
         await cut.Find("button.review-3m").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Save Plan first.", cut.Find("p.review-result").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Save Plan first.", data.StatusBar.Text), Wait);
         data.WaitForRecentWrites();
         Assert.Equal(before, FileSnapshot.Take(data.Root, TagIndex.FileName, RecentNotesStore.FileName));
         Assert.Single(cut.FindAll("li.review-item"));

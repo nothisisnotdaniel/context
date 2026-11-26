@@ -39,7 +39,6 @@
     }
     else
     {
-        <p class="board-result cut @resultClass" role="status" title="@result">@result</p>
         <div class="board-columns">
             @foreach (BoardColumn lane in view.Columns)
             {
@@ -90,8 +89,8 @@
     private string? loaded;
     private int request;
     private BoardCard? dragged;
-    private string result = string.Empty;
-    private string resultClass = string.Empty;
+    // The id of this panel's last red move result in the status bar (job 455).
+    private long resultId;
 
     /// <summary>The tag as typed after <c>/board</c> or as <c>TagPanel</c> shows it.</summary>
     [Parameter]
@@ -147,7 +146,7 @@
         // Another tag: its cards are not known yet, so the old ones go.
         loaded = Tag;
         page = null;
-        result = string.Empty;
+        Bar.Clear(resultId);
         return Load();
     }
 
@@ -170,14 +169,12 @@
         ActionResult moved = await Actions.MoveBoardCard(card, column);
         if (moved.Kind == ActionKind.Done)
         {
-            result = string.Empty;
-            resultClass = string.Empty;
+            Bar.Clear(resultId);
             await Load();
         }
         else
         {
-            result = DesktopText.OneLine(moved.Text);
-            resultClass = "red";
+            resultId = Bar.Show(DesktopText.OneLine(moved.Text), "red");
         }
     }
 

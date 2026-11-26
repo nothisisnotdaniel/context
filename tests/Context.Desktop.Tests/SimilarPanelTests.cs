@@ -175,7 +175,8 @@ public sealed class SimilarPanelTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".similar-rows li")), Wait);
         cut.WaitForAssertion(() => Assert.Equal("No similar notes.", cut.Find(".similar-panel p.grey[role=status]").TextContent), Wait);
-        AngleSharp.Dom.IElement result = cut.Find(".similar-panel p.similar-result");
+        Assert.Empty(cut.FindAll(".similar-panel p.similar-result"));
+        AngleSharp.Dom.IElement result = cut.Find(".main-status");
         Assert.Equal("Merged Project plan into Project plans.", result.TextContent);
         Assert.True(result.ClassList.Contains("accent"));
         Assert.Equal("b\n\na\n", File.ReadAllText(Path.Combine(data.Root, "Project plans.md")));
@@ -199,8 +200,8 @@ public sealed class SimilarPanelTests : IDisposable
 
         await cut.Find(".similar-rows button.keep-first").ClickAsync(new MouseEventArgs());
 
-        cut.WaitForAssertion(() => Assert.Equal("Save " + open + " first.", cut.Find(".similar-panel p.similar-result").TextContent), Wait);
-        Assert.True(cut.Find(".similar-panel p.similar-result").ClassList.Contains("red"));
+        cut.WaitForAssertion(() => Assert.Equal("Save " + open + " first.", cut.Find(".main-status").TextContent), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
         Assert.Empty(cut.FindAll(".similar-panel [role=dialog]"));
         Assert.Equal(before, Files());
     }

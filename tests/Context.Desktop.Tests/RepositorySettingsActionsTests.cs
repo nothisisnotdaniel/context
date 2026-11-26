@@ -22,6 +22,11 @@ public sealed class RepositorySettingsActionsTests : IDisposable
         Directory.CreateDirectory(repos);
     }
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     private string SettingsPath => Path.Combine(data.Root, SettingsStore.FileName);
@@ -155,20 +160,20 @@ public sealed class RepositorySettingsActionsTests : IDisposable
         await cut.InvokeAsync(() => cut.Find("input.repository-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" }));
 
         cut.WaitForAssertion(() => Assert.Equal([z, a, m], cut.FindAll(".repository-folder").Select(s => s.TextContent).ToArray()), Wait);
-        Assert.Equal("Added " + m + ".", cut.Find(".repository-result").TextContent);
-        Assert.True(cut.Find(".repository-result").ClassList.Contains("accent"));
+        Assert.Equal("Added " + m + ".", data.StatusBar.Text);
+        Assert.Equal("accent", data.StatusBar.Css);
         Assert.Null(cut.Find("input.repository-field").GetAttribute("value"));
 
         await cut.InvokeAsync(() => cut.Find("input.repository-field").InputAsync(new ChangeEventArgs { Value = "relative" }));
         await cut.InvokeAsync(() => cut.Find("button.repository-add").ClickAsync(new MouseEventArgs()));
 
-        cut.WaitForAssertion(() => Assert.Equal(DesktopActions.RepositoryRelativeText, cut.Find(".repository-result").TextContent), Wait);
-        Assert.True(cut.Find(".repository-result").ClassList.Contains("red"));
+        Bar.WaitForAssertion(() => Assert.Equal(DesktopActions.RepositoryRelativeText, data.StatusBar.Text), Wait);
+        Assert.Equal("red", data.StatusBar.Css);
 
         await cut.InvokeAsync(() => cut.FindAll("button.repository-remove")[0].ClickAsync(new MouseEventArgs()));
 
         cut.WaitForAssertion(() => Assert.Equal([a, m], cut.FindAll(".repository-folder").Select(s => s.TextContent).ToArray()), Wait);
-        Assert.Equal("Removed " + z + ".", cut.Find(".repository-result").TextContent);
+        Assert.Equal("Removed " + z + ".", data.StatusBar.Text);
         Assert.Equal([a, m], Stored());
     }
 

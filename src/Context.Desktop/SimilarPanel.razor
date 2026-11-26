@@ -51,10 +51,6 @@
             <p class="grey more">@More(view.Pairs.Count)</p>
         }
     }
-    @if (result is { } shown)
-    {
-        <p class="similar-result cut @(resultDone ? "accent" : "red")" role="status" title="@shown">@shown</p>
-    }
     @if (asking is { } asked)
     {
         <ConfirmDialog Question="@DesktopActions.MergeQuestion(asked.Source, asked.Target, asked.Count)" ConfirmLabel="Merge"
@@ -70,8 +66,8 @@
     private int request;
     private bool running;
     private (string Target, string Source, int Count)? asking;
-    private string? result;
-    private bool resultDone;
+    // Job 455: the id of this panel's latest merge result in the status bar.
+    private long resultId;
 
     /// <summary>Called with a note's name when it is clicked.</summary>
     [Parameter]
@@ -137,7 +133,7 @@
         }
 
         running = true;
-        result = null;
+        Bar.Clear(resultId);
         try
         {
             if (Guard is not null && await Guard(target, source) is { } held)
@@ -191,7 +187,6 @@
 
     private void Show(string text, bool done)
     {
-        result = DesktopText.OneLine(text);
-        resultDone = done;
+        resultId = Bar.Show(DesktopText.OneLine(text), done ? "accent" : "red");
     }
 }

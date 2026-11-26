@@ -1,0 +1,35 @@
+@* The status bar (job 455): one footer fixed along the bottom of the window, rendered once by Main outside the layout,
+   holding the one feedback message of StatusBar in p.main-status (role="status", the full text in title; a multi-line
+   message as one span.line per line). *@
+@implements IDisposable
+
+<footer class="status-bar">
+    @if (Bar.Lines is { Count: > 0 } lines)
+    {
+        <p class="main-status cut" role="status" title="@string.Join(" ", lines.Select(l => l.Text))">
+            @foreach ((string text, string css) in lines)
+            {
+                <span class="line cut @css" title="@text">@text</span>
+            }
+        </p>
+    }
+    else
+    {
+        <p class="main-status cut @Bar.Css" role="status" title="@Bar.Text">@Bar.Text</p>
+    }
+</footer>
+
+@code {
+    [Inject]
+    internal StatusBar Bar { get; set; } = null!;
+
+    public void Dispose()
+    {
+        Bar.Changed -= OnChanged;
+        GC.SuppressFinalize(this);
+    }
+
+    protected override void OnInitialized() => Bar.Changed += OnChanged;
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+}

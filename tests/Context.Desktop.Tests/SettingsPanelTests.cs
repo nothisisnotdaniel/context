@@ -25,6 +25,11 @@ public sealed class SettingsPanelTests : IDisposable
 
     private readonly DesktopFixture data = new();
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     private string LinkPath => Path.Combine(data.Root, CalendarLink.FileName);
@@ -53,8 +58,8 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.Equal("No calendar link set.", line.TextContent);
         Assert.True(line.ClassList.Contains("grey"));
         Assert.Empty(cut.FindAll("button.calendar-link-remove"));
-        Assert.Equal(string.Empty, cut.Find(".settings-result").TextContent);
-        Assert.Equal("status", cut.Find(".settings-result").GetAttribute("role"));
+        Assert.Equal(string.Empty, data.StatusBar.Text);
+        Assert.Empty(cut.FindAll(".settings-result"));
         Assert.All(cut.FindAll("button"), b => Assert.Equal("button", b.GetAttribute("type")));
         Assert.Equal(before, FileSnapshot.Take(data.Root));
         Assert.Equal(0, data.Http.Requests);
@@ -181,7 +186,7 @@ public sealed class SettingsPanelTests : IDisposable
             await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
         }
 
-        IElement status = cut.Find(".settings-result");
+        IElement status = Bar.Find(".main-status");
         Assert.Equal($"Calendar link saved ({Masked}).", status.TextContent);
         Assert.True(status.ClassList.Contains("accent"));
         Assert.Equal(FakeHttpHandler.Link + "\n", File.ReadAllText(LinkPath));
@@ -217,7 +222,7 @@ public sealed class SettingsPanelTests : IDisposable
 
         await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
 
-        IElement status = cut.Find(".settings-result");
+        IElement status = Bar.Find(".main-status");
         Assert.Equal(InvalidText, status.TextContent);
         Assert.True(status.ClassList.Contains("red"));
         Assert.Empty(cut.FindAll("[role=dialog]"));
@@ -225,7 +230,7 @@ public sealed class SettingsPanelTests : IDisposable
 
         // Typing again clears the line.
         await Type(cut, value + "x");
-        Assert.Equal(string.Empty, cut.Find(".settings-result").TextContent);
+        Assert.Equal(string.Empty, data.StatusBar.Text);
     }
 
     // AC-6: with a link stored Save asks first; Cancel keeps the old link and its copy byte for byte.
@@ -242,7 +247,7 @@ public sealed class SettingsPanelTests : IDisposable
 
         Assert.Equal(ReplaceQuestion, cut.Find("[role=dialog] .question").TextContent);
         Assert.Equal("Replace", cut.Find("[role=dialog] button.confirm").TextContent);
-        Assert.Equal(string.Empty, cut.Find(".settings-result").TextContent);
+        Assert.Equal(string.Empty, data.StatusBar.Text);
         Assert.Equal(before, FileSnapshot.Take(data.Root));
 
         await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
@@ -266,7 +271,7 @@ public sealed class SettingsPanelTests : IDisposable
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
         Assert.Empty(cut.FindAll("[role=dialog]"));
-        Assert.Equal("Calendar link saved (https://other.example/…).", cut.Find(".settings-result").TextContent);
+        Assert.Equal("Calendar link saved (https://other.example/…).", data.StatusBar.Text);
         Assert.Equal(OtherLink + "\n", File.ReadAllText(LinkPath));
         Assert.False(File.Exists(CachePath));
         cut.WaitForAssertion(() => Assert.Equal(
@@ -295,7 +300,7 @@ public sealed class SettingsPanelTests : IDisposable
         await cut.Find("button.calendar-link-remove").ClickAsync(new MouseEventArgs());
         await cut.Find("[role=dialog] button.confirm").ClickAsync(new MouseEventArgs());
 
-        IElement status = cut.Find(".settings-result");
+        IElement status = Bar.Find(".main-status");
         Assert.Equal("Calendar link removed.", status.TextContent);
         Assert.True(status.ClassList.Contains("accent"));
         Assert.False(File.Exists(LinkPath));
@@ -327,7 +332,7 @@ public sealed class SettingsPanelTests : IDisposable
             File.SetUnixFileMode(data.Root, mode);
         }
 
-        IElement status = cut.Find(".settings-result");
+        IElement status = Bar.Find(".main-status");
         Assert.Equal("Can't remove the calendar link. Check that the Context folder is writable.", status.TextContent);
         Assert.True(status.ClassList.Contains("red"));
         Assert.True(File.Exists(LinkPath));
@@ -460,7 +465,7 @@ public sealed class SettingsPanelTests : IDisposable
         await Type(cut, MarkerLink);
         Clean();
         await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
-        Assert.Equal("Calendar link saved (https://outlook.example/…).", cut.Find(".settings-result").TextContent);
+        Assert.Equal("Calendar link saved (https://outlook.example/…).", data.StatusBar.Text);
         Assert.Equal(MarkerLink + "\n", File.ReadAllText(LinkPath));
         cut.WaitForAssertion(() => Assert.StartsWith("Calendar link: https://outlook.example/…", cut.Find(".calendar-link-state").TextContent), Wait);
         Clean();
@@ -469,7 +474,7 @@ public sealed class SettingsPanelTests : IDisposable
         // Refused: an invalid value that holds the marker.
         await Type(cut, "http://outlook.example/" + Marker);
         await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
-        Assert.Equal(InvalidText, cut.Find(".settings-result").TextContent);
+        Assert.Equal(InvalidText, data.StatusBar.Text);
         Clean();
 
         // Replaced: asked, cancelled, asked again, confirmed.
@@ -481,7 +486,7 @@ public sealed class SettingsPanelTests : IDisposable
         Clean();
         await cut.Find(".calendar-link-field").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
         await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
-        Assert.Equal("Calendar link saved (https://other.example/…).", cut.Find(".settings-result").TextContent);
+        Assert.Equal("Calendar link saved (https://other.example/…).", data.StatusBar.Text);
         Assert.Equal(OtherMarkerLink + "\n", File.ReadAllText(LinkPath));
         Clean();
         await Views();
@@ -504,7 +509,7 @@ public sealed class SettingsPanelTests : IDisposable
 
             Assert.Equal(
                 "Can't save the calendar link. Check that the Context folder is writable.",
-                cut.Find(".settings-result").TextContent);
+                data.StatusBar.Text);
             Assert.Equal(OtherMarkerLink + "\n", File.ReadAllText(LinkPath));
             Clean();
         }
@@ -525,7 +530,7 @@ public sealed class SettingsPanelTests : IDisposable
         await StaleClick.ClickAsync(cut, "button.calendar-link-remove");
         Clean();
         await StaleClick.ClickAsync(cut, "[role=dialog] button.confirm");
-        Assert.Equal("Calendar link removed.", cut.Find(".settings-result").TextContent);
+        Assert.Equal("Calendar link removed.", data.StatusBar.Text);
         Assert.False(File.Exists(LinkPath));
         Clean();
         await StaleClick.ClickAsync(cut, ".settings-panel button.close");
@@ -599,20 +604,26 @@ public sealed class SettingsPanelTests : IDisposable
 
         await cut.Find("input.outlook-enabled").ChangeAsync(new ChangeEventArgs { Value = true });
 
+        Bar.WaitForAssertion(() =>
+        {
+            Assert.Equal("Outlook on.", data.StatusBar.Text);
+        }, Wait);
         cut.WaitForAssertion(() =>
         {
-            Assert.Equal("Outlook on.", cut.Find(".outlook-result").TextContent);
             Assert.True(cut.Find("input.outlook-enabled").HasAttribute("checked"));
         }, Wait);
-        Assert.Contains("accent", cut.Find(".outlook-result").ClassList);
-        Assert.Equal("status", cut.Find(".outlook-result").GetAttribute("role"));
+        Assert.Equal("accent", data.StatusBar.Css);
+        Assert.Empty(cut.FindAll(".outlook-result"));
         Assert.True(new SettingsStore(data.Root).ReadOutlook());
 
         await cut.Find("input.outlook-enabled").ChangeAsync(new ChangeEventArgs { Value = false });
 
+        Bar.WaitForAssertion(() =>
+        {
+            Assert.Equal("Outlook off.", data.StatusBar.Text);
+        }, Wait);
         cut.WaitForAssertion(() =>
         {
-            Assert.Equal("Outlook off.", cut.Find(".outlook-result").TextContent);
             Assert.False(cut.Find("input.outlook-enabled").HasAttribute("checked"));
         }, Wait);
         Assert.False(new SettingsStore(data.Root).ReadOutlook());
@@ -630,9 +641,9 @@ public sealed class SettingsPanelTests : IDisposable
         await cut.Find("input.outlook-enabled").ChangeAsync(new ChangeEventArgs { Value = true });
 
         cut.WaitForAssertion(
-            () => Assert.Equal("Can't read settings.json. Nothing was saved.", cut.Find(".outlook-result").TextContent),
+            () => Assert.Equal("Can't read settings.json. Nothing was saved.", data.StatusBar.Text),
             Wait);
-        Assert.Contains("red", cut.Find(".outlook-result").ClassList);
+        Assert.Equal("red", data.StatusBar.Css);
         Assert.False(cut.Find("input.outlook-enabled").HasAttribute("checked"));
         Assert.Equal(before, File.ReadAllBytes(path));
     }
@@ -660,8 +671,8 @@ public sealed class SettingsPanelTests : IDisposable
         IElement hint = cut.Find(".fetch-titles-hint");
         Assert.Equal("When on, Context downloads a pasted link's page to read its title.", hint.TextContent);
         Assert.Contains("grey", hint.ClassList);
-        Assert.Equal(string.Empty, cut.Find(".fetch-titles-result").TextContent);
-        Assert.Equal("status", cut.Find(".fetch-titles-result").GetAttribute("role"));
+        Assert.Equal(string.Empty, data.StatusBar.Text);
+        Assert.Empty(cut.FindAll(".fetch-titles-result"));
         Assert.Equal(0, data.PageTitles.Calls);
     }
 
@@ -675,12 +686,15 @@ public sealed class SettingsPanelTests : IDisposable
 
         await cut.Find("input.fetch-titles").ChangeAsync(new ChangeEventArgs { Value = true });
 
+        Bar.WaitForAssertion(() =>
+        {
+            Assert.Equal("Page titles on.", data.StatusBar.Text);
+        }, Wait);
         cut.WaitForAssertion(() =>
         {
-            Assert.Equal("Page titles on.", cut.Find(".fetch-titles-result").TextContent);
             Assert.True(cut.Find("input.fetch-titles").HasAttribute("checked"));
         }, Wait);
-        Assert.Contains("accent", cut.Find(".fetch-titles-result").ClassList);
+        Assert.Equal("accent", data.StatusBar.Css);
         SettingsStore store = new SettingsStore(data.Root);
         Assert.True(store.ReadFetchTitles());
         Assert.True(store.ReadOutlook());
@@ -689,9 +703,12 @@ public sealed class SettingsPanelTests : IDisposable
 
         await cut.Find("input.fetch-titles").ChangeAsync(new ChangeEventArgs { Value = false });
 
+        Bar.WaitForAssertion(() =>
+        {
+            Assert.Equal("Page titles off.", data.StatusBar.Text);
+        }, Wait);
         cut.WaitForAssertion(() =>
         {
-            Assert.Equal("Page titles off.", cut.Find(".fetch-titles-result").TextContent);
             Assert.False(cut.Find("input.fetch-titles").HasAttribute("checked"));
         }, Wait);
         Assert.False(store.ReadFetchTitles());
@@ -711,8 +728,8 @@ public sealed class SettingsPanelTests : IDisposable
         await cut.Find("input.fetch-titles").ChangeAsync(new ChangeEventArgs { Value = true });
 
         cut.WaitForAssertion(
-            () => Assert.Equal("Can't save settings.json.", cut.Find(".fetch-titles-result").TextContent), Wait);
-        Assert.Contains("red", cut.Find(".fetch-titles-result").ClassList);
+            () => Assert.Equal("Can't save settings.json.", data.StatusBar.Text), Wait);
+        Assert.Equal("red", data.StatusBar.Css);
         Assert.False(cut.Find("input.fetch-titles").HasAttribute("checked"));
         Assert.Equal(before, File.ReadAllBytes(path));
     }
@@ -742,8 +759,8 @@ public sealed class SettingsPanelTests : IDisposable
             await cut.Find("input.fetch-titles").ChangeAsync(new ChangeEventArgs { Value = false });
 
             cut.WaitForAssertion(
-                () => Assert.Equal("Can't save settings.json.", cut.Find(".fetch-titles-result").TextContent), Wait);
-            Assert.Contains("red", cut.Find(".fetch-titles-result").ClassList);
+                () => Assert.Equal("Can't save settings.json.", data.StatusBar.Text), Wait);
+            Assert.Equal("red", data.StatusBar.Css);
             Assert.True(cut.Find("input.fetch-titles").HasAttribute("checked"));
             Assert.Equal(before, File.ReadAllBytes(path));
         }
@@ -800,8 +817,8 @@ public sealed class SettingsPanelTests : IDisposable
         string[] expected = ["false", "false", "false"];
         expected[pressed] = "true";
         Assert.Equal(expected, Pressed(cut));
-        IElement result = cut.Find("p.theme-result");
-        Assert.Contains("theme-result", group.NextElementSibling!.ClassList);
+        IElement result = Bar.Find(".main-status");
+        Assert.Empty(cut.FindAll(".theme-result"));
         Assert.Equal("status", result.GetAttribute("role"));
         Assert.Equal(string.Empty, result.TextContent);
         Assert.Empty(group.QuerySelectorAll("input"));
@@ -860,8 +877,8 @@ public sealed class SettingsPanelTests : IDisposable
         {
             await StaleClick.ClickAsync(cut, button);
 
-            cut.WaitForAssertion(() => Assert.Equal(text, cut.Find("p.theme-result").TextContent), Wait);
-            Assert.Contains("accent", cut.Find("p.theme-result").ClassList);
+            Bar.WaitForAssertion(() => Assert.Equal(text, data.StatusBar.Text), Wait);
+            Assert.Equal("accent", data.StatusBar.Css);
             Assert.Equal(pressed, Pressed(cut));
             applied.Add(name);
             Assert.Equal(applied, data.Themes());
@@ -885,7 +902,7 @@ public sealed class SettingsPanelTests : IDisposable
 
         await StaleClick.ClickAsync(cut, "button.theme-dark");
 
-        Assert.Equal(string.Empty, cut.Find("p.theme-result").TextContent);
+        Assert.Equal(string.Empty, data.StatusBar.Text);
         Assert.Equal(["false", "false", "true"], Pressed(cut));
         Assert.Equal(["dark"], data.Themes());
         Assert.Equal(before, File.ReadAllBytes(SettingsPath));
@@ -904,8 +921,8 @@ public sealed class SettingsPanelTests : IDisposable
         await StaleClick.ClickAsync(cut, "button.theme-dark");
 
         cut.WaitForAssertion(
-            () => Assert.Equal(DesktopActions.SettingsNotSavedText, cut.Find("p.theme-result").TextContent), Wait);
-        Assert.Contains("red", cut.Find("p.theme-result").ClassList);
+            () => Assert.Equal(DesktopActions.SettingsNotSavedText, data.StatusBar.Text), Wait);
+        Assert.Equal("red", data.StatusBar.Css);
         Assert.Equal(["false", "true", "false"], Pressed(cut));
         Assert.Equal(["light"], data.Themes());
         Assert.Equal(before, File.ReadAllBytes(SettingsPath));
@@ -922,8 +939,8 @@ public sealed class SettingsPanelTests : IDisposable
         await StaleClick.ClickAsync(cut, "button.theme-light");
 
         cut.WaitForAssertion(
-            () => Assert.Equal(DesktopActions.SettingsNotSavedText, cut.Find("p.theme-result").TextContent), Wait);
-        Assert.Contains("red", cut.Find("p.theme-result").ClassList);
+            () => Assert.Equal(DesktopActions.SettingsNotSavedText, data.StatusBar.Text), Wait);
+        Assert.Equal("red", data.StatusBar.Css);
         Assert.Equal(["true", "false", "false"], Pressed(cut));
         Assert.Equal(["system"], data.Themes());
         Assert.Equal(before, File.ReadAllBytes(SettingsPath));
@@ -953,8 +970,8 @@ public sealed class SettingsPanelTests : IDisposable
             await cut.Find("button.theme-system").ClickAsync(new MouseEventArgs());
 
             cut.WaitForAssertion(
-                () => Assert.Equal(DesktopActions.SettingsNotSavedText, cut.Find("p.theme-result").TextContent), Wait);
-            Assert.Contains("red", cut.Find("p.theme-result").ClassList);
+                () => Assert.Equal(DesktopActions.SettingsNotSavedText, data.StatusBar.Text), Wait);
+            Assert.Equal("red", data.StatusBar.Css);
             Assert.Equal(["false", "false", "true"], Pressed(cut));
             Assert.Equal(before, File.ReadAllBytes(SettingsPath));
         }
@@ -990,7 +1007,7 @@ public sealed class SettingsPanelTests : IDisposable
         }
 
         await click;
-        cut.WaitForAssertion(() => Assert.Equal("Theme: Dark.", cut.Find("p.theme-result").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Theme: Dark.", data.StatusBar.Text), Wait);
         Assert.All(ThemeButtons, b => Assert.False(cut.Find(b).HasAttribute("disabled"), b));
         Assert.Equal(["false", "false", "true"], Pressed(cut));
     }
@@ -1106,7 +1123,7 @@ public sealed class SettingsPanelTests : IDisposable
         Assert.Equal("1024", field.GetAttribute("maxlength"));
         Assert.Equal("Save folder", cut.Find("button.screenshot-folder-save").TextContent);
         Assert.Empty(cut.FindAll("button.screenshot-folder-remove"));
-        Assert.Equal("status", cut.Find(".screenshot-result").GetAttribute("role"));
+        Assert.Empty(cut.FindAll(".screenshot-result"));
     }
 
     // 260 AC-8: a broken screenshots value shows the red line.
@@ -1161,20 +1178,26 @@ public sealed class SettingsPanelTests : IDisposable
             await cut.Find("button.screenshot-folder-save").ClickAsync(new MouseEventArgs());
         }
 
+        Bar.WaitForAssertion(() =>
+        {
+            Assert.Equal("Screenshot folder saved.", data.StatusBar.Text);
+        }, Wait);
         cut.WaitForAssertion(() =>
         {
-            Assert.Equal("Screenshot folder saved.", cut.Find(".screenshot-result").TextContent);
             Assert.Equal("Folder: " + folder, cut.Find(".screenshot-folder-state").TextContent);
         }, Wait);
-        Assert.Contains("accent", cut.Find(".screenshot-result").ClassList);
+        Assert.Equal("accent", data.StatusBar.Css);
         Assert.Empty(cut.FindAll(".screenshot-folder-missing"));
         Assert.Equal(folder, new SettingsStore(data.Root).ReadScreenshotFolder());
 
         await cut.Find("button.screenshot-folder-remove").ClickAsync(new MouseEventArgs());
 
+        Bar.WaitForAssertion(() =>
+        {
+            Assert.Equal("Screenshot folder removed.", data.StatusBar.Text);
+        }, Wait);
         cut.WaitForAssertion(() =>
         {
-            Assert.Equal("Screenshot folder removed.", cut.Find(".screenshot-result").TextContent);
             Assert.Equal(SettingsPanel.ScreenshotNotSetText, cut.Find(".screenshot-folder-state").TextContent);
         }, Wait);
         Assert.Null(new SettingsStore(data.Root).ReadScreenshotFolder());
@@ -1190,8 +1213,8 @@ public sealed class SettingsPanelTests : IDisposable
         await cut.Find("button.screenshot-folder-save").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(
-            () => Assert.Equal("Type the folder's full path.", cut.Find(".screenshot-result").TextContent), Wait);
-        Assert.Contains("red", cut.Find(".screenshot-result").ClassList);
+            () => Assert.Equal("Type the folder's full path.", data.StatusBar.Text), Wait);
+        Assert.Equal("red", data.StatusBar.Css);
         Assert.False(File.Exists(Path.Combine(data.Root, SettingsStore.FileName)));
     }
 

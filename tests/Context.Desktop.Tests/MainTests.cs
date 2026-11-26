@@ -14,6 +14,11 @@ public sealed class MainTests : IDisposable
 
     private readonly DesktopFixture data = new();
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     // 281 (as 279): "the reload count is 0", then the element is found and clicked in one dispatcher call, so no
@@ -1277,8 +1282,8 @@ public sealed class MainTests : IDisposable
 
         await cut.InvokeAsync(() => js.Page().OnDrop(1, [new DroppedFile("shot.png", png.Length, png)]));
 
-        cut.WaitForAssertion(() => Assert.Equal("Attached shot.png.", cut.Find(".note-editor .status .line").TextContent), Wait);
-        Assert.True(cut.Find(".note-editor .status .line").ClassList.Contains("accent"));
+        cut.WaitForAssertion(() => Assert.Equal("Attached shot.png.", cut.Find(".main-status .line").TextContent), Wait);
+        Assert.True(cut.Find(".main-status .line").ClassList.Contains("accent"));
         JSRuntimeInvocation insert = Assert.Single(js.Calls("ContextEditor.insertAttachment"));
         Assert.Equal(
             [".attachments/shot.png", "shot.png", true, "image/png", Convert.ToBase64String(png)],
@@ -1298,8 +1303,8 @@ public sealed class MainTests : IDisposable
 
         await cut.InvokeAsync(() => js.Page().OnDrop(11, []));
 
-        cut.WaitForAssertion(() => Assert.Equal("Drop at most 10 files.", cut.Find(".note-editor .status").TextContent.Trim()), Wait);
-        Assert.True(cut.Find(".note-editor .status").ClassList.Contains("red"));
+        cut.WaitForAssertion(() => Assert.Equal("Drop at most 10 files.", cut.Find(".main-status").TextContent.Trim()), Wait);
+        Assert.True(cut.Find(".main-status").ClassList.Contains("red"));
         Assert.Empty(js.Calls("ContextEditor.insertAttachment"));
         Assert.False(Directory.Exists(Path.Combine(data.Root, ".attachments")));
     }
@@ -1356,7 +1361,7 @@ public sealed class MainTests : IDisposable
 
         await cut.InvokeAsync(() => js.Page().OnDrop(1, [new DroppedFile("sketch.excalidraw", drawing.Length, drawing)]));
 
-        cut.WaitForAssertion(() => Assert.Equal("Attached sketch.excalidraw.", cut.Find(".note-editor .status .line").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Attached sketch.excalidraw.", cut.Find(".main-status .line").TextContent), Wait);
         JSRuntimeInvocation insert = Assert.Single(js.Calls("ContextEditor.insertAttachment"));
         string svg = ExcalidrawSvg.Render(drawing)!;
         Assert.Equal(
@@ -2188,8 +2193,8 @@ public sealed class MainTests : IDisposable
         await NoteOpener.OpenAsync(cut, "Other");
 
         cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
-        Assert.Equal(DesktopActions.ChangedOnDiskText("Plan"), cut.Find(".note-editor .status").TextContent);
-        Assert.Contains("red", cut.Find(".note-editor .status").ClassList);
+        Assert.Equal(DesktopActions.ChangedOnDiskText("Plan"), cut.Find(".main-status").TextContent);
+        Assert.Contains("red", cut.Find(".main-status").ClassList);
         Assert.Equal("# Plan\n\nElsewhere\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         Assert.Single(js.Calls("ContextEditor.mount"));
     }
@@ -2270,8 +2275,8 @@ public sealed class MainTests : IDisposable
 
         await RunPalette(cut, "/save");
 
-        cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".note-editor .status").TextContent), Wait);
-        Assert.Contains("accent", cut.Find(".note-editor .status").ClassList);
+        cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".main-status").TextContent), Wait);
+        Assert.Contains("accent", cut.Find(".main-status").ClassList);
         Assert.Equal("# Plan\n\nBy palette\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
         Assert.Equal(0, data.AutoSave.Pending);
         data.AutoSave.Elapse();
@@ -2325,7 +2330,7 @@ public sealed class MainTests : IDisposable
         await asked.Task.WaitAsync(Wait);
         await data.State!.ReloadsSettled().WaitAsync(Wait);
         await cut.InvokeAsync(() => { });
-        Assert.Equal("Saved.", cut.Find(".note-editor .status").TextContent);
+        Assert.Equal("Saved.", cut.Find(".main-status").TextContent);
         Assert.Equal(0, data.CloseCalls);
         int renders = cut.RenderCount;
         gate.SetResult();
@@ -2353,7 +2358,7 @@ public sealed class MainTests : IDisposable
         Assert.True(data.Guard.Closing());
 
         cut.WaitForAssertion(() => Assert.Equal("Discard changes to Plan?", cut.Find("[role=dialog] .question").TextContent), Wait);
-        Assert.Equal(DesktopActions.ChangedOnDiskText("Plan"), cut.Find(".note-editor .status").TextContent);
+        Assert.Equal(DesktopActions.ChangedOnDiskText("Plan"), cut.Find(".main-status").TextContent);
         await cut.Find("[role=dialog] button.cancel").ClickAsync(new MouseEventArgs());
         Assert.Empty(cut.FindAll("[role=dialog]"));
         Assert.Equal(0, data.CloseCalls);
@@ -2628,7 +2633,7 @@ public sealed class MainTests : IDisposable
         js.Edit(captured + "\nMore\n");
         await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
-        cut.WaitForAssertion(() => Assert.Equal("Saved inbox.", cut.Find(".note-editor .status").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Saved inbox.", cut.Find(".main-status").TextContent), Wait);
         Assert.Equal(captured + "\nMore\n", File.ReadAllText(Path.Combine(data.Root, "inbox.md")));
     }
 
@@ -2656,7 +2661,7 @@ public sealed class MainTests : IDisposable
 
         await cut.Find(".note-editor").KeyDownAsync(new KeyboardEventArgs { Key = "s", CtrlKey = true });
 
-        cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".note-editor .status").TextContent), Wait);
+        cut.WaitForAssertion(() => Assert.Equal("Saved Plan.", cut.Find(".main-status").TextContent), Wait);
         Assert.Equal("# Plan\n\nUnsaved\n", File.ReadAllText(Path.Combine(data.Root, "Plan.md")));
     }
 
@@ -3511,9 +3516,9 @@ public sealed class MainTests : IDisposable
         await cut.Find("nav.saved-searches button.saved-search-remove").ClickAsync(new MouseEventArgs());
 
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll("nav.saved-searches")), Wait);
-        cut.WaitForAssertion(() => Assert.Equal(
-            "Removed saved search Open job1234.", cut.Find("p.saved-search-result").TextContent), Wait);
-        Assert.True(cut.Find("p.saved-search-result").ClassList.Contains("grey"));
+        Bar.WaitForAssertion(() => Assert.Equal(
+            "Removed saved search Open job1234.", data.StatusBar.Text), Wait);
+        Assert.Equal("grey", data.StatusBar.Css);
         Assert.Empty(new SettingsStore(data.Root).ReadSavedSearches());
         Assert.Contains("dayEnd", File.ReadAllText(Path.Combine(data.Root, SettingsStore.FileName)), StringComparison.Ordinal);
     }
@@ -4082,8 +4087,8 @@ public sealed class MainTests : IDisposable
         await js.Change(cut, text);
         cut.WaitForAssertion(() => Assert.Equal(1, data.AutoSave.Pending), Wait);
         data.AutoSave.Elapse();
-        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".note-editor .status").TextContent), Wait);
-        Assert.Contains("grey", cut.Find(".note-editor .status").ClassList);
+        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".main-status").TextContent), Wait);
+        Assert.Contains("grey", cut.Find(".main-status").ClassList);
     }
 
     // 212 AC-1: a picked day with no note creates it with that day's compose and opens it in the page editor.

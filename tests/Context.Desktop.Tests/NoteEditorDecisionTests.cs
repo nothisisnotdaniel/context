@@ -15,6 +15,11 @@ public sealed class NoteEditorDecisionTests : IDisposable
 
     public NoteEditorDecisionTests() => data.WriteDecisionFolder();
 
+    private IRenderedComponent<StatusBarView>? bar;
+
+    // 455: feedback goes to the status bar, which Main renders; tests render the bar next to the panel.
+    private IRenderedComponent<StatusBarView> Bar => bar ??= data.Bunit.Render<StatusBarView>();
+
     public void Dispose() => data.Dispose();
 
     private static readonly string Line = DesktopFixture.DecisionFolderLine;
@@ -35,7 +40,7 @@ public sealed class NoteEditorDecisionTests : IDisposable
 
         data.AutoSave.Elapse();
 
-        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Saved.", data.StatusBar.Text), Wait);
         string saved = $"# Plan\n{Line}\n\n!d ab12-1 one\n";
         Assert.Equal(saved, File.ReadAllText(PlanPath));
         Assert.Equal([("{\"set\":[[0,null,\"ab12-1\"]],\"folder\":\"" + Guid + "\"}", saved)], js.DecisionEdits());
@@ -57,7 +62,7 @@ public sealed class NoteEditorDecisionTests : IDisposable
 
         data.AutoSave.Elapse();
 
-        cut.WaitForAssertion(() => Assert.Equal("Saved.", cut.Find(".status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal("Saved.", data.StatusBar.Text), Wait);
         Assert.Single(js.DecisionEdits());
         Assert.True(await cut.InvokeAsync(() => cut.Instance.IsDirtyAsync()));
         cut.WaitForAssertion(() => Assert.Equal(1, data.AutoSave.Pending), Wait);
@@ -148,8 +153,8 @@ public sealed class NoteEditorDecisionTests : IDisposable
         cut.WaitForAssertion(() => Assert.Equal([("Owner", "ab12-5")], opened), Wait);
 
         await cut.InvokeAsync(() => page.OnDecision("9"));
-        cut.WaitForAssertion(() => Assert.Equal("No decision #!d9.", cut.Find(".status").TextContent), Wait);
-        Assert.True(cut.Find(".status").ClassList.Contains("grey"));
+        Bar.WaitForAssertion(() => Assert.Equal("No decision #!d9.", data.StatusBar.Text), Wait);
+        Assert.Equal("grey", data.StatusBar.Css);
 
         await cut.InvokeAsync(() => page.OnDecision("ab12-3"));
         cut.WaitForAssertion(() => Assert.Equal(["ab12-9", "ab12-3"], js.DecisionJumps()), Wait);
@@ -166,11 +171,11 @@ public sealed class NoteEditorDecisionTests : IDisposable
         EditorInterop page = js.Page();
 
         await cut.InvokeAsync(() => page.OnCopiedDecision("not a reference"));
-        Assert.Equal(string.Empty, cut.Find(".status").TextContent);
+        Assert.Equal(string.Empty, data.StatusBar.Text);
 
         await cut.InvokeAsync(() => page.OnCopiedDecision("3"));
-        cut.WaitForAssertion(() => Assert.Equal("Copied #!d3.", cut.Find(".status").TextContent), Wait);
-        Assert.True(cut.Find(".status").ClassList.Contains("grey"));
+        Bar.WaitForAssertion(() => Assert.Equal("Copied #!d3.", data.StatusBar.Text), Wait);
+        Assert.Equal("grey", data.StatusBar.Css);
     }
 
     // 349 AC-11: the picker's rows come from the log, as JSON, through the page's DecisionPicks call.
@@ -208,7 +213,7 @@ public sealed class NoteEditorDecisionTests : IDisposable
 
         cut.WaitForAssertion(() => Assert.True(cut.Instance.IsReady), Wait);
         cut.WaitForAssertion(() => Assert.Equal([token], js.DecisionJumps()), Wait);
-        cut.WaitForAssertion(() => Assert.Equal(status, cut.Find(".status").TextContent), Wait);
+        Bar.WaitForAssertion(() => Assert.Equal(status, data.StatusBar.Text), Wait);
     }
 
     // 349 AC-4, AC-3: a save of another folder's note or one that ran out of numbers says so in red after the saved
@@ -224,9 +229,9 @@ public sealed class NoteEditorDecisionTests : IDisposable
         await js.Change(cut, $"# Plan\n{foreign}\n\n!d hold\n");
         data.AutoSave.Elapse();
 
-        cut.WaitForAssertion(() => Assert.Equal(
-            "Saved. " + DesktopActions.DecisionForeignText, cut.Find(".status").TextContent), Wait);
-        Assert.True(cut.Find(".status").ClassList.Contains("red"));
+        Bar.WaitForAssertion(() => Assert.Equal(
+            "Saved. " + DesktopActions.DecisionForeignText, data.StatusBar.Text), Wait);
+        Assert.Equal("red", data.StatusBar.Css);
         Assert.Equal($"# Plan\n{foreign}\n\n!d hold\n", File.ReadAllText(PlanPath));
 
         TagIndex index = new TagIndex(data.Root);
@@ -235,7 +240,7 @@ public sealed class NoteEditorDecisionTests : IDisposable
         data.AutoSave.Elapse();
 
         cut.WaitForAssertion(() => Assert.StartsWith(
-            "Saved. " + DesktopActions.DecisionNumbersRanOutText, cut.Find(".status").TextContent, StringComparison.Ordinal), Wait);
+            "Saved. " + DesktopActions.DecisionNumbersRanOutText, data.StatusBar.Text, StringComparison.Ordinal), Wait);
         Assert.Equal("# Plan\n\n!d new\n", File.ReadAllText(PlanPath));
     }
 
