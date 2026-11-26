@@ -980,7 +980,7 @@ Every factory agent reads this file before working on Context. Keep it short and
   code block with that `params`. No text is ever escaped on save (`markdown.js` writes `node.text` as is; the parser
   keeps `\*` and `&amp;` as their source characters through `keep_escapes`, so they show raw and round-trip). The two toggles are also run by the `div.format-bar` toolbar (`EditorInterop.ToggleInlineCodeAsync` /
   `ToggleCodeBlockAsync`, shown only while mounted and not locked). Enter in a code block is a newline (also in a list
-  item); the block input rules carry `inCodeMark = false`. `src/highlight.js` (DOM-free; `lowlight` 3.3.0 MIT and
+  item); Tab in a code block (job 447, `indentCode`/`outdentCode` before the list bindings, also inside a list item) adds two spaces at the caret or at the start of each touched line and Shift-Tab removes up to two spaces or one tab; Esc there lets the next Tab or Shift-Tab move focus on (`escapePlugin`; test hook `keySequenceMarkdown`); the block input rules carry `inCodeMark = false`. `src/highlight.js` (DOM-free; `lowlight` 3.3.0 MIT and
   `highlight.js` 11.11.2 BSD-3, only the 11 languages of its `Languages` table, no auto-detection) gives `tokens(text,
   lang)`, drawn as class decorations by the `codeHighlight` plugin for the blocks `changedCodeBlocks` names (over
   20,000 chars stay plain). Long code lines wrap at the block's edge (job 438: `pre-wrap` +

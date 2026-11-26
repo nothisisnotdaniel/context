@@ -1,7 +1,7 @@
 // The bundle's entry: everything the page and the tests use hangs off globalThis.ContextEditor.
 import { roundTrip, isLossless, inlineNodes, docJson, webHref, splitTitle, outline, attributeRows, editAttributes, attributeSplit } from "./markdown.js";
 import { chipDom, headingDom } from "./schema.js";
-import { opensChip, typedBlock, typedMarkdown, commandMarkdown, typedAtMarkdown, clickedLinkJson, linkDomJson, toggledMarkdown, carriedMarkdown, changedCodeBlocksJson, copyText, copyToClipboard, toggleInlineCodeIn, toggleCodeBlockIn, mount, getMarkdown, isDirty, markClean, markCleanIf, destroy, focus, insertAttachment, headings, scrollToHeading, attributes, setAttributes, setLinkTitle, applyDecisionEdits, decisionReferencesIn, setDecisionTitles, setDecisionPrefixes, scrollToDecision, decisionEditsMarkdown, decisionRefsJson, setGlossary, glossaryDecorationsJson, glossaryMetaJson, isDrawingSrc, imageViewTest } from "./view.js";
+import { opensChip, typedBlock, typedMarkdown, commandMarkdown, keySequenceMarkdown, typedAtMarkdown, clickedLinkJson, linkDomJson, toggledMarkdown, carriedMarkdown, changedCodeBlocksJson, copyText, copyToClipboard, toggleInlineCodeIn, toggleCodeBlockIn, mount, getMarkdown, isDirty, markClean, markCleanIf, destroy, focus, insertAttachment, headings, scrollToHeading, attributes, setAttributes, setLinkTitle, applyDecisionEdits, decisionReferencesIn, setDecisionTitles, setDecisionPrefixes, scrollToDecision, decisionEditsMarkdown, decisionRefsJson, setGlossary, glossaryDecorationsJson, glossaryMetaJson, isDrawingSrc, imageViewTest } from "./view.js";
 import { glossaryMatches } from "./glossary.js";
 import { decisionsJson, decisionReferences, applyDecisionEditsText, withFolderLine, pickerQuery, pickerRows, pickerKey, pickerAttrs, copyButtonAttrs } from "./decisions.js";
 import { pastedMarkdown, pastedDocJson, titledMarkdown, pastedImagesJson } from "./paste.js";
@@ -70,6 +70,7 @@ globalThis.ContextEditor = Object.freeze({
   // Code (job 283): the selection-marked command and typing hooks, the changed-block rule, syntax tokens, the language
   // picker's options and params rule, and the copy fallback chain (given its clipboard functions).
   commandMarkdown,
+  keySequenceMarkdown,
   typedAtMarkdown,
   // Job 329: ticking a task item keeps its kind.
   toggledMarkdown,
